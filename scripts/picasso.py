@@ -1,16 +1,32 @@
 #!/usr/bin/env python
-'''
-A wrapper script which can be used to call the subscripts. It might be useful for command line sanity or getting reminded which scripts
-are available in picasso.
-'''
+"""
+    scripts/picasso
+    ~~~~~~~~~~~~~~~
+
+    Picasso command line interface
+
+    :author: Joerg Schnitzbauer
+"""
 
 
-import argparse
+def import_nolocal(module):
+    """
+    Imports a module, but ignores the current file.
+    This is needed, when we want to import `picasso` package.
+    """
+    import sys
+    import importlib
+    temp = sys.path.pop(0)
+    module = importlib.import_module(module)
+    sys.path.insert(0, temp)
+    return module
+
 
 if __name__ == '__main__':
+    import argparse
+
     # Main parser
     parser = argparse.ArgumentParser()
-    parser.add_argument('-g', '--gui', help='load graphical user interface for the given command', action='store_true')
     subparsers = parser.add_subparsers(dest='command')
 
     # toraw parser
@@ -22,18 +38,21 @@ if __name__ == '__main__':
     localize_parser.add_argument('files', help='one or multiple raw files specified by a unix style path pattern')
     localize_parser.add_argument('parameters', help='a yaml parameter file')
 
+    # GUI parser
+    gui_parser = subparsers.add_parser('gui', help='load graphical user interface for the following command')
+    gui_parser.add_argument('tool', choices=['toraw', 'localize'])
+
     # Parse
     args = parser.parse_args()
     if args.command:
-        if args.gui:
-            print('Gui was requested.')
-        else:
-            # Run command line interface
-            if args.command == 'toraw':
-                from picasso import io
-                io.to_raw.main(args.files)
-            elif args.command == 'localize':
-                from picasso import localize
-                localize.localize(args.files, args.parameters)
+        if args.command == 'gui':
+            module = import_nolocal('picasso.gui.' + args.tool)
+            module.main()
+        elif args.command == 'toraw':
+            io = import_nolocal('picasso.io')
+            io.to_raw(args.files)
+        elif args.command == 'localize':
+            localize = import_nolocal('picasso.localize')
+            localize.localize(args.files, args.parameters)
     else:
         parser.print_help()
