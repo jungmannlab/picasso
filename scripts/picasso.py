@@ -30,10 +30,10 @@ if __name__ == '__main__':
         else:
             # Run command line interface
             if args.command == 'toraw':
-                from lib import toraw
-                toraw.main(args.files)
+                from picasso import io
+                io.to_raw.main(args.files)
             elif args.command == 'localize':
-                from lib import localize
-                localize.main(args.files, args.parameters)
+                from picasso import localize
+                localize.localize(args.files, args.parameters)
     else:
         parser.print_help()
