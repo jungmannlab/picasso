@@ -10,7 +10,8 @@ import yaml
 from lib import io
 
 
-def main(paths):
+def main(files):
+    paths = glob.glob(files)
     for path in paths:
         path_base, path_extension = os.path.splitext(path)
         path_extension = path_extension.lower()
@@ -31,5 +32,4 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('files', help='one or multiple files specified by a unix style pathname pattern')
     args = parser.parse_args()
-    paths = glob.glob(args.files)
-    main(paths)
+    main(args.files)
