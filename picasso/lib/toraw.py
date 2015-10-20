@@ -3,7 +3,7 @@
 Convert image sequences to binary raw files and accompanied YAML information files.
 '''
 
-import argparse
+
 import glob
 import os.path
 import yaml
@@ -29,6 +29,7 @@ def main(files):
 
 
 if __name__ == '__main__':
+    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('files', help='one or multiple files specified by a unix style pathname pattern')
     args = parser.parse_args()

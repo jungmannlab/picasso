@@ -7,8 +7,7 @@ import argparse
 
 
 def main(files, parameters):
-
-
+    print('Localizer started')
 
 
 if __name__ == '__main__':
