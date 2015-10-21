@@ -4,7 +4,7 @@
 
     General purpose library for handling input and output of files
 
-    :author: Joerg Schnitzbauer
+    :author: Joerg Schnitzbauer, 2015
 """
 
 

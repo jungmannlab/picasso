@@ -5,42 +5,92 @@
 
     Graphical user interface for picasso.localize
 
-    :author: Joerg Schnitzbauer
+    :author: Joerg Schnitzbauer, 2015
 """
 
 import sys
-from PyQt4 import QtGui
+from PyQt4 import QtCore, QtGui
 from picasso import io, localize
 
 
 GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
+IDENTIFICATION_PARAMETERS_DEFAULTS = {'roi': 5, 'threshold': 100}
+
+
+class View(QtGui.QGraphicsView):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)
+
+    def wheelEvent(self, event):
+        scale = 1.01 ** (-event.delta())
+        self.scale(scale, scale)
+
+
+class OddSpinBox(QtGui.QSpinBox):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.valueChanged.connect(self.on_value_changed)
+
+    def on_value_changed(self, value):
+        if value % 2 == 0:
+            self.setValue(value + 1)
+
+
+class IdentificationParametersDialog(QtGui.QDialog):
+
+    def __init__(self, parameters, parent=None):
+        super().__init__(parent)
+        vbox = QtGui.QVBoxLayout(self)
+        grid = QtGui.QGridLayout()
+        vbox.addLayout(grid)
+        grid.addWidget(QtGui.QLabel('ROI'), 0, 0)
+        self.roi_spinbox = OddSpinBox()
+        self.roi_spinbox.setValue(parameters['roi'])
+        self.roi_spinbox.setSingleStep(2)
+        grid.addWidget(self.roi_spinbox, 0, 1)
+        grid.addWidget(QtGui.QLabel('Threshold'), 1, 0)
+        self.threshold_spinbox = QtGui.QSpinBox()
+        self.threshold_spinbox.setMaximum(999999999)
+        self.threshold_spinbox.setValue(parameters['threshold'])
+        grid.addWidget(self.threshold_spinbox, 1, 1)
+        buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal, self)
+        vbox.addWidget(buttons)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+    def parameters(self):
+        return {'roi': self.roi_spinbox.value(), 'threshold': self.threshold_spinbox.value()}
 
 
 class Window(QtGui.QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle('Picasso Localize')
+        self.setWindowTitle('Picasso: Localize')
+        self.resize(768, 768)
         self.init_menu_bar()
-        self.view = QtGui.QGraphicsView()
+        self.view = View()
         self.setCentralWidget(self.view)
         self.scene = QtGui.QGraphicsScene()
         self.view.setScene(self.scene)
+        self.identification_parameters = IDENTIFICATION_PARAMETERS_DEFAULTS
+        self.identification_rectangles = []
 
     def init_menu_bar(self):
         menu_bar = self.menuBar()
 
-        ## File
+        """ File """
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
         open_action.setShortcut('Ctrl+O')
         open_action.triggered.connect(self.on_file_open)
         file_menu.addAction(open_action)
 
-        ## View
+        """ View """
         view_menu = menu_bar.addMenu('View')
-
-        # Next and previous frames
         next_frame_action = view_menu.addAction('Next frame')
         next_frame_action.setShortcut('Right')
         next_frame_action.triggered.connect(self.on_next_frame)
@@ -49,58 +99,85 @@ class Window(QtGui.QMainWindow):
         previous_frame_action.setShortcut('Left')
         previous_frame_action.triggered.connect(self.on_previous_frame)
         view_menu.addAction(previous_frame_action)
-
-        # Zooming
-        zoom_out_action = view_menu.addAction('Zoom out')
-        zoom_out_action.setShortcut('Ctrl+-')
-        zoom_out_action.triggered.connect(self.on_zoom_out)
-        view_menu.addAction(zoom_out_action)
+        view_menu.addSeparator()
         zoom_in_action = view_menu.addAction('Zoom in')
         zoom_in_action.setShortcuts(['Ctrl++', 'Ctrl+='])
         zoom_in_action.triggered.connect(self.on_zoom_in)
         view_menu.addAction(zoom_in_action)
+        zoom_out_action = view_menu.addAction('Zoom out')
+        zoom_out_action.setShortcut('Ctrl+-')
+        zoom_out_action.triggered.connect(self.on_zoom_out)
+        view_menu.addAction(zoom_out_action)
+
+        """ Analyze """
+        analyze_menu = menu_bar.addMenu('Analyze')
+        identification_parameters_action = analyze_menu.addAction('Identification parameters')
+        identification_parameters_action.setShortcut('Ctrl+Shift+I')
+        identification_parameters_action.triggered.connect(self.on_identification_parameters)
+        analyze_menu.addAction(identification_parameters_action)
+        identify_action = analyze_menu.addAction('Identify')
+        identify_action.setShortcut('Ctrl+I')
+        identify_action.triggered.connect(self.on_identify)
+        analyze_menu.addAction(identify_action)
 
     def on_file_open(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw')
         if path:
             self.movie, self.info = io.load_raw(path)
             self.set_frame(0)
+            self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
 
     def on_next_frame(self):
-        if self.frame_number < self.info['frames']:
-            self.set_frame(self.frame_number + 1)
+        if self.current_frame_number < self.info['frames']:
+            self.set_frame(self.current_frame_number + 1)
 
     def on_previous_frame(self):
-        if self.frame_number > 0:
-            self.set_frame(self.frame_number - 1)
-
-    def on_zoom_in(self):
-        self.view.scale(4, 4)
-
-    def on_zoom_out(self):
-        self.view.scale(0.5, 0.5)
+        if self.current_frame_number > 0:
+            self.set_frame(self.current_frame_number - 1)
 
     def set_frame(self, number):
-        self.frame_number = number
+        self.current_frame_number = number
         frame = self.movie[number]
-        frame = frame.astype('float32')
-        frame -= frame.min()
-        frame /= frame.ptp()
-        frame *= 255.0
-        frame = frame.astype('uint8')
-        image = QtGui.QImage(frame.data, self.info['width'], self.info['height'], QtGui.QImage.Format_Indexed8)
-        image.setColorTable(GRAYSCALE)
-        #pixmap = QtGui.QPixmap.fromImage(image)
-        pixmap = QtGui.QPixmap(2, 2)
-        pixmap.fill(QtGui.QColor('white'))
-        painter = QtGui.QPainter(pixmap)
-        painter.setPen(QtGui.QColor('black'))
-        painter.drawPoint(0, 0)
-        painter.drawPoint(1, 1)
-        painter.end()
+        self.set_image(frame)
+
+    def set_image(self, image):
+        image = image.astype('float32')
+        image -= image.min()
+        image /= image.ptp()
+        image *= 255.0
+        image = image.astype('uint8')
+        width, height = image.shape
+        qimage = QtGui.QImage(image.data, width, height, QtGui.QImage.Format_Indexed8)
+        qimage.setColorTable(GRAYSCALE)
+        qpixmap = QtGui.QPixmap.fromImage(qimage)
         self.scene = QtGui.QGraphicsScene()
-        self.scene.addPixmap(pixmap)
+        self.scene.addPixmap(qpixmap)
         self.view.setScene(self.scene)
+
+    def on_identification_parameters(self):
+        dialog = IdentificationParametersDialog(self.identification_parameters, self)
+        result = dialog.exec_()
+        if result == QtGui.QDialog.Accepted:
+            self.identification_parameters = dialog.parameters()
+
+    def on_identify(self):
+        frame = self.movie[self.current_frame_number]
+        roi_size = self.identification_parameters['roi']
+        roi_size_half = int(roi_size/2)
+        threshold = self.identification_parameters['threshold']
+        maxima = localize.identify(frame, roi_size, threshold)
+        for rect in self.identification_rectangles:
+            self.scene.removeItem(rect)
+        self.identification_rectangles = []
+        for y, x in maxima:
+            rect = self.scene.addRect(x - roi_size_half, y - roi_size_half, roi_size, roi_size, QtGui.QPen(QtGui.QColor('red')))
+            self.identification_rectangles.append(rect)
+
+    def on_zoom_in(self):
+        self.view.scale(10 / 8, 10 / 8)
+
+    def on_zoom_out(self):
+        self.view.scale(8 / 10, 8 / 10)
 
 
 def main():

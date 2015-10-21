@@ -5,7 +5,7 @@
 
     Picasso command line interface
 
-    :author: Joerg Schnitzbauer
+    :author: Joerg Schnitzbauer, 2015
 """
 
 
