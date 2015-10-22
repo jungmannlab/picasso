@@ -16,11 +16,11 @@ I suggest installing it with [Anaconda](https://www.continuum.io/downloads) whic
 
 ## Installation
 1. `git clone https://gitlab.com/jungmannlab/picasso.git` or [download](https://gitlab.com/jungmannlab/picasso) the zip file (you need approved access).
-2. Copy `picasso.pth` to your `site-packages` folder in your Python installation directory.
 3. Add `picasso/scripts` to your PATH environment variable.
 4. Windows only: (the equivalent of Linux or OSX procedures is not documented here.)
   - Add `.PY;.PYW` to your `PATHEXT` environment variable
   - Run these commands in an Administrator console:
+    - `ECHO <picasso_installation_directory> >> <python_installation_directory>\Lib\site-packages\picasso.pth` (replace the <...> according to your situation)
     - `assoc .py=Python.File`
     - `assoc .pyw=Python.NoConFile`
     - `ftype Python.File=C:\Anaconda3\python.exe %1` (replace path if you don't use that Anaconda version)
