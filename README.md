@@ -35,3 +35,10 @@ The result is that you don't have to specify the .py or .pyw ending when you run
     - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1`  
 If the command `picasso gui localize` does not open a Window, you might have to apply
 [this solution](http://stackoverflow.com/questions/2640971/windows-is-not-passing-command-line-arguments-to-python-programs-executed-from-t).
+
+## To Do
+-
+
+## Credits
+- Localize icon based on "Picture by Eugen Belyakoff from the Noun Project"
+- ToRaw icon based on "Lion by Sathish Selladurai from the Noun Project"
