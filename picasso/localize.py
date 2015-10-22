@@ -41,16 +41,17 @@ def spot_map(frame, roi, abs_gradient):
     return spot_map
 
 
-def identify_frame(frame, roi, threshold):
+def identify_frame(frame, parameters):
     gradient_x, gradient_y = np.gradient(np.float32(frame))
     abs_gradient = np.sqrt(gradient_x**2 + gradient_y**2)
+    roi = parameters['roi']
     s_map = spot_map(frame, roi, abs_gradient)
     lm_map = local_maxima_map(frame, roi)
-    s_map_thesholded = s_map > threshold
+    s_map_thesholded = s_map > parameters['threshold']
     combined_map = (lm_map * s_map_thesholded) > 0.5
     return np.vstack(np.where(combined_map)).T
 
 
-def identify(movie, roi, threshold):
-    identifications = [identify_frame(frame, roi, threshold) for frame in movie]
+def identify(movie, parameters):
+    identifications = [identify_frame(frame, parameters) for frame in movie]
     return identifications

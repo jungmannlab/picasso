@@ -170,9 +170,7 @@ class Window(QtGui.QMainWindow):
         dialog = IdentificationParametersDialog(self.identification_parameters, self)
         result = dialog.exec_()
         if result == QtGui.QDialog.Accepted:
-            self.identification_parameters = dialog.parameters()
-            self.identifications = localize.identify(self.movie, *self.identification_parameters.values())
-            print(self.identifications)
+            self.identifications = localize.identify(self.movie, dialog.parameters())
             self.draw_identification_markers()
 
     def remove_identification_markers(self):
@@ -182,7 +180,7 @@ class Window(QtGui.QMainWindow):
 
     def draw_identification_markers(self):
         identifications_frame = self.identifications[self.current_frame_number]
-        roi, threshold = self.identification_parameters.values()
+        roi = self.identification_parameters['roi']
         roi_half = int(roi/2)
         for y, x in identifications_frame:
             rect = self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(QtGui.QColor('red')))
