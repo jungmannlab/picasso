@@ -26,10 +26,12 @@ This will make the scripts in this folder accessible in the
 console, independent of the current directory.
 4. Add `.PY;.PYW` to your `PATHEXT` environment variable.  
 The result is that you don't have to specify the .py or .pyw ending when you run a Python in the command line.
-5. Run these commands in an Administrator console to tell Windows that it should run .py and .pyw files with the Python interpreter:
+5. Run this command to register the picasso package in the Python installation.
+    - `ECHO <picasso directory> >> <python installation directory>\Lib\site-packages\picasso.pth`
+6. Run these commands in an Administrator console to tell Windows that it should run .py and .pyw files with the Python interpreter:
     - `assoc .py=Python.File`
     - `assoc .pyw=Python.NoConFile`
     - `ftype Python.File=<python installation directory>\python.exe %1`
-    - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1`
-6. Run this command to register the picasso package in the Python installation.
-    - `ECHO <picasso directory> >> <python installation directory>\Lib\site-packages\picasso.pth`
+    - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1`  
+If the command `picasso gui localize` does not open a Window, you might have to apply
+[this solution](http://stackoverflow.com/questions/2640971/windows-is-not-passing-command-line-arguments-to-python-programs-executed-from-t).
