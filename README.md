@@ -17,17 +17,19 @@ I suggest installing it with [Anaconda](https://www.continuum.io/downloads) whic
 ## Installation
 The described procedure is intended for Windows. The equivalent steps for Linux or OSX are not documented.
 Replace any <...> notations according to your situation.
-1. `git clone https://gitlab.com/jungmannlab/picasso.git` or [download](https://gitlab.com/jungmannlab/picasso) the zip file (you need approved access).
-3. Add `<picasso directory>\scripts` to your PATH environment variable.
-  - This will make the scripts in this folder accessible in the
+1. Open the console, `cd` to the directory where you want to install and run  
+`git clone https://gitlab.com/jungmannlab/picasso.git`  
+Alternatively, [download](https://gitlab.com/jungmannlab/picasso) the zip file and unzip it.  
+For both options you need approved access on Gitlab.
+3. Add `<picasso directory>\scripts` to your PATH environment variable.  
+This will make the scripts in this folder accessible in the
 console, independent of the current directory.
-4. Add `.PY;.PYW` to your `PATHEXT` environment variable.
-  - The result is that you don't have to specify the .py or .pyw ending when you run a Python
-in the command line.
-5. Run these commands in an Administrator console to tell Windows that it should run .py and .pyw files with the Python interpreter.
+4. Add `.PY;.PYW` to your `PATHEXT` environment variable.  
+The result is that you don't have to specify the .py or .pyw ending when you run a Python in the command line.
+5. Run these commands in an Administrator console to tell Windows that it should run .py and .pyw files with the Python interpreter:
     - `assoc .py=Python.File`
     - `assoc .pyw=Python.NoConFile`
     - `ftype Python.File=<python installation directory>\python.exe %1`
     - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1` (same here)
-6. Run this command - potentially Administrator rights required - to register the picasso package in the Python installation.
+6. Run this command to register the picasso package in the Python installation.
     - `ECHO <picasso directory> >> <python installation directory>\Lib\site-packages\picasso.pth`
