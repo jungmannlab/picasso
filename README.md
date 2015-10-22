@@ -30,6 +30,6 @@ The result is that you don't have to specify the .py or .pyw ending when you run
     - `assoc .py=Python.File`
     - `assoc .pyw=Python.NoConFile`
     - `ftype Python.File=<python installation directory>\python.exe %1`
-    - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1` (same here)
+    - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1`
 6. Run this command to register the picasso package in the Python installation.
     - `ECHO <picasso directory> >> <python installation directory>\Lib\site-packages\picasso.pth`
