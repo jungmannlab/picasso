@@ -10,18 +10,24 @@ I suggest installing it with [Anaconda](https://www.continuum.io/downloads) whic
 | -------- | -------------------- | ------------------------- |
 | numpy    | yes                  | pre-installed             |
 | pyyaml   | yes                  | pre-installed             |
-| tifffile | no                   | [Download](http://www.lfd.uci.edu/~gohlke/pythonlibs/), then `pip install *.whl` |
 | numba    | yes                  | pre-installed             |
 | PyQt4    | yes                  | pre-installed             |
+| tifffile | no                   | [Download](http://www.lfd.uci.edu/~gohlke/pythonlibs/), then `pip install *.whl` |
 
 ## Installation
+The described procedure is intended for Windows. The equivalent steps for Linux or OSX are not documented.
+Replace any <...> notations according to your situation.
 1. `git clone https://gitlab.com/jungmannlab/picasso.git` or [download](https://gitlab.com/jungmannlab/picasso) the zip file (you need approved access).
-3. Add `picasso/scripts` to your PATH environment variable.
-4. Windows only: (the equivalent of Linux or OSX procedures is not documented here.)
-  - Add `.PY;.PYW` to your `PATHEXT` environment variable
-  - Run these commands in an Administrator console:
-    - `ECHO <picasso_installation_directory> >> <python_installation_directory>\Lib\site-packages\picasso.pth` (replace the <...> according to your situation)
+3. Add `<picasso directory>\scripts` to your PATH environment variable.
+  - This will make the scripts in this folder accessible in the
+console, independent of the current directory.
+4. Add `.PY;.PYW` to your `PATHEXT` environment variable.
+  - The result is that you don't have to specify the .py or .pyw ending when you run a Python
+in the command line.
+5. Run these commands in an Administrator console to tell Windows that it should run .py and .pyw files with the Python interpreter.
     - `assoc .py=Python.File`
     - `assoc .pyw=Python.NoConFile`
-    - `ftype Python.File=C:\Anaconda3\python.exe %1` (replace path if you don't use that Anaconda version)
-    - `ftype Python.NoConFile=C:\Anaconda3\pythonw.exe %1` (same here)
+    - `ftype Python.File=<python installation directory>\python.exe %1`
+    - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1` (same here)
+6. Run this command - potentially Administrator rights required - to register the picasso package in the Python installation.
+    - `ECHO <picasso directory> >> <python installation directory>\Lib\site-packages\picasso.pth`
