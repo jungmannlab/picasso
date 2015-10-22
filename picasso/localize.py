@@ -21,8 +21,8 @@ def local_maxima_map(image, roi_size):
         for j in range(roi_half_size+1, Y-roi_half_size-2):
             local_image = image[i-roi_half_size:i+roi_half_size+1, j-roi_half_size:j+roi_half_size+1]
             flat_max = np.argmax(local_image)
-            j_local_max = int(flat_max/roi_size)
-            i_local_max = int(flat_max%roi_size)
+            j_local_max = int(flat_max / roi_size)
+            i_local_max = int(flat_max % roi_size)
             if (i_local_max == roi_half_size) and (j_local_max == roi_half_size):
                 maxima_map[i, j] = 1
     return maxima_map

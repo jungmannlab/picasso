@@ -77,6 +77,7 @@ class Window(QtGui.QMainWindow):
         self.scene = QtGui.QGraphicsScene()
         self.view.setScene(self.scene)
         self.identification_parameters = IDENTIFICATION_PARAMETERS_DEFAULTS
+        self.identifications = []
         self.identification_rectangles = []
 
     def init_menu_bar(self):
@@ -138,21 +139,20 @@ class Window(QtGui.QMainWindow):
     def set_frame(self, number):
         self.current_frame_number = number
         frame = self.movie[number]
-        self.set_image(frame)
-
-    def set_image(self, image):
-        image = image.astype('float32')
-        image -= image.min()
-        image /= image.ptp()
-        image *= 255.0
-        image = image.astype('uint8')
-        width, height = image.shape
-        qimage = QtGui.QImage(image.data, width, height, QtGui.QImage.Format_Indexed8)
+        frame = frame.astype('float32')
+        frame -= frame.min()
+        frame /= frame.ptp()
+        frame *= 255.0
+        frame = frame.astype('uint8')
+        width, height = frame.shape
+        qimage = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
         qimage.setColorTable(GRAYSCALE)
         qpixmap = QtGui.QPixmap.fromImage(qimage)
         self.scene = QtGui.QGraphicsScene()
         self.scene.addPixmap(qpixmap)
         self.view.setScene(self.scene)
+        if self.identifications:
+            self.draw_identifications()
 
     def on_identification_parameters(self):
         dialog = IdentificationParametersDialog(self.identification_parameters, self)
@@ -161,23 +161,31 @@ class Window(QtGui.QMainWindow):
             self.identification_parameters = dialog.parameters()
 
     def on_identify(self):
-        frame = self.movie[self.current_frame_number]
         roi_size = self.identification_parameters['roi']
-        roi_size_half = int(roi_size/2)
         threshold = self.identification_parameters['threshold']
-        maxima = localize.identify(frame, roi_size, threshold)
+        self.identifications = []
+        for frame in self.movie:
+            frame_identificiations = localize.identify(frame, roi_size, threshold)
+            self.identifications.append(frame_identificiations)
+        self.draw_identifications()
+
+    def draw_identifications(self):
+        # Remove old identification
         for rect in self.identification_rectangles:
             self.scene.removeItem(rect)
+        frame_identifications = self.identifications[self.current_frame_number]
         self.identification_rectangles = []
-        for y, x in maxima:
+        roi_size = self.identification_parameters['roi']
+        roi_size_half = int(roi_size/2)
+        for y, x in frame_identifications:
             rect = self.scene.addRect(x - roi_size_half, y - roi_size_half, roi_size, roi_size, QtGui.QPen(QtGui.QColor('red')))
             self.identification_rectangles.append(rect)
 
     def on_zoom_in(self):
-        self.view.scale(10 / 8, 10 / 8)
+        self.view.scale(10 / 7, 10 / 7)
 
     def on_zoom_out(self):
-        self.view.scale(8 / 10, 8 / 10)
+        self.view.scale(7 / 10, 7 / 10)
 
 
 def main():
@@ -185,3 +193,7 @@ def main():
     window = Window()
     window.show()
     sys.exit(app.exec_())
+
+
+if __name__ == '__main__':
+    main()
