@@ -182,7 +182,7 @@ class Window(QtGui.QMainWindow):
     def draw_identification_markers(self):
         identifications_frame = self.identifications[self.current_frame_number]
         roi = self.identification_parameters['roi']
-        roi_half = int(roi/2)
+        roi_half = int(roi / 2)
         for y, x in identifications_frame:
             rect = self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(QtGui.QColor('red')))
             self.identification_markers.append(rect)
