@@ -9,12 +9,16 @@
 """
 
 import sys
+import time
 from PyQt4 import QtCore, QtGui
 from picasso import io, localize
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
 DEFAULT_IDENTIFICATION_PARAMETERS = {'roi': 5, 'threshold': 300}
+FRAME_STARTED_MESSAGE = 'ROI: {}, Mininum AGS: {}, Frame: {}/{}'
+IDENTIFY_FINISHED_MESSAGE = 'ROI: {}, Minimum AGS: {}, Secs/Frame: {:.3f}, Identifications: {}'
+MOVIE_LOADED_MESSAGE = '{} frames loaded in {:.2f} seconds.'
 
 
 class View(QtGui.QGraphicsView):
@@ -22,10 +26,33 @@ class View(QtGui.QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)
+        self.setAcceptDrops(True)
 
     def wheelEvent(self, event):
         scale = 1.01 ** (-event.delta())
         self.scale(scale, scale)
+
+
+class Scene(QtGui.QGraphicsScene):
+
+    def __init__(self, window, parent=None):
+        super().__init__(parent)
+        self.window = window
+
+    def dragEnterEvent(self, event):
+        event.accept()
+
+    def dragMoveEvent(self, event):
+        event.accept()
+
+    def dropEvent(self, event):
+        if event.mimeData().urls():
+            url = event.mimeData().urls()[0]
+            path = url.toLocalFile()
+            try:
+                self.window.open(path)
+            except OSError:
+                pass
 
 
 class OddSpinBox(QtGui.QSpinBox):
@@ -43,6 +70,7 @@ class IdentificationParametersDialog(QtGui.QDialog):
 
     def __init__(self, parameters, parent=None):
         super().__init__(parent)
+        self.setWindowTitle('Identification parameters')
         vbox = QtGui.QVBoxLayout(self)
         grid = QtGui.QGridLayout()
         vbox.addLayout(grid)
@@ -76,8 +104,9 @@ class Window(QtGui.QMainWindow):
         self.init_menu_bar()
         self.view = View()
         self.setCentralWidget(self.view)
-        self.scene = QtGui.QGraphicsScene()
+        self.scene = Scene(self)
         self.view.setScene(self.scene)
+        self.status_bar = self.statusBar()
         # Init variables
         self.movie = None
         self.identification_parameters = DEFAULT_IDENTIFICATION_PARAMETERS
@@ -91,7 +120,7 @@ class Window(QtGui.QMainWindow):
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
         open_action.setShortcut('Ctrl+O')
-        open_action.triggered.connect(self.on_file_open)
+        open_action.triggered.connect(self.open_with_dialog)
         file_menu.addAction(open_action)
 
         """ View """
@@ -124,16 +153,30 @@ class Window(QtGui.QMainWindow):
         identify_action.setShortcut('Ctrl+I')
         identify_action.triggered.connect(self.on_identify)
         analyze_menu.addAction(identify_action)
+        analyze_menu.addSeparator()
+        interrupt_action = analyze_menu.addAction('Interrupt')
+        interrupt_action.setShortcut('Ctrl+X')
+        interrupt_action.triggered.connect(self.on_interrupt)
+        analyze_menu.addAction(interrupt_action)
 
-    def on_file_open(self):
+    def open_with_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw')
         if path:
-            self.movie, self.info = io.load_raw(path)
-            self.set_frame(0)
-            self.fit_in_view()
+            self.open(path)
+
+    def open(self, path):
+        self.status_bar.showMessage('Loading movie...')
+        start = time.time()
+        self.movie, self.info = io.load_raw(path)
+        n_frames = self.info['frames']
+        elapsed_time = time.time() - start
+        message = MOVIE_LOADED_MESSAGE.format(n_frames, elapsed_time)
+        self.status_bar.showMessage(message)
+        self.set_frame(0)
+        self.fit_in_view()
 
     def on_next_frame(self):
-        if self.movie is not None and self.current_frame_number < self.info['frames']:
+        if self.movie is not None and self.current_frame_number + 1 < self.info['frames']:
             self.set_frame(self.current_frame_number + 1)
 
     def on_previous_frame(self):
@@ -154,7 +197,7 @@ class Window(QtGui.QMainWindow):
         qimage = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
         qimage.setColorTable(CMAP_GRAYSCALE)
         qpixmap = QtGui.QPixmap.fromImage(qimage)
-        self.scene = QtGui.QGraphicsScene(self.view)
+        self.scene = Scene(self)
         self.scene.addPixmap(qpixmap)
         self.view.setScene(self.scene)
         if self.identifications:
@@ -164,15 +207,50 @@ class Window(QtGui.QMainWindow):
         if self.movie is not None:
             self.identify()
         else:
-            self.on_file_open()
+            self.open_with_dialog()
             self.identify()
 
     def identify(self):
         dialog = IdentificationParametersDialog(self.identification_parameters, self)
         result = dialog.exec_()
         if result == QtGui.QDialog.Accepted:
-            self.identifications = localize.identify(self.movie, dialog.parameters())
-            self.draw_identification_markers()
+            self.identification_parameters = dialog.parameters()
+            thread = IdentifyWorker(self, self.movie, self.identification_parameters)
+            thread.frameStarted.connect(self.on_identify_frame_started)
+            thread.finished.connect(self.on_identify_finished)
+            thread.interrupted.connect(self.on_interrupted_thread_done)
+            self.interupt_flag = False
+            self.identify_start = time.time()
+            thread.start()
+
+    def on_identify_frame_started(self, frame_number):
+        n_frames = self.info['frames']
+        roi = self.identification_parameters['roi']
+        threshold = self.identification_parameters['threshold']
+        message = FRAME_STARTED_MESSAGE.format(roi, threshold, frame_number, n_frames)
+        self.status_bar.showMessage(message)
+
+    def on_identify_finished(self, identifications):
+        required_time = time.time() - self.identify_start
+        time_per_frame = required_time / self.info['frames']
+        n_identifications = 0
+        for identifications_frame in identifications:
+            n_identifications += len(identifications_frame)
+        roi = self.identification_parameters['roi']
+        threshold = self.identification_parameters['threshold']
+        message = IDENTIFY_FINISHED_MESSAGE.format(roi, threshold, time_per_frame, n_identifications)
+        self.status_bar.showMessage(message)
+        self.identifications = identifications
+        self.remove_identification_markers()
+        self.draw_identification_markers()
+
+    def on_interrupt(self):
+        """ Gets called when the user chooses the Interrupt action from the menu """
+        self.interupt_flag = True
+
+    def on_interrupted_thread_done(self):
+        """ Gets called when and interrupted thread returned without finishing """
+        self.status_bar.showMessage('')
 
     def remove_identification_markers(self):
         for rect in self.identification_markers:
@@ -195,6 +273,30 @@ class Window(QtGui.QMainWindow):
 
     def on_zoom_out(self):
         self.view.scale(7 / 10, 7 / 10)
+
+
+class IdentifyWorker(QtCore.QThread):
+
+    frameStarted = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(list)
+    interrupted = QtCore.pyqtSignal()
+
+    def __init__(self, window, movie, parameters):
+        super().__init__()
+        self.window = window
+        self.movie = movie
+        self.parameters = parameters
+
+    def run(self):
+        identifications = []
+        for i, frame in enumerate(self.movie):
+            self.frameStarted.emit(i)
+            identifications_frame = localize.identify_frame(frame, self.parameters)
+            identifications.append(identifications_frame)
+            if self.window.interupt_flag:
+                self.interrupted.emit()
+                return
+        self.finished.emit(identifications)
 
 
 def main():
