@@ -22,10 +22,33 @@ class View(QtGui.QGraphicsView):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)
+        self.setAcceptDrops(True)
 
     def wheelEvent(self, event):
         scale = 1.01 ** (-event.delta())
         self.scale(scale, scale)
+
+
+class Scene(QtGui.QGraphicsScene):
+
+    def __init__(self, window, parent=None):
+        super().__init__(parent)
+        self.window = window
+
+    def dragEnterEvent(self, event):
+        event.accept()
+
+    def dragMoveEvent(self, event):
+        event.accept()
+
+    def dropEvent(self, event):
+        if event.mimeData().urls():
+            url = event.mimeData().urls()[0]
+            path = url.toLocalFile()
+            try:
+                self.window.open(path)
+            except OSError:
+                pass
 
 
 class OddSpinBox(QtGui.QSpinBox):
@@ -43,6 +66,7 @@ class IdentificationParametersDialog(QtGui.QDialog):
 
     def __init__(self, parameters, parent=None):
         super().__init__(parent)
+        self.setWindowTitle('Identification parameters')
         vbox = QtGui.QVBoxLayout(self)
         grid = QtGui.QGridLayout()
         vbox.addLayout(grid)
@@ -76,7 +100,7 @@ class Window(QtGui.QMainWindow):
         self.init_menu_bar()
         self.view = View()
         self.setCentralWidget(self.view)
-        self.scene = QtGui.QGraphicsScene()
+        self.scene = Scene(self)
         self.view.setScene(self.scene)
         # Init variables
         self.movie = None
@@ -91,7 +115,7 @@ class Window(QtGui.QMainWindow):
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
         open_action.setShortcut('Ctrl+O')
-        open_action.triggered.connect(self.on_file_open)
+        open_action.triggered.connect(self.on_open)
         file_menu.addAction(open_action)
 
         """ View """
@@ -125,12 +149,15 @@ class Window(QtGui.QMainWindow):
         identify_action.triggered.connect(self.on_identify)
         analyze_menu.addAction(identify_action)
 
-    def on_file_open(self):
+    def on_open(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw')
         if path:
-            self.movie, self.info = io.load_raw(path)
-            self.set_frame(0)
-            self.fit_in_view()
+            self.open(path)
+
+    def open(self, path):
+        self.movie, self.info = io.load_raw(path)
+        self.set_frame(0)
+        self.fit_in_view()
 
     def on_next_frame(self):
         if self.movie is not None and self.current_frame_number < self.info['frames']:
@@ -154,7 +181,7 @@ class Window(QtGui.QMainWindow):
         qimage = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
         qimage.setColorTable(CMAP_GRAYSCALE)
         qpixmap = QtGui.QPixmap.fromImage(qimage)
-        self.scene = QtGui.QGraphicsScene(self.view)
+        self.scene = Scene(self)
         self.scene.addPixmap(qpixmap)
         self.view.setScene(self.scene)
         if self.identifications:
