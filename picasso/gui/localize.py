@@ -71,6 +71,7 @@ class Window(QtGui.QMainWindow):
         super().__init__()
         # Init GUI
         self.setWindowTitle('Picasso: Localize')
+        self.setWindowIcon(QtGui.QIcon('localize.ico'))
         self.resize(768, 768)
         self.init_menu_bar()
         self.view = View()

@@ -35,9 +35,13 @@ The result is that you don't have to specify the .py or .pyw ending when you run
     - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1`  
 If the command `picasso gui localize` does not open a Window, you might have to apply
 [this solution](http://stackoverflow.com/questions/2640971/windows-is-not-passing-command-line-arguments-to-python-programs-executed-from-t).
+7. Make shortcuts of `gui\*.pyw` files. Open shortcut properties. Prepend shortcut command with `pythonw `. Set the icon to the respective file in the `gui` folder. Move the shortcut to top level. This shortcut can now be double-clicked, pinned to task bar or copied to Desktop.
 
 ## To Do
--
+- Icon to Localize window
+- ToRaw gui
+- fitting in localize
+- drag and drop file in localize
 
 ## Credits
 - Localize icon based on "Picture by Eugen Belyakoff from the Noun Project"
