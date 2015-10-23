@@ -128,7 +128,7 @@ class Window(QtGui.QMainWindow):
         """ File """
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
-        open_action.setShortcut('Ctrl+O')
+        open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
 
@@ -143,11 +143,11 @@ class Window(QtGui.QMainWindow):
         next_frame_action.triggered.connect(self.next_frame)
         view_menu.addAction(next_frame_action)
         first_frame_action = view_menu.addAction('First frame')
-        first_frame_action.setShortcut('Shift + Left')
+        first_frame_action.setShortcut(QtGui.QKeySequence.MoveToStartOfLine)
         first_frame_action.triggered.connect(self.first_frame)
         view_menu.addAction(first_frame_action)
         last_frame_action = view_menu.addAction('Last frame')
-        last_frame_action.setShortcut('Shift + Right')
+        last_frame_action.setShortcut(QtGui.QKeySequence.MoveToEndOfLine)
         last_frame_action.triggered.connect(self.last_frame)
         view_menu.addAction(last_frame_action)
         view_menu.addSeparator()
@@ -208,32 +208,33 @@ class Window(QtGui.QMainWindow):
                 self.set_frame(self.current_frame_number + 1)
 
     def first_frame(self):
-        self.set_frame(0)
+        if self.movie is not None:
+            self.set_frame(0)
 
     def last_frame(self):
-        self.set_frame(-1)
+        if self.movie is not None:
+            self.set_frame(self.info['frames'] - 1)
 
     def set_frame(self, number):
-        if self.movie is not None:
-            if self.identifications:
-                self.remove_identification_markers()
-            self.current_frame_number = number
-            frame = self.movie[number]
-            frame = frame.astype('float32')
-            frame -= frame.min()
-            frame /= frame.ptp()
-            frame *= 255.0
-            frame = frame.astype('uint8')
-            width, height = frame.shape
-            image = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
-            image.setColorTable(CMAP_GRAYSCALE)
-            pixmap = QtGui.QPixmap.fromImage(image)
-            self.scene = Scene(self)
-            self.scene.addPixmap(pixmap)
-            self.view.setScene(self.scene)
-            self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['frames']))
-            if self.identifications:
-                self.draw_identification_markers()
+        if self.identifications:
+            self.remove_identification_markers()
+        self.current_frame_number = number
+        frame = self.movie[number]
+        frame = frame.astype('float32')
+        frame -= frame.min()
+        frame /= frame.ptp()
+        frame *= 255.0
+        frame = frame.astype('uint8')
+        width, height = frame.shape
+        image = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
+        image.setColorTable(CMAP_GRAYSCALE)
+        pixmap = QtGui.QPixmap.fromImage(image)
+        self.scene = Scene(self)
+        self.scene.addPixmap(pixmap)
+        self.view.setScene(self.scene)
+        self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['frames']))
+        if self.identifications:
+            self.draw_identification_markers()
 
     def open_parameters_dialog(self):
         dialog = ParametersDialog(self.parameters)
