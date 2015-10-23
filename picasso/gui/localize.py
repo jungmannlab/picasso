@@ -107,6 +107,8 @@ class Window(QtGui.QMainWindow):
         self.scene = Scene(self)
         self.view.setScene(self.scene)
         self.status_bar = self.statusBar()
+        self.status_bar_frame_indicator = QtGui.QLabel()
+        self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
         # Init variables
         self.movie = None
         self.identification_parameters = DEFAULT_IDENTIFICATION_PARAMETERS
@@ -200,6 +202,7 @@ class Window(QtGui.QMainWindow):
         self.scene = Scene(self)
         self.scene.addPixmap(qpixmap)
         self.view.setScene(self.scene)
+        self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['frames']))
         if self.identifications:
             self.draw_identification_markers()
 

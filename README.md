@@ -42,8 +42,6 @@ If the command `picasso gui localize` does not open a Window, you might have to 
 - toraw output of progress
 - Icon to toraw gui
 - fitting in localize
-- localize dialog window title
-- localize indicator "frame X out of Y"
 
 
 ## Credits
