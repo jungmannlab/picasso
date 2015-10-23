@@ -134,14 +134,22 @@ class Window(QtGui.QMainWindow):
 
         """ View """
         view_menu = menu_bar.addMenu('View')
-        next_frame_action = view_menu.addAction('Next frame')
-        next_frame_action.setShortcut('Right')
-        next_frame_action.triggered.connect(self.next_frame)
-        view_menu.addAction(next_frame_action)
         previous_frame_action = view_menu.addAction('Previous frame')
         previous_frame_action.setShortcut('Left')
         previous_frame_action.triggered.connect(self.previous_frame)
         view_menu.addAction(previous_frame_action)
+        next_frame_action = view_menu.addAction('Next frame')
+        next_frame_action.setShortcut('Right')
+        next_frame_action.triggered.connect(self.next_frame)
+        view_menu.addAction(next_frame_action)
+        first_frame_action = view_menu.addAction('First frame')
+        first_frame_action.setShortcut('Shift + Left')
+        first_frame_action.triggered.connect(self.first_frame)
+        view_menu.addAction(first_frame_action)
+        last_frame_action = view_menu.addAction('Last frame')
+        last_frame_action.setShortcut('Shift + Right')
+        last_frame_action.triggered.connect(self.last_frame)
+        view_menu.addAction(last_frame_action)
         view_menu.addSeparator()
         zoom_in_action = view_menu.addAction('Zoom in')
         zoom_in_action.setShortcuts(['Ctrl++', 'Ctrl+='])
@@ -189,36 +197,43 @@ class Window(QtGui.QMainWindow):
         self.set_frame(0)
         self.fit_in_view()
 
-    def next_frame(self):
-        if self.movie is not None:
-            if self.current_frame_number + 1 < self.info['frames']:
-                self.set_frame(self.current_frame_number + 1)
-
     def previous_frame(self):
         if self.movie is not None:
             if self.current_frame_number > 0:
                 self.set_frame(self.current_frame_number - 1)
 
+    def next_frame(self):
+        if self.movie is not None:
+            if self.current_frame_number + 1 < self.info['frames']:
+                self.set_frame(self.current_frame_number + 1)
+
+    def first_frame(self):
+        self.set_frame(0)
+
+    def last_frame(self):
+        self.set_frame(-1)
+
     def set_frame(self, number):
-        if self.identifications:
-            self.remove_identification_markers()
-        self.current_frame_number = number
-        frame = self.movie[number]
-        frame = frame.astype('float32')
-        frame -= frame.min()
-        frame /= frame.ptp()
-        frame *= 255.0
-        frame = frame.astype('uint8')
-        width, height = frame.shape
-        image = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
-        image.setColorTable(CMAP_GRAYSCALE)
-        pixmap = QtGui.QPixmap.fromImage(image)
-        self.scene = Scene(self)
-        self.scene.addPixmap(pixmap)
-        self.view.setScene(self.scene)
-        self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['frames']))
-        if self.identifications:
-            self.draw_identification_markers()
+        if self.movie is not None:
+            if self.identifications:
+                self.remove_identification_markers()
+            self.current_frame_number = number
+            frame = self.movie[number]
+            frame = frame.astype('float32')
+            frame -= frame.min()
+            frame /= frame.ptp()
+            frame *= 255.0
+            frame = frame.astype('uint8')
+            width, height = frame.shape
+            image = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
+            image.setColorTable(CMAP_GRAYSCALE)
+            pixmap = QtGui.QPixmap.fromImage(image)
+            self.scene = Scene(self)
+            self.scene.addPixmap(pixmap)
+            self.view.setScene(self.scene)
+            self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['frames']))
+            if self.identifications:
+                self.draw_identification_markers()
 
     def open_parameters_dialog(self):
         dialog = ParametersDialog(self.parameters)
