@@ -9,6 +9,7 @@
 """
 
 import sys
+import os.path
 from PyQt4 import QtGui
 from picasso import io
 
@@ -19,7 +20,26 @@ class Window(QtGui.QWidget):
         super().__init__()
         # Init GUI
         self.setWindowTitle('Picasso: ToRaw')
-        self.setWindowIcon(QtGui.QIcon('toraw.ico'))
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'toraw.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(512, 1)
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        hbox = QtGui.QHBoxLayout()
+        vbox.addLayout(hbox)
+        self.files_edit = QtGui.QLineEdit()
+        hbox.addWidget(self.files_edit)
+        browse_button = QtGui.QPushButton('Browse')
+        hbox.addWidget(browse_button)
+        hbox2 = QtGui.QHBoxLayout()
+        vbox.addLayout(hbox2)
+        go_button = QtGui.QPushButton('Convert')
+        hbox2.addWidget(go_button)
+        hbox2.addStretch(1)
+        hbox2.addWidget(go_button)
+        hbox2.addStretch(1)
 
 
 def main():
