@@ -40,7 +40,6 @@ If the command `picasso gui localize` does not open a Window, you might have to 
 ## To Do
 - ToRaw gui
 - toraw output of progress
-- Icon to toraw gui
 - fitting in localize
 
 

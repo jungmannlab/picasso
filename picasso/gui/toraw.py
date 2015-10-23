@@ -10,7 +10,8 @@
 
 import sys
 import os.path
-from PyQt4 import QtGui
+import glob
+from PyQt4 import QtCore, QtGui
 from picasso import io
 
 
@@ -25,21 +26,43 @@ class Window(QtGui.QWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(512, 1)
-        vbox = QtGui.QVBoxLayout()
-        self.setLayout(vbox)
+        self.vbox = QtGui.QVBoxLayout()
+        self.setLayout(self.vbox)
+        file_label = QtGui.QLabel('Drop or browse a file:')
+        file_label.setAlignment(QtCore.Qt.AlignHCenter)
+        self.vbox.addWidget(file_label)
         hbox = QtGui.QHBoxLayout()
-        vbox.addLayout(hbox)
-        self.files_edit = QtGui.QLineEdit()
-        hbox.addWidget(self.files_edit)
-        browse_button = QtGui.QPushButton('Browse')
-        hbox.addWidget(browse_button)
+        self.vbox.addLayout(hbox)
+        self.path_edit = QtGui.QLineEdit()
+        hbox.addWidget(self.path_edit)
+        self.browse_button = QtGui.QPushButton('Browse')
+        self.browse_button.released.connect(self.browse)
+        hbox.addWidget(self.browse_button)
         hbox2 = QtGui.QHBoxLayout()
-        vbox.addLayout(hbox2)
-        go_button = QtGui.QPushButton('Convert')
-        hbox2.addWidget(go_button)
+        self.vbox.addLayout(hbox2)
+        self.convert_button = QtGui.QPushButton('Convert')
+        self.convert_button.clicked.connect(self.convert)
         hbox2.addStretch(1)
-        hbox2.addWidget(go_button)
+        hbox2.addWidget(self.convert_button)
         hbox2.addStretch(1)
+        self.progress_bar = QtGui.QProgressBar()
+        self.progress_bar.setMinimum(0)
+
+    def browse(self):
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Open file to convert')
+        if path:
+            self.path_edit.setText(path)
+
+    def convert(self):
+        files = self.path_edit.text()
+        paths = glob.glob(files)
+        self.progress_bar.setMaximum(len(paths))
+        self.vbox.addWidget(self.progress_bar)
+        for i, path in enumerate(paths):
+            io.to_raw_single(path)
+            self.progress_bar.setValue(i + 1)
+        self.path_edit.setText('')
+
 
 
 def main():

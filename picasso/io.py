@@ -15,6 +15,10 @@ import yaml
 import tifffile
 
 
+class FileFormatNotSupported(Exception):
+    pass
+
+
 def load_raw(path):
     path_base, path_extension = os.path.splitext(path)
     with open(path_base + '.yaml', 'r') as info_file:
@@ -47,16 +51,19 @@ def load_tif(path):
 def to_raw(files):
     paths = glob.glob(files)
     for path in paths:
-        path_base, path_extension = os.path.splitext(path)
-        path_extension = path_extension.lower()
-        if path_extension == '.tif' or path_extension == 'tiff':
-            movie, info = load_tif(path)
-        else:
-            print('Image format {} not supported.'.format(path_extension))
-            return
+        to_raw_single(path)
+
+
+def to_raw_single(path):
+    path_base, path_extension = os.path.splitext(path)
+    path_extension = path_extension.lower()
+    if path_extension == '.tif' or path_extension == 'tiff':
+        movie, info = load_tif(path)
         raw_file_name = path_base + '.raw'
         movie.tofile(raw_file_name)
         info['original file'] = info.pop('file')
         info['raw file'] = os.path.basename(raw_file_name)
         with open(path_base + '.yaml', 'w') as info_file:
             yaml.dump(info, info_file, default_flow_style=False)
+    else:
+        pass  # TODO: spit out a warning

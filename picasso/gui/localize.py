@@ -152,8 +152,7 @@ class Window(QtGui.QMainWindow):
         view_menu.addAction(last_frame_action)
         view_menu.addSeparator()
         zoom_in_action = view_menu.addAction('Zoom in')
-        zoom_in_action.setShortcut(QtGui.QKeySequence.ZoomIn)
-        # zoom_in_action.setShortcuts(['Ctrl++', 'Ctrl+='])
+        zoom_in_action.setShortcuts(['Ctrl++', 'Ctrl+='])
         zoom_in_action.triggered.connect(self.zoom_in)
         view_menu.addAction(zoom_in_action)
         zoom_out_action = view_menu.addAction('Zoom out')
@@ -176,6 +175,10 @@ class Window(QtGui.QMainWindow):
         identify_action.setShortcut('Ctrl+I')
         identify_action.triggered.connect(self.identify)
         analyze_menu.addAction(identify_action)
+        fit_action = analyze_menu.addAction('Fit')
+        fit_action.setShortcut('Ctrl+F')
+        fit_action.triggered.connect(self.fit)
+        analyze_menu.addAction(fit_action)
         analyze_menu.addSeparator()
         interrupt_action = analyze_menu.addAction('Interrupt')
         interrupt_action.setShortcut('Ctrl+X')
@@ -275,6 +278,9 @@ class Window(QtGui.QMainWindow):
         self.last_identification_parameters = self.parameters.copy()
         self.remove_identification_markers()
         self.draw_identification_markers()
+
+    def fit(self):
+        pass
 
     def interrupt(self):
         """ Gets called when the user chooses the Interrupt action from the menu """
