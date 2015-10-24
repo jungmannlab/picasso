@@ -9,6 +9,7 @@
 """
 
 import sys
+import os.path
 import time
 from PyQt4 import QtCore, QtGui
 from picasso import io, localize
@@ -99,7 +100,10 @@ class Window(QtGui.QMainWindow):
         super().__init__()
         # Init GUI
         self.setWindowTitle('Picasso: Localize')
-        self.setWindowIcon(QtGui.QIcon('localize.ico'))
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'localize.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
         self.resize(768, 768)
         self.init_menu_bar()
         self.view = View()
@@ -196,11 +200,11 @@ class Window(QtGui.QMainWindow):
         frame *= 255.0
         frame = frame.astype('uint8')
         width, height = frame.shape
-        qimage = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
-        qimage.setColorTable(CMAP_GRAYSCALE)
-        qpixmap = QtGui.QPixmap.fromImage(qimage)
+        image = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
+        image.setColorTable(CMAP_GRAYSCALE)
+        pixmap = QtGui.QPixmap.fromImage(image)
         self.scene = Scene(self)
-        self.scene.addPixmap(qpixmap)
+        self.scene.addPixmap(pixmap)
         self.view.setScene(self.scene)
         self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['frames']))
         if self.identifications:
