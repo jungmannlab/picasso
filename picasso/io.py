@@ -20,13 +20,18 @@ class FileFormatNotSupported(Exception):
 
 
 def load_raw(path):
-    path_base, path_extension = os.path.splitext(path)
-    with open(path_base + '.yaml', 'r') as info_file:
-        info = yaml.load(info_file)
+    info = load_raw_info(path)
     movie = np.fromfile(path, info['data type'])
     shape = (info['frames'], info['width'], info['height'])
     movie = np.reshape(movie, shape)
     return movie, info
+
+
+def load_raw_info(path):
+    path_base, path_extension = os.path.splitext(path)
+    with open(path_base + '.yaml', 'r') as info_file:
+        info = yaml.load(info_file)
+    return info
 
 
 def load_tif(path):
@@ -51,19 +56,15 @@ def load_tif(path):
 def to_raw(files):
     paths = glob.glob(files)
     for path in paths:
-        to_raw_single(path)
-
-
-def to_raw_single(path):
-    path_base, path_extension = os.path.splitext(path)
-    path_extension = path_extension.lower()
-    if path_extension == '.tif' or path_extension == 'tiff':
-        movie, info = load_tif(path)
+        path_base, path_extension = os.path.splitext(path)
+        path_extension = path_extension.lower()
+        if path_extension == '.tif' or path_extension == 'tiff':
+            movie, info = load_tif(path)
+        else:
+            raise FileFormatNotSupported("File format must be '.tif' or '.tiff'.")
         raw_file_name = path_base + '.raw'
         movie.tofile(raw_file_name)
         info['original file'] = info.pop('file')
         info['raw file'] = os.path.basename(raw_file_name)
         with open(path_base + '.yaml', 'w') as info_file:
             yaml.dump(info, info_file, default_flow_style=False)
-    else:
-        pass  # TODO: spit out a warning
