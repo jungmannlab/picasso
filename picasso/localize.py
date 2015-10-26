@@ -15,7 +15,7 @@ import numba
 def local_maxima_map(frame, roi):
     """ Finds pixels with maximum value within a region of interest """
     X, Y = frame.shape
-    maxima_map = np.zeros_like(frame)
+    maxima_map = np.zeros(frame.shape, np.uint8)
     roi_half = int(roi/2)
     for i in range(roi, X-roi):
         for j in range(roi, Y-roi):
