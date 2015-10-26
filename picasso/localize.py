@@ -29,16 +29,16 @@ def local_maxima_map(frame, roi):
 
 
 @numba.jit(nopython=True)
-def spot_map(frame, roi, abs_gradient):
+def local_gradient_magnitude(frame, roi, abs_gradient):
     """ Returns the sum of the absolute gradient within a ROI around each pixel """
     X, Y = frame.shape
-    spot_map = np.zeros_like(abs_gradient)
+    lgm = np.zeros_like(abs_gradient)
     roi_half = int(roi/2)
     for i in range(roi, X-roi):
         for j in range(roi, Y-roi):
             local_gradient = abs_gradient[i-roi_half:i+roi_half+1, j-roi_half:j+roi_half+1]
-            spot_map[i, j] = np.sum(local_gradient)
-    return spot_map
+            lgm[i, j] = np.sum(local_gradient)
+    return lgm
 
 
 def identify_frame(frame, parameters):
