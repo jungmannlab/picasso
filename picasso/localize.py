@@ -9,6 +9,8 @@
 
 import numpy as np
 import numba
+import multiprocessing
+import functools
 
 
 @numba.jit(nopython=True)
@@ -52,6 +54,29 @@ def identify_frame(frame, parameters):
     return np.vstack(np.where(combined_map)).T
 
 
+# Needs to be declared top level and global due to not understood multiprocessing reasons
+_counter = multiprocessing.Value('i', 0)
+
+
+# The target function for the processing pool, switched args, ready for functools.partial
+def _identify_frame_async(parameters, frame):
+    with _counter.get_lock():      # The lock is needed, because +=1 is not atomic. The internal lock of Value ensures atomic operations are safe.
+        _counter.value += 1
+    return identify_frame(frame, parameters)
+
+
+def identify_async(movie, parameters):
+    n_cpus = multiprocessing.cpu_count()
+    if len(movie) < n_cpus:
+        n_processes = len(movie)
+    else:
+        n_processes = 2 * n_cpus
+    _counter.value = 0
+    targetfunc = functools.partial(_identify_frame_async, parameters)
+    pool = multiprocessing.Pool(processes=n_processes)
+    result = pool.map_async(targetfunc, movie)
+    return result, _counter, pool
+
+
 def identify(movie, parameters):
-    identifications = [identify_frame(frame, parameters) for frame in movie]
-    return identifications
+    return [identify_frame(frame, parameters) for frame in movie]
