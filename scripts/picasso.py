@@ -49,7 +49,7 @@ if __name__ == '__main__':
     if args.command:
         if args.command == 'toraw':
             io = import_nolocal('picasso.io')
-            io.to_raw(args.files)
+            io.to_raw(args.files, verbose=True)
         elif args.command == 'localize':
             localize = import_nolocal('picasso.localize')
             localize.localize(args.files, args.parameters)
