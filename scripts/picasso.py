@@ -9,10 +9,13 @@
 """
 
 
+print(__file__)
+
+
 def import_nolocal(module):
     """
-    Imports a module, but ignores the current file.
-    This is needed, when we want to import `picasso` package.
+    Imports a module, but ignores the current directory.
+    This is needed, when we want to import the `picasso` package.
     """
     import sys
     import importlib
@@ -20,6 +23,9 @@ def import_nolocal(module):
     module = importlib.import_module(module)
     sys.path.insert(0, temp)
     return module
+
+
+# localize = import_nolocal('picasso.localize')   # Added this, because multiprocessing thinks that this file is the picasso package
 
 
 if __name__ == '__main__':
@@ -38,17 +44,10 @@ if __name__ == '__main__':
     localize_parser.add_argument('files', help='one or multiple raw files specified by a unix style path pattern')
     localize_parser.add_argument('parameters', help='a yaml parameter file')
 
-    # GUI parser
-    gui_parser = subparsers.add_parser('gui', help='load graphical user interface for the following command')
-    gui_parser.add_argument('tool', choices=['toraw', 'localize'])
-
     # Parse
     args = parser.parse_args()
     if args.command:
-        if args.command == 'gui':
-            module = import_nolocal('picasso.gui.' + args.tool)
-            module.main()
-        elif args.command == 'toraw':
+        if args.command == 'toraw':
             io = import_nolocal('picasso.io')
             io.to_raw(args.files)
         elif args.command == 'localize':

@@ -19,9 +19,9 @@ def local_maxima_map(frame, roi):
     X, Y = frame.shape
     maxima_map = np.zeros(frame.shape, np.uint8)
     roi_half = int(roi / 2)
-    for i in range(roi, X-roi):
-        for j in range(roi, Y-roi):
-            local_frame = frame[i-roi_half:i+roi_half+1, j-roi_half:j+roi_half+1]
+    for i in range(roi, X - roi):
+        for j in range(roi, Y - roi):
+            local_frame = frame[i - roi_half:i + roi_half + 1, j - roi_half:j + roi_half + 1]
             flat_max = np.argmax(local_frame)
             j_local_max = int(flat_max / roi)
             i_local_max = int(flat_max % roi)
@@ -35,10 +35,10 @@ def local_gradient_magnitude(frame, roi, abs_gradient):
     """ Returns the sum of the absolute gradient within a ROI around each pixel """
     X, Y = frame.shape
     lgm = np.zeros_like(abs_gradient)
-    roi_half = int(roi/2)
-    for i in range(roi, X-roi):
-        for j in range(roi, Y-roi):
-            local_gradient = abs_gradient[i-roi_half:i+roi_half+1, j-roi_half:j+roi_half+1]
+    roi_half = int(roi / 2)
+    for i in range(roi, X - roi):
+        for j in range(roi, Y - roi):
+            local_gradient = abs_gradient[i - roi_half:i + roi_half + 1, j - roi_half:j + roi_half + 1]
             lgm[i, j] = np.sum(local_gradient)
     return lgm
 
