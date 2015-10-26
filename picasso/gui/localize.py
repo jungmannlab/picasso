@@ -11,12 +11,13 @@
 import sys
 import os.path
 import time
+import yaml
 from PyQt4 import QtCore, QtGui
 from picasso import io, localize
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
-DEFAULT_PARAMETERS = {'roi': 5, 'threshold': 300}
+DEFAULT_PARAMETERS = {'ROI': 5, 'Minimum LGM': 300}
 FRAME_STARTED_MESSAGE = 'Identifying: Frame {}/{} (ROI: {}, Mininum AGS: {})'
 IDENTIFY_FINISHED_MESSAGE = 'Identifications: {} (ROI: {}, Minimum AGS: {}, Secs/Frame: {:.3f})'
 
@@ -50,7 +51,11 @@ class Scene(QtGui.QGraphicsScene):
             url = event.mimeData().urls()[0]
             path = url.toLocalFile()
             try:
-                self.window.open(path)
+                base, extension = os.path.splitext(path)
+                if extension == '.raw':
+                    self.window.open(path)
+                elif extension == '.yaml':
+                    self.window.load_parameters(path)
             except OSError:
                 pass
 
@@ -76,21 +81,21 @@ class ParametersDialog(QtGui.QDialog):
         vbox.addLayout(grid)
         grid.addWidget(QtGui.QLabel('ROI side length:'), 0, 0)
         self.roi_spinbox = OddSpinBox()
-        self.roi_spinbox.setValue(parameters['roi'])
+        self.roi_spinbox.setValue(parameters['ROI'])
         self.roi_spinbox.setSingleStep(2)
         grid.addWidget(self.roi_spinbox, 0, 1)
         grid.addWidget(QtGui.QLabel('Minimum LGM:'), 1, 0)
-        self.threshold_spinbox = QtGui.QSpinBox()
-        self.threshold_spinbox.setMaximum(999999999)
-        self.threshold_spinbox.setValue(parameters['threshold'])
-        grid.addWidget(self.threshold_spinbox, 1, 1)
+        self.mmlg_spinbox = QtGui.QSpinBox()
+        self.mmlg_spinbox.setMaximum(999999999)
+        self.mmlg_spinbox.setValue(parameters['Minimum LGM'])
+        grid.addWidget(self.mmlg_spinbox, 1, 1)
         buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal, self)
         vbox.addWidget(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
 
     def parameters(self):
-        return {'roi': self.roi_spinbox.value(), 'threshold': self.threshold_spinbox.value()}
+        return {'ROI': self.roi_spinbox.value(), 'Minimum LGM': self.mmlg_spinbox.value()}
 
 
 class Window(QtGui.QMainWindow):
@@ -130,6 +135,15 @@ class Window(QtGui.QMainWindow):
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
+        file_menu.addSeparator()
+        open_parameters_action = file_menu.addAction('Open parameters')
+        open_parameters_action.setShortcut('Ctrl+Shift+O')
+        open_parameters_action.triggered.connect(self.open_parameters)
+        file_menu.addAction(open_parameters_action)
+        save_parameters_action = file_menu.addAction('Save parameters')
+        save_parameters_action.setShortcut('Ctrl+Shift+S')
+        save_parameters_action.triggered.connect(self.save_parameters)
+        file_menu.addAction(save_parameters_action)
 
         """ View """
         view_menu = menu_bar.addMenu('View')
@@ -247,6 +261,21 @@ class Window(QtGui.QMainWindow):
         if self.identifications:
             self.draw_identification_markers()
 
+    def open_parameters(self):
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', filter='*.yaml')
+        if path:
+            self.load_parameters(path)
+
+    def load_parameters(self, path):
+        with open(path, 'r') as file:
+            self.parameters = yaml.load(file)
+
+    def save_parameters(self):
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save parameters', filter='*.yaml')
+        if path:
+            with open(path, 'w') as file:
+                yaml.dump(self.parameters, file, default_flow_style=False)
+
     def open_parameters_dialog(self):
         dialog = ParametersDialog(self.parameters)
         result = dialog.exec_()
@@ -264,9 +293,9 @@ class Window(QtGui.QMainWindow):
 
     def on_identify_next_frame_started(self, frame_number):
         n_frames = self.info['frames']
-        roi = self.parameters['roi']
-        threshold = self.parameters['threshold']
-        message = FRAME_STARTED_MESSAGE.format(frame_number, n_frames, roi, threshold)
+        roi = self.parameters['ROI']
+        mmlg = self.parameters['Minimum LGM']
+        message = FRAME_STARTED_MESSAGE.format(frame_number, n_frames, roi, mmlg)
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, identifications):
@@ -275,9 +304,9 @@ class Window(QtGui.QMainWindow):
         n_identifications = 0
         for identifications_frame in identifications:
             n_identifications += len(identifications_frame)
-        roi = self.parameters['roi']
-        threshold = self.parameters['threshold']
-        message = IDENTIFY_FINISHED_MESSAGE.format(n_identifications, roi, threshold, time_per_frame)
+        roi = self.parameters['ROI']
+        mmlg = self.parameters['Minimum LGM']
+        message = IDENTIFY_FINISHED_MESSAGE.format(n_identifications, roi, mmlg, time_per_frame)
         self.status_bar.showMessage(message)
         self.identifications = identifications
         self.last_identification_parameters = self.parameters.copy()
@@ -304,7 +333,7 @@ class Window(QtGui.QMainWindow):
 
     def draw_identification_markers(self):
         identifications_frame = self.identifications[self.current_frame_number]
-        roi = self.last_identification_parameters['roi']
+        roi = self.last_identification_parameters['ROI']
         roi_half = int(roi / 2)
         for y, x in identifications_frame:
             rect = self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(QtGui.QColor('red')))

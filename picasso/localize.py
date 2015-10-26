@@ -46,10 +46,10 @@ def local_gradient_magnitude(frame, roi, abs_gradient):
 def identify_frame(frame, parameters):
     gradient_x, gradient_y = np.gradient(np.float32(frame))
     abs_gradient = np.sqrt(gradient_x**2 + gradient_y**2)
-    roi = parameters['roi']
+    roi = parameters['ROI']
     s_map = local_gradient_magnitude(frame, roi, abs_gradient)
     lm_map = local_maxima_map(frame, roi)
-    s_map_thesholded = s_map > parameters['threshold']
+    s_map_thesholded = s_map > parameters['Minimum LGM']
     combined_map = (lm_map * s_map_thesholded) > 0.5
     return np.vstack(np.where(combined_map)).T
 
