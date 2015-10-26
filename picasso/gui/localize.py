@@ -12,6 +12,8 @@ import sys
 import os.path
 import time
 from PyQt4 import QtCore, QtGui
+import multiprocessing
+import functools
 from picasso import io, localize
 
 
@@ -79,7 +81,7 @@ class ParametersDialog(QtGui.QDialog):
         self.roi_spinbox.setValue(parameters['roi'])
         self.roi_spinbox.setSingleStep(2)
         grid.addWidget(self.roi_spinbox, 0, 1)
-        grid.addWidget(QtGui.QLabel('Minimum AGS:'), 1, 0)
+        grid.addWidget(QtGui.QLabel('Minimum LGM:'), 1, 0)
         self.threshold_spinbox = QtGui.QSpinBox()
         self.threshold_spinbox.setMaximum(999999999)
         self.threshold_spinbox.setValue(parameters['threshold'])
@@ -190,7 +192,7 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        self.movie, self.info = io.load_raw(path)
+        self.movie, self.info = io.load_raw(path, False)
         self.set_frame(0)
         self.fit_in_view()
 
@@ -306,6 +308,18 @@ class Window(QtGui.QMainWindow):
         self.view.scale(7 / 10, 7 / 10)
 
 
+# Need to be declared top level and global due to not understood multiprocessing reasons
+lock = multiprocessing.Lock()
+counter = multiprocessing.Value('i', 0)
+
+
+# The target function for the processing pool. Needs to be declared top level, so it can be pickled
+def identify_frame(parameters, frame):
+    with lock:      # The lock is needed, because +=1 is not atomic. The internal lock of Value ensures atomic operations are safe.
+        counter.value += 1
+    return localize.identify_frame(frame, parameters)
+
+
 class IdentificationWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int)
@@ -320,14 +334,23 @@ class IdentificationWorker(QtCore.QThread):
 
     def run(self):
         start = time.time()
-        identifications = []
-        for i, frame in enumerate(self.movie):
-            self.progressMade.emit(i)
-            identifications_frame = localize.identify_frame(frame, self.parameters)
-            identifications.append(identifications_frame)
-            if self.window.worker_interrupt_flag:
-                self.interrupted.emit()
-                return
+        n_cpus = multiprocessing.cpu_count()
+        if len(self.movie) < n_cpus:
+            n_processes = len(self.movie)
+        else:
+            n_processes = 2 * n_cpus
+        counter.value = 0
+        targetfunc = functools.partial(identify_frame, self.parameters)
+        with multiprocessing.Pool(processes=n_processes) as pool:
+            result = pool.map_async(targetfunc, self.movie)
+            while not result.ready():
+                self.progressMade.emit(int(counter.value))
+                time.sleep(0.33)
+                if self.window.worker_interrupt_flag:
+                    pool.terminate()
+                    self.interrupted.emit()
+                    return
+        identifications = result.get()
         self.elapsed_time = time.time() - start
         self.finished.emit(identifications)
 
