@@ -10,7 +10,7 @@
 
 import sys
 import os.path
-from PyQt4 import QtGui
+from PyQt4 import QtCore, QtGui
 from picasso import io
 
 
@@ -27,6 +27,7 @@ class Window(QtGui.QWidget):
         self.setWindowIcon(icon)
         vbox = QtGui.QVBoxLayout()
         self.setLayout(vbox)
+        vbox.addWidget(QtGui.QLabel('Files:'))
         self.path_edit = QtGui.QTextEdit()
         vbox.addWidget(self.path_edit)
         hbox = QtGui.QHBoxLayout()
@@ -44,28 +45,47 @@ class Window(QtGui.QWidget):
         for path in paths:
             self.path_edit.append(path)
 
-    def update_path_edit(self, paths, done):
+    def to_raw(self):
+        self.setEnabled(False)
+        text = self.path_edit.toPlainText()
+        self.paths = text.splitlines()
+        self.update_html(0)
+        self.worker = Worker(self.paths)
+        self.worker.progressMade.connect(self.update_html)
+        self.worker.finished.connect(self.on_finished)
+        self.worker.start()
+
+    def update_html(self, done):
         html = ''
-        for i, path in enumerate(paths):
+        for i, path in enumerate(self.paths):
             if i < done:
-                html += '<font color="green">{}</font>\n'.format(path)
+                html += '<font color="green">{}</font><br>'.format(path)
             elif i == done:
-                html += '<font color="yellow">{}</font>\n'.format(path)
+                html += '<font color="yellow">{}</font><br>'.format(path)
             else:
-                html += path + '\n'
+                html += path + '<br>'
         self.path_edit.setHtml(html)
 
-    def to_raw(self):
-        self.path_edit.setEnabled(False)
-        self.browse_button.setEnabled(False)
-        text = self.path_edit.toPlainText()
-        paths = text.splitlines()
-        for i, path in enumerate(paths):
-            self.update_path_edit(paths, i)
+    def on_finished(self, done):
+        self.update_html(done + 1)
+        self.setEnabled(True)
+
+
+class Worker(QtCore.QThread):
+
+    progressMade = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(int)
+    interrupted = QtCore.pyqtSignal()
+
+    def __init__(self, paths):
+        super().__init__()
+        self.paths = paths
+
+    def run(self):
+        for i, path in enumerate(self.paths):
+            self.progressMade.emit(i)
             io.to_raw_single(path)
-        self.update_path_edit(paths, i + 1)
-        self.path_edit.setEnabled(True)
-        self.browse_button.setEnabled(True)
+        self.finished.emit(i)
 
 
 if __name__ == '__main__':

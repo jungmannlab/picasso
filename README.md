@@ -38,8 +38,7 @@ If the command `picasso gui localize` does not open a Window, you might have to 
 7. Make shortcuts of `gui\*.pyw` files. Open shortcut properties. Prepend shortcut command with `pythonw `. Set the icon to the respective file in the `gui` folder. Move the shortcut to top level. This shortcut can now be double-clicked, pinned to task bar or copied to Desktop.
 
 ## To Do
-- ToRaw gui
-- toraw output of progress
+- toraw cli output of progress
 - fitting in localize
 
 
