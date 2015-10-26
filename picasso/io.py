@@ -10,7 +10,7 @@
 
 import glob
 import os.path
-from numpy import memmap, dtype
+from numpy import memmap, fromfile, dtype, reshape
 import yaml
 import tifffile
 
@@ -21,7 +21,11 @@ class FileFormatNotSupported(Exception):
 
 def load_raw(path, memory_map=True):
     info = load_raw_info(path)
-    movie = memmap(path, info['data type'], 'r', shape=info['shape'])
+    if memory_map:
+        movie = memmap(path, info['data type'], 'r', shape=info['shape'])
+    else:
+        movie = fromfile(path, info['data type'])
+        movie = reshape(movie, info['shape'])
     return movie, info
 
 
