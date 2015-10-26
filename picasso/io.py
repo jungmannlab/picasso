@@ -59,18 +59,22 @@ def load_tif(path):
     return movie, info
 
 
+def to_raw_single(path):
+    path_base, path_extension = os.path.splitext(path)
+    path_extension = path_extension.lower()
+    if path_extension == '.tif' or path_extension == 'tiff':
+        movie, info = load_tif(path)
+    else:
+        raise FileFormatNotSupported("File format must be '.tif' or '.tiff'.")
+    raw_file_name = path_base + '.raw'
+    movie.tofile(raw_file_name)
+    info['original file'] = info.pop('file')
+    info['raw file'] = os.path.basename(raw_file_name)
+    with open(path_base + '.yaml', 'w') as info_file:
+        yaml.dump(info, info_file, default_flow_style=False)
+
+
 def to_raw(files):
     paths = glob.glob(files)
     for path in paths:
-        path_base, path_extension = os.path.splitext(path)
-        path_extension = path_extension.lower()
-        if path_extension == '.tif' or path_extension == 'tiff':
-            movie, info = load_tif(path)
-        else:
-            raise FileFormatNotSupported("File format must be '.tif' or '.tiff'.")
-        raw_file_name = path_base + '.raw'
-        movie.tofile(raw_file_name)
-        info['original file'] = info.pop('file')
-        info['raw file'] = os.path.basename(raw_file_name)
-        with open(path_base + '.yaml', 'w') as info_file:
-            yaml.dump(info, info_file, default_flow_style=False)
+        to_raw_single(path)

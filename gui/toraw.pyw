@@ -10,8 +10,7 @@
 
 import sys
 import os.path
-import glob
-from PyQt4 import QtCore, QtGui
+from PyQt4 import QtGui
 from picasso import io
 
 
@@ -21,47 +20,52 @@ class Window(QtGui.QWidget):
         super().__init__()
         # Init GUI
         self.setWindowTitle('Picasso: ToRaw')
+        self.resize(768, 512)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, 'toraw.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
-        self.resize(512, 1)
-        self.vbox = QtGui.QVBoxLayout()
-        self.setLayout(self.vbox)
-        file_label = QtGui.QLabel('Drop or browse a file:')
-        file_label.setAlignment(QtCore.Qt.AlignHCenter)
-        self.vbox.addWidget(file_label)
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        self.path_edit = QtGui.QTextEdit()
+        vbox.addWidget(self.path_edit)
         hbox = QtGui.QHBoxLayout()
-        self.vbox.addLayout(hbox)
-        self.path_edit = QtGui.QLineEdit()
-        hbox.addWidget(self.path_edit)
+        vbox.addLayout(hbox)
         self.browse_button = QtGui.QPushButton('Browse')
-        self.browse_button.released.connect(self.browse)
+        self.browse_button.clicked.connect(self.browse)
         hbox.addWidget(self.browse_button)
-        hbox2 = QtGui.QHBoxLayout()
-        self.vbox.addLayout(hbox2)
-        self.convert_button = QtGui.QPushButton('Convert')
-        self.convert_button.clicked.connect(self.convert)
-        hbox2.addStretch(1)
-        hbox2.addWidget(self.convert_button)
-        hbox2.addStretch(1)
-        self.progress_bar = QtGui.QProgressBar()
-        self.progress_bar.setMinimum(0)
+        hbox.addStretch(1)
+        to_raw_button = QtGui.QPushButton('To raw')
+        to_raw_button.clicked.connect(self.to_raw)
+        hbox.addWidget(to_raw_button)
 
     def browse(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Open file to convert')
-        if path:
-            self.path_edit.setText(path)
+        paths = QtGui.QFileDialog.getOpenFileNames(self, 'Open files to convert', filter='*.tif; **.tiff')
+        for path in paths:
+            self.path_edit.append(path)
 
-    def convert(self):
-        files = self.path_edit.text()
-        paths = glob.glob(files)
-        self.progress_bar.setMaximum(len(paths))
-        self.vbox.addWidget(self.progress_bar)
+    def update_path_edit(self, paths, done):
+        html = ''
         for i, path in enumerate(paths):
+            if i < done:
+                html += '<font color="green">{}</font>\n'.format(path)
+            elif i == done:
+                html += '<font color="yellow">{}</font>\n'.format(path)
+            else:
+                html += path + '\n'
+        self.path_edit.setHtml(html)
+
+    def to_raw(self):
+        self.path_edit.setEnabled(False)
+        self.browse_button.setEnabled(False)
+        text = self.path_edit.toPlainText()
+        paths = text.splitlines()
+        for i, path in enumerate(paths):
+            self.update_path_edit(paths, i)
             io.to_raw_single(path)
-            self.progress_bar.setValue(i + 1)
-        self.path_edit.setText('')
+        self.update_path_edit(paths, i + 1)
+        self.path_edit.setEnabled(True)
+        self.browse_button.setEnabled(True)
 
 
 if __name__ == '__main__':
