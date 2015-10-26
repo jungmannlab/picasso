@@ -45,7 +45,7 @@ def identify_frame(frame, parameters):
     gradient_x, gradient_y = np.gradient(np.float32(frame))
     abs_gradient = np.sqrt(gradient_x**2 + gradient_y**2)
     roi = parameters['roi']
-    s_map = spot_map(frame, roi, abs_gradient)
+    s_map = local_gradient_magnitude(frame, roi, abs_gradient)
     lm_map = local_maxima_map(frame, roi)
     s_map_thesholded = s_map > parameters['threshold']
     combined_map = (lm_map * s_map_thesholded) > 0.5
