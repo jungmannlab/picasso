@@ -19,7 +19,6 @@ CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
 DEFAULT_PARAMETERS = {'roi': 5, 'threshold': 300}
 FRAME_STARTED_MESSAGE = 'Identifying: Frame {}/{} (ROI: {}, Mininum AGS: {})'
 IDENTIFY_FINISHED_MESSAGE = 'Identifications: {} (ROI: {}, Minimum AGS: {}, Secs/Frame: {:.3f})'
-MOVIE_LOADED_MESSAGE = '{} frames loaded in {:.2f} seconds.'
 
 
 class View(QtGui.QGraphicsView):
@@ -182,7 +181,7 @@ class Window(QtGui.QMainWindow):
         analyze_menu.addSeparator()
         interrupt_action = analyze_menu.addAction('Interrupt')
         interrupt_action.setShortcut('Ctrl+X')
-        interrupt_action.triggered.connect(self.interrupt)
+        interrupt_action.triggered.connect(self.interrupt_worker_if_running)
         analyze_menu.addAction(interrupt_action)
 
     def open_file_dialog(self):
@@ -191,13 +190,7 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        self.status_bar.showMessage('Loading movie...')
-        start = time.time()
         self.movie, self.info = io.load_raw(path)
-        n_frames = self.info['frames']
-        elapsed_time = time.time() - start
-        message = MOVIE_LOADED_MESSAGE.format(n_frames, elapsed_time)
-        self.status_bar.showMessage(message)
         self.set_frame(0)
         self.fit_in_view()
 
@@ -248,13 +241,11 @@ class Window(QtGui.QMainWindow):
 
     def identify(self):
         if self.movie is not None:
-            if self.worker and self.worker.isRunning():
-                self.interrupt()
-            self.worker = IdentifyWorker(self, self.movie, self.parameters)
-            self.worker.frameStarted.connect(self.on_identify_next_frame_started)
+            self.interrupt_worker_if_running()
+            self.worker = IdentificationWorker(self, self.movie, self.parameters)
+            self.worker.progressMade.connect(self.on_identify_next_frame_started)
             self.worker.finished.connect(self.on_identify_finished)
-            self.worker.interrupted.connect(self.on_interrupted_thread_finished)
-            self.identify_start = time.time()
+            self.worker.interrupted.connect(self.on_identify_interrupted)
             self.worker.start()
 
     def on_identify_next_frame_started(self, frame_number):
@@ -265,7 +256,7 @@ class Window(QtGui.QMainWindow):
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, identifications):
-        required_time = time.time() - self.identify_start
+        required_time = self.worker.elapsed_time
         time_per_frame = required_time / self.info['frames']
         n_identifications = 0
         for identifications_frame in identifications:
@@ -282,17 +273,15 @@ class Window(QtGui.QMainWindow):
     def fit(self):
         pass
 
-    def interrupt(self):
-        """ Gets called when the user chooses the Interrupt action from the menu """
+    def interrupt_worker_if_running(self):
         if self.worker and self.worker.isRunning():
             self.worker_interrupt_flag = True
             self.worker.wait()
             self.worker_interupt_flag = False
 
-    def on_interrupted_thread_finished(self):
-        """ Gets called when and interrupted thread returned without finishing """
+    def on_identify_interrupted(self):
         self.worker_interrupt_flag = False
-        self.status_bar.showMessage('')
+        self.status_bar.showMessage('Interrupted')
 
     def remove_identification_markers(self):
         for rect in self.identification_markers:
@@ -317,9 +306,9 @@ class Window(QtGui.QMainWindow):
         self.view.scale(7 / 10, 7 / 10)
 
 
-class IdentifyWorker(QtCore.QThread):
+class IdentificationWorker(QtCore.QThread):
 
-    frameStarted = QtCore.pyqtSignal(int)
+    progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(list)
     interrupted = QtCore.pyqtSignal()
 
@@ -330,14 +319,16 @@ class IdentifyWorker(QtCore.QThread):
         self.parameters = parameters
 
     def run(self):
+        start = time.time()
         identifications = []
         for i, frame in enumerate(self.movie):
-            self.frameStarted.emit(i)
+            self.progressMade.emit(i)
             identifications_frame = localize.identify_frame(frame, self.parameters)
             identifications.append(identifications_frame)
             if self.window.worker_interrupt_flag:
                 self.interrupted.emit()
                 return
+        self.elapsed_time = time.time() - start
         self.finished.emit(identifications)
 
 

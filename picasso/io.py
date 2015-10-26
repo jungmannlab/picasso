@@ -10,7 +10,7 @@
 
 import glob
 import os.path
-import numpy as np
+from numpy import memmap, dtype
 import yaml
 import tifffile
 
@@ -19,11 +19,9 @@ class FileFormatNotSupported(Exception):
     pass
 
 
-def load_raw(path):
+def load_raw(path, memory_map=True):
     info = load_raw_info(path)
-    movie = np.fromfile(path, info['data type'])
-    shape = (info['frames'], info['width'], info['height'])
-    movie = np.reshape(movie, shape)
+    movie = memmap(path, info['data type'], 'r', shape=info['shape'])
     return movie, info
 
 
@@ -31,6 +29,7 @@ def load_raw_info(path):
     path_base, path_extension = os.path.splitext(path)
     with open(path_base + '.yaml', 'r') as info_file:
         info = yaml.load(info_file)
+    info['shape'] = tuple(info['shape'])
     return info
 
 
@@ -40,8 +39,10 @@ def load_tif(path):
         movie = tif.asarray()
         info['file'] = tif.filename
         if 'datetime' in tif.pages[0].tags:
-            info['timestamp'] = tif.pages[0].tags['datetime'].value.decode()
-        info['data type'] = str(np.dtype(tif.pages[0].dtype))
+            info['timestamp'] = tif.pages[0].tags.datetime.value.decode()
+        info['data type'] = str(dtype(tif.pages[0].dtype))
+        info['byte order'] = tif.byteorder
+        info['bits per sample'] = tif.pages[0].tags.bits_per_sample.value
     if movie.ndim == 3:
         info['frames'], info['width'], info['height'] = movie.shape
     elif movie.ndim == 2:
@@ -50,6 +51,7 @@ def load_tif(path):
     elif movie.ndim == 1:
         info['frames'] = info['height'] = 1
         info['width'] = len(movie)
+    info['shape'] = [info['frames'], info['width'], info['height']]
     return movie, info
 
 
