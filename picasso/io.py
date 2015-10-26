@@ -74,7 +74,18 @@ def to_raw_single(path):
         yaml.dump(info, info_file, default_flow_style=False)
 
 
-def to_raw(files):
+def to_raw(files, verbose=False):
+    ''' Test '''
     paths = glob.glob(files)
-    for path in paths:
-        to_raw_single(path)
+    n_files = len(paths)
+    if n_files:
+        for i, path in enumerate(paths):
+            if verbose:
+                print('Converting file {}/{}'.format(i, n_files), end='\r')
+            to_raw_single(path)
+        if verbose:
+            print(' ...done.')
+    else:
+        if verbose:
+            print('No files matching {}'.format(files))
+    return n_files
