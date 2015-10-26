@@ -9,9 +9,6 @@
 """
 
 
-print(__file__)
-
-
 def import_nolocal(module):
     """
     Imports a module, but ignores the current directory.

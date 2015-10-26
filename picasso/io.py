@@ -75,16 +75,15 @@ def to_raw_single(path):
 
 
 def to_raw(files, verbose=False):
-    ''' Test '''
     paths = glob.glob(files)
     n_files = len(paths)
     if n_files:
         for i, path in enumerate(paths):
             if verbose:
-                print('Converting file {}/{}'.format(i, n_files), end='\r')
+                print('Converting file {}/{}...'.format(i + 1, n_files), end='\r')
             to_raw_single(path)
         if verbose:
-            print(' ...done.')
+            print('\nDone.')
     else:
         if verbose:
             print('No files matching {}'.format(files))
