@@ -18,7 +18,7 @@ def local_maxima_map(frame, roi):
     """ Finds pixels with maximum value within a region of interest """
     X, Y = frame.shape
     maxima_map = np.zeros(frame.shape, np.uint8)
-    roi_half = int(roi/2)
+    roi_half = int(roi / 2)
     for i in range(roi, X-roi):
         for j in range(roi, Y-roi):
             local_frame = frame[i-roi_half:i+roi_half+1, j-roi_half:j+roi_half+1]
@@ -54,14 +54,10 @@ def identify_frame(frame, parameters):
     return np.vstack(np.where(combined_map)).T
 
 
-# Needs to be declared top level and global due to not understood multiprocessing reasons
-_counter = multiprocessing.Value('i', 0)
-
-
-# The target function for the processing pool, switched args, ready for functools.partial
-def _identify_frame_async(parameters, frame):
-    with _counter.get_lock():      # The lock is needed, because +=1 is not atomic. The internal lock of Value ensures atomic operations are safe.
-        _counter.value += 1
+# The target function for the processing pool, ready for functools.partial
+def _identify_frame_async(parameters, counter, lock, frame):
+    with lock:
+        counter.value += 1
     return identify_frame(frame, parameters)
 
 
@@ -71,11 +67,14 @@ def identify_async(movie, parameters):
         n_processes = len(movie)
     else:
         n_processes = 2 * n_cpus
-    _counter.value = 0
-    targetfunc = functools.partial(_identify_frame_async, parameters)
+    manager = multiprocessing.Manager()
+    counter = manager.Value('i', 0)
+    lock = manager.Lock()
+    # _counter.value = 0
+    targetfunc = functools.partial(_identify_frame_async, parameters, counter, lock)
     pool = multiprocessing.Pool(processes=n_processes)
     result = pool.map_async(targetfunc, movie)
-    return result, _counter, pool
+    return result, counter, pool
 
 
 def identify(movie, parameters):

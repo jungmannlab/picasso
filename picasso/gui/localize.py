@@ -18,6 +18,7 @@ from picasso import io, localize
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
 DEFAULT_PARAMETERS = {'ROI': 5, 'Minimum LGM': 300}
+MOVIE_LOADED_MESSAGE = 'Loaded {} frames. Ready to go.'
 FRAME_STARTED_MESSAGE = 'Identifying: Frame {}/{} (ROI: {}, Mininum AGS: {})'
 IDENTIFY_FINISHED_MESSAGE = 'Identifications: {} (ROI: {}, Minimum AGS: {}, Secs/Frame: {:.3f})'
 
@@ -50,14 +51,13 @@ class Scene(QtGui.QGraphicsScene):
         if event.mimeData().urls():
             url = event.mimeData().urls()[0]
             path = url.toLocalFile()
-            try:
-                base, extension = os.path.splitext(path)
-                if extension == '.raw':
-                    self.window.open(path)
-                elif extension == '.yaml':
-                    self.window.load_parameters(path)
-            except OSError:
-                pass
+            base, extension = os.path.splitext(path)
+            if extension == '.raw':
+                self.window.open(path)
+            elif extension == '.yaml':
+                self.window.load_parameters(path)
+            else:
+                pass  # TODO: send message to user
 
 
 class OddSpinBox(QtGui.QSpinBox):
@@ -136,7 +136,7 @@ class Window(QtGui.QMainWindow):
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
         file_menu.addSeparator()
-        open_parameters_action = file_menu.addAction('Open parameters')
+        open_parameters_action = file_menu.addAction('Load parameters')
         open_parameters_action.setShortcut('Ctrl+Shift+O')
         open_parameters_action.triggered.connect(self.open_parameters)
         file_menu.addAction(open_parameters_action)
@@ -210,7 +210,13 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        self.movie, self.info = io.load_raw(path, False)
+        self.status_bar.showMessage('Memory-mapping file...')
+        try:
+            self.movie, self.info = io.load_raw(path, False)
+        except FileNotFoundError:
+            pass  # TODO send a message
+        message = MOVIE_LOADED_MESSAGE.format(self.info['frames'])
+        self.status_bar.showMessage(message)
         self.set_frame(0)
         self.fit_in_view()
 
@@ -285,6 +291,7 @@ class Window(QtGui.QMainWindow):
     def identify(self):
         if self.movie is not None:
             self.interrupt_worker_if_running()
+            self.status_bar.showMessage('Setting up identification...')
             self.worker = IdentificationWorker(self, self.movie, self.parameters)
             self.worker.progressMade.connect(self.on_identify_next_frame_started)
             self.worker.finished.connect(self.on_identify_finished)
@@ -366,10 +373,12 @@ class IdentificationWorker(QtCore.QThread):
         result, counter, pool = localize.identify_async(self.movie, self.parameters)
         while not result.ready():
             self.progressMade.emit(int(counter.value))
-            time.sleep(0.33)
+            time.sleep(0.1)
             if self.window.worker_interrupt_flag:
-                pool.terminate()
                 self.interrupted.emit()
+                pool.close()
+                pool.terminate()
+                pool.join()
                 return
         identifications = result.get()
         self.elapsed_time = time.time() - start
