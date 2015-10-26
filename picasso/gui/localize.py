@@ -29,7 +29,7 @@ class View(QtGui.QGraphicsView):
         self.setAcceptDrops(True)
 
     def wheelEvent(self, event):
-        scale = 1.01 ** (-event.delta())
+        scale = 1.008 ** (-event.delta())
         self.scale(scale, scale)
 
 
@@ -141,6 +141,7 @@ class Window(QtGui.QMainWindow):
         next_frame_action.setShortcut('Right')
         next_frame_action.triggered.connect(self.next_frame)
         view_menu.addAction(next_frame_action)
+        view_menu.addSeparator()
         first_frame_action = view_menu.addAction('First frame')
         first_frame_action.setShortcut('Ctrl+Left')
         first_frame_action.triggered.connect(self.first_frame)
@@ -149,6 +150,10 @@ class Window(QtGui.QMainWindow):
         last_frame_action.setShortcut('Ctrl+Right')
         last_frame_action.triggered.connect(self.last_frame)
         view_menu.addAction(last_frame_action)
+        go_to_frame_action = view_menu.addAction('Go to frame')
+        go_to_frame_action.setShortcut('Ctrl+G')
+        go_to_frame_action.triggered.connect(self.to_frame)
+        view_menu.addAction(go_to_frame_action)
         view_menu.addSeparator()
         zoom_in_action = view_menu.addAction('Zoom in')
         zoom_in_action.setShortcuts(['Ctrl++', 'Ctrl+='])
@@ -158,6 +163,7 @@ class Window(QtGui.QMainWindow):
         zoom_out_action.setShortcut('Ctrl+-')
         zoom_out_action.triggered.connect(self.zoom_out)
         view_menu.addAction(zoom_out_action)
+        view_menu.addSeparator()
         fit_in_view_action = view_menu.addAction('Fit image to window')
         fit_in_view_action.setShortcut('Ctrl+W')
         fit_in_view_action.triggered.connect(self.fit_in_view)
@@ -211,6 +217,14 @@ class Window(QtGui.QMainWindow):
     def last_frame(self):
         if self.movie is not None:
             self.set_frame(self.info['frames'] - 1)
+
+    def to_frame(self):
+        if self.movie is not None:
+            frames = self.info['frames']
+            frames_half = int(frames/2)
+            number, ok = QtGui.QInputDialog.getInt(self, 'Go to frame', 'Frame number:', 1, frames_half, frames)
+            if ok:
+                self.set_frame(number - 1)
 
     def set_frame(self, number):
         if self.identifications:
