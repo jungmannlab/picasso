@@ -14,6 +14,8 @@ import time
 import yaml
 from PyQt4 import QtCore, QtGui
 from picasso import io, localize
+import multiprocessing
+import functools
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
@@ -125,6 +127,9 @@ class Window(QtGui.QMainWindow):
         self.identification_markers = []
         self.worker = None
         self.worker_interrupt_flag = False
+        self.worker_pool_mutex = QtCore.QMutex()
+        self.n_cpus = multiprocessing.cpu_count()
+        self.init_worker_pool()
 
     def init_menu_bar(self):
         menu_bar = self.menuBar()
@@ -203,6 +208,12 @@ class Window(QtGui.QMainWindow):
         interrupt_action.setShortcut('Ctrl+X')
         interrupt_action.triggered.connect(self.interrupt_worker_if_running)
         analyze_menu.addAction(interrupt_action)
+
+    def init_worker_pool(self):
+        manager = multiprocessing.Manager()
+        self.work_counter = manager.Value('i', 0)
+        self.work_counter_lock = manager.Lock()
+        self.worker_pool = multiprocessing.Pool(processes=2*self.n_cpus)
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw')
@@ -291,7 +302,7 @@ class Window(QtGui.QMainWindow):
         if self.movie is not None:
             self.interrupt_worker_if_running()
             self.status_bar.showMessage('Setting up identification...')
-            self.worker = IdentificationWorker(self, self.movie, self.parameters)
+            self.worker = IdentificationWorker(self)
             self.worker.progressMade.connect(self.on_identify_next_frame_started)
             self.worker.finished.connect(self.on_identify_finished)
             self.worker.interrupted.connect(self.on_identify_interrupted)
@@ -354,6 +365,19 @@ class Window(QtGui.QMainWindow):
     def zoom_out(self):
         self.view.scale(7 / 10, 7 / 10)
 
+    def closeEvent(self, event):
+        self.interrupt_worker_if_running()
+        self.worker_pool_mutex.lock()
+        self.worker_pool.close()
+        self.worker_pool.terminate()
+        self.worker_pool.join()
+
+
+def _identify_frame_async(parameters, counter, lock, frame):
+    with lock:
+        counter.value += 1
+    return localize.identify_frame(frame, parameters)
+
 
 class IdentificationWorker(QtCore.QThread):
 
@@ -361,26 +385,36 @@ class IdentificationWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(list)
     interrupted = QtCore.pyqtSignal()
 
-    def __init__(self, window, movie, parameters):
+    def __init__(self, window):
         super().__init__()
         self.window = window
-        self.movie = movie
-        self.parameters = parameters
+        self.pool = window.worker_pool
+        self.movie = window.movie
+        self.parameters = window.parameters
+        self.counter = window.work_counter
+        self.lock = window.work_counter_lock
+        self.pool_mutex = window.worker_pool_mutex
 
     def run(self):
         start = time.time()
-        result, counter, pool = localize.identify_async(self.movie, self.parameters)
+        self.pool_mutex.lock()
+        self.counter.value = 0
+        targetfunc = functools.partial(_identify_frame_async, self.parameters, self.counter, self.lock)
+        result = self.pool.map_async(targetfunc, self.movie)
         while not result.ready():
-            self.progressMade.emit(int(counter.value))
+            self.progressMade.emit(int(self.counter.value))
             time.sleep(0.1)
             if self.window.worker_interrupt_flag:
                 self.interrupted.emit()
-                pool.close()
-                pool.terminate()
-                pool.join()
+                self.pool.close()
+                self.pool.terminate()
+                self.pool.join()
+                self.window.init_worker_pool()
+                self.pool_mutex.unlock()
                 return
         identifications = result.get()
         self.elapsed_time = time.time() - start
+        self.pool_mutex.unlock()
         self.finished.emit(identifications)
 
 
