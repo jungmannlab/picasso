@@ -212,7 +212,7 @@ class Window(QtGui.QMainWindow):
     def open(self, path):
         self.status_bar.showMessage('Memory-mapping file...')
         try:
-            self.movie, self.info = io.load_raw(path, False)
+            self.movie, self.info = io.load_raw(path, memory_map=True)
         except FileNotFoundError:
             pass  # TODO send a message
         message = MOVIE_LOADED_MESSAGE.format(self.info['frames'])
