@@ -42,6 +42,8 @@ class Window(QtGui.QWidget):
 
     def browse(self):
         paths = QtGui.QFileDialog.getOpenFileNames(self, 'Open files to convert', filter='*.tif; **.tiff')
+        if paths:
+            self.path_edit.clear()
         for path in paths:
             self.path_edit.append(path)
 
