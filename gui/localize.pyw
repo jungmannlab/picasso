@@ -213,7 +213,7 @@ class Window(QtGui.QMainWindow):
         manager = multiprocessing.Manager()
         self.work_counter = manager.Value('i', 0)
         self.work_counter_lock = manager.Lock()
-        self.worker_pool = multiprocessing.Pool(processes=2 * self.n_cpus)
+        self.worker_pool = multiprocessing.Pool(processes=2*self.n_cpus)
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw')
@@ -301,7 +301,6 @@ class Window(QtGui.QMainWindow):
     def identify(self):
         if self.movie is not None:
             self.interrupt_worker_if_running()
-            self.status_bar.showMessage('Setting up identification...')
             self.worker = IdentificationWorker(self)
             self.worker.progressMade.connect(self.on_identify_next_frame_started)
             self.worker.finished.connect(self.on_identify_finished)
