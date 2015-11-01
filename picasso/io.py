@@ -40,7 +40,7 @@ def load_raw_info(path):
 def load_tif(path):
     info = {}
     with tifffile.TiffFile(path) as tif:
-        movie = tif.asarray()
+        movie = tif.asarray(memmap=True)
         info['file'] = tif.filename
         if 'datetime' in tif.pages[0].tags:
             info['timestamp'] = tif.pages[0].tags.datetime.value.decode()
@@ -71,7 +71,7 @@ def to_raw_single(path):
     info['original file'] = info.pop('file')
     info['raw file'] = os.path.basename(raw_file_name)
     with open(path_base + '.yaml', 'w') as info_file:
-        yaml.dump(info, info_file, default_flow_style=False)
+        yaml.dump(info, info_file)
 
 
 def to_raw(files, verbose=False):
