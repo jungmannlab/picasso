@@ -11,6 +11,16 @@ import numpy as np
 import numba
 import multiprocessing
 import functools
+import ctypes
+import threading
+
+
+C_FLOAT_POINTER = ctypes.POINTER(ctypes.c_float)
+
+
+WoehrLok = ctypes.CDLL('WoehrLok')
+# Visual C compiler mangles up the function name (thanks Microsoft!)
+WoehrLok.fnWoehrLokMLEFitAll = getattr(WoehrLok, '?fnWoehrLokMLEFitAll@@YAXHPEBMMHHPEAM11KHPEAK@Z')
 
 
 @numba.jit(nopython=True)
@@ -79,3 +89,54 @@ def identify_async(movie, parameters):
 
 def identify(movie, parameters):
     return [identify_frame(frame, parameters) for frame in movie]
+
+
+def get_spots(movie, identifications, roi):
+    n_spots_frame = [len(_) for _ in identifications]
+    n_spots = sum(n_spots_frame)
+    spots = np.zeros((n_spots, roi, roi), dtype=np.float32)
+    r = int(roi/2)
+    i = 0
+    for frame_number, identifications_frame in enumerate(identifications):
+        for x, y in identifications_frame:
+            spots[i] = movie[frame_number, x-r:x+r+1, y-r:y+r+1]
+    return n_spots, n_spots_frame, spots
+
+
+def prepare_fit(spots, info):
+    args = {}
+    n_spots, roi, _ = spots.shape
+    fit_type = ctypes.c_int(4)
+    spots = np.float32(spots)
+    spots = (spots - info['Baseline']) * info['Quantum Efficiency'] * info['Pre-Amp Gain'] / info['Real EM Gain']
+    spots_pointer = spots.ctypes.data_as(C_FLOAT_POINTER)
+    psf_sigma = ctypes.c_float(1.0)
+    roi = ctypes.c_uint(roi)
+    n_iterations = ctypes.c_uint(20)
+    params = np.zeros((6, n_spots), dtype=np.float32)
+    params_pointer = params.ctypes.data_as(C_FLOAT_POINTER)
+    CRLBs = np.zeros((6, n_spots), dtype=np.float32)
+    CRLBs_pointer = CRLBs.ctypes.data_as(C_FLOAT_POINTER)
+    likelihoods = np.zeros(n_spots, dtype=np.float32)
+    likelihoods_pointer = likelihoods.ctypes.data_as(C_FLOAT_POINTER)
+    n_spots = ctypes.c_long(n_spots)
+    n_cpus = multiprocessing.cpu_count()
+    n_threads = ctypes.c_uint(2*n_cpus)
+    current = ctypes.c_long(0)
+    args = (fit_type, spots_pointer, psf_sigma, roi, n_iterations, params_pointer, CRLBs_pointer,
+            likelihoods_pointer, n_spots, n_threads, ctypes.byref(current))
+    results = (current, params, CRLBs, likelihoods)
+    return args, results
+
+
+def fit(spots, info):
+    args, results = prepare_fit(spots, info)
+    WoehrLok.fnWoehrLokMLEFitAll(*args)
+    return results[1:]
+
+
+def fit_async(spots, info):
+    args, results = prepare_fit(spots, info)
+    thread = threading.Thread(target=WoehrLok.fnWoehrLokMLEFitAll, args=args)
+    thread.start()
+    return (thread,) + results

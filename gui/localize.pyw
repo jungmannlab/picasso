@@ -16,13 +16,17 @@ from PyQt4 import QtCore, QtGui
 from picasso import io, localize
 import multiprocessing
 import functools
+import numpy as np
+from numpy.lib import recfunctions
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
 DEFAULT_PARAMETERS = {'ROI': 5, 'Minimum LGM': 300}
 MOVIE_LOADED_MESSAGE = 'Loaded {} frames. Ready to go.'
-FRAME_STARTED_MESSAGE = 'Identifying: Frame {}/{} (ROI: {}, Mininum AGS: {})'
+IDENTIFY_PROGRESS_MESSAGE = 'Identifying: Frame {}/{} (ROI: {}, Mininum AGS: {})'
 IDENTIFY_FINISHED_MESSAGE = 'Identifications: {} (ROI: {}, Minimum AGS: {}, Secs/Frame: {:.3f})'
+FIT_PROGRESS_MESSAGE = 'Fitting: Spot {}/{}'
+FIT_FINISHED_MESSAGE = 'Fitting done.'
 
 
 class View(QtGui.QGraphicsView):
@@ -130,6 +134,7 @@ class Window(QtGui.QMainWindow):
         self.worker_pool_mutex = QtCore.QMutex()
         self.n_cpus = multiprocessing.cpu_count()
         self.init_worker_pool()
+        self.locs = None
 
     def init_menu_bar(self):
         menu_bar = self.menuBar()
@@ -302,16 +307,16 @@ class Window(QtGui.QMainWindow):
         if self.movie is not None:
             self.interrupt_worker_if_running()
             self.worker = IdentificationWorker(self)
-            self.worker.progressMade.connect(self.on_identify_next_frame_started)
+            self.worker.progressMade.connect(self.on_identify_progress)
             self.worker.finished.connect(self.on_identify_finished)
             self.worker.interrupted.connect(self.on_identify_interrupted)
             self.worker.start()
 
-    def on_identify_next_frame_started(self, frame_number):
+    def on_identify_progress(self, frame_number):
         n_frames = self.info['frames']
         roi = self.parameters['ROI']
         mmlg = self.parameters['Minimum LGM']
-        message = FRAME_STARTED_MESSAGE.format(frame_number, n_frames, roi, mmlg)
+        message = IDENTIFY_PROGRESS_MESSAGE.format(frame_number, n_frames, roi, mmlg)
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, identifications):
@@ -328,9 +333,31 @@ class Window(QtGui.QMainWindow):
         self.last_identification_parameters = self.parameters.copy()
         self.remove_identification_markers()
         self.draw_identification_markers()
+        self.status_bar.showMessage('Preparing data for fitting...')
+        self.status_bar.showMessage('Ready for fit.')
 
     def fit(self):
-        pass
+        if self.movie is not None and self.identifications is not None:
+            self.interrupt_worker_if_running()
+            self.worker = FitWorker(self)
+            self.worker.progressMade.connect(self.on_fit_progress)
+            self.worker.finished.connect(self.on_fit_finished)
+            self.worker.interrupted.connect(self.on_fit_interrupted)
+            self.worker.start()
+
+    def on_fit_progress(self, current, n_spots):
+        message = FIT_PROGRESS_MESSAGE.format(current, n_spots)
+        self.status_bar.showMessage(message)
+
+    def on_fit_finished(self, results):
+        self.locs, CRLBs = results
+        self.status_bar.showMessage(FIT_FINISHED_MESSAGE)
+        self.draw_fit_markers()
+
+    def draw_fit_markers(self):
+        fits_frame = self.locs[self.locs.frame == self.current_frame_number]
+        for fit in fits_frame:
+            self.scene.addPoint(fit.y, fit.x, QtGui.QPen(QtGui.QColor('red')))
 
     def interrupt_worker_if_running(self):
         if self.worker and self.worker.isRunning():
@@ -415,6 +442,42 @@ class IdentificationWorker(QtCore.QThread):
         self.elapsed_time = time.time() - start
         self.pool_mutex.unlock()
         self.finished.emit(identifications)
+
+
+class FitWorker(QtCore.QThread):
+
+    progressMade = QtCore.pyqtSignal(int, int)
+    finished = QtCore.pyqtSignal(tuple)
+    interrupted = QtCore.pyqtSignal()
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        self.movie = window.movie
+        self.info = window.info
+        self.identifications = window.identifications
+        self.roi = window.parameters['ROI']
+
+    def run(self):
+        n_spots, n_spots_frame, spots = localize.get_spots(self.movie, self.identifications, self.roi)
+        results = localize.fit_async(spots, self.info)
+        thread, current, params, CRLBs, likelihoods = results
+        while thread.is_alive():
+            if self.window.worker_interrupt_flag:
+                self.interrupted.emit()
+                return
+            self.progressMade.emit((current.value, n_spots))
+            time.sleep(0.1)
+        thread.join()   # just in case...
+        locs = np.rec.array(params.T.flatten(), dtype=[('x', 'f4'), ('y', 'f4'), ('photons', 'f4'),
+                                                       ('bg', 'f4'), ('sx', 'f4'), ('sy', 'f4')])
+        frames = np.zeros(n_spots, dtype=np.uint32)
+        start_frames = np.cumsum(n_spots_frame) - n_spots_frame[0]
+        for frame_number, start_frame in enumerate(start_frames):
+            frames[start_frame:start_frames[frame_number+1]+1] = frame_number
+        locs = recfunctions.append_fields(locs, ['frame', 'likelihood'], [frames, likelihoods],
+                                          usemask=False, asrecarray=True)
+        self.finished.emit((locs, CRLBs))
 
 
 if __name__ == '__main__':
