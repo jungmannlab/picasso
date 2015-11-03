@@ -2,7 +2,7 @@
     picasso.localize
     ~~~~~~~~~~~~~~~~
 
-    Identify and localize fluorescent single molecules in an frame sequence
+    Identify and localize fluorescent single molecules in a frame sequence
 
     :author: Joerg Schnitzbauer, 2015
 """
@@ -14,17 +14,16 @@ import ctypes
 import threading
 import os.path
 from collections import namedtuple
-from numpy.lib import recfunctions
 
 
 C_FLOAT_POINTER = ctypes.POINTER(ctypes.c_float)
 
 
-this_file = os.path.abspath(__file__)
-this_directory = os.path.dirname(this_file)
-woehrlok_file = os.path.join(this_directory, 'WoehrLok.dll')
-WoehrLok = ctypes.CDLL(woehrlok_file)
-# Visual C compiler mangles up the function name (thanks Microsoft!)
+_this_file = os.path.abspath(__file__)
+_this_directory = os.path.dirname(_this_file)
+_woehrlok_file = os.path.join(_this_directory, 'WoehrLok.dll')
+WoehrLok = ctypes.CDLL(_woehrlok_file)
+# Visual C compiler mangles up the function name (thanks Microsoft):
 WoehrLok.fnWoehrLokMLEFitAll = getattr(WoehrLok, '?fnWoehrLokMLEFitAll@@YAXHPEBMMHHPEAM11KHPEAK@Z')
 
 
@@ -114,7 +113,7 @@ def identify(movie, parameters, threaded=True):
 
 
 @numba.jit(nopython=True)
-def get_spots(movie, ids_frame, ids_x, ids_y, roi):
+def _get_spots(movie, ids_frame, ids_x, ids_y, roi):
     n_spots = len(ids_x)
     r = int(roi/2)
     spots = np.zeros((n_spots, roi, roi), dtype=movie.dtype)
@@ -125,11 +124,8 @@ def get_spots(movie, ids_frame, ids_x, ids_y, roi):
     return spots
 
 
-FitInfo = namedtuple('FitInfo', 'n_spots spots gaussmle_args current params CRLBs likelihoods')
-
-
-def prepare_fit(movie, info, identifications, roi):
-    spots = get_spots(movie, identifications.frame, identifications.x, identifications.y, roi)
+def _get_fit_info(movie, info, identifications, roi):
+    spots = _get_spots(movie, identifications.frame, identifications.x, identifications.y, roi)
     n_spots, roi, roi = spots.shape
     fit_type = ctypes.c_int(4)
     spots = np.float32(spots)
@@ -151,30 +147,34 @@ def prepare_fit(movie, info, identifications, roi):
     current_pointer = current.ctypes.data_as(ctypes.POINTER(ctypes.c_ulong))
     gaussmle_args = (fit_type, spots_pointer, psf_sigma, roi, n_iterations, params_pointer, CRLBs_pointer,
                      likelihoods_pointer, n_spots, n_threads, current_pointer)
+    FitInfo = namedtuple('FitInfo', 'n_spots spots gaussmle_args current params CRLBs likelihoods')
     fit_info = FitInfo(n_spots.value, spots, gaussmle_args, current, params, CRLBs, likelihoods)
     return fit_info
 
 
 def fit(movie, info, identifications, roi):
-    fit_info = prepare_fit(movie, info, identifications, roi)
+    fit_info = _get_fit_info(movie, info, identifications, roi)
     WoehrLok.fnWoehrLokMLEFitAll(*fit_info.gaussmle_args)
-    locs = np.rec.array(fit_info.params.T.flatten(), dtype=[('x', 'f4'), ('y', 'f4'), ('photons', 'f4'),
-                                                            ('bg', 'f4'), ('sx', 'f4'), ('sy', 'f4')])
-    identifications_flat = np.vstack(identifications)
-    locs.x += identifications_flat[:, 1] - roi/2 + 1
-    locs.y += identifications_flat[:, 0] - roi/2 + 1
-    frames = np.zeros(fit_info.n_spots, dtype=np.uint32)
-    end_frame_indices = list(np.cumsum(fit_info.n_spots_frame))
-    start_frame_indices = [0] + end_frame_indices[:-1]
-    for frame_number, (start_frame_index, end_frame_index) in enumerate(zip(start_frame_indices, end_frame_indices)):
-        frames[start_frame_index:end_frame_index] = frame_number
-    locs = recfunctions.append_fields(locs, ['frame', 'likelihood'], [frames, fit_info.likelihoods],
-                                      usemask=False, asrecarray=True)
-    return locs
+    return locs_from_fit_info(fit_info, identifications, roi)
 
 
 def fit_async(movie, info, identifications, roi):
-    fit_info = prepare_fit(movie, info, identifications, roi)
+    fit_info = _get_fit_info(movie, info, identifications, roi)
     thread = threading.Thread(target=WoehrLok.fnWoehrLokMLEFitAll, args=fit_info.gaussmle_args)
     thread.start()
     return thread, fit_info
+
+
+def locs_from_fit_info(fit_info, identifications, roi):
+    x = fit_info.params[0] + identifications.x - roi/2 + 1
+    y = fit_info.params[1] + identifications.y - roi/2 + 1
+    loc_ac = np.zeros(fit_info.n_spots, dtype=np.float32)
+    return np.rec.array((identifications.frame, x, y, fit_info.params[2],
+                         fit_info.params[4], fit_info.params[5], loc_ac, fit_info.params[2]),
+                        dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'), ('photons', 'f4'),
+                               ('sx', 'f4'), ('sy', 'f4'), ('loc_ac', 'f4'), ('bg', 'f4')])
+
+
+def localize(movie, info, parameters):
+    identifications = identify(movie, parameters)
+    return fit(movie, info, identifications, parameters['ROI'])

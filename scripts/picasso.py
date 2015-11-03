@@ -7,6 +7,9 @@
 
     :author: Joerg Schnitzbauer, 2015
 """
+import glob
+import os.path
+import yaml
 
 
 def import_nolocal(module):
@@ -22,7 +25,27 @@ def import_nolocal(module):
     return module
 
 
-# localize = import_nolocal('picasso.localize')   # Added this, because multiprocessing thinks that this file is the picasso package
+localize = import_nolocal('picasso.localize')
+io = import_nolocal('picasso.io')
+
+
+def _localize(files, parameters_file, verbose=True):
+    paths = glob.glob(files)
+    n_files = len(paths)
+    if n_files:
+        with open(parameters_file, 'r') as parameters_file:
+            parameters = yaml.load(parameters_file)
+        for i, path in enumerate(paths):
+            if verbose:
+                print('Localizing in file {}/{}...'.format(i + 1, n_files), end='\r')
+            movie, info = io.load_raw(path)
+            locs = localize.localize(movie, info, parameters)
+            base, ext = os.path.splitext(path)
+            io.save_locs(base + '_locs.txt', locs, info, parameters)
+    else:
+        if verbose:
+            print('No files matching {}'.format(files))
+    return n_files
 
 
 if __name__ == '__main__':
@@ -45,10 +68,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.command:
         if args.command == 'toraw':
-            io = import_nolocal('picasso.io')
             io.to_raw(args.files, verbose=True)
         elif args.command == 'localize':
-            localize = import_nolocal('picasso.localize')
-            localize.localize(args.files, args.parameters)
+            _localize(args.files, args.parameters, verbose=True)
     else:
         parser.print_help()
