@@ -26,6 +26,7 @@ IDENTIFY_FINISHED_MESSAGE = 'Identifications: {} (ROI: {}, Minimum AGS: {}, Secs
 
 
 class View(QtGui.QGraphicsView):
+    """ The central widget which shows `Scene` objects of individual frames """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -33,11 +34,13 @@ class View(QtGui.QGraphicsView):
         self.setAcceptDrops(True)
 
     def wheelEvent(self, event):
+        """ Implements zoooming with the mouse wheel """
         scale = 1.008 ** (-event.delta())
         self.scale(scale, scale)
 
 
 class Scene(QtGui.QGraphicsScene):
+    """ Scenes render indivdual frames and can be displayed in a `View` widget """
 
     def __init__(self, window, parent=None):
         super().__init__(parent)
@@ -50,6 +53,7 @@ class Scene(QtGui.QGraphicsScene):
         event.accept()
 
     def dropEvent(self, event):
+        """ Loads raw movies or yaml parameters when dropped into the scene """
         if event.mimeData().urls():
             url = event.mimeData().urls()[0]
             path = url.toLocalFile()
@@ -63,6 +67,7 @@ class Scene(QtGui.QGraphicsScene):
 
 
 class OddSpinBox(QtGui.QSpinBox):
+    """ A spinbox that allows only odd numbers """
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -74,6 +79,7 @@ class OddSpinBox(QtGui.QSpinBox):
 
 
 class ParametersDialog(QtGui.QDialog):
+    """ The dialog showing analysis parameters """
 
     def __init__(self, parameters, parent=None):
         super().__init__(parent)
@@ -101,6 +107,7 @@ class ParametersDialog(QtGui.QDialog):
 
 
 class Window(QtGui.QMainWindow):
+    """ The main window """
 
     def __init__(self):
         super().__init__()
@@ -119,11 +126,20 @@ class Window(QtGui.QMainWindow):
         self.status_bar = self.statusBar()
         self.status_bar_frame_indicator = QtGui.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
-        # Init variables
+
+        #: Holds the current movie as a numpy memmap in the format (frame, x, y)
         self.movie = None
+
+        #: A dictionary of the current analysis parameters
         self.parameters = DEFAULT_PARAMETERS
-        self.identifications = []
+
+        #: A dictionary of analysis parameters used for the last operation
         self.last_identification_parameters = None
+
+        #: A list of current identifications. Each element contains the identifications of the frame specified
+        #: by the element's index. The frame identifications are a 2d numpy array with columns x and y.
+        self.identifications = []
+
         self.identification_markers = []
         self.worker = None
         self.worker_interrupt_flag = False
