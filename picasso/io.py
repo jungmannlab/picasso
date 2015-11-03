@@ -80,7 +80,7 @@ def _to_raw_single(path):
         yaml.dump(info, info_file, indent=4)
 
 
-def _to_raw(path, verbose=True):
+def to_raw(path, verbose=True):
     paths = glob.glob(path)
     n_files = len(paths)
     if n_files:
