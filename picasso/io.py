@@ -40,7 +40,7 @@ def load_raw_info(path):
 def load_tif(path):
     info = {}
     with tifffile.TiffFile(path) as tif:
-        movie = tif.asarray()
+        movie = tif.asarray(memmap=True)
         info['file'] = tif.filename
         if 'datetime' in tif.pages[0].tags:
             info['timestamp'] = tif.pages[0].tags.datetime.value.decode()
@@ -56,6 +56,11 @@ def load_tif(path):
         info['frames'] = info['height'] = 1
         info['width'] = len(movie)
     info['shape'] = [info['frames'], info['width'], info['height']]
+    # TODO load baseline, preamp gain, emgain. Dummy numbers for now
+    info['baseline'] = 100
+    info['preamp gain'] = 2
+    info['em realgain'] = 1
+    info['quantum efficiency'] = 0.9
     return movie, info
 
 
@@ -71,7 +76,7 @@ def to_raw_single(path):
     info['original file'] = info.pop('file')
     info['raw file'] = os.path.basename(raw_file_name)
     with open(path_base + '.yaml', 'w') as info_file:
-        yaml.dump(info, info_file, default_flow_style=False)
+        yaml.dump(info, info_file)
 
 
 def to_raw(files, verbose=False):
@@ -82,8 +87,6 @@ def to_raw(files, verbose=False):
             if verbose:
                 print('Converting file {}/{}...'.format(i + 1, n_files), end='\r')
             to_raw_single(path)
-        if verbose:
-            print('\nDone.')
     else:
         if verbose:
             print('No files matching {}'.format(files))

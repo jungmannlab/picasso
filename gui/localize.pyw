@@ -10,19 +10,24 @@
 
 import sys
 import os.path
-import time
 import yaml
 from PyQt4 import QtCore, QtGui
 from picasso import io, localize
+import time
 import multiprocessing
 import functools
+import numpy as np
+from numpy.lib import recfunctions
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
 DEFAULT_PARAMETERS = {'ROI': 5, 'Minimum LGM': 300}
 MOVIE_LOADED_MESSAGE = 'Loaded {} frames. Ready to go.'
-FRAME_STARTED_MESSAGE = 'Identifying: Frame {}/{} (ROI: {}, Mininum AGS: {})'
-IDENTIFY_FINISHED_MESSAGE = 'Identifications: {} (ROI: {}, Minimum AGS: {}, Secs/Frame: {:.3f})'
+IDENTIFY_PROGRESS_MESSAGE = 'Identifying: Frame {}/{} (ROI: {}, Mininum AGS: {})'
+IDENTIFY_FINISHED_MESSAGE = 'Identifications: {} (ROI: {}, Minimum AGS: {})'
+FIT_PROGRESS_MESSAGE = 'Fitting spot {}/{}.'
+FITS_DONE_MESSAGE = 'Fitted {} spots. Wrapping up...'
+FIT_FINISHED_MESSAGE = 'Fitted {} spots.'
 
 
 class View(QtGui.QGraphicsView):
@@ -64,6 +69,19 @@ class Scene(QtGui.QGraphicsScene):
                 self.window.load_parameters(path)
             else:
                 pass  # TODO: send message to user
+
+
+class FitMarker(QtGui.QGraphicsItemGroup):
+
+    def __init__(self, x, y, size, parent=None):
+        super().__init__(parent)
+        L = size/2
+        line1 = QtGui.QGraphicsLineItem(x-L, y, x+L, y)
+        line1.setPen(QtGui.QPen(QtGui.QColor('red')))
+        self.addToGroup(line1)
+        line2 = QtGui.QGraphicsLineItem(x, y-L, x, y+L)
+        line2.setPen(QtGui.QPen(QtGui.QColor('red')))
+        self.addToGroup(line2)
 
 
 class OddSpinBox(QtGui.QSpinBox):
@@ -140,12 +158,12 @@ class Window(QtGui.QMainWindow):
         #: by the element's index. The frame identifications are a 2d numpy array with columns x and y.
         self.identifications = []
 
-        self.identification_markers = []
         self.worker = None
         self.worker_interrupt_flag = False
         self.worker_pool_mutex = QtCore.QMutex()
         self.n_cpus = multiprocessing.cpu_count()
         self.init_worker_pool()
+        self.locs = None
 
     def init_menu_bar(self):
         menu_bar = self.menuBar()
@@ -273,8 +291,6 @@ class Window(QtGui.QMainWindow):
                 self.set_frame(number - 1)
 
     def set_frame(self, number):
-        if self.identifications:
-            self.remove_identification_markers()
         self.current_frame_number = number
         frame = self.movie[number]
         frame = frame.astype('float32')
@@ -291,7 +307,16 @@ class Window(QtGui.QMainWindow):
         self.view.setScene(self.scene)
         self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['frames']))
         if self.identifications:
-            self.draw_identification_markers()
+            identifications_frame = self.identifications[self.current_frame_number]
+            roi = self.last_identification_parameters['ROI']
+            roi_half = int(roi / 2)
+            for y, x in identifications_frame:
+                self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(QtGui.QColor('red')))
+        if self.locs is not None:
+            locs_frame = self.locs[self.locs.frame == self.current_frame_number]
+            L = self.last_identification_parameters['ROI']
+            for loc in locs_frame:
+                self.scene.addItem(FitMarker(loc.x, loc.y, L))
 
     def open_parameters(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', filter='*.yaml')
@@ -318,58 +343,67 @@ class Window(QtGui.QMainWindow):
         if self.movie is not None:
             self.interrupt_worker_if_running()
             self.worker = IdentificationWorker(self)
-            self.worker.progressMade.connect(self.on_identify_next_frame_started)
+            self.worker.progressMade.connect(self.on_identify_progress)
             self.worker.finished.connect(self.on_identify_finished)
             self.worker.interrupted.connect(self.on_identify_interrupted)
             self.worker.start()
 
-    def on_identify_next_frame_started(self, frame_number):
+    def on_identify_progress(self, frame_number):
         n_frames = self.info['frames']
         roi = self.parameters['ROI']
         mmlg = self.parameters['Minimum LGM']
-        message = FRAME_STARTED_MESSAGE.format(frame_number, n_frames, roi, mmlg)
+        message = IDENTIFY_PROGRESS_MESSAGE.format(frame_number, n_frames, roi, mmlg)
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, identifications):
-        required_time = self.worker.elapsed_time
-        time_per_frame = required_time / self.info['frames']
+        self.locs = None
         n_identifications = 0
         for identifications_frame in identifications:
             n_identifications += len(identifications_frame)
         roi = self.parameters['ROI']
         mmlg = self.parameters['Minimum LGM']
-        message = IDENTIFY_FINISHED_MESSAGE.format(n_identifications, roi, mmlg, time_per_frame)
+        message = IDENTIFY_FINISHED_MESSAGE.format(n_identifications, roi, mmlg)
         self.status_bar.showMessage(message)
         self.identifications = identifications
         self.last_identification_parameters = self.parameters.copy()
-        self.remove_identification_markers()
-        self.draw_identification_markers()
+        self.set_frame(self.current_frame_number)
 
     def fit(self):
-        pass
+        if self.movie is not None and self.identifications is not None:
+            self.interrupt_worker_if_running()
+            self.status_bar.showMessage('Preparing fit...')
+            self.worker = FitWorker(self)
+            self.worker.progressMade.connect(self.on_fit_progress)
+            self.worker.fits_done.connect(self.on_fit_done)
+            self.worker.finished.connect(self.on_fit_finished)
+            self.worker.interrupted.connect(self.on_fit_interrupted)
+            self.worker.start()
+
+    def on_fit_progress(self, current, n_spots):
+        message = FIT_PROGRESS_MESSAGE.format(current, n_spots)
+        self.status_bar.showMessage(message)
+
+    def on_fit_done(self, n_spots):
+        self.status_bar.showMessage(FITS_DONE_MESSAGE.format(n_spots))
+
+    def on_fit_finished(self, results):
+        n_spots, self.locs, CRLBs = results
+        self.status_bar.showMessage(FIT_FINISHED_MESSAGE.format(n_spots))
+        self.set_frame(self.current_frame_number)
+
+    def on_fit_interrupted(self):
+        self.worker_interrupt_flag = False
+        self.status_bar.showMessage('Fitting interrupted.')
 
     def interrupt_worker_if_running(self):
         if self.worker and self.worker.isRunning():
             self.worker_interrupt_flag = True
             self.worker.wait()
-            self.worker_interupt_flag = False
+            self.worker_interrupt_flag = False
 
     def on_identify_interrupted(self):
         self.worker_interrupt_flag = False
-        self.status_bar.showMessage('Interrupted')
-
-    def remove_identification_markers(self):
-        for rect in self.identification_markers:
-            self.scene.removeItem(rect)
-        self.identification_markers = []
-
-    def draw_identification_markers(self):
-        identifications_frame = self.identifications[self.current_frame_number]
-        roi = self.last_identification_parameters['ROI']
-        roi_half = int(roi / 2)
-        for y, x in identifications_frame:
-            rect = self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(QtGui.QColor('red')))
-            self.identification_markers.append(rect)
+        self.status_bar.showMessage('Identification interrupted.')
 
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
@@ -386,12 +420,6 @@ class Window(QtGui.QMainWindow):
         self.worker_pool.close()
         self.worker_pool.terminate()
         self.worker_pool.join()
-
-
-def _identify_frame_async(parameters, counter, lock, frame):
-    with lock:
-        counter.value += 1
-    return localize.identify_frame(frame, parameters)
 
 
 class IdentificationWorker(QtCore.QThread):
@@ -411,10 +439,9 @@ class IdentificationWorker(QtCore.QThread):
         self.pool_mutex = window.worker_pool_mutex
 
     def run(self):
-        start = time.time()
         self.pool_mutex.lock()
         self.counter.value = 0
-        targetfunc = functools.partial(_identify_frame_async, self.parameters, self.counter, self.lock)
+        targetfunc = functools.partial(localize._identify_frame_async, self.parameters, self.counter, self.lock)
         result = self.pool.map_async(targetfunc, self.movie)
         while not result.ready():
             self.progressMade.emit(int(self.counter.value))
@@ -428,9 +455,49 @@ class IdentificationWorker(QtCore.QThread):
                 self.pool_mutex.unlock()
                 return
         identifications = result.get()
-        self.elapsed_time = time.time() - start
         self.pool_mutex.unlock()
         self.finished.emit(identifications)
+
+
+class FitWorker(QtCore.QThread):
+
+    progressMade = QtCore.pyqtSignal(int, int)
+    fits_done = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(tuple)
+    interrupted = QtCore.pyqtSignal()
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        self.movie = window.movie
+        self.info = window.info
+        self.identifications = window.identifications
+        self.roi = window.parameters['ROI']
+
+    def run(self):
+        thread, fit_info = localize.fit_async(self.movie, self.info, self.identifications, self.roi)
+        while thread.is_alive():
+            if self.window.worker_interrupt_flag:
+                # Find a way how to stop DLL function
+                self.interrupted.emit()
+                return
+            self.progressMade.emit(fit_info.current, fit_info.n_spots)
+            time.sleep(0.1)
+        thread.join()   # just in case...
+        self.fits_done.emit(fit_info.n_spots)
+        locs = np.rec.array(fit_info.params.T.flatten(), dtype=[('x', 'f4'), ('y', 'f4'), ('photons', 'f4'),
+                                                                ('bg', 'f4'), ('sx', 'f4'), ('sy', 'f4')])
+        identifications_flat = np.vstack(self.identifications)
+        locs.x += identifications_flat[:, 1] - self.roi/2 + 1
+        locs.y += identifications_flat[:, 0] - self.roi/2 + 1
+        frames = np.zeros(fit_info.n_spots, dtype=np.uint32)
+        end_frame_indices = list(np.cumsum(fit_info.n_spots_frame))
+        start_frame_indices = [0] + end_frame_indices[:-1]
+        for frame_number, (start_frame_index, end_frame_index) in enumerate(zip(start_frame_indices, end_frame_indices)):
+            frames[start_frame_index:end_frame_index] = frame_number
+        locs = recfunctions.append_fields(locs, ['frame', 'likelihood'], [frames, fit_info.likelihoods],
+                                          usemask=False, asrecarray=True)
+        self.finished.emit((fit_info.n_spots, locs, fit_info.CRLBs))
 
 
 if __name__ == '__main__':
