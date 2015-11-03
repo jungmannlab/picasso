@@ -10,7 +10,6 @@
 import numpy as np
 import numba
 import multiprocessing
-import functools
 import ctypes
 import threading
 import os.path
@@ -59,7 +58,7 @@ def local_gradient_magnitude(frame, roi, abs_gradient):
     return lgm
 
 
-def identify_frame(parameters, frame):
+def identify_frame(frame, parameters, frame_number=None):
     gradient_x, gradient_y = np.gradient(np.float32(frame))
     abs_gradient = np.sqrt(gradient_x**2 + gradient_y**2)
     roi = parameters['ROI']
@@ -67,63 +66,70 @@ def identify_frame(parameters, frame):
     lm_map = local_maxima_map(frame, roi)
     s_map_thesholded = s_map > parameters['Minimum LGM']
     combined_map = (lm_map * s_map_thesholded) > 0.5
-    return np.vstack(np.where(combined_map)).T
+    if frame_number is not None:
+        x, y = np.where(combined_map)
+        frame = frame_number * np.ones(len(x))
+        return np.rec.array((frame, x, y), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i')])
+    else:
+        return np.rec.array(np.where(combined_map), dtype=[('x', 'i'), ('y', 'i')])
 
 
-# The target function for the processing pool, ready for functools.partial
-def _identify_frame_async(parameters, counter, lock, frame):
+def _identify_frame_async(frame, parameters, frame_number, counter, lock):
     with lock:
         counter.value += 1
-    return identify_frame(parameters, frame)
+    return identify_frame(frame, parameters, frame_number)
 
 
 def identify_async(movie, parameters):
+    n_frames = len(movie)
     n_cpus = multiprocessing.cpu_count()
-    if len(movie) < n_cpus:
-        n_processes = len(movie)
+    if n_frames < n_cpus:
+        n_processes = n_frames
     else:
         n_processes = 2 * n_cpus
     manager = multiprocessing.Manager()
     counter = manager.Value('i', 0)
     lock = manager.Lock()
-    targetfunc = functools.partial(_identify_frame_async, parameters, counter, lock)
     pool = multiprocessing.Pool(processes=n_processes)
-    result = pool.map_async(targetfunc, movie)
+    args = [(movie[_], parameters, _, counter, lock) for _ in range(n_frames)]
+    result = pool.starmap_async(_identify_frame_async, args)
     return result, counter, pool
 
 
 def identify(movie, parameters, threaded=True):
     if threaded:
+        n_frames = len(movie)
         n_cpus = multiprocessing.cpu_count()
-        if len(movie) < n_cpus:
-            n_processes = len(movie)
+        if n_frames < n_cpus:
+            n_processes = n_frames
         else:
             n_processes = 2 * n_cpus
-        targetfunc = functools.partial(identify_frame, parameters)
         pool = multiprocessing.Pool(processes=n_processes)
-        return pool.map(targetfunc, movie)
+        args = [(movie[_], parameters) for _ in range(n_frames)]
+        result = pool.starmap(identify_frame, args)
+        identifications = result.get()
     else:
-        return [identify_frame(parameters, frame) for frame in movie]
+        identifications = [identify_frame(parameters, frame) for frame in movie]
+    return np.hstack(identifications).view(np.recarray)
 
 
-def get_spots(movie, identifications, roi):
-    n_spots_frame = [len(_) for _ in identifications]
-    n_spots = np.sum(n_spots_frame)
-    spots = np.zeros((n_spots, roi, roi), dtype=np.float32)
+@numba.jit(nopython=True)
+def get_spots(movie, ids_frame, ids_x, ids_y, roi):
+    n_spots = len(ids_x)
     r = int(roi/2)
-    i = 0
-    for frame_number, identifications_frame in enumerate(identifications):
-        for x, y in identifications_frame:
-            spots[i] = movie[frame_number, x-r:x+r+1, y-r:y+r+1]
-            i += 1
-    return n_spots, n_spots_frame, spots
+    spots = np.zeros((n_spots, roi, roi), dtype=movie.dtype)
+    for frame, xc, yc in zip(ids_frame, ids_x, ids_y):
+        for xi, x in enumerate(range(xc-r, xc+r+1)):
+            for yi, y in enumerate(range(yc-r, yc+r+1)):
+                spots[frame, xi, yi] = movie[frame, x, y]
+    return spots
 
 
-FitInfo = namedtuple('FitInfo', 'n_spots n_spots_frame spots gaussmle_args current params CRLBs likelihoods')
+FitInfo = namedtuple('FitInfo', 'n_spots spots gaussmle_args current params CRLBs likelihoods')
 
 
 def prepare_fit(movie, info, identifications, roi):
-    n_spots, n_spots_frame, spots = get_spots(movie, identifications, roi)
+    spots = get_spots(movie, identifications.frame, identifications.x, identifications.y, roi)
     n_spots, roi, roi = spots.shape
     fit_type = ctypes.c_int(4)
     spots = np.float32(spots)
@@ -145,7 +151,7 @@ def prepare_fit(movie, info, identifications, roi):
     current_pointer = current.ctypes.data_as(ctypes.POINTER(ctypes.c_ulong))
     gaussmle_args = (fit_type, spots_pointer, psf_sigma, roi, n_iterations, params_pointer, CRLBs_pointer,
                      likelihoods_pointer, n_spots, n_threads, current_pointer)
-    fit_info = FitInfo(n_spots.value, n_spots_frame, spots, gaussmle_args, current, params, CRLBs, likelihoods)
+    fit_info = FitInfo(n_spots.value, spots, gaussmle_args, current, params, CRLBs, likelihoods)
     return fit_info
 
 
