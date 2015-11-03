@@ -170,7 +170,7 @@ def locs_from_fit_info(fit_info, identifications, roi):
     y = fit_info.params[1] + identifications.y - roi/2 + 1
     loc_ac = np.zeros(fit_info.n_spots, dtype=np.float32)
     return np.rec.array((identifications.frame, x, y, fit_info.params[2],
-                         fit_info.params[4], fit_info.params[5], loc_ac, fit_info.params[2]),
+                         fit_info.params[4], fit_info.params[5], loc_ac, fit_info.params[3]),
                         dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'), ('photons', 'f4'),
                                ('sx', 'f4'), ('sy', 'f4'), ('loc_ac', 'f4'), ('bg', 'f4')])
 
