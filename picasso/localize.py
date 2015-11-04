@@ -103,10 +103,10 @@ def identify(movie, parameters, threaded=True):
             n_processes = n_frames
         else:
             n_processes = 2 * n_cpus
-        pool = multiprocessing.Pool(processes=n_processes)
-        args = [(movie[_], parameters) for _ in range(n_frames)]
-        result = pool.starmap(identify_frame, args)
-        identifications = result.get()
+        with multiprocessing.Pool(processes=n_processes) as pool:
+            args = [(movie[_], parameters) for _ in range(n_frames)]
+            result = pool.starmap(identify_frame, args)
+            identifications = result.get()
     else:
         identifications = [identify_frame(parameters, frame) for frame in movie]
     return np.hstack(identifications).view(np.recarray)
@@ -117,15 +117,17 @@ def _get_spots(movie, ids_frame, ids_x, ids_y, roi):
     n_spots = len(ids_x)
     r = int(roi/2)
     spots = np.zeros((n_spots, roi, roi), dtype=movie.dtype)
-    for frame, xc, yc in zip(ids_frame, ids_x, ids_y):
+    for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
         for xi, x in enumerate(range(xc-r, xc+r+1)):
             for yi, y in enumerate(range(yc-r, yc+r+1)):
-                spots[frame, xi, yi] = movie[frame, x, y]
+                spots[id, xi, yi] = movie[frame, x, y]
     return spots
 
 
-def _get_fit_info(movie, info, identifications, roi):
+def _generate_fit_info(movie, info, identifications, roi):
     spots = _get_spots(movie, identifications.frame, identifications.x, identifications.y, roi)
+    print(spots[0])
+    print(spots[-1])
     n_spots, roi, roi = spots.shape
     fit_type = ctypes.c_int(4)
     spots = np.float32(spots)
@@ -153,13 +155,13 @@ def _get_fit_info(movie, info, identifications, roi):
 
 
 def fit(movie, info, identifications, roi):
-    fit_info = _get_fit_info(movie, info, identifications, roi)
+    fit_info = _generate_fit_info(movie, info, identifications, roi)
     WoehrLok.fnWoehrLokMLEFitAll(*fit_info.gaussmle_args)
     return locs_from_fit_info(fit_info, identifications, roi)
 
 
 def fit_async(movie, info, identifications, roi):
-    fit_info = _get_fit_info(movie, info, identifications, roi)
+    fit_info = _generate_fit_info(movie, info, identifications, roi)
     thread = threading.Thread(target=WoehrLok.fnWoehrLokMLEFitAll, args=fit_info.gaussmle_args)
     thread.start()
     return thread, fit_info
@@ -168,11 +170,13 @@ def fit_async(movie, info, identifications, roi):
 def locs_from_fit_info(fit_info, identifications, roi):
     x = fit_info.params[0] + identifications.x - roi/2 + 1
     y = fit_info.params[1] + identifications.y - roi/2 + 1
-    loc_ac = np.zeros(fit_info.n_spots, dtype=np.float32)
+    loc_ac = 0.1*np.ones(fit_info.n_spots, dtype=np.float32)
+    noise = np.ones(fit_info.n_spots, dtype=np.float32)
+    amp = np.ones(fit_info.n_spots, dtype=np.float32)
     return np.rec.array((identifications.frame, x, y, fit_info.params[2],
-                         fit_info.params[4], fit_info.params[5], loc_ac, fit_info.params[3]),
+                         fit_info.params[4], fit_info.params[5], loc_ac, fit_info.params[3], noise, amp),
                         dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'), ('photons', 'f4'),
-                               ('sx', 'f4'), ('sy', 'f4'), ('loc_ac', 'f4'), ('bg', 'f4')])
+                               ('sx', 'f4'), ('sy', 'f4'), ('loc_ac', 'f4'), ('bg', 'f4'), ('noise', 'f4'), ('amp', 'f4')])
 
 
 def localize(movie, info, parameters):

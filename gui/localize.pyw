@@ -245,6 +245,8 @@ class Window(QtGui.QMainWindow):
             self.movie_path = path
             message = 'Loaded {} frames. Ready to go.'.format(self.info['frames'])
             self.status_bar.showMessage(message)
+            self.identifications = None
+            self.locs = None
             self.set_frame(0)
             self.fit_in_view()
         except FileNotFoundError:
@@ -271,8 +273,7 @@ class Window(QtGui.QMainWindow):
     def to_frame(self):
         if self.movie is not None:
             frames = self.info['frames']
-            frames_half = int(frames / 2)
-            number, ok = QtGui.QInputDialog.getInt(self, 'Go to frame', 'Frame number:', 1, frames_half, frames)
+            number, ok = QtGui.QInputDialog.getInt(self, 'Go to frame', 'Frame number:', self.current_frame_number+1, 1, frames)
             if ok:
                 self.set_frame(number - 1)
 
@@ -430,6 +431,8 @@ class IdentificationWorker(QtCore.QThread):
                 pool.terminate()
                 return
         identifications = result.get()
+        pool.close()
+        pool.terminate()
         identifications = np.hstack(identifications)
         identifications = identifications.view(np.recarray)
         self.finished.emit(identifications)
