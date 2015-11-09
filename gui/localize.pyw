@@ -67,10 +67,10 @@ class FitMarker(QtGui.QGraphicsItemGroup):
     def __init__(self, x, y, size, parent=None):
         super().__init__(parent)
         L = size/2
-        line1 = QtGui.QGraphicsLineItem(x-L, y, x+L, y)
+        line1 = QtGui.QGraphicsLineItem(x-L, y-L, x+L, y+L)
         line1.setPen(QtGui.QPen(QtGui.QColor('red')))
         self.addToGroup(line1)
-        line2 = QtGui.QGraphicsLineItem(x, y-L, x, y+L)
+        line2 = QtGui.QGraphicsLineItem(x-L, y+L, x+L, y-L)
         line2.setPen(QtGui.QPen(QtGui.QColor('red')))
         self.addToGroup(line2)
 
@@ -187,11 +187,11 @@ class Window(QtGui.QMainWindow):
         view_menu.addAction(next_frame_action)
         view_menu.addSeparator()
         first_frame_action = view_menu.addAction('First frame')
-        first_frame_action.setShortcut('Ctrl+Left')
+        first_frame_action.setShortcut(QtGui.QKeySequence.MoveToStartOfLine)
         first_frame_action.triggered.connect(self.first_frame)
         view_menu.addAction(first_frame_action)
         last_frame_action = view_menu.addAction('Last frame')
-        last_frame_action.setShortcut('Ctrl+Right')
+        last_frame_action.setShortcut(QtGui.QKeySequence.MoveToEndOfLine)
         last_frame_action.triggered.connect(self.last_frame)
         view_menu.addAction(last_frame_action)
         go_to_frame_action = view_menu.addAction('Go to frame')
@@ -228,11 +228,6 @@ class Window(QtGui.QMainWindow):
         fit_action.setShortcut('Ctrl+F')
         fit_action.triggered.connect(self.fit)
         analyze_menu.addAction(fit_action)
-        analyze_menu.addSeparator()
-        interrupt_action = analyze_menu.addAction('Interrupt')
-        interrupt_action.setShortcut('Ctrl+X')
-        interrupt_action.triggered.connect(self.interrupt_worker_if_running)
-        analyze_menu.addAction(interrupt_action)
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw')
@@ -243,7 +238,7 @@ class Window(QtGui.QMainWindow):
         try:
             self.movie, self.info = io.load_raw(path, memory_map=True)
             self.movie_path = path
-            message = 'Loaded {} frames. Ready to go.'.format(self.info['frames'])
+            message = 'Loaded {} frames. Ready to go.'.format(self.info['Frames'])
             self.status_bar.showMessage(message)
             self.identifications = None
             self.locs = None
@@ -259,7 +254,7 @@ class Window(QtGui.QMainWindow):
 
     def next_frame(self):
         if self.movie is not None:
-            if self.current_frame_number + 1 < self.info['frames']:
+            if self.current_frame_number + 1 < self.info['Frames']:
                 self.set_frame(self.current_frame_number + 1)
 
     def first_frame(self):
@@ -268,11 +263,11 @@ class Window(QtGui.QMainWindow):
 
     def last_frame(self):
         if self.movie is not None:
-            self.set_frame(self.info['frames'] - 1)
+            self.set_frame(self.info['Frames'] - 1)
 
     def to_frame(self):
         if self.movie is not None:
-            frames = self.info['frames']
+            frames = self.info['Frames']
             number, ok = QtGui.QInputDialog.getInt(self, 'Go to frame', 'Frame number:', self.current_frame_number+1, 1, frames)
             if ok:
                 self.set_frame(number - 1)
@@ -292,7 +287,7 @@ class Window(QtGui.QMainWindow):
         self.scene = Scene(self)
         self.scene.addPixmap(pixmap)
         self.view.setScene(self.scene)
-        self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['frames']))
+        self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['Frames']))
         if self.identifications is not None:
             identifications_frame = self.identifications[self.identifications.frame == number]
             roi = self.last_identification_parameters['ROI']
@@ -300,12 +295,11 @@ class Window(QtGui.QMainWindow):
             for identification in identifications_frame:
                 x = identification.x
                 y = identification.y
-                self.scene.addRect(y - roi_half, x - roi_half, roi, roi, QtGui.QPen(QtGui.QColor('red')))
+                self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(QtGui.QColor('yellow')))
         if self.locs is not None:
             locs_frame = self.locs[self.locs.frame == number]
-            L = self.last_identification_parameters['ROI']
             for loc in locs_frame:
-                self.scene.addItem(FitMarker(loc.y, loc.x, L))
+                self.scene.addItem(FitMarker(loc.x+0.5, loc.y+0.5, 1))
 
     def open_parameters(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', filter='*.yaml')
@@ -315,6 +309,7 @@ class Window(QtGui.QMainWindow):
     def load_parameters(self, path):
         with open(path, 'r') as file:
             self.parameters = yaml.load(file)
+            self.stats_bar.showMessage('Parameter file {} loaded.'.format(path))
 
     def save_parameters(self):
         path = QtGui.QFileDialog.getSaveFileName(self, 'Save parameters', filter='*.yaml')
@@ -330,19 +325,17 @@ class Window(QtGui.QMainWindow):
 
     def identify(self):
         if self.movie is not None:
-            self.interrupt_worker_if_running()
             self.status_bar.showMessage('Preparing identification...')
             self.worker = IdentificationWorker(self)
             self.worker.progressMade.connect(self.on_identify_progress)
             self.worker.finished.connect(self.on_identify_finished)
-            self.worker.interrupted.connect(self.on_identify_interrupted)
             self.worker.start()
 
     def on_identify_progress(self, frame_number):
-        n_frames = self.info['frames']
+        n_frames = self.info['Frames']
         roi = self.parameters['ROI']
         mmlg = self.parameters['Minimum LGM']
-        message = 'Identifying in frame {}/{} (ROI: {}, Mininum AGS: {})...'.format(frame_number, n_frames, roi, mmlg)
+        message = 'Identifying in frame {}/{} (ROI: {}, Mininum LGM: {})...'.format(frame_number, n_frames, roi, mmlg)
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, identifications):
@@ -358,12 +351,10 @@ class Window(QtGui.QMainWindow):
 
     def fit(self):
         if self.movie is not None and self.identifications is not None:
-            self.interrupt_worker_if_running()
             self.status_bar.showMessage('Preparing fit...')
             self.worker = FitWorker(self)
             self.worker.progressMade.connect(self.on_fit_progress)
             self.worker.finished.connect(self.on_fit_finished)
-            self.worker.interrupted.connect(self.on_fit_interrupted)
             self.worker.start()
 
     def on_fit_progress(self, current, n_spots):
@@ -374,20 +365,6 @@ class Window(QtGui.QMainWindow):
         self.status_bar.showMessage('Fitted {} spots.'.format(len(locs)))
         self.locs = locs
         self.set_frame(self.current_frame_number)
-
-    def on_fit_interrupted(self):
-        self.worker_interrupt_flag = False
-        self.status_bar.showMessage('Fitting interrupted.')
-
-    def interrupt_worker_if_running(self):
-        if self.worker and self.worker.isRunning():
-            self.worker_interrupt_flag = True
-            self.worker.wait()
-            self.worker_interrupt_flag = False
-
-    def on_identify_interrupted(self):
-        self.worker_interrupt_flag = False
-        self.status_bar.showMessage('Identification interrupted.')
 
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
@@ -400,20 +377,16 @@ class Window(QtGui.QMainWindow):
 
     def save_locs(self):
         base, ext = os.path.splitext(self.movie_path)
-        locs_path = base + '_locs.txt'
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', locs_path, filter='*.txt')
+        locs_path = base + '_locs.hdf5'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', locs_path, filter='*.hdf5')
         if path:
             io.save_locs(path, self.locs, self.info, self.last_identification_parameters)
-
-    def closeEvent(self, event):
-        self.interrupt_worker_if_running()
 
 
 class IdentificationWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(np.recarray)
-    interrupted = QtCore.pyqtSignal()
 
     def __init__(self, window):
         super().__init__()
@@ -426,13 +399,7 @@ class IdentificationWorker(QtCore.QThread):
         while not result.ready():
             self.progressMade.emit(int(counter.value))
             time.sleep(0.1)
-            if self.window.worker_interrupt_flag:
-                self.interrupted.emit()
-                pool.terminate()
-                return
         identifications = result.get()
-        pool.close()
-        pool.terminate()
         identifications = np.hstack(identifications)
         identifications = identifications.view(np.recarray)
         self.finished.emit(identifications)
@@ -442,7 +409,6 @@ class FitWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray)
-    interrupted = QtCore.pyqtSignal()
 
     def __init__(self, window):
         super().__init__()
@@ -455,10 +421,6 @@ class FitWorker(QtCore.QThread):
     def run(self):
         thread, fit_info = localize.fit_async(self.movie, self.info, self.identifications, self.roi)
         while thread.is_alive():
-            if self.window.worker_interrupt_flag:
-                # Find a way how to stop DLL function
-                self.interrupted.emit()
-                return
             self.progressMade.emit(fit_info.current, fit_info.n_spots)
             time.sleep(0.1)
         thread.join()   # just in case...
