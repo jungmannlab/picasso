@@ -13,6 +13,7 @@ I suggest installing it with [Anaconda](https://www.continuum.io/downloads) whic
 | numba    | yes                  | pre-installed             |
 | PyQt4    | yes                  | pre-installed             |
 | tifffile | no                   | [Download](http://www.lfd.uci.edu/~gohlke/pythonlibs/), then `pip install *.whl` |
+| h5py     | ye                   | ?                         |
 
 ## Installation
 The described procedure is intended for Windows. The equivalent steps for Linux or OSX are not documented.
