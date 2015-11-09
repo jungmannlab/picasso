@@ -45,20 +45,24 @@ def load_tif(path):
         info['Byte Order'] = tif.byteorder
         info['Data Type'] = str(_np.dtype(tif.pages[0].dtype))
         info['File'] = tif.filename
-        info['Comments'] = tif.micromanager_metadata['comments']['Summary']
-        info['Computer'] = tif.micromanager_metadata['summary']['ComputerName']
-        info['Directory'] = tif.micromanager_metadata['summary']['Directory']
-        micromanager_metadata = tif.pages[0].tags['micromanager_metadata'].value
-        info['Camera'] = {'Manufacturer': micromanager_metadata['Camera']}
-        if info['Camera']['Manufacturer'] == 'Andor':
-            _, type, model, serial_number, _ = (_.strip() for _ in micromanager_metadata['Andor-Camera'].split('|'))
-            info['Camera']['Type'] = type
-            info['Camera']['Model'] = model
-            info['Camera']['Serial Number'] = int(serial_number)
-            info['EM RealGain'] = int(micromanager_metadata['Andor-Gain'])
-            info['Pre-Amp Gain'] = int(micromanager_metadata['Andor-Pre-Amp-Gain'].split()[1])
-            info['Readout Mode'] = micromanager_metadata['Andor-ReadoutMode']
-        info['Excitation Wavelength'] = int(micromanager_metadata['TIFilterBlock1-Label'][-3:])
+        try:
+            info['Comments'] = tif.micromanager_metadata['comments']['Summary']
+            info['Computer'] = tif.micromanager_metadata['summary']['ComputerName']
+            info['Directory'] = tif.micromanager_metadata['summary']['Directory']
+            micromanager_metadata = tif.pages[0].tags['micromanager_metadata'].value
+            info['Camera'] = {'Manufacturer': micromanager_metadata['Camera']}
+            if info['Camera']['Manufacturer'] == 'Andor':
+                _, type, model, serial_number, _ = (_.strip() for _ in micromanager_metadata['Andor-Camera'].split('|'))
+                info['Camera']['Type'] = type
+                info['Camera']['Model'] = model
+                info['Camera']['Serial Number'] = int(serial_number)
+                info['EM RealGain'] = int(micromanager_metadata['Andor-Gain'])
+                info['Pre-Amp Gain'] = int(micromanager_metadata['Andor-Pre-Amp-Gain'].split()[1])
+                info['Readout Mode'] = micromanager_metadata['Andor-ReadoutMode']
+            info['Excitation Wavelength'] = int(micromanager_metadata['TIFilterBlock1-Label'][-3:])
+        except Exception as error:
+            print('Exception in io.load_tif:')
+            print(error)
     return movie, info
 
 
