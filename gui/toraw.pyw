@@ -15,6 +15,36 @@ from picasso import io
 import traceback
 
 
+class TextEdit(QtGui.QTextEdit):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # self.setAcceptDrops(True)
+
+    def canInsertFromMimeData(self, source):
+        if source.hasUrls():
+            return True
+        return False
+
+    def dragEnterEvent(self, event):
+        if event.mimeData().hasUrls():
+            event.accept()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event):
+        urls = event.mimeData().urls()
+        paths = [url.toLocalFile() for url in urls]
+        extensions = [os.path.splitext(path)[1].lower() for path in paths]
+        valid_flags = [(extension in ['.tif', '.tiff']) for extension in extensions]
+        valid_paths = [path for path, valid_flag in zip(paths, valid_flags) if valid_flag]
+        self.set_paths(valid_paths)
+
+    def set_paths(self, paths):
+        for path in paths:
+            self.append(path)
+
+
 class Window(QtGui.QWidget):
 
     def __init__(self):
@@ -29,7 +59,7 @@ class Window(QtGui.QWidget):
         vbox = QtGui.QVBoxLayout()
         self.setLayout(vbox)
         vbox.addWidget(QtGui.QLabel('Files:'))
-        self.path_edit = QtGui.QTextEdit()
+        self.path_edit = TextEdit()
         vbox.addWidget(self.path_edit)
         hbox = QtGui.QHBoxLayout()
         vbox.addLayout(hbox)
@@ -43,10 +73,7 @@ class Window(QtGui.QWidget):
 
     def browse(self):
         paths = QtGui.QFileDialog.getOpenFileNames(self, 'Open files to convert', filter='*.tif; **.tiff')
-        if paths:
-            self.path_edit.clear()
-        for path in paths:
-            self.path_edit.append(path)
+        self.path_edit.set_paths(paths)
 
     def to_raw(self):
         self.setEnabled(False)
