@@ -22,6 +22,6 @@ Cameras:
               0.080 MHz: [4.05, 3.12, 1.45]
           Quantum Efficiency:
             # Excitation wavelength
-            488: 0.95
+            489: 0.95
             561: 0.96
             640: 0.9
