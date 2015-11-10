@@ -42,25 +42,37 @@ class Scene(QtGui.QGraphicsScene):
     def __init__(self, window, parent=None):
         super().__init__(parent)
         self.window = window
+        self.dragMoveEvent = self.dragEnterEvent
+
+    def path_from_drop(self, event):
+        url = event.mimeData().urls()[0]
+        path = url.toLocalFile()
+        base, extension = os.path.splitext(path)
+        return path, extension
+
+    def drop_has_valid_url(self, event):
+        if not event.mimeData().hasUrls():
+            return False
+        path, extension = self.path_from_drop(event)
+        if extension.lower() not in ['.raw', '.yaml']:
+            return False
+        return True
 
     def dragEnterEvent(self, event):
-        event.accept()
-
-    def dragMoveEvent(self, event):
-        event.accept()
+        if self.drop_has_valid_url(event):
+            event.accept()
+        else:
+            event.ignore()
 
     def dropEvent(self, event):
         """ Loads raw movies or yaml parameters when dropped into the scene """
-        if event.mimeData().urls():
-            url = event.mimeData().urls()[0]
-            path = url.toLocalFile()
-            base, extension = os.path.splitext(path)
-            if extension == '.raw':
-                self.window.open(path)
-            elif extension == '.yaml':
-                self.window.load_parameters(path)
-            else:
-                pass  # TODO: send message to user
+        path, extension = self.path_from_drop(event)
+        if extension == '.raw':
+            self.window.open(path)
+        elif extension == '.yaml':
+            self.window.load_parameters(path)
+        else:
+            pass  # TODO: send message to user
 
 
 class FitMarker(QtGui.QGraphicsItemGroup):
@@ -310,7 +322,7 @@ class Window(QtGui.QMainWindow):
     def load_parameters(self, path):
         with open(path, 'r') as file:
             self.parameters = yaml.load(file)
-            self.stats_bar.showMessage('Parameter file {} loaded.'.format(path))
+            self.status_bar.showMessage('Parameter file {} loaded.'.format(path))
 
     def save_parameters(self):
         path = QtGui.QFileDialog.getSaveFileName(self, 'Save parameters', filter='*.yaml')
