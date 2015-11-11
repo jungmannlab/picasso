@@ -352,12 +352,12 @@ class Window(QtGui.QMainWindow):
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, identifications):
-        if identifications:
+        if len(identifications):
             self.locs = None
             n_identifications = len(identifications)
             roi = self.parameters['ROI']
             mmlg = self.parameters['Minimum LGM']
-            message = 'Identified {} spots (ROI: {}, Minimum AGS: {}).'.format(n_identifications, roi, mmlg)
+            message = 'Identified {} spots (ROI: {}, Minimum LGM: {}).'.format(n_identifications, roi, mmlg)
             self.status_bar.showMessage(message)
             self.identifications = identifications
             self.last_identification_parameters = self.parameters.copy()
