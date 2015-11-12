@@ -44,7 +44,7 @@ def load_tif(path):
         movie = tif.asarray(memmap=True)
         info = {}
         info['Byte Order'] = tif.byteorder
-        info['Data Type'] = _np.dtype(tif.pages[0].dtype).str
+        info['Data Type'] = _np.dtype(tif.pages[0].dtype).name
         info['File'] = tif.filename
         info['Shape'] = list(movie.shape)
         info['Frames'], info['Height'], info['Width'] = movie.shape
