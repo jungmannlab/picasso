@@ -19,8 +19,7 @@ import traceback
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
-DEFAULT_MLGM_MAXIMUM = 10000
-DEFAULT_PARAMETERS = {'ROI': 5, 'Minimum LGM': 300}
+DEFAULT_PARAMETERS = {'ROI': 7, 'Minimum LGM': 5000}
 
 
 class View(QtGui.QGraphicsView):
@@ -107,51 +106,88 @@ class ParametersDialog(QtGui.QDialog):
 
     def __init__(self, window):
         super().__init__(window)
-        # self.resize(300, 0)
         self.window = window
         self.setWindowTitle('Parameters')
+        self.resize(300, 0)
         self.setModal(False)
         grid = QtGui.QGridLayout(self)
+
+        # ROI
         grid.addWidget(QtGui.QLabel('ROI side length:'), 0, 0)
-        grid.setColumnStretch(1, 1)
         self.roi_spinbox = OddSpinBox()
         self.roi_spinbox.setValue(DEFAULT_PARAMETERS['ROI'])
-        grid.addWidget(self.roi_spinbox, 0, 2)
+        self.roi_spinbox.valueChanged.connect(self.on_roi_changed)
+        grid.addWidget(self.roi_spinbox, 0, 1)
+
+        # Minimum LGM
         grid.addWidget(QtGui.QLabel('Minimum LGM:'), 1, 0)
-        mlgm_min_spinbox = QtGui.QSpinBox()
-        mlgm_min_spinbox.setRange(1, DEFAULT_MLGM_MAXIMUM)
-        mlgm_min_spinbox.setKeyboardTracking(False)
-        mlgm_min_spinbox.setValue(1)
-        mlgm_min_spinbox.valueChanged.connect(self.on_mlgm_min_changed)
-        hbox = QtGui.QHBoxLayout()
-        grid.addLayout(hbox, 2, 0, 3, 3)
-        hbox.addWidget(mlgm_min_spinbox)
+        self.mlgm_spinbox = QtGui.QSpinBox()
+        self.mlgm_spinbox.setRange(0, 999999)
+        self.mlgm_spinbox.setValue(DEFAULT_PARAMETERS['Minimum LGM'])
+        self.mlgm_spinbox.setKeyboardTracking(False)
+        self.mlgm_spinbox.valueChanged.connect(self.on_mlgm_spinbox_changed)
+        grid.addWidget(self.mlgm_spinbox, 1, 1)
+
+        # Slider
         self.mlgm_slider = QtGui.QSlider()
         self.mlgm_slider.setOrientation(QtCore.Qt.Horizontal)
-        self.mlgm_slider.setRange(1, DEFAULT_MLGM_MAXIMUM)
+        self.mlgm_slider.setRange(0, 10000)
         self.mlgm_slider.setValue(DEFAULT_PARAMETERS['Minimum LGM'])
         self.mlgm_slider.setSingleStep(1)
         self.mlgm_slider.setPageStep(20)
-        self.mlgm_slider.valueChanged.connect(self.on_mlgm_changed)
-        hbox.addWidget(self.mlgm_slider)
-        mlgm_max_spinbox = QtGui.QSpinBox()
-        mlgm_max_spinbox.setKeyboardTracking(False)
-        mlgm_max_spinbox.setRange(2, 999999)
-        mlgm_max_spinbox.setValue(DEFAULT_MLGM_MAXIMUM)
-        mlgm_max_spinbox.valueChanged.connect(self.on_mlgm_max_changed)
-        hbox.addWidget(mlgm_max_spinbox)
-        self.mlgm_label = QtGui.QLabel(str(self.mlgm_slider.value()))
-        grid.addWidget(self.mlgm_label, 1, 2)
+        self.mlgm_slider.valueChanged.connect(self.on_mlgm_slider_changed)
+        grid.addWidget(self.mlgm_slider, 2, 0, 1, 2)
 
-    def on_mlgm_changed(self, value):
-        self.mlgm_label.setText(str(self.mlgm_slider.value()))
+        hbox = QtGui.QHBoxLayout()
+        grid.addLayout(hbox, 3, 0, 1, 2)
+
+        # Min SpinBox
+        self.mlgm_min_spinbox = QtGui.QSpinBox()
+        self.mlgm_min_spinbox.setRange(0, 999999)
+        self.mlgm_min_spinbox.setKeyboardTracking(False)
+        self.mlgm_min_spinbox.setValue(0)
+        self.mlgm_min_spinbox.valueChanged.connect(self.on_mlgm_min_changed)
+        hbox.addWidget(self.mlgm_min_spinbox)
+
+        hbox.addStretch(1)
+
+        # Max SpinBox
+        self.mlgm_max_spinbox = QtGui.QSpinBox()
+        self.mlgm_max_spinbox.setKeyboardTracking(False)
+        self.mlgm_max_spinbox.setRange(0, 999999)
+        self.mlgm_max_spinbox.setValue(10000)
+        self.mlgm_max_spinbox.valueChanged.connect(self.on_mlgm_max_changed)
+        hbox.addWidget(self.mlgm_max_spinbox)
+
+        self.preview_checkbox = QtGui.QCheckBox('Preview')
+        self.preview_checkbox.setTristate(False)
+        # self.preview_checkbox.setChecked(True)
+        self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
+        grid.addWidget(self.preview_checkbox, 4, 0)
+
+    def on_roi_changed(self, value):
         self.window.on_parameters_changed()
+
+    def on_mlgm_spinbox_changed(self, value):
+        if value < self.mlgm_slider.minimum():
+            self.mlgm_min_spinbox.setValue(value)
+        if value > self.mlgm_slider.maximum():
+            self.mlgm_max_spinbox.setValue(value)
+        self.mlgm_slider.setValue(value)
+
+    def on_mlgm_slider_changed(self, value):
+        self.mlgm_spinbox.setValue(value)
+        if self.preview_checkbox.isChecked():
+            self.window.on_parameters_changed()
 
     def on_mlgm_min_changed(self, value):
         self.mlgm_slider.setMinimum(value)
 
     def on_mlgm_max_changed(self, value):
         self.mlgm_slider.setMaximum(value)
+
+    def on_preview_changed(self, state):
+        self.window.draw_frame()
 
 
 class Window(QtGui.QMainWindow):
@@ -265,6 +301,10 @@ class Window(QtGui.QMainWindow):
         fit_action.setShortcut('Ctrl+F')
         fit_action.triggered.connect(self.fit)
         analyze_menu.addAction(fit_action)
+        localize_action = analyze_menu.addAction('Localize (Identify && Fit)')
+        localize_action.setShortcut('Ctrl+L')
+        localize_action.triggered.connect(self.localize)
+        analyze_menu.addAction(localize_action)
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw')
@@ -275,10 +315,9 @@ class Window(QtGui.QMainWindow):
         try:
             self.movie, self.info = io.load_raw(path, memory_map=True)
             self.movie_path = path
-            message = 'Loaded {} frames. Ready to go.'.format(self.info['Frames'])
-            self.status_bar.showMessage(message)
             self.identifications = None
             self.locs = None
+            self.ready_for_fit = False
             self.set_frame(0)
             self.fit_in_view()
         except FileNotFoundError:
@@ -311,40 +350,49 @@ class Window(QtGui.QMainWindow):
 
     def set_frame(self, number):
         self.current_frame_number = number
-        frame = self.movie[number]
-        frame = frame.astype('float32')
-        frame -= frame.min()
-        frame /= frame.ptp()
-        frame *= 255.0
-        frame = frame.astype('uint8')
-        width, height = frame.shape
-        image = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
-        image.setColorTable(CMAP_GRAYSCALE)
-        pixmap = QtGui.QPixmap.fromImage(image)
-        self.scene = Scene(self)
-        self.scene.addPixmap(pixmap)
-        self.view.setScene(self.scene)
-        self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['Frames']))
-        if self.ready_for_fit:
-            identifications_frame = self.identifications[self.identifications.frame == number]
-            roi = self.last_identification_parameters['ROI']
-            identification_marker_color = QtGui.QColor('yellow')
-        else:
-            identifications_frame = localize.identify_frame(self.movie[self.current_frame_number],
-                                                            self.parameters,
-                                                            self.current_frame_number)
-            roi = self.parameters['ROI']
-            identification_marker_color = QtGui.QColor('red')
-            self.status_bar.showMessage('Found {} spots in current frame.'.format(len(identifications_frame)))
+        self.draw_frame()
+        self.status_bar_frame_indicator.setText('{:,}/{:,}'.format(number + 1, self.info['Frames']))
+
+    def draw_frame(self):
+        if self.movie is not None:
+            frame = self.movie[self.current_frame_number]
+            frame = frame.astype('float32')
+            frame -= frame.min()
+            frame /= frame.ptp()
+            frame *= 255.0
+            frame = frame.astype('uint8')
+            width, height = frame.shape
+            image = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
+            image.setColorTable(CMAP_GRAYSCALE)
+            pixmap = QtGui.QPixmap.fromImage(image)
+            self.scene = Scene(self)
+            self.scene.addPixmap(pixmap)
+            self.view.setScene(self.scene)
+            if self.ready_for_fit:
+                identifications_frame = self.identifications[self.identifications.frame == self.current_frame_number]
+                roi = self.last_identification_parameters['ROI']
+                self.draw_identifications(identifications_frame, roi, QtGui.QColor('yellow'))
+            else:
+                if self.parameters_dialog.preview_checkbox.isChecked():
+                    identifications_frame = localize.identify_frame(self.movie[self.current_frame_number],
+                                                                    self.parameters,
+                                                                    self.current_frame_number)
+                    roi = self.parameters['ROI']
+                    self.status_bar.showMessage('Found {:,} spots in current frame.'.format(len(identifications_frame)))
+                    self.draw_identifications(identifications_frame, roi, QtGui.QColor('red'))
+                else:
+                    self.status_bar.showMessage('')
+            if self.locs is not None:
+                locs_frame = self.locs[self.locs.frame == self.current_frame_number]
+                for loc in locs_frame:
+                    self.scene.addItem(FitMarker(loc.x+0.5, loc.y+0.5, 1))
+
+    def draw_identifications(self, identifications, roi, color):
         roi_half = int(roi / 2)
-        for identification in identifications_frame:
+        for identification in identifications:
             x = identification.x
             y = identification.y
-            self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(identification_marker_color))
-        if self.locs is not None:
-            locs_frame = self.locs[self.locs.frame == number]
-            for loc in locs_frame:
-                self.scene.addItem(FitMarker(loc.x+0.5, loc.y+0.5, 1))
+            self.scene.addRect(x - roi_half, y - roi_half, roi, roi, color)
 
     def open_parameters(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', filter='*.yaml')
@@ -368,55 +416,56 @@ class Window(QtGui.QMainWindow):
                 'Minimum LGM': self.parameters_dialog.mlgm_slider.value()}
 
     def on_parameters_changed(self):
-        if self.movie is not None:
-            self.locs = None
-            self.ready_for_fit = False
-            self.set_frame(self.current_frame_number)
+        self.locs = None
+        self.ready_for_fit = False
+        self.draw_frame()
 
-    def identify(self):
+    def identify(self, fit_afterwards=False):
         if self.movie is not None:
             self.status_bar.showMessage('Preparing identification...')
-            self.worker = IdentificationWorker(self)
-            self.worker.progressMade.connect(self.on_identify_progress)
-            self.worker.finished.connect(self.on_identify_finished)
-            self.worker.start()
+            self.identificaton_worker = IdentificationWorker(self, fit_afterwards)
+            self.identificaton_worker.progressMade.connect(self.on_identify_progress)
+            self.identificaton_worker.finished.connect(self.on_identify_finished)
+            self.identificaton_worker.start()
 
     def on_identify_progress(self, frame_number, parameters):
         n_frames = self.info['Frames']
         roi = parameters['ROI']
         mmlg = parameters['Minimum LGM']
-        message = 'Identifying in frame {}/{} (ROI: {}, Mininum LGM: {})...'.format(frame_number, n_frames, roi, mmlg)
+        message = 'Identifying in frame {:,}/{:,} (ROI: {:,}; Mininum LGM: {:,})...'.format(frame_number, n_frames, roi, mmlg)
         self.status_bar.showMessage(message)
 
-    def on_identify_finished(self, parameters, identifications):
+    def on_identify_finished(self, parameters, identifications, fit_afterwards):
         if len(identifications):
             self.locs = None
             self.last_identification_parameters = parameters.copy()
             n_identifications = len(identifications)
             roi = parameters['ROI']
             mmlg = parameters['Minimum LGM']
-            message = 'Identified {} spots (ROI: {}, Minimum LGM: {}). Ready for fit.'.format(n_identifications, roi, mmlg)
+            message = 'Identified {:,} spots (ROI: {:,}; Minimum LGM: {:,}). Ready for fit.'.format(n_identifications, roi, mmlg)
             self.status_bar.showMessage(message)
             self.identifications = identifications
             self.ready_for_fit = True
-            self.set_frame(self.current_frame_number)
+            self.draw_frame()
+            if fit_afterwards:
+                self.fit()
 
     def fit(self):
-        if self.movie is not None and self.identifications is not None:
+        if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage('Preparing fit...')
-            self.worker = FitWorker(self)
-            self.worker.progressMade.connect(self.on_fit_progress)
-            self.worker.finished.connect(self.on_fit_finished)
-            self.worker.start()
+            self.fit_worker = FitWorker(self)
+            self.fit_worker.progressMade.connect(self.on_fit_progress)
+            self.fit_worker.finished.connect(self.on_fit_finished)
+            self.fit_worker.start()
 
     def on_fit_progress(self, current, n_spots):
-        message = 'Fitting spot {}/{}...'.format(current, n_spots)
+        message = 'Fitting spot {:,}/{:,}...'.format(current, n_spots)
         self.status_bar.showMessage(message)
 
     def on_fit_finished(self, locs):
-        self.status_bar.showMessage('Fitted {} spots.'.format(len(locs)))
+        self.status_bar.showMessage('Fitted {:,} spots.'.format(len(locs)))
         self.locs = locs
-        self.set_frame(self.current_frame_number)
+        self.draw_frame()
 
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
@@ -434,17 +483,21 @@ class Window(QtGui.QMainWindow):
         if path:
             io.save_locs(path, self.locs, self.info, self.last_identification_parameters)
 
+    def localize(self):
+        self.identify(fit_afterwards=True)
+
 
 class IdentificationWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, dict)
-    finished = QtCore.pyqtSignal(dict, np.recarray)
+    finished = QtCore.pyqtSignal(dict, np.recarray, bool)
 
-    def __init__(self, window):
+    def __init__(self, window, fit_afterwards):
         super().__init__()
         self.window = window
         self.movie = window.movie
         self.parameters = window.parameters
+        self.fit_afterwards = fit_afterwards
 
     def run(self):
         result, counter, pool = localize.identify_async(self.movie, self.parameters)
@@ -455,7 +508,7 @@ class IdentificationWorker(QtCore.QThread):
         pool.terminate()
         identifications = np.hstack(identifications)
         identifications = identifications.view(np.recarray)
-        self.finished.emit(self.parameters, identifications)
+        self.finished.emit(self.parameters, identifications, self.fit_afterwards)
 
 
 class FitWorker(QtCore.QThread):
