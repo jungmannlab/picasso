@@ -100,6 +100,7 @@ def identify_async(movie, parameters):
     pool = _multiprocessing.Pool(processes=n_processes)
     args = [(movie[_], parameters, _, counter, lock) for _ in range(n_frames)]
     result = pool.starmap_async(_identify_frame_async, args)
+    pool.close()
     return result, counter, pool
 
 

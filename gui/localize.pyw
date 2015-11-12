@@ -19,6 +19,7 @@ import traceback
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
+DEFAULT_MLGM_MAXIMUM = 10000
 DEFAULT_PARAMETERS = {'ROI': 5, 'Minimum LGM': 300}
 
 
@@ -81,10 +82,10 @@ class FitMarker(QtGui.QGraphicsItemGroup):
         super().__init__(parent)
         L = size/2
         line1 = QtGui.QGraphicsLineItem(x-L, y-L, x+L, y+L)
-        line1.setPen(QtGui.QPen(QtGui.QColor('red')))
+        line1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
         self.addToGroup(line1)
         line2 = QtGui.QGraphicsLineItem(x-L, y+L, x+L, y-L)
-        line2.setPen(QtGui.QPen(QtGui.QColor('red')))
+        line2.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
         self.addToGroup(line2)
 
 
@@ -93,6 +94,7 @@ class OddSpinBox(QtGui.QSpinBox):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.setSingleStep(2)
         self.valueChanged.connect(self.on_value_changed)
 
     def on_value_changed(self, value):
@@ -103,29 +105,53 @@ class OddSpinBox(QtGui.QSpinBox):
 class ParametersDialog(QtGui.QDialog):
     """ The dialog showing analysis parameters """
 
-    def __init__(self, parameters, parent=None):
-        super().__init__(parent)
+    def __init__(self, window):
+        super().__init__(window)
+        # self.resize(300, 0)
+        self.window = window
         self.setWindowTitle('Parameters')
-        vbox = QtGui.QVBoxLayout(self)
-        grid = QtGui.QGridLayout()
-        vbox.addLayout(grid)
+        self.setModal(False)
+        grid = QtGui.QGridLayout(self)
         grid.addWidget(QtGui.QLabel('ROI side length:'), 0, 0)
+        grid.setColumnStretch(1, 1)
         self.roi_spinbox = OddSpinBox()
-        self.roi_spinbox.setValue(parameters['ROI'])
-        self.roi_spinbox.setSingleStep(2)
-        grid.addWidget(self.roi_spinbox, 0, 1)
+        self.roi_spinbox.setValue(DEFAULT_PARAMETERS['ROI'])
+        grid.addWidget(self.roi_spinbox, 0, 2)
         grid.addWidget(QtGui.QLabel('Minimum LGM:'), 1, 0)
-        self.mmlg_spinbox = QtGui.QSpinBox()
-        self.mmlg_spinbox.setMaximum(999999999)
-        self.mmlg_spinbox.setValue(parameters['Minimum LGM'])
-        grid.addWidget(self.mmlg_spinbox, 1, 1)
-        buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal, self)
-        vbox.addWidget(buttons)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
+        mlgm_min_spinbox = QtGui.QSpinBox()
+        mlgm_min_spinbox.setRange(1, DEFAULT_MLGM_MAXIMUM)
+        mlgm_min_spinbox.setKeyboardTracking(False)
+        mlgm_min_spinbox.setValue(1)
+        mlgm_min_spinbox.valueChanged.connect(self.on_mlgm_min_changed)
+        hbox = QtGui.QHBoxLayout()
+        grid.addLayout(hbox, 2, 0, 3, 3)
+        hbox.addWidget(mlgm_min_spinbox)
+        self.mlgm_slider = QtGui.QSlider()
+        self.mlgm_slider.setOrientation(QtCore.Qt.Horizontal)
+        self.mlgm_slider.setRange(1, DEFAULT_MLGM_MAXIMUM)
+        self.mlgm_slider.setValue(DEFAULT_PARAMETERS['Minimum LGM'])
+        self.mlgm_slider.setSingleStep(1)
+        self.mlgm_slider.setPageStep(20)
+        self.mlgm_slider.valueChanged.connect(self.on_mlgm_changed)
+        hbox.addWidget(self.mlgm_slider)
+        mlgm_max_spinbox = QtGui.QSpinBox()
+        mlgm_max_spinbox.setKeyboardTracking(False)
+        mlgm_max_spinbox.setRange(2, 999999)
+        mlgm_max_spinbox.setValue(DEFAULT_MLGM_MAXIMUM)
+        mlgm_max_spinbox.valueChanged.connect(self.on_mlgm_max_changed)
+        hbox.addWidget(mlgm_max_spinbox)
+        self.mlgm_label = QtGui.QLabel(str(self.mlgm_slider.value()))
+        grid.addWidget(self.mlgm_label, 1, 2)
 
-    def parameters(self):
-        return {'ROI': self.roi_spinbox.value(), 'Minimum LGM': self.mmlg_spinbox.value()}
+    def on_mlgm_changed(self, value):
+        self.mlgm_label.setText(str(self.mlgm_slider.value()))
+        self.window.on_parameters_changed()
+
+    def on_mlgm_min_changed(self, value):
+        self.mlgm_slider.setMinimum(value)
+
+    def on_mlgm_max_changed(self, value):
+        self.mlgm_slider.setMaximum(value)
 
 
 class Window(QtGui.QMainWindow):
@@ -140,6 +166,7 @@ class Window(QtGui.QMainWindow):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(768, 768)
+        self.parameters_dialog = ParametersDialog(self)
         self.init_menu_bar()
         self.view = View()
         self.setCentralWidget(self.view)
@@ -149,11 +176,8 @@ class Window(QtGui.QMainWindow):
         self.status_bar_frame_indicator = QtGui.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
 
-        #: Holds the current movie as a numpy memmap in the format (frame, x, y)
+        #: Holds the current movie as a numpy memmap in the format (frame, y, x)
         self.movie = None
-
-        #: A dictionary of the current analysis parameters
-        self.parameters = DEFAULT_PARAMETERS
 
         #: A dictionary of analysis parameters used for the last operation
         self.last_identification_parameters = None
@@ -161,8 +185,8 @@ class Window(QtGui.QMainWindow):
         #: A numpy.recarray of identifcations with fields frame, x and y
         self.identifications = None
 
-        self.worker = None
-        self.worker_interrupt_flag = False
+        self.ready_for_fit = False
+
         self.locs = None
 
     def init_menu_bar(self):
@@ -230,7 +254,7 @@ class Window(QtGui.QMainWindow):
         analyze_menu = menu_bar.addMenu('Analyze')
         parameters_action = analyze_menu.addAction('Parameters')
         parameters_action.setShortcut('Ctrl+P')
-        parameters_action.triggered.connect(self.open_parameters_dialog)
+        parameters_action.triggered.connect(self.parameters_dialog.show)
         analyze_menu.addAction(parameters_action)
         analyze_menu.addSeparator()
         identify_action = analyze_menu.addAction('Identify')
@@ -301,14 +325,22 @@ class Window(QtGui.QMainWindow):
         self.scene.addPixmap(pixmap)
         self.view.setScene(self.scene)
         self.status_bar_frame_indicator.setText('{}/{}'.format(number + 1, self.info['Frames']))
-        if self.identifications is not None:
+        if self.ready_for_fit:
             identifications_frame = self.identifications[self.identifications.frame == number]
             roi = self.last_identification_parameters['ROI']
-            roi_half = int(roi / 2)
-            for identification in identifications_frame:
-                x = identification.x
-                y = identification.y
-                self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(QtGui.QColor('yellow')))
+            identification_marker_color = QtGui.QColor('yellow')
+        else:
+            identifications_frame = localize.identify_frame(self.movie[self.current_frame_number],
+                                                            self.parameters,
+                                                            self.current_frame_number)
+            roi = self.parameters['ROI']
+            identification_marker_color = QtGui.QColor('red')
+            self.status_bar.showMessage('Found {} spots in current frame.'.format(len(identifications_frame)))
+        roi_half = int(roi / 2)
+        for identification in identifications_frame:
+            x = identification.x
+            y = identification.y
+            self.scene.addRect(x - roi_half, y - roi_half, roi, roi, QtGui.QPen(identification_marker_color))
         if self.locs is not None:
             locs_frame = self.locs[self.locs.frame == number]
             for loc in locs_frame:
@@ -330,11 +362,16 @@ class Window(QtGui.QMainWindow):
             with open(path, 'w') as file:
                 yaml.dump(self.parameters, file, default_flow_style=False)
 
-    def open_parameters_dialog(self):
-        dialog = ParametersDialog(self.parameters)
-        result = dialog.exec_()
-        if result == QtGui.QDialog.Accepted:
-            self.parameters = dialog.parameters()
+    @property
+    def parameters(self):
+        return {'ROI': self.parameters_dialog.roi_spinbox.value(),
+                'Minimum LGM': self.parameters_dialog.mlgm_slider.value()}
+
+    def on_parameters_changed(self):
+        if self.movie is not None:
+            self.locs = None
+            self.ready_for_fit = False
+            self.set_frame(self.current_frame_number)
 
     def identify(self):
         if self.movie is not None:
@@ -344,23 +381,24 @@ class Window(QtGui.QMainWindow):
             self.worker.finished.connect(self.on_identify_finished)
             self.worker.start()
 
-    def on_identify_progress(self, frame_number):
+    def on_identify_progress(self, frame_number, parameters):
         n_frames = self.info['Frames']
-        roi = self.parameters['ROI']
-        mmlg = self.parameters['Minimum LGM']
+        roi = parameters['ROI']
+        mmlg = parameters['Minimum LGM']
         message = 'Identifying in frame {}/{} (ROI: {}, Mininum LGM: {})...'.format(frame_number, n_frames, roi, mmlg)
         self.status_bar.showMessage(message)
 
-    def on_identify_finished(self, identifications):
+    def on_identify_finished(self, parameters, identifications):
         if len(identifications):
             self.locs = None
+            self.last_identification_parameters = parameters.copy()
             n_identifications = len(identifications)
-            roi = self.parameters['ROI']
-            mmlg = self.parameters['Minimum LGM']
-            message = 'Identified {} spots (ROI: {}, Minimum LGM: {}).'.format(n_identifications, roi, mmlg)
+            roi = parameters['ROI']
+            mmlg = parameters['Minimum LGM']
+            message = 'Identified {} spots (ROI: {}, Minimum LGM: {}). Ready for fit.'.format(n_identifications, roi, mmlg)
             self.status_bar.showMessage(message)
             self.identifications = identifications
-            self.last_identification_parameters = self.parameters.copy()
+            self.ready_for_fit = True
             self.set_frame(self.current_frame_number)
 
     def fit(self):
@@ -399,8 +437,8 @@ class Window(QtGui.QMainWindow):
 
 class IdentificationWorker(QtCore.QThread):
 
-    progressMade = QtCore.pyqtSignal(int)
-    finished = QtCore.pyqtSignal(np.recarray)
+    progressMade = QtCore.pyqtSignal(int, dict)
+    finished = QtCore.pyqtSignal(dict, np.recarray)
 
     def __init__(self, window):
         super().__init__()
@@ -411,12 +449,13 @@ class IdentificationWorker(QtCore.QThread):
     def run(self):
         result, counter, pool = localize.identify_async(self.movie, self.parameters)
         while not result.ready():
-            self.progressMade.emit(int(counter.value))
+            self.progressMade.emit(int(counter.value), self.parameters)
             time.sleep(0.1)
         identifications = result.get()
+        pool.terminate()
         identifications = np.hstack(identifications)
         identifications = identifications.view(np.recarray)
-        self.finished.emit(identifications)
+        self.finished.emit(self.parameters, identifications)
 
 
 class FitWorker(QtCore.QThread):
