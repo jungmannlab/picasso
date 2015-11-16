@@ -432,7 +432,7 @@ class Window(QtGui.QMainWindow):
         n_frames = self.info['Frames']
         roi = parameters['ROI']
         mmlg = parameters['Minimum LGM']
-        message = 'Identifying in frame {:,}/{:,} (ROI: {:,}; Mininum LGM: {:,})...'.format(frame_number, n_frames, roi, mmlg)
+        message = 'Identifying in frame {:,}/{:,} (ROI: {:,}; Minimum LGM: {:,})...'.format(frame_number, n_frames, roi, mmlg)
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, parameters, identifications, fit_afterwards):
