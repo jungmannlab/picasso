@@ -401,7 +401,9 @@ class Window(QtGui.QMainWindow):
 
     def load_parameters(self, path):
         with open(path, 'r') as file:
-            self.parameters = yaml.load(file)
+            parameters = yaml.load(file)
+            self.parameters_dialog.roi_spinbox.setValue(parameters['ROI'])
+            self.parameters_dialog.mlgm_spinbox.setValue(parameters['Minimum LGM'])
             self.status_bar.showMessage('Parameter file {} loaded.'.format(path))
 
     def save_parameters(self):
