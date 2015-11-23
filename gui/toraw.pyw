@@ -8,9 +8,14 @@
     :author: Joerg Schnitzbauer, 2015
 """
 
-import sys
-sys.path.insert(0, '..')    # We want to use the local picasso instead the system-wide
 import os.path
+
+_this_file = os.path.abspath(__file__)
+_this_directory = os.path.dirname(_this_file)
+_parent_directory = os.path.dirname(_this_directory)
+
+import sys
+sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
 from PyQt4 import QtCore, QtGui
 from picasso import io
 import traceback
