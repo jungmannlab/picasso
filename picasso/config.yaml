@@ -25,3 +25,24 @@ Cameras:
             489: 0.95
             561: 0.96
             640: 0.9
+  # Manufacturer
+  Lidke:
+    # Type
+    example:
+      # Model
+      gaussMLE:
+        # Serial number
+        V0:
+          Baseline: 0
+          Sensitivity:
+            # EM gain
+            true:
+              # Sensitivity for each readout rate, for each preamp gain (1, 2, 3)
+              17.000 MHz: [1, 1, 1]
+            false:
+              17.000 MHz: [1, 1, 1]
+          Quantum Efficiency:
+            # Excitation wavelength
+            489: 1
+            561: 1
+            640: 1
