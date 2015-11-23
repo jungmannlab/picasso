@@ -8,9 +8,15 @@
     :author: Joerg Schnitzbauer, 2015
 """
 
-import sys
-sys.path.insert(0, '..')    # We want to use the local picasso instead the system-wide
 import os.path
+
+_this_file = os.path.abspath(__file__)
+_this_directory = os.path.dirname(_this_file)
+_parent_directory = os.path.dirname(_this_directory)
+
+import sys
+sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
+
 import yaml
 from PyQt4 import QtCore, QtGui
 from picasso import io, localize
@@ -363,7 +369,7 @@ class Window(QtGui.QMainWindow):
             frame *= 255.0
             frame = frame.astype('uint8')
             width, height = frame.shape
-            image = QtGui.QImage(frame.data, width, height, QtGui.QImage.Format_Indexed8)
+            image = QtGui.QImage(frame.data, width, height, width, QtGui.QImage.Format_Indexed8)
             image.setColorTable(CMAP_GRAYSCALE)
             pixmap = QtGui.QPixmap.fromImage(image)
             self.scene = Scene(self)
