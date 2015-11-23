@@ -148,6 +148,20 @@ def _to_photons(spots, info):
         excitation = info['Excitation Wavelength']
         qe = camera_config['Quantum Efficiency'][excitation]
         return (spots - baseline) * qe * sensitivity / em_realgain
+    if info['Camera']['Manufacturer'] == 'Lidke':
+        type = info['Camera']['Type']
+        model = info['Camera']['Model']
+        serial_number = info['Camera']['Serial Number']
+        camera_config = CONFIG['Cameras']['Lidke'][type][model][serial_number]
+        baseline = camera_config['Baseline']
+        em_realgain = info['EM RealGain']
+        em = em_realgain > 1
+        preamp_gain = info['Pre-Amp Gain']
+        read_mode = info['Readout Mode']
+        sensitivity = camera_config['Sensitivity'][em][read_mode][preamp_gain-1]
+        excitation = info['Excitation Wavelength']
+        qe = camera_config['Quantum Efficiency'][excitation]
+        return spots
     else:
         raise Exception("No configuration found for camera '{}''".format(info['Camera']))
 
@@ -182,7 +196,7 @@ def _generate_fit_info(movie, info, identifications, roi):
 def fit(movie, info, identifications, roi):
     fit_info = _generate_fit_info(movie, info, identifications, roi)
     WoehrLok.fnWoehrLokMLEFitAll(*fit_info.gaussmle_args)
-    return locs_from_fit_info(fit_info, identifications, roi)
+    return locs_from_fit_info(fit_info, identifications, roi), fit_info
 
 
 def fit_async(movie, info, identifications, roi):
@@ -196,7 +210,9 @@ def locs_from_fit_info(fit_info, identifications, roi):
     roi_offset = int(roi/2)
     x = fit_info.params[0] + identifications.x - roi_offset
     y = fit_info.params[1] + identifications.y - roi_offset
-    loc_ac = 0.1*_np.ones(fit_info.n_spots, dtype=_np.float32)
+    loc_ac_x = _np.sqrt(fit_info.CRLBs[0])
+    loc_ac_y = _np.sqrt(fit_info.CRLBs[1])
+    loc_ac = (loc_ac_x + loc_ac_y) / 2
     noise = _np.ones(fit_info.n_spots, dtype=_np.float32)
     amp = _np.ones(fit_info.n_spots, dtype=_np.float32)
     return _np.rec.array((identifications.frame, x, y, fit_info.params[2],
