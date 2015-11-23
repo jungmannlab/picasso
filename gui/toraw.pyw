@@ -9,6 +9,7 @@
 """
 
 import sys
+sys.path.insert(0, '..')    # We want to use the local picasso instead the system-wide
 import os.path
 from PyQt4 import QtCore, QtGui
 from picasso import io

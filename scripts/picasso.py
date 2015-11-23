@@ -7,26 +7,13 @@
 
     :author: Joerg Schnitzbauer, 2015
 """
+
+import sys
+sys.path.insert(0, '..')    # We want to use the local picasso instead the system-wide
 import glob
 import os.path
 import yaml
-
-
-def import_nolocal(module):
-    """
-    Imports a module, but ignores the current directory.
-    This is needed, when we want to import the `picasso` package.
-    """
-    import sys
-    import importlib
-    temp = sys.path.pop(0)
-    module = importlib.import_module(module)
-    sys.path.insert(0, temp)
-    return module
-
-
-localize = import_nolocal('picasso.localize')
-io = import_nolocal('picasso.io')
+from picasso import io, localize
 
 
 def _localize(files, parameters_file, verbose=True):
