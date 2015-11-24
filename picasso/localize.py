@@ -58,8 +58,8 @@ def local_gradient_magnitude(frame, roi, abs_gradient):
     Y, X = frame.shape
     lgm = _np.zeros_like(abs_gradient)
     roi_half = int(roi / 2)
-    for i in range(roi, Y - roi):
-        for j in range(roi, X - roi):
+    for i in range(roi_half, Y - roi + roi_half + 1):
+        for j in range(roi_half, X - roi + roi_half + 1):
             local_gradient = abs_gradient[i - roi_half:i + roi_half + 1, j - roi_half:j + roi_half + 1]
             lgm[i, j] = _np.sum(local_gradient)
     return lgm
