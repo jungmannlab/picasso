@@ -45,3 +45,4 @@ The result is that you don't have to specify the .py or .pyw ending when you run
 ## Credits
 - Localize icon based on "Picture by Eugen Belyakoff from the Noun Project"
 - ToRaw icon based on "Lion by Sathish Selladurai from the Noun Project"
+- Filter icon based on "Funnel by José Campos from the Noun Project"

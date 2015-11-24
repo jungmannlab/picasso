@@ -147,7 +147,7 @@ def _to_photons(spots, info):
         sensitivity = camera_config['Sensitivity'][em][read_mode][preamp_gain-1]
         excitation = info['Excitation Wavelength']
         qe = camera_config['Quantum Efficiency'][excitation]
-        return (spots - baseline) * qe * sensitivity / em_realgain
+        return (spots - baseline) * sensitivity / (em_realgain * qe)
     if info['Camera']['Manufacturer'] == 'Lidke':
         type = info['Camera']['Type']
         model = info['Camera']['Model']
