@@ -7,12 +7,12 @@
 
     :author: Joerg Schnitzbauer, 2015
 """
-
-import sys
-sys.path.insert(0, '..')    # We want to use the local picasso instead the system-wide
 import glob
 import os.path
 import yaml
+import sys
+sys.path.pop(0)
+sys.path.insert(0, '..')
 from picasso import io, localize
 
 
