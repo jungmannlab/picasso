@@ -174,7 +174,7 @@ def _generate_fit_info(movie, info, identifications, roi):
     spots_pointer = spots.ctypes.data_as(_C_FLOAT_POINTER)
     psf_sigma = _ctypes.c_float(1.0)
     roi = _ctypes.c_int(roi)
-    n_iterations = _ctypes.c_int(20)
+    n_iterations = _ctypes.c_int(30)
     params = _np.zeros((6, n_spots), dtype=_np.float32)
     params_pointer = params.ctypes.data_as(_C_FLOAT_POINTER)
     CRLBs = _np.zeros((6, n_spots), dtype=_np.float32)
