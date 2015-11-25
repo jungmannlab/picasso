@@ -197,6 +197,56 @@ class ParametersDialog(QtGui.QDialog):
         self.window.draw_frame()
 
 
+class ContrastDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Contrast')
+        self.resize(200, 0)
+        self.setModal(False)
+        grid = QtGui.QGridLayout(self)
+        black_label = QtGui.QLabel('Black:')
+        grid.addWidget(black_label, 0, 0)
+        self.black_spinbox = QtGui.QSpinBox()
+        self.black_spinbox.setKeyboardTracking(False)
+        self.black_spinbox.setRange(0, 999999)
+        self.black_spinbox.valueChanged.connect(self.on_contrast_changed)
+        grid.addWidget(self.black_spinbox, 0, 1)
+        white_label = QtGui.QLabel('White:')
+        grid.addWidget(white_label, 1, 0)
+        self.white_spinbox = QtGui.QSpinBox()
+        self.white_spinbox.setKeyboardTracking(False)
+        self.white_spinbox.setRange(0, 999999)
+        self.white_spinbox.valueChanged.connect(self.on_contrast_changed)
+        grid.addWidget(self.white_spinbox, 1, 1)
+        self.auto_checkbox = QtGui.QCheckBox('Auto')
+        self.auto_checkbox.setTristate(False)
+        self.auto_checkbox.setChecked(True)
+        self.auto_checkbox.stateChanged.connect(self.on_auto_changed)
+        grid.addWidget(self.auto_checkbox, 2, 0, 1, 2)
+        self.silent_contrast_change = False
+
+    def change_contrast_silently(self, black, white):
+        self.silent_contrast_change = True
+        self.black_spinbox.setValue(black)
+        self.white_spinbox.setValue(white)
+        self.silent_contrast_change = False
+
+    def on_contrast_changed(self, value):
+        if not self.silent_contrast_change:
+            self.auto_checkbox.setChecked(False)
+            self.window.draw_frame()
+
+    def on_auto_changed(self, state):
+        if state:
+            movie = self.window.movie
+            frame_number = self.window.current_frame_number
+            frame = movie[frame_number]
+            self.change_contrast_silently(frame.min(), frame.max())
+            self.window.draw_frame()
+
+
 class Window(QtGui.QMainWindow):
     """ The main window """
 
@@ -210,6 +260,7 @@ class Window(QtGui.QMainWindow):
         self.setWindowIcon(icon)
         self.resize(768, 768)
         self.parameters_dialog = ParametersDialog(self)
+        self.contrast_dialog = ContrastDialog(self)
         self.init_menu_bar()
         self.view = View()
         self.setCentralWidget(self.view)
@@ -238,11 +289,11 @@ class Window(QtGui.QMainWindow):
         """ File """
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open movie')
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut('Ctrl+O')
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
         save_action = file_menu.addAction('Save localizations')
-        save_action.setShortcut(QtGui.QKeySequence.Save)
+        save_action.setShortcut('Ctrl+S')
         save_action.triggered.connect(self.save_locs)
         file_menu.addAction(save_action)
         file_menu.addSeparator()
@@ -267,11 +318,11 @@ class Window(QtGui.QMainWindow):
         view_menu.addAction(next_frame_action)
         view_menu.addSeparator()
         first_frame_action = view_menu.addAction('First frame')
-        first_frame_action.setShortcut(QtGui.QKeySequence.MoveToStartOfLine)
+        first_frame_action.setShortcut('Ctrl+Home')
         first_frame_action.triggered.connect(self.first_frame)
         view_menu.addAction(first_frame_action)
         last_frame_action = view_menu.addAction('Last frame')
-        last_frame_action.setShortcut(QtGui.QKeySequence.MoveToEndOfLine)
+        last_frame_action.setShortcut('Ctrl+End')
         last_frame_action.triggered.connect(self.last_frame)
         view_menu.addAction(last_frame_action)
         go_to_frame_action = view_menu.addAction('Go to frame')
@@ -287,11 +338,15 @@ class Window(QtGui.QMainWindow):
         zoom_out_action.setShortcut('Ctrl+-')
         zoom_out_action.triggered.connect(self.zoom_out)
         view_menu.addAction(zoom_out_action)
-        view_menu.addSeparator()
         fit_in_view_action = view_menu.addAction('Fit image to window')
         fit_in_view_action.setShortcut('Ctrl+W')
         fit_in_view_action.triggered.connect(self.fit_in_view)
         view_menu.addAction(fit_in_view_action)
+        view_menu.addSeparator()
+        display_settings_action = view_menu.addAction('Contrast')
+        display_settings_action.setShortcut('Ctrl+C')
+        display_settings_action.triggered.connect(self.contrast_dialog.show)
+        view_menu.addAction(display_settings_action)
 
         """ Analyze """
         analyze_menu = menu_bar.addMenu('Analyze')
@@ -357,6 +412,10 @@ class Window(QtGui.QMainWindow):
 
     def set_frame(self, number):
         self.current_frame_number = number
+        if self.contrast_dialog.auto_checkbox.isChecked():
+            black = self.movie[number].min()
+            white = self.movie[number].max()
+            self.contrast_dialog.change_contrast_silently(black, white)
         self.draw_frame()
         self.status_bar_frame_indicator.setText('{:,}/{:,}'.format(number + 1, self.info['Frames']))
 
@@ -364,11 +423,17 @@ class Window(QtGui.QMainWindow):
         if self.movie is not None:
             frame = self.movie[self.current_frame_number]
             frame = frame.astype('float32')
-            frame -= frame.min()
-            frame /= frame.ptp()
+            if self.contrast_dialog.auto_checkbox.isChecked():
+                frame -= frame.min()
+                frame /= frame.max()
+            else:
+                frame -= self.contrast_dialog.black_spinbox.value()
+                frame /= self.contrast_dialog.white_spinbox.value()
             frame *= 255.0
+            frame = np.maximum(frame, 0)
+            frame = np.minimum(frame, 255)
             frame = frame.astype('uint8')
-            width, height = frame.shape
+            height, width = frame.shape
             image = QtGui.QImage(frame.data, width, height, width, QtGui.QImage.Format_Indexed8)
             image.setColorTable(CMAP_GRAYSCALE)
             pixmap = QtGui.QPixmap.fromImage(image)
