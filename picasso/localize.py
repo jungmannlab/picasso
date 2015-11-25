@@ -19,8 +19,8 @@ import yaml as _yaml
 
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
 LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
-              ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'), ('loc_ac', 'f4'),
-              ('bg', 'f4'), ('noise', 'f4'), ('amp', 'f4')]
+              ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
+              ('bg', 'f4'), ('CRLBx', 'f4'), ('CRLBy', 'f4')]
 
 
 _this_file = _ospath.abspath(__file__)
@@ -210,13 +210,11 @@ def locs_from_fit_info(fit_info, identifications, roi):
     roi_offset = int(roi/2)
     x = fit_info.params[0] + identifications.x - roi_offset
     y = fit_info.params[1] + identifications.y - roi_offset
-    loc_ac_x = _np.sqrt(fit_info.CRLBs[0])
-    loc_ac_y = _np.sqrt(fit_info.CRLBs[1])
-    loc_ac = (loc_ac_x + loc_ac_y) / 2
-    noise = _np.ones(fit_info.n_spots, dtype=_np.float32)
-    amp = _np.ones(fit_info.n_spots, dtype=_np.float32)
-    return _np.rec.array((identifications.frame, x, y, fit_info.params[2],
-                         fit_info.params[4], fit_info.params[5], loc_ac, fit_info.params[3], noise, amp),
+    CRLB_x = _np.sqrt(fit_info.CRLBs[0])
+    CRLB_y = _np.sqrt(fit_info.CRLBs[1])
+    return _np.rec.array((identifications.frame, x, y,
+                          fit_info.params[2], fit_info.params[4], fit_info.params[5],
+                          fit_info.params[3], CRLB_x, CRLB_y),
                          dtype=LOCS_DTYPE)
 
 
