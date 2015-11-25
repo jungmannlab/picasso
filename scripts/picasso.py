@@ -28,7 +28,7 @@ def _localize(files, parameters_file, verbose=True):
             movie, info = io.load_raw(path)
             locs = localize.localize(movie, info, parameters)
             base, ext = os.path.splitext(path)
-            io.save_locs(base + '_locs.txt', locs, info, parameters)
+            io.save_locs(base + '_locs.hdf5', locs, info, parameters)
     else:
         if verbose:
             print('No files matching {}'.format(files))
