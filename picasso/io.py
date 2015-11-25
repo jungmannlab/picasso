@@ -29,11 +29,12 @@ def raw_byteswap(movie, info):
 def load_raw(path, memory_map=True):
     info = load_raw_info(path)
     dtype = _np.dtype(info['Data Type'])
+    shape = (info['Frames'], info['Height'], info['Width'])
     if memory_map:
-        movie = _np.memmap(path, dtype, 'r', shape=tuple(info['Shape']))
+        movie = _np.memmap(path, dtype, 'r', shape=shape)
     else:
         movie = _np.fromfile(path, dtype)
-        movie = _np.reshape(movie, tuple(info['Shape']))
+        movie = _np.reshape(movie, shape)
     if info['Byte Order'] != '<':
         movie, info = raw_byteswap(movie, info)
     return movie, info
@@ -54,7 +55,6 @@ def load_tif(path):
         info['Byte Order'] = tif.byteorder
         info['Data Type'] = _np.dtype(tif.pages[0].dtype).name
         info['File'] = tif.filename
-        info['Shape'] = list(movie.shape)
         info['Frames'], info['Height'], info['Width'] = movie.shape
         try:
             info['Comments'] = tif.micromanager_metadata['comments']['Summary']
