@@ -12,7 +12,7 @@ import sys
 import traceback
 from PyQt4 import QtCore, QtGui
 import h5py
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
 import matplotlib.pyplot as plt
 import numpy as np
 import os.path
@@ -120,10 +120,15 @@ class Window(QtGui.QMainWindow):
                 figure = plt.Figure()
                 figure.suptitle(column)
                 axes = figure.add_subplot(111)
-                axes.hist(data, bins=int(len(self.locs)/1000))
+                axes.hist(data, bins=int(len(self.locs)/1000), rwidth=1, linewidth=0)
+                window = QtGui.QWidget()
+                vbox = QtGui.QVBoxLayout()
+                window.setLayout(vbox)
                 canvas = FigureCanvasQTAgg(figure)
-                canvas.setWindowTitle('Histogram')
-                canvas.show()
+                vbox.addWidget(canvas)
+                vbox.addWidget(NavigationToolbar2QT(canvas, window))
+                window.setWindowTitle('Histogram')
+                window.show()
 
 if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
