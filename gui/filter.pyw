@@ -120,7 +120,7 @@ class Window(QtGui.QMainWindow):
                 figure = plt.Figure()
                 figure.suptitle(column)
                 axes = figure.add_subplot(111)
-                axes.hist(data)
+                axes.hist(data, bins=int(len(self.locs)/1000))
                 canvas = FigureCanvasQTAgg(figure)
                 canvas.setWindowTitle('Histogram')
                 canvas.show()
