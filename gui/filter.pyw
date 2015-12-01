@@ -96,6 +96,7 @@ class Window(QtGui.QMainWindow):
         self.table_view = TableView(self, self)
         self.table_view.setAcceptDrops(True)
         self.setCentralWidget(self.table_view)
+        self.plot_windows = []
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open localizations', filter='*.hdf5')
@@ -121,14 +122,26 @@ class Window(QtGui.QMainWindow):
                 figure.suptitle(column)
                 axes = figure.add_subplot(111)
                 axes.hist(data, bins=int(len(self.locs)/1000), rwidth=1, linewidth=0)
-                window = QtGui.QWidget()
-                vbox = QtGui.QVBoxLayout()
-                window.setLayout(vbox)
                 canvas = FigureCanvasQTAgg(figure)
-                vbox.addWidget(canvas)
-                vbox.addWidget(NavigationToolbar2QT(canvas, window))
-                window.setWindowTitle('Histogram')
+                window = PlotWindow(self, canvas)
+                self.plot_windows.append(window)
                 window.show()
+
+
+class PlotWindow(QtGui.QWidget):
+
+    def __init__(self, window, canvas):
+        super().__init__()
+        self.main_window = window
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(canvas)
+        vbox.addWidget((NavigationToolbar2QT(canvas, self)))
+        self.setWindowTitle('Histogram')
+
+    def closeEvent(self, event):
+        self.main_window.plot_windows.remove(self)
+        event.accept()
 
 if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
