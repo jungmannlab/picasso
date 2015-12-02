@@ -1,8 +1,8 @@
 import numpy as _np
 import numba as _numba
-from localize import LOCS_DTYPE as _LOCS_DTYPE
+import localize as _localize
 
-LINKED_LOCS_DTYPE = _LOCS_DTYPE + [('len', 'u4')]
+LINKED_LOCS_DTYPE = _localize.LOCS_DTYPE + [('len', 'u4')]
 
 
 def link(locs, radius, max_dark_time):
