@@ -37,11 +37,6 @@ The result is that you don't have to specify the .py or .pyw ending when you run
 7. Make shortcuts of `gui\*.pyw` files. Open shortcut properties. Prepend shortcut command with `pythonw `. Set the icon to the respective file in the `gui` folder. Move the shortcut to top level. This shortcut can now be double-clicked, pinned to task bar or copied to Desktop.
 
 
-## To Do
-- Localize: save localization precision in x and y, so that rendering can regard it correctly
-- Localize: adjustable display contrast
-
-
 ## Credits
 - Localize icon based on "Mountains by MONTANA RUCOBO from the Noun Project"
 - ToRaw icon based on "Lion by Sathish Selladurai from the Noun Project"
