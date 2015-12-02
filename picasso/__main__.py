@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
-    scripts/picasso
-    ~~~~~~~~~~~~~~~
+    picasso.__main__
+    ~~~~~~~~~~~~~~~~
 
     Picasso command line interface
 
@@ -10,10 +10,7 @@
 import glob
 import os.path
 import yaml
-import sys
-sys.path.pop(0)
-sys.path.insert(0, '..')
-from picasso import io, localize, postprocess
+import io, localize, postprocess
 
 
 def _localize(files, parameters_file, verbose=True):
