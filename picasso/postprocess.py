@@ -1,6 +1,6 @@
 import numpy as _np
 import numba as _numba
-import localize as _localize
+from . import localize as _localize
 
 LINKED_LOCS_DTYPE = _localize.LOCS_DTYPE + [('len', 'u4')]
 

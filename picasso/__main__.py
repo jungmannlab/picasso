@@ -7,10 +7,12 @@
 
     :author: Joerg Schnitzbauer, 2015
 """
+
+
 import glob
 import os.path
 import yaml
-import io, localize, postprocess
+from . import io, localize, postprocess
 
 
 def _localize(files, parameters_file, verbose=True):
@@ -50,7 +52,7 @@ if __name__ == '__main__':
     import argparse
 
     # Main parser
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser('picasso')
     subparsers = parser.add_subparsers(dest='command')
 
     # toraw parser
