@@ -44,7 +44,9 @@ def load_raw(path, memory_map=True):
 def load_info(path):
     path_base, path_extension = _ospath.splitext(path)
     with open(path_base + '.yaml', 'r') as info_file:
-        info = _yaml.load(info_file)
+        info = list(_yaml.load_all(info_file))
+        if len(info) == 1:
+            info = info[0]
     return info
 
 
@@ -101,7 +103,6 @@ def to_raw_combined(paths):
     path_extension = path_extension.lower()
     raw_file_name = path_base + '.raw'
     with open(raw_file_name, 'wb') as file_handle:
-        print('Reading', paths[0])
         movie, info = load_tif(paths[0])
         if info['Byte Order'] == '>':
             movie, info = to_little_endian(movie, info)
@@ -151,13 +152,7 @@ def to_raw(path, verbose=True):
 
 def save_info(path, info):
     with open(path, 'w') as file:
-        if isinstance(info, (list, tuple)) and len(info) > 0:
-            _yaml.dump(info[0], file)
-            for document in info[1:]:
-                file.write('---\n')
-                _yaml.dump(document, file)
-        else:
-            _yaml.dump(info, file)
+        _yaml.dump_all(info, file, default_flow_style=False)
 
 
 def save_locs(path, locs, info):
@@ -172,5 +167,6 @@ def save_locs(path, locs, info):
 def load_locs(path):
     with _h5py.File(path, 'r') as locs_file:
         locs = locs_file['locs'][...]
+    locs = _np.rec.array(locs, dtype=locs.dtype)    # Convert to rec array with fields as attributes
     info = load_info(path)
     return locs, info
