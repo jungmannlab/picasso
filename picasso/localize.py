@@ -20,7 +20,7 @@ import yaml as _yaml
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
 LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
               ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
-              ('bg', 'f4'), ('CRLBx', 'f4'), ('CRLBy', 'f4')]
+              ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4')]
 
 
 _this_file = _ospath.abspath(__file__)
@@ -210,11 +210,11 @@ def locs_from_fit_info(fit_info, identifications, roi):
     roi_offset = int(roi/2)
     x = fit_info.params[0] + identifications.x - roi_offset
     y = fit_info.params[1] + identifications.y - roi_offset
-    CRLB_x = _np.sqrt(fit_info.CRLBs[0])
-    CRLB_y = _np.sqrt(fit_info.CRLBs[1])
+    lpx = _np.sqrt(fit_info.CRLBs[0])
+    lpy = _np.sqrt(fit_info.CRLBs[1])
     return _np.rec.array((identifications.frame, x, y,
                           fit_info.params[2], fit_info.params[4], fit_info.params[5],
-                          fit_info.params[3], CRLB_x, CRLB_y),
+                          fit_info.params[3], lpx, lpy),
                          dtype=LOCS_DTYPE)
 
 
