@@ -14,8 +14,10 @@ from PyQt4 import QtCore, QtGui
 import h5py
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
 import matplotlib.pyplot as plt
+from matplotlib.widgets import SpanSelector
 import numpy as np
 import os.path
+from picasso import io
 
 
 plt.style.use('ggplot')
@@ -71,6 +73,51 @@ class TableView(QtGui.QTableView):
             self.window.open(path)
 
 
+class PlotWindow(QtGui.QWidget):
+
+    def __init__(self, main_window, locs, field):
+        super().__init__()
+        self.main_window = main_window
+        self.locs = locs
+        self.field = field
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.plot()
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+        self.setWindowTitle('Picasso: Filter')
+
+    def plot(self):
+        # Prepare the data
+        data = self.locs[self.field]
+        data = data[np.isfinite(data)]
+        iqr = np.subtract(*np.percentile(data, [75, 25]))
+        bin_size = 2 * iqr * len(data)**(-1/3)
+        if data.dtype.kind in ('u', 'i') and bin_size < 1:
+            bin_size = 1
+        bin_min = max(data.min() - bin_size / 2, 0)
+        n_bins = min(1000, int(np.ceil((data.max() - bin_min) / bin_size)))
+        bins = np.linspace(bin_min, data.max(), n_bins)
+        # Prepare the figure
+        self.figure.clear()
+        self.figure.suptitle(self.field)
+        axes = self.figure.add_subplot(111)
+        axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bin_min - 0.05*data_range, data.max() + 0.05*data_range])
+        SpanSelector(axes, self.on_span_select, 'horizontal', useblit=True)
+        self.canvas.draw()
+
+    def on_span_select(self, xmin, xmax):
+        self.locs = self.locs[np.isfinite(self.locs[self.field])]
+        self.locs = self.locs[(self.locs[self.field] > xmin) & (self.locs[self.field] < xmax)]
+        self.main_window.update_locs(self.locs)
+        self.main_window.log_filter(self.field, xmin, xmax)
+        self.plot()
+
+
 class Window(QtGui.QMainWindow):
 
     def __init__(self):
@@ -88,15 +135,19 @@ class Window(QtGui.QMainWindow):
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
+        save_action = file_menu.addAction('Save')
+        save_action.setShortcut(QtGui.QKeySequence.Save)
+        save_action.triggered.connect(self.save_file_dialog)
+        file_menu.addAction(save_action)
         plot_menu = menu_bar.addMenu('Plot')
         histogram_action = plot_menu.addAction('Histogram')
         histogram_action.setShortcut('Ctrl+H')
         histogram_action.triggered.connect(self.plot_histogram)
-        filter_menu = menu_bar.addMenu('Filter')
         self.table_view = TableView(self, self)
         self.table_view.setAcceptDrops(True)
         self.setCentralWidget(self.table_view)
-        self.plot_windows = []
+        self.plot_windows = {}
+        self.filter_log = {}
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open localizations', filter='*.hdf5')
@@ -104,10 +155,12 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        with h5py.File(path) as hdf:
-            self.locs = hdf['locs'][...]
-        table_model = TableModel(self.locs, self)
-        self.table_view.setModel(table_model)
+        locs, self.info = io.load_locs(path)
+        self.locs_path = path
+        self.update_locs(locs)
+        for field in self.locs.dtype.names:
+            self.plot_windows[field] = None
+            self.filter_log[field] = None
 
     def plot_histogram(self):
         selection_model = self.table_view.selectionModel()
@@ -115,33 +168,40 @@ class Window(QtGui.QMainWindow):
         if len(indices) > 0:
             for index in indices:
                 index = index.column()
-                column = self.locs.dtype.names[index]
-                data = self.locs[column]
-                data = data[np.isfinite(data)]
-                figure = plt.Figure()
-                figure.suptitle(column)
-                axes = figure.add_subplot(111)
-                axes.hist(data, bins=int(len(self.locs)/1000), rwidth=1, linewidth=0)
-                canvas = FigureCanvasQTAgg(figure)
-                window = PlotWindow(self, canvas)
-                self.plot_windows.append(window)
-                window.show()
+                field = self.locs.dtype.names[index]
+                if self.plot_windows[field]:
+                    self.plot_windows[field].show()
+                else:
+                    self.plot_windows[field] = PlotWindow(self, self.locs, field)
+                    self.plot_windows[field].show()
 
+    def update_locs(self, locs):
+        self.locs = locs
+        table_model = TableModel(self.locs, self)
+        self.table_view.setModel(table_model)
 
-class PlotWindow(QtGui.QWidget):
+    def log_filter(self, field, xmin, xmax):
+        xmin = xmin.item()
+        xmax = xmax.item()
+        if self.filter_log[field]:
+            self.filter_log[field][0] = max(xmin, self.filter_log[field][0])
+            self.filter_log[field][1] = min(xmax, self.filter_log[field][1])
+        else:
+            self.filter_log[field] = [xmin, xmax]
 
-    def __init__(self, window, canvas):
-        super().__init__()
-        self.main_window = window
-        vbox = QtGui.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(canvas)
-        vbox.addWidget((NavigationToolbar2QT(canvas, self)))
-        self.setWindowTitle('Histogram')
+    def save_file_dialog(self):
+        base, ext = os.path.splitext(self.locs_path)
+        out_path = base + '_filter.hdf5'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', out_path, filter='*.hdf5')
+        if path:
+            filter_info = self.filter_log.copy()
+            filter_info.update({'Generated by': 'Picasso Filter'})
+            info = self.info + [filter_info]
+            io.save_locs(path, self.locs, info)
 
     def closeEvent(self, event):
-        self.main_window.plot_windows.remove(self)
-        event.accept()
+        QtGui.qApp.closeAllWindows()
+
 
 if __name__ == '__main__':
     app = QtGui.QApplication(sys.argv)
