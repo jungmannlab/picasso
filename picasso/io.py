@@ -45,9 +45,12 @@ def load_info(path):
     path_base, path_extension = _ospath.splitext(path)
     with open(path_base + '.yaml', 'r') as info_file:
         info = list(_yaml.load_all(info_file))
-        if len(info) == 1:
-            info = info[0]
     return info
+
+
+def save_info(path, info):
+    with open(path, 'w') as file:
+        _yaml.dump_all(info, file, default_flow_style=False)
 
 
 def load_tif(path):
@@ -148,11 +151,6 @@ def to_raw(path, verbose=True):
     else:
         if verbose:
             print('No files matching {}'.format(path))
-
-
-def save_info(path, info):
-    with open(path, 'w') as file:
-        _yaml.dump_all(info, file, default_flow_style=False)
 
 
 def save_locs(path, locs, info):
