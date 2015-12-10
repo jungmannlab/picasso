@@ -1,8 +1,18 @@
 import numpy as _np
+from numpy.lib.recfunctions import append_fields as _append_fields
 import numba as _numba
+from sklearn.cluster import DBSCAN as _DBSCAN
 from . import localize as _localize
 
-LINKED_LOCS_DTYPE = _localize.LOCS_DTYPE + [('len', 'u4')]
+LINKED_LOCS_DTYPE = _localize.LOCS_DTYPE + [('len', 'u4'), ('n', 'u4')]
+
+
+def dbscan(locs, radius, min_density):
+    X = _np.vstack((locs.x, locs.y)).T
+    db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
+    group = db.labels_
+    locs = _append_fields(locs, 'group', group, 'i4', usemask=False, asrecarray=True)
+    return locs
 
 
 def link(locs, radius, max_dark_time, combine_mode='average'):
@@ -11,9 +21,34 @@ def link(locs, radius, max_dark_time, combine_mode='average'):
     if combine_mode == 'average':
         linked_locs_data = _link_locs(group, locs)
         linked_locs = _np.rec.array(linked_locs_data, dtype=LINKED_LOCS_DTYPE)
+        # TODO: set len to -1 if loc lasts until last frame or starts at first frame
     elif combine_mode == 'refit':
         pass    # TODO
     return linked_locs
+
+
+def get_dark_times(locs):
+    last_frame = locs.frame + locs.len - 1
+    dark = _get_dark_times(locs, last_frame)
+    locs = _append_fields(locs, 'dark', dark, dtypes=dark.dtype, usemask=False, asrecarray=True)
+    return locs
+
+
+@_numba.jit(nopython=True)
+def _get_dark_times(locs, last_frame):
+    N = len(locs)
+    max_frame = locs.frame.max()
+    dark = max_frame * _np.ones(len(locs), dtype=_np.int32)
+    for i in range(N):
+        for j in range(N):
+            if (locs.group[i] == locs.group[j]) and (i != j):
+                dark_ij = locs.frame[i] - last_frame[j]
+                if (dark_ij > 0) and (dark_ij < dark[i]):
+                    dark[i] = dark_ij
+    for i in range(N):
+        if dark[i] == max_frame:
+            dark[i] = -1
+    return dark
 
 
 @_numba.jit(nopython=True)
@@ -55,7 +90,7 @@ def _link_locs(group, locs):
     lpx_ = _np.sqrt(lpx_) / n_
     lpy_ = _np.sqrt(lpy_) / n_
     len_ = last_frame_ - frame_ + 1
-    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_
+    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
 @_numba.jit(nopython=True)
