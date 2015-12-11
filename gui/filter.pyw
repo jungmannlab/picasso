@@ -11,13 +11,13 @@
 import sys
 import traceback
 from PyQt4 import QtCore, QtGui
-import h5py
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
 import matplotlib.pyplot as plt
-from matplotlib.widgets import SpanSelector
+from matplotlib.widgets import SpanSelector, RectangleSelector
+from matplotlib.colors import LogNorm
 import numpy as np
 import os.path
-from picasso import io
+from picasso import io, postprocess
 
 
 plt.style.use('ggplot')
@@ -30,7 +30,10 @@ class TableModel(QtCore.QAbstractTableModel):
         self.locs = locs
 
     def columnCount(self, parent):
-        return len(self.locs[0])
+        try:
+            return len(self.locs[0])
+        except IndexError:
+            return 0
 
     def rowCount(self, parent):
         return self.locs.shape[0]
@@ -75,11 +78,10 @@ class TableView(QtGui.QTableView):
 
 class PlotWindow(QtGui.QWidget):
 
-    def __init__(self, main_window, locs, field):
+    def __init__(self, main_window, locs):
         super().__init__()
         self.main_window = main_window
         self.locs = locs
-        self.field = field
         self.figure = plt.Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.plot()
@@ -89,33 +91,98 @@ class PlotWindow(QtGui.QWidget):
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
         self.setWindowTitle('Picasso: Filter')
 
+    def update_locs(self, locs):
+        self.locs = locs
+        self.plot()
+        self.update()
+
+
+class HistWindow(PlotWindow):
+
+    def __init__(self, main_window, locs, field):
+        self.field = field
+        super().__init__(main_window, locs)
+
     def plot(self):
         # Prepare the data
         data = self.locs[self.field]
         data = data[np.isfinite(data)]
-        iqr = np.subtract(*np.percentile(data, [75, 25]))
-        bin_size = 2 * iqr * len(data)**(-1/3)
-        if data.dtype.kind in ('u', 'i') and bin_size < 1:
-            bin_size = 1
-        bin_min = max(data.min() - bin_size / 2, 0)
-        n_bins = min(1000, int(np.ceil((data.max() - bin_min) / bin_size)))
-        bins = np.linspace(bin_min, data.max(), n_bins)
+        bins = postprocess.calculate_optimal_bins(data, 1000)
         # Prepare the figure
         self.figure.clear()
         self.figure.suptitle(self.field)
         axes = self.figure.add_subplot(111)
         axes.hist(data, bins, rwidth=1, linewidth=0)
         data_range = data.ptp()
-        axes.set_xlim([bin_min - 0.05*data_range, data.max() + 0.05*data_range])
-        SpanSelector(axes, self.on_span_select, 'horizontal', useblit=True)
+        axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        SpanSelector(axes, self.on_span_select, 'horizontal', useblit=True, rectprops=dict(facecolor='green', alpha=0.2))
         self.canvas.draw()
 
     def on_span_select(self, xmin, xmax):
         self.locs = self.locs[np.isfinite(self.locs[self.field])]
         self.locs = self.locs[(self.locs[self.field] > xmin) & (self.locs[self.field] < xmax)]
         self.main_window.update_locs(self.locs)
-        self.main_window.log_filter(self.field, xmin, xmax)
+        self.main_window.log_filter(self.field, xmin.item(), xmax.item())
         self.plot()
+
+    def closeEvent(self, event):
+        self.main_window.hist_windows[self.field] = None
+        event.accept()
+
+
+class Hist2DWindow(PlotWindow):
+
+    def __init__(self, main_window, locs, field_x, field_y):
+        self.field_x = field_x
+        self.field_y = field_y
+        super().__init__(main_window, locs)
+
+    def plot(self):
+        # Prepare the data
+        x = self.locs[self.field_x]
+        y = self.locs[self.field_y]
+        valid = (np.isfinite(x) & np.isfinite(y))
+        x = x[valid]
+        y = y[valid]
+        # Prepare the figure
+        self.figure.clear()
+        axes = self.figure.add_subplot(111)
+        # Start hist2 version
+        bins_x = postprocess.calculate_optimal_bins(x, 1000)
+        bins_y = postprocess.calculate_optimal_bins(y, 1000)
+        counts, x_edges, y_edges, image = axes.hist2d(x, y, bins=[bins_x, bins_y], norm=LogNorm())
+        x_range = x.ptp()
+        axes.set_xlim([bins_x[0] - 0.05*x_range, x.max() + 0.05*x_range])
+        y_range = y.ptp()
+        axes.set_ylim([bins_y[0] - 0.05*y_range, y.max() + 0.05*y_range])
+        self.figure.colorbar(image, ax=axes)
+        axes.grid(False)
+        axes.get_xaxis().set_label_text(self.field_x)
+        axes.get_yaxis().set_label_text(self.field_y)
+        self.selector = RectangleSelector(axes, self.on_rect_select, useblit=True, rectprops=dict(facecolor='green',
+                                                                                                  alpha=0.2,
+                                                                                                  fill=True))
+        self.canvas.draw()
+
+    def on_rect_select(self, press_event, release_event):
+        x1, y1 = press_event.xdata, press_event.ydata
+        x2, y2 = release_event.xdata, release_event.ydata
+        xmin = min(x1, x2)
+        xmax = max(x1, x2)
+        ymin = min(y1, y2)
+        ymax = max(y1, y2)
+        self.locs = self.locs[np.isfinite(self.locs[self.field_x])]
+        self.locs = self.locs[np.isfinite(self.locs[self.field_y])]
+        self.locs = self.locs[(self.locs[self.field_x] > xmin) & (self.locs[self.field_x] < xmax)]
+        self.locs = self.locs[(self.locs[self.field_y] > ymin) & (self.locs[self.field_y] < ymax)]
+        self.main_window.update_locs(self.locs)
+        self.main_window.log_filter(self.field_x, xmin, xmax)
+        self.main_window.log_filter(self.field_y, ymin, ymax)
+        self.plot()
+
+    def closeEvent(self, event):
+        self.main_window.hist2d_windows[self.field_x][self.field_y] = None
+        event.accept()
 
 
 class Window(QtGui.QMainWindow):
@@ -143,11 +210,16 @@ class Window(QtGui.QMainWindow):
         histogram_action = plot_menu.addAction('Histogram')
         histogram_action.setShortcut('Ctrl+H')
         histogram_action.triggered.connect(self.plot_histogram)
+        scatter_action = plot_menu.addAction('2D Histogram')
+        scatter_action.setShortcut('Ctrl+D')
+        scatter_action.triggered.connect(self.plot_hist2d)
         self.table_view = TableView(self, self)
         self.table_view.setAcceptDrops(True)
         self.setCentralWidget(self.table_view)
-        self.plot_windows = {}
+        self.hist_windows = {}
+        self.hist2d_windows = {}
         self.filter_log = {}
+        self.locs = None
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open localizations', filter='*.hdf5')
@@ -156,10 +228,20 @@ class Window(QtGui.QMainWindow):
 
     def open(self, path):
         locs, self.info = io.load_locs(path)
+        if self.locs is not None:
+            for field in self.locs.dtype.names:
+                if self.hist_windows[field]:
+                    self.hist_windows[field].close()
+                for field_y in self.locs.dtype.names:
+                    if self.hist2d_windows[field][field_y]:
+                        self.hist_windows[field][field_y].close()
         self.locs_path = path
         self.update_locs(locs)
         for field in self.locs.dtype.names:
-            self.plot_windows[field] = None
+            self.hist_windows[field] = None
+            self.hist2d_windows[field] = {}
+            for field_y in self.locs.dtype.names:
+                self.hist2d_windows[field][field_y] = None
             self.filter_log[field] = None
 
     def plot_histogram(self):
@@ -169,20 +251,33 @@ class Window(QtGui.QMainWindow):
             for index in indices:
                 index = index.column()
                 field = self.locs.dtype.names[index]
-                if self.plot_windows[field]:
-                    self.plot_windows[field].show()
-                else:
-                    self.plot_windows[field] = PlotWindow(self, self.locs, field)
-                    self.plot_windows[field].show()
+                if not self.hist_windows[field]:
+                    self.hist_windows[field] = HistWindow(self, self.locs, field)
+                self.hist_windows[field].show()
+
+    def plot_hist2d(self):
+        selection_model = self.table_view.selectionModel()
+        indices = selection_model.selectedColumns()
+        if len(indices) == 2:
+            indices = [index.column() for index in indices]
+            field_x, field_y = [self.locs.dtype.names[index] for index in indices]
+            if not self.hist2d_windows[field_x][field_y]:
+                self.hist2d_windows[field_x][field_y] = Hist2DWindow(self, self.locs, field_x, field_y)
+            self.hist2d_windows[field_x][field_y].show()
 
     def update_locs(self, locs):
         self.locs = locs
         table_model = TableModel(self.locs, self)
         self.table_view.setModel(table_model)
+        for field, hist_window in self.hist_windows.items():
+            if hist_window:
+                hist_window.update_locs(locs)
+        for field_x, hist2d_windows in self.hist2d_windows.items():
+            for field_y, hist2d_window in hist2d_windows.items():
+                if hist2d_window:
+                    hist2d_window.update_locs(locs)
 
     def log_filter(self, field, xmin, xmax):
-        xmin = xmin.item()
-        xmax = xmax.item()
         if self.filter_log[field]:
             self.filter_log[field][0] = max(xmin, self.filter_log[field][0])
             self.filter_log[field][1] = min(xmax, self.filter_log[field][1])
