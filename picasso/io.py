@@ -29,6 +29,7 @@ def to_little_endian(movie, info):
 
 def load_raw(path, memory_map=True):
     info = load_info(path)
+    info = info[0]
     dtype = _np.dtype(info['Data Type'])
     shape = (info['Frames'], info['Height'], info['Width'])
     if memory_map:
@@ -73,6 +74,9 @@ def load_tif(path):
                 info['Camera']['Type'] = type
                 info['Camera']['Model'] = model
                 info['Camera']['Serial Number'] = int(serial_number)
+                info['Output Amplifier'] = 'Electron Multiplying'
+                if micromanager_metadata['Andor-EMSwitch'] == 'Off':
+                    info['Output Amplifier'] = 'Conventional'
                 info['EM RealGain'] = int(micromanager_metadata['Andor-Gain'])
                 info['Pre-Amp Gain'] = int(micromanager_metadata['Andor-Pre-Amp-Gain'].split()[1])
                 info['Readout Mode'] = micromanager_metadata['Andor-ReadoutMode']
