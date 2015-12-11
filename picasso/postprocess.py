@@ -2,9 +2,6 @@ import numpy as _np
 from numpy.lib.recfunctions import append_fields as _append_fields
 import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
-from . import localize as _localize
-
-LINKED_LOCS_DTYPE = _localize.LOCS_DTYPE + [('len', 'u4'), ('n', 'u4')]
 
 
 def dbscan(locs, radius, min_density):
@@ -13,18 +10,6 @@ def dbscan(locs, radius, min_density):
     group = db.labels_
     locs = _append_fields(locs, 'group', group, 'i4', usemask=False, asrecarray=True)
     return locs
-
-
-def link(locs, radius, max_dark_time, combine_mode='average'):
-    locs.sort(kind='mergesort', order='frame')
-    group = _get_link_groups(locs.frame, locs.x, locs.y, radius, max_dark_time)
-    if combine_mode == 'average':
-        linked_locs_data = _link_locs(group, locs)
-        linked_locs = _np.rec.array(linked_locs_data, dtype=LINKED_LOCS_DTYPE)
-        # TODO: set len to -1 if loc lasts until last frame or starts at first frame
-    elif combine_mode == 'refit':
-        pass    # TODO
-    return linked_locs
 
 
 def get_dark_times(locs):
@@ -51,8 +36,70 @@ def _get_dark_times(locs, last_frame):
     return dark
 
 
+def link(locs, radius, max_dark_time, combine_mode='average'):
+    locs.sort(kind='mergesort', order='frame')
+    group = get_link_groups(locs, radius, max_dark_time)
+    if combine_mode == 'average':
+        linked_locs = link_loc_groups(locs, group)
+        # TODO: set len to -1 if loc lasts until last frame or starts at first frame
+    elif combine_mode == 'refit':
+        pass    # TODO
+    return linked_locs
+
+
+def get_link_groups(locs, radius, max_dark_time):
+    return _get_link_groups(locs.frame, locs.x, locs.y, radius, max_dark_time)
+
+
 @_numba.jit(nopython=True)
-def _link_locs(group, locs):
+def _get_link_groups(frame, x, y, radius, max_dark_time):
+    ''' Assumes that locs are sorted by frame '''
+    N = len(x)
+    group = -_np.ones(N, dtype=_np.int32)
+    current_group = -1
+    for i in range(N):
+        if group[i] == -1:  # loc has no group yet
+            current_group += 1
+            group[i] = current_group
+            current_index = i
+            next_loc_index_in_group = _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time)
+            while next_loc_index_in_group != -1:
+                group[next_loc_index_in_group] = current_group
+                current_index = next_loc_index_in_group
+                next_loc_index_in_group = _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time)
+    return group
+
+
+@_numba.jit(nopython=True)
+def _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time):
+    current_frame = frame[current_index]
+    current_x = x[current_index]
+    current_y = y[current_index]
+    min_frame = current_frame + 1
+    for min_index in range(current_index + 1, N):
+        if frame[min_index] >= min_frame:
+            break
+    max_frame = current_frame + max_dark_time + 1
+    for max_index in range(min_index + 1, N):
+        if frame[max_index] > max_frame:
+            break
+    for j in range(min_index, max_index):
+        if group[j] == -1:
+            if (abs(current_x - x[j]) < radius) and (abs(current_y - y[j]) < radius):
+                distance_to_current = _np.sqrt((current_x - x[j])**2 + (current_y - y[j])**2)
+                if distance_to_current < radius:
+                    return j
+    return -1
+
+
+def link_loc_groups(locs, group):
+    linked_locs_data = _link_loc_groups(locs, group)
+    dtype = locs.dtype.descr + [('len', 'u4'), ('n', 'u4')]
+    return _np.rec.array(linked_locs_data, dtype=dtype)
+
+
+@_numba.jit(nopython=True)
+def _link_loc_groups(locs, group):
     N_linked = group.max() + 1
     frame_ = locs.frame.max() * _np.ones(N_linked, dtype=_np.uint32)
     x_ = _np.zeros(N_linked, dtype=_np.float32)
@@ -93,42 +140,13 @@ def _link_locs(group, locs):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
-@_numba.jit(nopython=True)
-def _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time):
-    current_frame = frame[current_index]
-    current_x = x[current_index]
-    current_y = y[current_index]
-    min_frame = current_frame + 1
-    for min_index in range(current_index + 1, N):
-        if frame[min_index] >= min_frame:
-            break
-    max_frame = current_frame + max_dark_time + 1
-    for max_index in range(min_index + 1, N):
-        if frame[max_index] > max_frame:
-            break
-    for j in range(min_index, max_index):
-        if group[j] == -1:
-            if (abs(current_x - x[j]) < radius) and (abs(current_y - y[j]) < radius):
-                distance_to_current = _np.sqrt((current_x - x[j])**2 + (current_y - y[j])**2)
-                if distance_to_current < radius:
-                    return j
-    return -1
-
-
-@_numba.jit(nopython=True)
-def _get_link_groups(frame, x, y, radius, max_dark_time):
-    ''' Assumes that locs are sorted by frame '''
-    N = len(x)
-    group = -_np.ones(N, dtype=_np.int32)
-    current_group = -1
-    for i in range(N):
-        if group[i] == -1:  # loc has no group yet
-            current_group += 1
-            group[i] = current_group
-            current_index = i
-            next_loc_index_in_group = _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time)
-            while next_loc_index_in_group != -1:
-                group[next_loc_index_in_group] = current_group
-                current_index = next_loc_index_in_group
-                next_loc_index_in_group = _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time)
-    return group
+def calculate_optimal_bins(data, max_n_bins=None):
+    iqr = _np.subtract(*_np.percentile(data, [75, 25]))
+    bin_size = 2 * iqr * len(data)**(-1/3)
+    if data.dtype.kind in ('u', 'i') and bin_size < 1:
+        bin_size = 1
+    bin_min = max(data.min() - bin_size / 2, 0)
+    n_bins = int(_np.ceil((data.max() - bin_min) / bin_size))
+    if max_n_bins and n_bins > max_n_bins:
+        n_bins = max_n_bins
+    return _np.linspace(bin_min, data.max(), n_bins)
