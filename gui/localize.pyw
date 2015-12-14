@@ -9,20 +9,19 @@
 """
 
 import os.path
+import sys
+import yaml
+from PyQt4 import QtCore, QtGui
+import time
+import numpy as np
+import traceback
+
 
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
 _parent_directory = os.path.dirname(_this_directory)
-
-import sys
 sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
-
-import yaml
-from PyQt4 import QtCore, QtGui
 from picasso import io, localize
-import time
-import numpy as np
-import traceback
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
