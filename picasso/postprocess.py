@@ -112,6 +112,52 @@ def _link_loc_groups(locs, group):
     len_ = _np.zeros(N_linked, dtype=_np.uint32)
     n_ = _np.zeros(N_linked, dtype=_np.uint32)
     last_frame_ = _np.zeros(N_linked, dtype=_np.uint32)
+    weights_x = 1/locs.lpx**2
+    weights_y = 1/locs.lpy**2
+    sum_weights_x_ = _np.zeros(N_linked, dtype=_np.float32)
+    sum_weights_y_ = _np.zeros(N_linked, dtype=_np.float32)
+    N = len(group)
+    for i in range(N):
+        i_ = group[i]
+        n_[i_] += 1
+        x_[i_] += weights_x[i] * locs.x[i]
+        sum_weights_x_[i_] += weights_x[i]
+        y_[i_] += weights_y[i] * locs.y[i]
+        sum_weights_y_[i_] += weights_y[i]
+        photons_[i_] += locs.photons[i]
+        sx_[i_] += locs.sx[i]
+        sy_[i_] += locs.sy[i]
+        bg_[i_] += locs.bg[i]
+        if locs.frame[i] < frame_[i_]:
+            frame_[i_] = locs.frame[i]
+        if locs.frame[i] > last_frame_[i_]:
+            last_frame_[i_] = locs.frame[i]
+    x_ = x_ / sum_weights_x_
+    y_ = y_ / sum_weights_y_
+    sx_ = sx_ / n_
+    sy_ = sy_ / n_
+    bg_ = bg_ / n_
+    lpx_ = _np.sqrt(1/sum_weights_x_)
+    lpy_ = _np.sqrt(1/sum_weights_y_)
+    len_ = last_frame_ - frame_ + 1
+    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
+
+
+@_numba.jit(nopython=True)
+def __link_loc_groups(locs, group):
+    N_linked = group.max() + 1
+    frame_ = locs.frame.max() * _np.ones(N_linked, dtype=_np.uint32)
+    x_ = _np.zeros(N_linked, dtype=_np.float32)
+    y_ = _np.zeros(N_linked, dtype=_np.float32)
+    photons_ = _np.zeros(N_linked, dtype=_np.float32)
+    sx_ = _np.zeros(N_linked, dtype=_np.float32)
+    sy_ = _np.zeros(N_linked, dtype=_np.float32)
+    bg_ = _np.zeros(N_linked, dtype=_np.float32)
+    lpx_ = _np.zeros(N_linked, dtype=_np.float32)
+    lpy_ = _np.zeros(N_linked, dtype=_np.float32)
+    len_ = _np.zeros(N_linked, dtype=_np.uint32)
+    n_ = _np.zeros(N_linked, dtype=_np.uint32)
+    last_frame_ = _np.zeros(N_linked, dtype=_np.uint32)
     N = len(group)
     for i in range(N):
         i_ = group[i]
