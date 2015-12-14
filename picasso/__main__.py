@@ -9,10 +9,17 @@
 """
 
 
+import sys
 import glob
 import os.path
 import yaml
-from . import io, localize, postprocess
+
+
+_this_file = os.path.abspath(__file__)
+_this_directory = os.path.dirname(_this_file)
+_parent_directory = os.path.dirname(_this_directory)
+sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
+from picasso import io, localize, postprocess
 
 
 def _localize(files, parameters_file, verbose=True):
