@@ -47,13 +47,12 @@ def link(locs, radius, max_dark_time, combine_mode='average'):
     return linked_locs
 
 
-def get_link_groups(locs, radius, max_dark_time):
-    return _get_link_groups(locs.frame, locs.x, locs.y, radius, max_dark_time)
-
-
 @_numba.jit(nopython=True)
-def _get_link_groups(frame, x, y, radius, max_dark_time):
+def get_link_groups(locs, radius, max_dark_time):
     ''' Assumes that locs are sorted by frame '''
+    frame = locs.frame
+    x = locs.x
+    y = locs.y
     N = len(x)
     group = -_np.ones(N, dtype=_np.int32)
     current_group = -1
