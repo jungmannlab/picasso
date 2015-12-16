@@ -74,9 +74,7 @@ def load_tif(path):
                 info['Camera']['Type'] = type
                 info['Camera']['Model'] = model
                 info['Camera']['Serial Number'] = int(serial_number)
-                info['Output Amplifier'] = 'Electron Multiplying'
-                if micromanager_metadata['Andor-EMSwitch'] == 'Off':
-                    info['Output Amplifier'] = 'Conventional'
+                info['Electron Multiplying'] = micromanager_metadata['Andor-EMSwitch'] == 'On'
                 info['EM RealGain'] = int(micromanager_metadata['Andor-Gain'])
                 info['Pre-Amp Gain'] = int(micromanager_metadata['Andor-Pre-Amp-Gain'].split()[1])
                 info['Readout Mode'] = micromanager_metadata['Andor-ReadoutMode']
