@@ -5,6 +5,7 @@ from sklearn.cluster import DBSCAN as _DBSCAN
 
 
 def dbscan(locs, radius, min_density):
+    locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
     X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
     group = db.labels_
