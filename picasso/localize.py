@@ -140,14 +140,17 @@ def _to_photons(spots, info):
         serial_number = info['Camera']['Serial Number']
         camera_config = CONFIG['Cameras']['Andor'][type][model][serial_number]
         baseline = camera_config['Baseline']
-        em_realgain = info['EM RealGain']
-        em = em_realgain > 1
+        em = info['Electron Multiplying']
+        if em:
+            gain = info['EM RealGain']
+        else:
+            gain = 1
         preamp_gain = info['Pre-Amp Gain']
         read_mode = info['Readout Mode']
         sensitivity = camera_config['Sensitivity'][em][read_mode][preamp_gain-1]
         excitation = info['Excitation Wavelength']
         qe = camera_config['Quantum Efficiency'][excitation]
-        return (spots - baseline) * sensitivity / (em_realgain * qe)
+        return (spots - baseline) * sensitivity / (gain * qe)
     if info['Camera']['Manufacturer'] == 'Lidke':
         type = info['Camera']['Type']
         model = info['Camera']['Model']
