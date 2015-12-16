@@ -159,8 +159,7 @@ def to_raw(path, verbose=True):
 
 def save_locs(path, locs, info):
     with _h5py.File(path, 'w') as locs_file:
-        locs_dataset = locs_file.create_dataset('locs', locs.shape, dtype=locs.dtype)
-        locs_dataset[...] = locs
+        locs_file.create_dataset('locs', data=locs)
     base, ext = _ospath.splitext(path)
     info_path = base + '.yaml'
     save_info(info_path, info)
