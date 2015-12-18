@@ -176,8 +176,8 @@ class Hist2DWindow(PlotWindow):
         self.locs = self.locs[(self.locs[self.field_x] > xmin) & (self.locs[self.field_x] < xmax)]
         self.locs = self.locs[(self.locs[self.field_y] > ymin) & (self.locs[self.field_y] < ymax)]
         self.main_window.update_locs(self.locs)
-        self.main_window.log_filter(self.field_x, xmin, xmax)
-        self.main_window.log_filter(self.field_y, ymin, ymax)
+        self.main_window.log_filter(self.field_x, xmin.item(), xmax.item())
+        self.main_window.log_filter(self.field_y, ymin.item(), ymax.item())
         self.plot()
 
     def closeEvent(self, event):
