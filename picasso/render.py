@@ -20,8 +20,8 @@ def render(locs, info, oversampling='auto', blur_method='convolve'):
         oversampling = 2 / lp
     else:
         auto_oversample = False
-    image = bin_locs(locs, info, oversampling)
     if blur_method == 'convolve':
+        image = bin_locs(locs, info, oversampling)
         lpy = oversampling * _np.median(locs.lpy[_np.isfinite(locs.lpy)])
         lpx = oversampling * _np.median(locs.lpx[_np.isfinite(locs.lpx)])
         kernel_height = 10 * int(_np.round(lpy)) + 1
