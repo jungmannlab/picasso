@@ -2,6 +2,23 @@ import numpy as _np
 from numpy.lib.recfunctions import append_fields as _append_fields
 import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
+import os.path as _ospath
+import sys as _sys
+from tqdm import tqdm as _tqdm
+import lmfit as _lmfit
+from scipy import interpolate as _interpolate
+import matplotlib.pyplot as _plt
+
+
+_plt.style.use('ggplot')
+
+
+_this_file = _ospath.abspath(__file__)
+_this_directory = _ospath.dirname(_this_file)
+_parent_directory = _ospath.dirname(_this_directory)
+_sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
+from picasso import io as _io
+from picasso import lib as _lib
 
 
 def dbscan(locs, radius, min_density):
@@ -186,13 +203,96 @@ def __link_loc_groups(locs, group):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
-def calculate_optimal_bins(data, max_n_bins=None):
-    iqr = _np.subtract(*_np.percentile(data, [75, 25]))
-    bin_size = 2 * iqr * len(data)**(-1/3)
-    if data.dtype.kind in ('u', 'i') and bin_size < 1:
-        bin_size = 1
-    bin_min = max(data.min() - bin_size / 2, 0)
-    n_bins = int(_np.ceil((data.max() - bin_min) / bin_size))
-    if max_n_bins and n_bins > max_n_bins:
-        n_bins = max_n_bins
-    return _np.linspace(bin_min, data.max(), n_bins)
+def undrift(locs, info, segmentation, display=True):
+    fit_roi = 5
+    movie_file = info[0]['Raw File']
+    movie, _ = _io.load_raw(movie_file)
+    frames, Y, X = movie.shape
+    n_segments = int(_np.round(frames/segmentation))
+    n_pairs = int(n_segments * (n_segments - 1) / 2)
+    bounds = _np.linspace(0, frames-1, n_segments+1, dtype=_np.uint32)
+    segments = _np.zeros((n_segments, movie.shape[1], movie.shape[1]))
+    with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
+        for i in range(n_segments):
+            progress_bar.update()
+            segments[i] = _np.std(movie[bounds[i]:bounds[i+1]], axis=0)
+    fit_X = int(fit_roi/2)
+    y, x = _np.mgrid[-fit_X:fit_X+1, -fit_X:fit_X+1]
+    Y_ = Y / 4
+    X_ = X / 4
+    rij = _np.zeros((n_pairs, 2))
+    A = _np.zeros((n_pairs, n_segments - 1))
+    flag = 0
+
+    def _gaussian2d(a, xc, yc, s, b):
+        A = a * _np.exp(-0.5 * ((x - xc)**2 + (y - yc)**2) / s**2) + b
+        return A.flatten()
+    gaussian2d = _lmfit.Model(_gaussian2d, name='2D Gaussian', independent_vars=[])
+
+    def fit_gaussian(I):
+        I_ = I[Y_:-Y_, X_:-X_]
+        y_max, x_max = _np.unravel_index(I_.argmax(), I_.shape)
+        y_max += Y_
+        x_max += X_
+        I_ = I[y_max-fit_X:y_max+fit_X+1, x_max-fit_X:x_max+fit_X+1]
+        params = _lmfit.Parameters()
+        params.add('a', value=I_.max(), vary=True, min=0)
+        params.add('xc', value=0, vary=True)
+        params.add('yc', value=0, vary=True)
+        params.add('s', value=1, vary=True, min=0)
+        params.add('b', value=I_.min(), vary=True, min=0)
+        results = gaussian2d.fit(I_.flatten(), params)
+        xc = results.best_values['xc']
+        yc = results.best_values['yc']
+        xc += x_max
+        yc += y_max
+        return yc, xc
+
+    with _tqdm(total=n_pairs, desc='Correlating segment pairs', unit='pairs') as progress_bar:
+        for i in range(n_segments - 1):
+            autocorr = _lib.xcorr_fft(segments[i], segments[i])
+            cyii, cxii = fit_gaussian(autocorr)
+            for j in range(i+1, n_segments):
+                progress_bar.update()
+                xcorr = _lib.xcorr_fft(segments[i], segments[j])
+                cyij, cxij = fit_gaussian(xcorr)
+                rij[flag, 0] = cyii - cyij
+                rij[flag, 1] = cxii - cxij
+                A[flag, i:j] = 1
+                flag += 1
+
+    Dj = _np.dot(_np.linalg.pinv(A), rij)
+    drift_y = _np.insert(_np.cumsum(Dj[:, 0]), 0, 0)
+    drift_x = _np.insert(_np.cumsum(Dj[:, 1]), 0, 0)
+
+    t = (bounds[1:] + bounds[:-1]) / 2
+    drift_x_pol = _interpolate.InterpolatedUnivariateSpline(t, drift_x, k=3)
+    drift_y_pol = _interpolate.InterpolatedUnivariateSpline(t, drift_y, k=3)
+    t_inter = _np.arange(frames)
+    drift_x_inter = drift_x_pol(t_inter)
+    drift_y_inter = drift_y_pol(t_inter)
+
+    if display:
+        _plt.figure(figsize=(17, 6))
+        _plt.suptitle('Estimated drift')
+        _plt.subplot(1, 2, 1)
+        ax = _plt.plot(t_inter, drift_x_inter, label='x interpolated')
+        color_x = ax[0].get_color()
+        ax = _plt.plot(t_inter, drift_y_inter, label='y interpolated')
+        color_y = ax[0].get_color()
+        _plt.plot(t, drift_x, 'o', color=color_x, label='x measured')
+        _plt.plot(t, drift_y, 'o', color=color_y, label='y measured')
+        _plt.legend(loc='best')
+        _plt.xlabel('Frame')
+        _plt.ylabel('Drift (pixel)')
+        _plt.subplot(1, 2, 2)
+        ax = _plt.plot(drift_x_inter, drift_y_inter, color=_plt.rcParams['axes.color_cycle'][2])
+        _plt.plot(drift_x, drift_y, 'o', color=_plt.rcParams['axes.color_cycle'][2])
+        _plt.axis('equal')
+        _plt.xlabel('x')
+        _plt.ylabel('y')
+        _plt.show()
+
+    locs.x -= drift_x_inter[locs.frame]
+    locs.y -= drift_y_inter[locs.frame]
+    return locs
