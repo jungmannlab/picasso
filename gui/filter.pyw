@@ -17,7 +17,7 @@ from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
 import numpy as np
 import os.path
-from picasso import io, postprocess
+from picasso import io, postprocess, lib
 
 
 plt.style.use('ggplot')
@@ -107,7 +107,7 @@ class HistWindow(PlotWindow):
         # Prepare the data
         data = self.locs[self.field]
         data = data[np.isfinite(data)]
-        bins = postprocess.calculate_optimal_bins(data, 1000)
+        bins = lib.calculate_optimal_bins(data, 1000)
         # Prepare the figure
         self.figure.clear()
         self.figure.suptitle(self.field)
@@ -148,8 +148,8 @@ class Hist2DWindow(PlotWindow):
         self.figure.clear()
         axes = self.figure.add_subplot(111)
         # Start hist2 version
-        bins_x = postprocess.calculate_optimal_bins(x, 1000)
-        bins_y = postprocess.calculate_optimal_bins(y, 1000)
+        bins_x = lib.calculate_optimal_bins(x, 1000)
+        bins_y = lib.calculate_optimal_bins(y, 1000)
         counts, x_edges, y_edges, image = axes.hist2d(x, y, bins=[bins_x, bins_y], norm=LogNorm())
         x_range = x.ptp()
         axes.set_xlim([bins_x[0] - 0.05*x_range, x.max() + 0.05*x_range])
