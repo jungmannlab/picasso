@@ -120,7 +120,7 @@ class Worker(QtCore.QThread):
     def run(self):
         for i, path in enumerate(self.paths):
             self.progressMade.emit(i)
-            io._to_raw_single(path)
+            io.to_raw_single(path)
         self.finished.emit(i)
 
 
