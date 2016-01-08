@@ -3,6 +3,7 @@ import os.path
 import traceback
 from PyQt4 import QtCore, QtGui
 import numpy as np
+from matplotlib import cm
 
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
@@ -11,10 +12,8 @@ sys.path.insert(0, _parent_directory)    # We want to use the local picasso inst
 from picasso import io, render
 
 
-red = np.hstack((128*[0], np.linspace(0, 255, 128)))
-green = np.hstack((np.linspace(0, 255, 128), 128*[255]))
-blue = np.hstack((128*[0], np.linspace(0, 255, 128)))
-CMAP = [QtGui.qRgb(r, g, b) for r, g, b in zip(red, green, blue)]
+cmap = np.uint16(np.round(255 * cm.magma(range(256))))
+CMAP = [QtGui.qRgba(r, g, b, a) for r, g, b, a in cmap]
 
 
 class View(QtGui.QLabel):
@@ -94,7 +93,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         grid.addWidget(self.minimum_edit, 0, 1)
         maximum_label = QtGui.QLabel('Maximum:')
         grid.addWidget(maximum_label, 1, 0)
-        self.maximum_edit = QtGui.QLineEdit('0.15')
+        self.maximum_edit = QtGui.QLineEdit('0.2')
         self.maximum_edit.editingFinished.connect(self.window.render)
         grid.addWidget(self.maximum_edit, 1, 1)
 
