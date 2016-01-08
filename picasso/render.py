@@ -11,17 +11,11 @@ import numba as _numba
 import scipy.signal as _signal
 
 
-def render(locs, info, oversampling='auto', blur_method='convolve'):
-    if oversampling == 'auto':
-        auto_oversample = True
-        lpy = _np.median(locs.lpy[_np.isfinite(locs.lpy)])
-        lpx = _np.median(locs.lpx[_np.isfinite(locs.lpx)])
-        lp = (lpx + lpy) / 2
-        oversampling = 2 / lp
-    else:
-        auto_oversample = False
-    if blur_method == 'convolve':
-        image = bin_locs(locs, info, oversampling)
+def render(locs, info, oversampling=1, viewport=None, blur_method=None):
+    if blur_method is None:
+        image = bin_locs(locs, info, oversampling, viewport)
+    elif blur_method == 'convolve':
+        image = bin_locs(locs, info, oversampling, viewport)
         lpy = oversampling * _np.median(locs.lpy[_np.isfinite(locs.lpy)])
         lpx = oversampling * _np.median(locs.lpx[_np.isfinite(locs.lpx)])
         kernel_height = 10 * int(_np.round(lpy)) + 1
@@ -31,17 +25,21 @@ def render(locs, info, oversampling='auto', blur_method='convolve'):
         kernel = _np.outer(kernel_y, kernel_x)
         image = _signal.fftconvolve(image, kernel, mode='same')
         image = len(locs) * image / image.sum()
-    if auto_oversample:
-        return image, oversampling
     return image
 
 
-def bin_locs(locs, info, oversampling):
+def bin_locs(locs, info, oversampling=1, viewport=None):
     minfo = info[0]
-    x = _np.int32(oversampling * locs.x)
-    y = _np.int32(oversampling * locs.y)
-    n_pixel_x = int(_np.ceil(oversampling * minfo['Height']))
-    n_pixel_y = int(_np.ceil(oversampling * minfo['Width']))
+    if viewport is None:
+        viewport = [(0, 0), (minfo['Width'], minfo['Height'])]
+    (y_min, x_min), (y_max, x_max) = viewport
+    in_view = (locs.x > x_min) & (locs.y > y_min) & (locs.x < x_max) & (locs.y < y_max)
+    x = locs.x[in_view] - x_min
+    y = locs.y[in_view] - y_min
+    x = _np.int32(oversampling * x)
+    y = _np.int32(oversampling * y)
+    n_pixel_x = int(_np.round(oversampling * (y_max - y_min)))
+    n_pixel_y = int(_np.round(oversampling * (x_max - x_min)))
     return _bin_locs(x, y, n_pixel_x, n_pixel_y)
 
 
@@ -49,6 +47,5 @@ def bin_locs(locs, info, oversampling):
 def _bin_locs(x, y, n_pixel_x, n_pixel_y):
     image = _np.zeros((n_pixel_x, n_pixel_y), dtype=_np.float32)
     for i, j in zip(x, y):
-        if (0 <= i < n_pixel_x) and (0 <= j <= n_pixel_y):
-            image[j, i] += 1
+        image[j, i] += 1
     return image
