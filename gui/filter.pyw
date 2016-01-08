@@ -17,7 +17,7 @@ from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
 import numpy as np
 import os.path
-from picasso import io, postprocess, lib
+from picasso import io, lib
 
 
 plt.style.use('ggplot')
