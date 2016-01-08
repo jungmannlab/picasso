@@ -41,3 +41,4 @@ The result is that you don't have to specify the .py or .pyw ending when you run
 - Localize icon based on "Mountains by MONTANA RUCOBO from the Noun Project"
 - ToRaw icon based on "Lion by Sathish Selladurai from the Noun Project"
 - Filter icon based on "Funnel by José Campos from the Noun Project"
+- Render icon based on "Paint Palette by Vectors Market from the Noun Project"

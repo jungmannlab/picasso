@@ -107,7 +107,7 @@ class Window(QtGui.QMainWindow):
         self.setWindowTitle('Picasso: Render')
         self.resize(768, 768)
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'filter.ico')
+        icon_path = os.path.join(this_directory, 'render.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.view = View(self)
