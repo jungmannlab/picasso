@@ -12,8 +12,13 @@ sys.path.insert(0, _parent_directory)    # We want to use the local picasso inst
 from picasso import io, render
 
 
-cmap = np.uint16(np.round(255 * cm.magma(range(256))))
-CMAP = [QtGui.qRgba(r, g, b, a) for r, g, b, a in cmap]
+# cmap = np.uint16(np.round(255 * cm.magma(range(256))))
+# CMAP = [QtGui.qRgba(r, g, b, a) for r, g, b, a in cmap]
+
+red = np.zeros(256)
+green = np.arange(256)
+blue = np.arange(256)
+CMAP = [QtGui.qRgb(r, g, b) for r, g, b in zip(red, green, blue)]
 
 
 class View(QtGui.QLabel):
