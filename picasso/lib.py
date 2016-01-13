@@ -1,3 +1,13 @@
+"""
+    picasso/lib
+    ~~~~~~~~~~~~~~~~~~~~
+
+    Handy functions and classes
+
+    :author: Joerg Schnitzbauer, 2016
+"""
+
+
 import numpy as _np
 
 
