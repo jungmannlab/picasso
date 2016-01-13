@@ -1,9 +1,18 @@
+"""
+    gui/render
+    ~~~~~~~~~~~~~~~~~~~~
+
+    Graphical user interface for rendering localization images
+
+    :author: Joerg Schnitzbauer, 2016
+"""
+
+
 import sys
 import os.path
 import traceback
 from PyQt4 import QtCore, QtGui
 import numpy as np
-from matplotlib import cm
 
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
