@@ -157,7 +157,7 @@ def _to_photons(spots, info):
         serial_number = info['Camera']['Serial Number']
         camera_config = CONFIG['Cameras']['Lidke'][type][model][serial_number]
         baseline = camera_config['Baseline']
-        em_realgain = info['EM RealGain']
+        em_realgain = info['EM Real Gain']
         em = em_realgain > 1
         preamp_gain = info['Pre-Amp Gain']
         read_mode = info['Readout Mode']
