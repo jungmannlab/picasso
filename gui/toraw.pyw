@@ -3,22 +3,22 @@
     gui/toraw
     ~~~~~~~~~~~~~~~~~~~~
 
-    Graphical user interface for picasso.io.to_raw
+    Graphical user interface for converting movies to raw files
 
     :author: Joerg Schnitzbauer, 2015
 """
 
+import sys
 import os.path
+from PyQt4 import QtCore, QtGui
+import traceback
+
 
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
 _parent_directory = os.path.dirname(_this_directory)
-
-import sys
 sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
-from PyQt4 import QtCore, QtGui
 from picasso import io
-import traceback
 
 
 class TextEdit(QtGui.QTextEdit):
@@ -82,29 +82,38 @@ class Window(QtGui.QWidget):
         self.path_edit.set_paths(paths)
 
     def to_raw(self):
-        self.setEnabled(False)
         text = self.path_edit.toPlainText()
-        self.paths = text.splitlines()
-        self.update_html(0)
-        self.worker = Worker(self.paths)
-        self.worker.progressMade.connect(self.update_html)
+        paths = text.splitlines()
+        movie_groups = io.get_movie_groups(paths)
+        n_movies = len(movie_groups)
+        if n_movies == 1:
+            text = 'Converting 1 movie...'
+        else:
+            text = 'Converting {} movies...'.format(n_movies)
+        self.progress_dialog = QtGui.QProgressDialog(text, 'Cancel', 0, n_movies, self)
+        progress_bar = QtGui.QProgressBar(self.progress_dialog)
+        progress_bar.setTextVisible(False)
+        self.progress_dialog.setBar(progress_bar)
+        self.progress_dialog.setMaximum(n_movies)
+        self.progress_dialog.setWindowTitle('Picasso: ToRaw')
+        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
+        self.progress_dialog.canceled.connect(self.cancel)
+        self.progress_dialog.closeEvent = self.cancel
+        self.worker = Worker(movie_groups)
+        self.worker.progressMade.connect(self.update_progress)
         self.worker.finished.connect(self.on_finished)
         self.worker.start()
+        self.progress_dialog.show()
 
-    def update_html(self, done):
-        html = ''
-        for i, path in enumerate(self.paths):
-            if i < done:
-                html += '<font color="green">{}</font><br>'.format(path)
-            elif i == done:
-                html += '<font color="yellow">{}</font><br>'.format(path)
-            else:
-                html += path + '<br>'
-        self.path_edit.setHtml(html)
+    def cancel(self, event=None):
+        self.worker.terminate()
+
+    def update_progress(self, n_done):
+        self.progress_dialog.setValue(n_done)
 
     def on_finished(self, done):
-        self.update_html(done + 1)
-        self.setEnabled(True)
+        self.progress_dialog.close()
+        QtGui.QMessageBox.information(self, 'Picasso: ToRaw', 'Conversion complete.')
 
 
 class Worker(QtCore.QThread):
@@ -113,14 +122,14 @@ class Worker(QtCore.QThread):
     finished = QtCore.pyqtSignal(int)
     interrupted = QtCore.pyqtSignal()
 
-    def __init__(self, paths):
+    def __init__(self, movie_groups):
         super().__init__()
-        self.paths = paths
+        self.movie_groups = movie_groups
 
     def run(self):
-        for i, path in enumerate(self.paths):
-            self.progressMade.emit(i)
-            io.to_raw_single(path)
+        for i, paths in enumerate(self.movie_groups):
+            io.to_raw_combined(paths)
+            self.progressMade.emit(i+1)
         self.finished.emit(i)
 
 
