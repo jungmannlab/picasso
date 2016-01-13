@@ -2,7 +2,7 @@
     gui/filter
     ~~~~~~~~~~~~~~~~~~~~
 
-    Graphical user interface for picasso.filter
+    Graphical user interface for filtering localization lists
 
     :author: Joerg Schnitzbauer, 2015
 """
