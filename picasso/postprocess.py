@@ -1,3 +1,12 @@
+"""
+    gui/postprocess
+    ~~~~~~~~~~~~~~~~~~~~
+
+    Data analysis of localization lists
+
+    :author: Joerg Schnitzbauer, 2015
+"""
+
 import numpy as _np
 from numpy.lib.recfunctions import append_fields as _append_fields
 import numba as _numba
