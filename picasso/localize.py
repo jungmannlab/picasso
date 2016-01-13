@@ -142,7 +142,7 @@ def _to_photons(spots, info):
         baseline = camera_config['Baseline']
         em = info['Electron Multiplying']
         if em:
-            gain = info['EM RealGain']
+            gain = info['EM Real Gain']
         else:
             gain = 1
         preamp_gain = info['Pre-Amp Gain']
