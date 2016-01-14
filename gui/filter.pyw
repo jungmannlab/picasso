@@ -28,15 +28,17 @@ class TableModel(QtCore.QAbstractTableModel):
     def __init__(self, locs, parent=None):
         super().__init__(parent)
         self.locs = locs
+        try:
+            self._column_count = len(locs[0])
+        except IndexError:
+            self._column_count = 0
+        self._row_count = self.locs.shape[0]
 
     def columnCount(self, parent):
-        try:
-            return len(self.locs[0])
-        except IndexError:
-            return 0
+        return self._column_count
 
     def rowCount(self, parent):
-        return self.locs.shape[0]
+        return self._row_count
 
     def data(self, index, role=QtCore.Qt.DisplayRole):
         if role == QtCore.Qt.DisplayRole:
@@ -115,10 +117,11 @@ class HistWindow(PlotWindow):
         axes.hist(data, bins, rwidth=1, linewidth=0)
         data_range = data.ptp()
         axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
-        SpanSelector(axes, self.on_span_select, 'horizontal', useblit=True, rectprops=dict(facecolor='green', alpha=0.2))
+        self.span = SpanSelector(axes, self.on_span_select, 'horizontal', useblit=True, rectprops=dict(facecolor='green', alpha=0.2))
         self.canvas.draw()
 
     def on_span_select(self, xmin, xmax):
+        print('span selected')
         self.locs = self.locs[np.isfinite(self.locs[self.field])]
         self.locs = self.locs[(self.locs[self.field] > xmin) & (self.locs[self.field] < xmax)]
         self.main_window.update_locs(self.locs)
@@ -136,6 +139,7 @@ class Hist2DWindow(PlotWindow):
         self.field_x = field_x
         self.field_y = field_y
         super().__init__(main_window, locs)
+        self.resize(1000, 800)
 
     def plot(self):
         # Prepare the data
@@ -146,6 +150,7 @@ class Hist2DWindow(PlotWindow):
         y = y[valid]
         # Prepare the figure
         self.figure.clear()
+        # self.canvas.figure = self.figure
         axes = self.figure.add_subplot(111)
         # Start hist2 version
         bins_x = lib.calculate_optimal_bins(x, 1000)
@@ -159,9 +164,8 @@ class Hist2DWindow(PlotWindow):
         axes.grid(False)
         axes.get_xaxis().set_label_text(self.field_x)
         axes.get_yaxis().set_label_text(self.field_y)
-        self.selector = RectangleSelector(axes, self.on_rect_select, useblit=True, rectprops=dict(facecolor='green',
-                                                                                                  alpha=0.2,
-                                                                                                  fill=True))
+        self.selector = RectangleSelector(axes, self.on_rect_select, useblit=False,
+                                          rectprops=dict(facecolor='green', alpha=0.2, fill=True))
         self.canvas.draw()
 
     def on_rect_select(self, press_event, release_event):
