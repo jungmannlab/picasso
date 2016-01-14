@@ -65,15 +65,15 @@ if __name__ == '__main__':
     link_parser = subparsers.add_parser('link', help='link localizations in consecutive frames')
     link_parser.add_argument('files', help='one or multiple hdf5 localization files specified by a unix style path pattern')
     link_parser.add_argument('-r', '--radius', type=float, default=1.0,
-                             help='maximum distance between consecutive localization to still consider them the same binding event')
+                             help='maximum distance between consecutive localization to still consider them the same binding event (default=1.0)')
     link_parser.add_argument('-t', '--tolerance', type=int, default=1,
-                             help='maximum dark time between localizations to still consider them the same binding event')
+                             help='maximum dark time between localizations to still consider them the same binding event (default=1)')
 
     # undrift parser
     undrift_parser = subparsers.add_parser('undrift', help='correct localization coordinates for drift')
     undrift_parser.add_argument('files', help='one or multiple hdf5 localization files specified by a unix style path pattern')
     undrift_parser.add_argument('-s', '--segmentation', type=float, default=1000,
-                                help='the number of frames to be combined for one temporal segment')
+                                help='the number of frames to be combined for one temporal segment (default=1000)')
     undrift_parser.add_argument('-d', '--nodisplay', action='store_false', help='do not display estimated drift')
 
     # Parse
