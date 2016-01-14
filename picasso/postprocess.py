@@ -8,7 +8,6 @@
 """
 
 import numpy as _np
-from numpy.lib.recfunctions import append_fields as _append_fields
 import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
 import os.path as _ospath
@@ -35,15 +34,38 @@ def dbscan(locs, radius, min_density):
     X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
     group = db.labels_
-    locs = _append_fields(locs, 'group', group, 'i4', usemask=False, asrecarray=True)
-    return locs
+    return _lib.append_to_rec(locs, group, 'group')
+
+
+def compute_local_density(locs, radius):
+    local_density = _compute_local_density(locs, radius)
+    return _lib.append_to_rec(locs, local_density, 'density')
+
+
+@_numba.jit(nopython=True)
+def _compute_local_density(locs, radius):
+    N = len(locs)
+    r2 = radius ** 2
+    density = _np.zeros(N, dtype=_np.uint32)
+    for i in range(N):
+        xi = locs.x[i]
+        yi = locs.y[i]
+        for j in range(N):
+            if i != j:
+                dx2 = (xi - locs.x[j])**2
+                if dx2 < r2:
+                    dy2 = (yi - locs.y[j])**2
+                    if dy2 < r2:
+                        d = _np.sqrt(dx2 + dy2)
+                        if d < radius:
+                            density[i] += 1
+    return density
 
 
 def get_dark_times(locs):
     last_frame = locs.frame + locs.len - 1
     dark = _get_dark_times(locs, last_frame)
-    locs = _append_fields(locs, 'dark', dark, dtypes=dark.dtype, usemask=False, asrecarray=True)
-    return locs
+    return _lib.append_to_rec(locs, dark, 'dark')
 
 
 @_numba.jit(nopython=True)
