@@ -45,7 +45,7 @@ def compute_local_density(locs, radius):
 @_numba.jit(nopython=True)
 def _compute_local_density(locs, radius):
     N = len(locs)
-    r2 = radius ** 2
+    r2 = radius**2
     density = _np.zeros(N, dtype=_np.uint32)
     for i in range(N):
         xi = locs.x[i]
