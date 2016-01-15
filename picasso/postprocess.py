@@ -16,6 +16,8 @@ from tqdm import tqdm as _tqdm
 import lmfit as _lmfit
 from scipy import interpolate as _interpolate
 import matplotlib.pyplot as _plt
+from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
+import multiprocessing as _multiprocessing
 
 
 _plt.style.use('ggplot')
@@ -38,8 +40,34 @@ def dbscan(locs, radius, min_density):
 
 
 def compute_local_density(locs, radius):
-    local_density = _compute_local_density(locs, radius)
-    return _lib.append_to_rec(locs, local_density, 'density')
+    N = len(locs)
+    n_threads = 2 * _multiprocessing.cpu_count()
+    chunksize = int(N / n_threads)
+    starts = range(0, N, chunksize)
+    density = _np.zeros(N, dtype=_np.uint16)
+    with _ThreadPoolExecutor(max_workers=n_threads) as executor:
+        [executor.submit(_compute_local_density_partially, locs, radius, _, chunksize, density) for _ in starts]
+    locs = _lib.remove_from_rec(locs, 'density')
+    return _lib.append_to_rec(locs, density, 'density')
+
+
+@_numba.jit(nopython=True, nogil=True)
+def _compute_local_density_partially(locs, radius, start, chunksize, density):
+    r2 = radius**2
+    N = len(locs)
+    end = min(N, start + chunksize)
+    for i in range(start, end):
+        xi = locs.x[i]
+        yi = locs.y[i]
+        for j in range(N):
+            dx2 = (xi - locs.x[j])**2
+            if dx2 < r2:
+                dy2 = (yi - locs.y[j])**2
+                if dy2 < r2:
+                    d = _np.sqrt(dx2 + dy2)
+                    if d < radius:
+                        density[i] += 1
+    return density
 
 
 @_numba.jit(nopython=True)
@@ -48,6 +76,8 @@ def _compute_local_density(locs, radius):
     r2 = radius ** 2
     density = _np.zeros(N, dtype=_np.uint32)
     for i in range(N):
+        if i % 1000 == 0:
+            print(i, N)
         xi = locs.x[i]
         yi = locs.y[i]
         for j in range(N):
