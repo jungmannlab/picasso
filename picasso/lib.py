@@ -10,6 +10,7 @@
 
 import numpy as _np
 from numpy.lib.recfunctions import append_fields as _append_fields
+from numpy.lib.recfunctions import drop_fields as _drop_fields
 
 
 def calculate_optimal_bins(data, max_n_bins=None):
@@ -30,3 +31,7 @@ def xcorr_fft(A, B):
 
 def append_to_rec(rec_array, data, name):
     return _append_fields(rec_array, name, data, dtypes=data.dtype, usemask=False, asrecarray=True)
+
+
+def remove_from_rec(rec_array, name):
+    return _drop_fields(rec_array, name, usemask=False, asrecarray=True)
