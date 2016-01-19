@@ -140,7 +140,10 @@ class TiffFile:
                     self.info['EM Real Gain'] = int(mm_info['Andor-Gain'])
                     self.info['Pre-Amp Gain'] = int(mm_info['Andor-Pre-Amp-Gain'].split()[1])
                     self.info['Readout Mode'] = mm_info['Andor-ReadoutMode']
-                self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
+                    try:
+                        self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
+                    except ValueError:
+                        self.info['Excitation Wavelength'] = None
         offset = self._first_ifd_offset
         n_frames = 0
         while offset != 0:
