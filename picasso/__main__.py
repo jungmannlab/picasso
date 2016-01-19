@@ -81,6 +81,20 @@ def _dbscan(files, radius, min_density):
             io.save_locs(base + '_dbscan.hdf5', locs, info)
 
 
+def _std(files):
+    import glob
+    paths = glob.glob(files)
+    if paths:
+        from picasso.io import load_raw
+        from numpy import std
+        from os.path import splitext
+        from tifffile import imsave
+        for path in paths:
+            movie, info = load_raw(path)
+            std_image = std(movie, axis=0, dtype='f4')
+            base, ext = splitext(path)
+            imsave(base + '_std.tif', std_image)
+
 if __name__ == '__main__':
     import argparse
 
@@ -118,6 +132,10 @@ if __name__ == '__main__':
     dbscan_parser.add_argument('radius', type=float, help='maximal distance between to localizations to be considered local')
     dbscan_parser.add_argument('density', type=int, help='minimum local density for localizations to be assigned to a cluster')
 
+    # STD Image
+    std_parser = subparsers.add_parser('std', help='generate the std image of a raw movie')
+    std_parser.add_argument('files', help='one or multiple raw files, specified by a unix style path pattern')
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -132,5 +150,7 @@ if __name__ == '__main__':
             _density(args.files, args.radius)
         elif args.command == 'dbscan':
             _dbscan(args.files, args.radius, args.density)
+        elif args.command == 'std':
+            _std(args.files)
     else:
         parser.print_help()
