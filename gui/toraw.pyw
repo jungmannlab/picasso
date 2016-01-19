@@ -9,6 +9,7 @@
 """
 
 import sys
+import os
 import os.path
 from PyQt4 import QtCore, QtGui
 import traceback
@@ -41,9 +42,17 @@ class TextEdit(QtGui.QTextEdit):
     def dropEvent(self, event):
         urls = event.mimeData().urls()
         paths = [url.toLocalFile() for url in urls]
-        extensions = [os.path.splitext(path)[1].lower() for path in paths]
-        valid_flags = [(extension in ['.tif', '.tiff']) for extension in extensions]
-        valid_paths = [path for path, valid_flag in zip(paths, valid_flags) if valid_flag]
+        valid_paths = []
+        for path in paths:
+            base, extension = os.path.splitext(path)
+            if extension.lower() in ['.tif', '.tiff']:
+                valid_paths.append(path)
+            for root, dirs, files in os.walk(path):
+                for name in files:
+                    candidate = os.path.join(root, name)
+                    base, extension = os.path.splitext(candidate)
+                    if extension.lower() in ['.tif', '.tiff']:
+                        valid_paths.append(candidate)
         self.set_paths(valid_paths)
 
     def set_paths(self, paths):
