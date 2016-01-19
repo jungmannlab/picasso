@@ -92,14 +92,14 @@ def _compute_local_density(locs, radius):
     return density
 
 
-def get_dark_times(locs):
+def compute_dark_times(locs):
     last_frame = locs.frame + locs.len - 1
-    dark = _get_dark_times(locs, last_frame)
+    dark = _compute_dark_times(locs, last_frame)
     return _lib.append_to_rec(locs, dark, 'dark')
 
 
 @_numba.jit(nopython=True)
-def _get_dark_times(locs, last_frame):
+def _compute_dark_times(locs, last_frame):
     N = len(locs)
     max_frame = locs.frame.max()
     dark = max_frame * _np.ones(len(locs), dtype=_np.int32)
@@ -116,6 +116,7 @@ def _get_dark_times(locs, last_frame):
 
 
 def link(locs, radius, max_dark_time, combine_mode='average'):
+    locs = locs[_np.all(_np.array([_np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
     locs.sort(kind='mergesort', order='frame')
     group = get_link_groups(locs, radius, max_dark_time)
     if combine_mode == 'average':
