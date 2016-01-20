@@ -21,15 +21,6 @@ sys.path.insert(0, _parent_directory)    # We want to use the local picasso inst
 from picasso import io, render
 
 
-# cmap = np.uint16(np.round(255 * cm.magma(range(256))))
-# CMAP = [QtGui.qRgba(r, g, b, a) for r, g, b, a in cmap]
-
-red = np.zeros(256)
-green = np.arange(256)
-blue = np.arange(256)
-CMAP = [QtGui.qRgb(r, g, b) for r, g, b in zip(red, green, blue)]
-
-
 class View(QtGui.QLabel):
 
     def __init__(self, window):
@@ -152,7 +143,31 @@ class Window(QtGui.QMainWindow):
 
     def open(self, path):
         self.locs, self.info = io.load_locs(path)
+        self.color_locs = None
+        if hasattr(self.locs, 'group'):
+            valid_locs = self.locs[self.locs.group != 1]
+            colors = valid_locs.group % 3
+            self.color_locs = [valid_locs[colors == _] for _ in range(3)]
         self.fit_in_view()
+
+    def to_qimage(self, image):
+        minimum = float(self.display_settings_dialog.minimum_edit.text())
+        maximum = float(self.display_settings_dialog.maximum_edit.text())
+        imax = image.max()
+        image = 255 * (image - imax * minimum) / (imax * maximum)
+        image = np.minimum(image, 255)
+        image = np.maximum(image, 0)
+        image = image.astype('uint8')
+        height, width = image.shape[-2:]
+        self._bgra = np.zeros((height, width, 4), np.uint8, 'C')
+        if image.ndim == 2:
+            self._bgra[..., 0] = self._bgra[..., 1] = image
+        elif image.ndim == 3:
+            self._bgra[..., 0] = image[0] + image[1]
+            self._bgra[..., 1] = image[0] + image[2]
+            self._bgra[..., 2] = image[1] + image[2]
+        self._bgra[..., 3].fill(255)
+        return QtGui.QImage(self._bgra.data, width, height, QtGui.QImage.Format_RGB32)
 
     def render(self, center=None, zoom=None):
         if center:
@@ -168,20 +183,16 @@ class Window(QtGui.QMainWindow):
         min_x = self.center[1] - image_width / 2
         max_x = min_x + image_width
         viewport = [(min_y, min_x), (max_y, max_x)]
-        image = render.render(self.locs, self.info, oversampling=self.zoom, viewport=viewport, blur_method='convolve')
-        image_max = image.max()
-        minimum = float(self.display_settings_dialog.minimum_edit.text()) * image_max
-        maximum = float(self.display_settings_dialog.maximum_edit.text()) * image_max
-        image -= minimum
-        image /= maximum
-        image *= 255
-        image = np.maximum(image, 0)
-        image = np.minimum(image, 255)
-        image = image.astype('uint8')
-        image = QtGui.QImage(image.data, view_width, view_height, view_width, QtGui.QImage.Format_Indexed8)
-        image.setColorTable(CMAP)
+        if self.color_locs:
+            image = np.array([self.render_image(_, viewport) for _ in self.color_locs])
+        else:
+            image = self.render_image(self.locs, viewport)
+        image = self.to_qimage(image)
         pixmap = QtGui.QPixmap.fromImage(image)
         self.view.setPixmap(pixmap)
+
+    def render_image(self, locs, viewport):
+        return render.render(locs, self.info, oversampling=self.zoom, viewport=viewport, blur_method='convolve')
 
 
 if __name__ == '__main__':

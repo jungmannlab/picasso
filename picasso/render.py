@@ -25,6 +25,7 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None):
         kernel = _np.outer(kernel_y, kernel_x)
         image = _signal.fftconvolve(image, kernel, mode='same')
         image = len(locs) * image / image.sum()
+        image[_np.logical_not(_np.isfinite(image))] = 0
     return image
 
 
