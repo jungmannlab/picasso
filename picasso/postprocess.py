@@ -35,7 +35,7 @@ def dbscan(locs, radius, min_density):
     locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
     X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
-    group = db.labels_
+    group = _np.int32(db.labels_)       # int32 for Origin compatiblity
     return _lib.append_to_rec(locs, group, 'group')
 
 
@@ -44,7 +44,7 @@ def compute_local_density(locs, radius):
     n_threads = 2 * _multiprocessing.cpu_count()
     chunksize = int(N / n_threads)
     starts = range(0, N, chunksize)
-    density = _np.zeros(N, dtype=_np.uint16)
+    density = _np.zeros(N, dtype=_np.uint32)
     with _ThreadPoolExecutor(max_workers=n_threads) as executor:
         [executor.submit(_compute_local_density_partially, locs, radius, _, chunksize, density) for _ in starts]
     locs = _lib.remove_from_rec(locs, 'density')
@@ -95,7 +95,7 @@ def _compute_local_density(locs, radius):
 def compute_dark_times(locs):
     last_frame = locs.frame + locs.len - 1
     dark = _compute_dark_times(locs, last_frame)
-    return _lib.append_to_rec(locs, dark, 'dark')
+    return _lib.append_to_rec(locs, _np.int32(dark), 'dark')        # int32 for Origin compatiblity
 
 
 @_numba.jit(nopython=True)
