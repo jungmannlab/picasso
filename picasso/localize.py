@@ -149,22 +149,12 @@ def _to_photons(spots, info):
         read_mode = info['Readout Mode']
         sensitivity = camera_config['Sensitivity'][em][read_mode][preamp_gain-1]
         excitation = info['Excitation Wavelength']
-        qe = camera_config['Quantum Efficiency'][excitation]
+        try:
+            qe = camera_config['Quantum Efficiency'][excitation]
+        except KeyError:
+            _ = list(camera_config['Quantum Efficiency'].keys())
+            raise Exception('Valid excitation wavelengths are: {}\nAdjust your yaml file!'.format(_))
         return (spots - baseline) * sensitivity / (gain * qe)
-    if info['Camera']['Manufacturer'] == 'Lidke':
-        type = info['Camera']['Type']
-        model = info['Camera']['Model']
-        serial_number = info['Camera']['Serial Number']
-        camera_config = CONFIG['Cameras']['Lidke'][type][model][serial_number]
-        baseline = camera_config['Baseline']
-        em_realgain = info['EM Real Gain']
-        em = em_realgain > 1
-        preamp_gain = info['Pre-Amp Gain']
-        read_mode = info['Readout Mode']
-        sensitivity = camera_config['Sensitivity'][em][read_mode][preamp_gain-1]
-        excitation = info['Excitation Wavelength']
-        qe = camera_config['Quantum Efficiency'][excitation]
-        return spots
     else:
         raise Exception("No configuration found for camera '{}''".format(info['Camera']))
 
