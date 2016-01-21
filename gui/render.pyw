@@ -108,7 +108,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         contrast_grid.addWidget(maximum_label, 1, 0)
         self.maximum = QtGui.QDoubleSpinBox()
         self.maximum.setRange(0, 1)
-        self.maximum.setSingleStep(0.1)
+        self.maximum.setSingleStep(0.05)
         self.maximum.setValue(0.2)
         self.maximum.setDecimals(3)
         self.maximum.setKeyboardTracking(False)
