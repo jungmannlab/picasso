@@ -138,8 +138,8 @@ if __name__ == '__main__':
 
     # local density
     density_parser = subparsers.add_parser('density', help='compute the local density of localizations')
-    density_parser.add_argument('radius', type=float, help='maximal distance between to localizations to be considered local')
     density_parser.add_argument('files', help='one or multiple hdf5 localization files specified by a unix style path pattern')
+    density_parser.add_argument('radius', type=float, help='maximal distance between to localizations to be considered local')
 
     # DBSCAN
     dbscan_parser = subparsers.add_parser('dbscan', help='cluster localizations')
