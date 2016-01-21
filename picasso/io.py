@@ -140,7 +140,6 @@ class TiffFile:
                     self.info['EM Real Gain'] = int(mm_info['Andor-Gain'])
                     self.info['Pre-Amp Gain'] = int(mm_info['Andor-Pre-Amp-Gain'].split()[1])
                     self.info['Readout Mode'] = mm_info['Andor-ReadoutMode']
-                print('TIFilterBlock1-Label:', mm_info['TIFilterBlock1-Label'])
                 try:
                     self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
                 except ValueError:
@@ -186,8 +185,9 @@ def to_raw_combined(paths):
 
 
 def get_movie_groups(paths):
-    groups = []
+    paths = [path.replace('\\', '/') for path in paths]
     paths = sorted(paths)
+    groups = []
     while len(paths) > 0:
         path = paths[0]
         if path.endswith('.ome.tif'):
@@ -203,7 +203,6 @@ def get_movie_groups(paths):
 
 def to_raw(path, verbose=True):
     paths = _glob.glob(path)
-    paths = [path.replace('\\', '/') for path in paths]
     groups = get_movie_groups(paths)
     n_groups = len(groups)
     if n_groups:
