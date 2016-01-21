@@ -22,7 +22,7 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None):
     y = locs.y
     in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
     if _np.sum(in_view) == 0:
-        return image
+        return 0, image
     x = x[in_view]
     y = y[in_view]
     x = oversampling * (x - x_min)
@@ -30,7 +30,7 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None):
     if blur_method is None:
         x = _np.int32(x)
         y = _np.int32(y)
-        return _fill(image, x, y)
+        return len(x), _fill(image, x, y)
     elif blur_method == 'convolve':
         x = _np.int32(x)
         y = _np.int32(y)
@@ -48,13 +48,13 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None):
         kernel = _np.outer(kernel_y, kernel_x)
         image = _signal.fftconvolve(image, kernel, mode='same')
         image = len(locs) * image / image.sum()
-        return image
+        return len(x), image
     elif blur_method == 'gaussian':
         lpy = locs.lpy
         lpx = locs.lpx
         lpy = oversampling * lpy[in_view]
         lpx = oversampling * lpx[in_view]
-        return _fill_gaussians(image, x, y, lpx, lpy)
+        return len(x), _fill_gaussians(image, x, y, lpx, lpy)
     else:
         raise Exception('blur_method not understood.')
 

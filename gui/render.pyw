@@ -160,6 +160,7 @@ class Window(QtGui.QMainWindow):
         display_settings_action.setShortcut('Ctrl+D')
         display_settings_action.triggered.connect(self.display_settings_dialog.show)
         view_menu.addAction(display_settings_action)
+        self.status_bar = self.statusBar()
         self.locs = None
 
     def fit_in_view(self):
@@ -219,9 +220,12 @@ class Window(QtGui.QMainWindow):
             max_x = min_x + image_width
             viewport = [(min_y, min_x), (max_y, max_x)]
             if self.color_locs:
-                image = np.array([self.render_image(_, viewport) for _ in self.color_locs])
+                rendering = [self.render_image(_, viewport) for _ in self.color_locs]
+                image = np.array([_[1] for _ in rendering])
+                N = sum([_[0] for _ in rendering])
             else:
-                image = self.render_image(self.locs, viewport)
+                N, image = self.render_image(self.locs, viewport)
+            self.status_bar.showMessage('{:,} localizations in FOV'.format(N))
             image = self.to_qimage(image)
             pixmap = QtGui.QPixmap.fromImage(image)
             self.view.setPixmap(pixmap)
