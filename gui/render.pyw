@@ -90,17 +90,49 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.setWindowTitle('Display Settings')
         self.resize(200, 0)
         self.setModal(False)
-        grid = QtGui.QGridLayout(self)
+        vbox = QtGui.QVBoxLayout(self)
+        contrast_groupbox = QtGui.QGroupBox('Contrast')
+        vbox.addWidget(contrast_groupbox)
+        contrast_grid = QtGui.QGridLayout(contrast_groupbox)
         minimum_label = QtGui.QLabel('Minimum:')
-        grid.addWidget(minimum_label, 0, 0)
-        self.minimum_edit = QtGui.QLineEdit('0')
-        self.minimum_edit.editingFinished.connect(self.window.render)
-        grid.addWidget(self.minimum_edit, 0, 1)
+        contrast_grid.addWidget(minimum_label, 0, 0)
+        self.minimum = QtGui.QDoubleSpinBox()
+        self.minimum.setRange(0, 1)
+        self.minimum.setSingleStep(0.1)
+        self.minimum.setValue(0)
+        self.minimum.setKeyboardTracking(False)
+        self.minimum.valueChanged.connect(self.on_contrast_changed)
+        contrast_grid.addWidget(self.minimum, 0, 1)
         maximum_label = QtGui.QLabel('Maximum:')
-        grid.addWidget(maximum_label, 1, 0)
-        self.maximum_edit = QtGui.QLineEdit('0.2')
-        self.maximum_edit.editingFinished.connect(self.window.render)
-        grid.addWidget(self.maximum_edit, 1, 1)
+        contrast_grid.addWidget(maximum_label, 1, 0)
+        self.maximum = QtGui.QDoubleSpinBox()
+        self.maximum.setRange(0, 1)
+        self.maximum.setSingleStep(0.1)
+        self.maximum.setValue(0.2)
+        self.maximum.setKeyboardTracking(False)
+        self.maximum.valueChanged.connect(self.on_contrast_changed)
+        contrast_grid.addWidget(self.maximum, 1, 1)
+        blur_groupbox = QtGui.QGroupBox('Blur Method')
+        self.blur_buttongroup = QtGui.QButtonGroup()
+        self.points_button = QtGui.QRadioButton('Points (fast)')
+        self.blur_buttongroup.addButton(self.points_button)
+        self.convolve_button = QtGui.QRadioButton('Gaussian filter (slow for large window)')
+        self.blur_buttongroup.addButton(self.convolve_button)
+        self.gaussian_button = QtGui.QRadioButton('Individual Gaussians (slow for many locs.)')
+        self.blur_buttongroup.addButton(self.gaussian_button)
+        blur_vbox = QtGui.QVBoxLayout(blur_groupbox)
+        blur_vbox.addWidget(self.points_button)
+        blur_vbox.addWidget(self.convolve_button)
+        blur_vbox.addWidget(self.gaussian_button)
+        self.convolve_button.setChecked(True)
+        self.blur_buttongroup.buttonReleased.connect(self.on_blur_button_released)
+        vbox.addWidget(blur_groupbox)
+
+    def on_contrast_changed(self, _):
+        self.window.render()
+
+    def on_blur_button_released(self, _):
+        self.window.render()
 
 
 class Window(QtGui.QMainWindow):
@@ -128,6 +160,7 @@ class Window(QtGui.QMainWindow):
         display_settings_action.setShortcut('Ctrl+D')
         display_settings_action.triggered.connect(self.display_settings_dialog.show)
         view_menu.addAction(display_settings_action)
+        self.locs = None
 
     def fit_in_view(self):
         center = (self.info[0]['Height'] / 2, self.info[0]['Width'] / 2)
@@ -142,7 +175,8 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        self.locs, self.info = io.load_locs(path)
+        locs, self.info = io.load_locs(path)
+        self.locs = locs[np.all(np.array([np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
         self.color_locs = None
         if hasattr(self.locs, 'group'):
             valid_locs = self.locs[self.locs.group != 1]
@@ -151,8 +185,8 @@ class Window(QtGui.QMainWindow):
         self.fit_in_view()
 
     def to_qimage(self, image):
-        minimum = float(self.display_settings_dialog.minimum_edit.text())
-        maximum = float(self.display_settings_dialog.maximum_edit.text())
+        minimum = float(self.display_settings_dialog.minimum.value())
+        maximum = float(self.display_settings_dialog.maximum.value())
         imax = image.max()
         image = 255 * (image - imax * minimum) / (imax * maximum)
         image = np.minimum(image, 255)
@@ -161,38 +195,46 @@ class Window(QtGui.QMainWindow):
         height, width = image.shape[-2:]
         self._bgra = np.zeros((height, width, 4), np.uint8, 'C')
         if image.ndim == 2:
-            self._bgra[..., 0] = self._bgra[..., 1] = image
+            self._bgra[..., 1] = image
         elif image.ndim == 3:
-            self._bgra[..., 0] = image[0] + image[1]
-            self._bgra[..., 1] = image[0] + image[2]
-            self._bgra[..., 2] = image[1] + image[2]
+            self._bgra[..., 0] = image[2]
+            self._bgra[..., 1] = image[0]
+            self._bgra[..., 2] = image[1]
         self._bgra[..., 3].fill(255)
         return QtGui.QImage(self._bgra.data, width, height, QtGui.QImage.Format_RGB32)
 
     def render(self, center=None, zoom=None):
-        if center:
-            self.center = center
-        if zoom:
-            self.zoom = zoom
-        view_height = self.view.height()
-        view_width = self.view.width()
-        image_height = view_height / self.zoom
-        image_width = view_width / self.zoom
-        min_y = self.center[0] - image_height / 2
-        max_y = min_y + image_height
-        min_x = self.center[1] - image_width / 2
-        max_x = min_x + image_width
-        viewport = [(min_y, min_x), (max_y, max_x)]
-        if self.color_locs:
-            image = np.array([self.render_image(_, viewport) for _ in self.color_locs])
-        else:
-            image = self.render_image(self.locs, viewport)
-        image = self.to_qimage(image)
-        pixmap = QtGui.QPixmap.fromImage(image)
-        self.view.setPixmap(pixmap)
+        if self.locs is not None:
+            if center:
+                self.center = center
+            if zoom:
+                self.zoom = zoom
+            view_height = self.view.height()
+            view_width = self.view.width()
+            image_height = view_height / self.zoom
+            image_width = view_width / self.zoom
+            min_y = self.center[0] - image_height / 2
+            max_y = min_y + image_height
+            min_x = self.center[1] - image_width / 2
+            max_x = min_x + image_width
+            viewport = [(min_y, min_x), (max_y, max_x)]
+            if self.color_locs:
+                image = np.array([self.render_image(_, viewport) for _ in self.color_locs])
+            else:
+                image = self.render_image(self.locs, viewport)
+            image = self.to_qimage(image)
+            pixmap = QtGui.QPixmap.fromImage(image)
+            self.view.setPixmap(pixmap)
 
     def render_image(self, locs, viewport):
-        return render.render(locs, self.info, oversampling=self.zoom, viewport=viewport, blur_method='convolve')
+        button = self.display_settings_dialog.blur_buttongroup.checkedButton()
+        if button == self.display_settings_dialog.points_button:
+            blur_method = None
+        elif button == self.display_settings_dialog.convolve_button:
+            blur_method = 'convolve'
+        elif button == self.display_settings_dialog.gaussian_button:
+            blur_method = 'gaussian'
+        return render.render(locs, self.info, oversampling=self.zoom, viewport=viewport, blur_method=blur_method)
 
 
 if __name__ == '__main__':
