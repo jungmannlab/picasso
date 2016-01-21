@@ -621,8 +621,8 @@ if __name__ == '__main__':
     window.show()
 
     def excepthook(type, value, tback):
-        # message = ''.join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(window, 'An error occured', str(value))
+        message = ''.join(traceback.format_exception(type, value, tback))
+        errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
     sys.excepthook = excepthook
