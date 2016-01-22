@@ -46,7 +46,8 @@ def compute_local_density(locs, radius):
     starts = range(0, N, chunksize)
     density = _np.zeros(N, dtype=_np.uint32)
     with _ThreadPoolExecutor(max_workers=n_threads) as executor:
-        [executor.submit(_compute_local_density_partially, locs, radius, _, chunksize, density) for _ in starts]
+        for start in starts:
+            executor.submit(_compute_local_density_partially, locs, radius, start, chunksize, density)
     locs = _lib.remove_from_rec(locs, 'density')
     return _lib.append_to_rec(locs, density, 'density')
 
