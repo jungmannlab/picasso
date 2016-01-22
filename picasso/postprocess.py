@@ -18,6 +18,7 @@ from scipy import interpolate as _interpolate
 import matplotlib.pyplot as _plt
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
+import time as _time
 
 
 _plt.style.use('ggplot')
@@ -41,19 +42,35 @@ def dbscan(locs, radius, min_density):
 
 def compute_local_density(locs, radius):
     N = len(locs)
-    n_threads = 2 * _multiprocessing.cpu_count()
+    n_threads = int(0.75 * _multiprocessing.cpu_count())
     chunksize = int(N / n_threads)
     starts = range(0, N, chunksize)
     density = _np.zeros(N, dtype=_np.uint32)
+    counters = [_np.zeros(1, dtype=_np.uint64) for _ in range(len(starts))]
     with _ThreadPoolExecutor(max_workers=n_threads) as executor:
-        for start in starts:
-            executor.submit(_compute_local_density_partially, locs, radius, start, chunksize, density)
+        for start, counter in zip(starts, counters):
+            executor.submit(_compute_local_density_partially, locs, radius, start, chunksize, density, counter)
+        done = 0
+        t0 = _time.time()
+        while done < N:
+            past = _time.time() - t0
+            if done > 0:
+                secsleft = N * past / done
+                minleft = int(secsleft / 60)
+                if minleft > 0:
+                    msg = '{} mins'.format(minleft)
+                else:
+                    msg = '{} secs'.format(int(secsleft))
+                print('Evaluated {:,}/{:,} locs. Time left: '.format(done, N) + msg, end='\r')
+            _time.sleep(0.1)
+            done = int(_np.sum(counters))
+        print()
     locs = _lib.remove_from_rec(locs, 'density')
     return _lib.append_to_rec(locs, density, 'density')
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _compute_local_density_partially(locs, radius, start, chunksize, density):
+def _compute_local_density_partially(locs, radius, start, chunksize, density, counter):
     r2 = radius**2
     N = len(locs)
     end = min(N, start + chunksize)
@@ -68,6 +85,7 @@ def _compute_local_density_partially(locs, radius, start, chunksize, density):
                     d = _np.sqrt(dx2 + dy2)
                     if d < radius:
                         density[i] += 1
+        counter[0] = i - start + 1
     return density
 
 
