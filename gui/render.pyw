@@ -98,7 +98,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         contrast_grid.addWidget(minimum_label, 0, 0)
         self.minimum = QtGui.QDoubleSpinBox()
         self.minimum.setRange(0, 1)
-        self.minimum.setSingleStep(0.1)
+        self.minimum.setSingleStep(0.05)
         self.minimum.setValue(0)
         self.minimum.setDecimals(3)
         self.minimum.setKeyboardTracking(False)
@@ -182,7 +182,7 @@ class Window(QtGui.QMainWindow):
         self.locs = locs[np.all(np.array([np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
         self.color_locs = None
         if hasattr(self.locs, 'group'):
-            valid_locs = self.locs[self.locs.group != 1]
+            valid_locs = self.locs[self.locs.group != -1]
             colors = valid_locs.group % 3
             self.color_locs = [valid_locs[colors == _] for _ in range(3)]
         self.fit_in_view()
