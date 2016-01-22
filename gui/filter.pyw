@@ -87,9 +87,6 @@ class TableView(QtGui.QTableView):
         if extension == '.hdf5':
             self.window.open(path)
 
-    def resizeEvent(self, event):
-        self.window.display_locs(self.window.vertical_scrollbar.value())
-
 
 class PlotWindow(QtGui.QWidget):
 
@@ -328,6 +325,9 @@ class Window(QtGui.QMainWindow):
     def wheelEvent(self, event):
         new_value = self.vertical_scrollbar.value() - 0.1 * event.delta()
         self.vertical_scrollbar.setValue(new_value)
+
+    def resizeEvent(self, event):
+        self.display_locs(self.vertical_scrollbar.value())
 
     def closeEvent(self, event):
         QtGui.qApp.closeAllWindows()
