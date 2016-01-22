@@ -93,7 +93,7 @@ def identify_async(movie, parameters):
     if n_frames < n_cpus:
         n_processes = n_frames
     else:
-        n_processes = 2 * n_cpus
+        n_processes = int(0.75 * n_cpus)
     manager = _multiprocessing.Manager()
     counter = manager.Value('i', 0)
     lock = manager.Lock()
@@ -111,7 +111,7 @@ def identify(movie, parameters, threaded=True):
         if n_frames < n_cpus:
             n_processes = n_frames
         else:
-            n_processes = 2 * n_cpus
+            n_processes = int(0.75 * n_cpus)
         with _multiprocessing.Pool(processes=n_processes) as pool:
             args = [(movie[_], parameters, _) for _ in range(n_frames)]
             identifications = pool.starmap(identify_frame, args)
@@ -176,7 +176,7 @@ def _generate_fit_info(movie, info, identifications, roi):
     likelihoods_pointer = likelihoods.ctypes.data_as(_C_FLOAT_POINTER)
     n_spots = _ctypes.c_ulong(n_spots)
     n_cpus = _multiprocessing.cpu_count()
-    n_threads = _ctypes.c_int(2*n_cpus)
+    n_threads = _ctypes.c_int(int(0.75 * n_cpus))
     current = _np.array(0, dtype=_np.uint32)
     current_pointer = current.ctypes.data_as(_ctypes.POINTER(_ctypes.c_ulong))
     gaussmle_args = (fit_type, spots_pointer, psf_sigma, roi, n_iterations, params_pointer, CRLBs_pointer,
