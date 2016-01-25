@@ -91,6 +91,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.resize(200, 0)
         self.setModal(False)
         vbox = QtGui.QVBoxLayout(self)
+        # Contrast
         contrast_groupbox = QtGui.QGroupBox('Contrast')
         vbox.addWidget(contrast_groupbox)
         contrast_grid = QtGui.QGridLayout(contrast_groupbox)
@@ -102,7 +103,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.minimum.setValue(0)
         self.minimum.setDecimals(3)
         self.minimum.setKeyboardTracking(False)
-        self.minimum.valueChanged.connect(self.on_contrast_changed)
+        self.minimum.valueChanged.connect(self.trigger_rendering)
         contrast_grid.addWidget(self.minimum, 0, 1)
         maximum_label = QtGui.QLabel('Maximum:')
         contrast_grid.addWidget(maximum_label, 1, 0)
@@ -112,8 +113,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.maximum.setValue(0.2)
         self.maximum.setDecimals(3)
         self.maximum.setKeyboardTracking(False)
-        self.maximum.valueChanged.connect(self.on_contrast_changed)
+        self.maximum.valueChanged.connect(self.trigger_rendering)
         contrast_grid.addWidget(self.maximum, 1, 1)
+        # Blur
         blur_groupbox = QtGui.QGroupBox('Blur Method')
         self.blur_buttongroup = QtGui.QButtonGroup()
         self.points_button = QtGui.QRadioButton('Points (fast)')
@@ -127,13 +129,25 @@ class DisplaySettingsDialog(QtGui.QDialog):
         blur_vbox.addWidget(self.convolve_button)
         blur_vbox.addWidget(self.gaussian_button)
         self.convolve_button.setChecked(True)
-        self.blur_buttongroup.buttonReleased.connect(self.on_blur_button_released)
+        self.blur_buttongroup.buttonReleased.connect(self.trigger_rendering)
         vbox.addWidget(blur_groupbox)
+        # Scale bar
+        self.scalebar_groupbox = QtGui.QGroupBox('Scale Bar')
+        self.scalebar_groupbox.setCheckable(True)
+        self.scalebar_groupbox.setChecked(False)
+        self.scalebar_groupbox.toggled.connect(self.trigger_rendering)
+        vbox.addWidget(self.scalebar_groupbox)
+        scalebar_grid = QtGui.QGridLayout(self.scalebar_groupbox)
+        scalebar_grid.addWidget(QtGui.QLabel('Pixel Size:'), 0, 0)
+        self.pixelsize_edit = QtGui.QLineEdit('160')
+        self.pixelsize_edit.editingFinished.connect(self.trigger_rendering)
+        scalebar_grid.addWidget(self.pixelsize_edit, 0, 1)
+        scalebar_grid.addWidget(QtGui.QLabel('Scale Bar Length (nm):'), 1, 0)
+        self.scalebar_edit = QtGui.QLineEdit('500')
+        self.scalebar_edit.editingFinished.connect(self.trigger_rendering)
+        scalebar_grid.addWidget(self.scalebar_edit, 1, 1)
 
-    def on_contrast_changed(self, _):
-        self.window.render()
-
-    def on_blur_button_released(self, _):
+    def trigger_rendering(self, *args):
         self.window.render()
 
 
@@ -157,6 +171,9 @@ class Window(QtGui.QMainWindow):
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
+        save_image_action = file_menu.addAction('Save image')
+        save_image_action.setShortcut('Ctrl+Shift+S')
+        save_image_action.triggered.connect(self.save_image)
         view_menu = menu_bar.addMenu('View')
         display_settings_action = view_menu.addAction('Display Settings')
         display_settings_action.setShortcut('Ctrl+D')
@@ -179,6 +196,7 @@ class Window(QtGui.QMainWindow):
 
     def open(self, path):
         locs, self.info = io.load_locs(path)
+        self.locs_path = path
         self.locs = locs[np.all(np.array([np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
         self.color_locs = None
         if hasattr(self.locs, 'group'):
@@ -229,7 +247,8 @@ class Window(QtGui.QMainWindow):
                 N, image = self.render_image(self.locs, viewport)
             self.status_bar.showMessage('{:,} localizations in FOV'.format(N))
             image = self.to_qimage(image)
-            pixmap = QtGui.QPixmap.fromImage(image)
+            self.image = self.draw_scalebar(image)
+            pixmap = QtGui.QPixmap.fromImage(self.image)
             self.view.setPixmap(pixmap)
 
     def render_image(self, locs, viewport):
@@ -241,6 +260,27 @@ class Window(QtGui.QMainWindow):
         elif button == self.display_settings_dialog.gaussian_button:
             blur_method = 'gaussian'
         return render.render(locs, self.info, oversampling=self.zoom, viewport=viewport, blur_method=blur_method)
+
+    def draw_scalebar(self, image):
+        if self.display_settings_dialog.scalebar_groupbox.isChecked():
+            pixelsize = float(self.display_settings_dialog.pixelsize_edit.text())
+            length_nm = float(self.display_settings_dialog.scalebar_edit.text())
+            length_camerapxl = length_nm / pixelsize
+            length_displaypxl = int(round(self.zoom * length_camerapxl))
+            height = max(int(round(0.15 * length_displaypxl)), 1)
+            painter = QtGui.QPainter(image)
+            painter.setBrush(QtGui.QBrush(QtGui.QColor('white')))
+            x = self.view.width() - length_displaypxl - 20
+            y = self.view.height() - height - 20
+            painter.drawRect(x, y, length_displaypxl + 1, height + 1)
+        return image
+
+    def save_image(self):
+        base, ext = os.path.splitext(self.locs_path)
+        out_path = base + '.png'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save image', out_path, filter='*.png')
+        if path:
+            self.image.save(path)
 
 
 if __name__ == '__main__':
