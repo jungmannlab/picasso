@@ -129,6 +129,7 @@ class TiffFile:
             elif tag == 51123:
                 readout = self._read(type, count)
                 mm_info = _json.loads(readout.decode())
+                # Read out info specifically for Picasso
                 self.info['Camera'] = {'Manufacturer': mm_info['Camera']}
                 if self.info['Camera']['Manufacturer'] == 'Andor':
                     _, type, model, serial_number, _ = (_.strip() for _ in mm_info['Andor-Camera'].split('|'))
@@ -144,6 +145,8 @@ class TiffFile:
                     self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
                 except ValueError:
                     self.info['Excitation Wavelength'] = None
+                # Dump the rest
+                self.info['Micro-Manager Metadata'] = mm_info
         offset = self._first_ifd_offset
         n_frames = 0
         while offset != 0:
