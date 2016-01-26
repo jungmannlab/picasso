@@ -40,6 +40,7 @@ def _undrift(files, segmentation, display):
     if paths:
         from picasso import io, postprocess
         for path in paths:
+            print('Undrifting file {}'.format(path))
             locs, info = io.load_locs(path)
             corrected_locs = postprocess.undrift(locs, info, segmentation, display)
             base, ext = os.path.splitext(path)
