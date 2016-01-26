@@ -42,7 +42,9 @@ def _undrift(files, segmentation, display):
         for path in paths:
             print('Undrifting file {}'.format(path))
             locs, info = io.load_locs(path)
-            corrected_locs = postprocess.undrift(locs, info, segmentation, display)
+            directory = os.path.dirname(os.path.abspath(path))
+            movie, _ = io.load_raw(os.path.join(directory, info[0]['Raw File']))
+            corrected_locs = postprocess.undrift(locs, movie, segmentation, display)
             base, ext = os.path.splitext(path)
             undrift_info = {'Segmentation': segmentation,
                             'Display': display,

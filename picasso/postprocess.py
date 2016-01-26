@@ -28,7 +28,6 @@ _this_file = _ospath.abspath(__file__)
 _this_directory = _ospath.dirname(_this_file)
 _parent_directory = _ospath.dirname(_this_directory)
 _sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
-from picasso import io as _io
 from picasso import lib as _lib
 
 
@@ -53,9 +52,9 @@ def compute_local_density(locs, radius):
         done = 0
         t0 = _time.time()
         while done < N:
-            past = _time.time() - t0
+            dt = _time.time() - t0
             if done > 0:
-                secsleft = N * past / done
+                secsleft = (N - done) * dt / done + 1
                 minleft = int(secsleft / 60)
                 if minleft > 0:
                     msg = '{} mins'.format(minleft)
@@ -284,10 +283,8 @@ def __link_loc_groups(locs, group):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
-def undrift(locs, info, segmentation, display=True):
+def undrift(locs, movie, segmentation, display=True):
     fit_roi = 5
-    movie_file = info[0]['Raw File']
-    movie, _ = _io.load_raw(movie_file)
     frames, Y, X = movie.shape
     n_segments = int(_np.round(frames/segmentation))
     n_pairs = int(n_segments * (n_segments - 1) / 2)
