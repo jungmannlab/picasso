@@ -133,10 +133,10 @@ def _compute_dark_times(locs, last_frame):
     return dark
 
 
-def link(locs, radius, max_dark_time, combine_mode='average'):
+def link(locs, min_prob=0.05, max_dark_time=1, combine_mode='average'):
     locs = locs[_np.all(_np.array([_np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
     locs.sort(kind='mergesort', order='frame')
-    group = get_link_groups(locs, radius, max_dark_time)
+    group = get_link_groups(locs, min_prob, max_dark_time)
     if combine_mode == 'average':
         linked_locs = link_loc_groups(locs, group)
         # TODO: set len to -1 if loc lasts until last frame or starts at first frame
@@ -146,11 +146,13 @@ def link(locs, radius, max_dark_time, combine_mode='average'):
 
 
 @_numba.jit(nopython=True)
-def get_link_groups(locs, radius, max_dark_time):
+def get_link_groups(locs, min_prob, max_dark_time):
     ''' Assumes that locs are sorted by frame '''
     frame = locs.frame
     x = locs.x
     y = locs.y
+    lpx = locs.lpx
+    lpy = locs.lpy
     N = len(x)
     group = -_np.ones(N, dtype=_np.int32)
     current_group = -1
@@ -159,16 +161,16 @@ def get_link_groups(locs, radius, max_dark_time):
             current_group += 1
             group[i] = current_group
             current_index = i
-            next_loc_index_in_group = _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time)
+            next_loc_index_in_group = _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, lpx, lpy, min_prob, max_dark_time)
             while next_loc_index_in_group != -1:
                 group[next_loc_index_in_group] = current_group
                 current_index = next_loc_index_in_group
-                next_loc_index_in_group = _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time)
+                next_loc_index_in_group = _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, lpx, lpy, min_prob, max_dark_time)
     return group
 
 
 @_numba.jit(nopython=True)
-def _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radius, max_dark_time):
+def _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, lpx, lpy, min_prob, max_dark_time):
     current_frame = frame[current_index]
     current_x = x[current_index]
     current_y = y[current_index]
@@ -180,12 +182,15 @@ def _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, radi
     for max_index in range(min_index + 1, N):
         if frame[max_index] > max_frame:
             break
+    current_lpx = lpx[current_index]
+    current_lpy = lpy[current_index]
     for j in range(min_index, max_index):
         if group[j] == -1:
-            if (abs(current_x - x[j]) < radius) and (abs(current_y - y[j]) < radius):
-                distance_to_current = _np.sqrt((current_x - x[j])**2 + (current_y - y[j])**2)
-                if distance_to_current < radius:
-                    return j
+            dx2 = (current_x - x[j])**2
+            dy2 = (current_y - y[j])**2
+            prob_of_same = _np.exp(-(dx2/(2*current_lpx) + dy2/(2*current_lpy)) - (dx2/(2*lpx[j]) + dy2/(2*lpy[j])))
+            if prob_of_same > min_prob:
+                return j
     return -1
 
 
