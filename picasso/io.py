@@ -19,17 +19,16 @@ import json as _json
 
 
 def to_little_endian(movie, info):
-    if info['Byte Order'] == '>':
+    if info[0]['Byte Order'] == '>':
         movie = movie.byteswap()
-        info['Byte Order'] = '<'
+        info[0]['Byte Order'] = '<'
     return movie, info
 
 
 def load_raw(path, memory_map=True):
     info = load_info(path)
-    info = info[0]
-    dtype = _np.dtype(info['Data Type'])
-    shape = (info['Frames'], info['Height'], info['Width'])
+    dtype = _np.dtype(info[0]['Data Type'])
+    shape = (info[0]['Frames'], info[0]['Height'], info[0]['Width'])
     if memory_map:
         movie = _np.memmap(path, dtype, 'r', shape=shape)
     else:
