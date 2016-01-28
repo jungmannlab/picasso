@@ -13,7 +13,7 @@ from matplotlib.widgets import RectangleSelector as _RectangleSelector
 _plt.style.use('ggplot')
 
 
-def split(movie, info, frame=0, rectangle=None):
+def split(movie, info, frame=0, max=0.9, rectangle=None):
     if rectangle:
         pass
     else:
@@ -37,7 +37,7 @@ def split(movie, info, frame=0, rectangle=None):
 
         f = _plt.figure(figsize=(12, 12))
         ax = f.add_subplot(111)
-        ax.matshow(movie[frame], cmap='viridis', vmax=0.9*movie[frame].max())
+        ax.matshow(movie[frame], cmap='viridis', vmax=max*movie[frame].max())
         ax.grid(False)
         selector = _RectangleSelector(ax, on_split_select, useblit=True, rectprops=dict(edgecolor='red', fill=False))
         _plt.show()

@@ -182,6 +182,7 @@ if __name__ == '__main__':
     split_parser = subparsers.add_parser('split', help='split subregions of a movie')
     split_parser.add_argument('files', help='one or multiple raw files, specified by a unix style path pattern')
     split_parser.add_argument('-f', '--frame', help='the frame to be displayed (default=0)', default=0, type=int)
+    split_parser.add_argument('-m', '--max', help='contrast setting (0.0 -1.0) (default=0.9)', default=0.9, type=float)
 
     # Parse
     args = parser.parse_args()
@@ -202,6 +203,6 @@ if __name__ == '__main__':
         elif args.command == 'std':
             _std(args.files)
         elif args.command == 'split':
-            _split(args.files, args.frame)
+            _split(args.files, args.frame, args.max)
     else:
         parser.print_help()
