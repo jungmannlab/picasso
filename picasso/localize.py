@@ -134,6 +134,8 @@ def _get_spots(movie, ids_frame, ids_x, ids_y, roi):
 
 def _to_photons(spots, info):
     spots = _np.float32(spots)
+    if info['Camera'] == 'Andor Zyla':
+        return spots - 100
     if info['Camera']['Manufacturer'] == 'Andor':
         type = info['Camera']['Type']
         model = info['Camera']['Model']

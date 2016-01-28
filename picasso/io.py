@@ -127,11 +127,12 @@ class TiffFile:
             elif tag == 279:
                 self.image_byte_count = self._read(type, count)
             elif tag == 51123:
-                readout = self._read(type, count)
+                readout = self._read(type, count).strip(b'\0')      # Strip null bytes which MM 1.4.22 adds
                 mm_info = _json.loads(readout.decode())
                 # Read out info specifically for Picasso
-                self.info['Camera'] = {'Manufacturer': mm_info['Camera']}
-                if self.info['Camera']['Manufacturer'] == 'Andor':
+                camera_name = mm_info['Camera']
+                if camera_name == 'Andor':
+                    self.info['Camera'] = {'Manufacturer': camera_name}
                     _, type, model, serial_number, _ = (_.strip() for _ in mm_info['Andor-Camera'].split('|'))
                     self.info['Camera']['Type'] = type
                     self.info['Camera']['Model'] = model
@@ -141,9 +142,11 @@ class TiffFile:
                     self.info['EM Real Gain'] = int(mm_info['Andor-Gain'])
                     self.info['Pre-Amp Gain'] = int(mm_info['Andor-Pre-Amp-Gain'].split()[1])
                     self.info['Readout Mode'] = mm_info['Andor-ReadoutMode']
+                elif camera_name in ['Andor Zyla', 'Andor sCMOS Camera']:
+                    self.info['Camera'] = 'Andor Zyla'
                 try:
                     self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
-                except ValueError:
+                except (ValueError, KeyError):
                     self.info['Excitation Wavelength'] = None
                 # Dump the rest
                 self.info['Micro-Manager Metadata'] = mm_info
