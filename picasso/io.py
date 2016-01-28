@@ -198,7 +198,7 @@ def get_movie_groups(paths):
         path = paths[0]
         if path.endswith('.ome.tif'):
             path_base = path[0:-8]
-            pattern = r'{}'.format(path_base + '_([0-9]).ome.tif')
+            pattern = r'{}'.format(path_base + '_([0-9]+).ome.tif')
             matches = [_re.match(pattern, _) for _ in paths]
             group = [path] + [_.group() for _ in matches if _]
             groups.append(group)
