@@ -18,7 +18,7 @@ def calculate_optimal_bins(data, max_n_bins=None):
     bin_size = 2 * iqr * len(data)**(-1/3)
     if data.dtype.kind in ('u', 'i') and bin_size < 1:
         bin_size = 1
-    bin_min = max(data.min() - bin_size / 2, 0)
+    bin_min = data.min() - bin_size / 2
     n_bins = int(_np.ceil((data.max() - bin_min) / bin_size))
     if max_n_bins and n_bins > max_n_bins:
         n_bins = max_n_bins

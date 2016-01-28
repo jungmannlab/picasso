@@ -19,17 +19,16 @@ import json as _json
 
 
 def to_little_endian(movie, info):
-    if info['Byte Order'] == '>':
+    if info[0]['Byte Order'] == '>':
         movie = movie.byteswap()
-        info['Byte Order'] = '<'
+        info[0]['Byte Order'] = '<'
     return movie, info
 
 
 def load_raw(path, memory_map=True):
     info = load_info(path)
-    info = info[0]
-    dtype = _np.dtype(info['Data Type'])
-    shape = (info['Frames'], info['Height'], info['Width'])
+    dtype = _np.dtype(info[0]['Data Type'])
+    shape = (info[0]['Frames'], info[0]['Height'], info[0]['Width'])
     if memory_map:
         movie = _np.memmap(path, dtype, 'r', shape=shape)
     else:
@@ -198,7 +197,7 @@ def get_movie_groups(paths):
         path = paths[0]
         if path.endswith('.ome.tif'):
             path_base = path[0:-8]
-            pattern = r'{}'.format(path_base + '_([0-9]).ome.tif')
+            pattern = r'{}'.format(path_base + '_([0-9]+).ome.tif')
             matches = [_re.match(pattern, _) for _ in paths]
             group = [path] + [_.group() for _ in matches if _]
             groups.append(group)

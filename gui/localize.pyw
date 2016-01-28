@@ -374,7 +374,8 @@ class Window(QtGui.QMainWindow):
 
     def open(self, path):
         try:
-            self.movie, self.info = io.load_raw(path, memory_map=True)
+            self.movie, info = io.load_raw(path, memory_map=True)
+            self.info = info[0]
             self.movie_path = path
             self.identifications = None
             self.locs = None
