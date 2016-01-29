@@ -40,6 +40,9 @@ def split(movie, info, frame=0, vmax=0.9, rectangle=None):
         ax.grid(False)
         selector = _RectangleSelector(ax, on_split_select, useblit=True, rectprops=dict(edgecolor='red', fill=False))
         _plt.show()
-        return subregions, shifts, infos
+        wavelengths = []
+        for i in range(len(shifts)):
+            wavelengths.append(int(input('Excitation wavelength for region {}? '.format(i))))
+        return subregions, shifts, infos, wavelengths
     else:
         pass
