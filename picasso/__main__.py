@@ -113,7 +113,7 @@ def _std(files):
             imsave(base + '_std.tif', std_image)
 
 
-def _split(files, frame):
+def _split(files, frame, max):
     import glob
     paths = glob.glob(files)
     if paths:
@@ -122,7 +122,7 @@ def _split(files, frame):
         from picasso.imageprocess import split
         for path in paths:
             movie, info = load_raw(path)
-            splits = split(movie, info)
+            splits = split(movie, info, vmax=max)
             base, ext = splitext(path)
             for i, (subregion, shift, info) in enumerate(zip(*splits)):
                 subregion_base = base + '_split{:03d}'.format(i)

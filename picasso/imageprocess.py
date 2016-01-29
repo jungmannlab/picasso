@@ -8,15 +8,14 @@
 """
 import matplotlib.pyplot as _plt
 from matplotlib.widgets import RectangleSelector as _RectangleSelector
+import copy as _copy
 
 
 _plt.style.use('ggplot')
 
 
-def split(movie, info, frame=0, max=0.9, rectangle=None):
-    if rectangle:
-        pass
-    else:
+def split(movie, info, frame=0, vmax=0.9, rectangle=None):
+    if rectangle is None:
         subregions = []
         shifts = []
         infos = []
@@ -30,15 +29,17 @@ def split(movie, info, frame=0, max=0.9, rectangle=None):
             ymax = int(max(y1, y2) + 0.5)
             subregions.append(movie[:, ymin:ymax+1, xmin:xmax+1])
             shifts.append((ymin, xmin))
-            subregion_info = info[:]
+            subregion_info = _copy.deepcopy(info)
             subregion_info[0]['Height'] = ymax - ymin + 1
             subregion_info[0]['Width'] = xmax - xmin + 1
             infos.append(subregion_info)
 
         f = _plt.figure(figsize=(12, 12))
         ax = f.add_subplot(111)
-        ax.matshow(movie[frame], cmap='viridis', vmax=max*movie[frame].max())
+        ax.matshow(movie[frame], cmap='viridis', vmax=vmax*movie[frame].max())
         ax.grid(False)
         selector = _RectangleSelector(ax, on_split_select, useblit=True, rectprops=dict(edgecolor='red', fill=False))
         _plt.show()
         return subregions, shifts, infos
+    else:
+        pass
