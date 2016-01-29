@@ -33,8 +33,39 @@ class View(QtGui.QGraphicsView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)
+        # self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)      # should change this to rubberband for zooming
         self.setAcceptDrops(True)
+        self.pan = False
+        self.hscrollbar = self.horizontalScrollBar()
+        self.vscrollbar = self.verticalScrollBar()
+
+    def mousePressEvent(self, event):
+        if event.button() == QtCore.Qt.RightButton:
+            self.pan = True
+            self.pan_start_x = event.x()
+            self.pan_start_y = event.y()
+            self.setCursor(QtCore.Qt.ClosedHandCursor)
+            event.accept()
+        else:
+            event.ignore()
+
+    def mouseMoveEvent(self, event):
+        if self.pan:
+            self.hscrollbar.setValue(self.hscrollbar.value() - event.x() + self.pan_start_x)
+            self.vscrollbar.setValue(self.vscrollbar.value() - event.y() + self.pan_start_y)
+            self.pan_start_x = event.x()
+            self.pan_start_y = event.y()
+            event.accept()
+        else:
+            event.ignore()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == QtCore.Qt.RightButton:
+            self.pan = False
+            self.setCursor(QtCore.Qt.ArrowCursor)
+            event.accept()
+        else:
+            event.ignore()
 
     def wheelEvent(self, event):
         """ Implements zoooming with the mouse wheel """
