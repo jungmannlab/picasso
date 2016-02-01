@@ -29,6 +29,7 @@ _this_directory = _ospath.dirname(_this_file)
 _parent_directory = _ospath.dirname(_this_directory)
 _sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
 from picasso import lib as _lib
+from picasso import render as _render
 
 
 def dbscan(locs, radius, min_density):
@@ -288,17 +289,25 @@ def __link_loc_groups(locs, group):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
-def undrift(locs, movie, segmentation, display=True):
+def undrift(locs, movie, segmentation, mode='std', info=None, display=True):
     fit_roi = 5
     frames, Y, X = movie.shape
     n_segments = int(_np.round(frames/segmentation))
     n_pairs = int(n_segments * (n_segments - 1) / 2)
     bounds = _np.linspace(0, frames-1, n_segments+1, dtype=_np.uint32)
     segments = _np.zeros((n_segments, movie.shape[1], movie.shape[1]))
-    with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
-        for i in range(n_segments):
-            progress_bar.update()
-            segments[i] = _np.std(movie[bounds[i]:bounds[i+1]], axis=0)
+
+    if mode == 'std':
+        with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
+            for i in range(n_segments):
+                progress_bar.update()
+                segments[i] = _np.std(movie[bounds[i]:bounds[i+1]], axis=0)
+    elif mode == 'render':
+        with _tqdm(total=n_segments, desc='Generating segments', unit='segements') as progress_bar:
+            for i in range(n_segments):
+                progress_bar.update()
+                segment_locs = locs[(locs.frame > bounds[i]) & (locs.frame < bounds[i+1])]
+                _, segments[i] = _render.render(segment_locs, info, oversampling=2, blur_method='gaussian', blur_width=0.5)
     fit_X = int(fit_roi/2)
     y, x = _np.mgrid[-fit_X:fit_X+1, -fit_X:fit_X+1]
     Y_ = Y / 4

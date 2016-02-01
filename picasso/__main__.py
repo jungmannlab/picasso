@@ -34,7 +34,7 @@ def _link(files, min_prob, tolerance):
             io.save_locs(base + '_link.hdf5', linked_locs, info)
 
 
-def _undrift(files, segmentation, display):
+def _undrift(files, segmentation, mode, display):
     import glob
     paths = glob.glob(files)
     if paths:
@@ -44,7 +44,7 @@ def _undrift(files, segmentation, display):
             locs, info = io.load_locs(path)
             directory = os.path.dirname(os.path.abspath(path))
             movie, _ = io.load_raw(os.path.join(directory, info[0]['Raw File']))
-            corrected_locs = postprocess.undrift(locs, movie, segmentation, display)
+            corrected_locs = postprocess.undrift(locs, movie, segmentation, mode=mode, info=info, display=display)
             base, ext = os.path.splitext(path)
             undrift_info = {'Segmentation': segmentation,
                             'Display': display,
@@ -158,6 +158,7 @@ if __name__ == '__main__':
     undrift_parser.add_argument('files', help='one or multiple hdf5 localization files specified by a unix style path pattern')
     undrift_parser.add_argument('-s', '--segmentation', type=float, default=1000,
                                 help='the number of frames to be combined for one temporal segment (default=1000)')
+    undrift_parser.add_argument('-m', '--mode', default='std', help='mode of segment creation ("std" or "render")')
     undrift_parser.add_argument('-d', '--nodisplay', action='store_false', help='do not display estimated drift')
 
     # local density
@@ -194,7 +195,7 @@ if __name__ == '__main__':
         elif args.command == 'link':
             _link(args.files, args.probability, args.tolerance)
         elif args.command == 'undrift':
-            _undrift(args.files, args.segmentation, args.nodisplay)
+            _undrift(args.files, args.segmentation, args.mode, args.nodisplay)
         elif args.command == 'density':
             _density(args.files, args.radius)
         elif args.command == 'dbscan':

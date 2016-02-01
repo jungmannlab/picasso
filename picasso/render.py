@@ -11,7 +11,7 @@ import numba as _numba
 import scipy.signal as _signal
 
 
-def render(locs, info, oversampling=1, viewport=None, blur_method=None):
+def render(locs, info, oversampling=1, viewport=None, blur_method=None, blur_width=None):
     if viewport is None:
         viewport = [(0, 0), (info[0]['Width'], info[0]['Height'])]
     (y_min, x_min), (y_max, x_max) = viewport
@@ -35,26 +35,35 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None):
         x = _np.int32(x)
         y = _np.int32(y)
         image = _fill(image, x, y)
-        lpy = locs.lpy
-        lpx = locs.lpx
-        lpy = lpy[in_view]
-        lpx = lpx[in_view]
-        lpy = oversampling * _np.median(lpy)
-        lpx = oversampling * _np.median(lpx)
-        kernel_height = 10 * int(_np.round(lpy)) + 1
-        kernel_width = 10 * int(_np.round(lpx)) + 1
-        kernel_y = _signal.gaussian(kernel_height, lpy)
-        kernel_x = _signal.gaussian(kernel_width, lpx)
-        kernel = _np.outer(kernel_y, kernel_x)
+        if blur_width is None:
+            lpy = locs.lpy
+            lpx = locs.lpx
+            lpy = lpy[in_view]
+            lpx = lpx[in_view]
+            lpy = oversampling * _np.median(lpy)
+            lpx = oversampling * _np.median(lpx)
+            kernel_height = 10 * int(_np.round(lpy)) + 1
+            kernel_width = 10 * int(_np.round(lpx)) + 1
+            kernel_y = _signal.gaussian(kernel_height, lpy)
+            kernel_x = _signal.gaussian(kernel_width, lpx)
+            kernel = _np.outer(kernel_y, kernel_x)
+        else:
+            blur_width *= oversampling
+            kernel_size = 10 * round(blur_width) + 1
+            kernel = _signal.gaussian(kernel_size, blur_width)
+            kernel = _np.outer(kernel, kernel)
         image = _signal.fftconvolve(image, kernel, mode='same')
         image = len(locs) * image / image.sum()
         return len(x), image
     elif blur_method == 'gaussian':
-        lpy = locs.lpy
-        lpx = locs.lpx
-        lpy = oversampling * lpy[in_view]
-        lpx = oversampling * lpx[in_view]
-        return len(x), _fill_gaussians(image, x, y, lpx, lpy)
+        if blur_width is None:
+            lpy = locs.lpy
+            lpx = locs.lpx
+            lpy = oversampling * lpy[in_view]
+            lpx = oversampling * lpx[in_view]
+        else:
+            s = oversampling * blur_width * _np.ones(len(locs))
+        return len(x), _fill_gaussians(image, x, y, s, s)
     else:
         raise Exception('blur_method not understood.')
 
@@ -67,24 +76,24 @@ def _fill(image, x, y):
 
 
 @_numba.jit(nopython=True)
-def _fill_gaussians(image, x, y, lpx, lpy):
+def _fill_gaussians(image, x, y, sx, sy):
     Y, X = image.shape
-    for x_, y_, lpx_, lpy_ in zip(x, y, lpx, lpy):
-        lpy_3 = 3 * lpy_
-        i_min = _np.int32(y_ - lpy_3)
+    for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
+        sy_3 = 3 * sy_
+        i_min = _np.int32(y_ - sy_3)
         if i_min < 0:
             i_min = 0
-        i_max = _np.int32(y_ + lpy_3 + 1)
+        i_max = _np.int32(y_ + sy_3 + 1)
         if i_max > Y:
             i_max = Y
-        lpx_3 = 3 * lpx_
-        j_min = _np.int32(x_ - lpx_3)
+        sx_3 = 3 * sx_
+        j_min = _np.int32(x_ - sx_3)
         if j_min < 0:
             j_min = 0
-        j_max = _np.int32(x_ + lpx_3) + 1
+        j_max = _np.int32(x_ + sx_3) + 1
         if j_max > X:
             j_max = X
         for i in range(i_min, i_max):
             for j in range(j_min, j_max):
-                image[i, j] += _np.exp(-((j - x_)**2/(2 * lpx_**2) + (i - y_)**2/(2 * lpy_**2))) / (2 * _np.pi * lpx_ * lpy_)
+                image[i, j] += _np.exp(-((j - x_)**2/(2 * sx_**2) + (i - y_)**2/(2 * sy_**2))) / (2 * _np.pi * sx_ * sy_)
     return image
