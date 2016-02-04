@@ -180,7 +180,7 @@ class Window(QtGui.QMainWindow):
         display_settings_action.triggered.connect(self.display_settings_dialog.show)
         view_menu.addAction(display_settings_action)
         self.status_bar = self.statusBar()
-        self.locs = None
+        self.locs = []
 
     def fit_in_view(self):
         center = (self.info[0]['Height'] / 2, self.info[0]['Width'] / 2)
@@ -195,15 +195,14 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        locs, self.info = io.load_locs(path)
-        self.locs_path = path
-        self.locs = locs[np.all(np.array([np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
-        self.color_locs = None
-        if hasattr(self.locs, 'group'):
-            valid_locs = self.locs[self.locs.group != -1]
-            colors = valid_locs.group % 3
-            self.color_locs = [valid_locs[colors == _] for _ in range(3)]
-        self.fit_in_view()
+        if len(self.locs) < 3:
+            locs, self.info = io.load_locs(path)
+            self.locs_path = path
+            locs = locs[np.all(np.array([np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
+            self.locs.append(locs)
+            self.fit_in_view()
+        else:
+            raise Exception('Maximum number of channels is 3.')
 
     def to_qimage(self, image):
         minimum = float(self.display_settings_dialog.minimum.value())
@@ -218,14 +217,16 @@ class Window(QtGui.QMainWindow):
         if image.ndim == 2:
             self._bgra[..., 1] = image
         elif image.ndim == 3:
-            self._bgra[..., 0] = image[2]
             self._bgra[..., 1] = image[0]
             self._bgra[..., 2] = image[1]
+            if len(image) > 2:
+                self._bgra[..., 0] = image[2]
         self._bgra[..., 3].fill(255)
         return QtGui.QImage(self._bgra.data, width, height, QtGui.QImage.Format_RGB32)
 
     def render(self, center=None, zoom=None):
-        if self.locs is not None:
+        n_channels = len(self.locs)
+        if n_channels:
             if center:
                 self.center = center
             if zoom:
@@ -239,17 +240,30 @@ class Window(QtGui.QMainWindow):
             min_x = self.center[1] - image_width / 2
             max_x = min_x + image_width
             viewport = [(min_y, min_x), (max_y, max_x)]
-            if self.color_locs:
-                rendering = [self.render_image(_, viewport) for _ in self.color_locs]
-                image = np.array([_[1] for _ in rendering])
-                N = sum([_[0] for _ in rendering])
+            if n_channels == 1:
+                locs = self.locs[0]
+                if hasattr(locs, 'group'):
+                    valid_locs = locs[locs.group != -1]
+                    colors = valid_locs.group % 3
+                    color_locs = [valid_locs[colors == _] for _ in range(3)]
+                    N, image = self.render_colors(color_locs, viewport)
+                else:
+                    N, image = self.render_image(locs, viewport)
+            elif n_channels == 2 or n_channels == 3:
+                N, image = self.render_colors(self.locs, viewport)
             else:
-                N, image = self.render_image(self.locs, viewport)
+                raise Exception('Cannot display more than 3 channels.')
             self.status_bar.showMessage('{:,} localizations in FOV'.format(N))
             image = self.to_qimage(image)
             self.image = self.draw_scalebar(image)
             pixmap = QtGui.QPixmap.fromImage(self.image)
             self.view.setPixmap(pixmap)
+
+    def render_colors(self, color_locs, viewport):
+        rendering = [self.render_image(_, viewport) for _ in color_locs]
+        image = np.array([_[1] for _ in rendering])
+        N = np.sum([_[0] for _ in rendering])
+        return N, image
 
     def render_image(self, locs, viewport):
         button = self.display_settings_dialog.blur_buttongroup.checkedButton()
