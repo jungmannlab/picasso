@@ -21,9 +21,6 @@ sys.path.insert(0, _parent_directory)    # We want to use the local picasso inst
 from picasso import io, render
 
 
-import time
-
-
 class View(QtGui.QLabel):
 
     def __init__(self, window):
@@ -250,7 +247,10 @@ class Window(QtGui.QMainWindow):
             self.locs_path = path
             locs = locs[np.all(np.array([np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
             self.locs.append(locs)
-            self.fit_in_view()
+            if len(self.locs) > 1:
+                self.render()
+            else:
+                self.fit_in_view()
         else:
             raise Exception('Maximum number of channels is 3.')
 
