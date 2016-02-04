@@ -21,6 +21,9 @@ sys.path.insert(0, _parent_directory)    # We want to use the local picasso inst
 from picasso import io, render
 
 
+import time
+
+
 class View(QtGui.QLabel):
 
     def __init__(self, window):
@@ -30,6 +33,7 @@ class View(QtGui.QLabel):
         self.setSizePolicy(QtGui.QSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Ignored))
         self.rubberband = QtGui.QRubberBand(QtGui.QRubberBand.Rectangle, self)
         self.rubberband.setStyleSheet('selection-background-color: white')
+        self.pan = False
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -50,10 +54,24 @@ class View(QtGui.QLabel):
                 self.origin = QtCore.QPoint(event.pos())
                 self.rubberband.setGeometry(QtCore.QRect(self.origin, QtCore.QSize()))
                 self.rubberband.show()
+        elif event.button() == QtCore.Qt.RightButton:
+            self.pan = True
+            self.pan_start_x = event.x()
+            self.pan_start_y = event.y()
+            self.setCursor(QtCore.Qt.ClosedHandCursor)
+            event.accept()
+        else:
+            event.ignore()
 
     def mouseMoveEvent(self, event):
         if self.rubberband.isVisible():
             self.rubberband.setGeometry(QtCore.QRect(self.origin, event.pos()))
+        if self.pan:
+            new_x = self.window.center[1] - (event.x() - self.pan_start_x) / self.window.zoom
+            new_y = self.window.center[0] - (event.y() - self.pan_start_y) / self.window.zoom
+            self.window.render((new_y, new_x))
+            self.pan_start_x = event.x()
+            self.pan_start_y = event.y()
 
     def mouseReleaseEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton and self.rubberband.isVisible():
@@ -71,6 +89,12 @@ class View(QtGui.QLabel):
                 zoom = self.window.zoom * min(self.window.view.height() / selection_height, self.window.view.width() / selection_width)
                 self.window.render(center, zoom)
             self.rubberband.hide()
+        elif event.button() == QtCore.Qt.RightButton:
+            self.pan = False
+            self.setCursor(QtCore.Qt.ArrowCursor)
+            event.accept()
+        else:
+            event.ignore()
 
     def resizeEvent(self, event):
         old_size = event.oldSize()
@@ -179,6 +203,32 @@ class Window(QtGui.QMainWindow):
         display_settings_action.setShortcut('Ctrl+D')
         display_settings_action.triggered.connect(self.display_settings_dialog.show)
         view_menu.addAction(display_settings_action)
+        view_menu.addSeparator()
+        to_left_action = view_menu.addAction('Left')
+        to_left_action.setShortcut('Left')
+        to_left_action.triggered.connect(self.to_left)
+        to_right_action = view_menu.addAction('Right')
+        to_right_action.setShortcut('Right')
+        to_right_action.triggered.connect(self.to_right)
+        to_up_action = view_menu.addAction('Up')
+        to_up_action.setShortcut('Up')
+        to_up_action.triggered.connect(self.to_up)
+        to_down_action = view_menu.addAction('Down')
+        to_down_action.setShortcut('Down')
+        to_down_action.triggered.connect(self.to_down)
+        view_menu.addSeparator()
+        zoom_in_action = view_menu.addAction('Zoom in')
+        zoom_in_action.setShortcuts(['Ctrl++', 'Ctrl+='])
+        zoom_in_action.triggered.connect(self.zoom_in)
+        view_menu.addAction(zoom_in_action)
+        zoom_out_action = view_menu.addAction('Zoom out')
+        zoom_out_action.setShortcut('Ctrl+-')
+        zoom_out_action.triggered.connect(self.zoom_out)
+        view_menu.addAction(zoom_out_action)
+        fit_in_view_action = view_menu.addAction('Fit image to window')
+        fit_in_view_action.setShortcut('Ctrl+W')
+        fit_in_view_action.triggered.connect(self.fit_in_view)
+        view_menu.addAction(fit_in_view_action)
         self.status_bar = self.statusBar()
         self.locs = []
 
@@ -295,6 +345,28 @@ class Window(QtGui.QMainWindow):
         path = QtGui.QFileDialog.getSaveFileName(self, 'Save image', out_path, filter='*.png')
         if path:
             self.image.save(path)
+
+    def to_left(self):
+        new_x = self.center[1] - 0.8 * self.view.width() / self.zoom
+        self.render(center=(self.center[0], new_x))
+
+    def to_right(self):
+        new_x = self.center[1] + 0.8 * self.view.width() / self.zoom
+        self.render(center=(self.center[0], new_x))
+
+    def to_up(self):
+        new_y = self.center[0] - 0.8 * self.view.height() / self.zoom
+        self.render(center=(new_y, self.center[1]))
+
+    def to_down(self):
+        new_y = self.center[0] + 0.8 * self.view.height() / self.zoom
+        self.render(center=(new_y, self.center[1]))
+
+    def zoom_in(self):
+        self.render(zoom=10*self.zoom/7)
+
+    def zoom_out(self):
+        self.render(zoom=7*self.zoom/10)
 
 
 if __name__ == '__main__':
