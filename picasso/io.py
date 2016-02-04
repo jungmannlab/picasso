@@ -150,7 +150,7 @@ class TiffFile:
                     except IndexError:      # In case gain is specified in the format "5x"
                         self.info['Pre-Amp Gain'] = str(mm_info['Andor-Pre-Amp-Gain']) + ' (CONVERT TO INDEX!)'
                     self.info['Readout Mode'] = mm_info['Andor-ReadoutMode']
-                elif camera_name in ['Andor Zyla', 'Andor sCMOS Camera']:
+                elif camera_name in ['Andor Zyla', 'Andor sCMOS Camera', 'Zyla4.2']:
                     self.info['Camera'] = 'Andor Zyla'
                 try:
                     self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
