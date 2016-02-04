@@ -13,7 +13,6 @@ from sklearn.cluster import DBSCAN as _DBSCAN
 import os.path as _ospath
 import sys as _sys
 from tqdm import tqdm as _tqdm
-import lmfit as _lmfit
 from scipy import interpolate as _interpolate
 import matplotlib.pyplot as _plt
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
@@ -30,6 +29,7 @@ _parent_directory = _ospath.dirname(_this_directory)
 _sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
 from picasso import lib as _lib
 from picasso import render as _render
+from picasso import imageprocess as _imageprocess
 
 
 def dbscan(locs, radius, min_density):
@@ -293,7 +293,6 @@ def __link_loc_groups(locs, group):
 
 
 def undrift(locs, movie, segmentation, mode='std', info=None, display=True):
-    fit_roi = 5
     frames, Y, X = movie.shape
     n_segments = int(_np.round(frames/segmentation))
     n_pairs = int(n_segments * (n_segments - 1) / 2)
@@ -311,48 +310,18 @@ def undrift(locs, movie, segmentation, mode='std', info=None, display=True):
                 progress_bar.update()
                 segment_locs = locs[(locs.frame > bounds[i]) & (locs.frame < bounds[i+1])]
                 _, segments[i] = _render.render(segment_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
-    fit_X = int(fit_roi/2)
-    y, x = _np.mgrid[-fit_X:fit_X+1, -fit_X:fit_X+1]
-    Y_ = Y / 4
-    X_ = X / 4
+
     rij = _np.zeros((n_pairs, 2))
     A = _np.zeros((n_pairs, n_segments - 1))
     flag = 0
 
-    def _gaussian2d(a, xc, yc, s, b):
-        A = a * _np.exp(-0.5 * ((x - xc)**2 + (y - yc)**2) / s**2) + b
-        return A.flatten()
-    gaussian2d = _lmfit.Model(_gaussian2d, name='2D Gaussian', independent_vars=[])
-
-    def fit_gaussian(I):
-        I_ = I[Y_:-Y_, X_:-X_]
-        y_max, x_max = _np.unravel_index(I_.argmax(), I_.shape)
-        y_max += Y_
-        x_max += X_
-        I_ = I[y_max-fit_X:y_max+fit_X+1, x_max-fit_X:x_max+fit_X+1]
-        params = _lmfit.Parameters()
-        params.add('a', value=I_.max(), vary=True, min=0)
-        params.add('xc', value=0, vary=True)
-        params.add('yc', value=0, vary=True)
-        params.add('s', value=1, vary=True, min=0)
-        params.add('b', value=I_.min(), vary=True, min=0)
-        results = gaussian2d.fit(I_.flatten(), params)
-        xc = results.best_values['xc']
-        yc = results.best_values['yc']
-        xc += x_max
-        yc += y_max
-        return yc, xc
-
     with _tqdm(total=n_pairs, desc='Correlating segment pairs', unit='pairs') as progress_bar:
         for i in range(n_segments - 1):
-            autocorr = _lib.xcorr_fft(segments[i], segments[i])
-            cyii, cxii = fit_gaussian(autocorr)
             for j in range(i+1, n_segments):
                 progress_bar.update()
-                xcorr = _lib.xcorr_fft(segments[i], segments[j])
-                cyij, cxij = fit_gaussian(xcorr)
-                rij[flag, 0] = cyii - cyij
-                rij[flag, 1] = cxii - cxij
+                dyij, dxij = _imageprocess.get_image_shift(segments[i], segments[j], 0.25, 5)
+                rij[flag, 0] = dyij
+                rij[flag, 1] = dxij
                 A[flag, i:j] = 1
                 flag += 1
 
@@ -390,4 +359,13 @@ def undrift(locs, movie, segmentation, mode='std', info=None, display=True):
 
     locs.x -= drift_x_inter[locs.frame]
     locs.y -= drift_y_inter[locs.frame]
+    return locs
+
+
+def align(target_locs, target_info, locs, info):
+    N_target, target_image = _render.render(target_locs, target_info, blur_method='gaussian', blur_width=1)
+    N, image = _render.render(locs, info, blur_method='gaussian', blur_width=1)
+    dy, dx = _imageprocess.get_image_shift(target_image, image, 0.25, 5)
+    locs.y -= dy
+    locs.x -= dx
     return locs
