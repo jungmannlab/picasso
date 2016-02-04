@@ -213,6 +213,7 @@ def _link_loc_groups(locs, group):
     bg_ = _np.zeros(N_linked, dtype=_np.float32)
     lpx_ = _np.zeros(N_linked, dtype=_np.float32)
     lpy_ = _np.zeros(N_linked, dtype=_np.float32)
+    likelihood_ = _np.zeros(N_linked, dtype=_np.float32)
     len_ = _np.zeros(N_linked, dtype=_np.uint32)
     n_ = _np.zeros(N_linked, dtype=_np.uint32)
     last_frame_ = _np.zeros(N_linked, dtype=_np.uint32)
@@ -232,6 +233,7 @@ def _link_loc_groups(locs, group):
         sx_[i_] += locs.sx[i]
         sy_[i_] += locs.sy[i]
         bg_[i_] += locs.bg[i]
+        likelihood_[i_] += locs.likelihood[i]
         if locs.frame[i] < frame_[i_]:
             frame_[i_] = locs.frame[i]
         if locs.frame[i] > last_frame_[i_]:
@@ -243,8 +245,9 @@ def _link_loc_groups(locs, group):
     bg_ = bg_ / n_
     lpx_ = _np.sqrt(1/sum_weights_x_)
     lpy_ = _np.sqrt(1/sum_weights_y_)
+    likelihood_ = likelihood_ / n_
     len_ = last_frame_ - frame_ + 1
-    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
+    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, len_, n_
 
 
 @_numba.jit(nopython=True)
@@ -307,7 +310,7 @@ def undrift(locs, movie, segmentation, mode='std', info=None, display=True):
             for i in range(n_segments):
                 progress_bar.update()
                 segment_locs = locs[(locs.frame > bounds[i]) & (locs.frame < bounds[i+1])]
-                _, segments[i] = _render.render(segment_locs, info, oversampling=2, blur_method='gaussian', blur_width=0.5)
+                _, segments[i] = _render.render(segment_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
     fit_X = int(fit_roi/2)
     y, x = _np.mgrid[-fit_X:fit_X+1, -fit_X:fit_X+1]
     Y_ = Y / 4
