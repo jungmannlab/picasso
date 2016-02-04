@@ -16,6 +16,7 @@ import h5py as _h5py
 import re as _re
 import struct as _struct
 import json as _json
+from pprint import pprint as _pprint
 
 
 def to_little_endian(movie, info):
@@ -55,7 +56,8 @@ class TiffFile:
     TIFF_TYPES = {1: 'B', 2: 'c', 3: 'H', 4: 'L', 5: 'RATIONAL'}
     TYPE_SIZES = {'c': 1, 'B': 1, 'h': 2, 'H': 2, 'i': 4, 'I': 4, 'L': 4, 'RATIONAL': 8}
 
-    def __init__(self, path):
+    def __init__(self, path, verbose=False):
+        self._verbose = verbose
         self._file_handle = open(path, 'rb')
         self.byte_order = {b'II': '<', b'MM': '>'}[self._file_handle.read(2)]
         self.path = path
@@ -113,6 +115,8 @@ class TiffFile:
             tag = self._read('H')
             type = self.TIFF_TYPES[self._read('H')]
             count = self._read('L')
+            if self._verbose:
+                print('Tag {} (type: {}, count: {})'.format(tag, type, count))
             if count * self.TYPE_SIZES[type] > 4:
                 self._file_handle.seek(self._read('L'))
             if tag == 256:
@@ -128,9 +132,11 @@ class TiffFile:
             elif tag == 51123:
                 readout = self._read(type, count).strip(b'\0')      # Strip null bytes which MM 1.4.22 adds
                 mm_info = _json.loads(readout.decode())
+                if self._verbose:
+                    _pprint(mm_info)
                 # Read out info specifically for Picasso
                 camera_name = mm_info['Camera']
-                if camera_name == 'Andor':
+                if camera_name == 'Andor':      # most likely an EMCCD
                     self.info['Camera'] = {'Manufacturer': camera_name}
                     _, type, model, serial_number, _ = (_.strip() for _ in mm_info['Andor-Camera'].split('|'))
                     self.info['Camera']['Type'] = type
@@ -139,13 +145,16 @@ class TiffFile:
                     em = (mm_info['Andor-EMSwitch'] == 'On') or (mm_info['Andor-Output_Amplifier'] == 'Electron Multiplying')
                     self.info['Electron Multiplying'] = em
                     self.info['EM Real Gain'] = int(mm_info['Andor-Gain'])
-                    self.info['Pre-Amp Gain'] = int(mm_info['Andor-Pre-Amp-Gain'].split()[1])
+                    try:
+                        self.info['Pre-Amp Gain'] = int(mm_info['Andor-Pre-Amp-Gain'].split()[1])
+                    except IndexError:      # In case gain is specified in the format "5x"
+                        self.info['Pre-Amp Gain'] = str(mm_info['Andor-Pre-Amp-Gain']) + ' (CONVERT TO INDEX!)'
                     self.info['Readout Mode'] = mm_info['Andor-ReadoutMode']
                 elif camera_name in ['Andor Zyla', 'Andor sCMOS Camera']:
                     self.info['Camera'] = 'Andor Zyla'
                 try:
                     self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
-                except (ValueError, KeyError):
+                except (ValueError, KeyError):      # Last three digits are not a number or FilterBlock has not been installed
                     self.info['Excitation Wavelength'] = None
                 # Dump the rest
                 self.info['Micro-Manager Metadata'] = mm_info
