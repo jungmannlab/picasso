@@ -59,11 +59,11 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None, blur_wid
         if blur_width is None:
             lpy = locs.lpy
             lpx = locs.lpx
-            lpy = oversampling * lpy[in_view]
-            lpx = oversampling * lpx[in_view]
+            sy = oversampling * lpy[in_view]
+            sx = oversampling * lpx[in_view]
         else:
-            s = oversampling * blur_width * _np.ones(len(locs))
-        return len(x), _fill_gaussians(image, x, y, s, s)
+            sy = sx = oversampling * blur_width * _np.ones(len(locs))
+        return len(x), _fill_gaussians(image, x, y, sx, sy)
     else:
         raise Exception('blur_method not understood.')
 
