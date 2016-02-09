@@ -179,10 +179,8 @@ class TiffFile:
             image.tofile(file_handle)
 
 
-def to_raw_combined(paths):
-    path_base, path_extension = _ospath.splitext(paths[0])
-    path_extension = path_extension.lower()
-    raw_file_name = path_base + '.raw'
+def to_raw_combined(basename, paths):
+    raw_file_name = basename + '.ome.raw'
     with open(raw_file_name, 'wb') as file_handle:
         with TiffFile(paths[0]) as tif:
             tif.tofile(file_handle, '<')
@@ -195,23 +193,27 @@ def to_raw_combined(paths):
         info['Byte Order'] = '<'
         info['Original File'] = _ospath.basename(info.pop('File'))
         info['Raw File'] = _ospath.basename(raw_file_name)
-        save_info(path_base + '.yaml', [info])
+        save_info(basename + '.ome.yaml', [info])
 
 
 def get_movie_groups(paths):
-    paths = [path.replace('\\', '/') for path in paths]
-    paths = sorted(paths)
-    groups = []
-    while len(paths) > 0:
-        path = paths[0]
-        if path.endswith('.ome.tif'):
-            path_base = path[0:-8]
-            pattern = r'{}'.format(path_base + '_([0-9]+).ome.tif')
-            matches = [_re.match(pattern, _) for _ in paths]
-            group = [path] + [_.group() for _ in matches if _]
-            groups.append(group)
-            for path_done in group:
-                paths.remove(path_done)
+    groups = {}
+    if len(paths) > 0:
+        pattern = _re.compile('(.*?)(_(\d*))?.ome.tif')    # This matches the basename + an optional appendix of the file number
+        matches = [_re.match(pattern, path) for path in paths]
+        match_infos = [{'path': _.group(), 'base': _.group(1), 'index': _.group(3)} for _ in matches]
+        for match_info in match_infos:
+            if match_info['index'] is None:
+                match_info['index'] = 0
+            else:
+                match_info['index'] = int(match_info['index'])
+        basenames = set([_['base'] for _ in match_infos])
+        for basename in basenames:
+            match_infos_group = [_ for _ in match_infos if _['base'] == basename]
+            group = [_['path'] for _ in match_infos_group]
+            indices = [_['index'] for _ in match_infos_group]
+            group = [path for (index, path) in sorted(zip(indices, group))]
+            groups[basename] = group
     return groups
 
 
@@ -220,10 +222,10 @@ def to_raw(path, verbose=True):
     groups = get_movie_groups(paths)
     n_groups = len(groups)
     if n_groups:
-        for i, group in enumerate(groups):
+        for i, basename, group in enumerate(groups.items()):
             if verbose:
                 print('Converting movie {}/{}...'.format(i + 1, n_groups), end='\r')
-            to_raw_combined(group)
+            to_raw_combined(basename, group)
         if verbose:
             print()
     else:

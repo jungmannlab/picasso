@@ -136,8 +136,8 @@ class Worker(QtCore.QThread):
         self.movie_groups = movie_groups
 
     def run(self):
-        for i, paths in enumerate(self.movie_groups):
-            io.to_raw_combined(paths)
+        for i, (basename, paths) in enumerate(self.movie_groups.items()):
+            io.to_raw_combined(basename, paths)
             self.progressMade.emit(i+1)
         self.finished.emit(i)
 
