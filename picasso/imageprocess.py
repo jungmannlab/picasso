@@ -65,12 +65,13 @@ def get_image_shift(imageA, imageB, margin, fit_roi):
     Y_ = int(margin * Y)
     X_ = int(margin * X)
     XCorr_ = XCorr[Y_:-Y_, X_:-X_]
-    # A coordinate grid for the fitting ROI
+    # A quarter of the fit ROI
     fit_X = int(fit_roi / 2)
+    # A coordinate grid for the fitting ROI
     y, x = _np.mgrid[-fit_X:fit_X+1, -fit_X:fit_X+1]
     # Find the brightest pixel and cut out the fit ROI
     y_max_, x_max_ = _np.unravel_index(XCorr_.argmax(), XCorr_.shape)
-    FitROI = XCorr_[y_max_ - fit_X:y_max_ + fit_X + 1, x_max_ - fit_X:x_max_ + fit_X + 1]
+    FitROI = XCorr[y_max_ - fit_X + Y_:y_max_ + fit_X + Y_ + 1, x_max_ - fit_X + X_:x_max_ + fit_X + X_ + 1]
 
     # The fit model
     def flat_2d_gaussian(a, xc, yc, s, b):
@@ -80,23 +81,13 @@ def get_image_shift(imageA, imageB, margin, fit_roi):
 
     # Set up initial parameters and fit
     params = _lmfit.Parameters()
-    try:
-        params.add('a', value=FitROI.max(), vary=True, min=0)
-    except ValueError:
-        print(XCorr_)
-        print(XCorr.shape)
-        _plt.matshow(XCorr_)
-        _plt.show()
-        print(y_max_, x_max_, fit_X)
-        print(FitROI)
-        _plt.matshow(FitROI)
-        _plt.show()
-        raise
+    params.add('a', value=FitROI.max(), vary=True, min=0)
     params.add('xc', value=0, vary=True)
     params.add('yc', value=0, vary=True)
     params.add('s', value=1, vary=True, min=0)
     params.add('b', value=FitROI.min(), vary=True, min=0)
     results = gaussian2d.fit(FitROI.flatten(), params)
+
     # Get maximum coordinates and add offsets
     xc = results.best_values['xc']
     yc = results.best_values['yc']

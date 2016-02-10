@@ -298,6 +298,7 @@ def undrift(locs, movie, segmentation, mode='std', info=None, display=True):
     n_pairs = int(n_segments * (n_segments - 1) / 2)
     bounds = _np.linspace(0, frames-1, n_segments+1, dtype=_np.uint32)
     segments = _np.zeros((n_segments, movie.shape[1], movie.shape[1]))
+    margin = 0.5 - 32 / X           # Maximum shift is 32 pixels
 
     if mode == 'std':
         with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
@@ -319,7 +320,7 @@ def undrift(locs, movie, segmentation, mode='std', info=None, display=True):
         for i in range(n_segments - 1):
             for j in range(i+1, n_segments):
                 progress_bar.update()
-                dyij, dxij = _imageprocess.get_image_shift(segments[i], segments[j], 0.25, 5)
+                dyij, dxij = _imageprocess.get_image_shift(segments[i], segments[j], margin, 5)
                 rij[flag, 0] = dyij
                 rij[flag, 1] = dxij
                 A[flag, i:j] = 1
