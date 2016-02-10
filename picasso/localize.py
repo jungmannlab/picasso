@@ -67,11 +67,22 @@ def local_gradient_magnitude(frame, roi, abs_gradient):
     return lgm
 
 
+@_numba.jit(nopython=True, nogil=True)
+def gradient_magnitude(frame):
+    Y, X = frame.shape
+    gm = _np.zeros((Y, X), dtype=_np.float32)
+    for i in range(1, Y-1):
+        for j in range(1, X-1):
+            dy = frame[i+1, j] - frame[i-1, j]
+            dx = frame[i, j+1] - frame[i, j-1]
+            gm[i, j] = 0.5 * _np.sqrt(dy**2 + dx**2)
+    return gm
+
+
 def identify_in_frame(frame, parameters):
-    gradient_y, gradient_x = _np.gradient(_np.float32(frame))
-    abs_gradient = _np.sqrt(gradient_x**2 + gradient_y**2)
+    gm = gradient_magnitude(frame)
     roi = parameters['ROI']
-    s_map = local_gradient_magnitude(frame, roi, abs_gradient)
+    s_map = local_gradient_magnitude(frame, roi, gm)
     lm_map = local_maxima_map(frame, roi)
     s_map_thesholded = s_map > parameters['Minimum LGM']
     combined_map = (lm_map * s_map_thesholded) > 0.5
