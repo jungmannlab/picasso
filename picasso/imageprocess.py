@@ -80,7 +80,18 @@ def get_image_shift(imageA, imageB, margin, fit_roi):
 
     # Set up initial parameters and fit
     params = _lmfit.Parameters()
-    params.add('a', value=FitROI.max(), vary=True, min=0)
+    try:
+        params.add('a', value=FitROI.max(), vary=True, min=0)
+    except ValueError:
+        print(XCorr_)
+        print(XCorr.shape)
+        _plt.matshow(XCorr_)
+        _plt.show()
+        print(y_max_, x_max_, fit_X)
+        print(FitROI)
+        _plt.matshow(FitROI)
+        _plt.show()
+        raise
     params.add('xc', value=0, vary=True)
     params.add('yc', value=0, vary=True)
     params.add('s', value=1, vary=True, min=0)
