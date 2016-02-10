@@ -116,7 +116,7 @@ def identify(movie, parameters, threaded=True):
             args = [(movie[_], parameters, _) for _ in range(n_frames)]
             identifications = pool.starmap(identify_frame, args)
     else:
-        identifications = [identify_frame(parameters, frame) for frame in movie]
+        identifications = [identify_frame(frame, parameters, i) for i, frame in enumerate(movie)]
     return _np.hstack(identifications).view(_np.recarray)
 
 

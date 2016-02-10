@@ -87,6 +87,7 @@ def get_image_shift(imageA, imageB, margin, fit_roi):
         print(XCorr.shape)
         _plt.matshow(XCorr_)
         _plt.show()
+        print(y_max_, x_max_, fit_X)
         print(FitROI)
         _plt.matshow(FitROI)
         _plt.show()
