@@ -15,6 +15,7 @@ from PyQt4 import QtCore, QtGui
 import time
 import numpy as np
 import traceback
+from concurrent.futures import wait
 
 
 _this_file = os.path.abspath(__file__)
@@ -477,9 +478,9 @@ class Window(QtGui.QMainWindow):
                 self.draw_identifications(identifications_frame, roi, QtGui.QColor('yellow'))
             else:
                 if self.parameters_dialog.preview_checkbox.isChecked():
-                    identifications_frame = localize.identify_frame(self.movie[self.current_frame_number],
-                                                                    self.parameters,
-                                                                    self.current_frame_number)
+                    identifications_frame = localize.identify_by_frame_number(self.movie,
+                                                                              self.parameters,
+                                                                              self.current_frame_number)
                     roi = self.parameters['ROI']
                     self.status_bar.showMessage('Found {:,} spots in current frame.'.format(len(identifications_frame)))
                     self.draw_identifications(identifications_frame, roi, QtGui.QColor('red'))
@@ -613,14 +614,12 @@ class IdentificationWorker(QtCore.QThread):
         self.fit_afterwards = fit_afterwards
 
     def run(self):
-        result, counter, pool = localize.identify_async(self.movie, self.parameters)
-        while not result.ready():
-            self.progressMade.emit(int(counter.value), self.parameters)
-            time.sleep(0.1)
-        identifications = result.get()
-        pool.terminate()
-        identifications = np.hstack(identifications)
-        identifications = identifications.view(np.recarray)
+        futures = localize.identify_async(self.movie, self.parameters)
+        not_done = futures
+        while not_done:
+            done, not_done = wait(futures, 0.1)
+            self.progressMade.emit(len(done), self.parameters)
+        identifications = np.hstack([_.result() for _ in futures]).view(np.recarray)
         self.finished.emit(self.parameters, identifications, self.fit_afterwards)
 
 

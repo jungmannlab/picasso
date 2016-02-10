@@ -15,6 +15,8 @@ import threading as _threading
 import os.path as _ospath
 from collections import namedtuple as _namedtuple
 import yaml as _yaml
+from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
+from concurrent.futures import wait as _wait
 
 
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
@@ -35,7 +37,7 @@ WoehrLok = _ctypes.CDLL(_woehrlok_file)
 WoehrLok.fnWoehrLokMLEFitAll = getattr(WoehrLok, '?fnWoehrLokMLEFitAll@@YAXHPEBMMHHPEAM11KHPEAK@Z')
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, nogil=True)
 def local_maxima_map(frame, roi):
     """ Finds pixels with maximum value within a region of interest """
     Y, X = frame.shape
@@ -52,7 +54,7 @@ def local_maxima_map(frame, roi):
     return maxima_map
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, nogil=True)
 def local_gradient_magnitude(frame, roi, abs_gradient):
     """ Returns the sum of the absolute gradient within a ROI around each pixel """
     Y, X = frame.shape
@@ -65,7 +67,7 @@ def local_gradient_magnitude(frame, roi, abs_gradient):
     return lgm
 
 
-def identify_frame(frame, parameters, frame_number=None):
+def identify_in_frame(frame, parameters):
     gradient_y, gradient_x = _np.gradient(_np.float32(frame))
     abs_gradient = _np.sqrt(gradient_x**2 + gradient_y**2)
     roi = parameters['ROI']
@@ -73,50 +75,33 @@ def identify_frame(frame, parameters, frame_number=None):
     lm_map = local_maxima_map(frame, roi)
     s_map_thesholded = s_map > parameters['Minimum LGM']
     combined_map = (lm_map * s_map_thesholded) > 0.5
-    if frame_number is not None:
-        y, x = _np.where(combined_map)
-        frame = frame_number * _np.ones(len(x))
-        return _np.rec.array((frame, x, y), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i')])
-    else:
-        return _np.rec.array(_np.where(combined_map), dtype=[('x', 'i'), ('y', 'i')])
+    y, x = _np.where(combined_map)
+    return y, x
 
 
-def _identify_frame_async(frame, parameters, frame_number, counter, lock):
-    with lock:
-        counter.value += 1
-    return identify_frame(frame, parameters, frame_number)
+def identify_by_frame_number(movie, parameters, frame_number):
+    frame = movie[frame_number]
+    y, x = identify_in_frame(frame, parameters)
+    frame = frame_number * _np.ones(len(x))
+    return _np.rec.array((frame, x, y), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i')])
 
 
 def identify_async(movie, parameters):
     n_frames = len(movie)
-    n_cpus = _multiprocessing.cpu_count()
-    if n_frames < n_cpus:
-        n_processes = n_frames
-    else:
-        n_processes = int(0.75 * n_cpus)
-    manager = _multiprocessing.Manager()
-    counter = manager.Value('i', 0)
-    lock = manager.Lock()
-    pool = _multiprocessing.Pool(processes=n_processes)
-    args = [(movie[_], parameters, _, counter, lock) for _ in range(n_frames)]
-    result = pool.starmap_async(_identify_frame_async, args)
-    pool.close()
-    return result, counter, pool
+    n_threads = int(0.75 * _multiprocessing.cpu_count())
+    executor = _ThreadPoolExecutor(n_threads)
+    futures = [executor.submit(identify_by_frame_number, movie, parameters, _) for _ in range(n_frames)]
+    executor.shutdown(wait=False)
+    return futures
 
 
 def identify(movie, parameters, threaded=True):
     if threaded:
-        n_frames = len(movie)
-        n_cpus = _multiprocessing.cpu_count()
-        if n_frames < n_cpus:
-            n_processes = n_frames
-        else:
-            n_processes = int(0.75 * n_cpus)
-        with _multiprocessing.Pool(processes=n_processes) as pool:
-            args = [(movie[_], parameters, _) for _ in range(n_frames)]
-            identifications = pool.starmap(identify_frame, args)
+        futures = identify_async(movie, parameters)
+        done, not_done = _wait(futures)
+        identifications = [future.result() for future in done]
     else:
-        identifications = [identify_frame(frame, parameters, i) for i, frame in enumerate(movie)]
+        identifications = [identify_by_frame_number(movie, parameters, i) for i in range(movie)]
     return _np.hstack(identifications).view(_np.recarray)
 
 
