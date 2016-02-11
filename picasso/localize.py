@@ -130,23 +130,23 @@ def _get_spots(movie, ids_frame, ids_x, ids_y, roi):
 
 def _to_photons(spots, info):
     spots = _np.float32(spots)
-    if info['Camera'] == 'Andor Zyla':
+    if info[0]['Camera'] == 'Andor Zyla':
         return spots - 100
-    if info['Camera']['Manufacturer'] == 'Andor':
-        type = info['Camera']['Type']
-        model = info['Camera']['Model']
-        serial_number = info['Camera']['Serial Number']
+    if info[0]['Camera']['Manufacturer'] == 'Andor':
+        type = info[0]['Camera']['Type']
+        model = info[0]['Camera']['Model']
+        serial_number = info[0]['Camera']['Serial Number']
         camera_config = CONFIG['Cameras']['Andor'][type][model][serial_number]
         baseline = camera_config['Baseline']
-        em = info['Electron Multiplying']
+        em = info[0]['Electron Multiplying']
         if em:
-            gain = info['EM Real Gain']
+            gain = info[0]['EM Real Gain']
         else:
             gain = 1
-        preamp_gain = info['Pre-Amp Gain']
-        read_mode = info['Readout Mode']
+        preamp_gain = info[0]['Pre-Amp Gain']
+        read_mode = info[0]['Readout Mode']
         sensitivity = camera_config['Sensitivity'][em][read_mode][preamp_gain-1]
-        excitation = info['Excitation Wavelength']
+        excitation = info[0]['Excitation Wavelength']
         try:
             qe = camera_config['Quantum Efficiency'][excitation]
         except KeyError:
@@ -154,7 +154,7 @@ def _to_photons(spots, info):
             raise Exception('Valid excitation wavelengths are: {}\nAdjust your yaml file!'.format(_))
         return (spots - baseline) * sensitivity / (gain * qe)
     else:
-        raise Exception("No configuration found for camera '{}''".format(info['Camera']))
+        raise Exception("No configuration found for camera '{}''".format(info[0]['Camera']))
 
 
 def _generate_fit_info(movie, info, identifications, roi):
