@@ -13,7 +13,7 @@ import scipy.signal as _signal
 
 def render(locs, info, oversampling=1, viewport=None, blur_method=None, blur_width=None):
     if viewport is None:
-        viewport = [(0, 0), (info[0]['Width'], info[0]['Height'])]
+        viewport = [(0, 0), (info[0]['Height'], info[0]['Width'])]
     (y_min, x_min), (y_max, x_max) = viewport
     n_pixel_x = int(_np.round(oversampling * (y_max - y_min)))
     n_pixel_y = int(_np.round(oversampling * (x_max - x_min)))
