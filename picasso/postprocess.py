@@ -292,12 +292,14 @@ def __link_loc_groups(locs, group):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
-def undrift(locs, movie, segmentation, mode='std', info=None, display=True):
-    frames, Y, X = movie.shape
+def undrift(locs, movie, info, segmentation, mode='std', display=True):
+    frames = len(movie)
+    Y = info[0]['Height']
+    X = info[0]['Width']
     n_segments = int(_np.round(frames/segmentation))
     n_pairs = int(n_segments * (n_segments - 1) / 2)
     bounds = _np.linspace(0, frames-1, n_segments+1, dtype=_np.uint32)
-    segments = _np.zeros((n_segments, movie.shape[1], movie.shape[1]))
+    segments = _np.zeros((n_segments, Y, X))
     margin = 0.5 - 32 / X           # Maximum shift is 32 pixels
 
     if mode == 'std':
