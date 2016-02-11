@@ -222,7 +222,7 @@ def to_raw(path, verbose=True):
     groups = get_movie_groups(paths)
     n_groups = len(groups)
     if n_groups:
-        for i, basename, group in enumerate(groups.items()):
+        for i, (basename, group) in enumerate(groups.items()):
             if verbose:
                 print('Converting movie {}/{}...'.format(i + 1, n_groups), end='\r')
             to_raw_combined(basename, group)
