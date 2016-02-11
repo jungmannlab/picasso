@@ -2,9 +2,14 @@ Cameras:
   # Manufacturer
   Andor:
     # Type
-    iXon Ultra:
+    iXon:
       # Model
       DU897_BV:
+        Quantum Efficiency:
+          # Excitation wavelength
+          489: 0.95
+          561: 0.96
+          640: 0.9
         # Serial number
         9603:       # Miblab
           Sensitivity:
@@ -19,11 +24,7 @@ Cameras:
               3.000 MHz: [4.0, 3.13, 1.47]
               1.000 MHz: [4.01, 3.1, 1.45]
               0.080 MHz: [4.05, 3.12, 1.45]
-          Quantum Efficiency:
-            # Excitation wavelength
-            489: 0.95
-            561: 0.96
-            640: 0.9
+        # Serial number
         9418:       # Loaner. SENSITIVITIES SHOULD BE UPDATED! These are simply copied from the Miblab camera
           Sensitivity:
             # EM gain
@@ -42,10 +43,6 @@ Cameras:
             489: 0.95
             561: 0.96
             640: 0.9
-    # Type
-    iXon:
-      # Model
-      DU897_BV:
         # Serial number
         9252:       # Boston. SENSITIVITIES SHOULD BE UPDATED! These are simply copied from the Miblab camera
           Sensitivity:
