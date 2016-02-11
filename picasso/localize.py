@@ -137,7 +137,6 @@ def _to_photons(spots, info):
         model = info[0]['Camera']['Model']
         serial_number = info[0]['Camera']['Serial Number']
         camera_config = CONFIG['Cameras']['Andor'][type][model][serial_number]
-        baseline = camera_config['Baseline']
         em = info[0]['Electron Multiplying']
         if em:
             gain = info[0]['EM Real Gain']
@@ -152,7 +151,7 @@ def _to_photons(spots, info):
         except KeyError:
             _ = list(camera_config['Quantum Efficiency'].keys())
             raise Exception('Valid excitation wavelengths are: {}\nAdjust your yaml file!'.format(_))
-        return (spots - baseline) * sensitivity / (gain * qe)
+        return (spots - 100) * sensitivity / (gain * qe)
     else:
         raise Exception("No configuration found for camera '{}''".format(info[0]['Camera']))
 

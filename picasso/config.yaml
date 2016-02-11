@@ -7,7 +7,6 @@ Cameras:
       DU897_BV:
         # Serial number
         9603:       # Miblab
-          Baseline: 100
           Sensitivity:
             # EM gain
             true:
@@ -26,7 +25,6 @@ Cameras:
             561: 0.96
             640: 0.9
         9418:       # Loaner. SENSITIVITIES SHOULD BE UPDATED! These are simply copied from the Miblab camera
-          Baseline: 100
           Sensitivity:
             # EM gain
             true:
@@ -50,7 +48,6 @@ Cameras:
       DU897_BV:
         # Serial number
         9252:       # Boston. SENSITIVITIES SHOULD BE UPDATED! These are simply copied from the Miblab camera
-          Baseline: 100
           Sensitivity:
             # EM gain
             true:
