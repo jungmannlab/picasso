@@ -310,7 +310,11 @@ class Window(QtGui.QMainWindow):
             self.view.setPixmap(pixmap)
 
     def render_colors(self, color_locs, viewport):
-        rendering = [self.render_image(_, viewport) for _ in color_locs]
+        rendering = []
+        for locs in color_locs:
+            if hasattr(locs, 'group'):
+                locs = locs[locs.group != -1]
+            rendering.append(self.render_image(locs, viewport))
         image = np.array([_[1] for _ in rendering])
         N = np.sum([_[0] for _ in rendering])
         return N, image
