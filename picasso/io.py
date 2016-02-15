@@ -85,7 +85,7 @@ class TiffFile:
                     image_offset = self._read(type, count)
                     break
             else:
-                raise Exception('IFD does not have tag 273 (data offset)')
+                raise Exception('IFD does not have tag 273 (data offset) (File: {})'.format(self.path))
             self._file_handle.seek(offset + 2 + n_entries * 12)
             offset = self._read('L')
             self._file_handle.seek(image_offset)
@@ -135,27 +135,24 @@ class TiffFile:
                 if self._verbose:
                     _pprint(mm_info)
                 # Read out info specifically for Picasso
-                camera_name = mm_info['Camera']
-                if camera_name == 'Andor':      # most likely an EMCCD
-                    self.info['Camera'] = {'Manufacturer': camera_name}
-                    _, type, model, serial_number, _ = (_.strip() for _ in mm_info['Andor-Camera'].split('|'))
-                    self.info['Camera']['Type'] = type
-                    self.info['Camera']['Model'] = model
-                    self.info['Camera']['Serial Number'] = int(serial_number)
-                    em = (mm_info['Andor-EMSwitch'] == 'On') or (mm_info['Andor-Output_Amplifier'] == 'Electron Multiplying')
+                camera = mm_info['Camera']
+                self.info['Camera'] = camera
+                if camera + '-Output_Amplifier' in mm_info:
+                    em = (mm_info[camera + '-Output_Amplifier'] == 'Electron Multiplying')
                     self.info['Electron Multiplying'] = em
+                if camera + '-Gain' in mm_info:
                     self.info['EM Real Gain'] = int(mm_info['Andor-Gain'])
+                if camera + '-Pre-Amp-Gain' in mm_info:
                     try:
                         self.info['Pre-Amp Gain'] = int(mm_info['Andor-Pre-Amp-Gain'].split()[1])
                     except IndexError:      # In case gain is specified in the format "5x"
                         self.info['Pre-Amp Gain'] = str(mm_info['Andor-Pre-Amp-Gain']) + ' (CONVERT TO INDEX!)'
                     self.info['Readout Mode'] = mm_info['Andor-ReadoutMode']
-                elif camera_name in ['Andor Zyla', 'Andor sCMOS Camera', 'Zyla4.2']:
-                    self.info['Camera'] = 'Andor Zyla'
-                try:
-                    self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
-                except (ValueError, KeyError):      # Last three digits are not a number or FilterBlock has not been installed
-                    self.info['Excitation Wavelength'] = None
+                if 'TIFilterBlock1-Label' in mm_info:
+                    try:
+                        self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
+                    except ValueError:      # Last three digits are not a number
+                        self.info['Excitation Wavelength'] = None
                 # Dump the rest
                 self.info['Micro-Manager Metadata'] = mm_info
         offset = self._first_ifd_offset
