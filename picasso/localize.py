@@ -38,31 +38,31 @@ WoehrLok.fnWoehrLokMLEFitAll = getattr(WoehrLok, '?fnWoehrLokMLEFitAll@@YAXHPEBM
 
 
 @_numba.jit(nopython=True, nogil=True)
-def local_maxima_map(frame, roi):
+def local_maxima_map(frame, box):
     """ Finds pixels with maximum value within a region of interest """
     Y, X = frame.shape
     maxima_map = _np.zeros(frame.shape, _np.uint8)
-    roi_half = int(roi / 2)
-    for i in range(roi, Y - roi):
-        for j in range(roi, X - roi):
-            local_frame = frame[i - roi_half:i + roi_half + 1, j - roi_half:j + roi_half + 1]
+    box_half = int(box / 2)
+    for i in range(box, Y - box):
+        for j in range(box, X - box):
+            local_frame = frame[i - box_half:i + box_half + 1, j - box_half:j + box_half + 1]
             flat_max = _np.argmax(local_frame)
-            i_local_max = int(flat_max / roi)
-            j_local_max = int(flat_max % roi)
-            if (i_local_max == roi_half) and (j_local_max == roi_half):
+            i_local_max = int(flat_max / box)
+            j_local_max = int(flat_max % box)
+            if (i_local_max == box_half) and (j_local_max == box_half):
                 maxima_map[i, j] = 1
     return maxima_map
 
 
 @_numba.jit(nopython=True, nogil=True)
-def local_gradient_magnitude(frame, roi, abs_gradient):
-    """ Returns the sum of the absolute gradient within a ROI around each pixel """
-    Y, X = frame.shape
-    lgm = _np.zeros_like(abs_gradient)
-    roi_half = int(roi / 2)
-    for i in range(roi_half, Y - roi + roi_half + 1):
-        for j in range(roi_half, X - roi + roi_half + 1):
-            local_gradient = abs_gradient[i - roi_half:i + roi_half + 1, j - roi_half:j + roi_half + 1]
+def local_gradient_magnitude(gm, box):
+    """ Returns the sum of the absolute gradient within a box around each pixel """
+    Y, X = gm.shape
+    lgm = _np.zeros_like(gm)
+    box_half = int(box / 2)
+    for i in range(box_half, Y - box + box_half + 1):
+        for j in range(box_half, X - box + box_half + 1):
+            local_gradient = gm[i - box_half:i + box_half + 1, j - box_half:j + box_half + 1]
             lgm[i, j] = _np.sum(local_gradient)
     return lgm
 
@@ -79,29 +79,35 @@ def gradient_magnitude(frame):
     return gm
 
 
-def identify_in_frame(frame, parameters):
+def identify_in_frame(frame, parameters, roi=None):
+    frame = _np.float32(frame)  # For some reason frame sometimes comes with different type, so we don't want to confuse numba
+    if roi is not None:
+        frame = frame[roi[0][0]:roi[1][0], roi[0][1]:roi[1][1]]
     gm = gradient_magnitude(frame)
-    roi = parameters['ROI']
-    s_map = local_gradient_magnitude(frame, roi, gm)
-    lm_map = local_maxima_map(frame, roi)
+    box = parameters['Box Size']
+    s_map = local_gradient_magnitude(gm, box)
+    lm_map = local_maxima_map(frame, box)
     s_map_thesholded = s_map > parameters['Minimum LGM']
     combined_map = (lm_map * s_map_thesholded) > 0.5
     y, x = _np.where(combined_map)
+    if roi is not None:
+        y += roi[0][0]
+        x += roi[0][1]
     return y, x
 
 
-def identify_by_frame_number(movie, parameters, frame_number):
+def identify_by_frame_number(movie, parameters, frame_number, roi=None):
     frame = movie[frame_number]
-    y, x = identify_in_frame(frame, parameters)
+    y, x = identify_in_frame(frame, parameters, roi)
     frame = frame_number * _np.ones(len(x))
     return _np.rec.array((frame, x, y), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i')])
 
 
-def identify_async(movie, parameters):
+def identify_async(movie, parameters, roi=None):
     n_frames = len(movie)
     n_threads = int(0.75 * _multiprocessing.cpu_count())
     executor = _ThreadPoolExecutor(n_threads)
-    futures = [executor.submit(identify_by_frame_number, movie, parameters, _) for _ in range(n_frames)]
+    futures = [executor.submit(identify_by_frame_number, movie, parameters, _, roi) for _ in range(n_frames)]
     executor.shutdown(wait=False)
     return futures
 
@@ -117,10 +123,10 @@ def identify(movie, parameters, threaded=True):
 
 
 @_numba.jit(nopython=True)
-def _get_spots(movie, ids_frame, ids_x, ids_y, roi):
+def _get_spots(movie, ids_frame, ids_x, ids_y, box):
     n_spots = len(ids_x)
-    r = int(roi/2)
-    spots = _np.zeros((n_spots, roi, roi), dtype=movie.dtype)
+    r = int(box/2)
+    spots = _np.zeros((n_spots, box, box), dtype=movie.dtype)
     for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
         for yi, y in enumerate(range(yc-r, yc+r+1)):
             for xi, x in enumerate(range(xc-r, xc+r+1)):
@@ -128,42 +134,24 @@ def _get_spots(movie, ids_frame, ids_x, ids_y, roi):
     return spots
 
 
-def _to_photons(spots, info):
+def _to_photons(spots, camera_info):
     spots = _np.float32(spots)
-    if info[0]['Camera'] == 'Andor Zyla':
+    if camera_info['sensor'] == 'EMCCD':
+        return (spots - 100) * camera_info['sensitivity'] / (camera_info['gain'] * camera_info['qe'])
+    elif camera_info['sensor'] == 'sCMOS':
         return spots - 100
-    if info[0]['Camera']['Manufacturer'] == 'Andor':
-        type = info[0]['Camera']['Type']
-        model = info[0]['Camera']['Model']
-        serial_number = info[0]['Camera']['Serial Number']
-        camera_config = CONFIG['Cameras']['Andor'][type][model][serial_number]
-        em = info[0]['Electron Multiplying']
-        if em:
-            gain = info[0]['EM Real Gain']
-        else:
-            gain = 1
-        preamp_gain = info[0]['Pre-Amp Gain']
-        read_mode = info[0]['Readout Mode']
-        sensitivity = camera_config['Sensitivity'][em][read_mode][preamp_gain-1]
-        excitation = info[0]['Excitation Wavelength']
-        try:
-            qe = camera_config['Quantum Efficiency'][excitation]
-        except KeyError:
-            _ = list(camera_config['Quantum Efficiency'].keys())
-            raise Exception('Valid excitation wavelengths are: {}\nAdjust your yaml file!'.format(_))
-        return (spots - 100) * sensitivity / (gain * qe)
     else:
-        raise Exception("No configuration found for camera '{}''".format(info[0]['Camera']))
+        raise TypeError('Unknown camera type')
 
 
-def _generate_fit_info(movie, info, identifications, roi):
-    spots = _get_spots(movie, identifications.frame, identifications.x, identifications.y, roi)
-    n_spots, roi, roi = spots.shape
+def _generate_fit_info(movie, camera_info, identifications, box):
+    spots = _get_spots(movie, identifications.frame, identifications.x, identifications.y, box)
+    n_spots, box, box = spots.shape
     fit_type = _ctypes.c_int(4)
-    spots = _to_photons(spots, info)
+    spots = _to_photons(spots, camera_info)
     spots_pointer = spots.ctypes.data_as(_C_FLOAT_POINTER)
     psf_sigma = _ctypes.c_float(1.0)
-    roi = _ctypes.c_int(roi)
+    box = _ctypes.c_int(box)
     n_iterations = _ctypes.c_int(30)
     params = _np.zeros((6, n_spots), dtype=_np.float32)
     params_pointer = params.ctypes.data_as(_C_FLOAT_POINTER)
@@ -176,30 +164,30 @@ def _generate_fit_info(movie, info, identifications, roi):
     n_threads = _ctypes.c_int(int(0.75 * n_cpus))
     current = _np.array(0, dtype=_np.uint32)
     current_pointer = current.ctypes.data_as(_ctypes.POINTER(_ctypes.c_ulong))
-    gaussmle_args = (fit_type, spots_pointer, psf_sigma, roi, n_iterations, params_pointer, CRLBs_pointer,
+    gaussmle_args = (fit_type, spots_pointer, psf_sigma, box, n_iterations, params_pointer, CRLBs_pointer,
                      likelihoods_pointer, n_spots, n_threads, current_pointer)
     FitInfo = _namedtuple('FitInfo', 'n_spots spots gaussmle_args current params CRLBs likelihoods')
     fit_info = FitInfo(n_spots.value, spots, gaussmle_args, current, params, CRLBs, likelihoods)
     return fit_info
 
 
-def fit(movie, info, identifications, roi):
-    fit_info = _generate_fit_info(movie, info, identifications, roi)
+def fit(movie, camera_info, identifications, box):
+    fit_info = _generate_fit_info(movie, camera_info, identifications, box)
     WoehrLok.fnWoehrLokMLEFitAll(*fit_info.gaussmle_args)
-    return locs_from_fit_info(fit_info, identifications, roi), fit_info
+    return locs_from_fit_info(fit_info, identifications, box), fit_info
 
 
-def fit_async(movie, info, identifications, roi):
-    fit_info = _generate_fit_info(movie, info, identifications, roi)
+def fit_async(movie, camera_info, identifications, box):
+    fit_info = _generate_fit_info(movie, camera_info, identifications, box)
     thread = _threading.Thread(target=WoehrLok.fnWoehrLokMLEFitAll, args=fit_info.gaussmle_args)
     thread.start()
     return thread, fit_info
 
 
-def locs_from_fit_info(fit_info, identifications, roi):
-    roi_offset = int(roi/2)
-    x = fit_info.params[0] + identifications.x - roi_offset
-    y = fit_info.params[1] + identifications.y - roi_offset
+def locs_from_fit_info(fit_info, identifications, box):
+    box_offset = int(box/2)
+    x = fit_info.params[0] + identifications.x - box_offset
+    y = fit_info.params[1] + identifications.y - box_offset
     lpx = _np.sqrt(fit_info.CRLBs[0])
     lpy = _np.sqrt(fit_info.CRLBs[1])
     return _np.rec.array((identifications.frame, x, y,
@@ -210,4 +198,4 @@ def locs_from_fit_info(fit_info, identifications, roi):
 
 def localize(movie, info, parameters):
     identifications = identify(movie, parameters)
-    return fit(movie, info, identifications, parameters['ROI'])
+    return fit(movie, info, identifications, parameters['Box Size'])
