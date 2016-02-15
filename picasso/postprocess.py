@@ -27,6 +27,7 @@ _this_file = _ospath.abspath(__file__)
 _this_directory = _ospath.dirname(_this_file)
 _parent_directory = _ospath.dirname(_this_directory)
 _sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
+from picasso import io as _io
 from picasso import lib as _lib
 from picasso import render as _render
 from picasso import imageprocess as _imageprocess
@@ -292,27 +293,52 @@ def __link_loc_groups(locs, group):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
-def undrift(locs, movie, info, segmentation, mode='std', display=True):
-    frames = len(movie)
+def undrift(locs, info, segmentation, mode='render'):
+    if mode in ['render', 'std']:
+        drift_y, drift_x = get_drift_rcc(locs, info, segmentation, mode)
+    elif mode == 'framepair':
+        drift_y, drift_x = get_drift_framepair(locs, info)
+    locs.x -= drift_y[locs.frame]
+    locs.y -= drift_y[locs.frame]
+    return locs
+
+
+def get_drift_framepair(locs, info):
+    roi = 32           # Maximum shift is 32 pixels
+    n_frames = info[0]['Frames']
+    drift_x = _np.zeros(n_frames)
+    drift_y = _np.zeros(n_frames)
+    for f in range(1, n_frames):
+        previous_frame_locs = locs[locs.frame == f-1]
+        _, previous_frame = _render.render(previous_frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
+        frame_locs = locs[locs.frame == f]
+        _, frame = _render.render(frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
+        drift_y[f], drift_x[f] = _imageprocess.get_image_shift(previous_frame, frame, roi, 5)
+    return drift_y, drift_x
+
+
+def get_drift_rcc(locs, info, segmentation, mode='render'):
+    roi = 32           # Maximum shift is 32 pixels
     Y = info[0]['Height']
     X = info[0]['Width']
-    n_segments = int(_np.round(frames/segmentation))
+    n_frames = info[0]['Frames']
+    n_segments = int(_np.round(n_frames/segmentation))
     n_pairs = int(n_segments * (n_segments - 1) / 2)
-    bounds = _np.linspace(0, frames-1, n_segments+1, dtype=_np.uint32)
+    bounds = _np.linspace(0, n_frames-1, n_segments+1, dtype=_np.uint32)
     segments = _np.zeros((n_segments, Y, X))
-    margin = 0.5 - 32 / X           # Maximum shift is 32 pixels
 
-    if mode == 'std':
-        with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
-            for i in range(n_segments):
-                progress_bar.update()
-                segments[i] = _np.std(movie[bounds[i]:bounds[i+1]], axis=0)
-    elif mode == 'render':
+    if mode == 'render':
         with _tqdm(total=n_segments, desc='Generating segments', unit='segements') as progress_bar:
             for i in range(n_segments):
                 progress_bar.update()
                 segment_locs = locs[(locs.frame > bounds[i]) & (locs.frame < bounds[i+1])]
                 _, segments[i] = _render.render(segment_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
+    elif mode == 'std':
+        movie, _ = _io.load_raw(info[0]['Raw File'])
+        with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
+            for i in range(n_segments):
+                progress_bar.update()
+                segments[i] = _np.std(movie[bounds[i]:bounds[i+1]], axis=0)
 
     rij = _np.zeros((n_pairs, 2))
     A = _np.zeros((n_pairs, n_segments - 1))
@@ -322,7 +348,7 @@ def undrift(locs, movie, info, segmentation, mode='std', display=True):
         for i in range(n_segments - 1):
             for j in range(i+1, n_segments):
                 progress_bar.update()
-                dyij, dxij = _imageprocess.get_image_shift(segments[i], segments[j], margin, 5)
+                dyij, dxij = _imageprocess.get_image_shift(segments[i], segments[j], roi, 5)
                 rij[flag, 0] = dyij
                 rij[flag, 1] = dxij
                 A[flag, i:j] = 1
@@ -335,34 +361,8 @@ def undrift(locs, movie, info, segmentation, mode='std', display=True):
     t = (bounds[1:] + bounds[:-1]) / 2
     drift_x_pol = _interpolate.InterpolatedUnivariateSpline(t, drift_x, k=3)
     drift_y_pol = _interpolate.InterpolatedUnivariateSpline(t, drift_y, k=3)
-    t_inter = _np.arange(frames)
-    drift_x_inter = drift_x_pol(t_inter)
-    drift_y_inter = drift_y_pol(t_inter)
-
-    if display:
-        _plt.figure(figsize=(17, 6))
-        _plt.suptitle('Estimated drift')
-        _plt.subplot(1, 2, 1)
-        ax = _plt.plot(t_inter, drift_x_inter, label='x interpolated')
-        color_x = ax[0].get_color()
-        ax = _plt.plot(t_inter, drift_y_inter, label='y interpolated')
-        color_y = ax[0].get_color()
-        _plt.plot(t, drift_x, 'o', color=color_x, label='x measured')
-        _plt.plot(t, drift_y, 'o', color=color_y, label='y measured')
-        _plt.legend(loc='best')
-        _plt.xlabel('Frame')
-        _plt.ylabel('Drift (pixel)')
-        _plt.subplot(1, 2, 2)
-        ax = _plt.plot(drift_x_inter, drift_y_inter, color=list(_plt.rcParams['axes.prop_cycle'])[2]['color'])
-        _plt.plot(drift_x, drift_y, 'o', color=list(_plt.rcParams['axes.prop_cycle'])[2]['color'])
-        _plt.axis('equal')
-        _plt.xlabel('x')
-        _plt.ylabel('y')
-        _plt.show()
-
-    locs.x -= drift_x_inter[locs.frame]
-    locs.y -= drift_y_inter[locs.frame]
-    return locs
+    t_inter = _np.arange(n_frames)
+    return drift_y_pol(t_inter), drift_x_pol(t_inter)
 
 
 def align(target_locs, target_info, locs, info):
