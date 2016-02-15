@@ -14,13 +14,9 @@ import os.path as _ospath
 import sys as _sys
 from tqdm import tqdm as _tqdm
 from scipy import interpolate as _interpolate
-import matplotlib.pyplot as _plt
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import time as _time
-
-
-_plt.style.use('ggplot')
 
 
 _this_file = _ospath.abspath(__file__)
