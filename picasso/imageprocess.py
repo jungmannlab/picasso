@@ -23,16 +23,16 @@ def xcorr(imageA, imageB):
     return _fft.fftshift(_np.real(_fft.ifft2((FimageA * CFimageB)))) / _np.sqrt(imageA.size)
 
 
-def get_image_shift(imageA, imageB, margin, fit_roi):
+def get_image_shift(imageA, imageB, roi, box):
     # Compute image correlation
     XCorr = xcorr(imageA, imageB)
-    # Cut the margins
+    # Cut out center roi
     Y, X = imageA.shape
-    Y_ = int(margin * Y)
-    X_ = int(margin * X)
+    Y_ = int((Y - roi) / 2)
+    X_ = int((X - roi) / 2)
     XCorr_ = XCorr[Y_:-Y_, X_:-X_]
     # A quarter of the fit ROI
-    fit_X = int(fit_roi / 2)
+    fit_X = int(box / 2)
     # A coordinate grid for the fitting ROI
     y, x = _np.mgrid[-fit_X:fit_X+1, -fit_X:fit_X+1]
     # Find the brightest pixel and cut out the fit ROI
