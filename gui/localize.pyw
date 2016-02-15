@@ -26,22 +26,43 @@ from picasso import io, localize
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
-DEFAULT_PARAMETERS = {'ROI': 7, 'Minimum LGM': 5000}
+DEFAULT_PARAMETERS = {'Box Size': 7, 'Minimum LGM': 5000}
+
+
+class RubberBand(QtGui.QRubberBand):
+
+    def __init__(self, parent):
+        super().__init__(QtGui.QRubberBand.Rectangle, parent)
+
+    def paintEvent(self, event):
+        painter = QtGui.QPainter(self)
+        color = QtGui.QColor(QtCore.Qt.blue)
+        painter.setPen(QtGui.QPen(color))
+        rect = event.rect()
+        rect.setHeight(rect.height() - 1)
+        rect.setWidth(rect.width() - 1)
+        painter.drawRect(rect)
 
 
 class View(QtGui.QGraphicsView):
     """ The central widget which shows `Scene` objects of individual frames """
 
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        # self.setDragMode(QtGui.QGraphicsView.ScrollHandDrag)      # should change this to rubberband for zooming
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
         self.setAcceptDrops(True)
         self.pan = False
         self.hscrollbar = self.horizontalScrollBar()
         self.vscrollbar = self.verticalScrollBar()
+        self.rubberband = RubberBand(self)
+        self.roi = None
 
     def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.RightButton:
+        if event.button() == QtCore.Qt.LeftButton:
+            self.roi_origin = QtCore.QPoint(event.pos())
+            self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, QtCore.QSize()))
+            self.rubberband.show()
+        elif event.button() == QtCore.Qt.RightButton:
             self.pan = True
             self.pan_start_x = event.x()
             self.pan_start_y = event.y()
@@ -51,6 +72,8 @@ class View(QtGui.QGraphicsView):
             event.ignore()
 
     def mouseMoveEvent(self, event):
+        if event.buttons() == QtCore.Qt.LeftButton:
+            self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, event.pos()))
         if self.pan:
             self.hscrollbar.setValue(self.hscrollbar.value() - event.x() + self.pan_start_x)
             self.vscrollbar.setValue(self.vscrollbar.value() - event.y() + self.pan_start_y)
@@ -61,7 +84,18 @@ class View(QtGui.QGraphicsView):
             event.ignore()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == QtCore.Qt.RightButton:
+        if event.button() == QtCore.Qt.LeftButton:
+            self.roi_end = QtCore.QPoint(event.pos())
+            dx = abs(self.roi_end.x() - self.roi_origin.x())
+            dy = abs(self.roi_end.y() - self.roi_origin.y())
+            if dx < 10 or dy < 10:
+                self.roi = None
+                self.rubberband.hide()
+            else:
+                roi_points = (self.mapToScene(self.roi_origin), self.mapToScene(self.roi_end))
+                self.roi = list([[int(_.y()), int(_.x())] for _ in roi_points])
+            self.window.draw_frame()
+        elif event.button() == QtCore.Qt.RightButton:
             self.pan = False
             self.setCursor(QtCore.Qt.ArrowCursor)
             event.accept()
@@ -142,29 +176,33 @@ class OddSpinBox(QtGui.QSpinBox):
 class ParametersDialog(QtGui.QDialog):
     """ The dialog showing analysis parameters """
 
-    def __init__(self, window):
-        super().__init__(window)
-        self.window = window
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.window = parent
         self.setWindowTitle('Parameters')
         self.resize(300, 0)
         self.setModal(False)
-        grid = QtGui.QGridLayout(self)
 
-        # ROI
-        grid.addWidget(QtGui.QLabel('ROI side length:'), 0, 0)
-        self.roi_spinbox = OddSpinBox()
-        self.roi_spinbox.setValue(DEFAULT_PARAMETERS['ROI'])
-        self.roi_spinbox.valueChanged.connect(self.on_roi_changed)
-        grid.addWidget(self.roi_spinbox, 0, 1)
+        vbox = QtGui.QVBoxLayout(self)
+        identification_groupbox = QtGui.QGroupBox('Identification')
+        vbox.addWidget(identification_groupbox)
+        identification_grid = QtGui.QGridLayout(identification_groupbox)
+
+        # Box Size
+        identification_grid.addWidget(QtGui.QLabel('Box side length:'), 0, 0)
+        self.box_spinbox = OddSpinBox()
+        self.box_spinbox.setValue(DEFAULT_PARAMETERS['Box Size'])
+        self.box_spinbox.valueChanged.connect(self.on_box_changed)
+        identification_grid.addWidget(self.box_spinbox, 0, 1)
 
         # Minimum LGM
-        grid.addWidget(QtGui.QLabel('Minimum LGM:'), 1, 0)
+        identification_grid.addWidget(QtGui.QLabel('Minimum LGM:'), 1, 0)
         self.mlgm_spinbox = QtGui.QSpinBox()
         self.mlgm_spinbox.setRange(0, 999999)
         self.mlgm_spinbox.setValue(DEFAULT_PARAMETERS['Minimum LGM'])
         self.mlgm_spinbox.setKeyboardTracking(False)
         self.mlgm_spinbox.valueChanged.connect(self.on_mlgm_spinbox_changed)
-        grid.addWidget(self.mlgm_spinbox, 1, 1)
+        identification_grid.addWidget(self.mlgm_spinbox, 1, 1)
 
         # Slider
         self.mlgm_slider = QtGui.QSlider()
@@ -174,10 +212,10 @@ class ParametersDialog(QtGui.QDialog):
         self.mlgm_slider.setSingleStep(1)
         self.mlgm_slider.setPageStep(20)
         self.mlgm_slider.valueChanged.connect(self.on_mlgm_slider_changed)
-        grid.addWidget(self.mlgm_slider, 2, 0, 1, 2)
+        identification_grid.addWidget(self.mlgm_slider, 2, 0, 1, 2)
 
         hbox = QtGui.QHBoxLayout()
-        grid.addLayout(hbox, 3, 0, 1, 2)
+        identification_grid.addLayout(hbox, 3, 0, 1, 2)
 
         # Min SpinBox
         self.mlgm_min_spinbox = QtGui.QSpinBox()
@@ -201,9 +239,66 @@ class ParametersDialog(QtGui.QDialog):
         self.preview_checkbox.setTristate(False)
         # self.preview_checkbox.setChecked(True)
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
-        grid.addWidget(self.preview_checkbox, 4, 0)
+        identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
-    def on_roi_changed(self, value):
+        fit_groupbox = QtGui.QGroupBox('Fitting')
+        vbox.addWidget(fit_groupbox)
+        fit_grid = QtGui.QGridLayout(fit_groupbox)
+
+        # Camera
+        fit_grid.addWidget(QtGui.QLabel('Camera:'), 0, 0)
+        self.camera_combo = QtGui.QComboBox()
+        self.camera_combo.currentIndexChanged.connect(self.on_camera_changed)
+        fit_grid.addWidget(self.camera_combo, 0, 1)
+        self.em_checkbox = QtGui.QCheckBox('Electron Multiplying')
+        self.em_checkbox.toggled.connect(self.update_readmodes)
+        fit_grid.addWidget(self.em_checkbox, 1, 1)
+        fit_grid.addWidget(QtGui.QLabel('EM Real Gain:'), 2, 0)
+        self.gain_spinbox = QtGui.QSpinBox()
+        self.gain_spinbox.setRange(1, 1000)
+        fit_grid.addWidget(self.gain_spinbox, 2, 1)
+        fit_grid.addWidget(QtGui.QLabel('Readout Mode:'), 3, 0)
+        self.readmode_combo = QtGui.QComboBox()
+        self.readmode_combo.currentIndexChanged.connect(self.update_preamps)
+        fit_grid.addWidget(self.readmode_combo, 3, 1)
+        fit_grid.addWidget(QtGui.QLabel('Pre-Amp Gain:'), 4, 0)
+        self.preamp_combo = QtGui.QComboBox()
+        fit_grid.addWidget(self.preamp_combo, 4, 1)
+        fit_grid.addWidget(QtGui.QLabel('Excitation Wavelength:'), 5, 0)
+        self.excitation_combo = QtGui.QComboBox()
+        fit_grid.addWidget(self.excitation_combo, 5, 1)
+        self.camera_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'].keys())))
+
+    def on_camera_changed(self, index):
+        self.update_readmodes(index)
+        self.excitation_combo.clear()
+        camera = self.camera_combo.currentText()
+        if camera:
+            wavelengths = sorted(list(localize.CONFIG['Cameras'][camera]['Quantum Efficiency'].keys()))
+            wavelengths = [str(_) for _ in wavelengths]
+            self.excitation_combo.addItems([''] + wavelengths)
+
+    def update_readmodes(self, index):
+        self.readmode_combo.clear()
+        camera = self.camera_combo.currentText()
+        if camera:
+            if localize.CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
+                em = self.em_checkbox.isChecked()
+                self.readmode_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'][camera]['Sensitivity'][em].keys())))
+
+    def update_preamps(self, index):
+        self.preamp_combo.clear()
+        camera = self.camera_combo.currentText()
+        if camera:
+            if localize.CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
+                em = self.em_checkbox.isChecked()
+                readmode = self.readmode_combo.currentText()
+                if readmode:
+                    preamps = range(len(localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode]))
+                    preamps = [''] + [str(_ + 1) for _ in list(preamps)]
+                    self.preamp_combo.addItems(preamps)
+
+    def on_box_changed(self, value):
         self.window.on_parameters_changed()
 
     def on_mlgm_spinbox_changed(self, value):
@@ -226,6 +321,54 @@ class ParametersDialog(QtGui.QDialog):
 
     def on_preview_changed(self, state):
         self.window.draw_frame()
+
+    def set_camera_parameters(self, parameters):
+        self.camera_combo.setCurrentIndex(0)
+        if 'Camera' in parameters:
+            camera = parameters['Camera']
+            for index in range(self.camera_combo.count()):
+                if self.camera_combo.itemText(index) == camera:
+                    self.camera_combo.setCurrentIndex(index)
+                    break
+        if 'Electron Multiplying' in parameters:
+            self.em_checkbox.setChecked(parameters['Electron Multiplying'])
+            if parameters['Electron Multiplying']:
+                if 'EM Real Gain' in parameters:
+                    self.gain_spinbox.setValue(parameters['EM Real Gain'])
+            self.readmode_combo.setCurrentIndex(0)
+        if 'Readout Mode' in parameters:
+            for index in range(self.readmode_combo.count()):
+                if self.readmode_combo.itemText(index) == parameters['Readout Mode']:
+                    self.readmode_combo.setCurrentIndex(index)
+                    break
+        self.preamp_combo.setCurrentIndex(0)
+        if 'Pre-Amp Gain' in parameters:
+            for index in range(self.preamp_combo.count()):
+                if self.preamp_combo.itemText(index) == str(parameters['Pre-Amp Gain']):
+                    self.preamp_combo.setCurrentIndex(index)
+                    break
+        self.excitation_combo.setCurrentIndex(0)
+        if 'Excitation Wavelength' in parameters:
+            for index in range(self.excitation_combo.count()):
+                if self.excitation_combo.itemText(index) == parameters['Excitation Wavelength']:
+                    self.excitation_combo.setCurrentIndex(index)
+                    break
+
+    def get_camera_parameters(self):
+        camera = self.camera_combo.currentText()
+        parameters = {'Camera': self.camera_combo.currentText()}
+        if localize.CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
+            parameters['Electron Multiplying'] = self.em_checkbox.isChecked()
+            parameters['EM Real Gain'] = self.gain_spinbox.value()
+            parameters['Readout Mode'] = self.readmode_combo.currentText()
+            parameters['Pre-Amp Gain'] = int(self.preamp_combo.currentText())
+        elif localize.CONFIG['Cameras'][camera]['Sensor'] == 'sCMOS':
+            pass
+        try:
+            parameters['Excitation Wavelength'] = int(self.excitation_combo.currentText())
+        except ValueError:
+            raise ValueError('You must set the wavelength!')
+        return parameters
 
 
 class ContrastDialog(QtGui.QDialog):
@@ -293,7 +436,7 @@ class Window(QtGui.QMainWindow):
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
         self.init_menu_bar()
-        self.view = View()
+        self.view = View(self)
         self.setCentralWidget(self.view)
         self.scene = Scene(self)
         self.view.setScene(self.scene)
@@ -305,7 +448,7 @@ class Window(QtGui.QMainWindow):
         self.movie = None
 
         #: A dictionary of analysis parameters used for the last operation
-        self.last_identification_parameters = None
+        self.last_identification_info = None
 
         #: A numpy.recarray of identifcations with fields frame, x and y
         self.identifications = None
@@ -349,11 +492,11 @@ class Window(QtGui.QMainWindow):
         view_menu.addAction(next_frame_action)
         view_menu.addSeparator()
         first_frame_action = view_menu.addAction('First frame')
-        first_frame_action.setShortcut('Ctrl+Home')
+        first_frame_action.setShortcut('Home')
         first_frame_action.triggered.connect(self.first_frame)
         view_menu.addAction(first_frame_action)
         last_frame_action = view_menu.addAction('Last frame')
-        last_frame_action.setShortcut('Ctrl+End')
+        last_frame_action.setShortcut('End')
         last_frame_action.triggered.connect(self.last_frame)
         view_menu.addAction(last_frame_action)
         go_to_frame_action = view_menu.addAction('Go to frame')
@@ -413,6 +556,7 @@ class Window(QtGui.QMainWindow):
             self.ready_for_fit = False
             self.set_frame(0)
             self.fit_in_view()
+            self.parameters_dialog.set_camera_parameters(self.info[0])
         except FileNotFoundError:
             pass  # TODO send a message
 
@@ -473,16 +617,17 @@ class Window(QtGui.QMainWindow):
             self.view.setScene(self.scene)
             if self.ready_for_fit:
                 identifications_frame = self.identifications[self.identifications.frame == self.current_frame_number]
-                roi = self.last_identification_parameters['ROI']
-                self.draw_identifications(identifications_frame, roi, QtGui.QColor('yellow'))
+                box = self.last_identification_info['Box Size']
+                self.draw_identifications(identifications_frame, box, QtGui.QColor('yellow'))
             else:
                 if self.parameters_dialog.preview_checkbox.isChecked():
                     identifications_frame = localize.identify_by_frame_number(self.movie,
                                                                               self.parameters,
-                                                                              self.current_frame_number)
-                    roi = self.parameters['ROI']
+                                                                              self.current_frame_number,
+                                                                              self.view.roi)
+                    box = self.parameters['Box Size']
                     self.status_bar.showMessage('Found {:,} spots in current frame.'.format(len(identifications_frame)))
-                    self.draw_identifications(identifications_frame, roi, QtGui.QColor('red'))
+                    self.draw_identifications(identifications_frame, box, QtGui.QColor('red'))
                 else:
                     self.status_bar.showMessage('')
             if self.locs is not None:
@@ -490,12 +635,12 @@ class Window(QtGui.QMainWindow):
                 for loc in locs_frame:
                     self.scene.addItem(FitMarker(loc.x+0.5, loc.y+0.5, 1))
 
-    def draw_identifications(self, identifications, roi, color):
-        roi_half = int(roi / 2)
+    def draw_identifications(self, identifications, box, color):
+        box_half = int(box / 2)
         for identification in identifications:
             x = identification.x
             y = identification.y
-            self.scene.addRect(x - roi_half, y - roi_half, roi, roi, color)
+            self.scene.addRect(x - box_half, y - box_half, box, box, color)
 
     def open_parameters(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', filter='*.yaml')
@@ -505,7 +650,7 @@ class Window(QtGui.QMainWindow):
     def load_parameters(self, path):
         with open(path, 'r') as file:
             parameters = yaml.load(file)
-            self.parameters_dialog.roi_spinbox.setValue(parameters['ROI'])
+            self.parameters_dialog.box_spinbox.setValue(parameters['Box Size'])
             self.parameters_dialog.mlgm_spinbox.setValue(parameters['Minimum LGM'])
             self.status_bar.showMessage('Parameter file {} loaded.'.format(path))
 
@@ -517,7 +662,7 @@ class Window(QtGui.QMainWindow):
 
     @property
     def parameters(self):
-        return {'ROI': self.parameters_dialog.roi_spinbox.value(),
+        return {'Box Size': self.parameters_dialog.box_spinbox.value(),
                 'Minimum LGM': self.parameters_dialog.mlgm_slider.value()}
 
     def on_parameters_changed(self):
@@ -535,19 +680,24 @@ class Window(QtGui.QMainWindow):
 
     def on_identify_progress(self, frame_number, parameters):
         n_frames = self.info[0]['Frames']
-        roi = parameters['ROI']
+        box = parameters['Box Size']
         mmlg = parameters['Minimum LGM']
-        message = 'Identifying in frame {:,}/{:,} (ROI: {:,}; Minimum LGM: {:,})...'.format(frame_number, n_frames, roi, mmlg)
+        message = 'Identifying in frame {:,}/{:,} (Box Size: {:,}; Minimum LGM: {:,})...'.format(frame_number,
+                                                                                                 n_frames,
+                                                                                                 box,
+                                                                                                 mmlg)
         self.status_bar.showMessage(message)
 
-    def on_identify_finished(self, parameters, identifications, fit_afterwards):
+    def on_identify_finished(self, parameters, roi, identifications, fit_afterwards):
         if len(identifications):
             self.locs = None
-            self.last_identification_parameters = parameters.copy()
+            self.last_identification_info = parameters.copy()
+            self.last_identification_info['ROI'] = roi
             n_identifications = len(identifications)
-            roi = parameters['ROI']
+            box = parameters['Box Size']
             mmlg = parameters['Minimum LGM']
-            message = 'Identified {:,} spots (ROI: {:,}; Minimum LGM: {:,}). Ready for fit.'.format(n_identifications, roi, mmlg)
+            message = 'Identified {:,} spots (Box Size: {:,}; Minimum LGM: {:,}). Ready for fit.'.format(n_identifications,
+                                                                                                         box, mmlg)
             self.status_bar.showMessage(message)
             self.identifications = identifications
             self.ready_for_fit = True
@@ -558,7 +708,24 @@ class Window(QtGui.QMainWindow):
     def fit(self):
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage('Preparing fit...')
-            self.fit_worker = FitWorker(self)
+            parameters = self.parameters_dialog.get_camera_parameters()
+            camera = parameters['Camera']
+            sensor = localize.CONFIG['Cameras'][camera]['Sensor']
+            camera_info = {'sensor': sensor}
+            if sensor == 'EMCCD':
+                em = parameters['Electron Multiplying']
+                readmode = parameters['Readout Mode']
+                preamp = parameters['Pre-Amp Gain'] - 1
+                camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode][preamp]
+                if em:
+                    camera_info['gain'] = parameters['EM Real Gain']
+                else:
+                    camera_info['gain'] = 1
+            elif sensor == 'sCMOS':
+                pass    # put calibration here
+            excitation = parameters['Excitation Wavelength']
+            camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
+            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'])
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
@@ -584,8 +751,8 @@ class Window(QtGui.QMainWindow):
         self.view.scale(7 / 10, 7 / 10)
 
     def save_locs(self, path):
-        localize_info = self.last_identification_parameters.copy()
-        localize_info.update({'Generated by': 'Picasso Localize'})
+        localize_info = self.last_identification_info.copy()
+        localize_info['Generated by'] = 'Picasso Localize'
         info = self.info + [localize_info]
         io.save_locs(path, self.locs, info)
 
@@ -603,23 +770,24 @@ class Window(QtGui.QMainWindow):
 class IdentificationWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, dict)
-    finished = QtCore.pyqtSignal(dict, np.recarray, bool)
+    finished = QtCore.pyqtSignal(dict, list, np.recarray, bool)
 
     def __init__(self, window, fit_afterwards):
         super().__init__()
         self.window = window
         self.movie = window.movie
+        self.roi = window.view.roi
         self.parameters = window.parameters
         self.fit_afterwards = fit_afterwards
 
     def run(self):
-        futures = localize.identify_async(self.movie, self.parameters)
+        futures = localize.identify_async(self.movie, self.parameters, self.roi)
         not_done = futures
         while not_done:
             done, not_done = wait(futures, 0.1)
             self.progressMade.emit(len(done), self.parameters)
         identifications = np.hstack([_.result() for _ in futures]).view(np.recarray)
-        self.finished.emit(self.parameters, identifications, self.fit_afterwards)
+        self.finished.emit(self.parameters, self.roi, identifications, self.fit_afterwards)
 
 
 class FitWorker(QtCore.QThread):
@@ -627,21 +795,20 @@ class FitWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray)
 
-    def __init__(self, window):
+    def __init__(self, movie, camera_info, identifications, box):
         super().__init__()
-        self.window = window
-        self.movie = window.movie
-        self.info = window.info
-        self.identifications = window.identifications
-        self.roi = window.parameters['ROI']
+        self.movie = movie
+        self.camera_info = camera_info
+        self.identifications = identifications
+        self.box = box
 
     def run(self):
-        thread, fit_info = localize.fit_async(self.movie, self.info, self.identifications, self.roi)
+        thread, fit_info = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box)
         while thread.is_alive():
             self.progressMade.emit(fit_info.current, fit_info.n_spots)
             time.sleep(0.1)
         thread.join()   # just in case...
-        locs = localize.locs_from_fit_info(fit_info, self.identifications, self.roi)
+        locs = localize.locs_from_fit_info(fit_info, self.identifications, self.box)
         self.finished.emit(locs)
 
 
