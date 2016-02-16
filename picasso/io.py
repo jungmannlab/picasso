@@ -141,13 +141,13 @@ class TiffFile:
                     em = (mm_info[camera + '-Output_Amplifier'] == 'Electron Multiplying')
                     self.info['Electron Multiplying'] = em
                 if camera + '-Gain' in mm_info:
-                    self.info['EM Real Gain'] = int(mm_info['Andor-Gain'])
+                    self.info['EM Real Gain'] = int(mm_info[camera + '-Gain'])
                 if camera + '-Pre-Amp-Gain' in mm_info:
                     try:
-                        self.info['Pre-Amp Gain'] = int(mm_info['Andor-Pre-Amp-Gain'].split()[1])
+                        self.info['Pre-Amp Gain'] = int(mm_info[camera + '-Pre-Amp-Gain'].split()[1])
                     except IndexError:      # In case gain is specified in the format "5x"
-                        self.info['Pre-Amp Gain'] = str(mm_info['Andor-Pre-Amp-Gain']) + ' (CONVERT TO INDEX!)'
-                    self.info['Readout Mode'] = mm_info['Andor-ReadoutMode']
+                        self.info['Pre-Amp Gain'] = str(mm_info[camera + '-Pre-Amp-Gain']) + ' (CONVERT TO INDEX!)'
+                    self.info['Readout Mode'] = mm_info[camera + '-ReadoutMode']
                 if 'TIFilterBlock1-Label' in mm_info:
                     try:
                         self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])

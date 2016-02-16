@@ -1,5 +1,5 @@
 Cameras:
-  Andor EMCCD 9603 (Miblab):   # Original Miblab
+  Andor iXon X-9418:   # Original Miblab
     Sensor: EMCCD
     Quantum Efficiency:
       # Excitation wavelength
@@ -18,7 +18,7 @@ Cameras:
         3.000 MHz: [4.0, 3.13, 1.47]
         1.000 MHz: [4.01, 3.1, 1.45]
         0.080 MHz: [4.05, 3.12, 1.45]
-  Andor Zyla:     # Generic Zyla
+  Andor Zyla VSC-01223:     # Generic Zyla
     Sensor: sCMOS
     Quantum Efficiency:
       489: 1
