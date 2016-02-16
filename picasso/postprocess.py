@@ -195,7 +195,7 @@ def _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, lpx,
 
 def link_loc_groups(locs, group):
     linked_locs_data = _link_loc_groups(locs, group)
-    dtype = locs.dtype.descr + [('len', 'u4'), ('n', 'u4')]
+    dtype = locs.dtype.descr + [('len', 'u4'), ('n', 'u4'), ('photon_rate', 'f4')]
     return _np.rec.array(linked_locs_data, dtype=dtype)
 
 
@@ -245,7 +245,8 @@ def _link_loc_groups(locs, group):
     lpy_ = _np.sqrt(1/sum_weights_y_)
     likelihood_ = likelihood_ / n_
     len_ = last_frame_ - frame_ + 1
-    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, len_, n_
+    photon_rate_ = photons_ / n_
+    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, len_, n_, photon_rate_
 
 
 @_numba.jit(nopython=True)
