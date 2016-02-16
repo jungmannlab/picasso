@@ -7,8 +7,6 @@
     :author: Joerg Schnitzbauer, 2016
 """
 import matplotlib.pyplot as _plt
-from matplotlib.widgets import RectangleSelector as _RectangleSelector
-import copy as _copy
 import numpy as _np
 from numpy import fft as _fft
 import lmfit as _lmfit

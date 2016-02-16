@@ -23,7 +23,6 @@ _this_file = _ospath.abspath(__file__)
 _this_directory = _ospath.dirname(_this_file)
 _parent_directory = _ospath.dirname(_this_directory)
 _sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
-from picasso import io as _io
 from picasso import lib as _lib
 from picasso import render as _render
 from picasso import imageprocess as _imageprocess
@@ -289,31 +288,71 @@ def __link_loc_groups(locs, group):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
-def undrift(locs, info, segmentation, mode='render'):
+def undrift(locs, info, segmentation, mode='render', movie=None):
     if mode in ['render', 'std']:
-        drift_y, drift_x = get_drift_rcc(locs, info, segmentation, mode)
+        drift_y, drift_x = get_drift_rcc(locs, info, segmentation, mode, movie)
     elif mode == 'framepair':
         drift_y, drift_x = get_drift_framepair(locs, info)
     locs.x -= drift_y[locs.frame]
     locs.y -= drift_y[locs.frame]
-    return locs
+    drift = _np.rec.array((drift_x, drift_y), dtype=[('x', 'f'), ('y', 'f')])
+    return drift, locs
+
+
+@_numba.jit(nopython=True, nogil=True)
+def get_frame_shift(locs, i, j, min_prob):
+    N = len(locs)
+    frame = locs.frame
+    x = locs.x
+    y = locs.y
+    lpx = locs.lpx
+    lpy = locs.lpy
+    shift_x = 0
+    shift_y = 0
+    n = 0
+    for k in range(N):
+        if frame[k] == i:
+            xk = x[k]
+            yk = y[k]
+            lpxk = lpx[k]
+            lpyk = lpy[k]
+            for l in range(N):
+                if frame[l] == j:
+                    dx = x[l] - xk
+                    dx2 = dx**2
+                    if dx2 < 1:
+                        dy = y[l] - yk
+                        dy2 = dy**2
+                        if dy2 < 1:
+                            prob_of_same = _np.exp(-(dx2/(2*lpxk) + dy2/(2*lpyk)) - (dx2/(2*lpx[l]) + dy2/(2*lpy[l])))
+                            if prob_of_same > min_prob:
+                                shift_x += dx
+                                shift_y += dy
+                                n += 1
+    if n > 0:
+        shift_x /= n
+        shift_y /= n
+    return shift_y, shift_x
 
 
 def get_drift_framepair(locs, info):
-    roi = 32           # Maximum shift is 32 pixels
+    # roi = 32           # Maximum shift is 32 pixels
     n_frames = info[0]['Frames']
-    drift_x = _np.zeros(n_frames)
-    drift_y = _np.zeros(n_frames)
-    for f in range(1, n_frames):
-        previous_frame_locs = locs[locs.frame == f-1]
-        _, previous_frame = _render.render(previous_frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
-        frame_locs = locs[locs.frame == f]
-        _, frame = _render.render(frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
-        drift_y[f], drift_x[f] = _imageprocess.get_image_shift(previous_frame, frame, roi, 5)
-    return drift_y, drift_x
+    shift_x = _np.zeros(n_frames)
+    shift_y = _np.zeros(n_frames)
+    with _tqdm(total=n_frames-1, desc='Computing frame shifts', unit='frames') as progress_bar:
+        for f in range(1, n_frames):
+            progress_bar.update()
+            # previous_frame_locs = locs[locs.frame == f-1]
+            # _, previous_frame = _render.render(previous_frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
+            # frame_locs = locs[locs.frame == f]
+            # _, frame = _render.render(frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
+            # shift_y[f], shift_x[f] = _imageprocess.get_image_shift(previous_frame, frame, roi, 5)
+            shift_y[f], shift_x[f] = get_frame_shift(locs, f-1, f, 0.1)
+    return _np.cumsum(shift_y), _np.cumsum(shift_x)
 
 
-def get_drift_rcc(locs, info, segmentation, mode='render'):
+def get_drift_rcc(locs, info, segmentation, mode='render', movie=None):
     roi = 32           # Maximum shift is 32 pixels
     Y = info[0]['Height']
     X = info[0]['Width']
@@ -324,13 +363,12 @@ def get_drift_rcc(locs, info, segmentation, mode='render'):
     segments = _np.zeros((n_segments, Y, X))
 
     if mode == 'render':
-        with _tqdm(total=n_segments, desc='Generating segments', unit='segements') as progress_bar:
+        with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
             for i in range(n_segments):
                 progress_bar.update()
                 segment_locs = locs[(locs.frame > bounds[i]) & (locs.frame < bounds[i+1])]
                 _, segments[i] = _render.render(segment_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
     elif mode == 'std':
-        movie, _ = _io.load_raw(info[0]['Raw File'])
         with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
             for i in range(n_segments):
                 progress_bar.update()
