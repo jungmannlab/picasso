@@ -33,6 +33,7 @@ def dbscan(locs, radius, min_density):
     X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
     group = _np.int32(db.labels_)       # int32 for Origin compatiblity
+    locs = locs[group != -1]
     return _lib.append_to_rec(locs, group, 'group')
 
 
