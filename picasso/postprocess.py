@@ -33,8 +33,8 @@ def dbscan(locs, radius, min_density):
     X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
     group = _np.int32(db.labels_)       # int32 for Origin compatiblity
-    locs = locs[group != -1]
-    return _lib.append_to_rec(locs, group, 'group')
+    locs = _lib.append_to_rec(locs, group, 'group')
+    return locs[locs.group != -1]
 
 
 def compute_local_density(locs, radius):
@@ -111,7 +111,8 @@ def _compute_local_density(locs, radius):
 def compute_dark_times(locs):
     last_frame = locs.frame + locs.len - 1
     dark = _compute_dark_times(locs, last_frame)
-    return _lib.append_to_rec(locs, _np.int32(dark), 'dark')        # int32 for Origin compatiblity
+    locs = _lib.append_to_rec(locs, _np.int32(dark), 'dark')        # int32 for Origin compatiblity
+    return locs[locs.dark != -1]
 
 
 @_numba.jit(nopython=True)
