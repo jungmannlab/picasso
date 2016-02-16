@@ -349,8 +349,8 @@ class ParametersDialog(QtGui.QDialog):
                     break
         self.excitation_combo.setCurrentIndex(0)
         if 'Excitation Wavelength' in parameters:
-            for index in range(self.excitation_combo.count()):
-                if self.excitation_combo.itemText(index) == parameters['Excitation Wavelength']:
+            for index in range(1, self.excitation_combo.count()):
+                if int(self.excitation_combo.itemText(index)) == parameters['Excitation Wavelength']:
                     self.excitation_combo.setCurrentIndex(index)
                     break
 
@@ -770,7 +770,7 @@ class Window(QtGui.QMainWindow):
 class IdentificationWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, dict)
-    finished = QtCore.pyqtSignal(dict, list, np.recarray, bool)
+    finished = QtCore.pyqtSignal(dict, object, np.recarray, bool)
 
     def __init__(self, window, fit_afterwards):
         super().__init__()
