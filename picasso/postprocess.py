@@ -141,7 +141,7 @@ def link(locs, min_prob=0.05, max_dark_time=1, combine_mode='average'):
         # TODO: set len to -1 if loc lasts until last frame or starts at first frame
     elif combine_mode == 'refit':
         pass    # TODO
-    return linked_locs
+    return linked_locs[linked_locs.len != -1]
 
 
 @_numba.jit(nopython=True)
