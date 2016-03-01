@@ -21,14 +21,19 @@ def xcorr(imageA, imageB):
     return _fft.fftshift(_np.real(_fft.ifft2((FimageA * CFimageB)))) / _np.sqrt(imageA.size)
 
 
-def get_image_shift(imageA, imageB, roi, box):
+def get_image_shift(imageA, imageB, box, roi=None, display=False):
+    """ Computes the shift from imageA to imageB """
     # Compute image correlation
     XCorr = xcorr(imageA, imageB)
     # Cut out center roi
     Y, X = imageA.shape
-    Y_ = int((Y - roi) / 2)
-    X_ = int((X - roi) / 2)
-    XCorr_ = XCorr[Y_:-Y_, X_:-X_]
+    if roi is not None:
+        Y_ = int((Y - roi) / 2)
+        X_ = int((X - roi) / 2)
+        XCorr_ = XCorr[Y_:-Y_, X_:-X_]
+    else:
+        Y_ = X_ = 0
+        XCorr_ = XCorr
     # A quarter of the fit ROI
     fit_X = int(box / 2)
     # A coordinate grid for the fitting ROI
@@ -55,6 +60,20 @@ def get_image_shift(imageA, imageB, roi, box):
     # Get maximum coordinates and add offsets
     xc = results.best_values['xc']
     yc = results.best_values['yc']
-    xc += X_ + x_max_ - X / 2
-    yc += Y_ + y_max_ - Y / 2
+    xc += X_ + x_max_
+    yc += Y_ + y_max_
+
+    if display:
+        _plt.figure(figsize=(17, 10))
+        _plt.subplot(1, 3, 1)
+        _plt.imshow(imageA, interpolation='none')
+        _plt.subplot(1, 3, 2)
+        _plt.imshow(imageB, interpolation='none')
+        _plt.subplot(1, 3, 3)
+        _plt.imshow(XCorr, interpolation='none')
+        _plt.plot(xc, yc, 'x')
+        _plt.show()
+
+    xc -= X / 2
+    yc -= Y / 2
     return -yc, -xc

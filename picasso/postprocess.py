@@ -17,6 +17,8 @@ from scipy import interpolate as _interpolate
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import time as _time
+import matplotlib.pyplot as _plt
+from scipy.optimize import minimize as _minimize
 
 
 _this_file = _ospath.abspath(__file__)
@@ -291,14 +293,14 @@ def __link_loc_groups(locs, group):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, len_, n_
 
 
-def undrift(locs, info, segmentation, mode='render', movie=None):
+def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
     if mode in ['render', 'std']:
-        drift_y, drift_x = get_drift_rcc(locs, info, segmentation, mode, movie)
+        drift = get_drift_rcc(locs, info, segmentation, mode, movie, display)
     elif mode == 'framepair':
-        drift_y, drift_x = get_drift_framepair(locs, info)
-    locs.x -= drift_y[locs.frame]
-    locs.y -= drift_y[locs.frame]
-    drift = _np.rec.array((drift_x, drift_y), dtype=[('x', 'f'), ('y', 'f')])
+        drift = get_drift_framepair(locs, info, display)
+    locs.x -= drift[1][locs.frame]
+    locs.y -= drift[0][locs.frame]
+    drift = _np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
     return drift, locs
 
 
@@ -338,7 +340,7 @@ def get_frame_shift(locs, i, j, min_prob):
     return shift_y, shift_x
 
 
-def get_drift_framepair(locs, info):
+def get_drift_framepair(locs, info, display=True):
     # roi = 32           # Maximum shift is 32 pixels
     n_frames = info[0]['Frames']
     shift_x = _np.zeros(n_frames)
@@ -352,10 +354,26 @@ def get_drift_framepair(locs, info):
             # _, frame = _render.render(frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
             # shift_y[f], shift_x[f] = _imageprocess.get_image_shift(previous_frame, frame, roi, 5)
             shift_y[f], shift_x[f] = get_frame_shift(locs, f-1, f, 0.1)
-    return _np.cumsum(shift_y), _np.cumsum(shift_x)
+    drift = (_np.cumsum(shift_y), _np.cumsum(shift_x))
+    if display:
+        _plt.figure(figsize=(17, 6))
+        _plt.suptitle('Estimated drift')
+        _plt.subplot(1, 2, 1)
+        _plt.plot(drift[1], label='x')
+        _plt.plot(drift[0], label='y')
+        _plt.legend(loc='best')
+        _plt.xlabel('Frame')
+        _plt.ylabel('Drift (pixel)')
+        _plt.subplot(1, 2, 2)
+        _plt.plot(drift[1], drift[0], color=list(_plt.rcParams['axes.prop_cycle'])[2]['color'])
+        _plt.axis('equal')
+        _plt.xlabel('x')
+        _plt.ylabel('y')
+        _plt.show()
+    return drift
 
 
-def get_drift_rcc(locs, info, segmentation, mode='render', movie=None):
+def get_drift_rcc(locs, info, segmentation, mode='render', movie=None, display=True):
     roi = 32           # Maximum shift is 32 pixels
     Y = info[0]['Height']
     X = info[0]['Width']
@@ -369,7 +387,7 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None):
         with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
             for i in range(n_segments):
                 progress_bar.update()
-                segment_locs = locs[(locs.frame > bounds[i]) & (locs.frame < bounds[i+1])]
+                segment_locs = locs[(locs.frame >= bounds[i]) & (locs.frame < bounds[i+1])]
                 _, segments[i] = _render.render(segment_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
     elif mode == 'std':
         with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
@@ -385,7 +403,7 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None):
         for i in range(n_segments - 1):
             for j in range(i+1, n_segments):
                 progress_bar.update()
-                dyij, dxij = _imageprocess.get_image_shift(segments[i], segments[j], roi, 5)
+                dyij, dxij = _imageprocess.get_image_shift(segments[i], segments[j], 5, roi)
                 rij[flag, 0] = dyij
                 rij[flag, 1] = dxij
                 A[flag, i:j] = 1
@@ -399,13 +417,93 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None):
     drift_x_pol = _interpolate.InterpolatedUnivariateSpline(t, drift_x, k=3)
     drift_y_pol = _interpolate.InterpolatedUnivariateSpline(t, drift_y, k=3)
     t_inter = _np.arange(n_frames)
-    return drift_y_pol(t_inter), drift_x_pol(t_inter)
+    drift = (drift_y_pol(t_inter), drift_x_pol(t_inter))
+    if display:
+        _plt.figure(figsize=(17, 6))
+        _plt.suptitle('Estimated drift')
+        _plt.subplot(1, 2, 1)
+        _plt.plot(drift[1], label='x interpolated')
+        _plt.plot(drift[0], label='y interpolated')
+        t = (bounds[1:] + bounds[:-1]) / 2
+        _plt.plot(t, drift_x, 'o', color=list(_plt.rcParams['axes.prop_cycle'])[0]['color'], label='x')
+        _plt.plot(t, drift_y, 'o', color=list(_plt.rcParams['axes.prop_cycle'])[1]['color'], label='y')
+        _plt.legend(loc='best')
+        _plt.xlabel('Frame')
+        _plt.ylabel('Drift (pixel)')
+        _plt.subplot(1, 2, 2)
+        _plt.plot(drift[1], drift[0], color=list(_plt.rcParams['axes.prop_cycle'])[2]['color'])
+        _plt.plot(drift_x, drift_y, 'o', color=list(_plt.rcParams['axes.prop_cycle'])[2]['color'])
+        _plt.axis('equal')
+        _plt.xlabel('x')
+        _plt.ylabel('y')
+        _plt.show()
+    return drift
 
 
-def align(target_locs, target_info, locs, info):
-    N_target, target_image = _render.render(target_locs, target_info, blur_method='gaussian', blur_width=1)
-    N, image = _render.render(locs, info, blur_method='gaussian', blur_width=1)
-    dy, dx = _imageprocess.get_image_shift(target_image, image, 0.25, 5)
+def align(target_locs, target_info, locs, info, display=False):
+    os = 1
+    bw = 1
+    N_target, target_image = _render.render(target_locs, target_info, oversampling=os,
+                                            blur_method='gaussian', blur_width=bw)
+    N, image = _render.render(locs, info, oversampling=os, blur_method='gaussian', blur_width=bw)
+    target_pad = [int(_/4) for _ in target_image.shape]
+    target_image_pad = _np.pad(target_image, target_pad, 'constant')
+    image_pad = [int(_/4) for _ in image.shape]
+    image = _np.pad(image, image_pad, 'constant')
+    dy, dx = _imageprocess.get_image_shift(target_image_pad, image, 7, None, display=display)
+    dy /= os
+    dx /= os
+    print('Image shift: dx={}, dy={}.'.format(dx, dy))
     locs.y -= dy
     locs.x -= dx
+    affine = True
+    if affine:
+        print('Attempting affine transformation...')
+
+        def apply_transforms(locs, T):
+            Ox, Oy, W, H, theta, A, B, X, Y = T
+            # Origin shift and scale
+            x = W * (locs.x - Ox)
+            y = H * (locs.y - Oy)
+            # Rotate
+            x_ = _np.cos(theta) * x + _np.sin(theta) * y
+            y_ = -_np.sin(theta) * x + _np.cos(theta) * y
+            x = x_.copy()
+            y = y_.copy()
+            # Shearing
+            x_ = x + A * y
+            y_ = B * x + y
+            x = x_.copy()
+            y = y_.copy()
+            # Translate and origin backshift
+            x += X + Ox
+            y += Y + Oy
+            return x, y
+        locsT = _np.rec.array((locs.x, locs.y), dtype=[('x', 'f4'), ('y', 'f4')])
+
+        def affine_xcorr_negmax(T, ref_image, locs):
+            locsT.x, locsT.y = apply_transforms(locs, T)
+            N_T, imageT = _render.render(locsT, info, blur_method='gaussian', blur_width=bw)
+            xcorr = _imageprocess.xcorr(ref_image, imageT)
+            return -xcorr.max()
+        Ox = _np.mean(locs.x)
+        Oy = _np.mean(locs.y)
+        W = 1
+        H = 1
+        theta = 0
+        A = 0
+        B = 0
+        X = 0
+        Y = 0
+        T0 = _np.array([Ox, Oy, W, H, theta, A, B, X, Y])
+        init_steps = [0.1, 0.1, 0.05, 0.05, 0.02, 0.05, 0.05]
+        result = _minimize(affine_xcorr_negmax, T0, args=(target_image, locs),
+                           method='COBYLA', options={'rhobeg': init_steps})
+        Ox, Oy, W, H, theta, A, B, X, Y = result.x
+        print('''Origin shift (x,y): {}, {}
+Scale (x,y): {}, {}
+Rotation (deg): {}
+Shear (x,y): {}, {}
+Translation (x,y): {}, {}'''.format(Ox, Oy, W, H, 360*theta/(2*_np.pi), A, B, X, Y))
+        locs.x, locs.y = apply_transforms(locs, result.x)
     return locs
