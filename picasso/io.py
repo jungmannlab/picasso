@@ -73,7 +73,9 @@ class TiffFile:
 
     def __iter__(self):
         offset = self._first_ifd_offset
+        current_frame = 0
         while offset != 0:
+            current_frame += 1
             self._file_handle.seek(offset)
             n_entries = self._read('H')
             for i in range(n_entries):
@@ -85,7 +87,8 @@ class TiffFile:
                     image_offset = self._read(type, count)
                     break
             else:
-                raise Exception('IFD does not have tag 273 (data offset) (File: {})'.format(self.path))
+                raise Exception('IFD does not have tag 273 (data offset) (File: {}, Frame: {})'.format(self.path,
+                                                                                                       current_frame))
             self._file_handle.seek(offset + 2 + n_entries * 12)
             offset = self._read('L')
             self._file_handle.seek(image_offset)
