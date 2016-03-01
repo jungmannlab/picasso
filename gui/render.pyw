@@ -94,13 +94,7 @@ class View(QtGui.QLabel):
             event.ignore()
 
     def resizeEvent(self, event):
-        old_size = event.oldSize()
-        new_size = event.size()
-        zoom = min(new_size.height() / old_size.height(), new_size.width() / old_size.width())
-        try:
-            self.window.render(self.window.center, zoom * self.window.zoom)
-        except AttributeError:
-            pass
+        self.window.render()
 
 
 class DisplaySettingsDialog(QtGui.QDialog):
