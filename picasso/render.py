@@ -48,7 +48,6 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None, blur_wid
             kernel_x = _signal.gaussian(kernel_width, lpx)
             kernel = _np.outer(kernel_y, kernel_x)
         else:
-            blur_width *= oversampling
             kernel_size = 10 * round(blur_width) + 1
             kernel = _signal.gaussian(kernel_size, blur_width)
             kernel = _np.outer(kernel, kernel)
@@ -62,7 +61,7 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None, blur_wid
             sy = oversampling * lpy[in_view]
             sx = oversampling * lpx[in_view]
         else:
-            sy = sx = oversampling * blur_width * _np.ones(len(locs))
+            sy = sx = blur_width * _np.ones(len(locs))
         return len(x), _fill_gaussians(image, x, y, sx, sy)
     else:
         raise Exception('blur_method not understood.')
