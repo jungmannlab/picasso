@@ -30,6 +30,36 @@ from picasso import render as _render
 from picasso import imageprocess as _imageprocess
 
 
+@_numba.jit(nopython=True)
+def distance_histogram(locs, bin_size, r_max):
+    x = locs.x
+    y = locs.y
+    dh_len = _np.uint32(r_max / bin_size)
+    dh = _np.zeros(dh_len, dtype=_np.uint32)
+    r_max_2 = r_max**2
+    N = len(x)
+    for i in range(N):
+        xi = x[i]
+        yi = y[i]
+        for j in range(i+1, N):
+            dx2 = (xi - x[j])**2
+            if dx2 < r_max_2:
+                dy2 = (yi - y[j])**2
+                if dy2 < r_max_2:
+                    d = _np.sqrt(dx2 + dy2)
+                    if d < r_max:
+                        bin = _np.uint32(d / bin_size)
+                        dh[bin] += 1
+    return dh
+
+
+def pair_correlation(locs, bin_size, r_max):
+    bins_lower = _np.arange(0, r_max, bin_size)
+    dh = distance_histogram(locs, bin_size, r_max)
+    area = _np.pi * bin_size * (2 * bins_lower + bin_size)
+    return bins_lower, dh / area
+
+
 def dbscan(locs, radius, min_density):
     locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
     X = _np.vstack((locs.x, locs.y)).T
