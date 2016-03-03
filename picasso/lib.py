@@ -29,5 +29,9 @@ def append_to_rec(rec_array, data, name):
     return _append_fields(rec_array, name, data, dtypes=data.dtype, usemask=False, asrecarray=True)
 
 
+def ensure_finite(rec_array):
+    return rec_array[_np.all(_np.array([_np.isfinite(rec_array[_]) for _ in rec_array.dtype.names]), axis=0)]
+
+
 def remove_from_rec(rec_array, name):
     return _drop_fields(rec_array, name, usemask=False, asrecarray=True)
