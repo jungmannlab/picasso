@@ -88,7 +88,8 @@ class DisplaySettingsDialog(QtGui.QDialog):
         scalebar_grid.addWidget(self.scalebar_edit, 1, 1)
 
     def trigger_rendering(self, *args):
-        self.window.render()
+        self.window.set_display_settings()
+        self.window.view.render()
 
 
 class Window(QtGui.QMainWindow):
@@ -174,6 +175,7 @@ class Window(QtGui.QMainWindow):
             locs, info = io.load_locs(path)
             self.locs_path = path
             self.view.add_locs(locs, info)
+            self.set_display_settings()
             if len(self.view.locs) > 1:
                 self.view.render()
             else:
@@ -181,7 +183,7 @@ class Window(QtGui.QMainWindow):
         else:
             raise Exception('Maximum number of channels is 3.')
 
-    def render(self):
+    def set_display_settings(self):
         self.view.vmin = float(self.display_settings_dialog.minimum.value())
         self.view.vmax = float(self.display_settings_dialog.maximum.value())
         self.view.pixelsize = float(self.display_settings_dialog.pixelsize_edit.text())
@@ -190,7 +192,6 @@ class Window(QtGui.QMainWindow):
             self.view.scalebar = float(self.display_settings_dialog.scalebar_edit.text())
         button = self.display_settings_dialog.blur_buttongroup.checkedButton()
         self.view.blur_method = self.display_settings_dialog.blur_methods[button]
-        self.view.render()
 
     def save_image(self):
         base, ext = os.path.splitext(self.locs_path)
