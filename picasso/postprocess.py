@@ -378,11 +378,6 @@ def get_drift_framepair(locs, info, display=True):
     with _tqdm(total=n_frames-1, desc='Computing frame shifts', unit='frames') as progress_bar:
         for f in range(1, n_frames):
             progress_bar.update()
-            # previous_frame_locs = locs[locs.frame == f-1]
-            # _, previous_frame = _render.render(previous_frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
-            # frame_locs = locs[locs.frame == f]
-            # _, frame = _render.render(frame_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
-            # shift_y[f], shift_x[f] = _imageprocess.get_image_shift(previous_frame, frame, roi, 5)
             shift_y[f], shift_x[f] = get_frame_shift(locs, f-1, f, 0.1)
     drift = (_np.cumsum(shift_y), _np.cumsum(shift_x))
     if display:
@@ -418,7 +413,7 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None, display=T
             for i in range(n_segments):
                 progress_bar.update()
                 segment_locs = locs[(locs.frame >= bounds[i]) & (locs.frame < bounds[i+1])]
-                _, segments[i] = _render.render(segment_locs, info, oversampling=1, blur_method='gaussian', blur_width=1)
+                _, segments[i] = _render.render(segment_locs, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
     elif mode == 'std':
         with _tqdm(total=n_segments, desc='Generating segments', unit='segments') as progress_bar:
             for i in range(n_segments):
@@ -471,11 +466,9 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None, display=T
 
 
 def align(target_locs, target_info, locs, info, display=False):
-    os = 1
-    bw = 1
-    N_target, target_image = _render.render(target_locs, target_info, oversampling=os,
-                                            blur_method='gaussian', blur_width=bw)
-    N, image = _render.render(locs, info, oversampling=os, blur_method='gaussian', blur_width=bw)
+    N_target, target_image = _render.render(target_locs, target_info, oversampling=1,
+                                            blur_method='gaussian', min_blur_width=1)
+    N, image = _render.render(locs, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
     target_pad = [int(_/4) for _ in target_image.shape]
     target_image_pad = _np.pad(target_image, target_pad, 'constant')
     image_pad = [int(_/4) for _ in image.shape]
@@ -513,7 +506,7 @@ def align(target_locs, target_info, locs, info, display=False):
 
         def affine_xcorr_negmax(T, ref_image, locs):
             locsT.x, locsT.y = apply_transforms(locs, T)
-            N_T, imageT = _render.render(locsT, info, blur_method='gaussian', blur_width=bw)
+            N_T, imageT = _render.render(locsT, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
             xcorr = _imageprocess.xcorr(ref_image, imageT)
             return -xcorr.max()
         Ox = _np.mean(locs.x)

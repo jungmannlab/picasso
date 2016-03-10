@@ -37,7 +37,7 @@ class LocsRenderer(_QtGui.QLabel):
         self.pixelsize = None
         self.scalebar = None
         self.blur_method = None
-        self.blur_width = None
+        self.min_blur_width = None
         self.locs = []
         self.info = None
 
@@ -140,7 +140,7 @@ class LocsRenderer(_QtGui.QLabel):
 
     def render_image(self, locs, viewport):
         return _render.render(locs, self.info, oversampling=self.zoom, viewport=viewport,
-                              blur_method=self.blur_method, blur_width=self.blur_width)
+                              blur_method=self.blur_method, min_blur_width=self.min_blur_width)
 
     def to_qimage(self, image):
         imax = image.max()

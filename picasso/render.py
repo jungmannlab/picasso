@@ -11,7 +11,7 @@ import numba as _numba
 import scipy.signal as _signal
 
 
-def render(locs, info, oversampling=1, viewport=None, blur_method=None, blur_width=None):
+def render(locs, info, oversampling=1, viewport=None, blur_method=None, min_blur_width=0):
     if viewport is None:
         viewport = [(0, 0), (info[0]['Height'], info[0]['Width'])]
     (y_min, x_min), (y_max, x_max) = viewport
@@ -35,33 +35,21 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None, blur_wid
         x = _np.int32(x)
         y = _np.int32(y)
         image = _fill(image, x, y)
-        if blur_width is None:
-            lpy = locs.lpy
-            lpx = locs.lpx
-            lpy = lpy[in_view]
-            lpx = lpx[in_view]
-            lpy = oversampling * _np.median(lpy)
-            lpx = oversampling * _np.median(lpx)
-            kernel_height = 10 * int(_np.round(lpy)) + 1
-            kernel_width = 10 * int(_np.round(lpx)) + 1
-            kernel_y = _signal.gaussian(kernel_height, lpy)
-            kernel_x = _signal.gaussian(kernel_width, lpx)
-            kernel = _np.outer(kernel_y, kernel_x)
-        else:
-            kernel_size = 10 * round(blur_width) + 1
-            kernel = _signal.gaussian(kernel_size, blur_width)
-            kernel = _np.outer(kernel, kernel)
+        blur_width = oversampling * max(_np.median(locs.lpx[in_view]), min_blur_width)
+        blur_height = oversampling * max(_np.median(locs.lpy[in_view]), min_blur_width)
+        kernel_width = 10 * int(_np.round(blur_width)) + 1
+        kernel_height = 10 * int(_np.round(blur_height)) + 1
+        kernel_y = _signal.gaussian(kernel_height, blur_height)
+        kernel_x = _signal.gaussian(kernel_width, blur_width)
+        kernel = _np.outer(kernel_y, kernel_x)
         image = _signal.fftconvolve(image, kernel, mode='same')
         image = len(locs) * image / image.sum()
         return len(x), image
     elif blur_method == 'gaussian':
-        if blur_width is None:
-            lpy = locs.lpy
-            lpx = locs.lpx
-            sy = oversampling * lpy[in_view]
-            sx = oversampling * lpx[in_view]
-        else:
-            sy = sx = blur_width * _np.ones(len(locs))
+        blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
+        blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
+        sy = blur_width[in_view]
+        sx = blur_width[in_view]
         return len(x), _fill_gaussians(image, x, y, sx, sy)
     else:
         raise Exception('blur_method not understood.')

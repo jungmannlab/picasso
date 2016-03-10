@@ -36,26 +36,25 @@ class DisplaySettingsDialog(QtGui.QDialog):
         contrast_grid = QtGui.QGridLayout(contrast_groupbox)
         minimum_label = QtGui.QLabel('Minimum:')
         contrast_grid.addWidget(minimum_label, 0, 0)
-        self.minimum = QtGui.QDoubleSpinBox()
-        self.minimum.setRange(0, 1)
-        self.minimum.setSingleStep(0.05)
+        self.minimum = QtGui.QSpinBox()
+        self.minimum.setRange(0, 999999)
+        self.minimum.setSingleStep(5)
         self.minimum.setValue(0)
-        self.minimum.setDecimals(3)
         self.minimum.setKeyboardTracking(False)
         self.minimum.valueChanged.connect(self.trigger_rendering)
         contrast_grid.addWidget(self.minimum, 0, 1)
         maximum_label = QtGui.QLabel('Maximum:')
         contrast_grid.addWidget(maximum_label, 1, 0)
-        self.maximum = QtGui.QDoubleSpinBox()
-        self.maximum.setRange(0, 1)
-        self.maximum.setSingleStep(0.05)
-        self.maximum.setValue(0.2)
-        self.maximum.setDecimals(3)
+        self.maximum = QtGui.QSpinBox()
+        self.maximum.setRange(0, 999999)
+        self.maximum.setSingleStep(5)
+        self.maximum.setValue(20)
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.trigger_rendering)
         contrast_grid.addWidget(self.maximum, 1, 1)
         # Blur
-        blur_groupbox = QtGui.QGroupBox('Blur Method')
+        blur_groupbox = QtGui.QGroupBox('Blur')
+        blur_grid = QtGui.QGridLayout(blur_groupbox)
         self.blur_buttongroup = QtGui.QButtonGroup()
         points_button = QtGui.QRadioButton('Points (fast)')
         self.blur_buttongroup.addButton(points_button)
@@ -63,12 +62,20 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.blur_buttongroup.addButton(convolve_button)
         gaussian_button = QtGui.QRadioButton('Individual Gaussians (slow for many locs.)')
         self.blur_buttongroup.addButton(gaussian_button)
-        blur_vbox = QtGui.QVBoxLayout(blur_groupbox)
-        blur_vbox.addWidget(points_button)
-        blur_vbox.addWidget(convolve_button)
-        blur_vbox.addWidget(gaussian_button)
+        blur_grid.addWidget(points_button, 0, 0, 1, 2)
+        blur_grid.addWidget(convolve_button, 1, 0, 1, 2)
+        blur_grid.addWidget(gaussian_button, 2, 0, 1, 2)
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.trigger_rendering)
+        blur_grid.addWidget(QtGui.QLabel('Min. Blur (cam. pixel):'), 3, 0, 1, 1)
+        self.min_blur_width = QtGui.QDoubleSpinBox()
+        self.min_blur_width.setRange(0, 999999)
+        self.min_blur_width.setSingleStep(0.01)
+        self.min_blur_width.setValue(0)
+        self.min_blur_width.setDecimals(3)
+        self.min_blur_width.setKeyboardTracking(False)
+        self.min_blur_width.valueChanged.connect(self.trigger_rendering)
+        blur_grid.addWidget(self.min_blur_width, 3, 1, 1, 1)
         vbox.addWidget(blur_groupbox)
         self.blur_methods = {points_button: None, convolve_button: 'convolve', gaussian_button: 'gaussian'}
         # Scale bar
@@ -103,7 +110,7 @@ class Window(QtGui.QMainWindow):
         icon_path = os.path.join(this_directory, 'render.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
-        self.view = widgets.LocsRenderer(self)
+        self.view = widgets.LocsRenderer()
         self.view.setAcceptDrops(True)
         self.view.dragEnterEvent = self.dragEnterEvent
         self.view.dropEvent = self.dropEvent
@@ -184,14 +191,15 @@ class Window(QtGui.QMainWindow):
             raise Exception('Maximum number of channels is 3.')
 
     def set_display_settings(self):
-        self.view.vmin = float(self.display_settings_dialog.minimum.value())
-        self.view.vmax = float(self.display_settings_dialog.maximum.value())
+        self.view.vmin = float(self.display_settings_dialog.minimum.value())/100
+        self.view.vmax = float(self.display_settings_dialog.maximum.value())/100
         self.view.pixelsize = float(self.display_settings_dialog.pixelsize_edit.text())
         self.view.scalebar = None
         if self.display_settings_dialog.scalebar_groupbox.isChecked():
             self.view.scalebar = float(self.display_settings_dialog.scalebar_edit.text())
         button = self.display_settings_dialog.blur_buttongroup.checkedButton()
         self.view.blur_method = self.display_settings_dialog.blur_methods[button]
+        self.view.min_blur_width = float(self.display_settings_dialog.min_blur_width.value())
 
     def save_image(self):
         base, ext = os.path.splitext(self.locs_path)
