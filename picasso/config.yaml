@@ -40,6 +40,6 @@ Cameras:
   Andor Zyla VSC-01223:     # Generic Zyla
     Sensor: sCMOS
     Quantum Efficiency:
-      489: 1
-      561: 1
-      640: 1
+      489: 0.7
+      561: 0.72
+      640: 0.64
