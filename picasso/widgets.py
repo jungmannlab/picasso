@@ -144,7 +144,9 @@ class LocsRenderer(_QtGui.QLabel):
 
     def to_qimage(self, image):
         imax = image.max()
-        image = 255 * (image - imax * self.vmin) / (imax * self.vmax)
+        upper = self.vmax * imax
+        lower = self.vmin * imax
+        image = 255 * (image - lower) / (upper - lower)
         image = _np.minimum(image, 255)
         image = _np.maximum(image, 0)
         image = image.astype('uint8')
