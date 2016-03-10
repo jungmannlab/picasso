@@ -24,8 +24,8 @@ from picasso import lib as _lib
 
 class LocsRenderer(_QtGui.QLabel):
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self.setSizePolicy(_QtGui.QSizePolicy(_QtGui.QSizePolicy.Ignored, _QtGui.QSizePolicy.Ignored))
         self.rubberband = _QtGui.QRubberBand(_QtGui.QRubberBand.Rectangle, self)
         self.rubberband.setStyleSheet('selection-background-color: white')
@@ -37,8 +37,12 @@ class LocsRenderer(_QtGui.QLabel):
         self.pixelsize = None
         self.scalebar = None
         self.blur_method = None
+        self.blur_width = None
         self.locs = []
         self.info = None
+
+    def clear(self):
+        self.locs = []
 
     def fit_in_view(self):
         self.center = [self.info[0]['Height'] / 2, self.info[0]['Width'] / 2]
@@ -135,7 +139,8 @@ class LocsRenderer(_QtGui.QLabel):
         return N, image
 
     def render_image(self, locs, viewport):
-        return _render.render(locs, self.info, oversampling=self.zoom, viewport=viewport, blur_method=self.blur_method)
+        return _render.render(locs, self.info, oversampling=self.zoom, viewport=viewport,
+                              blur_method=self.blur_method, blur_width=self.blur_width)
 
     def to_qimage(self, image):
         imax = image.max()
