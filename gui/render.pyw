@@ -103,7 +103,7 @@ class Window(QtGui.QMainWindow):
         icon_path = os.path.join(this_directory, 'render.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
-        self.view = widgets.LocsRenderer()
+        self.view = widgets.LocsRenderer(self)
         self.view.setAcceptDrops(True)
         self.view.dragEnterEvent = self.dragEnterEvent
         self.view.dropEvent = self.dropEvent
