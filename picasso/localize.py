@@ -139,7 +139,7 @@ def _to_photons(spots, camera_info):
     if camera_info['sensor'] == 'EMCCD':
         return (spots - 100) * camera_info['sensitivity'] / (camera_info['gain'] * camera_info['qe'])
     elif camera_info['sensor'] == 'sCMOS':
-        return spots - 100
+        return (spots - 100) * 0.45 / camera_info['qe']        # sensitivity is for 200 MHz, 16 bit, Miblab Zyla
     else:
         raise TypeError('Unknown camera type')
 
