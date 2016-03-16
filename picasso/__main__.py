@@ -56,7 +56,7 @@ def _undrift(files, mode, segmentation, display):
                 undrift_info['Segmentation'] = segmentation
             info.append(undrift_info)
             io.save_locs(base + '_undrift.hdf5', corrected_locs, info)
-            savetxt(base + '_drift.txt', drift, newline='\r\n')
+            savetxt(base + '_drift.txt', drift, header='dx\tdy', newline='\r\n')
 
 
 def _density(files, radius):
@@ -155,7 +155,7 @@ if __name__ == '__main__':
     # undrift parser
     undrift_parser = subparsers.add_parser('undrift', help='correct localization coordinates for drift')
     undrift_parser.add_argument('files', help='one or multiple hdf5 localization files specified by a unix style path pattern')
-    undrift_parser.add_argument('-m', '--mode', default='std', help='"std", "render" or "framepair")')
+    undrift_parser.add_argument('-m', '--mode', default='render', help='"std", "render" or "framepair")')
     undrift_parser.add_argument('-s', '--segmentation', type=float, default=1000,
                                 help='the number of frames to be combined for one temporal segment (default=1000)')
     undrift_parser.add_argument('-d', '--nodisplay', action='store_false', help='do not display estimated drift')

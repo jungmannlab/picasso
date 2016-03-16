@@ -274,9 +274,10 @@ class ParametersDialog(QtGui.QDialog):
         self.excitation_combo.clear()
         camera = self.camera_combo.currentText()
         if camera:
-            wavelengths = sorted(list(localize.CONFIG['Cameras'][camera]['Quantum Efficiency'].keys()))
-            wavelengths = [str(_) for _ in wavelengths]
-            self.excitation_combo.addItems([''] + wavelengths)
+            if 'Quantum Efficiency' in localize.CONFIG['Cameras'][camera]:
+                wavelengths = sorted(list(localize.CONFIG['Cameras'][camera]['Quantum Efficiency'].keys()))
+                wavelengths = [str(_) for _ in wavelengths]
+                self.excitation_combo.addItems([''] + wavelengths)
 
     def update_readmodes(self, index):
         self.readmode_combo.clear()
@@ -362,8 +363,14 @@ class ParametersDialog(QtGui.QDialog):
             parameters['EM Real Gain'] = self.gain_spinbox.value()
             parameters['Readout Mode'] = self.readmode_combo.currentText()
             parameters['Pre-Amp Gain'] = int(self.preamp_combo.currentText())
+            parameters = self.add_wavelength_to_camera_parameters(parameters)
         elif localize.CONFIG['Cameras'][camera]['Sensor'] == 'sCMOS':
+            parameters = self.add_wavelength_to_camera_parameters(parameters)
+        elif localize.CONFIG['Cameras'][camera]['Sensor'] == 'Simulation':
             pass
+        return parameters
+
+    def add_wavelength_to_camera_parameters(self, parameters):
         try:
             parameters['Excitation Wavelength'] = int(self.excitation_combo.currentText())
         except ValueError:
@@ -721,10 +728,14 @@ class Window(QtGui.QMainWindow):
                     camera_info['gain'] = parameters['EM Real Gain']
                 else:
                     camera_info['gain'] = 1
+                excitation = parameters['Excitation Wavelength']
+                camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
             elif sensor == 'sCMOS':
-                pass    # put calibration here
-            excitation = parameters['Excitation Wavelength']
-            camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
+                # put calibration here
+                excitation = parameters['Excitation Wavelength']
+                camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
+            elif sensor == 'Simulation':
+                pass
             self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'])
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)

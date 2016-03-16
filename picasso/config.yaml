@@ -43,3 +43,5 @@ Cameras:
       489: 0.7
       561: 0.72
       640: 0.64
+  Simulation:
+    Sensor: Simulation

@@ -324,6 +324,7 @@ def __link_loc_groups(locs, group):
 
 
 def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
+    locs = _lib.ensure_finite(locs)
     if mode in ['render', 'std']:
         drift = get_drift_rcc(locs, info, segmentation, mode, movie, display)
     elif mode == 'framepair':
@@ -474,8 +475,6 @@ def align(target_locs, target_info, locs, info, display=False):
     image_pad = [int(_/4) for _ in image.shape]
     image = _np.pad(image, image_pad, 'constant')
     dy, dx = _imageprocess.get_image_shift(target_image_pad, image, 7, None, display=display)
-    dy /= os
-    dx /= os
     print('Image shift: dx={}, dy={}.'.format(dx, dy))
     locs.y -= dy
     locs.x -= dx
