@@ -20,7 +20,7 @@ from pprint import pprint as _pprint
 
 
 def to_little_endian(movie, info):
-    if info[0]['Byte Order'] == '>':
+    if info[0]['Byte Order'] != '<':
         movie = movie.byteswap()
         info[0]['Byte Order'] = '<'
     return movie, info
