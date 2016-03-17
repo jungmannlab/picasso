@@ -156,6 +156,10 @@ class TiffFile:
                     except IndexError:      # In case gain is specified in the format "5x"
                         self.info['Pre-Amp Gain'] = str(mm_info[camera + '-Pre-Amp-Gain']) + ' (CONVERT TO INDEX!)'
                     self.info['Readout Mode'] = mm_info[camera + '-ReadoutMode']
+                if camera + '-PixelReadoutRate' in mm_info:
+                    self.info['Readout Rate'] = mm_info[camera + '-PixelReadoutRate'].split('-')[0].strip()
+                if camera + '-Sensitivity/DynamicRange' in mm_info:
+                    self.info['Gain Setting'] = mm_info[camera + '-Sensitivity/DynamicRange']
                 if 'TIFilterBlock1-Label' in mm_info:
                     try:
                         self.info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
