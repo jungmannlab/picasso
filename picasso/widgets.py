@@ -24,6 +24,8 @@ from picasso import lib as _lib
 
 class LocsRenderer(_QtGui.QLabel):
 
+    rendered = _QtCore.pyqtSignal(int)
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSizePolicy(_QtGui.QSizePolicy(_QtGui.QSizePolicy.Ignored, _QtGui.QSizePolicy.Ignored))
@@ -49,7 +51,7 @@ class LocsRenderer(_QtGui.QLabel):
         view_height = self.height()
         view_width = self.width()
         self.zoom = min(view_height / self.info[0]['Height'], view_width / self.info[0]['Width'])
-        self.render()
+        return self.render()
 
     def mousePressEvent(self, event):
         if event.button() == _QtCore.Qt.LeftButton:
@@ -126,11 +128,11 @@ class LocsRenderer(_QtGui.QLabel):
                 N, image = self.render_colors(self.locs, viewport)
             else:
                 raise Exception('Cannot display more than 3 channels.')
-            # self.status_bar.showMessage('{:,} localizations in FOV'.format(N))    # Needs to happen top-level
             image = self.to_qimage(image)
             self.image = self.draw_scalebar(image)
             pixmap = _QtGui.QPixmap.fromImage(self.image)
             self.setPixmap(pixmap)
+            self.rendered.emit(N)
 
     def render_colors(self, color_locs, viewport):
         rendering = [self.render_image(locs, viewport) for locs in color_locs]

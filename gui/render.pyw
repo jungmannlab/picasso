@@ -114,6 +114,7 @@ class Window(QtGui.QMainWindow):
         self.view.setAcceptDrops(True)
         self.view.dragEnterEvent = self.dragEnterEvent
         self.view.dropEvent = self.dropEvent
+        self.view.rendered.connect(self.update_status_bar)
         self.setCentralWidget(self.view)
         self.display_settings_dialog = DisplaySettingsDialog(self)
         menu_bar = self.menuBar()
@@ -231,6 +232,9 @@ class Window(QtGui.QMainWindow):
     def zoom_out(self):
         self.view.zoom *= 7/10
         self.view.render()
+
+    def update_status_bar(self, N):
+        self.status_bar.showMessage('{:,} localizations in FOV'.format(N))
 
 
 if __name__ == '__main__':
