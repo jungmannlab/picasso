@@ -66,18 +66,18 @@ def _fill(image, x, y):
 def _fill_gaussians(image, x, y, sx, sy):
     Y, X = image.shape
     for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
-        sy_3 = 3 * sy_
-        i_min = _np.int32(y_ - sy_3)
+        sy_4 = 4 * sy_
+        i_min = _np.int32(y_ - sy_4)
         if i_min < 0:
             i_min = 0
-        i_max = _np.int32(y_ + sy_3 + 1)
+        i_max = _np.int32(y_ + sy_4 + 1)
         if i_max > Y:
             i_max = Y
-        sx_3 = 3 * sx_
-        j_min = _np.int32(x_ - sx_3)
+        sx_4 = 4 * sx_
+        j_min = _np.int32(x_ - sx_4)
         if j_min < 0:
             j_min = 0
-        j_max = _np.int32(x_ + sx_3) + 1
+        j_max = _np.int32(x_ + sx_4) + 1
         if j_max > X:
             j_max = X
         for i in range(i_min, i_max):

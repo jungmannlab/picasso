@@ -335,51 +335,70 @@ def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
     return drift, locs
 
 
-@_numba.jit(nopython=True, nogil=True)
-def get_frame_shift(locs, i, j, min_prob):
+@_numba.jit(nopython=True)
+def get_frame_shift(locs, i, j, min_prob, k):
     N = len(locs)
     frame = locs.frame
     x = locs.x
     y = locs.y
     lpx = locs.lpx
     lpy = locs.lpy
-    shift_x = 0
-    shift_y = 0
+    shift_x = 0.0
+    shift_y = 0.0
     n = 0
-    for k in range(N):
-        if frame[k] == i:
-            xk = x[k]
-            yk = y[k]
-            lpxk = lpx[k]
-            lpyk = lpy[k]
-            for l in range(N):
-                if frame[l] == j:
-                    dx = x[l] - xk
-                    dx2 = dx**2
-                    if dx2 < 1:
-                        dy = y[l] - yk
-                        dy2 = dy**2
-                        if dy2 < 1:
-                            prob_of_same = _np.exp(-(dx2/(2*lpxk) + dy2/(2*lpyk)) - (dx2/(2*lpx[l]) + dy2/(2*lpy[l])))
-                            if prob_of_same > min_prob:
-                                shift_x += dx
-                                shift_y += dy
-                                n += 1
+    sum_weights_x = 0.0
+    sum_weights_y = 0.0
+    while frame[k] == i:
+        xk = x[k]
+        yk = y[k]
+        lpxk = lpx[k]
+        lpyk = lpy[k]
+        for l in range(k+1, N):
+            if frame[l] == j:
+                dx = x[l] - xk
+                dx2 = dx**2
+                if dx2 < 1:
+                    dy = y[l] - yk
+                    dy2 = dy**2
+                    if dy2 < 1:
+                        lpxl = lpx[l]
+                        lpyl = lpy[l]
+                        prob_of_same = _np.exp(-(dx2/(2*lpxk) + dy2/(2*lpyk)) - (dx2/(2*lpxl) + dy2/(2*lpyl)))
+                        if prob_of_same > min_prob:
+                            weight_x = 1/(lpxk**2 + lpxl**2)
+                            weight_y = 1/(lpyk**2 + lpyl**2)
+                            sum_weights_x += weight_x
+                            sum_weights_y += weight_y
+                            shift_x += weight_x * dx
+                            shift_y += weight_y * dy
+                            n += 1
+            elif frame[l] > j:
+                break
+        k += 1
     if n > 0:
-        shift_x /= n
-        shift_y /= n
-    return shift_y, shift_x
+        shift_x /= sum_weights_x
+        shift_y /= sum_weights_y
+    return n, shift_y, shift_x, k
 
 
 def get_drift_framepair(locs, info, display=True):
-    # roi = 32           # Maximum shift is 32 pixels
+    locs.sort(kind='mergesort', order='frame')
     n_frames = info[0]['Frames']
     shift_x = _np.zeros(n_frames)
     shift_y = _np.zeros(n_frames)
+    n = _np.zeros(n_frames)
     with _tqdm(total=n_frames-1, desc='Computing frame shifts', unit='frames') as progress_bar:
+        k = 0
         for f in range(1, n_frames):
             progress_bar.update()
-            shift_y[f], shift_x[f] = get_frame_shift(locs, f-1, f, 0.1)
+            n[f], shift_y[f], shift_x[f], k = get_frame_shift(locs, f-1, f, 0.001, k)
+    # _plt.hist(n)
+    # _plt.show()
+    # Sliding window average
+    window_size = 10
+    window = _np.ones(window_size) / window_size
+    shift_x = _np.convolve(shift_x, window, 'same')
+    shift_y = _np.convolve(shift_y, window, 'same')
     drift = (_np.cumsum(shift_y), _np.cumsum(shift_x))
     if display:
         _plt.figure(figsize=(17, 6))
