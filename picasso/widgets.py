@@ -12,6 +12,7 @@ from PyQt4 import QtGui as _QtGui
 import numpy as _np
 import os.path as _ospath
 import sys as _sys
+import time as _time
 
 
 _this_file = _ospath.abspath(__file__)
@@ -24,7 +25,7 @@ from picasso import lib as _lib
 
 class LocsRenderer(_QtGui.QLabel):
 
-    rendered = _QtCore.pyqtSignal(int)
+    rendered = _QtCore.pyqtSignal(int, int, int, float)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -123,26 +124,31 @@ class LocsRenderer(_QtGui.QLabel):
                     color_locs = [locs[colors == _] for _ in range(3)]
                     N, image = self.render_colors(color_locs, viewport)
                 else:
-                    N, image = self.render_image(locs, viewport)
+                    T, N, image = self.render_image(locs, viewport)
             elif n_channels == 2 or n_channels == 3:
                 N, image = self.render_colors(self.locs, viewport)
             else:
                 raise Exception('Cannot display more than 3 channels.')
+            Y, X = image.shape
             image = self.to_qimage(image)
             self.image = self.draw_scalebar(image)
             pixmap = _QtGui.QPixmap.fromImage(self.image)
             self.setPixmap(pixmap)
-            self.rendered.emit(N)
+            self.rendered.emit(N, X, Y, T)
 
     def render_colors(self, color_locs, viewport):
         rendering = [self.render_image(locs, viewport) for locs in color_locs]
-        image = _np.array([_[1] for _ in rendering])
-        N = _np.sum([_[0] for _ in rendering])
-        return N, image
+        image = _np.array([_[2] for _ in rendering])
+        N = _np.sum([_[1] for _ in rendering])
+        T = _np.sum([_[0] for _ in rendering])
+        return T, N, image
 
     def render_image(self, locs, viewport):
-        return _render.render(locs, self.info, oversampling=self.zoom, viewport=viewport,
-                              blur_method=self.blur_method, min_blur_width=self.min_blur_width)
+        t0 = _time.time()
+        N, image = _render.render(locs, self.info, oversampling=self.zoom, viewport=viewport,
+                                  blur_method=self.blur_method, min_blur_width=self.min_blur_width)
+        T = _time.time() - t0
+        return T, N, image
 
     def to_qimage(self, image):
         imax = image.max()

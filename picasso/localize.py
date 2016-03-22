@@ -37,7 +37,7 @@ WoehrLok = _ctypes.CDLL(_woehrlok_file)
 WoehrLok.fnWoehrLokMLEFitAll = getattr(WoehrLok, '?fnWoehrLokMLEFitAll@@YAXHPEBMMHHPEAM11KHPEAK@Z')
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def local_maxima_map(frame, box):
     """ Finds pixels with maximum value within a region of interest """
     Y, X = frame.shape
@@ -54,7 +54,7 @@ def local_maxima_map(frame, box):
     return maxima_map
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def local_gradient_magnitude(gm, box):
     """ Returns the sum of the absolute gradient within a box around each pixel """
     Y, X = gm.shape
@@ -67,7 +67,7 @@ def local_gradient_magnitude(gm, box):
     return lgm
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def gradient_magnitude(frame):
     Y, X = frame.shape
     gm = _np.zeros((Y, X), dtype=_np.float32)
@@ -122,7 +122,7 @@ def identify(movie, parameters, threaded=True):
     return _np.hstack(identifications).view(_np.recarray)
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def _get_spots(movie, ids_frame, ids_x, ids_y, box):
     n_spots = len(ids_x)
     r = int(box/2)

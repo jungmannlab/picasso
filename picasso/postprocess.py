@@ -30,7 +30,7 @@ from picasso import render as _render
 from picasso import imageprocess as _imageprocess
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def distance_histogram(locs, bin_size, r_max):
     x = locs.x
     y = locs.y
@@ -98,7 +98,7 @@ def compute_local_density(locs, radius):
     return _lib.append_to_rec(locs, density, 'density')
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _compute_local_density_partially(locs, radius, start, chunksize, density, counter):
     r2 = radius**2
     N = len(locs)
@@ -118,7 +118,7 @@ def _compute_local_density_partially(locs, radius, start, chunksize, density, co
     return density
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def _compute_local_density(locs, radius):
     N = len(locs)
     r2 = radius**2
@@ -147,7 +147,7 @@ def compute_dark_times(locs):
     return locs[locs.dark != -1]
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def _compute_dark_times(locs, last_frame):
     N = len(locs)
     max_frame = locs.frame.max()
@@ -176,7 +176,7 @@ def link(locs, min_prob=0.05, max_dark_time=1, combine_mode='average'):
     return linked_locs[linked_locs.len != -1]
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def get_link_groups(locs, min_prob, max_dark_time):
     ''' Assumes that locs are sorted by frame '''
     frame = locs.frame
@@ -200,7 +200,7 @@ def get_link_groups(locs, min_prob, max_dark_time):
     return group
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, lpx, lpy, min_prob, max_dark_time):
     current_frame = frame[current_index]
     current_x = x[current_index]
@@ -231,7 +231,7 @@ def link_loc_groups(locs, group):
     return _np.rec.array(linked_locs_data, dtype=dtype)
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def _link_loc_groups(locs, group):
     N_linked = group.max() + 1
     frame_ = locs.frame.max() * _np.ones(N_linked, dtype=_np.uint32)
@@ -281,7 +281,7 @@ def _link_loc_groups(locs, group):
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, len_, n_, photon_rate_
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def __link_loc_groups(locs, group):
     N_linked = group.max() + 1
     frame_ = locs.frame.max() * _np.ones(N_linked, dtype=_np.uint32)
@@ -335,7 +335,7 @@ def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
     return drift, locs
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def get_frame_shift(locs, i, j, min_prob, k):
     N = len(locs)
     frame = locs.frame

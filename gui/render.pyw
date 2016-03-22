@@ -233,8 +233,8 @@ class Window(QtGui.QMainWindow):
         self.view.zoom *= 7/10
         self.view.render()
 
-    def update_status_bar(self, N):
-        self.status_bar.showMessage('{:,} localizations in FOV'.format(N))
+    def update_status_bar(self, N, X, Y, T):
+        self.status_bar.showMessage('Rendered {:,} localizations on {}x{} pixels in {:.4f} seconds.'.format(N, X, Y, T))
 
 
 if __name__ == '__main__':
