@@ -9,7 +9,6 @@
 import numpy as _np
 import numba as _numba
 import scipy.signal as _signal
-from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from multiprocessing import cpu_count as _cpu_count
 
 
@@ -57,13 +56,7 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None, min_blur
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
         sy = blur_width[in_view]
         sx = blur_width[in_view]
-        N = len(x)
-        chunksize = 100000
-        starts = range(0, N, chunksize)
-        with _ThreadPoolExecutor(max_workers=_N_CPUS) as executor:
-            futures = [executor.submit(_fill_gaussians, n_pixel_x, n_pixel_y, x[_:_+chunksize], y[_:_+chunksize], sx[_:_+chunksize], sy[_:_+chunksize]) for _ in starts]
-        sub_images = [_.result() for _ in futures]
-        return len(x), _np.sum(sub_images, 0)   # _fill_gaussians(image, x, y, sx, sy)
+        return len(x), _fill_gaussians(n_pixel_x, n_pixel_y, x, y, sx, sy)
     else:
         raise Exception('blur_method not understood.')
 

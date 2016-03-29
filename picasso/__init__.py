@@ -1,3 +1,11 @@
+"""
+    picasso/__init__.py
+    ~~~~~~~~~~~~~~~~~~~~
+
+    :author: Joerg Schnitzbauer, 2015
+"""
+
+
 import sys as _sys
 import os.path as _ospath
 

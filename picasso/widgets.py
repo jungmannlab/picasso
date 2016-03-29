@@ -122,14 +122,16 @@ class LocsRenderer(_QtGui.QLabel):
                 if hasattr(locs, 'group'):
                     colors = locs.group % 3
                     color_locs = [locs[colors == _] for _ in range(3)]
-                    N, image = self.render_colors(color_locs, viewport)
+                    T, N, image = self.render_colors(color_locs, viewport)
+                    _, Y, X = image.shape
                 else:
                     T, N, image = self.render_image(locs, viewport)
+                    Y, X = image.shape
             elif n_channels == 2 or n_channels == 3:
-                N, image = self.render_colors(self.locs, viewport)
+                T, N, image = self.render_colors(self.locs, viewport)
+                _, Y, X = image.shape
             else:
                 raise Exception('Cannot display more than 3 channels.')
-            Y, X = image.shape
             image = self.to_qimage(image)
             self.image = self.draw_scalebar(image)
             pixmap = _QtGui.QPixmap.fromImage(self.image)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-    picasso.__main__
+    picasso.__main__.py
     ~~~~~~~~~~~~~~~~
 
     Picasso command line interface
