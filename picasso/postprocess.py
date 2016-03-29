@@ -61,12 +61,37 @@ def pair_correlation(locs, bin_size, r_max):
 
 
 def dbscan(locs, radius, min_density):
+    print('Identifying clusters...')
+    locs = _lib.ensure_finite(locs)
     locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
     X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
     group = _np.int32(db.labels_)       # int32 for Origin compatiblity
     locs = _lib.append_to_rec(locs, group, 'group')
-    return locs[locs.group != -1]
+    locs = locs[locs.group != -1]
+    print('Generating cluster information...')
+    groups = _np.unique(locs.group)
+    n_groups = len(groups)
+    mean_frame = _np.zeros(n_groups)
+    std_frame = _np.zeros(n_groups)
+    com_x = _np.zeros(n_groups)
+    com_y = _np.zeros(n_groups)
+    std_x = _np.zeros(n_groups)
+    std_y = _np.zeros(n_groups)
+    n = _np.zeros(n_groups, dtype=_np.int32)
+    for i, group in enumerate(groups):
+        group_locs = locs[locs.group == i]
+        mean_frame[i] = _np.mean(group_locs.frame)
+        com_x[i] = _np.mean(group_locs.x)
+        com_y[i] = _np.mean(group_locs.y)
+        std_frame[i] = _np.std(group_locs.frame)
+        std_x[i] = _np.std(group_locs.x)
+        std_y[i] = _np.std(group_locs.y)
+        n[i] = len(group_locs)
+    clusters = _np.rec.array((groups, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
+                             dtype=[('groups', groups.dtype), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
+                             ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'), ('n', 'i4')])
+    return clusters, locs
 
 
 def compute_local_density(locs, radius):
@@ -485,7 +510,7 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None, display=T
     return drift
 
 
-def align(target_locs, target_info, locs, info, display=False):
+def align(target_locs, target_info, locs, info, affine=False, display=False):
     N_target, target_image = _render.render(target_locs, target_info, oversampling=1,
                                             blur_method='gaussian', min_blur_width=1)
     N, image = _render.render(locs, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
@@ -497,9 +522,9 @@ def align(target_locs, target_info, locs, info, display=False):
     print('Image shift: dx={}, dy={}.'.format(dx, dy))
     locs.y -= dy
     locs.x -= dx
-    affine = True
     if affine:
-        print('Attempting affine transformation...')
+        print('Attempting affine transformation - this may take a while...')
+        locsT = _np.rec.array((locs.x, locs.y, locs.lpx, locs.lpy), dtype=[('x', 'f4'), ('y', 'f4'), ('lpx', 'f4'), ('lpy', 'f4')])
 
         def apply_transforms(locs, T):
             Ox, Oy, W, H, theta, A, B, X, Y = T
@@ -520,24 +545,19 @@ def align(target_locs, target_info, locs, info, display=False):
             x += X + Ox
             y += Y + Oy
             return x, y
-        locsT = _np.rec.array((locs.x, locs.y), dtype=[('x', 'f4'), ('y', 'f4')])
 
         def affine_xcorr_negmax(T, ref_image, locs):
             locsT.x, locsT.y = apply_transforms(locs, T)
             N_T, imageT = _render.render(locsT, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
             xcorr = _imageprocess.xcorr(ref_image, imageT)
             return -xcorr.max()
+
         Ox = _np.mean(locs.x)
         Oy = _np.mean(locs.y)
-        W = 1
-        H = 1
-        theta = 0
-        A = 0
-        B = 0
-        X = 0
-        Y = 0
+        W = H = 1
+        theta = A = B = X = Y = 0
         T0 = _np.array([Ox, Oy, W, H, theta, A, B, X, Y])
-        init_steps = [0.1, 0.1, 0.05, 0.05, 0.02, 0.05, 0.05]
+        init_steps = [0.05, 0.05, 0.05, 0.05, 0.02, 0.05, 0.05, 0.05, 0.05]
         result = _minimize(affine_xcorr_negmax, T0, args=(target_image, locs),
                            method='COBYLA', options={'rhobeg': init_steps})
         Ox, Oy, W, H, theta, A, B, X, Y = result.x
