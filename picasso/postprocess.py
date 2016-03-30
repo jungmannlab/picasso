@@ -30,6 +30,37 @@ from picasso import render as _render
 from picasso import imageprocess as _imageprocess
 
 
+def get_index_blocks(locs, info, max_distance):
+    # Sort locs by indices
+    x_index = _np.uint32(locs.x / max_distance)
+    y_index = _np.uint32(locs.y / max_distance)
+    sort_indices = _np.lexsort([x_index, y_index])
+    locs = locs[sort_indices]
+    x_index = x_index[sort_indices]
+    y_index = y_index[sort_indices]
+    # Allocate block info arrays
+    n_blocks_x = int(_np.ceil(info[0]['Width'] / max_distance))
+    n_blocks_y = int(_np.ceil(info[0]['Height'] / max_distance))
+    block_starts = _np.zeros((n_blocks_y, n_blocks_x))
+    block_ends = _np.zeros((n_blocks_y, n_blocks_x))
+    # Fill in block starts and ends
+    _fill_index_blocks(block_starts, block_ends, x_index, y_index)
+    return locs, x_index, y_index, block_starts, block_ends
+
+
+@_numba.jit(nopython=True)
+def _fill_index_blocks(block_starts, block_ends, x_index, y_index):
+    Y, X = block_starts.shape
+    N = len(x_index)
+    k = 0
+    for i in range(Y):
+        for j in range(X):
+            block_starts[i, j] = k
+            while k < N and y_index[k] == i and x_index[k] == j:
+                k += 1
+            block_ends[i, j] = k
+
+
 @_numba.jit(nopython=True, cache=True)
 def distance_histogram(locs, bin_size, r_max):
     x = locs.x
@@ -56,6 +87,51 @@ def distance_histogram(locs, bin_size, r_max):
 def pair_correlation(locs, bin_size, r_max):
     bins_lower = _np.arange(0, r_max, bin_size)
     dh = distance_histogram(locs, bin_size, r_max)
+    area = _np.pi * bin_size * (2 * bins_lower + bin_size)
+    return bins_lower, dh / area
+
+
+@_numba.jit(nopython=True)
+def _distance_histogram_blocks(locs, bin_size, r_max, x_index, y_index, block_starts, block_ends):
+    x = locs.x
+    y = locs.y
+    dh_len = _np.uint32(r_max, bin_size)
+    dh = _np.zeros(dh_len, dtype=_np.uint32)
+    r_max_2 = r_max**2
+    N = len(x)
+    K, L = block_starts.shape
+    for i in range(N):
+        xi = x[i]
+        yi = y[i]
+        ki = y_index[i]
+        li = x_index[i]
+        for k in range(ki-1, ki+2):
+            if k < K:
+                for l in range(li-1, li+2):
+                    if l < L:
+                        for j in range(block_starts[k, l], block_ends[k, l]):
+                            dx2 = (xi - x[j])**2
+                            if dx2 < r_max_2:
+                                dy2 = (yi - y[j])**2
+                                if dy2 < r_max_2:
+                                    d = _np.sqrt(dx2 + dy2)
+                                    if d < r_max:
+                                        bin = _np.uint32(d / bin_size)
+                                        dh[bin] += 1
+    return dh
+
+
+def distance_histogram_blocks(locs, info, bin_size, r_max):
+    print('Indexing localizations...')
+    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, r_max)
+    print('Calculating distance histogram...')
+    return _distance_histogram_blocks(locs, bin_size, r_max, x_index, y_index, block_starts, block_ends)
+
+
+def pair_correlation_blocks(locs, info, bin_size, r_max):
+    dh = distance_histogram_blocks(locs, bin_size, r_max)
+    print('Applying normalization...')
+    bins_lower = _np.arange(0, r_max, bin_size)
     area = _np.pi * bin_size * (2 * bins_lower + bin_size)
     return bins_lower, dh / area
 
