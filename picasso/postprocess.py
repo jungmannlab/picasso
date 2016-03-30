@@ -256,7 +256,7 @@ def link_loc_groups(locs, group):
     return _np.rec.array(linked_locs_data, dtype=dtype)
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True)
 def _link_loc_groups(locs, group):
     N_linked = group.max() + 1
     frame_ = locs.frame.max() * _np.ones(N_linked, dtype=_np.uint32)

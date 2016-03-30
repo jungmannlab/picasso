@@ -186,6 +186,58 @@ def _join(files):
     save_locs(base + '_join.hdf5', locs, info)
 
 
+def _kinetics(path, ignore):
+    from picasso.io import load_locs
+    locs, info = load_locs(path)
+    from picasso.lib import calculate_optimal_bins
+    from numpy import histogram
+    from lmfit.models import ExponentialModel
+    from matplotlib.pyplot import show
+    from matplotlib.pyplot import style
+    style.use('ggplot')
+    if hasattr(locs, 'len'):
+        print('~~~ LENGTH ~~~')
+        bin_len = calculate_optimal_bins(locs.len)
+        hist_len, bin_len_edges = histogram(locs.len, bin_len)
+        bin_centers = bin_len_edges[:-1] + bin_len_edges[1] / 2
+        model = ExponentialModel()
+        parameters = model.guess(hist_len[ignore:], x=bin_centers[ignore:])
+        res = model.fit(hist_len[ignore:], parameters, x=bin_centers[ignore:])
+        print(res.fit_report())
+        res.plot()
+        show()
+    if hasattr(locs, 'dark'):
+        print('~~~ DARK ~~~')
+        bin_dark = calculate_optimal_bins(locs.dark)
+        hist_dark, bin_dark_edges = histogram(locs.dark, bin_dark)
+        bin_centers = bin_dark_edges[:-1] + bin_dark_edges[1] / 2
+        model = ExponentialModel()
+        parameters = model.guess(hist_dark[ignore:], x=bin_centers[ignore:])
+        res = model.fit(hist_dark[ignore:], parameters, x=bin_centers[ignore:])
+        print(res.fit_report())
+        res.plot()
+        show()
+
+
+def _pair_correlation(files, bin_size, r_max):
+    from glob import glob
+    paths = glob(files)
+    if paths:
+        from picasso.io import load_locs
+        from picasso.postprocess import pair_correlation
+        from matplotlib.pyplot import plot, style, show, xlabel, ylabel
+        style.use('ggplot')
+        for path in paths:
+            print('Loading {}...'.format(path))
+            locs, info = load_locs(path)
+            print('Calculating pair-correlation...')
+            bins_lower, pc = pair_correlation(locs, bin_size, r_max)
+            plot(bins_lower, pc)
+            xlabel('r (pixel)')
+            ylabel('pair-correlation (pixel^-2)')
+            show()
+
+
 if __name__ == '__main__':
     import argparse
 
@@ -244,6 +296,17 @@ if __name__ == '__main__':
     join_parser = subparsers.add_parser('join', help='join hdf5 localization lists')
     join_parser.add_argument('file', nargs='+', help='the hdf5 localization files to be joined')
 
+    # kinetics
+    kinetics_parser = subparsers.add_parser('kinetics', help='calculate and display binding kinetics')
+    kinetics_parser.add_argument('-i', '--ignore', type=int, default=1, help='the number of bins to be ignored for short kinetic events')
+    kinetics_parser.add_argument('file', help='the hdf5 localization file to be analyzed')
+
+    # Pair correlation
+    pc_parser = subparsers.add_parser('pc', help='calculate the pair-correlation of localizations')
+    pc_parser.add_argument('-b', '--binsize', type=float, default=0.1, help='the bin size')
+    pc_parser.add_argument('-r', '--rmax', type=float, default=10, help='The maximum distance to calculate the pair-correlation')
+    pc_parser.add_argument('files', help='one or multiple hdf5 localization files')
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -266,5 +329,9 @@ if __name__ == '__main__':
             _align(args.target, args.file, args.affine, args.display)
         elif args.command == 'join':
             _join(args.file)
+        elif args.command == 'kinetics':
+            _kinetics(args.file, args.ignore)
+        elif args.command == 'pc':
+            _pair_correlation(args.files, args.binsize, args.rmax)
     else:
         parser.print_help()
