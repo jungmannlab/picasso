@@ -29,7 +29,7 @@ from picasso import render as _render
 from picasso import imageprocess as _imageprocess
 
 
-def get_index_blocks(locs, info, max_distance):
+def _get_index_blocks(locs, info, max_distance):
     # Sort locs by indices
     x_index = _np.uint32(locs.x / max_distance)
     y_index = _np.uint32(locs.y / max_distance)
@@ -92,7 +92,7 @@ def _distance_histogram(locs, bin_size, r_max, x_index, y_index, block_starts, b
 
 
 def distance_histogram(locs, info, bin_size, r_max):
-    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, r_max)
+    locs, x_index, y_index, block_starts, block_ends = _get_index_blocks(locs, info, r_max)
     N = len(locs)
     n_threads = _multiprocessing.cpu_count()
     chunk = int(N / n_threads)
@@ -151,8 +151,8 @@ def _local_density(locs, radius, x_index, y_index, block_starts, block_ends, sta
     y = locs.y
     N = len(x)
     r2 = radius**2
-    density = _np.zeros(N, dtype=_np.uint32)
     end = min(start+chunk, N)
+    density = _np.zeros(N, dtype=_np.uint32)
     for i in range(start, end):
         yi = y[i]
         xi = x[i]
@@ -174,7 +174,7 @@ def _local_density(locs, radius, x_index, y_index, block_starts, block_ends, sta
 
 
 def compute_local_density(locs, info, radius):
-    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, radius)
+    locs, x_index, y_index, block_starts, block_ends = _get_index_blocks(locs, info, radius)
     N = len(locs)
     n_threads = _multiprocessing.cpu_count()
     chunk = int(N / n_threads)
@@ -182,8 +182,7 @@ def compute_local_density(locs, info, radius):
     args = [(locs, radius, x_index, y_index, block_starts, block_ends, start, chunk) for start in starts]
     with _ThreadPoolExecutor() as executor:
         futures = [executor.submit(_local_density, *_) for _ in args]
-    results = [future.result() for future in futures]
-    density = _np.concatenate(results)
+    density = _np.sum([future.result() for future in futures], axis=0)
     locs = _lib.remove_from_rec(locs, 'density')
     return _lib.append_to_rec(locs, density, 'density')
 

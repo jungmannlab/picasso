@@ -27,6 +27,7 @@ def calculate_optimal_bins(data, max_n_bins=None):
 
 def append_to_rec(rec_array, data, name):
     return _append_fields(rec_array, name, data, dtypes=data.dtype, usemask=False, asrecarray=True)
+    return rec_array
 
 
 def ensure_finite(rec_array):
