@@ -129,7 +129,7 @@ def distance_histogram_blocks(locs, info, bin_size, r_max):
 
 
 def pair_correlation_blocks(locs, info, bin_size, r_max):
-    dh = distance_histogram_blocks(locs, bin_size, r_max)
+    dh = distance_histogram_blocks(locs, info, bin_size, r_max)
     print('Applying normalization...')
     bins_lower = _np.arange(0, r_max, bin_size)
     area = _np.pi * bin_size * (2 * bins_lower + bin_size)
