@@ -16,7 +16,6 @@ from tqdm import tqdm as _tqdm
 from scipy import interpolate as _interpolate
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
-import time as _time
 import matplotlib.pyplot as _plt
 from scipy.optimize import minimize as _minimize
 
@@ -41,8 +40,8 @@ def get_index_blocks(locs, info, max_distance):
     # Allocate block info arrays
     n_blocks_x = int(_np.ceil(info[0]['Width'] / max_distance))
     n_blocks_y = int(_np.ceil(info[0]['Height'] / max_distance))
-    block_starts = _np.zeros((n_blocks_y, n_blocks_x))
-    block_ends = _np.zeros((n_blocks_y, n_blocks_x))
+    block_starts = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
+    block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     # Fill in block starts and ends
     _fill_index_blocks(block_starts, block_ends, x_index, y_index)
     return locs, x_index, y_index, block_starts, block_ends
@@ -61,76 +60,52 @@ def _fill_index_blocks(block_starts, block_ends, x_index, y_index):
             block_ends[i, j] = k
 
 
-@_numba.jit(nopython=True, cache=True)
-def distance_histogram(locs, bin_size, r_max):
+@_numba.jit(nopython=True, nogil=True)
+def _distance_histogram(locs, bin_size, r_max, x_index, y_index, block_starts, block_ends, start, chunk):
     x = locs.x
     y = locs.y
     dh_len = _np.uint32(r_max / bin_size)
     dh = _np.zeros(dh_len, dtype=_np.uint32)
     r_max_2 = r_max**2
-    N = len(x)
-    for i in range(N):
-        xi = x[i]
-        yi = y[i]
-        for j in range(i+1, N):
-            dx2 = (xi - x[j])**2
-            if dx2 < r_max_2:
-                dy2 = (yi - y[j])**2
-                if dy2 < r_max_2:
-                    d = _np.sqrt(dx2 + dy2)
-                    if d < r_max:
-                        bin = _np.uint32(d / bin_size)
-                        dh[bin] += 1
-    return dh
-
-
-def pair_correlation(locs, bin_size, r_max):
-    bins_lower = _np.arange(0, r_max, bin_size)
-    dh = distance_histogram(locs, bin_size, r_max)
-    area = _np.pi * bin_size * (2 * bins_lower + bin_size)
-    return bins_lower, dh / area
-
-
-@_numba.jit(nopython=True)
-def _distance_histogram_blocks(locs, bin_size, r_max, x_index, y_index, block_starts, block_ends):
-    x = locs.x
-    y = locs.y
-    dh_len = _np.uint32(r_max, bin_size)
-    dh = _np.zeros(dh_len, dtype=_np.uint32)
-    r_max_2 = r_max**2
-    N = len(x)
     K, L = block_starts.shape
-    for i in range(N):
+    end = min(start+chunk, len(locs))
+    for i in range(start, end):
         xi = x[i]
         yi = y[i]
         ki = y_index[i]
         li = x_index[i]
-        for k in range(ki-1, ki+2):
+        for k in range(ki, ki+2):
             if k < K:
-                for l in range(li-1, li+2):
+                for l in range(li, li+2):
                     if l < L:
                         for j in range(block_starts[k, l], block_ends[k, l]):
-                            dx2 = (xi - x[j])**2
-                            if dx2 < r_max_2:
-                                dy2 = (yi - y[j])**2
-                                if dy2 < r_max_2:
-                                    d = _np.sqrt(dx2 + dy2)
-                                    if d < r_max:
-                                        bin = _np.uint32(d / bin_size)
-                                        dh[bin] += 1
+                            if j > i:
+                                dx2 = (xi - x[j])**2
+                                if dx2 < r_max_2:
+                                    dy2 = (yi - y[j])**2
+                                    if dy2 < r_max_2:
+                                        d = _np.sqrt(dx2 + dy2)
+                                        if d < r_max:
+                                            bin = _np.uint32(d / bin_size)
+                                            dh[bin] += 1
     return dh
 
 
-def distance_histogram_blocks(locs, info, bin_size, r_max):
-    print('Indexing localizations...')
+def distance_histogram(locs, info, bin_size, r_max):
     locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, r_max)
-    print('Calculating distance histogram...')
-    return _distance_histogram_blocks(locs, bin_size, r_max, x_index, y_index, block_starts, block_ends)
+    N = len(locs)
+    n_threads = _multiprocessing.cpu_count()
+    chunk = int(N / n_threads)
+    starts = range(0, N, chunk)
+    args = [(locs, bin_size, r_max, x_index, y_index, block_starts, block_ends, start, chunk) for start in starts]
+    with _ThreadPoolExecutor() as executor:
+        futures = [executor.submit(_distance_histogram, *_) for _ in args]
+    results = [future.result() for future in futures]
+    return _np.sum(results, axis=0)
 
 
-def pair_correlation_blocks(locs, info, bin_size, r_max):
-    dh = distance_histogram_blocks(locs, info, bin_size, r_max)
-    print('Applying normalization...')
+def pair_correlation(locs, info, bin_size, r_max):
+    dh = distance_histogram(locs, info, bin_size, r_max)
     bins_lower = _np.arange(0, r_max, bin_size)
     area = _np.pi * bin_size * (2 * bins_lower + bin_size)
     return bins_lower, dh / area
@@ -170,75 +145,47 @@ def dbscan(locs, radius, min_density):
     return clusters, locs
 
 
-def compute_local_density(locs, radius):
-    N = len(locs)
-    n_threads = int(0.75 * _multiprocessing.cpu_count())
-    chunksize = int(N / n_threads)
-    starts = range(0, N, chunksize)
+@_numba.jit(nopython=True, nogil=True)
+def _local_density(locs, radius, x_index, y_index, block_starts, block_ends, start, chunk):
+    x = locs.x
+    y = locs.y
+    N = len(x)
+    r2 = radius**2
     density = _np.zeros(N, dtype=_np.uint32)
-    counters = [_np.zeros(1, dtype=_np.uint64) for _ in range(len(starts))]
-    with _ThreadPoolExecutor(max_workers=n_threads) as executor:
-        for start, counter in zip(starts, counters):
-            executor.submit(_compute_local_density_partially, locs, radius, start, chunksize, density, counter)
-        done = 0
-        t0 = _time.time()
-        while done < N:
-            dt = _time.time() - t0
-            if done > 0:
-                secsleft = (N - done) * dt / done + 1
-                minleft = int(secsleft / 60)
-                if minleft > 0:
-                    msg = '{} mins'.format(minleft)
-                else:
-                    msg = '{} secs'.format(int(secsleft))
-                print('Evaluated {:,}/{:,} locs. Time left: '.format(done, N) + msg, end='\r')
-            _time.sleep(0.1)
-            done = int(_np.sum(counters))
-        print()
+    end = min(start+chunk, N)
+    for i in range(start, end):
+        yi = y[i]
+        xi = x[i]
+        ki = y_index[i]
+        li = x_index[i]
+        di = 0
+        for k in range(ki-1, ki+2):
+            for l in range(li-1, li+2):
+                for j in range(block_starts[k, l], block_ends[k, l]):
+                    dx2 = (xi - x[j])**2
+                    if dx2 < r2:
+                        dy2 = (yi - y[j])**2
+                        if dy2 < r2:
+                            d2 = dx2 + dy2
+                            if d2 < r2:
+                                di += 1
+        density[i] = di
+    return density
+
+
+def compute_local_density(locs, info, radius):
+    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, radius)
+    N = len(locs)
+    n_threads = _multiprocessing.cpu_count()
+    chunk = int(N / n_threads)
+    starts = range(0, N, chunk)
+    args = [(locs, radius, x_index, y_index, block_starts, block_ends, start, chunk) for start in starts]
+    with _ThreadPoolExecutor() as executor:
+        futures = [executor.submit(_local_density, *_) for _ in args]
+    results = [future.result() for future in futures]
+    density = _np.concatenate(results)
     locs = _lib.remove_from_rec(locs, 'density')
     return _lib.append_to_rec(locs, density, 'density')
-
-
-@_numba.jit(nopython=True, nogil=True, cache=True)
-def _compute_local_density_partially(locs, radius, start, chunksize, density, counter):
-    r2 = radius**2
-    N = len(locs)
-    end = min(N, start + chunksize)
-    for i in range(start, end):
-        xi = locs.x[i]
-        yi = locs.y[i]
-        for j in range(N):
-            dx2 = (xi - locs.x[j])**2
-            if dx2 < r2:
-                dy2 = (yi - locs.y[j])**2
-                if dy2 < r2:
-                    d = _np.sqrt(dx2 + dy2)
-                    if d < radius:
-                        density[i] += 1
-        counter[0] = i - start + 1
-    return density
-
-
-@_numba.jit(nopython=True, cache=True)
-def _compute_local_density(locs, radius):
-    N = len(locs)
-    r2 = radius**2
-    density = _np.zeros(N, dtype=_np.uint32)
-    for i in range(N):
-        if i % 1000 == 0:
-            print(i, N)
-        xi = locs.x[i]
-        yi = locs.y[i]
-        for j in range(N):
-            if i != j:
-                dx2 = (xi - locs.x[j])**2
-                if dx2 < r2:
-                    dy2 = (yi - locs.y[j])**2
-                    if dy2 < r2:
-                        d = _np.sqrt(dx2 + dy2)
-                        if d < radius:
-                            density[i] += 1
-    return density
 
 
 def compute_dark_times(locs):
