@@ -18,17 +18,19 @@ For both options you need approved access on Gitlab.
 3. Add `<picasso directory>\scripts` to your PATH environment variable.  
 This will make the scripts in this folder accessible in the
 console, independent of the current directory.
-4. Add `.PY;.PYW` to your `PATHEXT` environment variable.  
-The result is that you don't have to specify the .py or .pyw ending when you run a Python in the command line.
-5. Run this command to register the picasso package in the Python installation.
+4. Run this command to register the picasso package in the Python installation.
     - `ECHO <picasso directory> >> <python installation directory>\Lib\site-packages\picasso.pth`
-6. Run these commands in an Administrator console to tell Windows that it should run .py and .pyw files with the Python interpreter:
-    - `assoc .py=Python.File`
-    - `assoc .pyw=Python.NoConFile`
-    - `ftype Python.File=<python installation directory>\python.exe %1`
-    - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1`  
-7. Make shortcuts of `gui\*.pyw` files. Open shortcut properties. Prepend shortcut command with `pythonw `. Set the icon to the respective file in the `gui` folder. Move the shortcut to top level. This shortcut can now be double-clicked, pinned to task bar or copied to Desktop.
+5. Make shortcuts of `gui\*.pyw` files. Open shortcut properties. Prepend shortcut command with `pythonw `. Set the icon to the respective file in the `gui` folder. Move the shortcut to the picasso top level directory. This shortcut can now be double-clicked, pinned to task bar or copied to Desktop.
 
+### Optional steps for your Python environment
+* Add `.PY;.PYW` to your `PATHEXT` environment variable.  
+The result is that Windows considers these files to be executable, so you don't have to type `.py` or `.pyw` when calling a Python script.
+* Depending on your Python installation, Windows might now know that it should call the Python interpreter when running a Python script just by its file name.
+If not, run these commands to tell Windows what to do if a `.py` or `.pyw` file is being called:
+  - `assoc .py=Python.File`
+  - `assoc .pyw=Python.NoConFile`
+  - `ftype Python.File=<python installation directory>\python.exe %1 %*`
+  - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1 %*`  
 
 ## Credits
 - Localize icon based on "Mountains by MONTANA RUCOBO from the Noun Project"
