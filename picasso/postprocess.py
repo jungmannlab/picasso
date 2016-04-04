@@ -27,6 +27,7 @@ _sys.path.insert(0, _parent_directory)    # We want to use the local picasso ins
 from picasso import lib as _lib
 from picasso import render as _render
 from picasso import imageprocess as _imageprocess
+from picasso.localize import LOCS_DTYPE as _LOCS_DTYPE
 
 
 def _get_index_blocks(locs, info, max_distance):
@@ -211,13 +212,15 @@ def _compute_dark_times(locs, last_frame):
     return dark
 
 
-def link(locs, min_prob=0.05, max_dark_time=1, combine_mode='average'):
+def link(locs, info, min_prob=0.05, max_dark_time=1, combine_mode='average'):
     locs = locs[_np.all(_np.array([_np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
     locs.sort(kind='mergesort', order='frame')
     group = get_link_groups(locs, min_prob, max_dark_time)
     if combine_mode == 'average':
         linked_locs = link_loc_groups(locs, group)
-        # TODO: set len to -1 if loc lasts until last frame or starts at first frame
+        last_frame = linked_locs.frame + linked_locs.len
+        linked_locs = linked_locs[last_frame >= info[0]['Frames']]
+        linked_locs = linked_locs[linked_locs.frame > 0]
     elif combine_mode == 'refit':
         pass    # TODO
     return linked_locs[linked_locs.len != -1]
@@ -274,7 +277,7 @@ def _get_next_loc_index_in_link_group(current_index, group, N, frame, x, y, lpx,
 
 def link_loc_groups(locs, group):
     linked_locs_data = _link_loc_groups(locs, group)
-    dtype = locs.dtype.descr + [('len', 'u4'), ('n', 'u4'), ('photon_rate', 'f4')]
+    dtype = _LOCS_DTYPE + [('len', 'u4'), ('n', 'u4'), ('photon_rate', 'f4')]
     return _np.rec.array(linked_locs_data, dtype=dtype)
 
 

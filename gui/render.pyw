@@ -21,6 +21,24 @@ sys.path.insert(0, _parent_directory)    # We want to use the local picasso inst
 from picasso import io, widgets
 
 
+class ToolsSettingsDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.setWindowTitle('Tools Settings')
+        self.setModal(False)
+        grid = QtGui.QGridLayout(self)
+        grid.addWidget(QtGui.QLabel('Pick Radius:'), 0, 0)
+        pick_diameter = QtGui.QDoubleSpinBox()
+        pick_diameter.setRange(0, 999999)
+        pick_diameter.setValue(1)
+        pick_diameter.setSingleStep(0.1)
+        pick_diameter.setDecimals(3)
+        pick_diameter.setKeyboardTracking(False)
+        pick_diameter.valueChanged.connect(window.view.set_pick_diameter)
+        grid.addWidget(pick_diameter, 0, 1)
+
+
 class DisplaySettingsDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -117,15 +135,19 @@ class Window(QtGui.QMainWindow):
         self.view.rendered.connect(self.update_status_bar)
         self.setCentralWidget(self.view)
         self.display_settings_dialog = DisplaySettingsDialog(self)
+        self.tools_settings_dialog = ToolsSettingsDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
-        save_image_action = file_menu.addAction('Save image')
+        save_image_action = file_menu.addAction('Save Image')
         save_image_action.setShortcut('Ctrl+Shift+S')
         save_image_action.triggered.connect(self.save_image)
+        save_picked_action = file_menu.addAction('Save Picked Localizations')
+        save_picked_action.setShortcut('Ctrl+Alt+Shift+S')
+        save_picked_action.triggered.connect(self.save_picked_locs)
         view_menu = menu_bar.addMenu('View')
         display_settings_action = view_menu.addAction('Display Settings')
         display_settings_action.setShortcut('Ctrl+D')
@@ -157,8 +179,21 @@ class Window(QtGui.QMainWindow):
         fit_in_view_action.setShortcut('Ctrl+W')
         fit_in_view_action.triggered.connect(self.view.fit_in_view)
         view_menu.addAction(fit_in_view_action)
+        tools_menu = menu_bar.addMenu('Tools')
+        tools_actiongroup = QtGui.QActionGroup(menu_bar)
+        zoom_tool_action = tools_actiongroup.addAction(QtGui.QAction('Zoom', tools_menu, checkable=True))
+        zoom_tool_action.setShortcut('Ctrl+Z')
+        tools_menu.addAction(zoom_tool_action)
+        zoom_tool_action.setChecked(True)
+        pick_tool_action = tools_actiongroup.addAction(QtGui.QAction('Pick', tools_menu, checkable=True))
+        pick_tool_action.setShortcut('Ctrl+P')
+        tools_menu.addAction(pick_tool_action)
+        tools_actiongroup.triggered.connect(self.on_tool_changed)
+        tools_menu.addSeparator()
+        tools_settings_action = tools_menu.addAction('Tools Setttings')
+        tools_settings_action.setShortcut('Ctrl+T')
+        tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
         self.status_bar = self.statusBar()
-        self.locs = []
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -179,15 +214,16 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        if len(self.locs) < 3:
+        if len(self.view.locs) < 3:
             locs, info = io.load_locs(path)
-            self.locs_path = path
             self.view.add_locs(locs, info)
             self.set_display_settings()
             if len(self.view.locs) > 1:
                 self.view.render()
             else:
                 self.view.fit_in_view()
+            if len(self.view.locs) == 1:
+                self.locs_path = path
         else:
             raise Exception('Maximum number of channels is 3.')
 
@@ -209,32 +245,45 @@ class Window(QtGui.QMainWindow):
         if path:
             self.view.save(path)
 
+    def save_picked_locs(self):
+        base, ext = os.path.splitext(self.locs_path)
+        out_path = base + '_picked.hdf5'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save picked localizations', out_path, filter='*.hdf5')
+        if path:
+            self.view.save_picked_locs(path)
+
     def to_left(self):
-        self.view.center[1] = self.view.center[1] - 0.8 * self.view.width() / self.view.zoom
+        self.view.center[1] = self.view.center[1] - 0.8 * self.view.width() / self.view.zoom()
         self.view.render()
 
     def to_right(self):
-        self.view.center[1] = self.view.center[1] + 0.8 * self.view.width() / self.view.zoom
+        self.view.center[1] = self.view.center[1] + 0.8 * self.view.width() / self.view.zoom()
         self.view.render()
 
     def to_up(self):
-        self.view.center[0] = self.view.center[0] - 0.8 * self.view.height() / self.view.zoom
+        self.view.center[0] = self.view.center[0] - 0.8 * self.view.height() / self.view.zoom()
         self.view.render()
 
     def to_down(self):
-        self.view.center[0] = self.view.center[0] + 0.8 * self.view.height() / self.view.zoom
+        self.view.center[0] = self.view.center[0] + 0.8 * self.view.height() / self.view.zoom()
         self.view.render()
 
     def zoom_in(self):
-        self.view.zoom *= 10/7
+        self.view.set_zoom(self.view.zoom() * 10 / 7)
         self.view.render()
 
     def zoom_out(self):
-        self.view.zoom *= 7/10
+        self.view.set_zoom(self.view.zoom() * 7 / 10)
         self.view.render()
 
     def update_status_bar(self, N, X, Y, T):
         self.status_bar.showMessage('Rendered {:,} localizations on {}x{} pixels in {:.4f} seconds.'.format(N, X, Y, T))
+
+    def on_tool_changed(self, action):
+        if action.text() == 'Zoom':
+            self.view.set_mode('zoom')
+        elif action.text() == 'Pick':
+            self.view.set_mode('pick')
 
 
 if __name__ == '__main__':
