@@ -25,7 +25,7 @@ def _link(files, min_prob, tolerance):
         from picasso import io, postprocess
         for path in paths:
             locs, info = io.load_locs(path)
-            linked_locs = postprocess.link(locs, min_prob, tolerance)
+            linked_locs = postprocess.link(locs, info, min_prob, tolerance)
             base, ext = os.path.splitext(path)
             link_info = {'Minimum Probablity': min_prob,
                          'Maximum Transient Dark Time': tolerance,

@@ -218,8 +218,8 @@ def link(locs, info, min_prob=0.05, max_dark_time=1, combine_mode='average'):
     group = get_link_groups(locs, min_prob, max_dark_time)
     if combine_mode == 'average':
         linked_locs = link_loc_groups(locs, group)
-        last_frame = linked_locs.frame + linked_locs.len
-        linked_locs = linked_locs[last_frame >= info[0]['Frames']]
+        last_frame = linked_locs.frame + linked_locs.len - 1
+        linked_locs = linked_locs[last_frame + 1 < info[0]['Frames']]
         linked_locs = linked_locs[linked_locs.frame > 0]
     elif combine_mode == 'refit':
         pass    # TODO
