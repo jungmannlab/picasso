@@ -7,6 +7,7 @@
     :author: Joerg Schnitzbauer, 2015
 """
 
+import sys as _sys
 import numpy as _np
 import numba as _numba
 import multiprocessing as _multiprocessing
@@ -27,6 +28,10 @@ LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
 
 _this_file = _ospath.abspath(__file__)
 _this_directory = _ospath.dirname(_this_file)
+_parent_directory = _ospath.dirname(_this_directory)
+_sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
+from picasso import gaussmle as _gaussmle
+
 
 with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
     CONFIG = _yaml.load(config_file)
@@ -174,9 +179,16 @@ def _generate_fit_info(movie, camera_info, identifications, box):
 
 
 def fit(movie, camera_info, identifications, box):
-    fit_info = _generate_fit_info(movie, camera_info, identifications, box)
-    WoehrLok.fnWoehrLokMLEFitAll(*fit_info.gaussmle_args)
-    return locs_from_fit_info(fit_info, identifications, box), fit_info
+    spots = _get_spots(movie, camera_info, identifications, box)
+    theta = _gaussmle.gaussmle_cpu(spots)
+    box_offset = int(box/2)
+    x = theta[:, 0] + identifications.x - box_offset
+    y = theta[:, 1] + identifications.y - box_offset
+    lpx = lpy = likelihoods = 0.1 * _np.ones(len(spots), dtype=_np.float32)
+    return _np.rec.array((identifications.frame, x, y,
+                          theta[:, 2], theta[:, 4], theta[:, 5],
+                          theta[:, 3], lpx, lpy, likelihoods),
+                         dtype=LOCS_DTYPE)
 
 
 def fit_async(movie, camera_info, identifications, box):

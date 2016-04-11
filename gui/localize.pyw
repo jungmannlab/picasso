@@ -875,12 +875,16 @@ class FitWorker(QtCore.QThread):
         self.box = box
 
     def run(self):
+        '''
         thread, fit_info = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box)
         while thread.is_alive():
             self.progressMade.emit(fit_info.current, fit_info.n_spots)
             time.sleep(0.1)
         thread.join()   # just in case...
         locs = localize.locs_from_fit_info(fit_info, self.identifications, self.box)
+        self.finished.emit(locs)
+        '''
+        locs = localize.fit(self.movie, self.camera_info, self.identifications, self.box)
         self.finished.emit(locs)
 
 
