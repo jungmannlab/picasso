@@ -12,9 +12,7 @@ import numpy as _np
 import numba as _numba
 import multiprocessing as _multiprocessing
 import ctypes as _ctypes
-import threading as _threading
 import os.path as _ospath
-from collections import namedtuple as _namedtuple
 import yaml as _yaml
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from concurrent.futures import wait as _wait
@@ -84,15 +82,14 @@ def gradient_magnitude(frame):
     return gm
 
 
-def identify_in_frame(frame, parameters, roi=None):
+def identify_in_frame(frame, minimum_lgm, box, roi=None):
     frame = _np.float32(frame)  # For some reason frame sometimes comes with different type, so we don't want to confuse numba
     if roi is not None:
         frame = frame[roi[0][0]:roi[1][0], roi[0][1]:roi[1][1]]
     gm = gradient_magnitude(frame)
-    box = parameters['Box Size']
     s_map = local_gradient_magnitude(gm, box)
     lm_map = local_maxima_map(frame, box)
-    s_map_thesholded = s_map > parameters['Minimum LGM']
+    s_map_thesholded = s_map > minimum_lgm
     combined_map = (lm_map * s_map_thesholded) > 0.5
     y, x = _np.where(combined_map)
     if roi is not None:
@@ -101,34 +98,34 @@ def identify_in_frame(frame, parameters, roi=None):
     return y, x
 
 
-def identify_by_frame_number(movie, parameters, frame_number, roi=None):
+def identify_by_frame_number(movie, minimum_lgm, box, frame_number, roi=None):
     frame = movie[frame_number]
-    y, x = identify_in_frame(frame, parameters, roi)
+    y, x = identify_in_frame(frame, minimum_lgm, box, roi)
     frame = frame_number * _np.ones(len(x))
     return _np.rec.array((frame, x, y), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i')])
 
 
-def identify_async(movie, parameters, roi=None):
+def identify_async(movie, minimum_lgm, box, roi=None):
     n_frames = len(movie)
     n_threads = int(0.75 * _multiprocessing.cpu_count())
     executor = _ThreadPoolExecutor(n_threads)
-    futures = [executor.submit(identify_by_frame_number, movie, parameters, _, roi) for _ in range(n_frames)]
+    futures = [executor.submit(identify_by_frame_number, movie, minimum_lgm, box, _, roi) for _ in range(n_frames)]
     executor.shutdown(wait=False)
     return futures
 
 
-def identify(movie, parameters, threaded=True):
+def identify(movie, minimum_lgm, box, threaded=True):
     if threaded:
-        futures = identify_async(movie, parameters)
+        futures = identify_async(movie, minimum_lgm, box)
         done, not_done = _wait(futures)
         identifications = [future.result() for future in done]
     else:
-        identifications = [identify_by_frame_number(movie, parameters, i) for i in range(movie)]
+        identifications = [identify_by_frame_number(movie, minimum_lgm, box, i) for i in range(movie)]
     return _np.hstack(identifications).view(_np.recarray)
 
 
-@_numba.jit(nopython=True, cache=True)
-def _get_spots(movie, ids_frame, ids_x, ids_y, box):
+@_numba.jit(nopython=True)
+def _cut_spots(movie, ids_frame, ids_x, ids_y, box):
     n_spots = len(ids_x)
     r = int(box/2)
     spots = _np.zeros((n_spots, box, box), dtype=movie.dtype)
@@ -151,62 +148,31 @@ def _to_photons(spots, camera_info):
         raise TypeError('Unknown camera type')
 
 
-def _generate_fit_info(movie, camera_info, identifications, box):
-    spots = _get_spots(movie, identifications.frame, identifications.x, identifications.y, box)
-    n_spots, box, box = spots.shape
-    fit_type = _ctypes.c_int(4)
-    spots = _to_photons(spots, camera_info)
-    spots_pointer = spots.ctypes.data_as(_C_FLOAT_POINTER)
-    psf_sigma = _ctypes.c_float(1.0)
-    box = _ctypes.c_int(box)
-    n_iterations = _ctypes.c_int(30)
-    params = _np.zeros((6, n_spots), dtype=_np.float32)
-    params_pointer = params.ctypes.data_as(_C_FLOAT_POINTER)
-    CRLBs = _np.zeros((6, n_spots), dtype=_np.float32)
-    CRLBs_pointer = CRLBs.ctypes.data_as(_C_FLOAT_POINTER)
-    likelihoods = _np.zeros(n_spots, dtype=_np.float32)
-    likelihoods_pointer = likelihoods.ctypes.data_as(_C_FLOAT_POINTER)
-    n_spots = _ctypes.c_ulong(n_spots)
-    n_cpus = _multiprocessing.cpu_count()
-    n_threads = _ctypes.c_int(int(0.75 * n_cpus))
-    current = _np.array(0, dtype=_np.uint32)
-    current_pointer = current.ctypes.data_as(_ctypes.POINTER(_ctypes.c_ulong))
-    gaussmle_args = (fit_type, spots_pointer, psf_sigma, box, n_iterations, params_pointer, CRLBs_pointer,
-                     likelihoods_pointer, n_spots, n_threads, current_pointer)
-    FitInfo = _namedtuple('FitInfo', 'n_spots spots gaussmle_args current params CRLBs likelihoods')
-    fit_info = FitInfo(n_spots.value, spots, gaussmle_args, current, params, CRLBs, likelihoods)
-    return fit_info
+def _get_spots(movie, identifications, box, camera_info):
+    spots = _cut_spots(movie, identifications.frame, identifications.x, identifications.y, box)
+    return _to_photons(spots, camera_info)
 
 
 def fit(movie, camera_info, identifications, box):
-    spots = _get_spots(movie, camera_info, identifications, box)
-    theta = _gaussmle.gaussmle_cpu(spots)
-    box_offset = int(box/2)
-    x = theta[:, 0] + identifications.x - box_offset
-    y = theta[:, 1] + identifications.y - box_offset
-    lpx = lpy = likelihoods = 0.1 * _np.ones(len(spots), dtype=_np.float32)
-    return _np.rec.array((identifications.frame, x, y,
-                          theta[:, 2], theta[:, 4], theta[:, 5],
-                          theta[:, 3], lpx, lpy, likelihoods),
-                         dtype=LOCS_DTYPE)
+    spots = _get_spots(movie, identifications, box, camera_info)
+    theta, CRLBs, likelihoods = _gaussmle.gaussmle_sigmaxy(spots)
+    return locs_from_fits(identifications, theta, CRLBs, likelihoods, box)
 
 
 def fit_async(movie, camera_info, identifications, box):
-    fit_info = _generate_fit_info(movie, camera_info, identifications, box)
-    thread = _threading.Thread(target=WoehrLok.fnWoehrLokMLEFitAll, args=fit_info.gaussmle_args)
-    thread.start()
-    return thread, fit_info
+    spots = _get_spots(movie, identifications, box, camera_info)
+    return _gaussmle.gaussmle_sigmaxy_async(spots)
 
 
-def locs_from_fit_info(fit_info, identifications, box):
+def locs_from_fits(identifications, theta, CRLBs, likelihoods, box):
     box_offset = int(box/2)
-    x = fit_info.params[0] + identifications.x - box_offset
-    y = fit_info.params[1] + identifications.y - box_offset
-    lpx = _np.sqrt(fit_info.CRLBs[0])
-    lpy = _np.sqrt(fit_info.CRLBs[1])
+    y = theta[:, 0] + identifications.y - box_offset
+    x = theta[:, 1] + identifications.x - box_offset
+    lpy = _np.sqrt(CRLBs[:, 0])
+    lpx = _np.sqrt(CRLBs[:, 1])
     return _np.rec.array((identifications.frame, x, y,
-                          fit_info.params[2], fit_info.params[4], fit_info.params[5],
-                          fit_info.params[3], lpx, lpy, fit_info.likelihoods),
+                          theta[:, 2], theta[:, 5], theta[:, 4],
+                          theta[:, 3], lpx, lpy, likelihoods),
                          dtype=LOCS_DTYPE)
 
 
