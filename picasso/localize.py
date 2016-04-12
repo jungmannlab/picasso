@@ -34,11 +34,6 @@ from picasso import gaussmle as _gaussmle
 with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
     CONFIG = _yaml.load(config_file)
 
-_woehrlok_file = _ospath.join(_this_directory, 'WoehrLok.dll')
-WoehrLok = _ctypes.CDLL(_woehrlok_file)
-# Visual C compiler mangles up the function name (thanks Microsoft):
-WoehrLok.fnWoehrLokMLEFitAll = getattr(WoehrLok, '?fnWoehrLokMLEFitAll@@YAXHPEBMMHHPEAM11KHPEAK@Z')
-
 
 @_numba.jit(nopython=True, nogil=True, cache=True)
 def local_maxima_map(frame, box):
@@ -153,15 +148,15 @@ def _get_spots(movie, identifications, box, camera_info):
     return _to_photons(spots, camera_info)
 
 
-def fit(movie, camera_info, identifications, box):
+def fit(movie, camera_info, identifications, box, eps=0.001):
     spots = _get_spots(movie, identifications, box, camera_info)
-    theta, CRLBs, likelihoods = _gaussmle.gaussmle_sigmaxy(spots)
+    theta, CRLBs, likelihoods = _gaussmle.gaussmle_sigmaxy(spots, eps)
     return locs_from_fits(identifications, theta, CRLBs, likelihoods, box)
 
 
-def fit_async(movie, camera_info, identifications, box):
+def fit_async(movie, camera_info, identifications, box, eps=0.001):
     spots = _get_spots(movie, identifications, box, camera_info)
-    return _gaussmle.gaussmle_sigmaxy_async(spots)
+    return _gaussmle.gaussmle_sigmaxy_async(spots, eps)
 
 
 def locs_from_fits(identifications, theta, CRLBs, likelihoods, box):
