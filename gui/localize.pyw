@@ -290,6 +290,18 @@ class ParametersDialog(QtGui.QDialog):
         exp_grid.addWidget(self.excitation_combo, 5, 1)
         self.camera_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'].keys())))
 
+        # Fit Settings
+        fit_groupbox = QtGui.QGroupBox('Fit Settings')
+        vbox.addWidget(fit_groupbox)
+        fit_grid = QtGui.QGridLayout(fit_groupbox)
+        fit_grid.addWidget(QtGui.QLabel('Convergence Criterion:'), 0, 0)
+        self.convergence_spinbox = QtGui.QDoubleSpinBox()
+        self.convergence_spinbox.setRange(0, 1)
+        self.convergence_spinbox.setDecimals(5)
+        self.convergence_spinbox.setValue(0.001)
+        self.convergence_spinbox.setSingleStep(0.001)
+        fit_grid.addWidget(self.convergence_spinbox, 0, 1)
+
     def on_camera_changed(self, index):
         self.update_readmodes()
         self.update_readoutrates()
@@ -798,7 +810,8 @@ class Window(QtGui.QMainWindow):
                 camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
             elif sensor == 'Simulation':
                 pass
-            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'])
+            eps = self.parameters_dialog.convergence_spinbox.value()
+            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'], eps)
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
@@ -857,7 +870,7 @@ class IdentificationWorker(QtCore.QThread):
         futures = localize.identify_async(self.movie, self.parameters['Minimum LGM'], self.parameters['Box Size'], self.roi)
         not_done = futures
         while not_done:
-            done, not_done = wait(futures, 0.1)
+            done, not_done = wait(futures, 0.2)
             self.progressMade.emit(len(done), self.parameters)
         identifications = np.hstack([_.result() for _ in futures]).view(np.recarray)
         self.finished.emit(self.parameters, self.roi, identifications, self.fit_afterwards)
@@ -868,22 +881,23 @@ class FitWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float)
 
-    def __init__(self, movie, camera_info, identifications, box):
+    def __init__(self, movie, camera_info, identifications, box, eps):
         super().__init__()
         self.movie = movie
         self.camera_info = camera_info
         self.identifications = identifications
         self.box = box
+        self.eps = eps
 
     def run(self):
         N = len(self.identifications)
         t0 = time.time()
-        current, thetas, CRLBs, likelihoods = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box)
+        current, thetas, CRLBs, likelihoods, iterations = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box, self.eps)
         while current[0] < N:
             self.progressMade.emit(current[0], N)
-            time.sleep(0.1)
+            time.sleep(0.2)
         dt = time.time() - t0
-        locs = localize.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, self.box)
+        locs = localize.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, iterations, self.box)
         self.finished.emit(locs, dt)
 
 

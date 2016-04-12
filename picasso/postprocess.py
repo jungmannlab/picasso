@@ -302,6 +302,7 @@ def _link_loc_groups(locs, link_group, is_grouped):
     lpx_ = _np.zeros(N_linked, dtype=_np.float32)
     lpy_ = _np.zeros(N_linked, dtype=_np.float32)
     likelihood_ = _np.zeros(N_linked, dtype=_np.float32)
+    iterations_ = _np.zeros(N_linked, dtype=_np.float32)
     len_ = _np.zeros(N_linked, dtype=_np.int32)
     n_ = _np.zeros(N_linked, dtype=_np.uint32)
     last_frame_ = _np.zeros(N_linked, dtype=_np.uint32)
@@ -323,6 +324,7 @@ def _link_loc_groups(locs, link_group, is_grouped):
         sy_[i_] += locs.sy[i]
         bg_[i_] += locs.bg[i]
         likelihood_[i_] += locs.likelihood[i]
+        iterations_[i_] += locs.iterations[i]
         if locs.frame[i] < frame_[i_]:
             frame_[i_] = locs.frame[i]
         if locs.frame[i] > last_frame_[i_]:
@@ -337,6 +339,7 @@ def _link_loc_groups(locs, link_group, is_grouped):
     lpx_ = _np.sqrt(1/sum_weights_x_)
     lpy_ = _np.sqrt(1/sum_weights_y_)
     likelihood_ = likelihood_ / n_
+    iterations_ = iterations_ / n_
     len_ = last_frame_ - frame_ + 1
     photon_rate_ = photons_ / n_
     return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, len_, n_, photon_rate_, group_

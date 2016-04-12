@@ -21,7 +21,7 @@ from concurrent.futures import wait as _wait
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
 LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
               ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
-              ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('likelihood', 'f4')]
+              ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('likelihood', 'f4'), ('iterations', 'i4')]
 
 
 _this_file = _ospath.abspath(__file__)
@@ -150,8 +150,8 @@ def _get_spots(movie, identifications, box, camera_info):
 
 def fit(movie, camera_info, identifications, box, eps=0.001):
     spots = _get_spots(movie, identifications, box, camera_info)
-    theta, CRLBs, likelihoods = _gaussmle.gaussmle_sigmaxy(spots, eps)
-    return locs_from_fits(identifications, theta, CRLBs, likelihoods, box)
+    theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle_sigmaxy(spots, eps)
+    return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
 
 
 def fit_async(movie, camera_info, identifications, box, eps=0.001):
@@ -159,7 +159,7 @@ def fit_async(movie, camera_info, identifications, box, eps=0.001):
     return _gaussmle.gaussmle_sigmaxy_async(spots, eps)
 
 
-def locs_from_fits(identifications, theta, CRLBs, likelihoods, box):
+def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
     box_offset = int(box/2)
     y = theta[:, 0] + identifications.y - box_offset
     x = theta[:, 1] + identifications.x - box_offset
@@ -167,7 +167,7 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, box):
     lpx = _np.sqrt(CRLBs[:, 1])
     return _np.rec.array((identifications.frame, x, y,
                           theta[:, 2], theta[:, 5], theta[:, 4],
-                          theta[:, 3], lpx, lpy, likelihoods),
+                          theta[:, 3], lpx, lpy, likelihoods, iterations),
                          dtype=LOCS_DTYPE)
 
 

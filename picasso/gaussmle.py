@@ -6,7 +6,7 @@ import threading as _threading
 from concurrent import futures as _futures
 
 
-ITERATIONS = 20
+MAX_ITERATIONS = 100
 MAX_STEP = _np.array([1.0, 1.0, 100, 2.0, 0.1, 0.1])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
@@ -112,7 +112,7 @@ def _derivative_gaussian_integral_sigma(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-def _worker(func, spots, thetas, CRLBs, likelihoods, current, lock):
+def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock):
     N = len(spots)
     while True:
         with lock:
@@ -120,47 +120,49 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, current, lock):
             if index == N:
                 return
             current[0] += 1
-        func(spots, index, thetas, CRLBs, likelihoods)
+        func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
 
 
-def gaussmle_sigmaxy(spots):
+def gaussmle_sigmaxy(spots, eps):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
     CRLBs = _np.zeros((N, 6), dtype=_np.float32)
     likelihoods = _np.zeros(N, dtype=_np.float32)
+    iterations = _np.zeros(N, dtype=_np.int32)
     n_workers = int(0.75 * _multiprocessing.cpu_count())
     with _futures.ThreadPoolExecutor(n_workers) as executor:
         lock = _threading.Lock()
         current = [0]
         futures = []
         for i in range(n_workers):
-            f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, current, lock)
+            f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
             futures.append(f)
         while _futures.wait(futures, 1.0)[1]:
             print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
         print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
-    return thetas, CRLBs, likelihoods
+    return thetas, CRLBs, likelihoods, iterations
 
 
-def gaussmle_sigmaxy_async(spots):
+def gaussmle_sigmaxy_async(spots, eps):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
     CRLBs = _np.zeros((N, 6), dtype=_np.float32)
     likelihoods = _np.zeros(N, dtype=_np.float32)
+    iterations = _np.zeros(N, dtype=_np.int32)
     n_workers = int(0.75 * _multiprocessing.cpu_count())
     lock = _threading.Lock()
     current = [0]
     futures = []
     executor = _futures.ThreadPoolExecutor(n_workers)
     for i in range(n_workers):
-        f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, current, lock)
+        f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
         futures.append(f)
     executor.shutdown(wait=False)
-    return current, thetas, CRLBs, likelihoods
+    return current, thetas, CRLBs, likelihoods, iterations
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods):
+def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
     initial_sigma = 1.0
     n_params = 6
 
@@ -179,7 +181,10 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods):
     numerator = _np.zeros(n_params, dtype=_np.float32)
     denominator = _np.zeros(n_params, dtype=_np.float32)
 
-    for kk in range(ITERATIONS):
+    old_x = theta[0]
+    old_y = theta[1]
+
+    for kk in range(MAX_ITERATIONS):
 
         numerator[:] = 0.0
         denominator[:] = 0.0
@@ -222,6 +227,16 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods):
         theta[4] = _np.maximum(theta[4], 0.05 * initial_sigma)
         theta[5] = _np.maximum(theta[5], 0.05 * initial_sigma)
 
+        # Check for convergence
+        if (_np.abs(old_x - theta[0]) < eps) and (_np.abs(old_y - theta[1]) < eps):
+            break
+        else:
+            old_x = theta[0]
+            old_y = theta[1]
+
+    thetas[index] = theta
+    iterations[index] = kk + 1
+
     # Calculating the CRLB and LogLikelihood
     Div = 0.0
     M = _np.zeros((n_params, n_params), dtype=_np.float32)
@@ -261,6 +276,5 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods):
         CRLB[kk] = Minv[kk, kk]
 
     # Write to global arrays
-    thetas[index] = theta
     CRLBs[index] = CRLB
     likelihoods[index] = Div
