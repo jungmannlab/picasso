@@ -688,7 +688,8 @@ class Window(QtGui.QMainWindow):
             else:
                 if self.parameters_dialog.preview_checkbox.isChecked():
                     identifications_frame = localize.identify_by_frame_number(self.movie,
-                                                                              self.parameters,
+                                                                              self.parameters['Minimum LGM'],
+                                                                              self.parameters['Box Size'],
                                                                               self.current_frame_number,
                                                                               self.view.roi)
                     box = self.parameters['Box Size']
@@ -748,10 +749,10 @@ class Window(QtGui.QMainWindow):
         n_frames = self.info[0]['Frames']
         box = parameters['Box Size']
         mmlg = parameters['Minimum LGM']
-        message = 'Identifying in frame {:,}/{:,} (Box Size: {:,}; Minimum LGM: {:,})...'.format(frame_number,
-                                                                                                 n_frames,
-                                                                                                 box,
-                                                                                                 mmlg)
+        message = 'Identifying in frame {:,} / {:,} (Box Size: {:,}; Minimum LGM: {:,}) ...'.format(frame_number,
+                                                                                                    n_frames,
+                                                                                                    box,
+                                                                                                    mmlg)
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, parameters, roi, identifications, fit_afterwards):
@@ -802,12 +803,12 @@ class Window(QtGui.QMainWindow):
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
 
-    def on_fit_progress(self, current, n_spots):
-        message = 'Fitting spot {:,}/{:,}...'.format(current, n_spots)
+    def on_fit_progress(self, current, total):
+        message = 'Fitting spot {:,} / {:,} ...'.format(current, total)
         self.status_bar.showMessage(message)
 
     def on_fit_finished(self, locs, elapsed_time):
-        self.status_bar.showMessage('Fitted {:,} spots in {} seconds.'.format(len(locs), elapsed_time))
+        self.status_bar.showMessage('Fitted {:,} spots in {:.2f} seconds.'.format(len(locs), elapsed_time))
         self.locs = locs
         self.draw_frame()
         base, ext = os.path.splitext(self.movie_path)
@@ -853,7 +854,7 @@ class IdentificationWorker(QtCore.QThread):
         self.fit_afterwards = fit_afterwards
 
     def run(self):
-        futures = localize.identify_async(self.movie, self.parameters, self.roi)
+        futures = localize.identify_async(self.movie, self.parameters['Minimum LGM'], self.parameters['Box Size'], self.roi)
         not_done = futures
         while not_done:
             done, not_done = wait(futures, 0.1)
@@ -875,10 +876,15 @@ class FitWorker(QtCore.QThread):
         self.box = box
 
     def run(self):
-
+        N = len(self.identifications)
         t0 = time.time()
-        locs = localize.fit(self.movie, self.camera_info, self.identifications, self.box)
-        self.finished.emit(locs, time.timet()-t0)
+        futures, current, thetas, CRLBs, likelihoods = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box)
+        n_workers = len(futures)
+        while wait(futures, 0.1)[1]:
+            self.progressMade.emit(current[0] - n_workers, N)
+        dt = time.time() - t0
+        locs = localize.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, self.box)
+        self.finished.emit(locs, dt)
 
 
 if __name__ == '__main__':

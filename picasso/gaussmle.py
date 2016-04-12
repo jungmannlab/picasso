@@ -1,12 +1,14 @@
 import numpy as _np
 import numba as _numba
 import math as _math
+import multiprocessing as _multiprocessing
+import threading as _threading
+from concurrent import futures as _futures
 
 
 ITERATIONS = 20
-MAX_STEP = _np.array([1e0, 1e0, 1e2, 2e0, 1e-1, 1e-1])
+MAX_STEP = _np.array([1.0, 1.0, 100, 2.0, 0.1, 0.1])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
-print('local!')
 
 
 @_numba.jit(nopython=True, nogil=True)
@@ -51,12 +53,13 @@ def _filtered_min_max(spot, size, sigma):
 def centroid(spot, size, sigma):
     y, x = _center_of_mass(spot, size)
     bg, spot_max = _filtered_min_max(spot, size, sigma)
-    photons = _np.maximum(0.0, (spot_max - bg) * 2 * _np.pi)
+    photons = _np.maximum(0.0, (spot_max - bg) * 2 * _np.pi * sigma * sigma)
     return x, y, photons, bg
 
 
 @_numba.vectorize(nopython=True)
 def _erf(x):
+    ''' Currently not needed, but might be useful for a CUDA implementation '''
     ax = _np.abs(x)
     if ax < 0.5:
         t = x*x
@@ -109,27 +112,65 @@ def _derivative_gaussian_integral_sigma(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-def gaussmle_cpu(spots):
-    ''' A wrappper around the gufunc to hide a workaround for the fixed size return array. '''
-    return _fit_gaussians_gufunc(spots, _np.zeros(6, dtype=_np.float32))
+def _worker(func, spots, thetas, CRLBs, likelihoods, current, lock):
+    N = len(spots)
+    with lock:
+        index = current[0]
+        current[0] += 1
+    while index < N:
+        func(spots, index, thetas, CRLBs, likelihoods)
+        with lock:
+            index = current[0]
+            current[0] += 1
 
 
-@_numba.guvectorize("void(float32[:,:],float32[:],float32[:])", "(n,n),(p)->(p)", nopython=True, target='parallel')
-def _fit_gaussians_gufunc(spot, dummy, theta):
-    '''
-    Theta is [x, y, N, bg, Sx, Sy]
-    Hence: x = theta[0]
-           y = theta[1]
-           N = theta[2]
-           bg = theta[3]
-           sx = theta[4]
-           sy = theta[5]
-    '''
-    n_params = 6
+def gaussmle_sigmaxy(spots):
+    N = len(spots)
+    thetas = _np.zeros((N, 6), dtype=_np.float32)
+    CRLBs = _np.zeros((N, 6), dtype=_np.float32)
+    likelihoods = _np.zeros(N, dtype=_np.float32)
+    n_workers = int(0.75 * _multiprocessing.cpu_count())
+    with _futures.ThreadPoolExecutor(n_workers) as executor:
+        lock = _threading.Lock()
+        current = [0]
+        futures = []
+        for i in range(n_workers):
+            f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, current, lock)
+            futures.append(f)
+        while _futures.wait(futures, 1.0)[1]:
+            print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
+        print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
+    return thetas, CRLBs, likelihoods
+
+
+def gaussmle_sigmaxy_async(spots):
+    N = len(spots)
+    thetas = _np.zeros((N, 6), dtype=_np.float32)
+    CRLBs = _np.zeros((N, 6), dtype=_np.float32)
+    likelihoods = _np.zeros(N, dtype=_np.float32)
+    n_workers = int(0.75 * _multiprocessing.cpu_count())
+    lock = _threading.Lock()
+    current = [0]
+    futures = []
+    executor = _futures.ThreadPoolExecutor(n_workers)
+    for i in range(n_workers):
+        f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, current, lock)
+        futures.append(f)
+    executor.shutdown(wait=False)
+    return futures, current, thetas, CRLBs, likelihoods
+
+
+@_numba.jit(nopython=True, nogil=True)
+def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods):
     initial_sigma = 1.0
+    n_params = 6
+
+    spot = spots[index]
     size, _ = spot.shape
 
     # Initial values
+    # theta is [x, y, N, bg, Sx, Sy]
+    theta = _np.zeros(n_params, dtype=_np.float32)
     theta[0], theta[1], theta[2], theta[3] = centroid(spot, size, initial_sigma)
     theta[4] = theta[5] = initial_sigma
 
@@ -161,25 +202,66 @@ def _fit_gaussians_gufunc(spot, dummy, theta):
 
                 model = theta[2] * dudt[2] + theta[3]
                 cf = df = 0.0
-                pixel_value = spot[ii, jj]
+                data = spot[ii, jj]
                 if model > 10e-3:
-                    cf = pixel_value / model - 1
-                    df = pixel_value / model**2
+                    cf = data / model - 1
+                    df = data / model**2
                 cf = _np.minimum(cf, 10e4)
                 df = _np.minimum(df, 10e4)
 
                 for ll in range(n_params):
-                    numerator[ll] = numerator[ll] + cf * dudt[ll]
-                    denominator[ll] = denominator[ll] + cf * d2udt2[ll] - (dudt[ll]**2) * df
+                    numerator[ll] += cf * dudt[ll]
+                    denominator[ll] += cf * d2udt2[ll] - df * dudt[ll]**2
 
         # The update
         for ll in range(n_params):
-            theta[ll] = theta[ll] - GAMMA[ll] * _np.minimum(_np.maximum(numerator[ll] / denominator[ll],
-                                                                        -MAX_STEP[ll]),
-                                                            MAX_STEP[ll])
+            theta[ll] -= GAMMA[ll] * _np.minimum(_np.maximum(numerator[ll] / denominator[ll], -MAX_STEP[ll]), MAX_STEP[ll])
 
         # Other constraints
         theta[2] = _np.maximum(theta[2], 1.0)
         theta[3] = _np.maximum(theta[3], 0.1)
-        theta[4] = _np.maximum(theta[4], 0.1)
-        theta[5] = _np.maximum(theta[5], 0.1)
+        theta[4] = _np.maximum(theta[4], 0.05 * initial_sigma)
+        theta[5] = _np.maximum(theta[5], 0.05 * initial_sigma)
+
+    # Calculating the CRLB and LogLikelihood
+    Div = 0.0
+    M = _np.zeros((n_params, n_params), dtype=_np.float32)
+    for ii in range(size):
+        for jj in range(size):
+            PSFx = _gaussian_integral(ii, theta[0], theta[4])
+            PSFy = _gaussian_integral(jj, theta[1], theta[5])
+            model = theta[3] + theta[2] * PSFx * PSFy
+
+            # Calculating derivatives
+            dudt[0], d2udt2[0] = _derivative_gaussian_integral(ii, theta[0], theta[4], theta[2], PSFy)
+            dudt[1], d2udt2[1] = _derivative_gaussian_integral(jj, theta[1], theta[5], theta[2], PSFx)
+            dudt[4], d2udt2[4] = _derivative_gaussian_integral_sigma(ii, theta[0], theta[4], theta[2], PSFy)
+            dudt[5], d2udt2[5] = _derivative_gaussian_integral_sigma(jj, theta[1], theta[5], theta[2], PSFx)
+            dudt[2] = PSFx * PSFy
+            dudt[3] = 1.0
+
+            # Building the Fisher Information Matrix
+            model = theta[3] + theta[2] * dudt[2]
+            for kk in range(n_params):
+                for ll in range(kk, n_params):
+                    M[kk, ll] += dudt[ll] * dudt[kk] / model
+                    M[ll, kk] = M[kk, ll]
+
+            # LogLikelihood
+            if model > 0:
+                data = spot[ii, jj]
+                if data > 0:
+                    Div += data * _np.log(model) - model - data * _np.log(data) + data
+                else:
+                    Div += -model
+
+    # Matrix inverse (CRLB=F^-1)
+    Minv = _np.linalg.inv(M)        # Reminder for CUDA implementation: Calculate CRLB and LL on CPU after iterations on CUDA (inv will be a mess)
+    CRLB = _np.zeros(n_params, dtype=_np.float32)
+    for kk in range(n_params):
+        CRLB[kk] = Minv[kk, kk]
+
+    # Write to global arrays
+    thetas[index] = theta
+    CRLBs[index] = CRLB
+    likelihoods[index] = Div
