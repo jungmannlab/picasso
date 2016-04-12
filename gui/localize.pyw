@@ -806,8 +806,8 @@ class Window(QtGui.QMainWindow):
         message = 'Fitting spot {:,}/{:,}...'.format(current, n_spots)
         self.status_bar.showMessage(message)
 
-    def on_fit_finished(self, locs):
-        self.status_bar.showMessage('Fitted {:,} spots.'.format(len(locs)))
+    def on_fit_finished(self, locs, elapsed_time):
+        self.status_bar.showMessage('Fitted {:,} spots in {} seconds.'.format(len(locs), elapsed_time))
         self.locs = locs
         self.draw_frame()
         base, ext = os.path.splitext(self.movie_path)
@@ -865,7 +865,7 @@ class IdentificationWorker(QtCore.QThread):
 class FitWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(np.recarray)
+    finished = QtCore.pyqtSignal(np.recarray, float)
 
     def __init__(self, movie, camera_info, identifications, box):
         super().__init__()
@@ -875,13 +875,15 @@ class FitWorker(QtCore.QThread):
         self.box = box
 
     def run(self):
+        t0 = time.time()
         thread, fit_info = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box)
         while thread.is_alive():
             self.progressMade.emit(fit_info.current, fit_info.n_spots)
             time.sleep(0.1)
         thread.join()   # just in case...
         locs = localize.locs_from_fit_info(fit_info, self.identifications, self.box)
-        self.finished.emit(locs)
+        dt = time.time() - t0
+        self.finished.emit(locs, dt)
 
 
 if __name__ == '__main__':

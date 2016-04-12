@@ -188,6 +188,8 @@ def fit_async(movie, camera_info, identifications, box):
 
 def locs_from_fit_info(fit_info, identifications, box):
     box_offset = int(box/2)
+    print(fit_info.params[0])
+    print(fit_info.params[1])
     x = fit_info.params[0] + identifications.x - box_offset
     y = fit_info.params[1] + identifications.y - box_offset
     lpx = _np.sqrt(fit_info.CRLBs[0])
