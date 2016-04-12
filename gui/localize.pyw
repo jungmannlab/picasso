@@ -878,10 +878,10 @@ class FitWorker(QtCore.QThread):
     def run(self):
         N = len(self.identifications)
         t0 = time.time()
-        futures, current, thetas, CRLBs, likelihoods = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box)
-        n_workers = len(futures)
-        while wait(futures, 0.1)[1]:
-            self.progressMade.emit(current[0] - n_workers, N)
+        current, thetas, CRLBs, likelihoods = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box)
+        while current[0] < N:
+            self.progressMade.emit(current[0], N)
+            time.sleep(0.1)
         dt = time.time() - t0
         locs = localize.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, self.box)
         self.finished.emit(locs, dt)

@@ -114,14 +114,13 @@ def _derivative_gaussian_integral_sigma(x, mu, sigma, photons, PSFc):
 
 def _worker(func, spots, thetas, CRLBs, likelihoods, current, lock):
     N = len(spots)
-    with lock:
-        index = current[0]
-        current[0] += 1
-    while index < N:
-        func(spots, index, thetas, CRLBs, likelihoods)
+    while True:
         with lock:
             index = current[0]
+            if index == N:
+                return
             current[0] += 1
+        func(spots, index, thetas, CRLBs, likelihoods)
 
 
 def gaussmle_sigmaxy(spots):
@@ -157,7 +156,7 @@ def gaussmle_sigmaxy_async(spots):
         f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, current, lock)
         futures.append(f)
     executor.shutdown(wait=False)
-    return futures, current, thetas, CRLBs, likelihoods
+    return current, thetas, CRLBs, likelihoods
 
 
 @_numba.jit(nopython=True, nogil=True)
