@@ -870,7 +870,7 @@ class IdentificationWorker(QtCore.QThread):
         futures = localize.identify_async(self.movie, self.parameters['Minimum LGM'], self.parameters['Box Size'], self.roi)
         not_done = futures
         while not_done:
-            done, not_done = wait(futures, 0.2)
+            done, not_done = wait(futures, 1)
             self.progressMade.emit(len(done), self.parameters)
         identifications = np.hstack([_.result() for _ in futures]).view(np.recarray)
         self.finished.emit(self.parameters, self.roi, identifications, self.fit_afterwards)

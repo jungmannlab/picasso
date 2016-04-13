@@ -213,10 +213,15 @@ def _compute_dark_times(locs, last_frame):
 
 
 def link(locs, info, min_prob=0.05, max_dark_time=1, combine_mode='average'):
-    locs = locs[_np.all(_np.array([_np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
+    locs = _lib.ensure_finite(locs)
+    locs = locs[locs.lpx > 0.0]
+    locs = locs[locs.lpy > 0.0]
     locs.sort(kind='mergesort', order='frame')
-    is_grouped = hasattr(locs, 'group')
-    link_group = get_link_groups(locs, min_prob, max_dark_time, is_grouped)
+    if hasattr(locs, 'group'):
+        group = locs.group
+    else:
+        group = _np.zeros(len(locs), dtype=_np.int32)
+    link_group = get_link_groups(locs, min_prob, max_dark_time, group)
     if combine_mode == 'average':
         linked_locs = link_loc_groups(locs, link_group)
     elif combine_mode == 'refit':
@@ -225,7 +230,7 @@ def link(locs, info, min_prob=0.05, max_dark_time=1, combine_mode='average'):
 
 
 @_numba.jit(nopython=True)
-def get_link_groups(locs, min_prob, max_dark_time, is_grouped):
+def get_link_groups(locs, min_prob, max_dark_time, group):
     ''' Assumes that locs are sorted by frame '''
     frame = locs.frame
     x = locs.x
@@ -233,10 +238,6 @@ def get_link_groups(locs, min_prob, max_dark_time, is_grouped):
     lpx = locs.lpx
     lpy = locs.lpy
     N = len(x)
-    if is_grouped:
-        group = locs.group
-    else:
-        group = _np.ones(N, dtype=_np.int32)
     link_group = -_np.ones(N, dtype=_np.int32)
     current_link_group = -1
     for i in range(N):
@@ -281,8 +282,12 @@ def _get_next_loc_index_in_link_group(current_index, link_group, N, frame, x, y,
 
 def link_loc_groups(locs, link_group):
     is_grouped = hasattr(locs, 'group')
-    linked_locs_data = _link_loc_groups(locs, link_group, is_grouped)
-    dtype = _LOCS_DTYPE + [('len', 'i4'), ('n', 'u4'), ('photon_rate', 'f4')]
+    if is_grouped:
+        group = locs.group
+    else:
+        group = _np.zeros(len(locs), dtype=_np.int32)
+    linked_locs_data = _link_loc_groups(locs, link_group, group)
+    dtype = _LOCS_DTYPE[:-1] + [('iterations', 'f4'), ('len', 'i4'), ('n', 'u4'), ('photon_rate', 'f4')]
     if is_grouped:
         dtype.append(('group', 'i4'))
         return _np.rec.array(linked_locs_data, dtype=dtype)
@@ -290,7 +295,7 @@ def link_loc_groups(locs, link_group):
 
 
 @_numba.jit(nopython=True)
-def _link_loc_groups(locs, link_group, is_grouped):
+def _link_loc_groups(locs, link_group, group):
     N_linked = link_group.max() + 1
     frame_ = locs.frame.max() * _np.ones(N_linked, dtype=_np.uint32)
     x_ = _np.zeros(N_linked, dtype=_np.float32)
@@ -329,8 +334,7 @@ def _link_loc_groups(locs, link_group, is_grouped):
             frame_[i_] = locs.frame[i]
         if locs.frame[i] > last_frame_[i_]:
             last_frame_[i_] = locs.frame[i]
-        if is_grouped:
-            group_[i_] = locs.group[i]
+        group_[i_] = group[i]
     x_ = x_ / sum_weights_x_
     y_ = y_ / sum_weights_y_
     sx_ = sx_ / n_
@@ -342,7 +346,7 @@ def _link_loc_groups(locs, link_group, is_grouped):
     iterations_ = iterations_ / n_
     len_ = last_frame_ - frame_ + 1
     photon_rate_ = photons_ / n_
-    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, len_, n_, photon_rate_, group_
+    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, iterations_, len_, n_, photon_rate_, group_
 
 
 def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
