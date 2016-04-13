@@ -120,7 +120,11 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, l
             if index == N:
                 return
             current[0] += 1
-        func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
+        try:
+            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
+        except ValueError:
+            with lock:
+                CRLBs[index] = _np.inf
 
 
 def gaussmle_sigmaxy(spots, eps, threaded=True):
@@ -174,7 +178,7 @@ def address_singular_matrix(func):
     return wrapper
 
 
-@address_singular_matrix
+# @address_singular_matrix
 @_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
     initial_sigma = 1.0
