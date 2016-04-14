@@ -169,15 +169,6 @@ def gaussmle_sigmaxy_async(spots, eps):
     return current, thetas, CRLBs, likelihoods, iterations
 
 
-def address_singular_matrix(func):
-    def wrapper(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
-        try:
-            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
-        except ValueError:  # This happens when the Fisher Information matrix is not invertible
-            CRLBs[index] = _np.inf
-    return wrapper
-
-
 # @address_singular_matrix
 @_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
