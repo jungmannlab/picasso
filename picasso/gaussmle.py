@@ -122,7 +122,7 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, l
             current[0] += 1
         try:
             func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
-        except ValueError:
+        except ValueError:  # This happens when the Fisher information matrix is not invertible
             with lock:
                 CRLBs[index] = _np.inf
 
@@ -130,7 +130,7 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, l
 def gaussmle_sigmaxy(spots, eps, threaded=True):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
-    CRLBs = _np.zeros((N, 6), dtype=_np.float32)
+    CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
     likelihoods = _np.zeros(N, dtype=_np.float32)
     iterations = _np.zeros(N, dtype=_np.int32)
     if threaded:
@@ -147,14 +147,17 @@ def gaussmle_sigmaxy(spots, eps, threaded=True):
             print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
     else:
         for i, spot in enumerate(spots):
-            _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
+            try:
+                _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
+            except ValueError:  # This happens when the Fisher information matrix is not invertible
+                CRLBs[i] = _np.inf
     return thetas, CRLBs, likelihoods, iterations
 
 
 def gaussmle_sigmaxy_async(spots, eps):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
-    CRLBs = _np.zeros((N, 6), dtype=_np.float32)
+    CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
     likelihoods = _np.zeros(N, dtype=_np.float32)
     iterations = _np.zeros(N, dtype=_np.int32)
     n_workers = int(0.75 * _multiprocessing.cpu_count())
@@ -169,7 +172,18 @@ def gaussmle_sigmaxy_async(spots, eps):
     return current, thetas, CRLBs, likelihoods, iterations
 
 
-# @address_singular_matrix
+def swallow_exception(exc=Exception):
+    def decorator(func):
+        def wrapper(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
+            try:
+                func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
+            except exc:
+                pass
+        return wrapper
+    return decorator
+
+
+@swallow_exception(ValueError)  # This happens when the Fisher information matrix is not invertible, in which case CRLB will not be written to global array
 @_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
     initial_sigma = 1.0
