@@ -30,17 +30,17 @@ from picasso import imageprocess as _imageprocess
 from picasso.localize import LOCS_DTYPE as _LOCS_DTYPE
 
 
-def _get_index_blocks(locs, info, max_distance):
+def _get_index_blocks(locs, info, size):
     # Sort locs by indices
-    x_index = _np.uint32(locs.x / max_distance)
-    y_index = _np.uint32(locs.y / max_distance)
+    x_index = _np.uint32(locs.x / size)
+    y_index = _np.uint32(locs.y / size)
     sort_indices = _np.lexsort([x_index, y_index])
     locs = locs[sort_indices]
     x_index = x_index[sort_indices]
     y_index = y_index[sort_indices]
     # Allocate block info arrays
-    n_blocks_x = int(_np.ceil(info[0]['Width'] / max_distance))
-    n_blocks_y = int(_np.ceil(info[0]['Height'] / max_distance))
+    n_blocks_x = int(_np.ceil(info[0]['Width'] / size))
+    n_blocks_y = int(_np.ceil(info[0]['Height'] / size))
     block_starts = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     # Fill in block starts and ends
