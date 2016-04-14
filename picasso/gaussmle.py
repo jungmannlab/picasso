@@ -122,7 +122,7 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, l
             current[0] += 1
         try:
             func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
-        except ValueError:
+        except ValueError:  # This happens when the Fisher information matrix is not invertible
             with lock:
                 CRLBs[index] = _np.inf
 
@@ -147,7 +147,10 @@ def gaussmle_sigmaxy(spots, eps, threaded=True):
             print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
     else:
         for i, spot in enumerate(spots):
-            _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
+            try:
+                _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
+            except ValueError:  # This happens when the Fisher information matrix is not invertible
+                CRLBs[i] = _np.inf
     return thetas, CRLBs, likelihoods, iterations
 
 
@@ -169,16 +172,6 @@ def gaussmle_sigmaxy_async(spots, eps):
     return current, thetas, CRLBs, likelihoods, iterations
 
 
-def address_singular_matrix(func):
-    def wrapper(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
-        try:
-            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
-        except ValueError:  # This happens when the Fisher Information matrix is not invertible
-            CRLBs[index] = _np.inf
-    return wrapper
-
-
-# @address_singular_matrix
 @_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
     initial_sigma = 1.0
