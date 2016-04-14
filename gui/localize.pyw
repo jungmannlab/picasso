@@ -353,8 +353,8 @@ class ParametersDialog(QtGui.QDialog):
                 em = self.em_checkbox.isChecked()
                 readmode = self.readmode_combo.currentText()
                 if readmode:
-                    preamps = range(len(localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode]))
-                    preamps = [''] + [str(_ + 1) for _ in list(preamps)]
+                    preamps = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode].keys()
+                    preamps = [''] + [str(_) for _ in list(preamps)]
                     self.preamp_combo.addItems(preamps)
 
     def on_box_changed(self, value):
@@ -794,7 +794,7 @@ class Window(QtGui.QMainWindow):
             if sensor == 'EMCCD':
                 em = parameters['Electron Multiplying']
                 readmode = parameters['Readout Mode']
-                preamp = parameters['Pre-Amp Gain'] - 1
+                preamp = parameters['Pre-Amp Gain']
                 camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode][preamp]
                 if em:
                     camera_info['gain'] = parameters['EM Real Gain']
