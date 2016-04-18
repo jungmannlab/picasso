@@ -150,7 +150,7 @@ def gaussmle_sigmaxy(spots, eps, threaded=True):
             try:
                 _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
             except ValueError:  # This happens when the Fisher information matrix is not invertible
-                CRLBs[i] = _np.inf
+                pass
     return thetas, CRLBs, likelihoods, iterations
 
 
