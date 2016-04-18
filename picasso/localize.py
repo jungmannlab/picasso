@@ -15,7 +15,8 @@ import ctypes as _ctypes
 import os.path as _ospath
 import yaml as _yaml
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
-from concurrent.futures import wait as _wait
+import threading as _threading
+from itertools import chain as _chain
 
 
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
@@ -35,7 +36,7 @@ with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
     CONFIG = _yaml.load(config_file)
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True)
 def local_maxima_map(frame, box):
     """ Finds pixels with maximum value within a region of interest """
     Y, X = frame.shape
@@ -52,9 +53,10 @@ def local_maxima_map(frame, box):
     return maxima_map
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
-def local_gradient_magnitude(gm, box):
+@_numba.jit(nopython=True, nogil=True)
+def local_gradient_magnitude(frame, box):
     """ Returns the sum of the absolute gradient within a box around each pixel """
+    gm = gradient_magnitude(frame)
     Y, X = gm.shape
     lgm = _np.zeros_like(gm)
     box_half = int(box / 2)
@@ -65,7 +67,7 @@ def local_gradient_magnitude(gm, box):
     return lgm
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True)
 def gradient_magnitude(frame):
     Y, X = frame.shape
     gm = _np.zeros((Y, X), dtype=_np.float32)
@@ -78,11 +80,9 @@ def gradient_magnitude(frame):
 
 
 def identify_in_frame(frame, minimum_lgm, box, roi=None):
-    frame = _np.float32(frame)  # For some reason frame sometimes comes with different type, so we don't want to confuse numba
     if roi is not None:
         frame = frame[roi[0][0]:roi[1][0], roi[0][1]:roi[1][1]]
-    gm = gradient_magnitude(frame)
-    s_map = local_gradient_magnitude(gm, box)
+    s_map = local_gradient_magnitude(frame, box)
     lm_map = local_maxima_map(frame, box)
     s_map_thesholded = s_map > minimum_lgm
     combined_map = (lm_map * s_map_thesholded) > 0.5
@@ -100,35 +100,80 @@ def identify_by_frame_number(movie, minimum_lgm, box, frame_number, roi=None):
     return _np.rec.array((frame, x, y), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i')])
 
 
-def identify_async(movie, minimum_lgm, box, roi=None):
+def _identify_worker(movie, current, minimum_lgm, box, roi, lock):
     n_frames = len(movie)
-    n_threads = int(0.75 * _multiprocessing.cpu_count())
-    executor = _ThreadPoolExecutor(n_threads)
-    futures = [executor.submit(identify_by_frame_number, movie, minimum_lgm, box, _, roi) for _ in range(n_frames)]
+    identifications = []
+    while True:
+        with lock:
+            index = current[0]
+            if index == n_frames:
+                return identifications
+            current[0] += 1
+        identifications.append(identify_by_frame_number(movie, minimum_lgm, box, index, roi))
+
+
+def identifications_from_futures(futures):
+    identifications_list_of_lists = [_.result() for _ in futures]
+    identifications_list = _chain(*identifications_list_of_lists)
+    return _np.hstack(identifications_list).view(_np.recarray)
+
+
+def identify_async(movie, minimum_lgm, box, roi=None):
+    n_workers = int(0.75 * _multiprocessing.cpu_count())
+    current = [0]
+    executor = _ThreadPoolExecutor(n_workers)
+    lock = _threading.Lock()
+    f = [executor.submit(_identify_worker, movie, current, minimum_lgm, box, roi, lock) for _ in range(n_workers)]
     executor.shutdown(wait=False)
-    return futures
+    return current, f
 
 
 def identify(movie, minimum_lgm, box, threaded=True):
     if threaded:
-        futures = identify_async(movie, minimum_lgm, box)
-        done, not_done = _wait(futures)
-        identifications = [future.result() for future in done]
+        N = len(movie)
+        current, futures = identify_async(movie, minimum_lgm, box)
+        while current[0] < N:
+            pass
+        return  # TODO
     else:
-        identifications = [identify_by_frame_number(movie, minimum_lgm, box, i) for i in range(movie)]
+        identifications = [identify_by_frame_number(movie, minimum_lgm, box, i) for i in range(len(movie))]
     return _np.hstack(identifications).view(_np.recarray)
 
 
 @_numba.jit(nopython=True)
-def _cut_spots(movie, ids_frame, ids_x, ids_y, box):
+def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     n_spots = len(ids_x)
     r = int(box/2)
     spots = _np.zeros((n_spots, box, box), dtype=movie.dtype)
     for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
-        for yi, y in enumerate(range(yc-r, yc+r+1)):
-            for xi, x in enumerate(range(xc-r, xc+r+1)):
-                spots[id, yi, xi] = movie[frame, y, x]
+        spots[id] = movie[frame, yc-r:yc+r+1, xc-r:xc+r+1]
     return spots
+
+
+@_numba.jit(nopython=True)
+def _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots):
+    for j in range(start, N):
+        if ids_frame[j] > frame_number:
+            break
+        yc = ids_y[j]
+        xc = ids_x[j]
+        spots[j] = frame[yc-r:yc+r+1, xc-r:xc+r+1]
+    return j
+
+
+def _cut_spots(movie, identifications, box):
+    ids_frame, ids_x, ids_y = (identifications[_] for _ in identifications.dtype.names)
+    if isinstance(movie, _np.ndarray):
+        return _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box)
+    else:
+        ''' Assumes that identifications are in order of frames! '''
+        r = int(box/2)
+        N = len(ids_frame)
+        spots = _np.zeros((N, box, box), dtype=movie.dtype)
+        start = 0
+        for frame_number, frame in enumerate(movie):
+            start = _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots)
+        return spots
 
 
 def _to_photons(spots, camera_info):
@@ -144,7 +189,7 @@ def _to_photons(spots, camera_info):
 
 
 def _get_spots(movie, identifications, box, camera_info):
-    spots = _cut_spots(movie, identifications.frame, identifications.x, identifications.y, box)
+    spots = _cut_spots(movie, identifications, box)
     return _to_photons(spots, camera_info)
 
 
