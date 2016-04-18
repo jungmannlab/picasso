@@ -152,11 +152,9 @@ def gaussmle_sigmaxy_async(spots, eps):
     n_workers = int(0.75 * _multiprocessing.cpu_count())
     lock = _threading.Lock()
     current = [0]
-    futures = []
     executor = _futures.ThreadPoolExecutor(n_workers)
     for i in range(n_workers):
-        f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
-        futures.append(f)
+        executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
     executor.shutdown(wait=False)
     return current, thetas, CRLBs, likelihoods, iterations
 
