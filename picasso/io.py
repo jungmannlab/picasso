@@ -108,11 +108,8 @@ class TiffMap:
         for i in range(n_index_entries):
             self.file.seek(index_map_offset + 20*i + 24)
             ifd_offsets.append(self.read('I'))
-        self.image_offsets = []
-        for ifd_offset in ifd_offsets:
-            self.file.seek(ifd_offset)
-            n_entries = self.read('H')
-            self.image_offsets.append(12 * n_entries + ifd_offset + 4)
+        self.image_offsets = [_ + 162 for _ in ifd_offsets]  # 2+12*13+4
+        self.image_offsets[0] += 48     # there are some extra tags in the first one
         self.n_frames = len(self.image_offsets)
 
         if memmap_frames:
