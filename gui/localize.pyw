@@ -15,7 +15,6 @@ from PyQt4 import QtCore, QtGui
 import time
 import numpy as np
 import traceback
-from concurrent.futures import wait
 
 
 _this_file = os.path.abspath(__file__)
@@ -126,7 +125,7 @@ class Scene(QtGui.QGraphicsScene):
         if not event.mimeData().hasUrls():
             return False
         path, extension = self.path_from_drop(event)
-        if extension.lower() not in ['.raw', '.yaml']:
+        if extension.lower() not in ['.raw', '.tif']:
             return False
         return True
 
@@ -137,14 +136,9 @@ class Scene(QtGui.QGraphicsScene):
             event.ignore()
 
     def dropEvent(self, event):
-        """ Loads raw movies or yaml parameters when dropped into the scene """
+        """ Loads  when dropped into the scene """
         path, extension = self.path_from_drop(event)
-        if extension == '.raw':
-            self.window.open(path)
-        elif extension == '.yaml':
-            self.window.load_parameters(path)
-        else:
-            pass  # TODO: send message to user
+        self.window.open(path)
 
 
 class FitMarker(QtGui.QGraphicsItemGroup):
@@ -353,8 +347,8 @@ class ParametersDialog(QtGui.QDialog):
                 em = self.em_checkbox.isChecked()
                 readmode = self.readmode_combo.currentText()
                 if readmode:
-                    preamps = range(len(localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode]))
-                    preamps = [''] + [str(_ + 1) for _ in list(preamps)]
+                    preamps = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode]
+                    preamps = [''] + [str(_) for _ in preamps]
                     self.preamp_combo.addItems(preamps)
 
     def on_box_changed(self, value):
@@ -431,7 +425,7 @@ class ParametersDialog(QtGui.QDialog):
             parameters['Electron Multiplying'] = self.em_checkbox.isChecked()
             parameters['EM Real Gain'] = self.gain_spinbox.value()
             parameters['Readout Mode'] = self.readmode_combo.currentText()
-            parameters['Pre-Amp Gain'] = int(self.preamp_combo.currentText())
+            parameters['Pre-Amp Gain'] = self.preamp_combo.currentText()
             parameters = self.add_wavelength_to_camera_parameters(parameters)
         elif localize.CONFIG['Cameras'][camera]['Sensor'] == 'sCMOS':
             parameters['Readout Rate'] = self.readoutrate_combo.currentText()
@@ -621,13 +615,15 @@ class Window(QtGui.QMainWindow):
         analyze_menu.addAction(localize_action)
 
     def open_file_dialog(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw')
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw; *.tif')
         if path:
             self.open(path)
 
     def open(self, path):
         try:
-            self.movie, self.info = io.load_raw(path, memory_map=True)
+            t0 = time.time()
+            self.movie, self.info = io.load_movie(path)
+            dt = time.time() - t0
             self.movie_path = path
             self.identifications = None
             self.locs = None
@@ -635,6 +631,7 @@ class Window(QtGui.QMainWindow):
             self.set_frame(0)
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
+            self.status_bar.showMessage('Opened movie in {:.2f} seconds.'.format(dt))
         except FileNotFoundError:
             pass  # TODO send a message
 
@@ -794,7 +791,7 @@ class Window(QtGui.QMainWindow):
             if sensor == 'EMCCD':
                 em = parameters['Electron Multiplying']
                 readmode = parameters['Readout Mode']
-                preamp = parameters['Pre-Amp Gain'] - 1
+                preamp = parameters['Pre-Amp Gain']
                 camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode][preamp]
                 if em:
                     camera_info['gain'] = parameters['EM Real Gain']
@@ -867,12 +864,13 @@ class IdentificationWorker(QtCore.QThread):
         self.fit_afterwards = fit_afterwards
 
     def run(self):
-        futures = localize.identify_async(self.movie, self.parameters['Minimum LGM'], self.parameters['Box Size'], self.roi)
-        not_done = futures
-        while not_done:
-            done, not_done = wait(futures, 0.2)
-            self.progressMade.emit(len(done), self.parameters)
-        identifications = np.hstack([_.result() for _ in futures]).view(np.recarray)
+        N = len(self.movie)
+        current, futures = localize.identify_async(self.movie, self.parameters['Minimum LGM'], self.parameters['Box Size'], self.roi)
+        while current[0] < N:
+            self.progressMade.emit(current[0], self.parameters)
+            time.sleep(0.2)
+        self.progressMade.emit(current[0], self.parameters)
+        identifications = localize.identifications_from_futures(futures)
         self.finished.emit(self.parameters, self.roi, identifications, self.fit_afterwards)
 
 
@@ -896,6 +894,7 @@ class FitWorker(QtCore.QThread):
         while current[0] < N:
             self.progressMade.emit(current[0], N)
             time.sleep(0.2)
+        self.progressMade.emit(current[0], N)
         dt = time.time() - t0
         locs = localize.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, iterations, self.box)
         self.finished.emit(locs, dt)
