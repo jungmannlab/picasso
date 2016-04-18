@@ -147,10 +147,7 @@ def gaussmle_sigmaxy(spots, eps, threaded=True):
             print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
     else:
         for i, spot in enumerate(spots):
-            try:
-                _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
-            except ValueError:  # This happens when the Fisher information matrix is not invertible
-                CRLBs[i] = _np.inf
+            _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
     return thetas, CRLBs, likelihoods, iterations
 
 
