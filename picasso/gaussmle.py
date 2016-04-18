@@ -120,33 +120,44 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, l
             if index == N:
                 return
             current[0] += 1
-        func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
+        try:
+            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
+        except ValueError:  # This happens when the Fisher information matrix is not invertible
+            with lock:
+                CRLBs[index] = _np.inf
 
 
-def gaussmle_sigmaxy(spots, eps):
+def gaussmle_sigmaxy(spots, eps, threaded=True):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
-    CRLBs = _np.zeros((N, 6), dtype=_np.float32)
+    CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
     likelihoods = _np.zeros(N, dtype=_np.float32)
     iterations = _np.zeros(N, dtype=_np.int32)
-    n_workers = int(0.75 * _multiprocessing.cpu_count())
-    with _futures.ThreadPoolExecutor(n_workers) as executor:
-        lock = _threading.Lock()
-        current = [0]
-        futures = []
-        for i in range(n_workers):
-            f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
-            futures.append(f)
-        while _futures.wait(futures, 1.0)[1]:
+    if threaded:
+        n_workers = int(0.75 * _multiprocessing.cpu_count())
+        with _futures.ThreadPoolExecutor(n_workers) as executor:
+            lock = _threading.Lock()
+            current = [0]
+            futures = []
+            for i in range(n_workers):
+                f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
+                futures.append(f)
+            while _futures.wait(futures, 1.0)[1]:
+                print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
             print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
-        print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
+    else:
+        for i, spot in enumerate(spots):
+            try:
+                _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
+            except ValueError:  # This happens when the Fisher information matrix is not invertible
+                CRLBs[i] = _np.inf
     return thetas, CRLBs, likelihoods, iterations
 
 
 def gaussmle_sigmaxy_async(spots, eps):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
-    CRLBs = _np.zeros((N, 6), dtype=_np.float32)
+    CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
     likelihoods = _np.zeros(N, dtype=_np.float32)
     iterations = _np.zeros(N, dtype=_np.int32)
     n_workers = int(0.75 * _multiprocessing.cpu_count())
@@ -159,6 +170,18 @@ def gaussmle_sigmaxy_async(spots, eps):
     return current, thetas, CRLBs, likelihoods, iterations
 
 
+def swallow_exception(exc=Exception):
+    def decorator(func):
+        def wrapper(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
+            try:
+                func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
+            except exc:
+                pass
+        return wrapper
+    return decorator
+
+
+@swallow_exception(ValueError)  # This happens when the Fisher information matrix is not invertible, in which case CRLB will not be written to global array
 @_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
     initial_sigma = 1.0
@@ -217,7 +240,10 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
 
         # The update
         for ll in range(n_params):
-            theta[ll] -= GAMMA[ll] * _np.minimum(_np.maximum(numerator[ll] / denominator[ll], -MAX_STEP[ll]), MAX_STEP[ll])
+            if denominator[ll] == 0.0:      # This is case is not handled in Lidke's code, but it seems to be a problem here (maybe due to many iterations)
+                theta[ll] -= GAMMA[ll] * _np.sign(numerator[ll]) * MAX_STEP[ll]
+            else:
+                theta[ll] -= GAMMA[ll] * _np.minimum(_np.maximum(numerator[ll] / denominator[ll], -MAX_STEP[ll]), MAX_STEP[ll])
 
         # Other constraints
         theta[2] = _np.maximum(theta[2], 1.0)
@@ -267,12 +293,11 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
                 else:
                     Div += -model
 
+    likelihoods[index] = Div
+
     # Matrix inverse (CRLB=F^-1)
     Minv = _np.linalg.inv(M)        # Reminder for CUDA implementation: Calculate CRLB and LL on CPU after iterations on CUDA (inv will be a mess)
     CRLB = _np.zeros(n_params, dtype=_np.float32)
     for kk in range(n_params):
         CRLB[kk] = Minv[kk, kk]
-
-    # Write to global arrays
     CRLBs[index] = CRLB
-    likelihoods[index] = Div

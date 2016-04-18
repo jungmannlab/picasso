@@ -16,7 +16,6 @@ import h5py as _h5py
 import re as _re
 import struct as _struct
 import json as _json
-from pprint import pprint as _pprint
 import os as _os
 import threading as _threading
 
