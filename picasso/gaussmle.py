@@ -146,7 +146,10 @@ def gaussmle_sigmaxy(spots, eps, threaded=True):
             print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
     else:
         for i, spot in enumerate(spots):
-            _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
+            try:
+                _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
+            except ValueError:  # This happens when the Fisher information matrix is not invertible
+                pass
     return thetas, CRLBs, likelihoods, iterations
 
 
@@ -159,11 +162,9 @@ def gaussmle_sigmaxy_async(spots, eps):
     n_workers = int(0.75 * _multiprocessing.cpu_count())
     lock = _threading.Lock()
     current = [0]
-    futures = []
     executor = _futures.ThreadPoolExecutor(n_workers)
     for i in range(n_workers):
-        f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
-        futures.append(f)
+        executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
     executor.shutdown(wait=False)
     return current, thetas, CRLBs, likelihoods, iterations
 
