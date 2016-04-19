@@ -123,8 +123,7 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, l
         try:
             func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
         except ValueError:  # This happens when the Fisher information matrix is not invertible
-            with lock:
-                CRLBs[index] = _np.inf
+            pass
 
 
 def gaussmle_sigmaxy(spots, eps, threaded=True):
