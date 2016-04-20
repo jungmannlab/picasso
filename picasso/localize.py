@@ -125,9 +125,11 @@ def _identify_worker(movie, current, minimum_ng, box, roi, lock):
 
 
 def identifications_from_futures(futures):
-    identifications_list_of_lists = [_.result() for _ in futures]
-    identifications_list = _chain(*identifications_list_of_lists)
-    return _np.hstack(identifications_list).view(_np.recarray)
+    ids_list_of_lists = [_.result() for _ in futures]
+    ids_list = _chain(*ids_list_of_lists)
+    ids = _np.hstack(ids_list).view(_np.recarray)
+    ids.sort(kind='mergesort', order='frame')
+    return ids
 
 
 def identify_async(movie, minimum_ng, box, roi=None):
@@ -152,7 +154,7 @@ def identify(movie, minimum_ng, box, threaded=True):
     return _np.hstack(identifications).view(_np.recarray)
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     n_spots = len(ids_x)
     r = int(box/2)
@@ -162,7 +164,7 @@ def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     return spots
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, cache=True)
 def _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots):
     for j in range(start, N):
         if ids_frame[j] > frame_number:

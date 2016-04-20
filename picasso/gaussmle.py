@@ -111,20 +111,6 @@ def _derivative_gaussian_integral_sigma(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock):
-    N = len(spots)
-    while True:
-        with lock:
-            index = current[0]
-            if index == N:
-                return
-            current[0] += 1
-        try:
-            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
-        except ValueError:  # This happens when the Fisher information matrix is not invertible
-            pass
-
-
 def gaussmle_sigmaxy(spots, eps, max_it, threaded=True):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
@@ -150,6 +136,20 @@ def gaussmle_sigmaxy(spots, eps, max_it, threaded=True):
             except ValueError:  # This happens when the Fisher information matrix is not invertible
                 pass
     return thetas, CRLBs, likelihoods, iterations
+
+
+def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock):
+    N = len(spots)
+    while True:
+        with lock:
+            index = current[0]
+            if index == N:
+                return
+            current[0] += 1
+        try:
+            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
+        except ValueError:  # This happens when the Fisher information matrix is not invertible
+            pass
 
 
 def gaussmle_sigmaxy_async(spots, eps, max_it):
@@ -180,7 +180,7 @@ def swallow_exception(exc=Exception):
 
 
 @swallow_exception(ValueError)  # This happens when the Fisher information matrix is not invertible, in which case CRLB will not be written to global array
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     initial_sigma = 1.0
     n_params = 6
