@@ -78,7 +78,7 @@ def _undrift(files, mode, segmentation, display, fromfile):
                 movie = None
                 if mode == 'std':
                     directory = os.path.dirname(os.path.abspath(path))
-                    movie, _ = io.load_raw(os.path.join(directory, info[0]['Raw File']))
+                    movie, _ = io.load_movie(os.path.join(directory, info[0]['File']))
                 drift, locs = postprocess.undrift(locs, info, segmentation, mode=mode, movie=movie, display=display)
                 base, ext = os.path.splitext(path)
                 undrift_info = {'Mode': mode,
