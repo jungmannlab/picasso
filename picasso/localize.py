@@ -122,6 +122,7 @@ def _identify_worker(movie, current, minimum_ng, box, roi, lock):
                 return identifications
             current[0] += 1
         identifications.append(identify_by_frame_number(movie, minimum_ng, box, index, roi))
+    return identifications
 
 
 def identifications_from_futures(futures):
@@ -222,10 +223,12 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
     x = theta[:, 1] + identifications.x - box_offset
     lpy = _np.sqrt(CRLBs[:, 0])
     lpx = _np.sqrt(CRLBs[:, 1])
-    return _np.rec.array((identifications.frame, x, y,
+    locs = _np.rec.array((identifications.frame, x, y,
                           theta[:, 2], theta[:, 5], theta[:, 4],
                           theta[:, 3], lpx, lpy, likelihoods, iterations),
                          dtype=LOCS_DTYPE)
+    locs.sort(kind='mergesort', order='frame')
+    return locs
 
 
 def localize(movie, info, parameters):
