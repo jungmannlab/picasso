@@ -25,7 +25,7 @@ from picasso import io, localize
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
-DEFAULT_PARAMETERS = {'Box Size': 7, 'Minimum LGM': 5000}
+DEFAULT_PARAMETERS = {'Box Size': 7, 'Min. Net Gradient': 5000}
 
 
 class RubberBand(QtGui.QRubberBand):
@@ -189,45 +189,45 @@ class ParametersDialog(QtGui.QDialog):
         self.box_spinbox.valueChanged.connect(self.on_box_changed)
         identification_grid.addWidget(self.box_spinbox, 0, 1)
 
-        # Minimum LGM
-        identification_grid.addWidget(QtGui.QLabel('Minimum LGM:'), 1, 0)
-        self.mlgm_spinbox = QtGui.QSpinBox()
-        self.mlgm_spinbox.setRange(0, 999999)
-        self.mlgm_spinbox.setValue(DEFAULT_PARAMETERS['Minimum LGM'])
-        self.mlgm_spinbox.setKeyboardTracking(False)
-        self.mlgm_spinbox.valueChanged.connect(self.on_mlgm_spinbox_changed)
-        identification_grid.addWidget(self.mlgm_spinbox, 1, 1)
+        # Min. Net Gradient
+        identification_grid.addWidget(QtGui.QLabel('Min. Net Gradient:'), 1, 0)
+        self.mng_spinbox = QtGui.QSpinBox()
+        self.mng_spinbox.setRange(0, 999999)
+        self.mng_spinbox.setValue(DEFAULT_PARAMETERS['Min. Net Gradient'])
+        self.mng_spinbox.setKeyboardTracking(False)
+        self.mng_spinbox.valueChanged.connect(self.on_mng_spinbox_changed)
+        identification_grid.addWidget(self.mng_spinbox, 1, 1)
 
         # Slider
-        self.mlgm_slider = QtGui.QSlider()
-        self.mlgm_slider.setOrientation(QtCore.Qt.Horizontal)
-        self.mlgm_slider.setRange(0, 10000)
-        self.mlgm_slider.setValue(DEFAULT_PARAMETERS['Minimum LGM'])
-        self.mlgm_slider.setSingleStep(1)
-        self.mlgm_slider.setPageStep(20)
-        self.mlgm_slider.valueChanged.connect(self.on_mlgm_slider_changed)
-        identification_grid.addWidget(self.mlgm_slider, 2, 0, 1, 2)
+        self.mng_slider = QtGui.QSlider()
+        self.mng_slider.setOrientation(QtCore.Qt.Horizontal)
+        self.mng_slider.setRange(0, 10000)
+        self.mng_slider.setValue(DEFAULT_PARAMETERS['Min. Net Gradient'])
+        self.mng_slider.setSingleStep(1)
+        self.mng_slider.setPageStep(20)
+        self.mng_slider.valueChanged.connect(self.on_mng_slider_changed)
+        identification_grid.addWidget(self.mng_slider, 2, 0, 1, 2)
 
         hbox = QtGui.QHBoxLayout()
         identification_grid.addLayout(hbox, 3, 0, 1, 2)
 
         # Min SpinBox
-        self.mlgm_min_spinbox = QtGui.QSpinBox()
-        self.mlgm_min_spinbox.setRange(0, 999999)
-        self.mlgm_min_spinbox.setKeyboardTracking(False)
-        self.mlgm_min_spinbox.setValue(0)
-        self.mlgm_min_spinbox.valueChanged.connect(self.on_mlgm_min_changed)
-        hbox.addWidget(self.mlgm_min_spinbox)
+        self.mng_min_spinbox = QtGui.QSpinBox()
+        self.mng_min_spinbox.setRange(0, 999999)
+        self.mng_min_spinbox.setKeyboardTracking(False)
+        self.mng_min_spinbox.setValue(0)
+        self.mng_min_spinbox.valueChanged.connect(self.on_mng_min_changed)
+        hbox.addWidget(self.mng_min_spinbox)
 
         hbox.addStretch(1)
 
         # Max SpinBox
-        self.mlgm_max_spinbox = QtGui.QSpinBox()
-        self.mlgm_max_spinbox.setKeyboardTracking(False)
-        self.mlgm_max_spinbox.setRange(0, 999999)
-        self.mlgm_max_spinbox.setValue(10000)
-        self.mlgm_max_spinbox.valueChanged.connect(self.on_mlgm_max_changed)
-        hbox.addWidget(self.mlgm_max_spinbox)
+        self.mng_max_spinbox = QtGui.QSpinBox()
+        self.mng_max_spinbox.setKeyboardTracking(False)
+        self.mng_max_spinbox.setRange(0, 999999)
+        self.mng_max_spinbox.setValue(10000)
+        self.mng_max_spinbox.valueChanged.connect(self.on_mng_max_changed)
+        hbox.addWidget(self.mng_max_spinbox)
 
         self.preview_checkbox = QtGui.QCheckBox('Preview')
         self.preview_checkbox.setTristate(False)
@@ -295,6 +295,12 @@ class ParametersDialog(QtGui.QDialog):
         self.convergence_spinbox.setValue(0.001)
         self.convergence_spinbox.setSingleStep(0.001)
         fit_grid.addWidget(self.convergence_spinbox, 0, 1)
+        fit_grid.addWidget(QtGui.QLabel('Max. Iterations:'), 1, 0)
+        self.max_iterations_spinbox = QtGui.QSpinBox()
+        self.max_iterations_spinbox.setRange(1, 999999)
+        self.max_iterations_spinbox.setValue(100)
+        self.max_iterations_spinbox.setSingleStep(10)
+        fit_grid.addWidget(self.max_iterations_spinbox, 1, 1)
 
     def on_camera_changed(self, index):
         self.update_readmodes()
@@ -354,23 +360,23 @@ class ParametersDialog(QtGui.QDialog):
     def on_box_changed(self, value):
         self.window.on_parameters_changed()
 
-    def on_mlgm_spinbox_changed(self, value):
-        if value < self.mlgm_slider.minimum():
-            self.mlgm_min_spinbox.setValue(value)
-        if value > self.mlgm_slider.maximum():
-            self.mlgm_max_spinbox.setValue(value)
-        self.mlgm_slider.setValue(value)
+    def on_mng_spinbox_changed(self, value):
+        if value < self.mng_slider.minimum():
+            self.mng_min_spinbox.setValue(value)
+        if value > self.mng_slider.maximum():
+            self.mng_max_spinbox.setValue(value)
+        self.mng_slider.setValue(value)
 
-    def on_mlgm_slider_changed(self, value):
-        self.mlgm_spinbox.setValue(value)
+    def on_mng_slider_changed(self, value):
+        self.mng_spinbox.setValue(value)
         if self.preview_checkbox.isChecked():
             self.window.on_parameters_changed()
 
-    def on_mlgm_min_changed(self, value):
-        self.mlgm_slider.setMinimum(value)
+    def on_mng_min_changed(self, value):
+        self.mng_slider.setMinimum(value)
 
-    def on_mlgm_max_changed(self, value):
-        self.mlgm_slider.setMaximum(value)
+    def on_mng_max_changed(self, value):
+        self.mng_slider.setMaximum(value)
 
     def on_preview_changed(self, state):
         self.window.draw_frame()
@@ -697,7 +703,7 @@ class Window(QtGui.QMainWindow):
             else:
                 if self.parameters_dialog.preview_checkbox.isChecked():
                     identifications_frame = localize.identify_by_frame_number(self.movie,
-                                                                              self.parameters['Minimum LGM'],
+                                                                              self.parameters['Min. Net Gradient'],
                                                                               self.parameters['Box Size'],
                                                                               self.current_frame_number,
                                                                               self.view.roi)
@@ -727,7 +733,7 @@ class Window(QtGui.QMainWindow):
         with open(path, 'r') as file:
             parameters = yaml.load(file)
             self.parameters_dialog.box_spinbox.setValue(parameters['Box Size'])
-            self.parameters_dialog.mlgm_spinbox.setValue(parameters['Minimum LGM'])
+            self.parameters_dialog.mng_spinbox.setValue(parameters['Min. Net Gradient'])
             self.status_bar.showMessage('Parameter file {} loaded.'.format(path))
 
     def save_parameters(self):
@@ -739,7 +745,7 @@ class Window(QtGui.QMainWindow):
     @property
     def parameters(self):
         return {'Box Size': self.parameters_dialog.box_spinbox.value(),
-                'Minimum LGM': self.parameters_dialog.mlgm_slider.value()}
+                'Min. Net Gradient': self.parameters_dialog.mng_slider.value()}
 
     def on_parameters_changed(self):
         self.locs = None
@@ -757,11 +763,11 @@ class Window(QtGui.QMainWindow):
     def on_identify_progress(self, frame_number, parameters):
         n_frames = self.info[0]['Frames']
         box = parameters['Box Size']
-        mmlg = parameters['Minimum LGM']
-        message = 'Identifying in frame {:,} / {:,} (Box Size: {:,}; Minimum LGM: {:,}) ...'.format(frame_number,
-                                                                                                    n_frames,
-                                                                                                    box,
-                                                                                                    mmlg)
+        mng = parameters['Min. Net Gradient']
+        message = 'Identifying in frame {:,} / {:,} (Box Size: {:,}; Min. Net Gradient: {:,}) ...'.format(frame_number,
+                                                                                                          n_frames,
+                                                                                                          box,
+                                                                                                          mng)
         self.status_bar.showMessage(message)
 
     def on_identify_finished(self, parameters, roi, identifications, fit_afterwards):
@@ -771,9 +777,9 @@ class Window(QtGui.QMainWindow):
             self.last_identification_info['ROI'] = roi
             n_identifications = len(identifications)
             box = parameters['Box Size']
-            mmlg = parameters['Minimum LGM']
-            message = 'Identified {:,} spots (Box Size: {:,}; Minimum LGM: {:,}). Ready for fit.'.format(n_identifications,
-                                                                                                         box, mmlg)
+            mng = parameters['Min. Net Gradient']
+            message = 'Identified {:,} spots (Box Size: {:,}; Min. Net Gradient: {:,}). Ready for fit.'.format(n_identifications,
+                                                                                                               box, mng)
             self.status_bar.showMessage(message)
             self.identifications = identifications
             self.ready_for_fit = True
@@ -808,7 +814,8 @@ class Window(QtGui.QMainWindow):
             elif sensor == 'Simulation':
                 pass
             eps = self.parameters_dialog.convergence_spinbox.value()
-            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'], eps)
+            max_it = self.parameters_dialog.max_iterations_spinbox.value()
+            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'], eps, max_it)
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
@@ -865,7 +872,7 @@ class IdentificationWorker(QtCore.QThread):
 
     def run(self):
         N = len(self.movie)
-        current, futures = localize.identify_async(self.movie, self.parameters['Minimum LGM'], self.parameters['Box Size'], self.roi)
+        current, futures = localize.identify_async(self.movie, self.parameters['Min. Net Gradient'], self.parameters['Box Size'], self.roi)
         while current[0] < N:
             self.progressMade.emit(current[0], self.parameters)
             time.sleep(0.2)
@@ -879,18 +886,21 @@ class FitWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float)
 
-    def __init__(self, movie, camera_info, identifications, box, eps):
+    def __init__(self, movie, camera_info, identifications, box, eps, max_it):
         super().__init__()
         self.movie = movie
         self.camera_info = camera_info
         self.identifications = identifications
         self.box = box
         self.eps = eps
+        self.max_it = max_it
 
     def run(self):
         N = len(self.identifications)
         t0 = time.time()
-        current, thetas, CRLBs, likelihoods, iterations = localize.fit_async(self.movie, self.camera_info, self.identifications, self.box, self.eps)
+        current, thetas, CRLBs, likelihoods, iterations = localize.fit_async(self.movie, self.camera_info,
+                                                                             self.identifications, self.box,
+                                                                             self.eps, self.max_it)
         while current[0] < N:
             self.progressMade.emit(current[0], N)
             time.sleep(0.2)

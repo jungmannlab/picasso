@@ -37,7 +37,7 @@ with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
 
 
 @_numba.jit(nopython=True, nogil=True)
-def local_maxima_map(frame, box):
+def local_maxima(frame, box):
     """ Finds pixels with maximum value within a region of interest """
     Y, X = frame.shape
     maxima_map = _np.zeros(frame.shape, _np.uint8)
@@ -50,57 +50,69 @@ def local_maxima_map(frame, box):
             j_local_max = int(flat_max % box)
             if (i_local_max == box_half) and (j_local_max == box_half):
                 maxima_map[i, j] = 1
-    return maxima_map
+    y, x = _np.where(maxima_map)
+    return y, x
 
 
 @_numba.jit(nopython=True, nogil=True)
-def local_gradient_magnitude(frame, box):
-    """ Returns the sum of the absolute gradient within a box around each pixel """
-    gm = gradient_magnitude(frame)
-    Y, X = gm.shape
-    lgm = _np.zeros_like(gm)
+def gradient_at(frame, y, x, i):
+    gy = frame[y+1, x] - frame[y-1, x]
+    gx = frame[y, x+1] - frame[y, x-1]
+    return gy, gx
+
+
+@_numba.jit(nopython=True, nogil=True)
+def net_gradient(frame, y, x, box, uy, ux):
     box_half = int(box / 2)
-    for i in range(box_half, Y - box + box_half + 1):
-        for j in range(box_half, X - box + box_half + 1):
-            local_gradient = gm[i - box_half:i + box_half + 1, j - box_half:j + box_half + 1]
-            lgm[i, j] = _np.sum(local_gradient)
-    return lgm
+    ng = _np.zeros(len(x), dtype=_np.float32)
+    for i, (yi, xi) in enumerate(zip(y, x)):
+        for k_index, k in enumerate(range(yi - box_half, yi + box_half + 1)):
+            for l_index, l in enumerate(range(xi - box_half, xi + box_half + 1)):
+                if k != yi and l != xi:
+                    gy, gx = gradient_at(frame, k, l, i)
+                    ng[i] += (gy*uy[k_index, l_index] + gx*ux[k_index, l_index])
+    return ng
 
 
-@_numba.jit(nopython=True, nogil=True)
-def gradient_magnitude(frame):
-    Y, X = frame.shape
-    gm = _np.zeros((Y, X), dtype=_np.float32)
-    for i in range(1, Y-1):
-        for j in range(1, X-1):
-            dy = frame[i+1, j] - frame[i-1, j]
-            dx = frame[i, j+1] - frame[i, j-1]
-            gm[i, j] = 0.5 * _np.sqrt(dy**2 + dx**2)
-    return gm
+@_numba.jit(nopython=True, nogil=True, cache=True)
+def identify_in_image(image, minimum_ng, box):
+    y, x = local_maxima(image, box)
+    box_half = int(box / 2)
+    # Now comes basically a meshgrid
+    ux = _np.zeros((box, box), dtype=_np.float32)
+    uy = _np.zeros((box, box), dtype=_np.float32)
+    for i in range(box):
+        val = box_half - i
+        ux[:, i] = uy[i, :] = val
+    unorm = _np.sqrt(ux**2 + uy**2)
+    ux /= unorm
+    uy /= unorm
+    ng = net_gradient(image, y, x, box, uy, ux)
+    positives = ng > minimum_ng
+    y = y[positives]
+    x = x[positives]
+    return y, x
 
 
-def identify_in_frame(frame, minimum_lgm, box, roi=None):
+def identify_in_frame(frame, minimum_ng, box, roi=None):
     if roi is not None:
         frame = frame[roi[0][0]:roi[1][0], roi[0][1]:roi[1][1]]
-    s_map = local_gradient_magnitude(frame, box)
-    lm_map = local_maxima_map(frame, box)
-    s_map_thesholded = s_map > minimum_lgm
-    combined_map = (lm_map * s_map_thesholded) > 0.5
-    y, x = _np.where(combined_map)
+    image = _np.float32(frame)      # otherwise numba goes crazy
+    y, x = identify_in_image(image, minimum_ng, box)
     if roi is not None:
         y += roi[0][0]
         x += roi[0][1]
     return y, x
 
 
-def identify_by_frame_number(movie, minimum_lgm, box, frame_number, roi=None):
+def identify_by_frame_number(movie, minimum_ng, box, frame_number, roi=None):
     frame = movie[frame_number]
-    y, x = identify_in_frame(frame, minimum_lgm, box, roi)
+    y, x = identify_in_frame(frame, minimum_ng, box, roi)
     frame = frame_number * _np.ones(len(x))
     return _np.rec.array((frame, x, y), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i')])
 
 
-def _identify_worker(movie, current, minimum_lgm, box, roi, lock):
+def _identify_worker(movie, current, minimum_ng, box, roi, lock):
     n_frames = len(movie)
     identifications = []
     while True:
@@ -109,7 +121,7 @@ def _identify_worker(movie, current, minimum_lgm, box, roi, lock):
             if index == n_frames:
                 return identifications
             current[0] += 1
-        identifications.append(identify_by_frame_number(movie, minimum_lgm, box, index, roi))
+        identifications.append(identify_by_frame_number(movie, minimum_ng, box, index, roi))
 
 
 def identifications_from_futures(futures):
@@ -118,25 +130,25 @@ def identifications_from_futures(futures):
     return _np.hstack(identifications_list).view(_np.recarray)
 
 
-def identify_async(movie, minimum_lgm, box, roi=None):
+def identify_async(movie, minimum_ng, box, roi=None):
     n_workers = int(0.75 * _multiprocessing.cpu_count())
     current = [0]
     executor = _ThreadPoolExecutor(n_workers)
     lock = _threading.Lock()
-    f = [executor.submit(_identify_worker, movie, current, minimum_lgm, box, roi, lock) for _ in range(n_workers)]
+    f = [executor.submit(_identify_worker, movie, current, minimum_ng, box, roi, lock) for _ in range(n_workers)]
     executor.shutdown(wait=False)
     return current, f
 
 
-def identify(movie, minimum_lgm, box, threaded=True):
+def identify(movie, minimum_ng, box, threaded=True):
     if threaded:
         N = len(movie)
-        current, futures = identify_async(movie, minimum_lgm, box)
+        current, futures = identify_async(movie, minimum_ng, box)
         while current[0] < N:
             pass
         return  # TODO
     else:
-        identifications = [identify_by_frame_number(movie, minimum_lgm, box, i) for i in range(len(movie))]
+        identifications = [identify_by_frame_number(movie, minimum_ng, box, i) for i in range(len(movie))]
     return _np.hstack(identifications).view(_np.recarray)
 
 
@@ -199,9 +211,9 @@ def fit(movie, camera_info, identifications, box, eps=0.001):
     return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
 
 
-def fit_async(movie, camera_info, identifications, box, eps=0.001):
+def fit_async(movie, camera_info, identifications, box, eps=0.001, max_it=100):
     spots = _get_spots(movie, identifications, box, camera_info)
-    return _gaussmle.gaussmle_sigmaxy_async(spots, eps)
+    return _gaussmle.gaussmle_sigmaxy_async(spots, eps, max_it)
 
 
 def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):

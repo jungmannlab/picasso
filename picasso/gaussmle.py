@@ -6,8 +6,7 @@ import threading as _threading
 from concurrent import futures as _futures
 
 
-MAX_ITERATIONS = 100
-MAX_STEP = _np.array([1.0, 1.0, 100, 2.0, 0.1, 0.1])
+MAX_STEP = _np.array([1.0, 1.0, 100.0, 2.0, 0.1, 0.1])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
@@ -112,7 +111,7 @@ def _derivative_gaussian_integral_sigma(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock):
+def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock):
     N = len(spots)
     while True:
         with lock:
@@ -121,12 +120,12 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, current, l
                 return
             current[0] += 1
         try:
-            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
+            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
         except ValueError:  # This happens when the Fisher information matrix is not invertible
             pass
 
 
-def gaussmle_sigmaxy(spots, eps, threaded=True):
+def gaussmle_sigmaxy(spots, eps, max_it, threaded=True):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
     CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
@@ -139,7 +138,7 @@ def gaussmle_sigmaxy(spots, eps, threaded=True):
             current = [0]
             futures = []
             for i in range(n_workers):
-                f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
+                f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
                 futures.append(f)
             while _futures.wait(futures, 1.0)[1]:
                 print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
@@ -147,13 +146,13 @@ def gaussmle_sigmaxy(spots, eps, threaded=True):
     else:
         for i, spot in enumerate(spots):
             try:
-                _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps)
+                _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
             except ValueError:  # This happens when the Fisher information matrix is not invertible
                 pass
     return thetas, CRLBs, likelihoods, iterations
 
 
-def gaussmle_sigmaxy_async(spots, eps):
+def gaussmle_sigmaxy_async(spots, eps, max_it):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
     CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
@@ -164,16 +163,16 @@ def gaussmle_sigmaxy_async(spots, eps):
     current = [0]
     executor = _futures.ThreadPoolExecutor(n_workers)
     for i in range(n_workers):
-        executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, current, lock)
+        executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
     executor.shutdown(wait=False)
     return current, thetas, CRLBs, likelihoods, iterations
 
 
 def swallow_exception(exc=Exception):
     def decorator(func):
-        def wrapper(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
+        def wrapper(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
             try:
-                func(spots, index, thetas, CRLBs, likelihoods, iterations, eps)
+                func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
             except exc:
                 pass
         return wrapper
@@ -182,7 +181,7 @@ def swallow_exception(exc=Exception):
 
 @swallow_exception(ValueError)  # This happens when the Fisher information matrix is not invertible, in which case CRLB will not be written to global array
 @_numba.jit(nopython=True, nogil=True)
-def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
+def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     initial_sigma = 1.0
     n_params = 6
 
@@ -204,7 +203,7 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps):
     old_x = theta[0]
     old_y = theta[1]
 
-    for kk in range(MAX_ITERATIONS):
+    for kk in range(max_it):
 
         numerator[:] = 0.0
         denominator[:] = 0.0
