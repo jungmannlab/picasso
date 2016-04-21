@@ -10,7 +10,7 @@ MAX_STEP = _np.array([1.0, 1.0, 100.0, 2.0, 0.1, 0.1])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _center_of_mass(spot, size):
     x = 0.0
     y = 0.0
@@ -25,7 +25,7 @@ def _center_of_mass(spot, size):
     return y, x
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _filtered_pixel(spot, size, k, l, sigma):
     norm = 0.5 / sigma**2
     pixel = _sum_ = 0.0
@@ -37,7 +37,7 @@ def _filtered_pixel(spot, size, k, l, sigma):
     return pixel / _sum_
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _filtered_min_max(spot, size, sigma):
     _min_ = _max_ = _filtered_pixel(spot, size, 0, 0, sigma)
     for k in range(size):
@@ -48,7 +48,7 @@ def _filtered_min_max(spot, size, sigma):
     return _min_, _max_
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def centroid(spot, size, sigma):
     y, x = _center_of_mass(spot, size)
     bg, spot_max = _filtered_min_max(spot, size, sigma)
@@ -85,14 +85,14 @@ def _erf(x):
     return _np.sign(x)
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _gaussian_integral(x, mu, sigma):
     sq_norm = 0.70710678118654757 / sigma       # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
     return 0.5 * (_math.erf((d + 0.5) * sq_norm) - _math.erf((d - 0.5) * sq_norm))
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
     d = x - mu
     a = _np.exp(-0.5 * ((d + 0.5) / sigma)**2)
@@ -102,7 +102,7 @@ def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _derivative_gaussian_integral_sigma(x, mu, sigma, photons, PSFc):
     ax = _np.exp(-0.5 * ((x + 0.5 - mu) / sigma)**2)
     bx = _np.exp(-0.5 * ((x - 0.5 - mu) / sigma)**2)
@@ -119,10 +119,7 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, cu
             if index == N:
                 return
             current[0] += 1
-        try:
-            func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
-        except ValueError:  # This happens when the Fisher information matrix is not invertible
-            pass
+        func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
 
 
 def gaussmle_sigmaxy(spots, eps, max_it, threaded=True):
@@ -145,10 +142,7 @@ def gaussmle_sigmaxy(spots, eps, max_it, threaded=True):
             print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
     else:
         for i, spot in enumerate(spots):
-            try:
-                _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
-            except ValueError:  # This happens when the Fisher information matrix is not invertible
-                pass
+            _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
     return thetas, CRLBs, likelihoods, iterations
 
 
@@ -170,9 +164,9 @@ def gaussmle_sigmaxy_async(spots, eps, max_it):
 
 def swallow_exception(exc=Exception):
     def decorator(func):
-        def wrapper(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
+        def wrapper(*args):
             try:
-                func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
+                return func(*args)
             except exc:
                 pass
         return wrapper
@@ -180,7 +174,7 @@ def swallow_exception(exc=Exception):
 
 
 @swallow_exception(ValueError)  # This happens when the Fisher information matrix is not invertible, in which case CRLB will not be written to global array
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     initial_sigma = 1.0
     n_params = 6

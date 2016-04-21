@@ -1,2 +1,2 @@
 @echo off
-python -m picasso %*
+python E:\picasso.test\picasso\__main__.py %*
