@@ -70,6 +70,14 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.trigger_rendering)
         contrast_grid.addWidget(self.maximum, 1, 1)
+        contrast_grid.addWidget(QtGui.QLabel('Colormap:'), 2, 0)
+        self.colormap = QtGui.QComboBox()
+        self.colormap.addItems(sorted(['hot', 'viridis', 'inferno', 'plasma', 'magma', 'gray']))
+        for i in range(self.colormap.count()):
+            if self.colormap.itemText(i) == 'viridis':
+                self.colormap.setCurrentIndex(i)
+        contrast_grid.addWidget(self.colormap, 2, 1)
+        self.colormap.currentIndexChanged.connect(self.trigger_rendering)
         # Blur
         blur_groupbox = QtGui.QGroupBox('Blur')
         blur_grid = QtGui.QGridLayout(blur_groupbox)
@@ -237,6 +245,7 @@ class Window(QtGui.QMainWindow):
         button = self.display_settings_dialog.blur_buttongroup.checkedButton()
         self.view.blur_method = self.display_settings_dialog.blur_methods[button]
         self.view.min_blur_width = float(self.display_settings_dialog.min_blur_width.value())
+        self.view.set_colormap(self.display_settings_dialog.colormap.currentText())
 
     def save_image(self):
         base, ext = os.path.splitext(self.locs_path)

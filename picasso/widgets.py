@@ -14,6 +14,7 @@ import os.path as _ospath
 import sys as _sys
 import time as _time
 from numpy.lib.recfunctions import stack_arrays as _stack_arrays
+import matplotlib.pyplot as _plt
 
 
 _this_file = _ospath.abspath(__file__)
@@ -48,6 +49,7 @@ class LocsRenderer(_QtGui.QLabel):
         self._mode = 'zoom'
         self._pick_diameter = 1
         self.picked_locs = []
+        self.set_colormap('viridis')
 
     def add_locs(self, locs, info):
         locs = _lib.ensure_finite(locs)
@@ -182,6 +184,9 @@ class LocsRenderer(_QtGui.QLabel):
         T = _time.time() - t0
         return T, N, image
 
+    def set_colormap(self, name):
+        self._cmap = _np.uint8(_np.round(255 * _plt.get_cmap(name)(_np.arange(256))))
+
     def set_mode(self, mode):
         if mode in ['zoom', 'pick']:
             self._mode = mode
@@ -195,23 +200,32 @@ class LocsRenderer(_QtGui.QLabel):
         self._zoom = zoom
         self.update_cursor()
 
-    def to_qimage(self, image):
+    def to_8bit(self, image):
         imax = image.max()
         upper = self.vmax * imax
         lower = self.vmin * imax
-        image = 255 * (image - lower) / (upper - lower)
-        image = _np.minimum(image, 255)
+        image = _np.round(255 * (image - lower) / (upper - lower))
         image = _np.maximum(image, 0)
-        image = image.astype('uint8')
+        image = _np.minimum(image, 255)
+        return image.astype('uint8')
+
+    def to_qimage(self, image):
         height, width = image.shape[-2:]
-        self._bgra = _np.zeros((height, width, 4), _np.uint8, 'C')
         if image.ndim == 2:
-            self._bgra[..., 1] = image
+            image = self.to_8bit(image)
+            self._bgra = _np.zeros((height, width, 4), dtype=_np.uint8, order='C')
+            self._bgra[..., 0] = self._cmap[:, 2][image]
+            self._bgra[..., 1] = self._cmap[:, 1][image]
+            self._bgra[..., 2] = self._cmap[:, 0][image]
         elif image.ndim == 3:
+            self._bgra = _np.zeros((height, width, 4), order='C')
+            self._bgra[..., 0] = image[0] + image[1]
             self._bgra[..., 1] = image[0]
             self._bgra[..., 2] = image[1]
             if len(image) > 2:
-                self._bgra[..., 0] = image[2]
+                self._bgra[..., 1] += image[2]
+                self._bgra[..., 2] += image[2]
+            self._bgra = self.to_8bit(self._bgra)
         self._bgra[..., 3].fill(255)
         return _QtGui.QImage(self._bgra.data, width, height, _QtGui.QImage.Format_RGB32)
 
