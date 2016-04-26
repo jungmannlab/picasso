@@ -50,6 +50,7 @@ class LocsRenderer(_QtGui.QLabel):
         self._pick_diameter = 1
         self.picked_locs = []
         self.set_colormap('viridis')
+        self._tracking = True
 
     def add_locs(self, locs, info):
         locs = _lib.ensure_finite(locs)
@@ -135,7 +136,8 @@ class LocsRenderer(_QtGui.QLabel):
             self.render()
 
     def resizeEvent(self, event):
-        self.render()
+        if self._tracking:
+            self.render()
 
     def render(self):
         n_channels = len(self.locs)
@@ -195,6 +197,12 @@ class LocsRenderer(_QtGui.QLabel):
     def set_pick_diameter(self, diameter):
         self._pick_diameter = diameter
         self.update_cursor()
+
+    def set_tracking(self, flag):
+        if flag:
+            self._tracking = True
+        else:
+            self._tracking = False
 
     def set_zoom(self, zoom):
         self._zoom = zoom

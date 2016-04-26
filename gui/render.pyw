@@ -119,10 +119,31 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.scalebar_edit = QtGui.QLineEdit('500')
         self.scalebar_edit.editingFinished.connect(self.trigger_rendering)
         scalebar_grid.addWidget(self.scalebar_edit, 1, 1)
+        # Window Size
+        window_groupbox = QtGui.QGroupBox('Dimensions')
+        window_grid = QtGui.QGridLayout(window_groupbox)
+        window_grid.addWidget(QtGui.QLabel('Width:'), 0, 0)
+        self.width_spinbox = QtGui.QSpinBox()
+        self.width_spinbox.setRange(1, 999999)
+        self.width_spinbox.setValue(768)
+        self.width_spinbox.setKeyboardTracking(False)
+        self.width_spinbox.valueChanged.connect(self.resize_view)
+        window_grid.addWidget(self.width_spinbox, 0, 1)
+        window_grid.addWidget(QtGui.QLabel('Height:'), 1, 0)
+        self.height_spinbox = QtGui.QSpinBox()
+        self.height_spinbox.setRange(1, 999999)
+        self.height_spinbox.setValue(768)
+        self.height_spinbox.setKeyboardTracking(False)
+        self.height_spinbox.valueChanged.connect(self.resize_view)
+        window_grid.addWidget(self.height_spinbox, 1, 1)
+        vbox.addWidget(window_groupbox)
 
     def trigger_rendering(self, *args):
         self.window.set_display_settings()
         self.window.view.render()
+
+    def resize_view(self, *args):
+        self.window.update_view_size()
 
 
 class Window(QtGui.QMainWindow):
@@ -131,7 +152,7 @@ class Window(QtGui.QMainWindow):
         super().__init__()
         # Init GUI
         self.setWindowTitle('Picasso: Render')
-        self.resize(768, 768)
+        # self.resize(768, 768)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, 'render.ico')
         icon = QtGui.QIcon(icon_path)
@@ -202,6 +223,7 @@ class Window(QtGui.QMainWindow):
         tools_settings_action.setShortcut('Ctrl+T')
         tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
         self.status_bar = self.statusBar()
+        self.update_view_size()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -229,6 +251,9 @@ class Window(QtGui.QMainWindow):
             if len(self.view.locs) > 1:
                 self.view.render()
             else:
+                self.view.set_tracking(False)
+                self.update_view_size()
+                self.view.set_tracking(True)
                 self.view.fit_in_view()
             if len(self.view.locs) == 1:
                 self.locs_path = path
@@ -260,6 +285,16 @@ class Window(QtGui.QMainWindow):
         path = QtGui.QFileDialog.getSaveFileName(self, 'Save picked localizations', out_path, filter='*.hdf5')
         if path:
             self.view.save_picked_locs(path)
+
+    def update_view_size(self):
+        width = self.display_settings_dialog.width_spinbox.value()
+        height = self.display_settings_dialog.height_spinbox.value()
+        self.view.setMinimumSize(width, height)
+        self.view.setMaximumSize(width, height)
+        self.view.resize(width, height)
+        self.adjustSize()
+        self.view.setMinimumSize(0, 0)
+        self.view.setMaximumSize(999999, 999999)
 
     def to_left(self):
         self.view.center[1] = self.view.center[1] - 0.8 * self.view.width() / self.view.zoom()
