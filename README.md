@@ -3,10 +3,11 @@ A collection of tools for painting super-resolution images
 
 ## Requirements
 ### Python 3.* (tested with 3.5)  
-I suggest installing it with [Anaconda](https://www.continuum.io/downloads) which comes bundled with many useful third-party packages and a package manager which removes the pain of building some packages by yourself.
+I suggest installing it with [Anaconda / Miniconda](https://www.continuum.io/downloads) which comes bundled with many useful third-party packages and a package manager which removes the pain of building some packages by yourself.
 
 ### Python packages
-Various Python packages need to be installed. Find out which by looking at either the source code or error messages when running Picasso programs.
+A few third-party Python packages are required. It is recommended to install them via `conda` (add channels if necessary):  
+`conda install h5py lmfit matplotlib numba numpy pyqt pyyaml scikit-learn tifffile tqdm`
 
 ## Installation
 The described procedure is intended for Windows. The equivalent steps for Linux or OSX are not documented.
@@ -33,7 +34,7 @@ If not, run these commands to tell Windows what to do if a `.py` or `.pyw` file 
   - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1 %*`  
 
 ## Contributions & Copyright
-Contributors: Joerg Schnitzbauer
+Contributors: Joerg Schnitzbauer  
 Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
 
 ## Credits
