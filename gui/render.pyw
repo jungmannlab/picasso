@@ -5,6 +5,7 @@
     Graphical user interface for rendering localization images
 
     :author: Joerg Schnitzbauer, 2016
+    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 
 

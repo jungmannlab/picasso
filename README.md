@@ -32,6 +32,10 @@ If not, run these commands to tell Windows what to do if a `.py` or `.pyw` file 
   - `ftype Python.File=<python installation directory>\python.exe %1 %*`
   - `ftype Python.NoConFile=<python installation directory>\pythonw.exe %1 %*`  
 
+## Contributions & Copyright
+Contributors: Joerg Schnitzbauer
+Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
+
 ## Credits
 - Localize icon based on "Mountains by MONTANA RUCOBO from the Noun Project"
 - ToRaw icon based on "Lion by Sathish Selladurai from the Noun Project"

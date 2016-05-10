@@ -5,6 +5,7 @@
     Image processing functions
 
     :author: Joerg Schnitzbauer, 2016
+    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 import matplotlib.pyplot as _plt
 import numpy as _np
