@@ -5,6 +5,7 @@
     GUI widgets for quick re-using
 
     :author: Joerg Schnitzbauer, 2015
+    :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 
 from PyQt4 import QtCore as _QtCore

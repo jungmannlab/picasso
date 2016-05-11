@@ -1,3 +1,12 @@
+"""
+    picasso/gaussmle
+    ~~~~~~~~~~~~~~~~
+
+    Maximum likelihood fits for single particle localization
+
+    :author: Joerg Schnitzbauer, 2016
+    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+"""
 import numpy as _np
 import numba as _numba
 import math as _math

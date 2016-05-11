@@ -5,6 +5,7 @@
     Data analysis of localization lists
 
     :author: Joerg Schnitzbauer, 2015
+    :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 
 import numpy as _np
@@ -192,7 +193,7 @@ def compute_dark_times(locs):
     last_frame = locs.frame + locs.len - 1
     dark = _compute_dark_times(locs, last_frame)
     locs = _lib.append_to_rec(locs, _np.int32(dark), 'dark')        # int32 for Origin compatiblity
-    return locs[locs.dark != -1]
+    return locs
 
 
 @_numba.jit(nopython=True, cache=True)
@@ -226,7 +227,7 @@ def link(locs, info, min_prob=0.05, max_dark_time=1, combine_mode='average'):
         linked_locs = link_loc_groups(locs, link_group)
     elif combine_mode == 'refit':
         pass    # TODO
-    return linked_locs[linked_locs.len != -1]
+    return linked_locs
 
 
 @_numba.jit(nopython=True)
