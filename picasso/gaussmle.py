@@ -6,7 +6,7 @@ import threading as _threading
 from concurrent import futures as _futures
 
 
-MAX_STEP = _np.array([1.0, 1.0, 100.0, 2.0, 0.1, 0.1])
+MAX_STEP = _np.array([1.0, 1.0, 100.0, 5.0, 0.1, 0.1])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
@@ -26,33 +26,28 @@ def _center_of_mass(spot, size):
 
 
 @_numba.jit(nopython=True, nogil=True, cache=True)
-def _filtered_pixel(spot, size, k, l, sigma):
-    norm = 0.5 / sigma**2
-    pixel = _sum_ = 0.0
-    for i in range(size):
-        for j in range(size):
-            exp = _np.exp(-norm * ((i - k - 2)**2 + (l - j - 2)**2))
-            pixel += exp * spot[i, j]
-            _sum_ += exp
-    return pixel / _sum_
-
-
-@_numba.jit(nopython=True, nogil=True, cache=True)
-def _filtered_min_max(spot, size, sigma):
-    _min_ = _max_ = _filtered_pixel(spot, size, 0, 0, sigma)
+def mean_filter(spot, size):
+    filtered_spot = _np.zeros_like(spot)
     for k in range(size):
         for l in range(size):
-            pixel = _filtered_pixel(spot, size, k, l, sigma)
-            _max_ = _np.maximum(_max_, pixel)
-            _min_ = _np.minimum(_min_, pixel)
-    return _min_, _max_
+            min_m = _np.maximum(0, k-1)
+            max_m = _np.minimum(size, k+2)
+            min_n = _np.maximum(0, l-1)
+            max_n = _np.minimum(size, l+2)
+            N = (max_m - min_m) * (max_n - min_n)
+            Nsum = 0.0
+            for m in range(min_m, max_m):
+                for n in range(min_n, max_n):
+                    Nsum += spot[m, n]
+            filtered_spot[k, l] = Nsum / N
+    return filtered_spot
 
 
 @_numba.jit(nopython=True, nogil=True, cache=True)
 def centroid(spot, size, sigma):
     y, x = _center_of_mass(spot, size)
-    bg, spot_max = _filtered_min_max(spot, size, sigma)
-    photons = _np.maximum(0.0, (spot_max - bg) * 2 * _np.pi * sigma * sigma)
+    bg = _np.min(mean_filter(spot, size))
+    photons = _np.maximum(1.0, _np.sum(spot) - size * size * bg)
     return x, y, photons, bg
 
 
@@ -197,7 +192,9 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
     old_x = theta[0]
     old_y = theta[1]
 
-    for kk in range(max_it):
+    kk = 0
+    while kk < max_it:      # we do this instead of a for loop for the special case of max_it=0
+        kk += 1
 
         numerator[:] = 0.0
         denominator[:] = 0.0
@@ -239,7 +236,7 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
 
         # Other constraints
         theta[2] = _np.maximum(theta[2], 1.0)
-        theta[3] = _np.maximum(theta[3], 0.1)
+        theta[3] = _np.maximum(theta[3], 0.0)
         theta[4] = _np.maximum(theta[4], 0.05 * initial_sigma)
         theta[5] = _np.maximum(theta[5], 0.05 * initial_sigma)
 
@@ -251,7 +248,7 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
             old_y = theta[1]
 
     thetas[index] = theta
-    iterations[index] = kk + 1
+    iterations[index] = kk
 
     # Calculating the CRLB and LogLikelihood
     Div = 0.0
