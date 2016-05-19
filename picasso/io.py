@@ -18,7 +18,6 @@ import json as _json
 import os as _os
 import threading as _threading
 from . import lib as _lib
-print('picasso.dev')
 
 
 def _user_settings_filename():
