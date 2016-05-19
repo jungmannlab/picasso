@@ -257,6 +257,9 @@ if __name__ == '__main__':
     toraw_parser = subparsers.add_parser('toraw', help='convert image sequences to binary raw files and accompanied YAML information files')
     toraw_parser.add_argument('files', help='one or multiple files specified by a unix style pathname pattern')
 
+    # render parser
+    render_parser = subparsers.add_parser('render')
+
     # link parser
     link_parser = subparsers.add_parser('link', help='link localizations in consecutive frames')
     link_parser.add_argument('files', help='one or multiple hdf5 localization files specified by a unix style path pattern')
@@ -321,6 +324,9 @@ if __name__ == '__main__':
         if args.command == 'toraw':
             from . import io
             io.to_raw(args.files, verbose=True)
+        elif args.command == 'render':
+            from .gui import render
+            render.main()
         elif args.command == 'link':
             _link(args.files, args.probability, args.tolerance)
         elif args.command == 'undrift':
