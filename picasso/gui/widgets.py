@@ -14,9 +14,9 @@ import numpy as _np
 import time as _time
 from numpy.lib.recfunctions import stack_arrays as _stack_arrays
 import matplotlib.pyplot as _plt
-from . import render as _render
-from . import lib as _lib
-from . import io as _io
+from .. import render as _render
+from .. import lib as _lib
+from .. import io as _io
 
 
 class LocsRenderer(_QtGui.QLabel):

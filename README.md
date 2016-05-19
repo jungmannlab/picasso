@@ -11,17 +11,20 @@ A few third-party Python packages are required. It is recommended to install the
 
 ## Installation
 The described procedure is intended for Windows. The equivalent steps for Linux or OSX are not documented.
-Replace any <...> notations according to your situation.
+Replace any `{{...}}` notation according to your situation.
 1. Open the console, `cd` to the directory where you want to install and run  
 `git clone https://gitlab.com/jungmannlab/picasso.git`  
 Alternatively, [download](https://gitlab.com/jungmannlab/picasso) the zip file and unzip it.  
 For both options you need approved access on Gitlab.
-3. Add `<picasso directory>\scripts` to your PATH environment variable.  
+3. Add `{{picasso directory}}\scripts` to your PATH environment variable.  
 This will make the scripts in this folder accessible in the
 console, independent of the current directory.
 4. Run this command to register the picasso package in the Python installation.
-    - `ECHO <picasso directory> >> <python installation directory>\Lib\site-packages\picasso.pth`
-5. Make shortcuts of `gui\*.pyw` files. Open shortcut properties. Prepend shortcut command with `pythonw `. Set the icon to the respective file in the `gui` folder. Move the shortcut to the picasso top level directory. This shortcut can now be double-clicked, pinned to task bar or copied to Desktop.
+    - `ECHO {{picasso directory}} >> {{python installation directory}}\Lib\site-packages\picasso.pth`
+5. Run the PowerShell script "create_shortcuts.ps1" in the top-level directory.  
+This should be doable by right-clicking on the script and choosing "Run with PowerShell". Alternatively, run the command `powershell ./create_shortcuts.ps1` in the command line.  
+Use the generated shortcuts in the same dirctory to start GUI components.
+You can drag these shortcuts to the Desktop, Start Menu or Task Bar.
 
 ### Optional steps for your Python environment
 * Add `.PY;.PYW` to your `PATHEXT` environment variable.  

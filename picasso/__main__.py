@@ -253,12 +253,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser('picasso')
     subparsers = parser.add_subparsers(dest='command')
 
-    # toraw parser
-    toraw_parser = subparsers.add_parser('toraw', help='convert image sequences to binary raw files and accompanied YAML information files')
-    toraw_parser.add_argument('files', help='one or multiple files specified by a unix style pathname pattern')
-
-    # render parser
-    render_parser = subparsers.add_parser('render')
+    for command in ['toraw', 'localize', 'filter', 'render']:
+        subparsers.add_parser(command)
 
     # link parser
     link_parser = subparsers.add_parser('link', help='link localizations in consecutive frames')
@@ -322,8 +318,14 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.command:
         if args.command == 'toraw':
-            from . import io
-            io.to_raw(args.files, verbose=True)
+            from .gui import toraw
+            toraw.main()
+        elif args.command == 'localize':
+            from .gui import localize
+            localize.main()
+        elif args.command == 'filter':
+            from .gui import filter
+            filter.main()
         elif args.command == 'render':
             from .gui import render
             render.main()
