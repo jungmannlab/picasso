@@ -13,6 +13,7 @@ import scipy.signal as _signal
 from multiprocessing import cpu_count as _cpu_count
 
 
+_DRAW_MAX_SIGMA = 3
 _N_CPUS = _cpu_count()
 
 
@@ -73,18 +74,18 @@ def _fill(image, x, y):
 def _fill_gaussians(X, Y, x, y, sx, sy):
     image = _np.zeros((Y, X), dtype=_np.float32)
     for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
-        sy_4 = 4 * sy_
-        i_min = _np.int32(y_ - sy_4)
+        max_y = _DRAW_MAX_SIGMA * sy_
+        i_min = _np.int32(y_ - max_y)
         if i_min < 0:
             i_min = 0
-        i_max = _np.int32(y_ + sy_4 + 1)
+        i_max = _np.int32(y_ + max_y + 1)
         if i_max > Y:
             i_max = Y
-        sx_4 = 4 * sx_
-        j_min = _np.int32(x_ - sx_4)
+        max_x = _DRAW_MAX_SIGMA * sx_
+        j_min = _np.int32(x_ - max_x)
         if j_min < 0:
             j_min = 0
-        j_max = _np.int32(x_ + sx_4) + 1
+        j_max = _np.int32(x_ + max_x) + 1
         if j_max > X:
             j_max = X
         for i in range(i_min, i_max):
