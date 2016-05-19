@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import matplotlib.pyplot as _plt
 from scipy.optimize import minimize as _minimize
+import itertools as _itertools
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
@@ -564,3 +565,25 @@ Shear (x,y): {}, {}
 Translation (x,y): {}, {}'''.format(Ox, Oy, W, H, 360*theta/(2*_np.pi), A, B, X, Y))
         locs.x, locs.y = apply_transforms(locs, result.x)
     return locs
+
+
+def groupprops(locs):
+    locs = _lib.ensure_finite(locs)
+    try:
+        locs = locs[locs.dark != -1]
+    except AttributeError:
+        pass
+    group_ids = _np.unique(locs.group)
+    n = len(group_ids)
+    n_cols = len(locs.dtype)
+    names = ['group', 'events'] + list(_itertools.chain(*[(_ + ' (mean)', _ + ' (std)') for _ in locs.dtype.names]))
+    formats = ['i4', 'i4'] + 2 * n_cols * ['f4']
+    groups = _np.recarray(n, formats=formats, names=names)
+    for i, group_id in enumerate(group_ids):
+        group_locs = locs[locs.group == group_id]
+        groups['group'][i] = group_id
+        groups['events'][i] = len(group_locs)
+        for name in locs.dtype.names:
+            groups[name + ' (mean)'][i] = _np.mean(group_locs[name])
+            groups[name + ' (std)'][i] = _np.std(group_locs[name])
+    return groups

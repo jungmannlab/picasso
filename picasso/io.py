@@ -434,6 +434,15 @@ def to_raw(path, verbose=True):
             print('No files matching {}'.format(path))
 
 
+def save_datasets(path, info, **kwargs):
+    with _h5py.File(path, 'w') as hdf:
+        for key, val in kwargs.items():
+            hdf.create_dataset(key, data=val)
+    base, ext = _ospath.splitext(path)
+    info_path = base + '.yaml'
+    save_info(info_path, info)
+
+
 def save_locs(path, locs, info):
     with _h5py.File(path, 'w') as locs_file:
         locs_file.create_dataset('locs', data=locs)
