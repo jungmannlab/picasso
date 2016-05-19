@@ -7,8 +7,6 @@
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
 """
-
-import sys as _sys
 import numpy as _np
 import numba as _numba
 import multiprocessing as _multiprocessing
@@ -18,6 +16,7 @@ import yaml as _yaml
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import threading as _threading
 from itertools import chain as _chain
+from . import gaussmle as _gaussmle
 
 
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
@@ -28,11 +27,6 @@ LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
 
 _this_file = _ospath.abspath(__file__)
 _this_directory = _ospath.dirname(_this_file)
-_parent_directory = _ospath.dirname(_this_directory)
-_sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
-from picasso import gaussmle as _gaussmle
-
-
 with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
     CONFIG = _yaml.load(config_file)
 

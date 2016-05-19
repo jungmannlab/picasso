@@ -11,20 +11,12 @@
 from PyQt4 import QtCore as _QtCore
 from PyQt4 import QtGui as _QtGui
 import numpy as _np
-import os.path as _ospath
-import sys as _sys
 import time as _time
 from numpy.lib.recfunctions import stack_arrays as _stack_arrays
 import matplotlib.pyplot as _plt
-
-
-_this_file = _ospath.abspath(__file__)
-_this_directory = _ospath.dirname(_this_file)
-_parent_directory = _ospath.dirname(_this_directory)
-_sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
-from picasso import render as _render
-from picasso import lib as _lib
-from picasso import io as _io
+from . import render as _render
+from . import lib as _lib
+from . import io as _io
 
 
 class LocsRenderer(_QtGui.QLabel):

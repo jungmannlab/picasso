@@ -11,24 +11,16 @@
 import numpy as _np
 import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
-import os.path as _ospath
-import sys as _sys
 from tqdm import tqdm as _tqdm
 from scipy import interpolate as _interpolate
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import matplotlib.pyplot as _plt
 from scipy.optimize import minimize as _minimize
-
-
-_this_file = _ospath.abspath(__file__)
-_this_directory = _ospath.dirname(_this_file)
-_parent_directory = _ospath.dirname(_this_directory)
-_sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
-from picasso import lib as _lib
-from picasso import render as _render
-from picasso import imageprocess as _imageprocess
-from picasso.localize import LOCS_DTYPE as _LOCS_DTYPE
+from . import lib as _lib
+from . import render as _render
+from . import imageprocess as _imageprocess
+from .localize import LOCS_DTYPE as _LOCS_DTYPE
 
 
 def _get_index_blocks(locs, info, size):

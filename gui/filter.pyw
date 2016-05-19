@@ -18,6 +18,12 @@ from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
 import numpy as np
 import os.path
+
+
+_this_file = os.path.abspath(__file__)
+_this_directory = os.path.dirname(_this_file)
+_parent_directory = os.path.dirname(_this_directory)
+sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
 from picasso import io, lib
 
 

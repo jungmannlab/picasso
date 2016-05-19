@@ -7,8 +7,6 @@
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
 """
-
-
 import os.path as _ospath
 import numpy as _np
 import yaml as _yaml
@@ -20,6 +18,7 @@ import json as _json
 import os as _os
 import threading as _threading
 from . import lib as _lib
+print('picasso.dev')
 
 
 def _user_settings_filename():

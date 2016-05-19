@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """
-    picasso.__main__.py
+    ..__main__.py
     ~~~~~~~~~~~~~~~~
 
     Picasso command line interface
@@ -8,22 +8,14 @@
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
 """
-
-
-import sys
 import os.path
-
-_this_file = os.path.abspath(__file__)
-_this_directory = os.path.dirname(_this_file)
-_parent_directory = os.path.dirname(_this_directory)
-sys.path.insert(0, _parent_directory)    # We want to use the local picasso instead the system-wide
 
 
 def _link(files, min_prob, tolerance):
     import glob
     paths = glob.glob(files)
     if paths:
-        from picasso import io, postprocess
+        from . import io, postprocess
         for path in paths:
             locs, info = io.load_locs(path)
             linked_locs = postprocess.link(locs, info, min_prob, tolerance)
@@ -39,7 +31,7 @@ def _undrift(files, mode, segmentation, display, fromfile):
     import glob
     paths = glob.glob(files)
     if paths:
-        from picasso import io
+        from . import io
         from numpy import savetxt
         if fromfile is not None:
             from numpy import genfromtxt
@@ -72,7 +64,7 @@ def _undrift(files, mode, segmentation, display, fromfile):
                     plt.ylabel('y')
                     plt.show()
         else:
-            from picasso import postprocess
+            from . import postprocess
             for path in paths:
                 print('Undrifting file {}'.format(path))
                 locs, info = io.load_locs(path)
@@ -96,7 +88,7 @@ def _density(files, radius):
     import glob
     paths = glob.glob(files)
     if paths:
-        from picasso import io, postprocess
+        from . import io, postprocess
         for path in paths:
             locs, info = io.load_locs(path)
             locs = postprocess.compute_local_density(locs, info, radius)
@@ -111,7 +103,7 @@ def _dbscan(files, radius, min_density):
     import glob
     paths = glob.glob(files)
     if paths:
-        from picasso import io, postprocess
+        from . import io, postprocess
         from h5py import File
         for path in paths:
             print('Loading {} ...'.format(path))
@@ -131,7 +123,7 @@ def _dark(files):
     import glob
     paths = glob.glob(files)
     if paths:
-        from picasso import io, postprocess
+        from . import io, postprocess
         for path in paths:
             locs, info = io.load_locs(path)
             locs = postprocess.compute_dark_times(locs)
@@ -145,7 +137,7 @@ def _std(files):
     import glob
     paths = glob.glob(files)
     if paths:
-        from picasso.io import load_raw
+        from .io import load_raw
         from numpy import std
         from os.path import splitext
         from tifffile import imsave
@@ -157,8 +149,8 @@ def _std(files):
 
 
 def _align(target, file, affine, display):
-    from picasso.io import load_locs, save_locs
-    from picasso.postprocess import align
+    from .io import load_locs, save_locs
+    from .postprocess import align
     from os.path import splitext
     target_locs, target_info = load_locs(target)
     locs, info = load_locs(file)
@@ -171,7 +163,7 @@ def _align(target, file, affine, display):
 
 
 def _join(files):
-    from picasso.io import load_locs, save_locs
+    from .io import load_locs, save_locs
     from os.path import splitext
     from numpy import append
     locs, info = load_locs(files[0])
@@ -191,8 +183,8 @@ def _kinetics(files, ignore):
     import glob
     paths = glob.glob(files)
     if paths:
-        from picasso.io import load_locs
-        from picasso.lib import calculate_optimal_bins
+        from .io import load_locs
+        from .lib import calculate_optimal_bins
         from numpy import histogram
         from lmfit.models import ExponentialModel
         from lmfit import Parameters
@@ -239,8 +231,8 @@ def _pair_correlation(files, bin_size, r_max):
     from glob import glob
     paths = glob(files)
     if paths:
-        from picasso.io import load_locs
-        from picasso.postprocess import pair_correlation
+        from .io import load_locs
+        from .postprocess import pair_correlation
         from matplotlib.pyplot import plot, style, show, xlabel, ylabel
         style.use('ggplot')
         for path in paths:
@@ -327,7 +319,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     if args.command:
         if args.command == 'toraw':
-            from picasso import io
+            from . import io
             io.to_raw(args.files, verbose=True)
         elif args.command == 'link':
             _link(args.files, args.probability, args.tolerance)
