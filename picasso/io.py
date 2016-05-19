@@ -19,6 +19,12 @@ import struct as _struct
 import json as _json
 import os as _os
 import threading as _threading
+from . import lib as _lib
+
+
+def _user_settings_filename():
+    home = _ospath.expanduser('~')
+    return _ospath.join(home, '.picasso', 'settings.yaml')
 
 
 def to_little_endian(movie, info):
@@ -63,9 +69,37 @@ def load_info(path):
     return info
 
 
+def load_user_settings():
+    settings_filename = _user_settings_filename()
+    try:
+        settings_file = open(settings_filename, 'r')
+    except FileNotFoundError:
+        return _lib.AutoDict()
+    settings = _yaml.load(settings_file)
+    settings_file.close()
+    return _lib.AutoDict(settings)
+
+
 def save_info(path, info):
     with open(path, 'w') as file:
         _yaml.dump_all(info, file, default_flow_style=False)
+
+
+def _to_dict_walk(node):
+    ''' Converts mapping objects (subclassed from dict) to actual dict objects, including nested ones '''
+    node = dict(node)
+    for key, val in node.items():
+        if isinstance(val, dict):
+            node[key] = _to_dict_walk(val)
+    return node
+
+
+def save_user_settings(settings):
+    settings = _to_dict_walk(settings)
+    settings_filename = _user_settings_filename()
+    _os.makedirs(_ospath.dirname(settings_filename), exist_ok=True)
+    with open(settings_filename, 'w') as settings_file:
+        _yaml.dump(dict(settings), settings_file, default_flow_style=False)
 
 
 class TiffMap:

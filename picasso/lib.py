@@ -12,6 +12,18 @@
 import numpy as _np
 from numpy.lib.recfunctions import append_fields as _append_fields
 from numpy.lib.recfunctions import drop_fields as _drop_fields
+import collections as _collections
+
+
+class AutoDict(_collections.defaultdict):
+    '''
+    A defaultdict whose auto-generated values are defaultdicts itself.
+    This allows for auto-generating nested values, e.g.
+    a = AutoDict()
+    a['foo']['bar']['carrot'] = 42
+    '''
+    def __init__(self, *args, **kwargs):
+        super().__init__(AutoDict, *args, **kwargs)
 
 
 def calculate_optimal_bins(data, max_n_bins=None):

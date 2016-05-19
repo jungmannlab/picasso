@@ -203,6 +203,21 @@ class Window(QtGui.QMainWindow):
         tools_settings_action.setShortcut('Ctrl+T')
         tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
         self.status_bar = self.statusBar()
+        settings = io.load_user_settings()
+        try:
+            colormap = settings['Render']['Colormap']
+        except KeyError:
+            pass
+        else:
+            for index in range(self.display_settings_dialog.colormap.count()):
+                if self.display_settings_dialog.colormap.itemText(index) == colormap:
+                    self.display_settings_dialog.colormap.setCurrentIndex(index)
+                    break
+
+    def closeEvent(self, event):
+        settings = io.load_user_settings()
+        settings['Render']['Colormap'] = self.display_settings_dialog.colormap.currentText()
+        io.save_user_settings(settings)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
