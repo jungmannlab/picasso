@@ -24,6 +24,10 @@ from .localize import LOCS_DTYPE as _LOCS_DTYPE
 
 
 def _get_index_blocks(locs, info, size):
+    locs = locs[locs.x > 0]
+    locs = locs[locs.y > 0]
+    locs = locs[locs.x < info[0]['Width']]
+    locs = locs[locs.y < info[0]['Height']]
     # Sort locs by indices
     x_index = _np.uint32(locs.x / size)
     y_index = _np.uint32(locs.y / size)
@@ -155,7 +159,9 @@ def _local_density(locs, radius, x_index, y_index, block_starts, block_ends, sta
         di = 0
         for k in range(ki-1, ki+2):
             for l in range(li-1, li+2):
-                for j in range(block_starts[k, l], block_ends[k, l]):
+                j_min = block_starts[k, l]
+                j_max = block_ends[k, l]
+                for j in range(j_min, j_max):
                     dx2 = (xi - x[j])**2
                     if dx2 < r2:
                         dy2 = (yi - y[j])**2
@@ -257,7 +263,7 @@ def _get_next_loc_index_in_link_group(current_index, link_group, N, frame, x, y,
         if frame[min_index] >= min_frame:
             break
     max_frame = current_frame + max_dark_time + 1
-    for max_index in range(min_index + 1, N):
+    for max_index in range(min_index, N):
         if frame[max_index] > max_frame:
             break
     current_lpx = lpx[current_index]
