@@ -86,7 +86,8 @@ def _distance_histogram(locs, bin_size, r_max, x_index, y_index, block_starts, b
                                         d = _np.sqrt(dx2 + dy2)
                                         if d < r_max:
                                             bin = _np.uint32(d / bin_size)
-                                            dh[bin] += 1
+                                            if bin < dh_len:
+                                                dh[bin] += 1
     return dh
 
 
@@ -582,14 +583,14 @@ def groupprops(locs):
     group_ids = _np.unique(locs.group)
     n = len(group_ids)
     n_cols = len(locs.dtype)
-    names = ['group', 'events'] + list(_itertools.chain(*[(_ + ' (mean)', _ + ' (std)') for _ in locs.dtype.names]))
+    names = ['group', 'n_events'] + list(_itertools.chain(*[(_ + '_mean', _ + '_std') for _ in locs.dtype.names]))
     formats = ['i4', 'i4'] + 2 * n_cols * ['f4']
     groups = _np.recarray(n, formats=formats, names=names)
     for i, group_id in enumerate(group_ids):
         group_locs = locs[locs.group == group_id]
         groups['group'][i] = group_id
-        groups['events'][i] = len(group_locs)
+        groups['n_events'][i] = len(group_locs)
         for name in locs.dtype.names:
-            groups[name + ' (mean)'][i] = _np.mean(group_locs[name])
-            groups[name + ' (std)'][i] = _np.std(group_locs[name])
+            groups[name + '_mean'][i] = _np.mean(group_locs[name])
+            groups[name + '_std'][i] = _np.std(group_locs[name])
     return groups

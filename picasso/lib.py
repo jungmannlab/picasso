@@ -13,6 +13,9 @@ import numpy as _np
 from numpy.lib.recfunctions import append_fields as _append_fields
 from numpy.lib.recfunctions import drop_fields as _drop_fields
 import collections as _collections
+import glob as _glob
+import os.path as _ospath
+from picasso import io as _io
 
 
 class AutoDict(_collections.defaultdict):
@@ -49,3 +52,22 @@ def ensure_finite(rec_array):
 
 def remove_from_rec(rec_array, name):
     return _drop_fields(rec_array, name, usemask=False, asrecarray=True)
+
+
+def locs_glob_map(func, pattern, args=[], kwargs={}, extension=''):
+    '''
+    Maps a function to localization files, specified by a unix style path pattern.
+    The function must take two arguments: locs and info. It may take additional args and kwargs which
+    are supplied to this map function.
+    A new locs file will be saved if an extension is provided. In that case the mapped function must return
+    new locs and a new info dict.
+    '''
+    paths = _glob.glob(pattern)
+    for path in paths:
+        locs, info = _io.load_locs(path)
+        result = func(locs, info, *args, **kwargs)
+        if extension:
+            base, ext = _ospath.splitext(path)
+            out_path = base + '_' + extension + '.hdf5'
+            locs, info = result
+            _io.save_locs(out_path, locs, info)
