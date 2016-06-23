@@ -56,3 +56,4 @@ Cameras:
         16-bit (low noise & high well capacity): 0.45
   Simulation:
     Sensor: Simulation
+Test: 100
