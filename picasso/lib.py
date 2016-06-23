@@ -65,7 +65,7 @@ def locs_glob_map(func, pattern, args=[], kwargs={}, extension=''):
     paths = _glob.glob(pattern)
     for path in paths:
         locs, info = _io.load_locs(path)
-        result = func(locs, info, *args, **kwargs)
+        result = func(locs, info, path, *args, **kwargs)
         if extension:
             base, ext = _ospath.splitext(path)
             out_path = base + '_' + extension + '.hdf5'

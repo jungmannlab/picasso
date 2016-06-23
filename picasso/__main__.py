@@ -275,6 +275,39 @@ def _localize(args):
         save_locs(out_path, locs, info)
 
 
+def _render(args):
+    from .lib import locs_glob_map
+    from .render import render
+    from os.path import splitext
+    from matplotlib.pyplot import imsave
+    from os import startfile
+    from .io import load_user_settings, save_user_settings
+
+    def render_many(locs, info, path, oversampling, blur_method, min_blur_width, vmin, vmax, cmap, silent):
+        if blur_method == 'none':
+            blur_method = None
+        N, image = render(locs, info, oversampling, blur_method=blur_method, min_blur_width=min_blur_width)
+        base, ext = splitext(path)
+        out_path = base + '.png'
+        im_max = image.max() / 100
+        imsave(out_path, image, vmin=vmin * im_max, vmax=vmax * im_max, cmap=cmap)
+        if not silent:
+            startfile(out_path)
+
+    settings = load_user_settings()
+    cmap = args.cmap
+    if cmap is None:
+        try:
+            cmap = settings['Render']['Colormap']
+        except KeyError:
+            cmap = 'viridis'
+    settings['Render']['Colormap'] = cmap
+    save_user_settings(settings)
+
+    locs_glob_map(render_many, args.files, args=(args.oversampling, args.blur_method, args.min_blur_width, args.vmin, args.vmax,
+                                                 cmap, args.silent))
+
+
 if __name__ == '__main__':
     import argparse
 
@@ -350,6 +383,17 @@ if __name__ == '__main__':
     localize_parser.add_argument('-c', '--convergence', type=float, default=0.001, help='convergence criterion')
     localize_parser.add_argument('-i', '--max-iterations', type=int, default=100, help='maximum fit iterations')
 
+    # render
+    render_parser = subparsers.add_parser('render', help='render localization based images')
+    render_parser.add_argument('files', nargs='?', help='one or multiple localization files specified by a unix style path pattern')
+    render_parser.add_argument('-o', '--oversampling', type=float, default=1.0, help='the number of super-resolution pixels per camera pixels')
+    render_parser.add_argument('-b', '--blur-method', choices=['none', 'convolve', 'gaussian'], default='convolve')
+    render_parser.add_argument('-w', '--min-blur-width', type=float, default=0.0, help='minimum blur width if blur is applied')
+    render_parser.add_argument('--vmin', type=float, default=0.0, help='minimum colormap level in range 0-100')
+    render_parser.add_argument('--vmax', type=float, default=20.0, help='maximum colormap level in range 0-100')
+    render_parser.add_argument('-c', '--cmap', choices=['viridis', 'inferno', 'plasma', 'magma', 'hot', 'gray'], help='the colormap to be applied')
+    render_parser.add_argument('-s', '--silent', action='store_true', help='do not open the image file')
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -366,8 +410,11 @@ if __name__ == '__main__':
             from .gui import filter
             filter.main()
         elif args.command == 'render':
-            from .gui import render
-            render.main()
+            if args.files:
+                _render(args)
+            else:
+                from .gui import render
+                render.main()
         elif args.command == 'link':
             _link(args.files, args.probability, args.tolerance)
         elif args.command == 'undrift':
