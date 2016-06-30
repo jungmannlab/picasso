@@ -22,13 +22,18 @@ from . import gaussmle as _gaussmle
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
 LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
               ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
-              ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('likelihood', 'f4'), ('iterations', 'i4')]
+              ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
+              ('likelihood', 'f4'), ('iterations', 'i4')]
 
 
 _this_file = _ospath.abspath(__file__)
 _this_directory = _ospath.dirname(_this_file)
-with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
-    CONFIG = _yaml.load(config_file)
+try:
+    with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
+        CONFIG = _yaml.load(config_file)
+except FileNotFoundError:#
+    print('No configuration file found. Generate one and restart the program.')
+    quit()
 
 
 @_numba.jit(nopython=True, nogil=True)
