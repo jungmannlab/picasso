@@ -1,4 +1,4 @@
-from distutils.core import setup
+from setuptools import setup
 
 setup(
     name = 'picassso',
@@ -11,5 +11,6 @@ setup(
                    "Programming Language :: Python :: 3.5",
                    "License :: OSI Approved :: MIT License",
                    "Operating System :: OS Independent"],
-    entry_points = {'console_scripts': ['picasso = picasso.main']}
+    entry_points = {'console_scripts': ['picasso = picasso.__main__:main']},
+    package_data = {'picasso': ['gui/icons/*.ico', 'config_template.yaml']}
 )
