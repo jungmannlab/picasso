@@ -1,7 +1,7 @@
 from setuptools import setup
 
 setup(
-    name = 'picassso',
+    name = 'picasso',
     version = '0.1',
     author = 'Joerg Schnitzbauer, Maximilian Strauss',
     author_email = 'joschnitzbauer@gmail.com, mstrauss@biochem.mpg.de',
