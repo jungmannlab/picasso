@@ -6,9 +6,10 @@ A collection of tools for painting super-resolution images
 I suggest installing it with [Anaconda / Miniconda](https://www.continuum.io/downloads) which comes bundled with many useful third-party packages and a package manager which removes the pain of building some packages by yourself.
 
 ### Python packages
-A few third-party Python packages are required. It is recommended to install them via `conda`.
-You might need additional conda channel, e.g. ``
-`conda install h5py lmfit matplotlib numba numpy pyqt pyyaml scikit-learn tifffile tqdm`
+A few third-party Python packages are required. It is recommended to install them via `conda install <package>`.  
+You might need to obtain packages from third-party conda channels. Visit [anaconda.org](anaconda.org) to search for them.  
+The following packages are required:  
+`h5py matplotlib numba numpy pyqt pyyaml scikit-learn lmfit tifffile tqdm`
 
 ## Installation
 

@@ -1,10 +1,10 @@
 from setuptools import setup
 
 setup(
-    name = 'picassso',
+    name = 'picasso',
     version = '0.1',
-    author = 'Joerg Schnitzbauer, Maximilian Strauss',
-    author_email = 'joschnitzbauer@gmail.com, mstrauss@biochem.mpg.de',
+    author = 'Joerg Schnitzbauer',
+    author_email = 'joschnitzbauer@gmail.com',
     url = 'https://gitlab.com/jungmannlab/picasso',
     packages = ['picasso', 'picasso.gui'],
     classifiers = ["Programming Language :: Python",
