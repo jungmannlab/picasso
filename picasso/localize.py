@@ -31,7 +31,7 @@ _this_directory = _ospath.dirname(_this_file)
 try:
     with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
         CONFIG = _yaml.load(config_file)
-except FileNotFoundError:#
+except FileNotFoundError:
     print('No configuration file found. Generate one and restart the program.')
     quit()
 
@@ -214,9 +214,9 @@ def fit(movie, camera_info, identifications, box, eps=0.001):
     return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
 
 
-def fit_async(movie, camera_info, identifications, box, eps=0.001, max_it=100):
+def fit_async(movie, camera_info, identifications, box, eps=0.001, max_it=100, method='sigma'):
     spots = _get_spots(movie, identifications, box, camera_info)
-    return _gaussmle.gaussmle_sigmaxy_async(spots, eps, max_it)
+    return _gaussmle.gaussmle_async(spots, eps, max_it, method=method)
 
 
 def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
