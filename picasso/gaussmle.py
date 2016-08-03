@@ -166,18 +166,6 @@ def gaussmle_sigmaxy_async(spots, eps, max_it):
     return current, thetas, CRLBs, likelihoods, iterations
 
 
-def swallow_exception(exc=Exception):
-    def decorator(func):
-        def wrapper(*args):
-            try:
-                return func(*args)
-            except exc:
-                pass
-        return wrapper
-    return decorator
-
-
-@swallow_exception(ValueError)  # This happens when the Fisher information matrix is not invertible, in which case CRLB will not be written to global array
 @_numba.jit(nopython=True, nogil=True, cache=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     initial_sigma = 1.0
@@ -294,7 +282,7 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
     likelihoods[index] = Div
 
     # Matrix inverse (CRLB=F^-1)
-    Minv = _np.linalg.inv(M)        # Reminder for CUDA implementation: Calculate CRLB and LL on CPU after iterations on CUDA (inv will be a mess)
+    Minv = _np.linalg.pinv(M)
     CRLB = _np.zeros(n_params, dtype=_np.float32)
     for kk in range(n_params):
         CRLB[kk] = Minv[kk, kk]
