@@ -283,7 +283,7 @@ class ParametersDialog(QtGui.QDialog):
         fit_groupbox = QtGui.QGroupBox('Fit Settings')
         vbox.addWidget(fit_groupbox)
         fit_grid = QtGui.QGridLayout(fit_groupbox)
-        self.symmetric_checkbox = QtGui.QCheckBox('tied width & height')
+        self.symmetric_checkbox = QtGui.QCheckBox('Symmetric PSF')
         self.symmetric_checkbox.setChecked(True)
         fit_grid.addWidget(self.symmetric_checkbox, 0, 1)
         fit_grid.addWidget(QtGui.QLabel('Convergence Criterion:'), 1, 0)
