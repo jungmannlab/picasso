@@ -196,7 +196,7 @@ def compute_dark_times(locs):
     return locs
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True, cache=False)
 def _compute_dark_times(locs, last_frame):
     N = len(locs)
     max_frame = locs.frame.max()
@@ -236,8 +236,6 @@ def get_link_groups(locs, d_max, max_dark_time, group):
     frame = locs.frame
     x = locs.x
     y = locs.y
-    lpx = locs.lpx
-    lpy = locs.lpy
     N = len(x)
     link_group = -_np.ones(N, dtype=_np.int32)
     current_link_group = -1
@@ -362,7 +360,7 @@ def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
     return drift, locs
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True, cache=False)
 def get_frame_shift(locs, i, j, min_prob, k):
     N = len(locs)
     frame = locs.frame

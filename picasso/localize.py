@@ -74,7 +74,7 @@ def net_gradient(frame, y, x, box, uy, ux):
     return ng
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def identify_in_image(image, minimum_ng, box):
     y, x = local_maxima(image, box)
     box_half = int(box / 2)
@@ -155,7 +155,7 @@ def identify(movie, minimum_ng, box, threaded=True):
     return _np.hstack(identifications).view(_np.recarray)
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True, cache=False)
 def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     n_spots = len(ids_x)
     r = int(box/2)
@@ -165,7 +165,7 @@ def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     return spots
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True, cache=False)
 def _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots):
     for j in range(start, N):
         if ids_frame[j] > frame_number:

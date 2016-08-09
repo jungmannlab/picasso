@@ -19,7 +19,7 @@ MAX_STEP = _np.array([1.0, 1.0, 100.0, 5.0, 0.1, 0.1])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _center_of_mass(spot, size):
     x = 0.0
     y = 0.0
@@ -34,7 +34,7 @@ def _center_of_mass(spot, size):
     return y, x
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def mean_filter(spot, size):
     filtered_spot = _np.zeros_like(spot)
     for k in range(size):
@@ -52,7 +52,7 @@ def mean_filter(spot, size):
     return filtered_spot
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def centroid(spot, size):
     y, x = _center_of_mass(spot, size)
     bg = _np.min(mean_filter(spot, size))
@@ -89,14 +89,14 @@ def _erf(x):
     return _np.sign(x)
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _gaussian_integral(x, mu, sigma):
     sq_norm = 0.70710678118654757 / sigma       # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
     return 0.5 * (_math.erf((d + 0.5) * sq_norm) - _math.erf((d - 0.5) * sq_norm))
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
     d = x - mu
     a = _np.exp(-0.5 * ((d + 0.5) / sigma)**2)
@@ -106,7 +106,7 @@ def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFc):
     ax = _np.exp(-0.5 * ((x + 0.5 - mu) / sigma)**2)
     bx = _np.exp(-0.5 * ((x - 0.5 - mu) / sigma)**2)
@@ -324,7 +324,7 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     CRLBs[index, 5] = CRLB[4]
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     initial_sigma = 1.0
     n_params = 6
