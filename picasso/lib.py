@@ -46,8 +46,13 @@ def append_to_rec(rec_array, data, name):
     return rec_array
 
 
-def ensure_finite(rec_array):
-    return rec_array[_np.all(_np.array([_np.isfinite(rec_array[_]) for _ in rec_array.dtype.names]), axis=0)]
+def ensure_finite(locs):
+    # no inf or nan:
+    locs = locs[_np.all(_np.array([_np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
+    # other sanity checks:
+    locs = locs[locs.lpx > 0]
+    locs = locs[locs.lpy > 0]
+    return locs
 
 
 def remove_from_rec(rec_array, name):
