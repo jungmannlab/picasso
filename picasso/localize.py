@@ -31,7 +31,7 @@ _this_directory = _ospath.dirname(_this_file)
 try:
     with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
         CONFIG = _yaml.load(config_file)
-except FileNotFoundError:#
+except FileNotFoundError:
     print('No configuration file found. Generate one and restart the program.')
     quit()
 
@@ -42,8 +42,8 @@ def local_maxima(frame, box):
     Y, X = frame.shape
     maxima_map = _np.zeros(frame.shape, _np.uint8)
     box_half = int(box / 2)
-    for i in range(box, Y - box):
-        for j in range(box, X - box):
+    for i in range(box_half, Y - box_half):
+        for j in range(box_half, X - box_half):
             local_frame = frame[i - box_half:i + box_half + 1, j - box_half:j + box_half + 1]
             flat_max = _np.argmax(local_frame)
             i_local_max = int(flat_max / box)
