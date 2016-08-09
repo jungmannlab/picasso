@@ -12,8 +12,10 @@ import os.path
 import traceback
 from PyQt4 import QtCore, QtGui
 import numpy as np
+from numpy.lib.recfunctions import stack_arrays
 import matplotlib.pyplot as plt
 import colorsys
+from math import ceil
 from .. import io, lib, render
 
 
@@ -38,6 +40,28 @@ class InfoDialog(QtGui.QDialog):
         layout.addWidget(QtGui.QLabel('# Localizations:'), 2, 0)
         self.locs_label = QtGui.QLabel()
         layout.addWidget(self.locs_label, 2, 1)
+
+
+class ToolsSettingsDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Tools Settings')
+        self.setModal(False)
+        grid = QtGui.QGridLayout(self)
+        grid.addWidget(QtGui.QLabel('Pick Radius:'), 0, 0)
+        self.pick_diameter = QtGui.QDoubleSpinBox()
+        self.pick_diameter.setRange(0, 999999)
+        self.pick_diameter.setValue(1)
+        self.pick_diameter.setSingleStep(0.1)
+        self.pick_diameter.setDecimals(3)
+        self.pick_diameter.setKeyboardTracking(False)
+        self.pick_diameter.valueChanged.connect(self.update_scene)
+        grid.addWidget(self.pick_diameter, 0, 1)
+
+    def update_scene(self, diameter):
+        self.window.view.update_scene(use_cache=True)
 
 
 class DisplaySettingsDialog(QtGui.QDialog):
@@ -177,10 +201,11 @@ class View(QtGui.QLabel):
         self._pixmap = None
         self.locs = []
         self.infos = []
-        self.mode = 'zoom'
+        self._mode = 'Zoom'
         self._pan = False
         self._size_hint = (768, 768)
         self.n_locs = 0
+        self._picks = []
 
     def add(self, path):
         locs, info = io.load_locs(path)
@@ -225,6 +250,18 @@ class View(QtGui.QLabel):
         else:
             event.ignore()
 
+    def draw_picks(self, image):
+        d = self.window.tools_settings_dialog.pick_diameter.value()
+        d *= self.width() / self.viewport_width()
+        # d = int(round(d))
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor('yellow'))
+        for pick in self._picks:
+            cx, cy = self.map_to_view(pick['x'], pick['y'])
+            painter.drawEllipse(cx-d/2, cy-d/2, d, d)
+        painter.end()
+        return image
+
     def draw_scalebar(self, image):
         if self.window.display_settings_dialog.scalebar_groupbox.isChecked():
             pixelsize = self.window.display_settings_dialog.pixelsize.value()
@@ -244,6 +281,7 @@ class View(QtGui.QLabel):
         self.viewport = self.adjust_viewport_to_view(viewport)
         qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
         qimage = qimage.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding)
+        qimage = self.draw_picks(qimage)
         self.qimage = self.draw_scalebar(qimage)
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(pixmap)
@@ -268,6 +306,18 @@ class View(QtGui.QLabel):
                 'blur_method': self.window.display_settings_dialog.blur_methods[blur_button],
                 'min_blur_width': float(self.window.display_settings_dialog.min_blur_width.value())}
 
+    def map_to_movie(self, position):
+        x_rel = position.x() / self.width()
+        x_movie = x_rel * self.viewport_width() + self.viewport[0][1]
+        y_rel = position.y() / self.height()
+        y_movie = y_rel * self.viewport_height() + self.viewport[0][0]
+        return x_movie, y_movie
+
+    def map_to_view(self, x, y):
+        cx = self.width() * (x - self.viewport[0][1]) / self.viewport_width()
+        cy = self.height() * (y - self.viewport[0][0]) / self.viewport_height()
+        return cx, cy
+
     def max_movie_height(self):
         return max(info[0]['Height'] for info in self.infos)
 
@@ -275,7 +325,7 @@ class View(QtGui.QLabel):
         return max([info[0]['Width'] for info in self.infos])
 
     def mouseMoveEvent(self, event):
-        if self.mode == 'zoom':
+        if self._mode == 'Zoom':
             if self.rubberband.isVisible():
                 self.rubberband.setGeometry(QtCore.QRect(self.origin, event.pos()))
             if self._pan:
@@ -286,7 +336,7 @@ class View(QtGui.QLabel):
                 self.pan_start_y = event.y()
 
     def mousePressEvent(self, event):
-        if self.mode == 'zoom':
+        if self._mode == 'Zoom':
             if event.button() == QtCore.Qt.LeftButton:
                 if not self.rubberband.isVisible():
                     self.origin = QtCore.QPoint(event.pos())
@@ -302,7 +352,7 @@ class View(QtGui.QLabel):
                 event.ignore()
 
     def mouseReleaseEvent(self, event):
-        if self.mode == 'zoom':
+        if self._mode == 'Zoom':
             if event.button() == QtCore.Qt.LeftButton and self.rubberband.isVisible():
                 end = QtCore.QPoint(event.pos())
                 if end.x() > self.origin.x() and end.y() > self.origin.y():
@@ -324,17 +374,10 @@ class View(QtGui.QLabel):
                 event.accept()
             else:
                 event.ignore()
-        elif self.mode == 'pick':
-            pass
-            '''
-            center = self.map_to_movie(event.pos())
-            dx = self.locs[0].x - center[1]
-            dy = self.locs[0].y - center[0]
-            is_picked = np.sqrt(dx**2 + dy**2) < self._pick_diameter / 2
-            self.picked_locs.append(self.locs[0][is_picked])
-            self.locs[0] = self.locs[0][~is_picked]
-            self.render()
-            '''
+        elif self._mode == 'Pick':
+            x, y = self.map_to_movie(event.pos())
+            self._picks.append({'x': x, 'y': y})
+            self.update_scene(use_cache=True)
 
     def movie_size(self):
         movie_height = self.max_movie_height()
@@ -420,6 +463,22 @@ class View(QtGui.QLabel):
     def resizeEvent(self, event):
         self.update_scene()
 
+    def save_picked_locs(self, path):
+        picked_locs = []
+        d = self.window.tools_settings_dialog.pick_diameter.value()
+        r = d / 2
+        for i, pick in enumerate(self._picks):
+            dx = self.locs[0].x - pick['x']
+            dy = self.locs[0].y - pick['y']
+            is_picked = np.sqrt(dx**2 + dy**2) < r
+            group_locs = self.locs[0][is_picked]
+            group = i * np.ones(len(group_locs), dtype=np.int32)
+            group_locs = lib.append_to_rec(group_locs, group, 'group')
+            picked_locs.append(group_locs)
+        locs = stack_arrays(picked_locs, asrecarray=True, usemask=False)
+        pick_info = {'Generated by:': 'Picasso Render', 'Pick Diameter:': d}
+        io.save_locs(path, locs, self.infos[0] + [pick_info])
+
     def scale_contrast(self, image, autoscale=False):
         if autoscale:
             if image.ndim == 2:
@@ -435,6 +494,10 @@ class View(QtGui.QLabel):
         image = np.minimum(image, 1.0)
         image = np.maximum(image, 0.0)
         return image
+
+    def set_mode(self, action):
+        self._mode = action.text()
+        self.update_cursor()
 
     def sizeHint(self):
         return QtCore.QSize(*self._size_hint)
@@ -454,17 +517,38 @@ class View(QtGui.QLabel):
     def to_down(self):
         self.pan_relative(-0.8, 0)
 
+    def update_cursor(self):
+        if self._mode == 'Zoom':
+            self.unsetCursor()
+        elif self._mode == 'Pick':
+            diameter = self.window.tools_settings_dialog.pick_diameter.value()
+            diameter = self.width() * diameter / self.viewport_width()
+            pixmap_size = ceil(diameter)
+            pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
+            pixmap.fill(QtCore.Qt.transparent)
+            painter = QtGui.QPainter(pixmap)
+            painter.setPen(QtGui.QColor('white'))
+            offset = (pixmap_size - diameter) / 2
+            painter.drawEllipse(offset, offset, diameter, diameter)
+            painter.end()
+            cursor = QtGui.QCursor(pixmap)
+            self.setCursor(cursor)
+
     def update_scene(self, viewport=None, autoscale=False, use_cache=False):
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
             self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache)
+            self.update_cursor()
 
     def viewport_center(self):
         return ((self.viewport[1][0] + self.viewport[0][0]) / 2), ((self.viewport[1][1] + self.viewport[0][1]) / 2)
 
+    def viewport_height(self):
+        return self.viewport[1][0] - self.viewport[0][0]
+
     def viewport_size(self):
-        return (self.viewport[1][0] - self.viewport[0][0]), self.viewport_width()
+        return self.viewport_height(), self.viewport_width()
 
     def viewport_width(self):
         return self.viewport[1][1] - self.viewport[0][1]
@@ -500,12 +584,16 @@ class Window(QtGui.QMainWindow):
         self.view.setMinimumSize(1, 1)
         self.setCentralWidget(self.view)
         self.display_settings_dialog = DisplaySettingsDialog(self)
+        self.tools_settings_dialog = ToolsSettingsDialog(self)
         self.info_dialog = InfoDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
+        save_picked_action = file_menu.addAction('Save picked localizations')
+        save_picked_action.setShortcut('Ctrl+S')
+        save_picked_action.triggered.connect(self.save_picked_locs)
         file_menu.addSeparator()
         export_current_action = file_menu.addAction('Export current view')
         export_current_action.setShortcut('Ctrl+E')
@@ -514,7 +602,7 @@ class Window(QtGui.QMainWindow):
         export_complete_action.setShortcut('Ctrl+Shift+E')
         export_complete_action.triggered.connect(self.export_complete)
         view_menu = menu_bar.addMenu('View')
-        display_settings_action = view_menu.addAction('Display Settings')
+        display_settings_action = view_menu.addAction('Display settings')
         display_settings_action.setShortcut('Ctrl+D')
         display_settings_action.triggered.connect(self.display_settings_dialog.show)
         view_menu.addAction(display_settings_action)
@@ -549,6 +637,20 @@ class Window(QtGui.QMainWindow):
         info_action.setShortcut('Ctrl+I')
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
+        tools_menu = menu_bar.addMenu('Tools')
+        tools_actiongroup = QtGui.QActionGroup(menu_bar)
+        zoom_tool_action = tools_actiongroup.addAction(QtGui.QAction('Zoom', tools_menu, checkable=True))
+        zoom_tool_action.setShortcut('Ctrl+Z')
+        tools_menu.addAction(zoom_tool_action)
+        zoom_tool_action.setChecked(True)
+        pick_tool_action = tools_actiongroup.addAction(QtGui.QAction('Pick', tools_menu, checkable=True))
+        pick_tool_action.setShortcut('Ctrl+P')
+        tools_menu.addAction(pick_tool_action)
+        tools_actiongroup.triggered.connect(self.view.set_mode)
+        tools_menu.addSeparator()
+        tools_settings_action = tools_menu.addAction('Tools settings')
+        tools_settings_action.setShortcut('Ctrl+T')
+        tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
         self.load_user_settings()
 
     def closeEvent(self, event):
@@ -598,6 +700,13 @@ class Window(QtGui.QMainWindow):
 
     def resizeEvent(self, event):
         self.update_info()
+
+    def save_picked_locs(self):
+        base, ext = os.path.splitext(self.view.locs_path)
+        out_path = base + '_picked.hdf5'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save picked localizations', out_path, filter='*.hdf5')
+        if path:
+            self.view.save_picked_locs(path)
 
     def update_info(self):
         self.info_dialog.width_label.setText(str(self.view.width()))
