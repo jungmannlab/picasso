@@ -10,19 +10,20 @@
 import numpy as _np
 import numba as _numba
 import scipy.signal as _signal
-from multiprocessing import cpu_count as _cpu_count
 
 
 _DRAW_MAX_SIGMA = 3
-_N_CPUS = _cpu_count()
 
 
-def render(locs, info, oversampling=1, viewport=None, blur_method=None, min_blur_width=0):
+def render(locs, info=None, oversampling=1, viewport=None, blur_method=None, min_blur_width=0):
     if viewport is None:
-        viewport = [(0, 0), (info[0]['Height'], info[0]['Width'])]
+        try:
+            viewport = [(0, 0), (info[0]['Height'], info[0]['Width'])]
+        except TypeError:
+            raise ValueError('Need info if no viewport is provided.')
     (y_min, x_min), (y_max, x_max) = viewport
-    n_pixel_y = int(_np.round(oversampling * (y_max - y_min)))
-    n_pixel_x = int(_np.round(oversampling * (x_max - x_min)))
+    n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
+    n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
     x = locs.x
     y = locs.y
     in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
@@ -38,20 +39,23 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None, min_blur
         y = _np.int32(y)
         image = _np.zeros((n_pixel_y, n_pixel_x), dtype=_np.float32)
         return len(x), _fill(image, x, y)
-    elif blur_method == 'convolve':
+    elif blur_method in ['smooth', 'convolve']:
         x = _np.int32(x)
         y = _np.int32(y)
         image = _np.zeros((n_pixel_y, n_pixel_x), dtype=_np.float32)
         image = _fill(image, x, y)
-        blur_width = oversampling * max(_np.median(locs.lpx[in_view]), min_blur_width)
-        blur_height = oversampling * max(_np.median(locs.lpy[in_view]), min_blur_width)
+        if blur_method == 'smooth':
+            blur_width = blur_height = 1
+        else:
+            blur_width = oversampling * max(_np.median(locs.lpx[in_view]), min_blur_width)
+            blur_height = oversampling * max(_np.median(locs.lpy[in_view]), min_blur_width)
         kernel_width = 10 * int(_np.round(blur_width)) + 1
         kernel_height = 10 * int(_np.round(blur_height)) + 1
         kernel_y = _signal.gaussian(kernel_height, blur_height)
         kernel_x = _signal.gaussian(kernel_width, blur_width)
         kernel = _np.outer(kernel_y, kernel_x)
+        kernel /= kernel.sum()
         image = _signal.fftconvolve(image, kernel, mode='same')
-        image = len(locs) * image / image.sum()
         return len(x), image
     elif blur_method == 'gaussian':
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
@@ -63,14 +67,14 @@ def render(locs, info, oversampling=1, viewport=None, blur_method=None, min_blur
         raise Exception('blur_method not understood.')
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True)
 def _fill(image, x, y):
     for i, j in zip(x, y):
         image[j, i] += 1
     return image
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True)
 def _fill_gaussians(X, Y, x, y, sx, sy):
     image = _np.zeros((Y, X), dtype=_np.float32)
     for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
@@ -90,5 +94,5 @@ def _fill_gaussians(X, Y, x, y, sx, sy):
             j_max = X
         for i in range(i_min, i_max):
             for j in range(j_min, j_max):
-                image[i, j] += _np.exp(-((j - x_)**2/(2 * sx_**2) + (i - y_)**2/(2 * sy_**2))) / (2 * _np.pi * sx_ * sy_)
+                image[i, j] += _np.exp(-((j - x_ + 0.5)**2/(2 * sx_**2) + (i - y_ + 0.5)**2/(2 * sy_**2))) / (2 * _np.pi * sx_ * sy_)
     return image
