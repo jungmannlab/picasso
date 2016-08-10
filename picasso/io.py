@@ -207,12 +207,14 @@ class TiffMap:
     def info(self):
         info = {'Byte Order': self.byte_order, 'File': self.path, 'Height': self.height,
                 'Width': self.width, 'Data Type': self.dtype.name, 'Frames': self.n_frames}
-        # TODO: make MM info optional
+        # The following block is MM-specific
+        '''
         self.file.seek(28)
         comments_offset = self.read('L')
         self.file.seek(36)
         summary_length = self.read('L')
         info['Summary'] = _json.loads(self.read('c', summary_length).decode())
+        '''
         self.file.seek(self.first_ifd_offset)
         n_entries = self.read('H')
         for i in range(n_entries):
@@ -247,6 +249,8 @@ class TiffMap:
                         info['Excitation Wavelength'] = None
                 # Dump the rest
                 info['Micro-Manager Metadata'] = mm_info
+        # Again, MM-specific:
+        '''
         if comments_offset:
             self.file.seek(comments_offset + 4)
             comments_length = self.read('L')
@@ -258,6 +262,7 @@ class TiffMap:
                     print('Did not find UTF-8 decoded comment bytes!')
                 else:
                     info['Comments'] = _json.loads(comments_json)
+        '''
         return info
 
     def memmap_frame(self, index):
