@@ -86,6 +86,10 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.oversampling.setKeyboardTracking(False)
         self.oversampling.valueChanged.connect(self.on_oversampling_changed)
         general_grid.addWidget(self.oversampling, 0, 1)
+        self.dynamic_oversampling = QtGui.QCheckBox('Dynamic')
+        self.dynamic_oversampling.setChecked(True)
+        self.dynamic_oversampling.toggled.connect(self.set_dynamic_oversampling)
+        general_grid.addWidget(self.dynamic_oversampling, 1, 1)
         # Contrast
         contrast_groupbox = QtGui.QGroupBox('Contrast')
         vbox.addWidget(contrast_groupbox)
@@ -164,13 +168,21 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.update_scene)
         scalebar_grid.addWidget(self.scalebar, 1, 1)
+        self._silent_oversampling_update = False
 
     def on_oversampling_changed(self, value):
         contrast_factor = (self._oversampling / value)**2
         self._oversampling = value
         self.silent_minimum_update(contrast_factor * self.minimum.value())
         self.silent_maximum_update(contrast_factor * self.maximum.value())
-        self.window.view.update_scene()
+        if not self._silent_oversampling_update:
+            self.dynamic_oversampling.setChecked(False)
+            self.window.view.update_scene()
+
+    def set_oversampling_silently(self, oversampling):
+        self._silent_oversampling_update = True
+        self.oversampling.setValue(oversampling)
+        self._silent_oversampling_update = False
 
     def silent_minimum_update(self, value):
         self.minimum.blockSignals(True)
@@ -184,6 +196,10 @@ class DisplaySettingsDialog(QtGui.QDialog):
 
     def render_scene(self, *args, **kwargs):
         self.window.view.update_scene()
+
+    def set_dynamic_oversampling(self, state):
+        if state:
+            self.window.view.update_scene()
 
     def update_scene(self, *args, **kwargs):
         self.window.view.update_scene(use_cache=True)
@@ -209,11 +225,11 @@ class View(QtGui.QLabel):
 
     def add(self, path):
         locs, info = io.load_locs(path)
-        self.locs_path = path
         locs = lib.ensure_finite(locs)
         self.locs.append(locs)
         self.infos.append(info)
         if len(self.locs) == 1:
+            self.locs_path = path
             if hasattr(locs, 'group'):
                 self.groups = np.unique(locs.group)
                 np.random.shuffle(self.groups)
@@ -301,6 +317,9 @@ class View(QtGui.QLabel):
 
     def get_render_kwargs(self, viewport):
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
+        if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
+            oversampling = self.optimal_oversampling(viewport)
+            self.window.display_settings_dialog.set_oversampling_silently(oversampling)
         return {'oversampling': float(self.window.display_settings_dialog.oversampling.value()),
                 'viewport': viewport,
                 'blur_method': self.window.display_settings_dialog.blur_methods[blur_button],
@@ -383,6 +402,14 @@ class View(QtGui.QLabel):
         movie_height = self.max_movie_height()
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
+
+    def optimal_oversampling(self, viewport=None):
+        if viewport is None:
+            viewport = self.viewport
+        os_horizontal = self.width() / self.viewport_width(viewport)
+        os_vertical = self.height() / self.viewport_height(viewport)
+        # The values should be identical, but just in case, we choose the max:
+        return max(os_horizontal, os_vertical)
 
     def pan_relative(self, dy, dx):
         viewport_height, viewport_width = self.viewport_size()
@@ -541,17 +568,25 @@ class View(QtGui.QLabel):
             self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache)
             self.update_cursor()
 
-    def viewport_center(self):
-        return ((self.viewport[1][0] + self.viewport[0][0]) / 2), ((self.viewport[1][1] + self.viewport[0][1]) / 2)
+    def viewport_center(self, viewport=None):
+        if viewport is None:
+            viewport = self.viewport
+        return ((viewport[1][0] + viewport[0][0]) / 2), ((viewport[1][1] + viewport[0][1]) / 2)
 
-    def viewport_height(self):
-        return self.viewport[1][0] - self.viewport[0][0]
+    def viewport_height(self, viewport=None):
+        if viewport is None:
+            viewport = self.viewport
+        return viewport[1][0] - viewport[0][0]
 
-    def viewport_size(self):
-        return self.viewport_height(), self.viewport_width()
+    def viewport_size(self, viewport=None):
+        if viewport is None:
+            viewport = self.viewport
+        return self.viewport_height(viewport), self.viewport_width(viewport)
 
-    def viewport_width(self):
-        return self.viewport[1][1] - self.viewport[0][1]
+    def viewport_width(self, viewport=None):
+        if viewport is None:
+            viewport = self.viewport
+        return viewport[1][1] - viewport[0][1]
 
     def zoom(self, factor):
         viewport_height, viewport_width = self.viewport_size()
