@@ -113,8 +113,6 @@ class TiffMap:
         self.byte_order = {b'II': '<', b'MM': '>'}[self.file.read(2)]
         self.file.seek(4)
         self.first_ifd_offset = self.read('L')
-        self.file.seek(12)
-        index_map_offset = self.read('I')
 
         # Read info from first IFD
         self.file.seek(self.first_ifd_offset)
@@ -135,14 +133,21 @@ class TiffMap:
         self.frame_size = self.height*self.width
 
         # Collect image offsets
-        self.file.seek(index_map_offset + 4)
-        n_index_entries = self.read('I')
-        ifd_offsets = []
-        for i in range(n_index_entries):
-            self.file.seek(index_map_offset + 20*i + 24)
-            ifd_offsets.append(self.read('I'))
-        self.image_offsets = [_ + 162 for _ in ifd_offsets]  # 2+12*13+4
-        self.image_offsets[0] += 48     # there are some extra tags in the first one
+        self.image_offsets = []
+        offset = self.first_ifd_offset
+        while offset != 0:
+            self.file.seek(offset)
+            n_entries = self.read('H')
+            for i in range(n_entries):
+                self.file.seek(offset + 2 + i * 12)
+                tag = self.read('H')
+                if tag == 273:
+                    type = self.TIFF_TYPES[self.read('H')]
+                    count = self.read('L')
+                    self.image_offsets.append(self.read(type, count))
+                    break
+            self.file.seek(offset + 2 + n_entries * 12)
+            offset = self.read('L')
         self.n_frames = len(self.image_offsets)
 
         if memmap_frames:
@@ -202,6 +207,7 @@ class TiffMap:
     def info(self):
         info = {'Byte Order': self.byte_order, 'File': self.path, 'Height': self.height,
                 'Width': self.width, 'Data Type': self.dtype.name, 'Frames': self.n_frames}
+        # TODO: make MM info optional
         self.file.seek(28)
         comments_offset = self.read('L')
         self.file.seek(36)
