@@ -42,8 +42,9 @@ def local_maxima(frame, box):
     Y, X = frame.shape
     maxima_map = _np.zeros(frame.shape, _np.uint8)
     box_half = int(box / 2)
-    for i in range(box_half, Y - box_half):
-        for j in range(box_half, X - box_half):
+    box_half_1 = box_half + 1
+    for i in range(box_half, Y - box_half_1):
+        for j in range(box_half, X - box_half_1):
             local_frame = frame[i - box_half:i + box_half + 1, j - box_half:j + box_half + 1]
             flat_max = _np.argmax(local_frame)
             i_local_max = int(flat_max / box)
@@ -198,7 +199,7 @@ def _to_photons(spots, camera_info):
     elif camera_info['sensor'] == 'sCMOS':
         return (spots - 100) * camera_info['sensitivity'] / camera_info['qe']
     elif camera_info['sensor'] == 'Simulation':
-        return spots - 100
+        return spots
     else:
         raise TypeError('Unknown camera type')
 
