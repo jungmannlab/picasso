@@ -796,6 +796,7 @@ class Window(QtGui.QMainWindow):
                 em = parameters['Electron Multiplying']
                 readmode = parameters['Readout Mode']
                 preamp = parameters['Pre-Amp Gain']
+                camera_info['baseline'] = localize.CONFIG['Cameras'][camera]['Baseline']
                 camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode][preamp]
                 if em:
                     camera_info['gain'] = parameters['EM Real Gain']
@@ -804,6 +805,7 @@ class Window(QtGui.QMainWindow):
                 excitation = parameters['Excitation Wavelength']
                 camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
             elif sensor == 'sCMOS':
+                camera_info['baseline'] = localize.CONFIG['Cameras'][camera]['Baseline']
                 readoutrate = parameters['Readout Rate']
                 gain = parameters['Gain Setting']
                 camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][readoutrate][gain]

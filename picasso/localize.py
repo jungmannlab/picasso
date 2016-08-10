@@ -195,9 +195,11 @@ def _cut_spots(movie, identifications, box):
 def _to_photons(spots, camera_info):
     spots = _np.float32(spots)
     if camera_info['sensor'] == 'EMCCD':
-        return (spots - 100) * camera_info['sensitivity'] / (camera_info['gain'] * camera_info['qe'])
+        b = camera_info['baseline']
+        return (spots - b) * camera_info['sensitivity'] / (camera_info['gain'] * camera_info['qe'])
     elif camera_info['sensor'] == 'sCMOS':
-        return (spots - 100) * camera_info['sensitivity'] / camera_info['qe']
+        b = camera_info['baseline']
+        return (spots - b) * camera_info['sensitivity'] / camera_info['qe']
     elif camera_info['sensor'] == 'Simulation':
         return spots
     else:
