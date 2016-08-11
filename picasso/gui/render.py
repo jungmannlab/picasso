@@ -86,7 +86,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.oversampling.setKeyboardTracking(False)
         self.oversampling.valueChanged.connect(self.on_oversampling_changed)
         general_grid.addWidget(self.oversampling, 0, 1)
-        self.dynamic_oversampling = QtGui.QCheckBox('Dynamic')
+        self.dynamic_oversampling = QtGui.QCheckBox('dynamic')
         self.dynamic_oversampling.setChecked(True)
         self.dynamic_oversampling.toggled.connect(self.set_dynamic_oversampling)
         general_grid.addWidget(self.dynamic_oversampling, 1, 1)
@@ -100,6 +100,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.minimum.setRange(0, 999999)
         self.minimum.setSingleStep(5)
         self.minimum.setValue(0)
+        self.minimum.setDecimals(3)
         self.minimum.setKeyboardTracking(False)
         self.minimum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.minimum, 0, 1)
@@ -109,6 +110,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.maximum.setRange(0, 999999)
         self.maximum.setSingleStep(5)
         self.maximum.setValue(100)
+        self.maximum.setDecimals(3)
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
@@ -123,7 +125,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.blur_buttongroup = QtGui.QButtonGroup()
         points_button = QtGui.QRadioButton('None')
         self.blur_buttongroup.addButton(points_button)
-        smooth_button = QtGui.QRadioButton('Smooth')
+        smooth_button = QtGui.QRadioButton('One-Pixel-Blur')
         self.blur_buttongroup.addButton(smooth_button)
         convolve_button = QtGui.QRadioButton('Global Localization Precision')
         self.blur_buttongroup.addButton(convolve_button)
@@ -133,7 +135,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         blur_grid.addWidget(smooth_button, 1, 0, 1, 2)
         blur_grid.addWidget(convolve_button, 2, 0, 1, 2)
         blur_grid.addWidget(gaussian_button, 3, 0, 1, 2)
-        smooth_button.setChecked(True)
+        convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene)
         blur_grid.addWidget(QtGui.QLabel('Min. Blur (cam. pixel):'), 4, 0, 1, 1)
         self.min_blur_width = QtGui.QDoubleSpinBox()
@@ -315,13 +317,13 @@ class View(QtGui.QLabel):
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
 
-    def get_render_kwargs(self, viewport):
+    def get_render_kwargs(self):
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
         if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
-            oversampling = self.optimal_oversampling(viewport)
+            oversampling = self.optimal_oversampling()
             self.window.display_settings_dialog.set_oversampling_silently(oversampling)
         return {'oversampling': float(self.window.display_settings_dialog.oversampling.value()),
-                'viewport': viewport,
+                'viewport': self.viewport,
                 'blur_method': self.window.display_settings_dialog.blur_methods[blur_button],
                 'min_blur_width': float(self.window.display_settings_dialog.min_blur_width.value())}
 
@@ -403,11 +405,9 @@ class View(QtGui.QLabel):
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
 
-    def optimal_oversampling(self, viewport=None):
-        if viewport is None:
-            viewport = self.viewport
-        os_horizontal = self.width() / self.viewport_width(viewport)
-        os_vertical = self.height() / self.viewport_height(viewport)
+    def optimal_oversampling(self):
+        os_horizontal = self.width() / self.viewport_width()
+        os_vertical = self.height() / self.viewport_height()
         # The values should be identical, but just in case, we choose the max:
         return max(os_horizontal, os_vertical)
 
@@ -422,10 +422,8 @@ class View(QtGui.QLabel):
         viewport = [(y_min, x_min), (y_max, x_max)]
         self.update_scene(viewport)
 
-    def render_scene(self, viewport=None, autoscale=False, use_cache=False, cache=True):
-        if viewport is None:
-            viewport = self.viewport
-        kwargs = self.get_render_kwargs(viewport)
+    def render_scene(self, autoscale=False, use_cache=False, cache=True):
+        kwargs = self.get_render_kwargs()
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache)
