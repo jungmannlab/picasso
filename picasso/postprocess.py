@@ -13,11 +13,13 @@ import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
 from tqdm import tqdm as _tqdm
 from scipy import interpolate as _interpolate
+from scipy.special import iv as _iv
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import matplotlib.pyplot as _plt
 from scipy.optimize import minimize as _minimize
 import itertools as _itertools
+import lmfit as _lmfit
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
@@ -102,6 +104,83 @@ def distance_histogram(locs, info, bin_size, r_max):
         futures = [executor.submit(_distance_histogram, *_) for _ in args]
     results = [future.result() for future in futures]
     return _np.sum(results, axis=0)
+
+
+def nena(locs):
+    locs = _lib.ensure_finite(locs)
+    bin_centers, dnfl_ = next_frame_neighbor_distance_histogram(locs)
+
+    def func(d, a, s, ac, dc, sc):
+        f = a * (d / s**2) * _np.exp(-0.5 * d**2 / s**2)
+        fc = ac * (d / sc**2) * _np.exp(-0.5 * (d**2 + dc**2) / sc**2) * _iv(0, d * dc / sc)
+        return f + fc
+
+    pdf_model = _lmfit.Model(func)
+    params = _lmfit.Parameters()
+    area = _np.trapz(dnfl_, bin_centers)
+    median_lp = _np.mean([_np.median(locs.lpx), _np.median(locs.lpy)])
+    params.add('a', value=area/2, min=0)
+    params.add('s', value=median_lp, min=0)
+    params.add('ac', value=area/2, min=0)
+    params.add('dc', value=2*median_lp, min=0)
+    params.add('sc', value=median_lp, min=0)
+    result = pdf_model.fit(dnfl_, params, d=bin_centers)
+    return result, result.best_values['s']
+
+
+def next_frame_neighbor_distance_histogram(locs):
+    locs.sort(kind='mergesort', order='frame')
+    frame = locs.frame
+    x = locs.x
+    y = locs.y
+    if hasattr(locs, 'group'):
+        group = locs.group
+    else:
+        group = _np.zeros(len(locs), dtype=_np.int32)
+    bin_size = 0.001
+    d_max = 1.0
+    return _nfndh(frame, x, y, group, d_max, bin_size)
+
+
+@_numba.jit(nopython=True)
+def _nfndh(frame, x, y, group, d_max, bin_size):
+    N = len(frame)
+    bins = _np.arange(0, d_max, bin_size)
+    dnfl = _np.zeros(len(bins))
+    for i in range(N):
+        d = distance_to_next_frame_neighbor(N, frame, x, y, group, i, d_max)
+        if d != -1.0:
+            bin = int(d / bin_size)
+            dnfl[bin] += 1
+    bin_centers = bins + bin_size / 2
+    return bin_centers, dnfl
+
+
+@_numba.jit(nopython=True)
+def distance_to_next_frame_neighbor(N, frame, x, y, group, i, d_max):
+    frame_i = frame[i]
+    x_i = x[i]
+    y_i = y[i]
+    group_i = group[i]
+    min_frame = frame_i + 1
+    for min_index in range(i + 1, N):
+        if frame[min_index] >= min_frame:
+            break
+    max_frame = frame_i + 1
+    for max_index in range(min_index, N):
+        if frame[max_index] > max_frame:
+            break
+    d_max_2 = d_max**2
+    for j in range(min_index, max_index):
+        if group[j] == group_i:
+            dx2 = (x_i - x[j])**2
+            if dx2 <= d_max_2:
+                dy2 = (y_i - y[j])**2
+                if dy2 <= d_max_2:
+                    d = _np.sqrt(dx2 + dy2)
+                    if d <= d_max:
+                        return d
+    return -1.0
 
 
 def pair_correlation(locs, info, bin_size, r_max):
@@ -215,8 +294,6 @@ def _compute_dark_times(locs, last_frame):
 
 def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average'):
     locs = _lib.ensure_finite(locs)
-    locs = locs[locs.lpx > 0.0]
-    locs = locs[locs.lpy > 0.0]
     locs.sort(kind='mergesort', order='frame')
     if hasattr(locs, 'group'):
         group = locs.group

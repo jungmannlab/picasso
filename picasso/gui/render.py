@@ -16,7 +16,7 @@ from numpy.lib.recfunctions import stack_arrays
 import matplotlib.pyplot as plt
 import colorsys
 from math import ceil
-from .. import io, lib, render
+from .. import io, lib, render, postprocess
 
 
 DEFAULT_OVERSAMPLING = 1.0
@@ -24,22 +24,63 @@ INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 10 / 7
 
 
+class NenaWorker(QtCore.QThread):
+
+    finished = QtCore.pyqtSignal(float)
+
+    def __init__(self, locs):
+        super().__init__()
+        self.locs = locs
+
+    def run(self):
+        result, lp = postprocess.nena(self.locs)
+        self.finished.emit(lp)
+
+
 class InfoDialog(QtGui.QDialog):
 
     def __init__(self, window):
         super().__init__(window)
+        self.window = window
         self.setWindowTitle('Info')
         self.setModal(False)
-        layout = QtGui.QGridLayout(self)
-        layout.addWidget(QtGui.QLabel('Display Width:'), 0, 0)
+        self.layout = QtGui.QGridLayout(self)
+        self.layout.addWidget(QtGui.QLabel('Display Width:'), 0, 0)
         self.width_label = QtGui.QLabel()
-        layout.addWidget(self.width_label, 0, 1)
-        layout.addWidget(QtGui.QLabel('Display Height:'), 1, 0)
+        self.layout.addWidget(self.width_label, 0, 1)
+        self.layout.addWidget(QtGui.QLabel('Display Height:'), 1, 0)
         self.height_label = QtGui.QLabel()
-        layout.addWidget(self.height_label, 1, 1)
-        layout.addWidget(QtGui.QLabel('# Localizations:'), 2, 0)
+        self.layout.addWidget(self.height_label, 1, 1)
+        self.layout.addWidget(QtGui.QLabel('# Localizations:'), 2, 0)
         self.locs_label = QtGui.QLabel()
-        layout.addWidget(self.locs_label, 2, 1)
+        self.layout.addWidget(self.locs_label, 2, 1)
+        self.layout.addWidget(QtGui.QLabel('Median CRLB precision:'), 3, 0)
+        self.crlb_precision = QtGui.QLabel('-')
+        self.layout.addWidget(self.crlb_precision, 3, 1)
+        self.layout.addWidget(QtGui.QLabel('NeNA precision:'), 4, 0)
+        self.nena_button = QtGui.QPushButton('Calculate')
+        self.nena_button.clicked.connect(self.calculate_nena_lp)
+        self.layout.addWidget(self.nena_button, 4, 1)
+
+    def calculate_nena_lp(self):
+        try:
+            self.nena_worker = NenaWorker(self.window.view.locs[0])
+        except IndexError:
+            return
+        self.nena_button.setParent(None)
+        self.layout.removeWidget(self.nena_button)
+        self.nena_label = QtGui.QLabel()
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        busy_path = os.path.join(this_directory, 'icons/busy2.gif')
+        movie = QtGui.QMovie(busy_path)
+        self.nena_label.setMovie(movie)
+        movie.start()
+        self.layout.addWidget(self.nena_label, 4, 1)
+        self.nena_worker.finished.connect(self.update_nena_lp)
+        self.nena_worker.start()
+
+    def update_nena_lp(self, lp):
+        self.nena_label.setText('{:.3} pixel'.format(lp))
 
 
 class ToolsSettingsDialog(QtGui.QDialog):
@@ -232,6 +273,7 @@ class View(QtGui.QLabel):
         self.infos.append(info)
         if len(self.locs) == 1:
             self.locs_path = path
+            self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
                 self.groups = np.unique(locs.group)
                 np.random.shuffle(self.groups)
@@ -319,10 +361,19 @@ class View(QtGui.QLabel):
 
     def get_render_kwargs(self):
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
+        optimal_oversampling = self.optimal_oversampling()
         if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
-            oversampling = self.optimal_oversampling()
-            self.window.display_settings_dialog.set_oversampling_silently(oversampling)
-        return {'oversampling': float(self.window.display_settings_dialog.oversampling.value()),
+            oversampling = optimal_oversampling
+            self.window.display_settings_dialog.set_oversampling_silently(optimal_oversampling)
+        else:
+            oversampling = float(self.window.display_settings_dialog.oversampling.value())
+            if oversampling > optimal_oversampling:
+                QtGui.QMessageBox.information(self,
+                                              'Oversampling too high',
+                                              'Oversampling will be adjusted to match the display pixel density.')
+                oversampling = optimal_oversampling
+                self.window.display_settings_dialog.set_oversampling_silently(optimal_oversampling)
+        return {'oversampling': oversampling,
                 'viewport': self.viewport,
                 'blur_method': self.window.display_settings_dialog.blur_methods[blur_button],
                 'min_blur_width': float(self.window.display_settings_dialog.min_blur_width.value())}
@@ -684,6 +735,8 @@ class Window(QtGui.QMainWindow):
         tools_settings_action = tools_menu.addAction('Tools settings')
         tools_settings_action.setShortcut('Ctrl+T')
         tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
+        # self.busy_label = QtGui.QLabel()
+        # menu_bar.setCornerWidget(self.busy_label)
         self.load_user_settings()
 
     def closeEvent(self, event):
@@ -742,9 +795,13 @@ class Window(QtGui.QMainWindow):
             self.view.save_picked_locs(path)
 
     def update_info(self):
-        self.info_dialog.width_label.setText(str(self.view.width()))
-        self.info_dialog.height_label.setText(str(self.view.height()))
+        self.info_dialog.width_label.setText('{} pixel'.format((self.view.width())))
+        self.info_dialog.height_label.setText('{} pixel'.format((self.view.height())))
         self.info_dialog.locs_label.setText('{:,}'.format(self.view.n_locs))
+        try:
+            self.info_dialog.crlb_precision.setText('{:.3} pixel'.format(self.view.median_lp))
+        except AttributeError:
+            pass
 
 
 def main():
