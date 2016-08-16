@@ -67,10 +67,10 @@ class PickSimilarWorker(QtCore.QThread):
         mean_rmsd = np.mean(rmsd)
         std_n_locs = np.std(n_locs)
         std_rmsd = np.std(rmsd)
-        min_n_locs = mean_n_locs - std_n_locs
-        max_n_locs = mean_n_locs + std_n_locs
-        min_rmsd = mean_rmsd - std_rmsd
-        max_rmsd = mean_rmsd + std_rmsd
+        min_n_locs = mean_n_locs - 2*std_n_locs
+        max_n_locs = mean_n_locs + 2*std_n_locs
+        min_rmsd = mean_rmsd - 2*std_rmsd
+        max_rmsd = mean_rmsd + 2*std_rmsd
         index_blocks = postprocess.get_index_blocks(self.locs[0], self.infos[0], self.d)
         locs = index_blocks[0]
         x_similar = np.array([_[0] for _ in self.picks])
@@ -571,8 +571,9 @@ class View(QtGui.QLabel):
         self.pick_similar_worker.start()
 
     def picked_locs_iter(self):
+        r = self.window.tools_settings_dialog.pick_diameter.value() / 2
         for i, pick in enumerate(self._picks):
-            group_locs = self.picked_locs_at(*pick)
+            group_locs = lib.locs_at(pick[0], pick[1], self.locs[0], r)
             group = i * np.ones(len(group_locs), dtype=np.int32)
             group_locs = lib.append_to_rec(group_locs, group, 'group')
             yield group_locs
@@ -687,6 +688,34 @@ class View(QtGui.QLabel):
 
     def to_down(self):
         self.pan_relative(-0.8, 0)
+
+    def undrift_from_picked(self):
+        n_picks = len(self._picks)
+        n_frames = self.infos[0][0]['Frames']
+        drift_x = np.empty((n_picks, n_frames))
+        drift_y = np.empty((n_picks, n_frames))
+        drift_x.fill(np.nan)
+        drift_y.fill(np.nan)
+        for i, locs in enumerate(self.picked_locs_iter()):
+            drift_x[i, locs.frame] = locs.x - np.mean(locs.x)
+            drift_y[i, locs.frame] = locs.y - np.mean(locs.y)
+        drift_x = np.nanmean(drift_x, 0)
+        drift_y = np.nanmean(drift_y, 0)
+
+        def nan_helper(y):
+            return np.isnan(y), lambda z: z.nonzero()[0]
+
+        nans, nonzero = nan_helper(drift_x)
+        drift_x[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_x[~nans])
+        nans, nonzero = nan_helper(drift_y)
+        drift_y[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_y[~nans])
+
+        drift_x = np.convolve(drift_x, np.ones((100,))/100, mode='same')
+        drift_y = np.convolve(drift_y, np.ones((100,))/100, mode='same')
+
+        self.locs[0].x -= drift_x[self.locs[0].frame]
+        self.locs[0].y -= drift_y[self.locs[0].frame]
+        self.update_scene()
 
     def update_cursor(self):
         if self._mode == 'Zoom':
@@ -822,11 +851,11 @@ class Window(QtGui.QMainWindow):
         zoom_tool_action.setShortcut('Ctrl+Z')
         tools_menu.addAction(zoom_tool_action)
         zoom_tool_action.setChecked(True)
-        tools_menu.addSeparator()
         pick_tool_action = tools_actiongroup.addAction(QtGui.QAction('Pick', tools_menu, checkable=True))
         pick_tool_action.setShortcut('Ctrl+P')
         tools_menu.addAction(pick_tool_action)
         tools_actiongroup.triggered.connect(self.view.set_mode)
+        tools_menu.addSeparator()
         pick_similar_action = tools_menu.addAction('Pick similar')
         pick_similar_action.setShortcut('Ctrl+Shift+P')
         pick_similar_action.triggered.connect(self.view.pick_similar)
@@ -834,6 +863,9 @@ class Window(QtGui.QMainWindow):
         tools_settings_action = tools_menu.addAction('Tools settings')
         tools_settings_action.setShortcut('Ctrl+T')
         tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
+        postprocess_menu = self.menu_bar.addMenu('Postprocess')
+        undrift_action = postprocess_menu.addAction('Correct drift from picked')
+        undrift_action.triggered.connect(self.view.undrift_from_picked)
         self.load_user_settings()
 
     def closeEvent(self, event):
