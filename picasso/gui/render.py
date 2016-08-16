@@ -28,12 +28,13 @@ class NenaWorker(QtCore.QThread):
 
     finished = QtCore.pyqtSignal(float)
 
-    def __init__(self, locs):
+    def __init__(self, locs, info):
         super().__init__()
         self.locs = locs
+        self.info = info
 
     def run(self):
-        result, lp = postprocess.nena(self.locs)
+        result, lp = postprocess.nena(self.locs, self.info)
         self.finished.emit(lp)
 
 
@@ -137,21 +138,19 @@ class InfoDialog(QtGui.QDialog):
         self.layout.addWidget(self.nena_button, 4, 1)
 
     def calculate_nena_lp(self):
-        try:
-            self.nena_worker = NenaWorker(self.window.view.locs[0])
-        except IndexError:
-            return
-        self.nena_button.setParent(None)
-        self.layout.removeWidget(self.nena_button)
-        self.nena_label = QtGui.QLabel()
-        this_directory = os.path.dirname(os.path.realpath(__file__))
-        busy_path = os.path.join(this_directory, 'icons/busy2.gif')
-        movie = QtGui.QMovie(busy_path)
-        self.nena_label.setMovie(movie)
-        movie.start()
-        self.layout.addWidget(self.nena_label, 4, 1)
-        self.nena_worker.finished.connect(self.update_nena_lp)
-        self.nena_worker.start()
+        if len(self.window.view.locs):
+            self.nena_button.setParent(None)
+            self.layout.removeWidget(self.nena_button)
+            self.nena_label = QtGui.QLabel()
+            this_directory = os.path.dirname(os.path.realpath(__file__))
+            busy_path = os.path.join(this_directory, 'icons/busy2.gif')
+            movie = QtGui.QMovie(busy_path)
+            self.nena_label.setMovie(movie)
+            movie.start()
+            self.layout.addWidget(self.nena_label, 4, 1)
+            self.nena_worker = NenaWorker(self.window.view.locs[0], self.window.view.infos[0])
+            self.nena_worker.finished.connect(self.update_nena_lp)
+            self.nena_worker.start()
 
     def update_nena_lp(self, lp):
         self.nena_label.setText('{:.3} pixel'.format(lp))
@@ -342,6 +341,7 @@ class View(QtGui.QLabel):
 
     def add(self, path):
         locs, info = io.load_locs(path)
+        locs = lib.ensure_sanity(locs, info)
         self.locs.append(locs)
         self.infos.append(info)
         if len(self.locs) == 1:
