@@ -37,6 +37,80 @@ class NenaWorker(QtCore.QThread):
         self.finished.emit(lp)
 
 
+class PickSimilarWorker(QtCore.QThread):
+
+    progressMade = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(list)
+
+    def __init__(self, locs, infos, picks, d):
+        super().__init__()
+        self.locs = locs
+        self.infos = infos
+        self.picks = picks
+        self.d = d
+
+    def rmsd_at_com(self, locs):
+        com_x = locs.x.mean()
+        com_y = locs.y.mean()
+        return np.sqrt(np.mean((locs.x - com_x)**2 + (locs.y - com_y)**2))
+
+    def run(self):
+        self.progressMade.emit(0)
+        n_locs = []
+        rmsd = []
+        r = self.d / 2
+        for locs in [lib.locs_at(x, y, self.locs[0], r) for x, y in self.picks]:
+            n_locs.append(len(locs))
+            rmsd.append(self.rmsd_at_com(locs))
+        mean_n_locs = np.mean(n_locs)
+        mean_rmsd = np.mean(rmsd)
+        std_n_locs = np.std(n_locs)
+        std_rmsd = np.std(rmsd)
+        min_n_locs = mean_n_locs - std_n_locs
+        max_n_locs = mean_n_locs + std_n_locs
+        min_rmsd = mean_rmsd - std_rmsd
+        max_rmsd = mean_rmsd + std_rmsd
+        index_blocks = postprocess.get_index_blocks(self.locs[0], self.infos[0], self.d)
+        locs = index_blocks[0]
+        x_similar = np.array([_[0] for _ in self.picks])
+        y_similar = np.array([_[1] for _ in self.picks])
+        # preparations for hex grid search
+        x_range = np.arange(self.d / 2, self.infos[0][0]['Width'], np.sqrt(3) * self.d / 2)
+        y_range_base = np.arange(self.d / 2, self.infos[0][0]['Height'] - self.d / 2, self.d)
+        y_range_shift = y_range_base + self.d / 2
+        r = self.d / 2
+        d2 = self.d**2
+        nx = len(x_range)
+        for i, x_grid in enumerate(x_range):
+            # y_grid is shifted for odd columns
+            if i % 2:
+                y_range = y_range_shift
+            else:
+                y_range = y_range_base
+            for y_grid in y_range:
+                block_locs = postprocess.get_block_locs_at(x_grid, y_grid, index_blocks)
+                picked_locs = lib.locs_at(x_grid, y_grid, block_locs, r)
+                if len(picked_locs):
+                    # Move to COM peak
+                    x_test_old = x_grid
+                    y_test_old = y_grid
+                    x_test = picked_locs.x.mean()
+                    y_test = picked_locs.y.mean()
+                    while np.abs(x_test - x_test_old) > 1e-3 or np.abs(y_test - y_test_old) > 1e-3:
+                        x_test_old = x_test
+                        y_test_old = y_test
+                        picked_locs = lib.locs_at(x_test, y_test, block_locs, r)
+                        x_test = picked_locs.x.mean()
+                        y_test = picked_locs.y.mean()
+                    if np.all((x_similar - x_test)**2 + (y_similar - y_test)**2 > d2):
+                        if min_n_locs < len(picked_locs) < max_n_locs:
+                            if min_rmsd < self.rmsd_at_com(picked_locs) < max_rmsd:
+                                x_similar = np.append(x_similar, x_test)
+                                y_similar = np.append(y_similar, y_test)
+            self.progressMade.emit(int(round(100 * i / nx)))
+        self.finished.emit(list(zip(x_similar, y_similar)))
+
+
 class InfoDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -98,10 +172,10 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.pick_diameter.setSingleStep(0.1)
         self.pick_diameter.setDecimals(3)
         self.pick_diameter.setKeyboardTracking(False)
-        self.pick_diameter.valueChanged.connect(self.update_scene)
+        self.pick_diameter.valueChanged.connect(self.on_pick_diameter_changed)
         grid.addWidget(self.pick_diameter, 0, 1)
 
-    def update_scene(self, diameter):
+    def on_pick_diameter_changed(self, diameter):
         self.window.view.update_scene(use_cache=True)
 
 
@@ -268,7 +342,6 @@ class View(QtGui.QLabel):
 
     def add(self, path):
         locs, info = io.load_locs(path)
-        locs = lib.ensure_finite(locs)
         self.locs.append(locs)
         self.infos.append(info)
         if len(self.locs) == 1:
@@ -280,6 +353,16 @@ class View(QtGui.QLabel):
             self.fit_in_view(autoscale=True)
         else:
             self.update_scene()
+
+    def add_pick(self, position, update_scene=True):
+        self._picks.append(position)
+        if update_scene:
+            self.update_scene(use_cache=True)
+
+    def add_picks(self, positions):
+        for position in positions:
+            self.add_pick(position, update_scene=False)
+        self.update_scene(use_cache=True)
 
     def adjust_viewport_to_view(self, viewport):
         viewport_height = viewport[1][0] - viewport[0][0]
@@ -317,7 +400,7 @@ class View(QtGui.QLabel):
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor('yellow'))
         for pick in self._picks:
-            cx, cy = self.map_to_view(pick['x'], pick['y'])
+            cx, cy = self.map_to_view(*pick)
             painter.drawEllipse(cx-d/2, cy-d/2, d, d)
         painter.end()
         return image
@@ -448,13 +531,20 @@ class View(QtGui.QLabel):
                 event.ignore()
         elif self._mode == 'Pick':
             x, y = self.map_to_movie(event.pos())
-            self._picks.append({'x': x, 'y': y})
-            self.update_scene(use_cache=True)
+            self.add_pick((x, y))
 
     def movie_size(self):
         movie_height = self.max_movie_height()
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
+
+    def on_pick_similar_finished(self, similar):
+        self.window.set_status('Picked {}.'.format(len(similar)))
+        self._picks = []
+        self.add_picks(similar)
+
+    def on_pick_similar_progress(self, progress):
+        self.window.set_status('Pick similar: {} %'.format(progress))
 
     def optimal_oversampling(self):
         os_horizontal = self.width() / self.viewport_width()
@@ -472,6 +562,20 @@ class View(QtGui.QLabel):
         y_max = self.viewport[1][0] - y_move
         viewport = [(y_min, x_min), (y_max, x_max)]
         self.update_scene(viewport)
+
+    def pick_similar(self):
+        d = self.window.tools_settings_dialog.pick_diameter.value()
+        self.pick_similar_worker = PickSimilarWorker(self.locs, self.infos, self._picks, d)
+        self.pick_similar_worker.progressMade.connect(self.on_pick_similar_progress)
+        self.pick_similar_worker.finished.connect(self.on_pick_similar_finished)
+        self.pick_similar_worker.start()
+
+    def picked_locs_iter(self):
+        for i, pick in enumerate(self._picks):
+            group_locs = self.picked_locs_at(*pick)
+            group = i * np.ones(len(group_locs), dtype=np.int32)
+            group_locs = lib.append_to_rec(group_locs, group, 'group')
+            yield group_locs
 
     def render_scene(self, autoscale=False, use_cache=False, cache=True):
         kwargs = self.get_render_kwargs()
@@ -540,18 +644,9 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def save_picked_locs(self, path):
-        picked_locs = []
-        d = self.window.tools_settings_dialog.pick_diameter.value()
-        r = d / 2
-        for i, pick in enumerate(self._picks):
-            dx = self.locs[0].x - pick['x']
-            dy = self.locs[0].y - pick['y']
-            is_picked = np.sqrt(dx**2 + dy**2) < r
-            group_locs = self.locs[0][is_picked]
-            group = i * np.ones(len(group_locs), dtype=np.int32)
-            group_locs = lib.append_to_rec(group_locs, group, 'group')
-            picked_locs.append(group_locs)
+        picked_locs = list(self.picked_locs_iter())
         locs = stack_arrays(picked_locs, asrecarray=True, usemask=False)
+        d = self.window.tools_settings_dialog.pick_diameter.value()
         pick_info = {'Generated by:': 'Picasso Render', 'Pick Diameter:': d}
         io.save_locs(path, locs, self.infos[0] + [pick_info])
 
@@ -670,8 +765,8 @@ class Window(QtGui.QMainWindow):
         self.display_settings_dialog = DisplaySettingsDialog(self)
         self.tools_settings_dialog = ToolsSettingsDialog(self)
         self.info_dialog = InfoDialog(self)
-        menu_bar = self.menuBar()
-        file_menu = menu_bar.addMenu('File')
+        self.menu_bar = self.menuBar()
+        file_menu = self.menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
@@ -685,7 +780,7 @@ class Window(QtGui.QMainWindow):
         export_complete_action = file_menu.addAction('Export complete image')
         export_complete_action.setShortcut('Ctrl+Shift+E')
         export_complete_action.triggered.connect(self.export_complete)
-        view_menu = menu_bar.addMenu('View')
+        view_menu = self.menu_bar.addMenu('View')
         display_settings_action = view_menu.addAction('Display settings')
         display_settings_action.setShortcut('Ctrl+D')
         display_settings_action.triggered.connect(self.display_settings_dialog.show)
@@ -721,22 +816,24 @@ class Window(QtGui.QMainWindow):
         info_action.setShortcut('Ctrl+I')
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
-        tools_menu = menu_bar.addMenu('Tools')
-        tools_actiongroup = QtGui.QActionGroup(menu_bar)
+        tools_menu = self.menu_bar.addMenu('Tools')
+        tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
         zoom_tool_action = tools_actiongroup.addAction(QtGui.QAction('Zoom', tools_menu, checkable=True))
         zoom_tool_action.setShortcut('Ctrl+Z')
         tools_menu.addAction(zoom_tool_action)
         zoom_tool_action.setChecked(True)
+        tools_menu.addSeparator()
         pick_tool_action = tools_actiongroup.addAction(QtGui.QAction('Pick', tools_menu, checkable=True))
         pick_tool_action.setShortcut('Ctrl+P')
         tools_menu.addAction(pick_tool_action)
         tools_actiongroup.triggered.connect(self.view.set_mode)
+        pick_similar_action = tools_menu.addAction('Pick similar')
+        pick_similar_action.setShortcut('Ctrl+Shift+P')
+        pick_similar_action.triggered.connect(self.view.pick_similar)
         tools_menu.addSeparator()
         tools_settings_action = tools_menu.addAction('Tools settings')
         tools_settings_action.setShortcut('Ctrl+T')
         tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
-        # self.busy_label = QtGui.QLabel()
-        # menu_bar.setCornerWidget(self.busy_label)
         self.load_user_settings()
 
     def closeEvent(self, event):
@@ -793,6 +890,15 @@ class Window(QtGui.QMainWindow):
         path = QtGui.QFileDialog.getSaveFileName(self, 'Save picked localizations', out_path, filter='*.hdf5')
         if path:
             self.view.save_picked_locs(path)
+
+    def set_status(self, message):
+        label = QtGui.QLabel(message)
+        old_widget = self.menu_bar.cornerWidget()
+        if old_widget is not None:
+            old_widget.hide()
+            del old_widget
+        self.menu_bar.setCornerWidget(label)
+        label.show()
 
     def update_info(self):
         self.info_dialog.width_label.setText('{} pixel'.format((self.view.width())))

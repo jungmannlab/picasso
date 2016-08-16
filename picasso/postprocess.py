@@ -26,11 +26,7 @@ from . import imageprocess as _imageprocess
 from .localize import LOCS_DTYPE as _LOCS_DTYPE
 
 
-def _get_index_blocks(locs, info, size):
-    locs = locs[locs.x > 0]
-    locs = locs[locs.y > 0]
-    locs = locs[locs.x < info[0]['Width']]
-    locs = locs[locs.y < info[0]['Height']]
+def get_index_blocks(locs, info, size):
     # Sort locs by indices
     x_index = _np.uint32(locs.x / size)
     y_index = _np.uint32(locs.y / size)
@@ -45,7 +41,22 @@ def _get_index_blocks(locs, info, size):
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     # Fill in block starts and ends
     _fill_index_blocks(block_starts, block_ends, x_index, y_index)
-    return locs, x_index, y_index, block_starts, block_ends
+    return locs, size, x_index, y_index, block_starts, block_ends
+
+
+def get_block_locs_at(x, y, index_blocks):
+    locs, size, x_index, y_index, block_starts, block_ends = index_blocks
+    x_index = _np.uint32(x / size)
+    y_index = _np.uint32(y / size)
+    K, L = block_starts.shape
+    indices = []
+    for k in range(y_index - 1, y_index+2):
+        if 0 < k < K:
+            for l in range(x_index - 1, x_index + 2):
+                if 0 < l < L:
+                    indices.append(list(range(block_starts[k, l], block_ends[k, l])))
+    indices = list(_itertools.chain(*indices))
+    return locs[indices]
 
 
 @_numba.jit(nopython=True)
@@ -94,7 +105,7 @@ def _distance_histogram(locs, bin_size, r_max, x_index, y_index, block_starts, b
 
 
 def distance_histogram(locs, info, bin_size, r_max):
-    locs, x_index, y_index, block_starts, block_ends = _get_index_blocks(locs, info, r_max)
+    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, r_max)
     N = len(locs)
     n_threads = _multiprocessing.cpu_count()
     chunk = int(N / n_threads)
@@ -106,8 +117,7 @@ def distance_histogram(locs, info, bin_size, r_max):
     return _np.sum(results, axis=0)
 
 
-def nena(locs):
-    locs = _lib.ensure_finite(locs)
+def nena(locs, info):
     bin_centers, dnfl_ = next_frame_neighbor_distance_histogram(locs)
 
     def func(d, a, s, ac, dc, sc):
@@ -192,7 +202,6 @@ def pair_correlation(locs, info, bin_size, r_max):
 
 def dbscan(locs, radius, min_density):
     print('Identifying clusters...')
-    locs = _lib.ensure_finite(locs)
     locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
     X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
@@ -255,7 +264,7 @@ def _local_density(locs, radius, x_index, y_index, block_starts, block_ends, sta
 
 
 def compute_local_density(locs, info, radius):
-    locs, x_index, y_index, block_starts, block_ends = _get_index_blocks(locs, info, radius)
+    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, radius)
     N = len(locs)
     n_threads = _multiprocessing.cpu_count()
     chunk = int(N / n_threads)
@@ -293,7 +302,6 @@ def _compute_dark_times(locs, last_frame):
 
 
 def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average'):
-    locs = _lib.ensure_finite(locs)
     locs.sort(kind='mergesort', order='frame')
     if hasattr(locs, 'group'):
         group = locs.group
@@ -426,7 +434,6 @@ def _link_loc_groups(locs, link_group, group):
 
 
 def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
-    locs = _lib.ensure_finite(locs)
     if mode in ['render', 'std']:
         drift = get_drift_rcc(locs, info, segmentation, mode, movie, display)
     elif mode == 'framepair':
@@ -588,8 +595,6 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None, display=T
 
 
 def align(target_locs, target_info, locs, info, affine=False, display=False):
-    target_locs = _lib.ensure_finite(target_locs)
-    locs = _lib.ensure_finite(locs)
     N_target, target_image = _render.render(target_locs, target_info, oversampling=1,
                                             blur_method='gaussian', min_blur_width=1)
     N, image = _render.render(locs, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
@@ -650,7 +655,6 @@ Translation (x,y): {}, {}'''.format(Ox, Oy, W, H, 360*theta/(2*_np.pi), A, B, X,
 
 
 def groupprops(locs):
-    locs = _lib.ensure_finite(locs)
     try:
         locs = locs[locs.dark != -1]
     except AttributeError:
