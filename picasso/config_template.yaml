@@ -1,6 +1,7 @@
 Cameras:
-  Andor iXon X-9603:   # Miblab
+  Andor iXon X-9603:
     Sensor: EMCCD
+    Baseline: 200
     Quantum Efficiency:
       # Excitation wavelength
       489: 0.95
@@ -41,6 +42,7 @@ Cameras:
           Gain 3: 1.44
   Andor Zyla VSC-01223:
     Sensor: sCMOS
+    Baseline: 100
     Quantum Efficiency:
       489: 0.7
       561: 0.72

@@ -46,8 +46,24 @@ def append_to_rec(rec_array, data, name):
     return rec_array
 
 
-def ensure_finite(rec_array):
-    return rec_array[_np.all(_np.array([_np.isfinite(rec_array[_]) for _ in rec_array.dtype.names]), axis=0)]
+def ensure_sanity(locs, info):
+    # no inf or nan:
+    locs = locs[_np.all(_np.array([_np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)]
+    # other sanity checks:
+    locs = locs[locs.x > 0]
+    locs = locs[locs.y > 0]
+    locs = locs[locs.x < info[0]['Width']]
+    locs = locs[locs.y < info[0]['Height']]
+    locs = locs[locs.lpx > 0]
+    locs = locs[locs.lpy > 0]
+    return locs
+
+
+def locs_at(x, y, locs, r):
+    dx = locs.x - x
+    dy = locs.y - y
+    is_picked = _np.sqrt(dx**2 + dy**2) < r
+    return locs[is_picked]
 
 
 def remove_from_rec(rec_array, name):

@@ -31,7 +31,7 @@ _this_directory = _ospath.dirname(_this_file)
 try:
     with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
         CONFIG = _yaml.load(config_file)
-except FileNotFoundError:#
+except FileNotFoundError:
     print('No configuration file found. Generate one and restart the program.')
     quit()
 
@@ -42,8 +42,9 @@ def local_maxima(frame, box):
     Y, X = frame.shape
     maxima_map = _np.zeros(frame.shape, _np.uint8)
     box_half = int(box / 2)
-    for i in range(box, Y - box):
-        for j in range(box, X - box):
+    box_half_1 = box_half + 1
+    for i in range(box_half, Y - box_half_1):
+        for j in range(box_half, X - box_half_1):
             local_frame = frame[i - box_half:i + box_half + 1, j - box_half:j + box_half + 1]
             flat_max = _np.argmax(local_frame)
             i_local_max = int(flat_max / box)
@@ -74,7 +75,7 @@ def net_gradient(frame, y, x, box, uy, ux):
     return ng
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def identify_in_image(image, minimum_ng, box):
     y, x = local_maxima(image, box)
     box_half = int(box / 2)
@@ -155,7 +156,7 @@ def identify(movie, minimum_ng, box, threaded=True):
     return _np.hstack(identifications).view(_np.recarray)
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True, cache=False)
 def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     n_spots = len(ids_x)
     r = int(box/2)
@@ -165,7 +166,7 @@ def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     return spots
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True, cache=False)
 def _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots):
     for j in range(start, N):
         if ids_frame[j] > frame_number:
@@ -194,11 +195,13 @@ def _cut_spots(movie, identifications, box):
 def _to_photons(spots, camera_info):
     spots = _np.float32(spots)
     if camera_info['sensor'] == 'EMCCD':
-        return (spots - 100) * camera_info['sensitivity'] / (camera_info['gain'] * camera_info['qe'])
+        b = camera_info['baseline']
+        return (spots - b) * camera_info['sensitivity'] / (camera_info['gain'] * camera_info['qe'])
     elif camera_info['sensor'] == 'sCMOS':
-        return (spots - 100) * camera_info['sensitivity'] / camera_info['qe']
+        b = camera_info['baseline']
+        return (spots - b) * camera_info['sensitivity'] / camera_info['qe']
     elif camera_info['sensor'] == 'Simulation':
-        return spots - 100
+        return spots
     else:
         raise TypeError('Unknown camera type')
 
@@ -214,9 +217,9 @@ def fit(movie, camera_info, identifications, box, eps=0.001):
     return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
 
 
-def fit_async(movie, camera_info, identifications, box, eps=0.001, max_it=100):
+def fit_async(movie, camera_info, identifications, box, eps=0.001, max_it=100, method='sigma'):
     spots = _get_spots(movie, identifications, box, camera_info)
-    return _gaussmle.gaussmle_sigmaxy_async(spots, eps, max_it)
+    return _gaussmle.gaussmle_async(spots, eps, max_it, method=method)
 
 
 def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):

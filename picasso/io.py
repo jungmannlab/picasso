@@ -124,8 +124,6 @@ class TiffMap:
         self.byte_order = {b'II': '<', b'MM': '>'}[self.file.read(2)]
         self.file.seek(4)
         self.first_ifd_offset = self.read('L')
-        self.file.seek(12)
-        index_map_offset = self.read('I')
 
         # Read info from first IFD
         self.file.seek(self.first_ifd_offset)
@@ -146,14 +144,21 @@ class TiffMap:
         self.frame_size = self.height*self.width
 
         # Collect image offsets
-        self.file.seek(index_map_offset + 4)
-        n_index_entries = self.read('I')
-        ifd_offsets = []
-        for i in range(n_index_entries):
-            self.file.seek(index_map_offset + 20*i + 24)
-            ifd_offsets.append(self.read('I'))
-        self.image_offsets = [_ + 162 for _ in ifd_offsets]  # 2+12*13+4
-        self.image_offsets[0] += 48     # there are some extra tags in the first one
+        self.image_offsets = []
+        offset = self.first_ifd_offset
+        while offset != 0:
+            self.file.seek(offset)
+            n_entries = self.read('H')
+            for i in range(n_entries):
+                self.file.seek(offset + 2 + i * 12)
+                tag = self.read('H')
+                if tag == 273:
+                    type = self.TIFF_TYPES[self.read('H')]
+                    count = self.read('L')
+                    self.image_offsets.append(self.read(type, count))
+                    break
+            self.file.seek(offset + 2 + n_entries * 12)
+            offset = self.read('L')
         self.n_frames = len(self.image_offsets)
 
         if memmap_frames:
@@ -213,11 +218,14 @@ class TiffMap:
     def info(self):
         info = {'Byte Order': self.byte_order, 'File': self.path, 'Height': self.height,
                 'Width': self.width, 'Data Type': self.dtype.name, 'Frames': self.n_frames}
+        # The following block is MM-specific
+        '''
         self.file.seek(28)
         comments_offset = self.read('L')
         self.file.seek(36)
         summary_length = self.read('L')
         info['Summary'] = _json.loads(self.read('c', summary_length).decode())
+        '''
         self.file.seek(self.first_ifd_offset)
         n_entries = self.read('H')
         for i in range(n_entries):
@@ -252,6 +260,8 @@ class TiffMap:
                         info['Excitation Wavelength'] = None
                 # Dump the rest
                 info['Micro-Manager Metadata'] = mm_info
+        # Again, MM-specific:
+        '''
         if comments_offset:
             self.file.seek(comments_offset + 4)
             comments_length = self.read('L')
@@ -263,6 +273,7 @@ class TiffMap:
                     print('Did not find UTF-8 decoded comment bytes!')
                 else:
                     info['Comments'] = _json.loads(comments_json)
+        '''
         return info
 
     def memmap_frame(self, index):
@@ -455,6 +466,7 @@ def save_datasets(path, info, **kwargs):
 
 
 def save_locs(path, locs, info):
+    locs = _lib.ensure_sanity(locs, info)
     with _h5py.File(path, 'w') as locs_file:
         locs_file.create_dataset('locs', data=locs)
     base, ext = _ospath.splitext(path)

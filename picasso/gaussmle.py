@@ -19,7 +19,7 @@ MAX_STEP = _np.array([1.0, 1.0, 100.0, 5.0, 0.1, 0.1])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _center_of_mass(spot, size):
     x = 0.0
     y = 0.0
@@ -34,7 +34,7 @@ def _center_of_mass(spot, size):
     return y, x
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def mean_filter(spot, size):
     filtered_spot = _np.zeros_like(spot)
     for k in range(size):
@@ -52,8 +52,8 @@ def mean_filter(spot, size):
     return filtered_spot
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
-def centroid(spot, size, sigma):
+@_numba.jit(nopython=True, nogil=True, cache=False)
+def centroid(spot, size):
     y, x = _center_of_mass(spot, size)
     bg = _np.min(mean_filter(spot, size))
     photons = _np.maximum(1.0, _np.sum(spot) - size * size * bg)
@@ -89,14 +89,14 @@ def _erf(x):
     return _np.sign(x)
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _gaussian_integral(x, mu, sigma):
     sq_norm = 0.70710678118654757 / sigma       # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
     return 0.5 * (_math.erf((d + 0.5) * sq_norm) - _math.erf((d - 0.5) * sq_norm))
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
     d = x - mu
     a = _np.exp(-0.5 * ((d + 0.5) / sigma)**2)
@@ -106,12 +106,21 @@ def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-@_numba.jit(nopython=True, nogil=True, cache=True)
-def _derivative_gaussian_integral_sigma(x, mu, sigma, photons, PSFc):
+@_numba.jit(nopython=True, nogil=True, cache=False)
+def _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFc):
     ax = _np.exp(-0.5 * ((x + 0.5 - mu) / sigma)**2)
     bx = _np.exp(-0.5 * ((x - 0.5 - mu) / sigma)**2)
     dudt = -photons * (ax * (x + 0.5 - mu) - bx * (x - 0.5 - mu)) * PSFc / (_np.sqrt(2.0 * _np.pi) * sigma**2)
     d2udt2 = -2.0 * dudt / sigma - photons * (ax * (x + 0.5 - mu)**3 - bx * (x - 0.5 - mu)**3) * PSFc / (_np.sqrt(2.0 * _np.pi) * sigma**5)
+    return dudt, d2udt2
+
+
+@_numba.jit(nopython=True, nogil=True)
+def _derivative_gaussian_integral_2d_sigma(x, y, mu, nu, sigma, photons, PSFx, PSFy):
+    dSx, ddSx = _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFy)
+    dSy, ddSy = _derivative_gaussian_integral_1d_sigma(y, nu, sigma, photons, PSFx)
+    dudt = dSx + dSy
+    d2udt2 = ddSx + ddSy
     return dudt, d2udt2
 
 
@@ -150,7 +159,24 @@ def gaussmle_sigmaxy(spots, eps, max_it, threaded=True):
     return thetas, CRLBs, likelihoods, iterations
 
 
-def gaussmle_sigmaxy_async(spots, eps, max_it):
+def gaussmle(spots, eps, max_it, method='sigma'):
+    N = len(spots)
+    thetas = _np.zeros((N, 6), dtype=_np.float32)
+    CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
+    likelihoods = _np.zeros(N, dtype=_np.float32)
+    iterations = _np.zeros(N, dtype=_np.int32)
+    if method == 'sigma':
+        func = _mlefit_sigma
+    elif method == 'sigmaxy':
+        func = _mlefit_sigmaxy
+    else:
+        raise ValueError('Method not available.')
+    for i in range(N):
+        func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
+    return thetas, CRLBs, likelihoods, iterations
+
+
+def gaussmle_async(spots, eps, max_it, method='sigma'):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
     CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
@@ -160,25 +186,145 @@ def gaussmle_sigmaxy_async(spots, eps, max_it):
     lock = _threading.Lock()
     current = [0]
     executor = _futures.ThreadPoolExecutor(n_workers)
+    if method == 'sigma':
+        func = _mlefit_sigma
+    elif method == 'sigmaxy':
+        func = _mlefit_sigmaxy
+    else:
+        raise ValueError('Method not available.')
     for i in range(n_workers):
-        executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
+        executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
     executor.shutdown(wait=False)
     return current, thetas, CRLBs, likelihoods, iterations
 
 
-def swallow_exception(exc=Exception):
-    def decorator(func):
-        def wrapper(*args):
-            try:
-                return func(*args)
-            except exc:
-                pass
-        return wrapper
-    return decorator
+@_numba.jit(nopython=True, nogil=True)
+def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
+    initial_sigma = 1.0
+    n_params = 5
+
+    spot = spots[index]
+    size, _ = spot.shape
+
+    # Initial values
+    # theta is [x, y, N, bg, S]
+    theta = _np.zeros(n_params, dtype=_np.float32)
+    theta[0], theta[1], theta[2], theta[3] = centroid(spot, size)
+    theta[4] = initial_sigma
+
+    # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
+    dudt = _np.zeros(n_params, dtype=_np.float32)
+    d2udt2 = _np.zeros(n_params, dtype=_np.float32)
+    numerator = _np.zeros(n_params, dtype=_np.float32)
+    denominator = _np.zeros(n_params, dtype=_np.float32)
+
+    old_x = theta[0]
+    old_y = theta[1]
+
+    kk = 0
+    while kk < max_it:      # we do this instead of a for loop for the special case of max_it=0
+        kk += 1
+
+        numerator[:] = 0.0
+        denominator[:] = 0.0
+
+        for ii in range(size):
+            for jj in range(size):
+                PSFx = _gaussian_integral(ii, theta[0], theta[4])
+                PSFy = _gaussian_integral(jj, theta[1], theta[4])
+
+                # Derivatives
+                dudt[0], d2udt2[0] = _derivative_gaussian_integral(ii, theta[0], theta[4], theta[2], PSFy)
+                dudt[1], d2udt2[1] = _derivative_gaussian_integral(jj, theta[1], theta[4], theta[2], PSFx)
+                dudt[2] = PSFx * PSFy
+                d2udt2[2] = 0.0
+                dudt[3] = 1.0
+                d2udt2[3] = 0.0
+                dudt[4], d2udt2[4] = _derivative_gaussian_integral_2d_sigma(ii, jj, theta[0], theta[1], theta[4], theta[2], PSFx, PSFy)
+
+                model = theta[2] * dudt[2] + theta[3]
+                cf = df = 0.0
+                data = spot[ii, jj]
+                if model > 10e-3:
+                    cf = data / model - 1
+                    df = data / model**2
+                cf = _np.minimum(cf, 10e4)
+                df = _np.minimum(df, 10e4)
+
+                for ll in range(n_params):
+                    numerator[ll] += cf * dudt[ll]
+                    denominator[ll] += cf * d2udt2[ll] - df * dudt[ll]**2
+
+        # The update
+        for ll in range(n_params):
+            if denominator[ll] == 0.0:
+                update = _np.sign(numerator[ll] * MAX_STEP[ll])
+            else:
+                update = _np.minimum(_np.maximum(numerator[ll] / denominator[ll], -MAX_STEP[ll]), MAX_STEP[ll])
+            if kk < 5:
+                update *= GAMMA[ll]
+            theta[ll] -= update
+
+        # Other constraints
+        theta[2] = _np.maximum(theta[2], 1.0)
+        theta[3] = _np.maximum(theta[3], 0.0)
+        theta[4] = _np.maximum(theta[4], initial_sigma / 4)
+        theta[4] = _np.minimum(theta[4], 2 * initial_sigma)
+
+        # Check for convergence
+        if (_np.abs(old_x - theta[0]) < eps) and (_np.abs(old_y - theta[1]) < eps):
+            break
+        else:
+            old_x = theta[0]
+            old_y = theta[1]
+
+    thetas[index, 0:5] = theta
+    thetas[index, 5] = theta[4]
+    iterations[index] = kk
+
+    # Calculating the CRLB and LogLikelihood
+    Div = 0.0
+    M = _np.zeros((n_params, n_params), dtype=_np.float32)
+    for ii in range(size):
+        for jj in range(size):
+            PSFx = _gaussian_integral(ii, theta[0], theta[4])
+            PSFy = _gaussian_integral(jj, theta[1], theta[4])
+            model = theta[3] + theta[2] * PSFx * PSFy
+
+            # Calculating derivatives
+            dudt[0], d2udt2[0] = _derivative_gaussian_integral(ii, theta[0], theta[4], theta[2], PSFy)
+            dudt[1], d2udt2[1] = _derivative_gaussian_integral(jj, theta[1], theta[4], theta[2], PSFx)
+            dudt[4], d2udt2[4] = _derivative_gaussian_integral_2d_sigma(ii, jj, theta[0], theta[1], theta[4], theta[2], PSFx, PSFy)
+            dudt[2] = PSFx * PSFy
+            dudt[3] = 1.0
+
+            # Building the Fisher Information Matrix
+            model = theta[3] + theta[2] * dudt[2]
+            for kk in range(n_params):
+                for ll in range(kk, n_params):
+                    M[kk, ll] += dudt[ll] * dudt[kk] / model
+                    M[ll, kk] = M[kk, ll]
+
+            # LogLikelihood
+            if model > 0:
+                data = spot[ii, jj]
+                if data > 0:
+                    Div += data * _np.log(model) - model - data * _np.log(data) + data
+                else:
+                    Div += -model
+
+    likelihoods[index] = Div
+
+    # Matrix inverse (CRLB=F^-1)
+    Minv = _np.linalg.pinv(M)
+    CRLB = _np.zeros(n_params, dtype=_np.float32)
+    for kk in range(n_params):
+        CRLB[kk] = Minv[kk, kk]
+    CRLBs[index, 0:5] = CRLB
+    CRLBs[index, 5] = CRLB[4]
 
 
-@swallow_exception(ValueError)  # This happens when the Fisher information matrix is not invertible, in which case CRLB will not be written to global array
-@_numba.jit(nopython=True, nogil=True, cache=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     initial_sigma = 1.0
     n_params = 6
@@ -189,7 +335,7 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
     # Initial values
     # theta is [x, y, N, bg, Sx, Sy]
     theta = _np.zeros(n_params, dtype=_np.float32)
-    theta[0], theta[1], theta[2], theta[3] = centroid(spot, size, initial_sigma)
+    theta[0], theta[1], theta[2], theta[3] = centroid(spot, size)
     theta[4] = theta[5] = initial_sigma
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
@@ -220,8 +366,8 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
                 d2udt2[2] = 0.0
                 dudt[3] = 1.0
                 d2udt2[3] = 0.0
-                dudt[4], d2udt2[4] = _derivative_gaussian_integral_sigma(ii, theta[0], theta[4], theta[2], PSFy)
-                dudt[5], d2udt2[5] = _derivative_gaussian_integral_sigma(jj, theta[1], theta[5], theta[2], PSFx)
+                dudt[4], d2udt2[4] = _derivative_gaussian_integral_1d_sigma(ii, theta[0], theta[4], theta[2], PSFy)
+                dudt[5], d2udt2[5] = _derivative_gaussian_integral_1d_sigma(jj, theta[1], theta[5], theta[2], PSFx)
 
                 model = theta[2] * dudt[2] + theta[3]
                 cf = df = 0.0
@@ -271,8 +417,8 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
             # Calculating derivatives
             dudt[0], d2udt2[0] = _derivative_gaussian_integral(ii, theta[0], theta[4], theta[2], PSFy)
             dudt[1], d2udt2[1] = _derivative_gaussian_integral(jj, theta[1], theta[5], theta[2], PSFx)
-            dudt[4], d2udt2[4] = _derivative_gaussian_integral_sigma(ii, theta[0], theta[4], theta[2], PSFy)
-            dudt[5], d2udt2[5] = _derivative_gaussian_integral_sigma(jj, theta[1], theta[5], theta[2], PSFx)
+            dudt[4], d2udt2[4] = _derivative_gaussian_integral_1d_sigma(ii, theta[0], theta[4], theta[2], PSFy)
+            dudt[5], d2udt2[5] = _derivative_gaussian_integral_1d_sigma(jj, theta[1], theta[5], theta[2], PSFx)
             dudt[2] = PSFx * PSFy
             dudt[3] = 1.0
 
@@ -294,7 +440,7 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
     likelihoods[index] = Div
 
     # Matrix inverse (CRLB=F^-1)
-    Minv = _np.linalg.inv(M)        # Reminder for CUDA implementation: Calculate CRLB and LL on CPU after iterations on CUDA (inv will be a mess)
+    Minv = _np.linalg.pinv(M)
     CRLB = _np.zeros(n_params, dtype=_np.float32)
     for kk in range(n_params):
         CRLB[kk] = Minv[kk, kk]

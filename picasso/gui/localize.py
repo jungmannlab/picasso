@@ -283,19 +283,22 @@ class ParametersDialog(QtGui.QDialog):
         fit_groupbox = QtGui.QGroupBox('Fit Settings')
         vbox.addWidget(fit_groupbox)
         fit_grid = QtGui.QGridLayout(fit_groupbox)
-        fit_grid.addWidget(QtGui.QLabel('Convergence Criterion:'), 0, 0)
+        self.symmetric_checkbox = QtGui.QCheckBox('Symmetric PSF')
+        self.symmetric_checkbox.setChecked(True)
+        fit_grid.addWidget(self.symmetric_checkbox, 0, 1)
+        fit_grid.addWidget(QtGui.QLabel('Convergence Criterion:'), 1, 0)
         self.convergence_spinbox = QtGui.QDoubleSpinBox()
         self.convergence_spinbox.setRange(0, 1)
         self.convergence_spinbox.setDecimals(5)
         self.convergence_spinbox.setValue(0.001)
         self.convergence_spinbox.setSingleStep(0.001)
-        fit_grid.addWidget(self.convergence_spinbox, 0, 1)
-        fit_grid.addWidget(QtGui.QLabel('Max. Iterations:'), 1, 0)
+        fit_grid.addWidget(self.convergence_spinbox, 1, 1)
+        fit_grid.addWidget(QtGui.QLabel('Max. Iterations:'), 2, 0)
         self.max_iterations_spinbox = QtGui.QSpinBox()
         self.max_iterations_spinbox.setRange(0, 999999)
         self.max_iterations_spinbox.setValue(100)
         self.max_iterations_spinbox.setSingleStep(10)
-        fit_grid.addWidget(self.max_iterations_spinbox, 1, 1)
+        fit_grid.addWidget(self.max_iterations_spinbox, 2, 1)
 
     def on_camera_changed(self, index):
         self.update_readmodes()
@@ -793,6 +796,7 @@ class Window(QtGui.QMainWindow):
                 em = parameters['Electron Multiplying']
                 readmode = parameters['Readout Mode']
                 preamp = parameters['Pre-Amp Gain']
+                camera_info['baseline'] = localize.CONFIG['Cameras'][camera]['Baseline']
                 camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode][preamp]
                 if em:
                     camera_info['gain'] = parameters['EM Real Gain']
@@ -801,6 +805,7 @@ class Window(QtGui.QMainWindow):
                 excitation = parameters['Excitation Wavelength']
                 camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
             elif sensor == 'sCMOS':
+                camera_info['baseline'] = localize.CONFIG['Cameras'][camera]['Baseline']
                 readoutrate = parameters['Readout Rate']
                 gain = parameters['Gain Setting']
                 camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][readoutrate][gain]
@@ -810,7 +815,9 @@ class Window(QtGui.QMainWindow):
                 pass
             eps = self.parameters_dialog.convergence_spinbox.value()
             max_it = self.parameters_dialog.max_iterations_spinbox.value()
-            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'], eps, max_it)
+            method = {True: 'sigma', False: 'sigmaxy'}[self.parameters_dialog.symmetric_checkbox.isChecked()]
+            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'],
+                                        eps, max_it, method)
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
@@ -881,7 +888,7 @@ class FitWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float)
 
-    def __init__(self, movie, camera_info, identifications, box, eps, max_it):
+    def __init__(self, movie, camera_info, identifications, box, eps, max_it, method):
         super().__init__()
         self.movie = movie
         self.camera_info = camera_info
@@ -889,13 +896,14 @@ class FitWorker(QtCore.QThread):
         self.box = box
         self.eps = eps
         self.max_it = max_it
+        self.method = method
 
     def run(self):
         N = len(self.identifications)
         t0 = time.time()
         current, thetas, CRLBs, likelihoods, iterations = localize.fit_async(self.movie, self.camera_info,
                                                                              self.identifications, self.box,
-                                                                             self.eps, self.max_it)
+                                                                             self.eps, self.max_it, self.method)
         while current[0] < N:
             self.progressMade.emit(current[0], N)
             time.sleep(0.2)

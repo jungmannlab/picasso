@@ -13,22 +13,20 @@ import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
 from tqdm import tqdm as _tqdm
 from scipy import interpolate as _interpolate
+from scipy.special import iv as _iv
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import matplotlib.pyplot as _plt
 from scipy.optimize import minimize as _minimize
 import itertools as _itertools
+import lmfit as _lmfit
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
 from .localize import LOCS_DTYPE as _LOCS_DTYPE
 
 
-def _get_index_blocks(locs, info, size):
-    locs = locs[locs.x > 0]
-    locs = locs[locs.y > 0]
-    locs = locs[locs.x < info[0]['Width']]
-    locs = locs[locs.y < info[0]['Height']]
+def get_index_blocks(locs, info, size):
     # Sort locs by indices
     x_index = _np.uint32(locs.x / size)
     y_index = _np.uint32(locs.y / size)
@@ -43,7 +41,22 @@ def _get_index_blocks(locs, info, size):
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     # Fill in block starts and ends
     _fill_index_blocks(block_starts, block_ends, x_index, y_index)
-    return locs, x_index, y_index, block_starts, block_ends
+    return locs, size, x_index, y_index, block_starts, block_ends
+
+
+def get_block_locs_at(x, y, index_blocks):
+    locs, size, x_index, y_index, block_starts, block_ends = index_blocks
+    x_index = _np.uint32(x / size)
+    y_index = _np.uint32(y / size)
+    K, L = block_starts.shape
+    indices = []
+    for k in range(y_index - 1, y_index+2):
+        if 0 < k < K:
+            for l in range(x_index - 1, x_index + 2):
+                if 0 < l < L:
+                    indices.append(list(range(block_starts[k, l], block_ends[k, l])))
+    indices = list(_itertools.chain(*indices))
+    return locs[indices]
 
 
 @_numba.jit(nopython=True)
@@ -92,7 +105,7 @@ def _distance_histogram(locs, bin_size, r_max, x_index, y_index, block_starts, b
 
 
 def distance_histogram(locs, info, bin_size, r_max):
-    locs, x_index, y_index, block_starts, block_ends = _get_index_blocks(locs, info, r_max)
+    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, r_max)
     N = len(locs)
     n_threads = _multiprocessing.cpu_count()
     chunk = int(N / n_threads)
@@ -104,6 +117,82 @@ def distance_histogram(locs, info, bin_size, r_max):
     return _np.sum(results, axis=0)
 
 
+def nena(locs, info):
+    bin_centers, dnfl_ = next_frame_neighbor_distance_histogram(locs)
+
+    def func(d, a, s, ac, dc, sc):
+        f = a * (d / s**2) * _np.exp(-0.5 * d**2 / s**2)
+        fc = ac * (d / sc**2) * _np.exp(-0.5 * (d**2 + dc**2) / sc**2) * _iv(0, d * dc / sc)
+        return f + fc
+
+    pdf_model = _lmfit.Model(func)
+    params = _lmfit.Parameters()
+    area = _np.trapz(dnfl_, bin_centers)
+    median_lp = _np.mean([_np.median(locs.lpx), _np.median(locs.lpy)])
+    params.add('a', value=area/2, min=0)
+    params.add('s', value=median_lp, min=0)
+    params.add('ac', value=area/2, min=0)
+    params.add('dc', value=2*median_lp, min=0)
+    params.add('sc', value=median_lp, min=0)
+    result = pdf_model.fit(dnfl_, params, d=bin_centers)
+    return result, result.best_values['s']
+
+
+def next_frame_neighbor_distance_histogram(locs):
+    locs.sort(kind='mergesort', order='frame')
+    frame = locs.frame
+    x = locs.x
+    y = locs.y
+    if hasattr(locs, 'group'):
+        group = locs.group
+    else:
+        group = _np.zeros(len(locs), dtype=_np.int32)
+    bin_size = 0.001
+    d_max = 1.0
+    return _nfndh(frame, x, y, group, d_max, bin_size)
+
+
+@_numba.jit(nopython=True)
+def _nfndh(frame, x, y, group, d_max, bin_size):
+    N = len(frame)
+    bins = _np.arange(0, d_max, bin_size)
+    dnfl = _np.zeros(len(bins))
+    for i in range(N):
+        d = distance_to_next_frame_neighbor(N, frame, x, y, group, i, d_max)
+        if d != -1.0:
+            bin = int(d / bin_size)
+            dnfl[bin] += 1
+    bin_centers = bins + bin_size / 2
+    return bin_centers, dnfl
+
+
+@_numba.jit(nopython=True)
+def distance_to_next_frame_neighbor(N, frame, x, y, group, i, d_max):
+    frame_i = frame[i]
+    x_i = x[i]
+    y_i = y[i]
+    group_i = group[i]
+    min_frame = frame_i + 1
+    for min_index in range(i + 1, N):
+        if frame[min_index] >= min_frame:
+            break
+    max_frame = frame_i + 1
+    for max_index in range(min_index, N):
+        if frame[max_index] > max_frame:
+            break
+    d_max_2 = d_max**2
+    for j in range(min_index, max_index):
+        if group[j] == group_i:
+            dx2 = (x_i - x[j])**2
+            if dx2 <= d_max_2:
+                dy2 = (y_i - y[j])**2
+                if dy2 <= d_max_2:
+                    d = _np.sqrt(dx2 + dy2)
+                    if d <= d_max:
+                        return d
+    return -1.0
+
+
 def pair_correlation(locs, info, bin_size, r_max):
     dh = distance_histogram(locs, info, bin_size, r_max)
     bins_lower = _np.arange(0, r_max, bin_size)
@@ -113,7 +202,6 @@ def pair_correlation(locs, info, bin_size, r_max):
 
 def dbscan(locs, radius, min_density):
     print('Identifying clusters...')
-    locs = _lib.ensure_finite(locs)
     locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
     X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
@@ -176,7 +264,7 @@ def _local_density(locs, radius, x_index, y_index, block_starts, block_ends, sta
 
 
 def compute_local_density(locs, info, radius):
-    locs, x_index, y_index, block_starts, block_ends = _get_index_blocks(locs, info, radius)
+    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, radius)
     N = len(locs)
     n_threads = _multiprocessing.cpu_count()
     chunk = int(N / n_threads)
@@ -196,7 +284,7 @@ def compute_dark_times(locs):
     return locs
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True, cache=False)
 def _compute_dark_times(locs, last_frame):
     N = len(locs)
     max_frame = locs.frame.max()
@@ -214,9 +302,6 @@ def _compute_dark_times(locs, last_frame):
 
 
 def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average'):
-    locs = _lib.ensure_finite(locs)
-    locs = locs[locs.lpx > 0.0]
-    locs = locs[locs.lpy > 0.0]
     locs.sort(kind='mergesort', order='frame')
     if hasattr(locs, 'group'):
         group = locs.group
@@ -236,8 +321,6 @@ def get_link_groups(locs, d_max, max_dark_time, group):
     frame = locs.frame
     x = locs.x
     y = locs.y
-    lpx = locs.lpx
-    lpy = locs.lpy
     N = len(x)
     link_group = -_np.ones(N, dtype=_np.int32)
     current_link_group = -1
@@ -351,7 +434,6 @@ def _link_loc_groups(locs, link_group, group):
 
 
 def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
-    locs = _lib.ensure_finite(locs)
     if mode in ['render', 'std']:
         drift = get_drift_rcc(locs, info, segmentation, mode, movie, display)
     elif mode == 'framepair':
@@ -362,7 +444,7 @@ def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
     return drift, locs
 
 
-@_numba.jit(nopython=True, cache=True)
+@_numba.jit(nopython=True, cache=False)
 def get_frame_shift(locs, i, j, min_prob, k):
     N = len(locs)
     frame = locs.frame
@@ -513,8 +595,6 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None, display=T
 
 
 def align(target_locs, target_info, locs, info, affine=False, display=False):
-    target_locs = _lib.ensure_finite(target_locs)
-    locs = _lib.ensure_finite(locs)
     N_target, target_image = _render.render(target_locs, target_info, oversampling=1,
                                             blur_method='gaussian', min_blur_width=1)
     N, image = _render.render(locs, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
@@ -575,7 +655,6 @@ Translation (x,y): {}, {}'''.format(Ox, Oy, W, H, 360*theta/(2*_np.pi), A, B, X,
 
 
 def groupprops(locs):
-    locs = _lib.ensure_finite(locs)
     try:
         locs = locs[locs.dark != -1]
     except AttributeError:
