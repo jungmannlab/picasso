@@ -43,12 +43,13 @@ class PickSimilarWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(list)
 
-    def __init__(self, locs, infos, picks, d):
+    def __init__(self, locs, infos, picks, d, std_range):
         super().__init__()
         self.locs = locs
         self.infos = infos
         self.picks = picks
         self.d = d
+        self.std_range = std_range
 
     def rmsd_at_com(self, locs):
         com_x = locs.x.mean()
@@ -67,10 +68,10 @@ class PickSimilarWorker(QtCore.QThread):
         mean_rmsd = np.mean(rmsd)
         std_n_locs = np.std(n_locs)
         std_rmsd = np.std(rmsd)
-        min_n_locs = mean_n_locs - 2*std_n_locs
-        max_n_locs = mean_n_locs + 2*std_n_locs
-        min_rmsd = mean_rmsd - 2*std_rmsd
-        max_rmsd = mean_rmsd + 2*std_rmsd
+        min_n_locs = mean_n_locs - self.std_range * std_n_locs
+        max_n_locs = mean_n_locs + self.std_range * std_n_locs
+        min_rmsd = mean_rmsd - self.std_range * std_rmsd
+        max_rmsd = mean_rmsd + self.std_range * std_rmsd
         index_blocks = postprocess.get_index_blocks(self.locs[0], self.infos[0], self.d)
         locs = index_blocks[0]
         x_similar = np.array([_[0] for _ in self.picks])
@@ -164,7 +165,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.setWindowTitle('Tools Settings')
         self.setModal(False)
         grid = QtGui.QGridLayout(self)
-        grid.addWidget(QtGui.QLabel('Pick Radius:'), 0, 0)
+        grid.addWidget(QtGui.QLabel('Pick Radius (cam. pixel):'), 0, 0)
         self.pick_diameter = QtGui.QDoubleSpinBox()
         self.pick_diameter.setRange(0, 999999)
         self.pick_diameter.setValue(1)
@@ -173,6 +174,13 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.pick_diameter.setKeyboardTracking(False)
         self.pick_diameter.valueChanged.connect(self.on_pick_diameter_changed)
         grid.addWidget(self.pick_diameter, 0, 1)
+        grid.addWidget(QtGui.QLabel('Pick similar +/- range (std)'), 1, 0)
+        self.pick_similar_range = QtGui.QDoubleSpinBox()
+        self.pick_similar_range.setRange(0, 100000)
+        self.pick_similar_range.setValue(2)
+        self.pick_similar_range.setSingleStep(0.1)
+        self.pick_similar_range.setDecimals(1)
+        grid.addWidget(self.pick_similar_range, 1, 1)
 
     def on_pick_diameter_changed(self, diameter):
         self.window.view.update_scene(use_cache=True)
@@ -573,7 +581,8 @@ class View(QtGui.QLabel):
 
     def pick_similar(self):
         d = self.window.tools_settings_dialog.pick_diameter.value()
-        self.pick_similar_worker = PickSimilarWorker(self.locs, self.infos, self._picks, d)
+        std_range = self.window.tools_settings_dialog.pick_similar_range.value()
+        self.pick_similar_worker = PickSimilarWorker(self.locs, self.infos, self._picks, d, std_range)
         self.pick_similar_worker.progressMade.connect(self.on_pick_similar_progress)
         self.pick_similar_worker.finished.connect(self.on_pick_similar_finished)
         self.pick_similar_worker.start()
@@ -895,7 +904,8 @@ class Window(QtGui.QMainWindow):
         tools_settings_action.setShortcut('Ctrl+T')
         tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
         postprocess_menu = self.menu_bar.addMenu('Postprocess')
-        undrift_action = postprocess_menu.addAction('Correct drift from picked')
+        undrift_action = postprocess_menu.addAction('Undrift from picked')
+        undrift_action.setShortcut('Ctrl+U')
         undrift_action.triggered.connect(self.view.undrift_from_picked)
         self.load_user_settings()
 
