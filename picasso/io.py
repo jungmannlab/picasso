@@ -45,6 +45,17 @@ def load_raw(path, memory_map=True):
     return movie, info
 
 
+def save_raw(path, movie, info):
+    movie.tofile(path)
+    info_path = _ospath.splitext(path)[0] + '.yaml'
+    save_info(info_path, info)
+
+def multiple_filenames(path, index):
+    base, ext = _ospath.splitext(path)
+    filename = base + '_' + str(index) + ext
+    return filename
+
+
 def load_tif(path):
     movie = TiffMultiMap(path, memmap_frames=False)
     info = movie.info()
@@ -78,9 +89,9 @@ def load_user_settings():
     return _lib.AutoDict(settings)
 
 
-def save_info(path, info):
+def save_info(path, info, default_flow_style=False):
     with open(path, 'w') as file:
-        _yaml.dump_all(info, file, default_flow_style=False)
+        _yaml.dump_all(info, file, default_flow_style=default_flow_style)
 
 
 def _to_dict_walk(node):
