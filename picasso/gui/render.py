@@ -94,7 +94,7 @@ class PickSimilarWorker(QtCore.QThread):
                 # but sleeping shortly forces a thread context switch so that the GUI can update
                 # time.sleep(1e-10)
                 n_block_locs = postprocess.n_block_locs_at(x_grid, y_grid, size, K, L, block_starts, block_ends)
-                if n_block_locs > 1:
+                if n_block_locs > min_n_locs:
                     block_locs = postprocess.get_block_locs_at(x_grid, y_grid, index_blocks)
                     picked_locs = lib.locs_at(x_grid, y_grid, block_locs, r)
                     if len(picked_locs) > 1:
