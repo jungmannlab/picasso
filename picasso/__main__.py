@@ -394,6 +394,11 @@ def main():
     render_parser.add_argument('-c', '--cmap', choices=['viridis', 'inferno', 'plasma', 'magma', 'hot', 'gray'], help='the colormap to be applied')
     render_parser.add_argument('-s', '--silent', action='store_true', help='do not open the image file')
 
+    # simulate
+    simulate_parser = subparsers.add_parser('simulate', help='simulate DNA-PAINT movies')
+
+    # design
+    design_parser = subparsers.add_parser('design', help='design RRO structures')
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -435,6 +440,12 @@ def main():
             _groupprops(args.files)
         elif args.command == 'pc':
             _pair_correlation(args.files, args.binsize, args.rmax)
+        elif args.command == 'simulate':
+            from .gui import simulate
+            simulate.main()
+        elif args.command == 'design':
+            from .gui import design
+            design.main()
     else:
         parser.print_help()
 
