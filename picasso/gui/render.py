@@ -73,7 +73,7 @@ class PickSimilarWorker(QtCore.QThread):
         min_rmsd = mean_rmsd - self.std_range * std_rmsd
         max_rmsd = mean_rmsd + self.std_range * std_rmsd
         index_blocks = postprocess.get_index_blocks(self.locs[0], self.infos[0], self.d)
-        locs = index_blocks[0]
+        locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
         x_similar = np.array([_[0] for _ in self.picks])
         y_similar = np.array([_[1] for _ in self.picks])
         # preparations for hex grid search
@@ -90,25 +90,30 @@ class PickSimilarWorker(QtCore.QThread):
             else:
                 y_range = y_range_base
             for y_grid in y_range:
-                block_locs = postprocess.get_block_locs_at(x_grid, y_grid, index_blocks)
-                picked_locs = lib.locs_at(x_grid, y_grid, block_locs, r)
-                if len(picked_locs):
-                    # Move to COM peak
-                    x_test_old = x_grid
-                    y_test_old = y_grid
-                    x_test = picked_locs.x.mean()
-                    y_test = picked_locs.y.mean()
-                    while np.abs(x_test - x_test_old) > 1e-3 or np.abs(y_test - y_test_old) > 1e-3:
-                        x_test_old = x_test
-                        y_test_old = y_test
-                        picked_locs = lib.locs_at(x_test, y_test, block_locs, r)
+                # The GIL causes this thread to take over the whole CPU,
+                # but sleeping shortly forces a thread context switch so that the GUI can update
+                # time.sleep(1e-10)
+                n_block_locs = postprocess.n_block_locs_at(x_grid, y_grid, size, K, L, block_starts, block_ends)
+                if n_block_locs > 1:
+                    block_locs = postprocess.get_block_locs_at(x_grid, y_grid, index_blocks)
+                    picked_locs = lib.locs_at(x_grid, y_grid, block_locs, r)
+                    if len(picked_locs) > 1:
+                        # Move to COM peak
+                        x_test_old = x_grid
+                        y_test_old = y_grid
                         x_test = picked_locs.x.mean()
                         y_test = picked_locs.y.mean()
-                    if np.all((x_similar - x_test)**2 + (y_similar - y_test)**2 > d2):
-                        if min_n_locs < len(picked_locs) < max_n_locs:
-                            if min_rmsd < self.rmsd_at_com(picked_locs) < max_rmsd:
-                                x_similar = np.append(x_similar, x_test)
-                                y_similar = np.append(y_similar, y_test)
+                        while np.abs(x_test - x_test_old) > 1e-3 or np.abs(y_test - y_test_old) > 1e-3:
+                            x_test_old = x_test
+                            y_test_old = y_test
+                            picked_locs = lib.locs_at(x_test, y_test, block_locs, r)
+                            x_test = picked_locs.x.mean()
+                            y_test = picked_locs.y.mean()
+                        if np.all((x_similar - x_test)**2 + (y_similar - y_test)**2 > d2):
+                            if min_n_locs < len(picked_locs) < max_n_locs:
+                                if min_rmsd < self.rmsd_at_com(picked_locs) < max_rmsd:
+                                    x_similar = np.append(x_similar, x_test)
+                                    y_similar = np.append(y_similar, y_test)
             self.progressMade.emit(int(round(100 * i / nx)))
         self.finished.emit(list(zip(x_similar, y_similar)))
 
@@ -450,7 +455,7 @@ class View(QtGui.QLabel):
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
 
-    def get_render_kwargs(self):
+    def get_render_kwargs(self, viewport=None):
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
         optimal_oversampling = self.optimal_oversampling()
         if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
@@ -464,8 +469,10 @@ class View(QtGui.QLabel):
                                               'Oversampling will be adjusted to match the display pixel density.')
                 oversampling = optimal_oversampling
                 self.window.display_settings_dialog.set_oversampling_silently(optimal_oversampling)
+        if viewport is None:
+            viewport = self.viewport
         return {'oversampling': oversampling,
-                'viewport': self.viewport,
+                'viewport': viewport,
                 'blur_method': self.window.display_settings_dialog.blur_methods[blur_button],
                 'min_blur_width': float(self.window.display_settings_dialog.min_blur_width.value())}
 
@@ -612,8 +619,8 @@ class View(QtGui.QLabel):
         self._picks = []
         self.add_picks(new_picks)
 
-    def render_scene(self, autoscale=False, use_cache=False, cache=True):
-        kwargs = self.get_render_kwargs()
+    def render_scene(self, autoscale=False, use_cache=False, cache=True, viewport=None):
+        kwargs = self.get_render_kwargs(viewport=viewport)
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache)
@@ -756,6 +763,7 @@ class View(QtGui.QLabel):
                               'Pick Diameter': self.window.tools_settings_dialog.pick_diameter.value(),
                               '# Picks': n_picks})
         io.save_locs(path, self.locs[0], self.infos[0])
+        self.locs_path = path
 
     def update_cursor(self):
         if self._mode == 'Zoom':
@@ -935,7 +943,7 @@ class Window(QtGui.QMainWindow):
         if path:
             movie_height, movie_width = self.view.movie_size()
             viewport = [(0, 0), (movie_height, movie_width)]
-            qimage = self.view.render_scene(viewport, cache=False)
+            qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage.save(path)
 
     def load_user_settings(self):

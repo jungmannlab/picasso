@@ -15,6 +15,7 @@ from numpy.lib.recfunctions import drop_fields as _drop_fields
 import collections as _collections
 import glob as _glob
 import os.path as _ospath
+import numba as _numba
 from picasso import io as _io
 
 
@@ -62,7 +63,8 @@ def ensure_sanity(locs, info):
 def locs_at(x, y, locs, r):
     dx = locs.x - x
     dy = locs.y - y
-    is_picked = _np.sqrt(dx**2 + dy**2) < r
+    r2 = r**2
+    is_picked = dx**2 + dy**2 < r2
     return locs[is_picked]
 
 

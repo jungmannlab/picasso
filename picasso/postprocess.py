@@ -41,14 +41,27 @@ def get_index_blocks(locs, info, size):
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     # Fill in block starts and ends
     _fill_index_blocks(block_starts, block_ends, x_index, y_index)
-    return locs, size, x_index, y_index, block_starts, block_ends
+    K, L = block_starts.shape
+    return locs, size, x_index, y_index, block_starts, block_ends, K, L
+
+
+@_numba.jit(nopython=True, nogil=True)
+def n_block_locs_at(x, y, size, K, L, block_starts, block_ends):
+    x_index = _np.uint32(x / size)
+    y_index = _np.uint32(y / size)
+    n_block_locs = 0
+    for k in range(y_index - 1, y_index + 2):
+        if 0 < k < K:
+            for l in range(x_index - 1, x_index + 2):
+                if 0 < l < L:
+                    n_block_locs += block_ends[k, l] - block_starts[k, l]
+    return n_block_locs
 
 
 def get_block_locs_at(x, y, index_blocks):
-    locs, size, x_index, y_index, block_starts, block_ends = index_blocks
+    locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
     x_index = _np.uint32(x / size)
     y_index = _np.uint32(y / size)
-    K, L = block_starts.shape
     indices = []
     for k in range(y_index - 1, y_index+2):
         if 0 < k < K:
