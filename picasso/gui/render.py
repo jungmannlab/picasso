@@ -740,22 +740,33 @@ class View(QtGui.QLabel):
         for i, locs in enumerate(self.picked_locs_iter()):
             drift_x[i, locs.frame] = locs.x - np.mean(locs.x)
             drift_y[i, locs.frame] = locs.y - np.mean(locs.y)
-        drift_x = np.nanmean(drift_x, 0)
-        drift_y = np.nanmean(drift_y, 0)
+        drift_x_mean = np.nanmean(drift_x, 0)
+        drift_y_mean = np.nanmean(drift_y, 0)
+
+        # Filter outliers
+        drift_x_std = np.nanstd(drift_x, 0)
+        drift_y_std = np.nanstd(drift_y, 0)
+        is_outlier_x = np.abs(drift_x - drift_x_mean) > 2 * drift_x_std
+        is_outlier_y = np.abs(drift_y - drift_y_mean) > 2 * drift_y_std
+        is_outlier = np.logical_or(is_outlier_x, is_outlier_y)
+        drift_x[is_outlier] = np.nan
+        drift_y[is_outlier] = np.nan
+        drift_x_mean = np.nanmean(drift_x, 0)
+        drift_y_mean = np.nanmean(drift_y, 0)
 
         def nan_helper(y):
             return np.isnan(y), lambda z: z.nonzero()[0]
 
-        nans, nonzero = nan_helper(drift_x)
-        drift_x[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_x[~nans])
-        nans, nonzero = nan_helper(drift_y)
-        drift_y[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_y[~nans])
+        nans, nonzero = nan_helper(drift_x_mean)
+        drift_x_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_x_mean[~nans])
+        nans, nonzero = nan_helper(drift_y_mean)
+        drift_y_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_y_mean[~nans])
 
-        drift_x = np.convolve(drift_x, np.ones((100,))/100, mode='same')
-        drift_y = np.convolve(drift_y, np.ones((100,))/100, mode='same')
+        drift_x_mean = np.convolve(drift_x_mean, np.ones((100,))/100, mode='same')
+        drift_y_mean = np.convolve(drift_y_mean, np.ones((100,))/100, mode='same')
 
-        self.locs[0].x -= drift_x[self.locs[0].frame]
-        self.locs[0].y -= drift_y[self.locs[0].frame]
+        self.locs[0].x -= drift_x_mean[self.locs[0].frame]
+        self.locs[0].y -= drift_y_mean[self.locs[0].frame]
         self.update_scene()
 
         path = os.path.splitext(self.locs_path)[0] + '_undrift.hdf5'
