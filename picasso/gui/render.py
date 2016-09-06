@@ -38,6 +38,28 @@ class NenaWorker(QtCore.QThread):
         self.finished.emit(lp)
 
 
+class PickInfoWorker(QtCore.QThread):
+
+    finished = QtCore.pyqtSignal(int)
+
+    def __init__(self, locs, info, picks, r):
+        super().__init__()
+        self.locs = locs
+        self.info = info
+        self.picks = picks
+        self.r = r
+
+    def run(self):
+        d = 2 * self.r
+        index_blocks = postprocess.get_index_blocks(self.locs, self.info, d)
+        N = 0
+        for x, y in self.picks:
+            block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+            picked_locs = lib.locs_at(x, y, block_locs, self.r)
+            N += len(picked_locs)
+        self.finished.emit(N)
+
+
 class PickSimilarWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int)
@@ -200,6 +222,19 @@ class InfoDialog(QtGui.QDialog):
         fov_grid.addWidget(QtGui.QLabel('# Localizations:'), 0, 0)
         self.locs_label = QtGui.QLabel()
         fov_grid.addWidget(self.locs_label, 0, 1)
+        # Picks
+        picks_groupbox = QtGui.QGroupBox('Picks')
+        vbox.addWidget(picks_groupbox)
+        picks_grid = QtGui.QGridLayout(picks_groupbox)
+        picks_grid.addWidget(QtGui.QLabel('# Picks:'), 0, 0)
+        self.n_picks = QtGui.QLabel()
+        picks_grid.addWidget(self.n_picks, 0, 1)
+        compute_pick_info_button = QtGui.QPushButton('Calculate info below')
+        compute_pick_info_button.clicked.connect(self.window.view.calculate_pick_info_long)
+        picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 2)
+        picks_grid.addWidget(QtGui.QLabel('# Localizations:'), 2, 0)
+        self.n_locs_label = QtGui.QLabel()
+        picks_grid.addWidget(self.n_locs_label, 2, 1)
 
     def calculate_nena_lp(self):
         if len(self.window.view.locs):
@@ -428,6 +463,7 @@ class View(QtGui.QLabel):
 
     def add_pick(self, position, update_scene=True):
         self._picks.append(position)
+        self.update_pick_info_short()
         if update_scene:
             self.update_scene(use_cache=True)
 
@@ -670,6 +706,7 @@ class View(QtGui.QLabel):
                 break
         else:
             self._picks = []
+            self.update_pick_info_short()
             self.update_scene()
             return
         for x_, y_ in self._picks:
@@ -854,6 +891,18 @@ class View(QtGui.QLabel):
             painter.end()
             cursor = QtGui.QCursor(pixmap)
             self.setCursor(cursor)
+
+    def calculate_pick_info_long(self):
+        r = self.window.tools_settings_dialog.pick_diameter.value() / 2
+        self.pick_info_worker = PickInfoWorker(self.locs[0], self.infos[0], self._picks, r)
+        self.pick_info_worker.finished.connect(self.update_pick_info_long)
+        self.pick_info_worker.start()
+
+    def update_pick_info_long(self, n_locs):
+        self.window.info_dialog.n_locs_label.setText('{:,}'.format(n_locs))
+
+    def update_pick_info_short(self):
+        self.window.info_dialog.n_picks.setText(str(len(self._picks)))
 
     def update_scene(self, viewport=None, autoscale=False, use_cache=False):
         n_channels = len(self.locs)
