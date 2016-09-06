@@ -607,18 +607,41 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None, display=T
     return drift
 
 
-def align(target_locs, target_info, locs, info, affine=False, display=False):
-    N_target, target_image = _render.render(target_locs, target_info, oversampling=1,
-                                            blur_method='gaussian', min_blur_width=1)
-    N, image = _render.render(locs, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
-    target_pad = [int(_/4) for _ in target_image.shape]
-    target_image_pad = _np.pad(target_image, target_pad, 'constant')
-    image_pad = [int(_/4) for _ in image.shape]
-    image = _np.pad(image, image_pad, 'constant')
-    dy, dx = _imageprocess.get_image_shift(target_image_pad, image, 7, None, display=display)
-    print('Image shift: dx={}, dy={}.'.format(dx, dy))
-    locs.y -= dy
-    locs.x -= dx
+def align(locs, infos, display=False):
+    kwargs = {'oversampling': 1, 'blur_method': 'gaussian', 'min_blur_width': 1}
+    renderings = [_render.render(locs_, info, **kwargs) for locs_, info in zip(locs, infos)]
+    Ns = [rendering[0] for rendering in renderings]
+    images = [rendering[1] for rendering in renderings]
+    padding = int(images[0].shape / 4)
+    images = [_np.pad(_, padding, 'constant') for _ in images]
+    n_images = len(images)
+
+    # RCC style shift estimation
+    roi = 32    # maximum shift is 32 pixels
+    n_pairs = int(n_images * (n_images - 1) / 2)
+    rij = _np.zeros((n_pairs, 2))
+    A = _np.zeros((n_pairs, n_images - 1))
+    flag = 0
+    for i in range(n_images - 1):
+        for j in range(i+1, n_images):
+            dyij, dxij = _imageprocess.get_image_shift(images[i], images[j], 5, roi)
+            rij[flag, 0] = dyij
+            rij[flag, 1] = dxij
+            A[flag, i:j] = 1
+            flag += 1
+
+    Dj = _np.dot(_np.linalg.pinv(A), rij)
+    drift_y = _np.insert(_np.cumsum(Dj[:, 0]), 0, 0)
+    drift_x = _np.insert(_np.cumsum(Dj[:, 1]), 0, 0)
+
+    print('Image x shifts: {}'.format(drift_x))
+    print('Image y shifts: {}'.format(drift_y))
+
+    for locs_, dx, dy in zip(locs, drift_x, drift_y):
+        locs_.y -= dy
+        locs_.x -= dx
+
+    '''
     if affine:
         print('Attempting affine transformation - this may take a while...')
         locsT = _np.rec.array((locs.x, locs.y, locs.lpx, locs.lpy), dtype=[('x', 'f4'), ('y', 'f4'), ('lpx', 'f4'), ('lpy', 'f4')])
@@ -658,12 +681,9 @@ def align(target_locs, target_info, locs, info, affine=False, display=False):
         result = _minimize(affine_xcorr_negmax, T0, args=(target_image, locs),
                            method='COBYLA', options={'rhobeg': init_steps})
         Ox, Oy, W, H, theta, A, B, X, Y = result.x
-        print('''Origin shift (x,y): {}, {}
-Scale (x,y): {}, {}
-Rotation (deg): {}
-Shear (x,y): {}, {}
-Translation (x,y): {}, {}'''.format(Ox, Oy, W, H, 360*theta/(2*_np.pi), A, B, X, Y))
+        print('Origin shift (x,y): {}, {}\nScale (x,y): {}, {}\nRotation (deg): {}\nShear (x,y): {}, {}\nTranslation (x,y): {}, {}'.format(Ox, Oy, W, H, 360*theta/(2*_np.pi), A, B, X, Y))
         locs.x, locs.y = apply_transforms(locs, result.x)
+        '''
     return locs
 
 
