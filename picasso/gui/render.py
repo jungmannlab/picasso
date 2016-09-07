@@ -247,8 +247,19 @@ class InfoDialog(QtGui.QDialog):
         self.mean_len = QtGui.QLabel()
         picks_grid.addWidget(self.mean_len, 4, 1)
         picks_grid.addWidget(QtGui.QLabel('Mean dark time:'), 5, 0)
-        self.mean_dark = QtGui.QLabel()
-        picks_grid.addWidget(self.mean_dark, 5, 1)
+        self.mean_dark_label = QtGui.QLabel()
+        picks_grid.addWidget(self.mean_dark_label, 5, 1)
+        picks_grid.addWidget(QtGui.QLabel('Influx rate (1/s):'), 6, 0)
+        self.influx_rate = QtGui.QDoubleSpinBox()
+        self.influx_rate.setRange(0, 1e10)
+        self.influx_rate.setDecimals(5)
+        self.influx_rate.setValue(0.03)
+        self.influx_rate.valueChanged.connect(self.update_binding_sites)
+        picks_grid.addWidget(self.influx_rate, 6, 1)
+        picks_grid.addWidget(QtGui.QLabel('Binding sites:'), 7, 0)
+        self.n_binding_sites = QtGui.QLabel()
+        picks_grid.addWidget(self.n_binding_sites, 7, 1)
+        self.mean_dark = None
 
     def calculate_nena_lp(self):
         if len(self.window.view.locs):
@@ -264,6 +275,12 @@ class InfoDialog(QtGui.QDialog):
             self.nena_worker = NenaWorker(self.window.view.locs[0], self.window.view.infos[0])
             self.nena_worker.finished.connect(self.update_nena_lp)
             self.nena_worker.start()
+
+    def update_binding_sites(self, influx=None):
+        if influx is None:
+            influx = self.influx_rate.value()
+        n_binding_sites = 1 / (influx * self.mean_dark)
+        self.n_binding_sites.setText('{:,.2f}'.format(n_binding_sites))
 
     def update_nena_lp(self, lp):
         self.nena_label.setText('{:.3} pixel'.format(lp))
@@ -923,7 +940,9 @@ class View(QtGui.QLabel):
         if 'len' in info:
             self.window.info_dialog.mean_len.setText('{:,.2f}'.format(info['len']))
         if 'dark' in info:
-            self.window.info_dialog.mean_dark.setText('{:,.2f}'.format(info['dark']))
+            self.window.info_dialog.mean_dark = info['dark']
+            self.window.info_dialog.mean_dark_label.setText('{:,.2f}'.format(info['dark']))
+            self.window.info_dialog.update_binding_sites()
 
     def update_pick_info_short(self):
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
