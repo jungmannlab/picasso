@@ -40,7 +40,7 @@ class NenaWorker(QtCore.QThread):
 
 class PickInfoWorker(QtCore.QThread):
 
-    finished = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(dict)
 
     def __init__(self, locs, info, picks, r):
         super().__init__()
@@ -52,12 +52,17 @@ class PickInfoWorker(QtCore.QThread):
     def run(self):
         d = 2 * self.r
         index_blocks = postprocess.get_index_blocks(self.locs, self.info, d)
-        N = 0
+        picked_locs = []
         for x, y in self.picks:
             block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
-            picked_locs = lib.locs_at(x, y, block_locs, self.r)
-            N += len(picked_locs)
-        self.finished.emit(N)
+            picked_locs.append(lib.locs_at(x, y, block_locs, self.r))
+        info = {'N': np.mean([len(_) for _ in picked_locs])}
+        info['photons'] = np.mean([np.mean(_.photons) for _ in picked_locs])
+        if hasattr(self.locs, 'len'):
+            info['len'] = np.mean([np.mean(_.len[_.len > 0]) for _ in picked_locs])
+        if hasattr(self.locs, 'dark'):
+            info['dark'] = np.mean([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
+        self.finished.emit(info)
 
 
 class PickSimilarWorker(QtCore.QThread):
@@ -235,6 +240,15 @@ class InfoDialog(QtGui.QDialog):
         picks_grid.addWidget(QtGui.QLabel('# Localizations:'), 2, 0)
         self.n_locs_label = QtGui.QLabel()
         picks_grid.addWidget(self.n_locs_label, 2, 1)
+        picks_grid.addWidget(QtGui.QLabel('Mean photons:'), 3, 0)
+        self.mean_photons = QtGui.QLabel()
+        picks_grid.addWidget(self.mean_photons, 3, 1)
+        picks_grid.addWidget(QtGui.QLabel('Mean length:'), 4, 0)
+        self.mean_len = QtGui.QLabel()
+        picks_grid.addWidget(self.mean_len, 4, 1)
+        picks_grid.addWidget(QtGui.QLabel('Mean dark time:'), 5, 0)
+        self.mean_dark = QtGui.QLabel()
+        picks_grid.addWidget(self.mean_dark, 5, 1)
 
     def calculate_nena_lp(self):
         if len(self.window.view.locs):
@@ -690,9 +704,13 @@ class View(QtGui.QLabel):
         self.pick_similar_worker.start()
 
     def picked_locs_iter(self):
-        r = self.window.tools_settings_dialog.pick_diameter.value() / 2
+        d = self.window.tools_settings_dialog.pick_diameter.value() / 2
+        r = d / 2
+        index_blocks = postprocess.get_index_blocks(self.locs[0], self.infos[0], d)
         for i, pick in enumerate(self._picks):
-            group_locs = lib.locs_at(pick[0], pick[1], self.locs[0], r)
+            x, y = pick
+            block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+            group_locs = lib.locs_at(x, y, block_locs, r)
             group = i * np.ones(len(group_locs), dtype=np.int32)
             group_locs = lib.append_to_rec(group_locs, group, 'group')
             yield group_locs
@@ -757,7 +775,8 @@ class View(QtGui.QLabel):
     def render_single_channel(self, kwargs, autoscale=False, use_cache=False, cache=True):
         locs = self.locs[0]
         if hasattr(locs, 'group'):
-            locs = [locs[locs.group == _] for _ in self.groups]
+            color_group = locs.group % 31
+            locs = [locs[color_group == _] for _ in range(32)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
         if use_cache:
             n_locs = self.n_locs
@@ -898,8 +917,13 @@ class View(QtGui.QLabel):
         self.pick_info_worker.finished.connect(self.update_pick_info_long)
         self.pick_info_worker.start()
 
-    def update_pick_info_long(self, n_locs):
-        self.window.info_dialog.n_locs_label.setText('{:,}'.format(n_locs))
+    def update_pick_info_long(self, info):
+        self.window.info_dialog.n_locs_label.setText('{:,.1f}'.format(info['N']))
+        self.window.info_dialog.mean_photons.setText('{:,.1f}'.format(info['photons']))
+        if 'len' in info:
+            self.window.info_dialog.mean_len.setText('{:,.2f}'.format(info['len']))
+        if 'dark' in info:
+            self.window.info_dialog.mean_dark.setText('{:,.2f}'.format(info['dark']))
 
     def update_pick_info_short(self):
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
