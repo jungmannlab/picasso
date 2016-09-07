@@ -148,10 +148,16 @@ def _std(files):
             imsave(base + '_std.tif', std_image)
 
 
-def _align(target, files, display):
+def _align(files, display):
+    from glob import glob
+    from itertools import chain
     from .io import load_locs, save_locs
     from .postprocess import align
     from os.path import splitext
+    files = list(chain(*[glob(_) for _ in files]))
+    print('Aligning files:')
+    for f in files:
+        print('  ' + f)
     locs_infos = [load_locs(_) for _ in files]
     locs = [_[0] for _ in locs_infos]
     infos = [_[1] for _ in locs_infos]
@@ -360,7 +366,7 @@ def main():
     align_parser = subparsers.add_parser('align', help='align one localization file to another')
     align_parser.add_argument('-d', '--display', help='display correlation', action='store_true')
     # align_parser.add_argument('-a', '--affine', help='include affine transformations (may take long time)', action='store_true')
-    align_parser.add_argument('file', help='a localization file', nargs='+')
+    align_parser.add_argument('file', help='one or multiple hdf5 localization files', nargs='+')
 
     # join
     join_parser = subparsers.add_parser('join', help='join hdf5 localization lists')
@@ -400,6 +406,7 @@ def main():
 
     # design
     design_parser = subparsers.add_parser('design', help='design RRO structures')
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -434,7 +441,7 @@ def main():
         elif args.command == 'std':
             _std(args.files)
         elif args.command == 'align':
-            _align(args.target, args.file, args.display)
+            _align(args.file, args.display)
         elif args.command == 'join':
             _join(args.file)
         elif args.command == 'groupprops':

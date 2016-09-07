@@ -611,8 +611,9 @@ def align(locs, infos, display=False):
     kwargs = {'oversampling': 1, 'blur_method': 'gaussian', 'min_blur_width': 1}
     renderings = [_render.render(locs_, info, **kwargs) for locs_, info in zip(locs, infos)]
     images = [rendering[1] for rendering in renderings]
-    padding = int(images[0].shape / 4)
-    images = [_np.pad(_, padding, 'constant') for _ in images]
+    # padding = int(images[0].shape[0] / 4)
+    # images = [_np.pad(_, padding, 'constant') for _ in images]
+    # print(len(images))
     n_images = len(images)
 
     # RCC style shift estimation
