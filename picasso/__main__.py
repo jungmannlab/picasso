@@ -133,21 +133,6 @@ def _dark(files):
             io.save_locs(base + '_dark.hdf5', locs, info)
 
 
-def _std(files):
-    import glob
-    paths = glob.glob(files)
-    if paths:
-        from .io import load_raw
-        from numpy import std
-        from os.path import splitext
-        from tifffile import imsave
-        for path in paths:
-            movie, info = load_raw(path)
-            std_image = std(movie, axis=0, dtype='f4')
-            base, ext = splitext(path)
-            imsave(base + '_std.tif', std_image)
-
-
 def _align(files, display):
     from glob import glob
     from itertools import chain
@@ -357,10 +342,6 @@ def main():
     # Dark time
     dark_parser = subparsers.add_parser('dark', help='compute the dark time for grouped localizations')
     dark_parser.add_argument('files', help='one or multiple hdf5 localization files specified by a unix style path pattern')
-
-    # STD Image
-    std_parser = subparsers.add_parser('std', help='generate the std image of a raw movie')
-    std_parser.add_argument('files', help='one or multiple raw files, specified by a unix style path pattern')
 
     # align
     align_parser = subparsers.add_parser('align', help='align one localization file to another')

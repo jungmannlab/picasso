@@ -9,7 +9,7 @@ I suggest installing it with [Anaconda / Miniconda](https://www.continuum.io/dow
 A few third-party Python packages are required. It is recommended to install them via `conda install <package>`.  
 You might need to obtain packages from third-party conda channels. Visit [anaconda.org](anaconda.org) to search for them.  
 The following packages are required:  
-`h5py matplotlib numba numpy pyqt pyyaml scikit-learn lmfit tifffile tqdm`
+`h5py matplotlib numba numpy scipy pyqt pyyaml scikit-learn lmfit tqdm`
 
 ## Installation
 
