@@ -24,7 +24,7 @@ Use the generated shortcuts in the top level directory to start GUI components.
 You can drag these shortcuts to the Desktop, Start Menu or Task Bar.
 
 ## Contributions & Copyright
-Contributors: Joerg Schnitzbauer
+Contributors: Joerg Schnitzbauer, Maximilian Strauss
 Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
 
 ## Credits
