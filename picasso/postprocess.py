@@ -290,21 +290,27 @@ def compute_local_density(locs, info, radius):
     return _lib.append_to_rec(locs, density, 'density')
 
 
-def compute_dark_times(locs):
-    last_frame = locs.frame + locs.len - 1
-    dark = _compute_dark_times(locs, last_frame)
-    locs = _lib.append_to_rec(locs, _np.int32(dark), 'dark')        # int32 for Origin compatiblity
+def compute_dark_times(locs, group=None):
+    dark = dark_times(locs, group)
+    locs = _lib.append_to_rec(locs, _np.int32(dark), 'dark')
     return locs
 
 
-@_numba.jit(nopython=True, cache=False)
-def _compute_dark_times(locs, last_frame):
+def dark_times(locs, group=None):
+    last_frame = locs.frame + locs.len - 1
+    if group is None:
+        group = locs.group
+    return _dark_times(locs, group, last_frame)
+
+
+@_numba.jit(nopython=True)
+def _dark_times(locs, group, last_frame):
     N = len(locs)
     max_frame = locs.frame.max()
     dark = max_frame * _np.ones(len(locs), dtype=_np.int32)
     for i in range(N):
         for j in range(N):
-            if (locs.group[i] == locs.group[j]) and (i != j):
+            if (group[i] == group[j]) and (i != j):
                 dark_ij = locs.frame[i] - last_frame[j]
                 if (dark_ij > 0) and (dark_ij < dark[i]):
                     dark[i] = dark_ij
