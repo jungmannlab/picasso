@@ -57,19 +57,21 @@ class PickInfoWorker(QtCore.QThread):
             block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
             picked_locs.append(lib.locs_at(x, y, block_locs, self.r))
         N = np.array([len(_) for _ in picked_locs])
-        info = {'N': (np.mean(N), np.std(N))}
+        info = {'# Localizations': N}
         com_x = [np.mean(_.x) for _ in picked_locs]
         com_y = [np.mean(_.y) for _ in picked_locs]
         rmsd = np.array([np.sqrt(np.mean((locs.x - x)**2 + (locs.y - y)**2)) for locs, x, y in zip(picked_locs, com_x, com_y)])
-        info['rmsd'] = np.mean(rmsd), np.std(rmsd)
+        info['RMSD to COM'] = rmsd
         photons = np.array([np.mean(_.photons) for _ in picked_locs])
-        info['photons'] = np.mean(photons), np.std(photons)
+        info['Photons'] = photons
         if hasattr(self.locs, 'len'):
             len_ = np.array([np.mean(_.len[_.len > 0]) for _ in picked_locs])
-            info['len'] = np.mean(len_), np.std(len_)
-        if hasattr(self.locs, 'dark'):
-            dark = np.array([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
-            info['dark'] = np.mean(dark), np.std(dark)
+            info['Length'] = len_
+            if hasattr(self.locs, 'dark'):
+                dark = np.array([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
+            else:
+                dark = np.array([np.mean(postprocess.dark_times(_, invalid=False)) for _ in picked_locs])
+            info['Dark time'] = dark
         self.finished.emit(info)
 
 
@@ -238,39 +240,45 @@ class InfoDialog(QtGui.QDialog):
         # Picks
         picks_groupbox = QtGui.QGroupBox('Picks')
         vbox.addWidget(picks_groupbox)
-        picks_grid = QtGui.QGridLayout(picks_groupbox)
-        picks_grid.addWidget(QtGui.QLabel('# Picks:'), 0, 0)
+        self.picks_grid = QtGui.QGridLayout(picks_groupbox)
+        self.picks_grid.addWidget(QtGui.QLabel('# Picks:'), 0, 0)
         self.n_picks = QtGui.QLabel()
-        picks_grid.addWidget(self.n_picks, 0, 1)
+        self.picks_grid.addWidget(self.n_picks, 0, 1)
         compute_pick_info_button = QtGui.QPushButton('Calculate info below')
         compute_pick_info_button.clicked.connect(self.window.view.calculate_pick_info_long)
-        picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 2)
-        picks_grid.addWidget(QtGui.QLabel('# Localizations:'), 2, 0)
-        self.n_locs_label = QtGui.QLabel()
-        picks_grid.addWidget(self.n_locs_label, 2, 1)
-        picks_grid.addWidget(QtGui.QLabel('RMSD to COM:'), 3, 0)
-        self.rmsd_com = QtGui.QLabel()
-        picks_grid.addWidget(self.rmsd_com, 3, 1)
-        picks_grid.addWidget(QtGui.QLabel('Mean photons:'), 4, 0)
-        self.mean_photons = QtGui.QLabel()
-        picks_grid.addWidget(self.mean_photons, 4, 1)
-        picks_grid.addWidget(QtGui.QLabel('Mean length:'), 5, 0)
-        self.mean_len = QtGui.QLabel()
-        picks_grid.addWidget(self.mean_len, 5, 1)
-        picks_grid.addWidget(QtGui.QLabel('Mean dark time:'), 6, 0)
-        self.mean_dark_label = QtGui.QLabel()
-        picks_grid.addWidget(self.mean_dark_label, 6, 1)
-        picks_grid.addWidget(QtGui.QLabel('Influx rate (1/s):'), 7, 0)
+        self.picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 3)
+        self.picks_grid.addWidget(QtGui.QLabel('Mean'), 2, 1)
+        self.picks_grid.addWidget(QtGui.QLabel('Std'), 2, 2)
+        self.picks_info_labels = {'mean': {}, 'std': {}, 'decimals': {}}
+        self.picks_grid_current = 3
+        self.add_pick_info_field('# Localizations')
+        self.add_pick_info_field('RMSD to COM', decimals=3)
+        self.add_pick_info_field('Photons')
+        self.add_pick_info_field('Length')
+        self.add_pick_info_field('Dark time')
+        self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/s):'), self.picks_grid_current, 0)
         self.influx_rate = QtGui.QDoubleSpinBox()
         self.influx_rate.setRange(0, 1e10)
         self.influx_rate.setDecimals(5)
         self.influx_rate.setValue(0.03)
         self.influx_rate.valueChanged.connect(self.update_binding_sites)
-        picks_grid.addWidget(self.influx_rate, 7, 1)
-        picks_grid.addWidget(QtGui.QLabel('Binding sites:'), 8, 0)
-        self.n_binding_sites = QtGui.QLabel()
-        picks_grid.addWidget(self.n_binding_sites, 8, 1)
-        self.mean_dark = None
+        self.picks_grid.addWidget(self.influx_rate, self.picks_grid_current, 1, 1, 2)
+        self.picks_grid_current += 1
+        self.picks_grid.addWidget(QtGui.QLabel('Binding sites:'), self.picks_grid_current, 0)
+        self.binding_sites = QtGui.QLabel()
+        self.picks_grid.addWidget(self.binding_sites, self.picks_grid_current, 1)
+        self.binding_sites_std = QtGui.QLabel()
+        self.picks_grid.addWidget(self.binding_sites_std, self.picks_grid_current, 2)
+        self.pick_info = None
+
+    def add_pick_info_field(self, name, decimals=1):
+        self.picks_grid.addWidget(QtGui.QLabel(name + ':'), self.picks_grid_current, 0)
+        self.picks_info_labels['mean'][name] = QtGui.QLabel()
+        self.picks_info_labels['std'][name] = QtGui.QLabel()
+        self.picks_info_labels['decimals'][name] = decimals
+        self.picks_grid.addWidget(self.picks_info_labels['mean'][name], self.picks_grid_current, 1)
+        self.picks_grid.addWidget(self.picks_info_labels['std'][name], self.picks_grid_current, 2)
+        self.picks_grid_current += 1
 
     def calculate_nena_lp(self):
         if len(self.window.view.locs):
@@ -288,10 +296,13 @@ class InfoDialog(QtGui.QDialog):
             self.nena_worker.start()
 
     def update_binding_sites(self, influx=None):
-        if influx is None:
-            influx = self.influx_rate.value()
-        n_binding_sites = 1 / (influx * self.mean_dark)
-        self.n_binding_sites.setText('{:,.2f}'.format(n_binding_sites))
+        if self.pick_info is not None:
+            if influx is None:
+                influx = self.influx_rate.value()
+            if 'Dark time' in self.pick_info:
+                n_binding_sites = 1 / (influx * self.pick_info['Dark time'])
+                self.binding_sites.setText('{:,.2f}'.format(np.mean(n_binding_sites)))
+                self.binding_sites_std.setText('{:,.2f}'.format(np.std(n_binding_sites)))
 
     def update_nena_lp(self, lp):
         self.nena_label.setText('{:.3} pixel'.format(lp))
@@ -537,6 +548,7 @@ class View(QtGui.QLabel):
             y_max = viewport[1][0] + y_margin
         return [(y_min, x_min), (y_max, x_max)]
 
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.accept()
@@ -731,6 +743,10 @@ class View(QtGui.QLabel):
         self.pick_similar_worker.finished.connect(self.on_pick_similar_finished)
         self.pick_similar_worker.start()
 
+    def picked_locs(self):
+        picked_locs = list(self.picked_locs_iter())
+        return stack_arrays(picked_locs, asrecarray=True, usemask=False)
+
     def picked_locs_iter(self):
         d = self.window.tools_settings_dialog.pick_diameter.value() / 2
         r = d / 2
@@ -802,10 +818,13 @@ class View(QtGui.QLabel):
 
     def render_single_channel(self, kwargs, autoscale=False, use_cache=False, cache=True):
         locs = self.locs[0]
+        # The following commented code renders groups with different colors.
+        '''
         if hasattr(locs, 'group'):
             color_group = locs.group % 31
             locs = [locs[color_group == _] for _ in range(32)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
+        '''
         if use_cache:
             n_locs = self.n_locs
             image = self.image
@@ -829,8 +848,7 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def save_picked_locs(self, path):
-        picked_locs = list(self.picked_locs_iter())
-        locs = stack_arrays(picked_locs, asrecarray=True, usemask=False)
+        locs = self.picked_locs()
         d = self.window.tools_settings_dialog.pick_diameter.value()
         pick_info = {'Generated by:': 'Picasso Render', 'Pick Diameter:': d}
         io.save_locs(path, locs, self.infos[0] + [pick_info])
@@ -969,15 +987,14 @@ class View(QtGui.QLabel):
         self.pick_info_worker.start()
 
     def update_pick_info_long(self, info):
-        self.window.info_dialog.n_locs_label.setText('{:,.1f} +/- {:,.1f}'.format(*info['N']))
-        self.window.info_dialog.rmsd_com.setText('{:,.3f} +/- {:,.3f}'.format(*info['rmsd']))
-        self.window.info_dialog.mean_photons.setText('{:,.1f} +/- {:,.1f}'.format(*info['photons']))
-        if 'len' in info:
-            self.window.info_dialog.mean_len.setText('{:,.2f} +/- {:,.2f}'.format(*info['len']))
-        if 'dark' in info:
-            self.window.info_dialog.mean_dark = info['dark'][0]
-            self.window.info_dialog.mean_dark_label.setText('{:,.2f} +/- {:,.2f}'.format(*info['dark']))
-            self.window.info_dialog.update_binding_sites()
+        for name in info:
+            mean = np.mean(info[name])
+            std = np.std(info[name])
+            decimals =  self.window.info_dialog.picks_info_labels['decimals'][name]
+            self.window.info_dialog.picks_info_labels['mean'][name].setText('{:.{p}f}'.format(mean, p=decimals))
+            self.window.info_dialog.picks_info_labels['std'][name].setText('{:.{p}f}'.format(std, p=decimals))
+        self.window.info_dialog.pick_info = info
+        self.window.info_dialog.update_binding_sites()
 
     def update_pick_info_short(self):
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
