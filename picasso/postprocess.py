@@ -296,11 +296,14 @@ def compute_dark_times(locs, group=None):
     return locs
 
 
-def dark_times(locs, group=None):
+def dark_times(locs, group=None, invalid=True):
     last_frame = locs.frame + locs.len - 1
     if group is None:
-        group = locs.group
-    return _dark_times(locs, group, last_frame)
+        group = _np.zeros(len(locs))
+    dark = _dark_times(locs, group, last_frame)
+    if not invalid:
+        dark = dark[dark != -1]
+    return dark
 
 
 @_numba.jit(nopython=True)
