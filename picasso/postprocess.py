@@ -623,7 +623,7 @@ def align(locs, infos, display=False):
     n_images = len(images)
 
     # RCC style shift estimation
-    roi = 32    # maximum shift is 32 pixels
+    roi = min(infos[0][0]['Width'], infos[0][0]['Height'])
     n_pairs = int(n_images * (n_images - 1) / 2)
     rij = _np.zeros((n_pairs, 2))
     A = _np.zeros((n_pairs, n_images - 1))
