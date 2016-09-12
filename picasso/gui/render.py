@@ -56,12 +56,20 @@ class PickInfoWorker(QtCore.QThread):
         for x, y in self.picks:
             block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
             picked_locs.append(lib.locs_at(x, y, block_locs, self.r))
-        info = {'N': np.mean([len(_) for _ in picked_locs])}
-        info['photons'] = np.mean([np.mean(_.photons) for _ in picked_locs])
+        N = np.array([len(_) for _ in picked_locs])
+        info = {'N': (np.mean(N), np.std(N))}
+        com_x = [np.mean(_.x) for _ in picked_locs]
+        com_y = [np.mean(_.y) for _ in picked_locs]
+        rmsd = np.array([np.sqrt(np.mean((locs.x - x)**2 + (locs.y - y)**2)) for locs, x, y in zip(picked_locs, com_x, com_y)])
+        info['rmsd'] = np.mean(rmsd), np.std(rmsd)
+        photons = np.array([np.mean(_.photons) for _ in picked_locs])
+        info['photons'] = np.mean(photons), np.std(photons)
         if hasattr(self.locs, 'len'):
-            info['len'] = np.mean([np.mean(_.len[_.len > 0]) for _ in picked_locs])
+            len_ = np.array([np.mean(_.len[_.len > 0]) for _ in picked_locs])
+            info['len'] = np.mean(len_), np.std(len_)
         if hasattr(self.locs, 'dark'):
-            info['dark'] = np.mean([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
+            dark = np.array([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
+            info['dark'] = np.mean(dark), np.std(dark)
         self.finished.emit(info)
 
 
@@ -240,25 +248,28 @@ class InfoDialog(QtGui.QDialog):
         picks_grid.addWidget(QtGui.QLabel('# Localizations:'), 2, 0)
         self.n_locs_label = QtGui.QLabel()
         picks_grid.addWidget(self.n_locs_label, 2, 1)
-        picks_grid.addWidget(QtGui.QLabel('Mean photons:'), 3, 0)
+        picks_grid.addWidget(QtGui.QLabel('RMSD to COM:'), 3, 0)
+        self.rmsd_com = QtGui.QLabel()
+        picks_grid.addWidget(self.rmsd_com, 3, 1)
+        picks_grid.addWidget(QtGui.QLabel('Mean photons:'), 4, 0)
         self.mean_photons = QtGui.QLabel()
-        picks_grid.addWidget(self.mean_photons, 3, 1)
-        picks_grid.addWidget(QtGui.QLabel('Mean length:'), 4, 0)
+        picks_grid.addWidget(self.mean_photons, 4, 1)
+        picks_grid.addWidget(QtGui.QLabel('Mean length:'), 5, 0)
         self.mean_len = QtGui.QLabel()
-        picks_grid.addWidget(self.mean_len, 4, 1)
-        picks_grid.addWidget(QtGui.QLabel('Mean dark time:'), 5, 0)
+        picks_grid.addWidget(self.mean_len, 5, 1)
+        picks_grid.addWidget(QtGui.QLabel('Mean dark time:'), 6, 0)
         self.mean_dark_label = QtGui.QLabel()
-        picks_grid.addWidget(self.mean_dark_label, 5, 1)
-        picks_grid.addWidget(QtGui.QLabel('Influx rate (1/s):'), 6, 0)
+        picks_grid.addWidget(self.mean_dark_label, 6, 1)
+        picks_grid.addWidget(QtGui.QLabel('Influx rate (1/s):'), 7, 0)
         self.influx_rate = QtGui.QDoubleSpinBox()
         self.influx_rate.setRange(0, 1e10)
         self.influx_rate.setDecimals(5)
         self.influx_rate.setValue(0.03)
         self.influx_rate.valueChanged.connect(self.update_binding_sites)
-        picks_grid.addWidget(self.influx_rate, 6, 1)
-        picks_grid.addWidget(QtGui.QLabel('Binding sites:'), 7, 0)
+        picks_grid.addWidget(self.influx_rate, 7, 1)
+        picks_grid.addWidget(QtGui.QLabel('Binding sites:'), 8, 0)
         self.n_binding_sites = QtGui.QLabel()
-        picks_grid.addWidget(self.n_binding_sites, 7, 1)
+        picks_grid.addWidget(self.n_binding_sites, 8, 1)
         self.mean_dark = None
 
     def calculate_nena_lp(self):
@@ -869,13 +880,20 @@ class View(QtGui.QLabel):
         drift_y = np.empty((n_picks, n_frames))
         drift_x.fill(np.nan)
         drift_y.fill(np.nan)
+
+        # TODO: We should add here a filter that sets x, y values to nan, when the number of localizations per frame is insufficient (e.g. < 10)
+
+        # Remove center of mass offset
         for i, locs in enumerate(self.picked_locs_iter()):
             drift_x[i, locs.frame] = locs.x - np.mean(locs.x)
             drift_y[i, locs.frame] = locs.y - np.mean(locs.y)
+
+        # Mean drift per frame
         drift_x_mean = np.nanmean(drift_x, 0)
         drift_y_mean = np.nanmean(drift_y, 0)
 
-        # Filter outliers
+        # Filter outliers per frame
+        '''
         drift_x_std = np.nanstd(drift_x, 0)
         drift_y_std = np.nanstd(drift_y, 0)
         is_outlier_x = np.abs(drift_x - drift_x_mean) > 2 * drift_x_std
@@ -885,7 +903,21 @@ class View(QtGui.QLabel):
         drift_y[is_outlier] = np.nan
         drift_x_mean = np.nanmean(drift_x, 0)
         drift_y_mean = np.nanmean(drift_y, 0)
+        '''
 
+        # New mean drift weighted by mean square deviation
+        msd_x = np.nanmean((drift_x - drift_x_mean)**2, 1)
+        msd_y = np.nanmean((drift_y - drift_y_mean)**2, 1)
+        # We are using a mask, because there is no function for weighted average ignoring nans:
+        nan_mask = np.isnan(drift_x)
+        drift_x = np.ma.MaskedArray(drift_x, mask=nan_mask)
+        drift_y = np.ma.MaskedArray(drift_y, mask=nan_mask)
+        drift_x_mean = np.ma.average(drift_x, axis=0, weights=1/msd_x)
+        drift_y_mean = np.ma.average(drift_y, axis=0, weights=1/msd_y)
+        drift_x_mean = drift_x_mean.filled(np.nan)
+        drift_y_mean = drift_y_mean.filled(np.nan)
+
+        # Linear interpolation for frames without localizations
         def nan_helper(y):
             return np.isnan(y), lambda z: z.nonzero()[0]
 
@@ -894,9 +926,11 @@ class View(QtGui.QLabel):
         nans, nonzero = nan_helper(drift_y_mean)
         drift_y_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_y_mean[~nans])
 
+        # Sliding window average
         drift_x_mean = np.convolve(drift_x_mean, np.ones((100,))/100, mode='same')
         drift_y_mean = np.convolve(drift_y_mean, np.ones((100,))/100, mode='same')
 
+        # Apply drift
         self.locs[0].x -= drift_x_mean[self.locs[0].frame]
         self.locs[0].y -= drift_y_mean[self.locs[0].frame]
         self.update_scene()
@@ -935,13 +969,14 @@ class View(QtGui.QLabel):
         self.pick_info_worker.start()
 
     def update_pick_info_long(self, info):
-        self.window.info_dialog.n_locs_label.setText('{:,.1f}'.format(info['N']))
-        self.window.info_dialog.mean_photons.setText('{:,.1f}'.format(info['photons']))
+        self.window.info_dialog.n_locs_label.setText('{:,.1f} +/- {:,.1f}'.format(*info['N']))
+        self.window.info_dialog.rmsd_com.setText('{:,.3f} +/- {:,.3f}'.format(*info['rmsd']))
+        self.window.info_dialog.mean_photons.setText('{:,.1f} +/- {:,.1f}'.format(*info['photons']))
         if 'len' in info:
-            self.window.info_dialog.mean_len.setText('{:,.2f}'.format(info['len']))
+            self.window.info_dialog.mean_len.setText('{:,.2f} +/- {:,.2f}'.format(*info['len']))
         if 'dark' in info:
-            self.window.info_dialog.mean_dark = info['dark']
-            self.window.info_dialog.mean_dark_label.setText('{:,.2f}'.format(info['dark']))
+            self.window.info_dialog.mean_dark = info['dark'][0]
+            self.window.info_dialog.mean_dark_label.setText('{:,.2f} +/- {:,.2f}'.format(*info['dark']))
             self.window.info_dialog.update_binding_sites()
 
     def update_pick_info_short(self):
