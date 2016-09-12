@@ -42,12 +42,13 @@ class PickInfoWorker(QtCore.QThread):
 
     finished = QtCore.pyqtSignal(dict)
 
-    def __init__(self, locs, info, picks, r):
+    def __init__(self, locs, info, picks, r, max_dark_time):
         super().__init__()
         self.locs = locs
         self.info = info
         self.picks = picks
         self.r = r
+        self.t = max_dark_time
 
     def run(self):
         d = 2 * self.r
@@ -60,18 +61,13 @@ class PickInfoWorker(QtCore.QThread):
         info = {'# Localizations': N}
         com_x = [np.mean(_.x) for _ in picked_locs]
         com_y = [np.mean(_.y) for _ in picked_locs]
-        rmsd = np.array([np.sqrt(np.mean((locs.x - x)**2 + (locs.y - y)**2)) for locs, x, y in zip(picked_locs, com_x, com_y)])
-        info['RMSD to COM'] = rmsd
-        photons = np.array([np.mean(_.photons) for _ in picked_locs])
-        info['Photons'] = photons
-        if hasattr(self.locs, 'len'):
-            len_ = np.array([np.mean(_.len[_.len > 0]) for _ in picked_locs])
-            info['Length'] = len_
-            if hasattr(self.locs, 'dark'):
-                dark = np.array([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
-            else:
-                dark = np.array([np.mean(postprocess.dark_times(_, invalid=False)) for _ in picked_locs])
-            info['Dark time'] = dark
+        rmsd = [np.sqrt(np.mean((locs.x - x)**2 + (locs.y - y)**2)) for locs, x, y in zip(picked_locs, com_x, com_y)]
+        info['RMSD to COM'] = np.array(rmsd)
+        info['Photons'] = np.array([np.mean(_.photons) for _ in picked_locs])
+        picked_locs = [postprocess.link(_, self.info, r_max=d, max_dark_time=self.t) for _ in picked_locs]
+        info['Length'] = np.array([np.mean(_.len[_.len > 0]) for _ in picked_locs])
+        picked_locs = [postprocess.compute_dark_times(_) for _ in picked_locs]
+        info['Dark time'] = np.array([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
         self.finished.emit(info)
 
 
@@ -247,15 +243,22 @@ class InfoDialog(QtGui.QDialog):
         compute_pick_info_button = QtGui.QPushButton('Calculate info below')
         compute_pick_info_button.clicked.connect(self.window.view.calculate_pick_info_long)
         self.picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 3)
-        self.picks_grid.addWidget(QtGui.QLabel('Mean'), 2, 1)
-        self.picks_grid.addWidget(QtGui.QLabel('Std'), 2, 2)
+        self.picks_grid.addWidget(QtGui.QLabel('<b>Mean</b'), 2, 1)
+        self.picks_grid.addWidget(QtGui.QLabel('<b>Std</b>'), 2, 2)
         self.picks_info_labels = {'mean': {}, 'std': {}, 'decimals': {}}
         self.picks_grid_current = 3
         self.add_pick_info_field('# Localizations')
-        self.add_pick_info_field('RMSD to COM', decimals=3)
+        self.add_pick_info_field('RMSD to COM', decimals=4)
         self.add_pick_info_field('Photons')
-        self.add_pick_info_field('Length')
-        self.add_pick_info_field('Dark time')
+        self.picks_grid.addWidget(QtGui.QLabel('Ignore dark times <='), self.picks_grid_current, 0)
+        self.max_dark_time = QtGui.QSpinBox()
+        self.max_dark_time.setRange(0, 1e9)
+        self.max_dark_time.setValue(1)
+        # self.max_dark_time.valueChanged.connect(self.update_binding_sites)
+        self.picks_grid.addWidget(self.max_dark_time, self.picks_grid_current, 1, 1, 2)
+        self.picks_grid_current += 1
+        self.add_pick_info_field('Length', decimals=2)
+        self.add_pick_info_field('Dark time', decimals=2)
         self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/s):'), self.picks_grid_current, 0)
         self.influx_rate = QtGui.QDoubleSpinBox()
         self.influx_rate.setRange(0, 1e10)
@@ -264,7 +267,7 @@ class InfoDialog(QtGui.QDialog):
         self.influx_rate.valueChanged.connect(self.update_binding_sites)
         self.picks_grid.addWidget(self.influx_rate, self.picks_grid_current, 1, 1, 2)
         self.picks_grid_current += 1
-        self.picks_grid.addWidget(QtGui.QLabel('Binding sites:'), self.picks_grid_current, 0)
+        self.picks_grid.addWidget(QtGui.QLabel('# Binding sites:'), self.picks_grid_current, 0)
         self.binding_sites = QtGui.QLabel()
         self.picks_grid.addWidget(self.binding_sites, self.picks_grid_current, 1)
         self.binding_sites_std = QtGui.QLabel()
@@ -301,8 +304,8 @@ class InfoDialog(QtGui.QDialog):
                 influx = self.influx_rate.value()
             if 'Dark time' in self.pick_info:
                 n_binding_sites = 1 / (influx * self.pick_info['Dark time'])
-                self.binding_sites.setText('{:,.2f}'.format(np.mean(n_binding_sites)))
-                self.binding_sites_std.setText('{:,.2f}'.format(np.std(n_binding_sites)))
+                self.binding_sites.setText('{:,.3f}'.format(np.mean(n_binding_sites)))
+                self.binding_sites_std.setText('{:,.3f}'.format(np.std(n_binding_sites)))
 
     def update_nena_lp(self, lp):
         self.nena_label.setText('{:.3} pixel'.format(lp))
@@ -982,7 +985,8 @@ class View(QtGui.QLabel):
 
     def calculate_pick_info_long(self):
         r = self.window.tools_settings_dialog.pick_diameter.value() / 2
-        self.pick_info_worker = PickInfoWorker(self.locs[0], self.infos[0], self._picks, r)
+        t = self.window.info_dialog.max_dark_time.value()
+        self.pick_info_worker = PickInfoWorker(self.locs[0], self.infos[0], self._picks, r, t)
         self.pick_info_worker.finished.connect(self.update_pick_info_long)
         self.pick_info_worker.start()
 
@@ -991,8 +995,8 @@ class View(QtGui.QLabel):
             mean = np.mean(info[name])
             std = np.std(info[name])
             decimals =  self.window.info_dialog.picks_info_labels['decimals'][name]
-            self.window.info_dialog.picks_info_labels['mean'][name].setText('{:.{p}f}'.format(mean, p=decimals))
-            self.window.info_dialog.picks_info_labels['std'][name].setText('{:.{p}f}'.format(std, p=decimals))
+            self.window.info_dialog.picks_info_labels['mean'][name].setText('{:,.{p}f}'.format(mean, p=decimals))
+            self.window.info_dialog.picks_info_labels['std'][name].setText('{:,.{p}f}'.format(std, p=decimals))
         self.window.info_dialog.pick_info = info
         self.window.info_dialog.update_binding_sites()
 
