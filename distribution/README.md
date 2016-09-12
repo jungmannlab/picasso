@@ -10,10 +10,10 @@ This document describes the procedure to generate a Windows installer for Picass
 We will build two distributions of picasso: one with console window and one without (for the command line interface and GUI programs, respectively). The two executables will be called picasso.exe and picassow.exe. Since picassow.exe depends on the exact same files than picasso.exe, we can simply copy picassow.exe from its distribution folder into the folder of picasso.exe. This way we will have both executables in the same directory, bundled with one Python distribution.
 
 1. Generate the executable with console window:  
-`pyinstaller --hidden-import=h5py.defs --hidden-import=h5py.utils  --hidden-import=h5py.h5ac --hidden-import=h5py._proxy --hidden-import=sklearn.neighbors.typedefs -n picasso picasso_script.py`
+`pyinstaller --hidden-import=h5py.defs --hidden-import=h5py.utils  --hidden-import=h5py.h5ac --hidden-import=h5py._proxy --hidden-import=sklearn.neighbors.typedefs -n picasso picasso-script.py`
 
 2. And one without console window:  
-`pyinstaller --hidden-import=h5py.defs --hidden-import=h5py.utils  --hidden-import=h5py.h5ac --hidden-import=h5py._proxy --hidden-import=sklearn.neighbors.typedefs --noconsole -n picassow picasso_script.py`
+`pyinstaller --hidden-import=h5py.defs --hidden-import=h5py.utils  --hidden-import=h5py.h5ac --hidden-import=h5py._proxy --hidden-import=sklearn.neighbors.typedefs --noconsole -n picassow picasso-script.py`
 
 3. Copy `picassow.exe` and `picassow.exe.manifest` from `dist\picassow` to `dist\picasso`.
 
