@@ -32,7 +32,7 @@ try:
     with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
         CONFIG = _yaml.load(config_file)
 except FileNotFoundError:
-    print('No configuration file found. Generate one and restart the program.')
+    raise FileNotFoundError('No configuration file found. Generate "config.yaml" and restart the program.')
     quit()
 
 
