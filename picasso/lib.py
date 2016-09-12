@@ -60,11 +60,15 @@ def ensure_sanity(locs, info):
     return locs
 
 
-def locs_at(x, y, locs, r):
+def is_loc_at(x, y, locs, r):
     dx = locs.x - x
     dy = locs.y - y
     r2 = r**2
-    is_picked = dx**2 + dy**2 < r2
+    return dx**2 + dy**2 < r2
+
+
+def locs_at(x, y, locs, r):
+    is_picked = is_loc_at(x, y, locs, r)
     return locs[is_picked]
 
 
