@@ -73,7 +73,8 @@ class PickInfoWorker(QtCore.QThread):
         rmsd = [np.sqrt(np.mean((locs.x - x)**2 + (locs.y - y)**2)) for locs, x, y in zip(picked_locs, com_x, com_y)]
         info['RMSD to COM'] = np.array(rmsd)
         info['Photons'] = np.array([np.mean(_.photons) for _ in picked_locs])
-        picked_locs = [postprocess.link(_, self.info, r_max=d, max_dark_time=self.t) for _ in picked_locs]
+        r_max = min(d, 1)
+        picked_locs = [postprocess.link(_, self.info, r_max=r_max, max_dark_time=self.t) for _ in picked_locs]
         info['Length'] = np.array([np.mean(_.len[_.len > 0]) for _ in picked_locs])
         picked_locs = [postprocess.compute_dark_times(_) for _ in picked_locs]
         info['Dark time'] = np.array([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
