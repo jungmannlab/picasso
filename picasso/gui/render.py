@@ -50,13 +50,21 @@ class PickInfoWorker(QtCore.QThread):
         self.r = r
         self.t = max_dark_time
 
+    def picked_locs_iter(self):
+        d = 2 * self.r
+        index_blocks = postprocess.get_index_blocks(self.locs, self.info, d)
+        for i, pick in enumerate(self.picks):
+            x, y = pick
+            block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+            group_locs = lib.locs_at(x, y, block_locs, self.r)
+            group = i * np.ones(len(group_locs), dtype=np.int32)
+            group_locs = lib.append_to_rec(group_locs, group, 'group')
+            yield group_locs
+
     def run(self):
         d = 2 * self.r
         index_blocks = postprocess.get_index_blocks(self.locs, self.info, d)
-        picked_locs = []
-        for x, y in self.picks:
-            block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
-            picked_locs.append(lib.locs_at(x, y, block_locs, self.r))
+        picked_locs = list(self.picked_locs_iter())
         N = np.array([len(_) for _ in picked_locs])
         info = {'# Localizations': N}
         com_x = [np.mean(_.x) for _ in picked_locs]
