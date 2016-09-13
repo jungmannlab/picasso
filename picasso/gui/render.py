@@ -751,7 +751,7 @@ class View(QtGui.QLabel):
         return stack_arrays(picked_locs, asrecarray=True, usemask=False)
 
     def picked_locs_iter(self):
-        d = self.window.tools_settings_dialog.pick_diameter.value() / 2
+        d = self.window.tools_settings_dialog.pick_diameter.value()
         r = d / 2
         index_blocks = postprocess.get_index_blocks(self.locs[0], self.infos[0], d)
         for i, pick in enumerate(self._picks):
@@ -948,8 +948,10 @@ class View(QtGui.QLabel):
         drift_y_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_y_mean[~nans])
 
         # Sliding window average
+        '''
         drift_x_mean = np.convolve(drift_x_mean, np.ones((100,))/100, mode='same')
         drift_y_mean = np.convolve(drift_y_mean, np.ones((100,))/100, mode='same')
+        '''
 
         # Apply drift
         self.locs[0].x -= drift_x_mean[self.locs[0].frame]
