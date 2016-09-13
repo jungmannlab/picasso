@@ -22,6 +22,7 @@ from .. import io, lib, render, postprocess
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 10 / 7
+N_GROUP_COLORS = 8
 
 
 class NenaWorker(QtCore.QThread):
@@ -529,12 +530,12 @@ class View(QtGui.QLabel):
         self._picks.append(position)
         self.update_pick_info_short()
         if update_scene:
-            self.update_scene(use_cache=True)
+            self.update_scene(picks_only=True)
 
     def add_picks(self, positions):
         for position in positions:
             self.add_pick(position, update_scene=False)
-        self.update_scene(use_cache=True)
+        self.update_scene(picks_only=True)
 
     def adjust_viewport_to_view(self, viewport):
         viewport_height = viewport[1][0] - viewport[0][0]
@@ -593,12 +594,13 @@ class View(QtGui.QLabel):
             painter.drawRect(x, y, length_displaypxl + 0, height + 0)
         return image
 
-    def draw_scene(self, viewport, autoscale=False, use_cache=False):
-        self.viewport = self.adjust_viewport_to_view(viewport)
-        qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
-        qimage = qimage.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding)
-        qimage = self.draw_picks(qimage)
-        self.qimage = self.draw_scalebar(qimage)
+    def draw_scene(self, viewport, autoscale=False, use_cache=False, picks_only=False):
+        if not picks_only:
+            self.viewport = self.adjust_viewport_to_view(viewport)
+            qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
+            qimage = qimage.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding)
+            self.qimage_no_picks = self.draw_scalebar(qimage)
+        self.qimage = self.draw_picks(self.qimage_no_picks)
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(pixmap)
         self.window.update_info()
@@ -829,13 +831,10 @@ class View(QtGui.QLabel):
 
     def render_single_channel(self, kwargs, autoscale=False, use_cache=False, cache=True):
         locs = self.locs[0]
-        # The following commented code renders groups with different colors.
-        '''
         if hasattr(locs, 'group'):
-            color_group = locs.group % 31
-            locs = [locs[color_group == _] for _ in range(32)]
+            color_group = locs.group % N_GROUP_COLORS
+            locs = [locs[color_group == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
-        '''
         if use_cache:
             n_locs = self.n_locs
             image = self.image
@@ -1013,11 +1012,11 @@ class View(QtGui.QLabel):
     def update_pick_info_short(self):
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
 
-    def update_scene(self, viewport=None, autoscale=False, use_cache=False):
+    def update_scene(self, viewport=None, autoscale=False, use_cache=False, picks_only=False):
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
-            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache)
+            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache, picks_only=picks_only)
             self.update_cursor()
 
     def viewport_center(self, viewport=None):
