@@ -626,14 +626,13 @@ def align(locs, infos, display=False):
     n_images = len(images)
 
     # RCC style shift estimation
-    roi = min(infos[0][0]['Width'], infos[0][0]['Height'])
     n_pairs = int(n_images * (n_images - 1) / 2)
     rij = _np.zeros((n_pairs, 2))
     A = _np.zeros((n_pairs, n_images - 1))
     flag = 0
     for i in range(n_images - 1):
         for j in range(i+1, n_images):
-            dyij, dxij = _imageprocess.get_image_shift(images[i], images[j], 5, roi)
+            dyij, dxij = _imageprocess.get_image_shift(images[i], images[j], 5)
             rij[flag, 0] = dyij
             rij[flag, 1] = dxij
             A[flag, i:j] = 1
