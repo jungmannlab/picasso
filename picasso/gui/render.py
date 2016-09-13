@@ -1185,10 +1185,9 @@ class Window(QtGui.QMainWindow):
 
     def load_user_settings(self):
         settings = io.load_user_settings()
-        try:
-            colormap = settings['Render']['Colormap']
-        except KeyError:
-            colormap = 'viridis'
+        colormap = settings['Render']['Colormap']
+        if len(colormap) == 0:
+            colormap = 'magma'
         for index in range(self.display_settings_dialog.colormap.count()):
             if self.display_settings_dialog.colormap.itemText(index) == colormap:
                 self.display_settings_dialog.colormap.setCurrentIndex(index)
