@@ -43,6 +43,8 @@ def calculate_optimal_bins(data, max_n_bins=None):
 
 
 def append_to_rec(rec_array, data, name):
+    if hasattr(rec_array, name):
+        rec_array = remove_from_rec(rec_array, name)
     return _append_fields(rec_array, name, data, dtypes=data.dtype, usemask=False, asrecarray=True)
     return rec_array
 
