@@ -69,7 +69,7 @@ def net_gradient(frame, y, x, box, uy, ux):
     for i, (yi, xi) in enumerate(zip(y, x)):
         for k_index, k in enumerate(range(yi - box_half, yi + box_half + 1)):
             for l_index, l in enumerate(range(xi - box_half, xi + box_half + 1)):
-                if k != yi and l != xi:
+                if not (k == yi and l == xi):
                     gy, gx = gradient_at(frame, k, l, i)
                     ng[i] += (gy*uy[k_index, l_index] + gx*ux[k_index, l_index])
     return ng
