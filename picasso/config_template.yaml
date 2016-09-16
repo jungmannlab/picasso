@@ -12,6 +12,7 @@ Cameras:
       true:
         # Readout rate
         17.000 MHz:
+          # For automated gain setting, the names should be the same as given by MicroManager metadata.
           Gain 1: 15.9
           Gain 2: 9.34
           Gain 3: 5.32
