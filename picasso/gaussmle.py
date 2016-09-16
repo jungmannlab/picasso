@@ -15,7 +15,7 @@ import threading as _threading
 from concurrent import futures as _futures
 
 
-MAX_STEP = _np.array([1.0, 1.0, 100.0, 5.0, 0.1, 0.1])
+MAX_STEP = _np.array([1.0, 1.0, 100.0, 5.0, 0.5, 0.5])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
@@ -185,16 +185,19 @@ def gaussmle_async(spots, eps, max_it, method='sigma'):
     n_workers = int(0.75 * _multiprocessing.cpu_count())
     lock = _threading.Lock()
     current = [0]
-    executor = _futures.ThreadPoolExecutor(n_workers)
     if method == 'sigma':
         func = _mlefit_sigma
     elif method == 'sigmaxy':
         func = _mlefit_sigmaxy
     else:
         raise ValueError('Method not available.')
+    executor = _futures.ThreadPoolExecutor(n_workers)
     for i in range(n_workers):
-        executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
+       executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
     executor.shutdown(wait=False)
+    # A synchronous single-threaded version for debugging:
+    # for i in range(N):
+    #     func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
     return current, thetas, CRLBs, likelihoods, iterations
 
 
@@ -267,9 +270,9 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
 
         # Other constraints
         theta[2] = _np.maximum(theta[2], 1.0)
-        theta[3] = _np.maximum(theta[3], 0.0)
-        theta[4] = _np.maximum(theta[4], initial_sigma / 4)
-        theta[4] = _np.minimum(theta[4], 2 * initial_sigma)
+        theta[3] = _np.maximum(theta[3], 0.01)
+        theta[4] = _np.maximum(theta[4], 0.01)
+        theta[4] = _np.minimum(theta[4], size)
 
         # Check for convergence
         if (_np.abs(old_x - theta[0]) < eps) and (_np.abs(old_y - theta[1]) < eps):
@@ -391,9 +394,9 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
 
         # Other constraints
         theta[2] = _np.maximum(theta[2], 1.0)
-        theta[3] = _np.maximum(theta[3], 0.0)
-        theta[4] = _np.maximum(theta[4], 0.05 * initial_sigma)
-        theta[5] = _np.maximum(theta[5], 0.05 * initial_sigma)
+        theta[3] = _np.maximum(theta[3], 0.01)
+        theta[4] = _np.maximum(theta[4], 0.01)
+        theta[5] = _np.maximum(theta[5], 0.01)
 
         # Check for convergence
         if (_np.abs(old_x - theta[0]) < eps) and (_np.abs(old_y - theta[1]) < eps):
