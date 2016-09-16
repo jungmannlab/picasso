@@ -16,7 +16,7 @@ from PyQt4 import QtCore, QtGui
 import time
 import numpy as np
 import traceback
-from .. import io, localize
+from .. import io, localize, CONFIG
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
@@ -274,10 +274,10 @@ class ParametersDialog(QtGui.QDialog):
         scmos_grid.addWidget(self.gain_combo, 1, 1)
 
         # Wavelength
-        exp_grid.addWidget(QtGui.QLabel('Excitation Wavelength:'), 5, 0)
-        self.excitation_combo = QtGui.QComboBox()
-        exp_grid.addWidget(self.excitation_combo, 5, 1)
-        self.camera_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'].keys())))
+        exp_grid.addWidget(QtGui.QLabel('Emission Wavelength:'), 5, 0)
+        self.emission_combo = QtGui.QComboBox()
+        exp_grid.addWidget(self.emission_combo, 5, 1)
+        self.camera_combo.addItems([''] + sorted(list(CONFIG['Cameras'].keys())))
 
         # Fit Settings
         fit_groupbox = QtGui.QGroupBox('Fit Settings')
@@ -303,55 +303,55 @@ class ParametersDialog(QtGui.QDialog):
     def on_camera_changed(self, index):
         self.update_readmodes()
         self.update_readoutrates()
-        self.excitation_combo.clear()
+        self.emission_combo.clear()
         camera = self.camera_combo.currentText()
         if camera:
-            if 'Sensor' in localize.CONFIG['Cameras'][camera]:
-                sensor = localize.CONFIG['Cameras'][camera]['Sensor']
+            if 'Sensor' in CONFIG['Cameras'][camera]:
+                sensor = CONFIG['Cameras'][camera]['Sensor']
                 if sensor == 'EMCCD':
                     self.camera_tabs.setCurrentIndex(0)
                 elif sensor == 'sCMOS':
                     self.camera_tabs.setCurrentIndex(1)
-            if 'Quantum Efficiency' in localize.CONFIG['Cameras'][camera]:
-                wavelengths = sorted(list(localize.CONFIG['Cameras'][camera]['Quantum Efficiency'].keys()))
+            if 'Quantum Efficiency' in CONFIG['Cameras'][camera]:
+                wavelengths = sorted(list(CONFIG['Cameras'][camera]['Quantum Efficiency'].keys()))
                 wavelengths = [str(_) for _ in wavelengths]
-                self.excitation_combo.addItems([''] + wavelengths)
+                self.emission_combo.addItems([''] + wavelengths)
 
     def update_readmodes(self):
         self.readmode_combo.clear()
         camera = self.camera_combo.currentText()
         if camera:
-            if 'Sensor' in localize.CONFIG['Cameras'][camera]:
-                sensor = localize.CONFIG['Cameras'][camera]['Sensor']
+            if 'Sensor' in CONFIG['Cameras'][camera]:
+                sensor = CONFIG['Cameras'][camera]['Sensor']
                 if sensor == 'EMCCD':
                     em = self.em_checkbox.isChecked()
-                    self.readmode_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'][camera]['Sensitivity'][em].keys())))
+                    self.readmode_combo.addItems([''] + sorted(list(CONFIG['Cameras'][camera]['Sensitivity'][em].keys())))
 
     def update_readoutrates(self):
         self.readoutrate_combo.clear()
         camera = self.camera_combo.currentText()
         if camera:
-            if 'Sensor' in localize.CONFIG['Cameras'][camera]:
-                sensor = localize.CONFIG['Cameras'][camera]['Sensor']
+            if 'Sensor' in CONFIG['Cameras'][camera]:
+                sensor = CONFIG['Cameras'][camera]['Sensor']
                 if sensor == 'sCMOS':
-                    self.readoutrate_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'][camera]['Sensitivity'])))
+                    self.readoutrate_combo.addItems([''] + sorted(list(CONFIG['Cameras'][camera]['Sensitivity'])))
 
     def update_gains(self):
         self.gain_combo.clear()
         camera = self.camera_combo.currentText()
         readout = self.readoutrate_combo.currentText()
         if camera and readout:
-            self.gain_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'][camera]['Sensitivity'][readout])))
+            self.gain_combo.addItems([''] + sorted(list(CONFIG['Cameras'][camera]['Sensitivity'][readout])))
 
     def update_preamps(self, index):
         self.preamp_combo.clear()
         camera = self.camera_combo.currentText()
         if camera:
-            if localize.CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
+            if CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
                 em = self.em_checkbox.isChecked()
                 readmode = self.readmode_combo.currentText()
                 if readmode:
-                    preamps = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode]
+                    preamps = CONFIG['Cameras'][camera]['Sensitivity'][em][readmode]
                     preamps = [''] + [str(_) for _ in preamps]
                     self.preamp_combo.addItems(preamps)
 
@@ -415,33 +415,33 @@ class ParametersDialog(QtGui.QDialog):
                 if self.gain_combo.itemText(index) == parameters['Gain Setting']:
                     self.gain_combo.setCurrentIndex(index)
                     break
-        self.excitation_combo.setCurrentIndex(0)
-        if 'Excitation Wavelength' in parameters:
-            for index in range(1, self.excitation_combo.count()):
-                if int(self.excitation_combo.itemText(index)) == parameters['Excitation Wavelength']:
-                    self.excitation_combo.setCurrentIndex(index)
+        self.emission_combo.setCurrentIndex(0)
+        if 'Emission Wavelength' in parameters:
+            for index in range(1, self.emission_combo.count()):
+                if int(self.emission_combo.itemText(index)) == parameters['Emission Wavelength']:
+                    self.emission_combo.setCurrentIndex(index)
                     break
 
     def get_camera_parameters(self):
         camera = self.camera_combo.currentText()
         parameters = {'Camera': self.camera_combo.currentText()}
-        if localize.CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
+        if CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
             parameters['Electron Multiplying'] = self.em_checkbox.isChecked()
             parameters['EM Real Gain'] = self.gain_spinbox.value()
             parameters['Readout Mode'] = self.readmode_combo.currentText()
             parameters['Pre-Amp Gain'] = self.preamp_combo.currentText()
             parameters = self.add_wavelength_to_camera_parameters(parameters)
-        elif localize.CONFIG['Cameras'][camera]['Sensor'] == 'sCMOS':
+        elif CONFIG['Cameras'][camera]['Sensor'] == 'sCMOS':
             parameters['Readout Rate'] = self.readoutrate_combo.currentText()
             parameters['Gain Setting'] = self.gain_combo.currentText()
             parameters = self.add_wavelength_to_camera_parameters(parameters)
-        elif localize.CONFIG['Cameras'][camera]['Sensor'] == 'Simulation':
+        elif CONFIG['Cameras'][camera]['Sensor'] == 'Simulation':
             pass
         return parameters
 
     def add_wavelength_to_camera_parameters(self, parameters):
         try:
-            parameters['Excitation Wavelength'] = int(self.excitation_combo.currentText())
+            parameters['Emission Wavelength'] = int(self.emission_combo.currentText())
         except ValueError:
             raise ValueError('You must set the wavelength!')
         return parameters
@@ -790,27 +790,27 @@ class Window(QtGui.QMainWindow):
             self.status_bar.showMessage('Preparing fit...')
             parameters = self.parameters_dialog.get_camera_parameters()
             camera = parameters['Camera']
-            sensor = localize.CONFIG['Cameras'][camera]['Sensor']
+            sensor = CONFIG['Cameras'][camera]['Sensor']
             camera_info = {'sensor': sensor}
             if sensor == 'EMCCD':
                 em = parameters['Electron Multiplying']
                 readmode = parameters['Readout Mode']
                 preamp = parameters['Pre-Amp Gain']
-                camera_info['baseline'] = localize.CONFIG['Cameras'][camera]['Baseline']
-                camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode][preamp]
+                camera_info['baseline'] = CONFIG['Cameras'][camera]['Baseline']
+                camera_info['sensitivity'] = CONFIG['Cameras'][camera]['Sensitivity'][em][readmode][preamp]
                 if em:
                     camera_info['gain'] = parameters['EM Real Gain']
                 else:
                     camera_info['gain'] = 1
-                excitation = parameters['Excitation Wavelength']
-                camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
+                emission = parameters['Emission Wavelength']
+                camera_info['qe'] = CONFIG['Cameras'][camera]['Quantum Efficiency'][emission]
             elif sensor == 'sCMOS':
-                camera_info['baseline'] = localize.CONFIG['Cameras'][camera]['Baseline']
+                camera_info['baseline'] = CONFIG['Cameras'][camera]['Baseline']
                 readoutrate = parameters['Readout Rate']
                 gain = parameters['Gain Setting']
-                camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][readoutrate][gain]
-                excitation = parameters['Excitation Wavelength']
-                camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
+                camera_info['sensitivity'] = CONFIG['Cameras'][camera]['Sensitivity'][readoutrate][gain]
+                emission = parameters['Emission Wavelength']
+                camera_info['qe'] = CONFIG['Cameras'][camera]['Quantum Efficiency'][emission]
             elif sensor == 'Simulation':
                 pass
             eps = self.parameters_dialog.convergence_spinbox.value()

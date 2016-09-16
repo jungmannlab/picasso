@@ -26,16 +26,6 @@ LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
               ('likelihood', 'f4'), ('iterations', 'i4')]
 
 
-_this_file = _ospath.abspath(__file__)
-_this_directory = _ospath.dirname(_this_file)
-try:
-    with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
-        CONFIG = _yaml.load(config_file)
-except FileNotFoundError:
-    print('No configuration file found. Generate "config.yaml" and restart the program.')
-    quit()
-
-
 @_numba.jit(nopython=True, nogil=True)
 def local_maxima(frame, box):
     """ Finds pixels with maximum value within a region of interest """

@@ -18,6 +18,7 @@ import json as _json
 import os as _os
 import threading as _threading
 from . import lib as _lib
+from . import CONFIG
 
 
 def _user_settings_filename():
@@ -236,6 +237,7 @@ class TiffMap:
             if count * self.TYPE_SIZES[type] > 4:
                 self.file.seek(self.read('L'))
             if tag == 51123:
+                # This is the Micro-Manager tag. We generate an info dict that contains any info we need.
                 readout = self.read(type, count).strip(b'\0')      # Strip null bytes which MM 1.4.22 adds
                 mm_info = _json.loads(readout.decode())
                 camera = mm_info['Camera']
@@ -253,12 +255,15 @@ class TiffMap:
                     info['Readout Rate'] = mm_info[camera + '-PixelReadoutRate'].split('-')[0].strip()
                 if camera + '-Sensitivity/DynamicRange' in mm_info:
                     info['Gain Setting'] = mm_info[camera + '-Sensitivity/DynamicRange']
-                if 'TIFilterBlock1-Label' in mm_info:
-                    try:
-                        info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
-                    except ValueError:      # Last three digits are not a number
-                        info['Excitation Wavelength'] = None
-                # Dump the rest
+                if camera in CONFIG['Cameras']:
+                    if 'Channel Device' in CONFIG['Cameras'][camera]:
+                        channel_device = CONFIG['Cameras'][camera]['Channel Device']['Name']
+                        if channel_device in mm_info:
+                            channel = mm_info[channel_device]
+                            wavelengths = CONFIG['Cameras'][camera]['Channel Device']['Emission Wavelengths']
+                            if channel in wavelengths:
+                                info['Emission Wavelength'] = wavelengths[channel]
+                # For completeness, we dump the rest
                 info['Micro-Manager Metadata'] = mm_info
         # Again, MM-specific:
         '''

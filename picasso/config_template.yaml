@@ -3,10 +3,10 @@ Cameras:
     Sensor: EMCCD
     Baseline: 200
     Quantum Efficiency:
-      # Excitation wavelength
-      489: 0.95
-      561: 0.96
-      640: 0.9
+      # Emission wavelength
+      525: 0.95
+      595: 0.96
+      700: 0.9
     Sensitivity:
       # EM gain
       true:
@@ -40,13 +40,20 @@ Cameras:
           Gain 1: 4.04
           Gain 2: 3.09
           Gain 3: 1.44
+    Channel Device:
+      # This information is used to automatically set the emission wavelength based on MicroManager metadata
+      Name: TIFilterBlock1-Label
+      Emission Wavelengths:
+        1-R640: 700
+        2-G561: 595
+        3-B489: 525
   Andor Zyla VSC-01223:
     Sensor: sCMOS
     Baseline: 100
     Quantum Efficiency:
-      489: 0.7
-      561: 0.72
-      640: 0.64
+      525: 0.7
+      595: 0.72
+      700: 0.64
     Sensitivity:
       540 MHz:
         12-bit (high well capacity): 7.18
@@ -56,5 +63,12 @@ Cameras:
         12-bit (high well capacity): 7.0
         12-bit (low noise): 0.26
         16-bit (low noise & high well capacity): 0.45
+    Channel Device:
+      # This information is used to automatically set the emission wavelength based on MicroManager metadata
+      Name: TIFilterBlock1-Label
+      Emission Wavelengths:
+        1-R640: 700
+        2-G561: 595
+        3-B489: 525
   Simulation:
     Sensor: Simulation

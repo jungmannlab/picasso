@@ -208,7 +208,8 @@ def _pair_correlation(files, bin_size, r_max):
 def _localize(args):
     from glob import glob
     from .io import load_movie, save_locs
-    from .localize import CONFIG, identify_async, identifications_from_futures, fit_async, locs_from_fits
+    from .localize import identify_async, identifications_from_futures, fit_async, locs_from_fits
+    from . import CONFIG
     from os.path import splitext
     from time import sleep
     paths = glob(args.files)
