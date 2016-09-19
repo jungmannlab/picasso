@@ -23,7 +23,7 @@ _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
 LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
               ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
               ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
-              ('likelihood', 'f4'), ('iterations', 'i4')]
+              ('net_gradient', 'f4'), ('likelihood', 'f4'), ('iterations', 'i4')]
 
 
 @_numba.jit(nopython=True, nogil=True)
@@ -82,25 +82,26 @@ def identify_in_image(image, minimum_ng, box):
     positives = ng > minimum_ng
     y = y[positives]
     x = x[positives]
-    return y, x
+    ng = ng[positives]
+    return y, x, ng
 
 
 def identify_in_frame(frame, minimum_ng, box, roi=None):
     if roi is not None:
         frame = frame[roi[0][0]:roi[1][0], roi[0][1]:roi[1][1]]
     image = _np.float32(frame)      # otherwise numba goes crazy
-    y, x = identify_in_image(image, minimum_ng, box)
+    y, x, net_gradient = identify_in_image(image, minimum_ng, box)
     if roi is not None:
         y += roi[0][0]
         x += roi[0][1]
-    return y, x
+    return y, x, net_gradient
 
 
 def identify_by_frame_number(movie, minimum_ng, box, frame_number, roi=None):
     frame = movie[frame_number]
-    y, x = identify_in_frame(frame, minimum_ng, box, roi)
+    y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
     frame = frame_number * _np.ones(len(x))
-    return _np.rec.array((frame, x, y), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i')])
+    return _np.rec.array((frame, x, y, net_gradient), dtype=[('frame', 'i'), ('x', 'i'), ('y', 'i'), ('net_gradient', 'f4')])
 
 
 def _identify_worker(movie, current, minimum_ng, box, roi, lock):
@@ -167,18 +168,17 @@ def _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, 
     return j
 
 
-def _cut_spots(movie, identifications, box):
-    ids_frame, ids_x, ids_y = (identifications[_] for _ in identifications.dtype.names)
+def _cut_spots(movie, ids, box):
     if isinstance(movie, _np.ndarray):
-        return _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box)
+        return _cut_spots_numba(movie, ids.frame, ids.x, ids.y, box)
     else:
         ''' Assumes that identifications are in order of frames! '''
         r = int(box/2)
-        N = len(ids_frame)
+        N = len(ids.frame)
         spots = _np.zeros((N, box, box), dtype=movie.dtype)
         start = 0
         for frame_number, frame in enumerate(movie):
-            start = _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots)
+            start = _cut_spots_frame(frame, frame_number, ids.frame, ids.x, ids.y, r, start, N, spots)
         return spots
 
 
@@ -220,7 +220,9 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
     lpx = _np.sqrt(CRLBs[:, 1])
     locs = _np.rec.array((identifications.frame, x, y,
                           theta[:, 2], theta[:, 5], theta[:, 4],
-                          theta[:, 3], lpx, lpy, likelihoods, iterations),
+                          theta[:, 3], lpx, lpy,
+                          identifications.net_gradient,
+                          likelihoods, iterations),
                          dtype=LOCS_DTYPE)
     locs.sort(kind='mergesort', order='frame')
     return locs

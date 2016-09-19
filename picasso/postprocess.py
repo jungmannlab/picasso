@@ -442,8 +442,9 @@ def _link_group_min_max(column, link_group, n_locs, n_groups):
 def _link_group_last(column, link_group, n_locs, n_groups):
     result = _np.zeros(n_groups, dtype=column.dtype)
     for i in range(n_locs):
-        i_ = link_group[i_]
+        i_ = link_group[i]
         result[i_] = column[i]
+    return result
 
 
 def link_loc_groups(locs, link_group):
@@ -485,7 +486,7 @@ def link_loc_groups(locs, link_group):
     columns['n'] = n_
     if hasattr(locs, 'photons'):
         columns['photon_rate'] = _np.float32(columns['photons'] / n_)
-    return = _np.rec.array(list(columns.values()), names=list(columns.keys()))
+    return _np.rec.array(list(columns.values()), names=list(columns.keys()))
 
 
 def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
