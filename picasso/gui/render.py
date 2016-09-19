@@ -860,8 +860,11 @@ class View(QtGui.QLabel):
     def render_single_channel(self, kwargs, autoscale=False, use_cache=False, cache=True):
         locs = self.locs[0]
         if hasattr(locs, 'group'):
-            color_group = locs.group % N_GROUP_COLORS
-            locs = [locs[color_group == _] for _ in range(N_GROUP_COLORS)]
+            groups = np.unique(locs.group)
+            np.random.shuffle(groups)
+            groups %= N_GROUP_COLORS
+            color = groups[locs.group]
+            locs = [locs[color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
         if use_cache:
             n_locs = self.n_locs
@@ -1119,10 +1122,10 @@ class Window(QtGui.QMainWindow):
         save_action = file_menu.addAction('Save localizations')
         save_action.setShortcut('Ctrl+S')
         save_action.triggered.connect(self.save_locs)
-        file_menu.addSeparator()
         save_picked_action = file_menu.addAction('Save picked localizations')
         save_picked_action.setShortcut('Ctrl+Shift+S')
         save_picked_action.triggered.connect(self.save_picked_locs)
+        file_menu.addSeparator()
         save_picks_action = file_menu.addAction('Save pick regions')
         save_picks_action.setShortcut('Ctrl+Shift+Alt+S')
         save_picks_action.triggered.connect(self.save_picks)
