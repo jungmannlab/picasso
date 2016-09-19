@@ -20,6 +20,7 @@ import matplotlib.pyplot as _plt
 from scipy.optimize import minimize as _minimize
 import itertools as _itertools
 import lmfit as _lmfit
+from collections import OrderedDict as _OrderedDict
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
@@ -389,73 +390,102 @@ def _get_next_loc_index_in_link_group(current_index, link_group, N, frame, x, y,
     return -1
 
 
-def link_loc_groups(locs, link_group):
-    is_grouped = hasattr(locs, 'group')
-    if is_grouped:
-        group = locs.group
-    else:
-        group = _np.zeros(len(locs), dtype=_np.int32)
-    linked_locs_data = _link_loc_groups(locs, link_group, group)
-    dtype = _LOCS_DTYPE[:-1] + [('iterations', 'f4'), ('len', 'i4'), ('n', 'u4'), ('photon_rate', 'f4')]
-    if is_grouped:
-        dtype.append(('group', 'i4'))
-        return _np.rec.array(linked_locs_data, dtype=dtype)
-    return _np.rec.array(linked_locs_data[:-1], dtype=dtype)
+@_numba.jit(nopython=True)
+def _link_group_count(link_group, n_locs, n_groups):
+    result = _np.zeros(n_groups, dtype=_np.uint32)
+    for i in range(n_locs):
+        i_ = link_group[i]
+        result[i_] += 1
+    return result
 
 
 @_numba.jit(nopython=True)
-def _link_loc_groups(locs, link_group, group):
-    N_linked = link_group.max() + 1
-    frame_ = locs.frame.max() * _np.ones(N_linked, dtype=_np.uint32)
-    x_ = _np.zeros(N_linked, dtype=_np.float32)
-    y_ = _np.zeros(N_linked, dtype=_np.float32)
-    photons_ = _np.zeros(N_linked, dtype=_np.float32)
-    sx_ = _np.zeros(N_linked, dtype=_np.float32)
-    sy_ = _np.zeros(N_linked, dtype=_np.float32)
-    bg_ = _np.zeros(N_linked, dtype=_np.float32)
-    lpx_ = _np.zeros(N_linked, dtype=_np.float32)
-    lpy_ = _np.zeros(N_linked, dtype=_np.float32)
-    likelihood_ = _np.zeros(N_linked, dtype=_np.float32)
-    iterations_ = _np.zeros(N_linked, dtype=_np.float32)
-    len_ = _np.zeros(N_linked, dtype=_np.int32)
-    n_ = _np.zeros(N_linked, dtype=_np.uint32)
-    last_frame_ = _np.zeros(N_linked, dtype=_np.uint32)
-    group_ = _np.zeros(N_linked, dtype=_np.int32)
-    weights_x = 1/locs.lpx**2
-    weights_y = 1/locs.lpy**2
-    sum_weights_x_ = _np.zeros(N_linked, dtype=_np.float32)
-    sum_weights_y_ = _np.zeros(N_linked, dtype=_np.float32)
-    N = len(link_group)
-    for i in range(N):
+def _link_group_sum(column, link_group, n_locs, n_groups):
+    result = _np.zeros(n_groups, dtype=column.dtype)
+    for i in range(n_locs):
         i_ = link_group[i]
-        n_[i_] += 1
-        x_[i_] += weights_x[i] * locs.x[i]
-        sum_weights_x_[i_] += weights_x[i]
-        y_[i_] += weights_y[i] * locs.y[i]
-        sum_weights_y_[i_] += weights_y[i]
-        photons_[i_] += locs.photons[i]
-        sx_[i_] += locs.sx[i]
-        sy_[i_] += locs.sy[i]
-        bg_[i_] += locs.bg[i]
-        likelihood_[i_] += locs.likelihood[i]
-        iterations_[i_] += locs.iterations[i]
-        if locs.frame[i] < frame_[i_]:
-            frame_[i_] = locs.frame[i]
-        if locs.frame[i] > last_frame_[i_]:
-            last_frame_[i_] = locs.frame[i]
-        group_[i_] = group[i]
-    x_ = x_ / sum_weights_x_
-    y_ = y_ / sum_weights_y_
-    sx_ = sx_ / n_
-    sy_ = sy_ / n_
-    bg_ = bg_ / n_
-    lpx_ = _np.sqrt(1/sum_weights_x_)
-    lpy_ = _np.sqrt(1/sum_weights_y_)
-    likelihood_ = likelihood_ / n_
-    iterations_ = iterations_ / n_
-    len_ = last_frame_ - frame_ + 1
-    photon_rate_ = photons_ / n_
-    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, iterations_, len_, n_, photon_rate_, group_
+        result[i_] += column[i]
+    return result
+
+
+@_numba.jit(nopython=True)
+def _link_group_mean(column, link_group, n_locs, n_groups, n_locs_per_group):
+    group_sum = _link_group_sum(column, link_group, n_locs, n_groups)
+    result = _np.empty(n_groups, dtype=_np.float32)     # this ensures float32 after the division
+    result[:] = group_sum / n_locs_per_group
+    return result
+
+
+@_numba.jit(nopython=True)
+def _link_group_weighted_mean(column, weights, link_group, n_locs, n_groups, n_locs_per_group):
+    sum_weights = _link_group_sum(weights, link_group, n_locs, n_groups)
+    return _link_group_mean(column * weights, link_group, n_locs, n_groups, sum_weights), sum_weights
+
+
+@_numba.jit(nopython=True)
+def _link_group_min_max(column, link_group, n_locs, n_groups):
+    min_ = _np.empty(n_groups, dtype=column.dtype)
+    max_ = _np.empty(n_groups, dtype=column.dtype)
+    min_[:] = column.max()
+    max_[:] = column.min()
+    for i in range(n_locs):
+        i_ = link_group[i]
+        value = column[i]
+        if value < min_[i_]:
+            min_[i_] = value
+        if value > max_[i_]:
+            max_[i_] = value
+    return min_, max_
+
+
+@_numba.jit(nopython=True)
+def _link_group_last(column, link_group, n_locs, n_groups):
+    result = _np.zeros(n_groups, dtype=column.dtype)
+    for i in range(n_locs):
+        i_ = link_group[i_]
+        result[i_] = column[i]
+
+
+def link_loc_groups(locs, link_group):
+    n_locs = len(link_group)
+    n_groups = link_group.max() + 1
+    n_ = _link_group_count(link_group, n_locs, n_groups)
+    columns = _OrderedDict()
+    if hasattr(locs, 'frame'):
+        first_frame_, last_frame_ = _link_group_min_max(locs.frame, link_group, n_locs, n_groups)
+        columns['frame'] = first_frame_
+    if hasattr(locs, 'x'):
+        weights_x = 1 / locs.lpx**2
+        columns['x'], sum_weights_x_ = _link_group_weighted_mean(locs.x, weights_x, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'y'):
+        weights_y = 1 / locs.lpy**2
+        columns['y'], sum_weights_y_ = _link_group_weighted_mean(locs.y, weights_y, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'photons'):
+        columns['photons'] = _link_group_sum(locs.photons, link_group, n_locs, n_groups)
+    if hasattr(locs, 'sx'):
+        columns['sx'] = _link_group_mean(locs.sx, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'sy'):
+        columns['sy'] = _link_group_mean(locs.sy, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'bg'):
+        columns['bg'] = _link_group_sum(locs.bg, link_group, n_locs, n_groups)
+    if hasattr(locs, 'x'):
+        columns['lpx'] = _np.sqrt(1 / sum_weights_x_)
+    if hasattr(locs, 'y'):
+        columns['lpy'] = _np.sqrt(1 / sum_weights_y_)
+    if hasattr(locs, 'net_gradient'):
+        columns['net_gradient'] = _link_group_mean(locs.net_gradient, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'likelihood'):
+        columns['likelihood'] = _link_group_mean(locs.likelihood, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'iterations'):
+        columns['iterations'] = _link_group_mean(locs.iterations, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'group'):
+        columns['group'] = _link_group_last(locs.group, link_group, n_locs, n_groups)
+    if hasattr(locs, 'frame'):
+        columns['len'] = last_frame_ - first_frame_ + 1
+    columns['n'] = n_
+    if hasattr(locs, 'photons'):
+        columns['photon_rate'] = _np.float32(columns['photons'] / n_)
+    return = _np.rec.array(list(columns.values()), names=list(columns.keys()))
 
 
 def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
