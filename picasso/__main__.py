@@ -20,7 +20,7 @@ def _average(args):
     paths = glob(args.file)
     if paths:
         for path in paths:
-            print('Averaging grouped localizations in {}'.format(path))
+            print('Averaging {}'.format(path))
             locs, info = load_locs(path)
             kwargs['path_basename'] = os.path.splitext(path)[0] + '_avg'
             average(locs, info, **kwargs)

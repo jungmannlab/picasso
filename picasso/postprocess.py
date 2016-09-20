@@ -756,9 +756,11 @@ def average(locs, info, iterations=50, oversampling=20, path_basename=None):
     n_digits = len(str(iterations))
     groups = _np.unique(locs.group)
     n_groups = len(groups)
+    print('# Particles:', n_groups)
+    print('Super-Resolution Pixel Size: {:.3f} cam. pixels'.format(1 / oversampling))
     group_index = [(locs.group == _) for _ in groups]
     # Translate all the groups by center of mass
-    for index in group_index:
+    for index in _tqdm(group_index, desc='Aligning by COM', unit='groups'):
         locs.x[index] -= _np.mean(locs.x[index])
         locs.y[index] -= _np.mean(locs.y[index])
     r = 2 * _np.sqrt(_np.mean(locs.x**2 + locs.y**2))
@@ -783,8 +785,6 @@ def average(locs, info, iterations=50, oversampling=20, path_basename=None):
                         vmin=0,
                         vmax=0.9*_np.max(image_avg))
 
-    print('# Particles:', n_groups)
-    print('Super-Resolution Pixel Size: {:.3f} cam. pixels'.format(1 / oversampling))
     print('Translation Range: {:.3f} cam. pixels'.format(r))
     print('Angle Step: {:.3f} degrees'.format(a_step * 360 / (2 * _np.pi)))
     for it in _trange(iterations, desc='Iterations'):
