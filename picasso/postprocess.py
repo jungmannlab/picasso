@@ -754,16 +754,16 @@ def groupprops(locs):
 
 def average(locs, info, iterations=50, oversampling=20, path_basename=None):
     n_digits = len(str(iterations))
-    print('Indexing particles...')
     groups = _np.unique(locs.group)
     n_groups = len(groups)
-    print('# Particles:', n_groups)
-    print('Super-Resolution Pixel Size: {:.3f} cam. pixels'.format(1 / oversampling))
+    print('Indexing particle localizations...')
     group_index = [(locs.group == _) for _ in groups]
+
     # Translate all the groups by center of mass
     for index in _tqdm(group_index, desc='Aligning by COM', unit='groups'):
         locs.x[index] -= _np.mean(locs.x[index])
         locs.y[index] -= _np.mean(locs.y[index])
+
     r = 2 * _np.sqrt(_np.mean(locs.x**2 + locs.y**2))
     a_step = _np.arcsin(1 / (oversampling * r))
     angles = _np.arange(0, 2*_np.pi, a_step)
@@ -773,21 +773,24 @@ def average(locs, info, iterations=50, oversampling=20, path_basename=None):
     Y_half = info[0]['Height'] / 2
     X_half = info[0]['Width'] / 2
 
+    print('# Particles:', n_groups)
+    print('Super-Resolution Pixel Size: {:.3f} cam. pixels'.format(1 / oversampling))
+    print('Translation Range: {:.3f} cam. pixels'.format(r))
+    print('Angle Step: {:.3f} degrees'.format(a_step * 360 / (2 * _np.pi)))
+
     def save(n):
         if path_basename is not None:
             locs.x += X_half
             locs.y += Y_half
-            _io.save_locs(path_basename + '_{:0{n}d}.hdf5'.format(n, n=n_digits), locs, info)
+            _io.save_locs(path_basename + '_{:0{nd}d}.hdf5'.format(n, nd=n_digits), locs, info)
             locs.x -= X_half
             locs.y -= Y_half
-            _plt.imsave(path_basename + '_{:0{n}d}.png'.format(n, n=n_digits),
+            _plt.imsave(path_basename + '_{:0{nd}d}.png'.format(n, nd=n_digits),
                         image_avg,
                         cmap='magma',
                         vmin=0,
                         vmax=0.9*_np.max(image_avg))
 
-    print('Translation Range: {:.3f} cam. pixels'.format(r))
-    print('Angle Step: {:.3f} degrees'.format(a_step * 360 / (2 * _np.pi)))
     for it in _trange(iterations, desc='Iterations'):
         # render average image
         N_avg, image_avg = _render.render(locs, **kwargs)
