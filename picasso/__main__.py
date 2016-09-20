@@ -11,6 +11,21 @@
 import os.path
 
 
+def _average(args):
+    from glob import glob
+    from .io import load_locs
+    from .postprocess import average
+    kwargs = {'iterations': args.iterations,
+              'oversampling': args.oversampling}
+    paths = glob(args.file)
+    if paths:
+        for path in paths:
+            print('Averaging grouped localizations in {}'.format(path))
+            locs, info = load_locs(path)
+            kwargs['path_basename'] = os.path.splitext(path)[0] + '_avg'
+            average(locs, info, **kwargs)
+
+
 def _link(files, d_max, tolerance):
     import glob
     paths = glob.glob(files)
@@ -389,6 +404,12 @@ def main():
     # design
     design_parser = subparsers.add_parser('design', help='design RRO structures')
 
+    # average
+    average_parser = subparsers.add_parser('average', help='particle averaging')
+    average_parser.add_argument('-o', '--oversampling', type=float, default=10, help='oversampling of the super-resolution images for alignment evaluation')
+    average_parser.add_argument('-i', '--iterations', type=int, default=20)
+    average_parser.add_argument('file', help='a localization file with grouped localizations')
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -436,6 +457,8 @@ def main():
         elif args.command == 'design':
             from .gui import design
             design.main()
+        elif args.command == 'average':
+            _average(args)
     else:
         parser.print_help()
 

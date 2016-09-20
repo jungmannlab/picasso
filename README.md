@@ -18,7 +18,7 @@ We highly recommend the [Anaconda or Miniconda](https://www.continuum.io/downloa
 
 ##### Python packages
 The following packages are required:  
-`h5py matplotlib numba numpy scipy pyqt pyyaml scikit-learn lmfit tqdm`  
+`h5py matplotlib numba numpy scipy pyqt pyyaml scikit-learn colorama lmfit tqdm`  
 When using Anaconda or Miniconda, most can be installed via `conda install <package>`. However, some packages need to be obtained from third-party conda channels. Visit [anaconda.org](anaconda.org) to search for them. Use `pip`  as a last resort to install packages from [PyPi](https://pypi.python.org/pypi).
 
 #### Installation

@@ -12,6 +12,7 @@ import numpy as _np
 import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
 from tqdm import tqdm as _tqdm
+from tqdm import trange as _trange
 from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
@@ -21,6 +22,7 @@ from scipy.optimize import minimize as _minimize
 import itertools as _itertools
 import lmfit as _lmfit
 from collections import OrderedDict as _OrderedDict
+from . import io as _io
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
@@ -748,3 +750,75 @@ def groupprops(locs):
             groups[name + '_mean'][i] = _np.mean(group_locs[name])
             groups[name + '_std'][i] = _np.std(group_locs[name])
     return groups
+
+
+def average(locs, info, iterations=50, oversampling=20, path_basename=None):
+    n_digits = len(str(iterations))
+    groups = _np.unique(locs.group)
+    n_groups = len(groups)
+    group_index = [(locs.group == _) for _ in groups]
+    # Translate all the groups by center of mass
+    for index in group_index:
+        locs.x[index] -= _np.mean(locs.x[index])
+        locs.y[index] -= _np.mean(locs.y[index])
+    r = 2 * _np.sqrt(_np.mean(locs.x**2 + locs.y**2))
+    a_step = _np.arcsin(1 / (oversampling * r))
+    angles = _np.arange(0, 2*_np.pi, a_step)
+    kwargs = {'oversampling': oversampling,
+              'viewport': [(-r, -r), (r, r)],
+              'blur_method': 'smooth'}
+    Y_half = info[0]['Height'] / 2
+    X_half = info[0]['Width'] / 2
+
+    def save(n):
+        if path_basename is not None:
+            locs.x += X_half
+            locs.y += Y_half
+            _io.save_locs(path_basename + '_{:0{n}d}.hdf5'.format(n, n=n_digits), locs, info)
+            locs.x -= X_half
+            locs.y -= Y_half
+            _plt.imsave(path_basename + '_{:0{n}d}.png'.format(n, n=n_digits),
+                        image_avg,
+                        cmap='magma',
+                        vmin=0,
+                        vmax=0.9*_np.max(image_avg))
+
+    print('# Particles:', n_groups)
+    print('Super-Resolution Pixel Size: {:.3f} cam. pixels'.format(1 / oversampling))
+    print('Translation Range: {:.3f} cam. pixels'.format(r))
+    print('Angle Step: {:.3f} degrees'.format(a_step * 360 / (2 * _np.pi)))
+    for it in _trange(iterations, desc='Iterations'):
+        # render average image
+        N_avg, image_avg = _render.render(locs, **kwargs)
+        save(it)
+        n_pixel, _ = image_avg.shape
+        image_half = n_pixel / 2
+        CF_image_avg = _np.conj(_np.fft.fft2(image_avg))
+        for i, index in enumerate(_tqdm(group_index, desc='Group alignment', unit='groups')):
+            group_locs = locs[index]
+            # Storing the original coordinates
+            x = group_locs.x.copy()
+            y = group_locs.y.copy()
+            xcorr_max = 0.0
+            for angle in angles:
+                # rotate locs
+                group_locs.x = _np.cos(angle) * x - _np.sin(angle) * y
+                group_locs.y = _np.sin(angle) * x + _np.cos(angle) * y
+                # render group image
+                N, image = _render.render(group_locs, **kwargs)
+                # calculate cross-correlation
+                F_image = _np.fft.fft2(image)
+                xcorr = _np.fft.fftshift(_np.real(_np.fft.ifft2((F_image * CF_image_avg))))
+                # find the brightest pixel
+                y_max, x_max = _np.unravel_index(xcorr.argmax(), xcorr.shape)
+                # store the transformation if the correlation is larger than before
+                if xcorr[y_max, x_max] > xcorr_max:
+                    xcorr_max = xcorr[y_max, x_max]
+                    rot = angle
+                    dy = (y_max - image_half + 0.5) / oversampling
+                    dx = (x_max - image_half + 0.5) / oversampling
+            # rotate and shift image group locs
+            locs.x[index] = _np.cos(rot) * x - _np.sin(rot) * y - dx
+            locs.y[index] = _np.sin(rot) * x + _np.cos(rot) * y - dy
+    save(iterations)
+    return locs
