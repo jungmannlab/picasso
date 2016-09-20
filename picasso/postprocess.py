@@ -754,6 +754,7 @@ def groupprops(locs):
 
 def average(locs, info, iterations=50, oversampling=20, path_basename=None):
     n_digits = len(str(iterations))
+    print('Indexing particles...')
     groups = _np.unique(locs.group)
     n_groups = len(groups)
     print('# Particles:', n_groups)
