@@ -14,6 +14,7 @@ from PyQt4 import QtCore, QtGui
 import numpy as np
 from numpy.lib.recfunctions import stack_arrays
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg
 import colorsys
 from math import ceil
 import yaml
@@ -28,7 +29,7 @@ N_GROUP_COLORS = 8
 
 class NenaWorker(QtCore.QThread):
 
-    finished = QtCore.pyqtSignal(float)
+    finished = QtCore.pyqtSignal(tuple)
 
     def __init__(self, locs, info):
         super().__init__()
@@ -36,8 +37,8 @@ class NenaWorker(QtCore.QThread):
         self.info = info
 
     def run(self):
-        result, lp = postprocess.nena(self.locs, self.info)
-        self.finished.emit(lp)
+        out = postprocess.nena(self.locs, self.info)
+        self.finished.emit(out)
 
 
 class PickInfoWorker(QtCore.QThread):
@@ -69,6 +70,7 @@ class PickInfoWorker(QtCore.QThread):
         picked_locs = list(self.picked_locs_iter())
         N = np.array([len(_) for _ in picked_locs])
         info = {'# Localizations': N}
+        info_pool = {'photons': np.concatenate([_.photons for _ in picked_locs])}
         com_x = [np.mean(_.x) for _ in picked_locs]
         com_y = [np.mean(_.y) for _ in picked_locs]
         rmsd = [np.sqrt(np.mean((locs.x - x)**2 + (locs.y - y)**2)) for locs, x, y in zip(picked_locs, com_x, com_y)]
@@ -79,6 +81,9 @@ class PickInfoWorker(QtCore.QThread):
         info['Length'] = np.array([np.mean(_.len[_.len > 0]) for _ in picked_locs])
         picked_locs = [postprocess.compute_dark_times(_) for _ in picked_locs]
         info['Dark time'] = np.array([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
+        info_pool['len'] = np.concatenate([_.len for _ in picked_locs])
+        info_pool['dark'] = np.concatenate([_.dark for _ in picked_locs])
+        info['pool'] = info_pool
         self.finished.emit(info)
 
 
@@ -283,6 +288,9 @@ class InfoDialog(QtGui.QDialog):
         self.picks_grid.addWidget(self.binding_sites, self.picks_grid_current, 1)
         self.binding_sites_std = QtGui.QLabel()
         self.picks_grid.addWidget(self.binding_sites_std, self.picks_grid_current, 2)
+        pick_hists = QtGui.QPushButton('Show histograms')
+        pick_hists.clicked.connect(self.show_pick_histograms)
+        self.picks_grid.addWidget(pick_hists, self.picks_grid.rowCount(), 0, 1, 3)
         self.pick_info = None
 
     def add_pick_info_field(self, name, decimals=1):
@@ -319,8 +327,52 @@ class InfoDialog(QtGui.QDialog):
                 self.binding_sites.setText('{:,.3f}'.format(np.mean(n_binding_sites)))
                 self.binding_sites_std.setText('{:,.3f}'.format(np.std(n_binding_sites)))
 
-    def update_nena_lp(self, lp):
+    def update_nena_lp(self, result_lp):
+        self.nena_result, lp = result_lp
         self.nena_label.setText('{:.3} pixel'.format(lp))
+        show_plot_button = QtGui.QPushButton('Show plot')
+        self.movie_grid.addWidget(show_plot_button, self.movie_grid.rowCount()-1, 2)
+        show_plot_button.clicked.connect(self.show_nena_plot)
+
+    def show_nena_plot(self):
+        d = self.nena_result.userkws['d']
+        figure = plt.Figure()
+        # canvas = FigureCanvasQTAgg(figure)
+        # figure.suptitle('Next frame neighbor distance histogram')
+        # axes = figure.add_subplot(111)
+        # axes.plot(d, self.nena_result.data, label='Data')
+        # axes.plot(d, self.nena_result.best_fit, label='Fit')
+        # axes.legend(loc='best')
+        # canvas.draw()
+        # self.movie_grid.addWidget(canvas, 2, 0, 1, 2)
+        plt.title('Next frame neighbor distance histogram')
+        plt.plot(d, self.nena_result.data, label='Data')
+        plt.plot(d, self.nena_result.best_fit, label='Fit')
+        plt.legend(loc='best')
+        plt.show()
+
+    def show_pick_histograms(self):
+        if self.pick_info is not None:
+            # Make this a qt widget so it can be updated without closing and opening.
+            figure = plt.Figure()
+            plt.suptitle('Pooled localizations')
+            plt.subplot(131)
+            plt.title('Photons per frame')
+            bins = lib.calculate_optimal_bins(self.pick_info['pool']['photons'], 200)
+            plt.hist(self.pick_info['pool']['photons'], bins, rwidth=1, linewidth=0)
+            plt.subplot(132)
+            plt.title('Length')
+            bins = lib.calculate_optimal_bins(self.pick_info['pool']['len'], 200)
+            # plt.hist(self.pick_info['pool']['len'], bins, histtype='step',
+            #          cumulative=True, rwidth=1)
+            plt.plot(np.sort(self.pick_info['pool']['len']), np.arange(len(self.pick_info['pool']['len'])))
+            plt.subplot(133)
+            plt.title('Dark time')
+            bins = lib.calculate_optimal_bins(self.pick_info['pool']['dark'], 200)
+            # plt.hist(self.pick_info['pool']['dark'], bins, histtype='step',
+            #          cumulative=True, rwidth=1)
+            plt.plot(np.sort(self.pick_info['pool']['dark']), np.arange(len(self.pick_info['pool']['dark'])))
+            plt.show()
 
 
 class ToolsSettingsDialog(QtGui.QDialog):
@@ -566,6 +618,9 @@ class View(QtGui.QLabel):
             y_max = viewport[1][0] + y_margin
         return [(y_min, x_min), (y_max, x_max)]
 
+    def clear_picks(self):
+        self._picks = []
+        self.update_scene(picks_only=True)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -574,6 +629,7 @@ class View(QtGui.QLabel):
             event.ignore()
 
     def draw_picks(self, image):
+        image = image.copy()
         d = self.window.tools_settings_dialog.pick_diameter.value()
         d *= self.width() / self.viewport_width()
         # d = int(round(d))
@@ -801,19 +857,12 @@ class View(QtGui.QLabel):
             yield group_locs
 
     def remove_picks(self, position):
-        new_picks = []
         x, y = position
-        r2 = self.window.tools_settings_dialog.pick_diameter.value()**2
+        pick_diameter_2 = self.window.tools_settings_dialog.pick_diameter.value()**2
+        new_picks = []
         for x_, y_ in self._picks:
-            if ((x - x_)**2 + (y - y_)**2) < r2:
-                break
-        else:
-            self._picks = []
-            self.update_pick_info_short()
-            self.update_scene()
-            return
-        for x_, y_ in self._picks:
-            if ((x - x_)**2 + (y - y_)**2) > r2:
+            d2 = (x - x_)**2 + (y - y_)**2
+            if d2 > pick_diameter_2:
                 new_picks.append((x_, y_))
         self._picks = []
         self.add_picks(new_picks)
@@ -1043,11 +1092,12 @@ class View(QtGui.QLabel):
 
     def update_pick_info_long(self, info):
         for name in info:
-            mean = np.mean(info[name])
-            std = np.std(info[name])
-            decimals =  self.window.info_dialog.picks_info_labels['decimals'][name]
-            self.window.info_dialog.picks_info_labels['mean'][name].setText('{:,.{p}f}'.format(mean, p=decimals))
-            self.window.info_dialog.picks_info_labels['std'][name].setText('{:,.{p}f}'.format(std, p=decimals))
+            if name != 'pool':
+                mean = np.mean(info[name])
+                std = np.std(info[name])
+                decimals =  self.window.info_dialog.picks_info_labels['decimals'][name]
+                self.window.info_dialog.picks_info_labels['mean'][name].setText('{:,.{p}f}'.format(mean, p=decimals))
+                self.window.info_dialog.picks_info_labels['std'][name].setText('{:,.{p}f}'.format(std, p=decimals))
         self.window.info_dialog.pick_info = info
         self.window.info_dialog.update_binding_sites()
 
@@ -1189,6 +1239,8 @@ class Window(QtGui.QMainWindow):
         pick_similar_action = tools_menu.addAction('Pick similar')
         pick_similar_action.setShortcut('Ctrl+Shift+P')
         pick_similar_action.triggered.connect(self.view.pick_similar)
+        clear_picks_action = tools_menu.addAction('Clear picks')
+        clear_picks_action.triggered.connect(self.view.clear_picks)
         tools_menu.addSeparator()
         tools_settings_action = tools_menu.addAction('Tools settings')
         tools_settings_action.setShortcut('Ctrl+T')
