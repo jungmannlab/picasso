@@ -14,7 +14,7 @@ from PyQt4 import QtCore, QtGui
 import numpy as np
 from numpy.lib.recfunctions import stack_arrays
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg
+from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
 import colorsys
 from math import ceil
 import yaml
@@ -167,6 +167,57 @@ class PickSimilarWorker(QtCore.QThread):
         self.finished.emit(list(zip(x_similar, y_similar)))
 
 
+class PickHistWindow(QtGui.QWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+        self.setWindowTitle('Picasso: Render')
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'icons/render.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+
+    def plot(self, pick_info):
+        # Prepare the figure
+        self.figure.clear()
+        self.figure.suptitle('Pooled localizations')
+        # Photons
+        axes = self.figure.add_subplot(131)
+        axes.set_title('Photons per frame')
+        data = pick_info['pool']['photons']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        # Length
+        axes = self.figure.add_subplot(132)
+        axes.set_title('Length (cumulative)')
+        data = pick_info['pool']['len']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        hist, bin_edges = np.histogram(data, bins=bins)
+        cumhist = np.cumsum(hist)
+        axes.step(bin_edges[:-1], cumhist, linewidth=1.5)
+        data_range = data.ptp()
+        axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        # Dark
+        axes = self.figure.add_subplot(133)
+        axes.set_title('Dark time (cumulative)')
+        data = pick_info['pool']['dark']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        hist, bin_edges = np.histogram(data, bins=bins)
+        cumhist = np.cumsum(hist)
+        axes.step(bin_edges[:-1], cumhist, linewidth=1.5)
+        data_range = data.ptp()
+        axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        self.canvas.draw()
+
+
 class ApplyDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -288,8 +339,9 @@ class InfoDialog(QtGui.QDialog):
         self.picks_grid.addWidget(self.binding_sites, self.picks_grid_current, 1)
         self.binding_sites_std = QtGui.QLabel()
         self.picks_grid.addWidget(self.binding_sites_std, self.picks_grid_current, 2)
+        self.pick_hist_window = PickHistWindow()
         pick_hists = QtGui.QPushButton('Show histograms')
-        pick_hists.clicked.connect(self.show_pick_histograms)
+        pick_hists.clicked.connect(self.pick_hist_window.show)
         self.picks_grid.addWidget(pick_hists, self.picks_grid.rowCount(), 0, 1, 3)
         self.pick_info = None
 
@@ -350,29 +402,6 @@ class InfoDialog(QtGui.QDialog):
         plt.plot(d, self.nena_result.best_fit, label='Fit')
         plt.legend(loc='best')
         plt.show()
-
-    def show_pick_histograms(self):
-        if self.pick_info is not None:
-            # Make this a qt widget so it can be updated without closing and opening.
-            figure = plt.Figure()
-            plt.suptitle('Pooled localizations')
-            plt.subplot(131)
-            plt.title('Photons per frame')
-            bins = lib.calculate_optimal_bins(self.pick_info['pool']['photons'], 200)
-            plt.hist(self.pick_info['pool']['photons'], bins, rwidth=1, linewidth=0)
-            plt.subplot(132)
-            plt.title('Length')
-            bins = lib.calculate_optimal_bins(self.pick_info['pool']['len'], 200)
-            # plt.hist(self.pick_info['pool']['len'], bins, histtype='step',
-            #          cumulative=True, rwidth=1)
-            plt.plot(np.sort(self.pick_info['pool']['len']), np.arange(len(self.pick_info['pool']['len'])))
-            plt.subplot(133)
-            plt.title('Dark time')
-            bins = lib.calculate_optimal_bins(self.pick_info['pool']['dark'], 200)
-            # plt.hist(self.pick_info['pool']['dark'], bins, histtype='step',
-            #          cumulative=True, rwidth=1)
-            plt.plot(np.sort(self.pick_info['pool']['dark']), np.arange(len(self.pick_info['pool']['dark'])))
-            plt.show()
 
 
 class ToolsSettingsDialog(QtGui.QDialog):
@@ -1100,6 +1129,7 @@ class View(QtGui.QLabel):
                 self.window.info_dialog.picks_info_labels['std'][name].setText('{:,.{p}f}'.format(std, p=decimals))
         self.window.info_dialog.pick_info = info
         self.window.info_dialog.update_binding_sites()
+        self.window.info_dialog.pick_hist_window.plot(info)
 
     def update_pick_info_short(self):
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
@@ -1258,6 +1288,7 @@ class Window(QtGui.QMainWindow):
         settings = io.load_user_settings()
         settings['Render']['Colormap'] = self.display_settings_dialog.colormap.currentText()
         io.save_user_settings(settings)
+        QtGui.qApp.closeAllWindows()
 
     def export_current(self):
         try:
@@ -1356,7 +1387,6 @@ class Window(QtGui.QMainWindow):
             self.info_dialog.crlb_precision.setText('{:.3} pixel'.format(self.view.median_lp))
         except AttributeError:
             pass
-
 
 def main():
     app = QtGui.QApplication(sys.argv)

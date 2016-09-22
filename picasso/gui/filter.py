@@ -103,6 +103,10 @@ class PlotWindow(QtGui.QWidget):
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
         self.setWindowTitle('Picasso: Filter')
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'icons/filter.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
 
     def update_locs(self, locs):
         self.locs = locs
