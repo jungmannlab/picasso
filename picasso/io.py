@@ -32,15 +32,26 @@ def to_little_endian(movie, info):
     return movie, info
 
 
-def load_raw(path, memory_map=True):
-    info = load_info(path)
+def load_raw(path, prompt_info=None):
+    try:
+        info = load_info(path)
+    except FileNotFoundError as error:
+        if prompt_info is None:
+            raise error
+        else:
+            result = prompt_info()
+            if result is None:
+                return
+            else:
+                info, save = result
+                info = [info]
+                if save:
+                    base, ext = _ospath.splitext(path)
+                    info_path = base + '.yaml'
+                    save_info(info_path, info)
     dtype = _np.dtype(info[0]['Data Type'])
     shape = (info[0]['Frames'], info[0]['Height'], info[0]['Width'])
-    if memory_map:
-        movie = _np.memmap(path, dtype, 'r', shape=shape)
-    else:
-        movie = _np.fromfile(path, dtype)
-        movie = _np.reshape(movie, shape)
+    movie = _np.memmap(path, dtype, 'r', shape=shape)
     movie, info = to_little_endian(movie, info)
     return movie, info
 
@@ -62,11 +73,11 @@ def load_tif(path):
     return movie, [info]
 
 
-def load_movie(path):
+def load_movie(path, prompt_info=None):
     base, ext = _ospath.splitext(path)
     ext = ext.lower()
     if ext == '.raw':
-        return load_raw(path)
+        return load_raw(path, prompt_info=prompt_info)
     elif ext == '.tif':
         return load_tif(path)
 

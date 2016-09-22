@@ -182,6 +182,63 @@ class CamSettingComboBox(QtGui.QComboBox):
         target.addItems(sorted(list(sensitivity.keys())))
 
 
+class PromptInfoDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Enter movie info')
+        vbox = QtGui.QVBoxLayout(self)
+        grid = QtGui.QGridLayout()
+        grid.addWidget(QtGui.QLabel('Byte Order:'), 0, 0)
+        self.byte_order = QtGui.QComboBox()
+        self.byte_order.addItems(['Little Endian (loads faster)', 'Big Endian'])
+        grid.addWidget(self.byte_order, 0, 1)
+        grid.addWidget(QtGui.QLabel('Data Type:'), 1, 0)
+        self.dtype = QtGui.QComboBox()
+        self.dtype.addItems(['float16', 'float32', 'float64', 'int8', 'int16', 'int32', 'uint8', 'uint16', 'uint32'])
+        grid.addWidget(self.dtype, 1, 1)
+        grid.addWidget(QtGui.QLabel('Frames:'), 2, 0)
+        self.frames = QtGui.QSpinBox()
+        self.frames.setRange(1, 1e9)
+        grid.addWidget(self.frames, 2, 1)
+        grid.addWidget(QtGui.QLabel('Height:'), 3, 0)
+        self.movie_height = QtGui.QSpinBox()
+        self.movie_height.setRange(1, 1e9)
+        grid.addWidget(self.movie_height, 3, 1)
+        grid.addWidget(QtGui.QLabel('Width'), 4, 0)
+        self.movie_width = QtGui.QSpinBox()
+        self.movie_width.setRange(1, 1e9)
+        grid.addWidget(self.movie_width, 4, 1)
+        self.save = QtGui.QCheckBox('Save info to yaml file')
+        self.save.setChecked(True)
+        grid.addWidget(self.save, 5, 0, 1, 2)
+        vbox.addLayout(grid)
+        hbox = QtGui.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
+                                              QtCore.Qt.Horizontal,
+                                              self)
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    # static method to create the dialog and return (date, time, accepted)
+    @staticmethod
+    def getMovieSpecs(parent=None):
+        dialog = PromptInfoDialog(parent)
+        result = dialog.exec_()
+        info = {}
+        info['Byte Order'] = '>' if dialog.byte_order == 'big endian' else '<'
+        info['Data Type'] = dialog.dtype.currentText()
+        info['Frames'] = dialog.frames.value()
+        info['Height'] = dialog.movie_height.value()
+        info['Width'] = dialog.movie_width.value()
+        save = dialog.save.isChecked()
+        return (info, save, result == QtGui.QDialog.Accepted)
+
+
 class ParametersDialog(QtGui.QDialog):
     """ The dialog showing analysis parameters """
 
@@ -647,9 +704,10 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        try:
-            t0 = time.time()
-            self.movie, self.info = io.load_movie(path)
+        t0 = time.time()
+        result = io.load_movie(path, prompt_info=self.prompt_info)
+        if result is not None:
+            self.movie, self.info = result
             dt = time.time() - t0
             self.movie_path = path
             self.identifications = None
@@ -659,8 +717,11 @@ class Window(QtGui.QMainWindow):
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
             self.status_bar.showMessage('Opened movie in {:.2f} seconds.'.format(dt))
-        except FileNotFoundError:
-            pass  # TODO send a message
+
+    def prompt_info(self):
+        info, save, ok = PromptInfoDialog.getMovieSpecs(self)
+        if ok:
+            return info, save
 
     def previous_frame(self):
         if self.movie is not None:
