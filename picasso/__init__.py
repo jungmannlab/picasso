@@ -14,6 +14,7 @@ _this_directory = _ospath.dirname(_this_file)
 try:
     with open(_ospath.join(_this_directory, 'config.yaml'), 'r') as config_file:
         CONFIG = _yaml.load(config_file)
+    if CONFIG is None:
+        CONFIG = {}
 except FileNotFoundError:
-    print('No configuration file found. Generate "config.yaml" and restart the program.')
-    quit()
+    CONFIG = {}
