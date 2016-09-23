@@ -63,7 +63,7 @@ class Window(QtGui.QWidget):
         self.setWindowTitle('Picasso: ToRaw')
         self.resize(768, 512)
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons/toraw.ico')
+        icon_path = os.path.join(this_directory, 'icons', 'toraw.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         vbox = QtGui.QVBoxLayout()

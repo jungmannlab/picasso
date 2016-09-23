@@ -585,7 +585,7 @@ class Window(QtGui.QMainWindow):
         # Init GUI
         self.setWindowTitle('Picasso: Localize')
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons/localize.ico')
+        icon_path = os.path.join(this_directory, 'icons', 'localize.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(768, 768)

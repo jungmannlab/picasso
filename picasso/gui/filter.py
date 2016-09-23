@@ -104,7 +104,7 @@ class PlotWindow(QtGui.QWidget):
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
         self.setWindowTitle('Picasso: Filter')
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons/filter.ico')
+        icon_path = os.path.join(this_directory, 'icons', 'filter.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
 
@@ -212,7 +212,7 @@ class Window(QtGui.QMainWindow):
         self.setWindowTitle('Picasso: Filter')
         self.resize(1100, 750)
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons/filter.ico')
+        icon_path = os.path.join(this_directory, 'icons', 'filter.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         menu_bar = self.menuBar()

@@ -793,7 +793,7 @@ class MainWindow(QtGui.QWidget):
         super(MainWindow, self).__init__()
         self.setWindowTitle('Picasso: Design')
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons/design.ico')
+        icon_path = os.path.join(this_directory, 'icons', 'design.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(800, 600)

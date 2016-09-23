@@ -66,11 +66,15 @@ STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
 
 
-class Example(QtGui.QMainWindow):
+class Window(QtGui.QMainWindow):
 
     def __init__(self):
-        super(Example, self).__init__()
-
+        super().__init__()
+        self.setWindowTitle('Picasso: Simulate')
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'icons', 'simulate.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
         self.initUI()
 
     def initUI(self):
@@ -1547,8 +1551,16 @@ class CalibrationDialog(QtGui.QDialog):
 def main():
 
     app = QtGui.QApplication(sys.argv)
-    ex = Example()
+    window = Window()
+    window.show()
     sys.exit(app.exec_())
+
+    def excepthook(type, value, tback):
+        message = ''.join(traceback.format_exception(type, value, tback))
+        errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
+        errorbox.exec_()
+        sys.__excepthook__(type, value, tback)
+    sys.excepthook = excepthook
 
 
 if __name__ == '__main__':
