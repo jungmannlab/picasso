@@ -32,15 +32,26 @@ def to_little_endian(movie, info):
     return movie, info
 
 
-def load_raw(path, memory_map=True):
-    info = load_info(path)
+def load_raw(path, prompt_info=None):
+    try:
+        info = load_info(path)
+    except FileNotFoundError as error:
+        if prompt_info is None:
+            raise error
+        else:
+            result = prompt_info()
+            if result is None:
+                return
+            else:
+                info, save = result
+                info = [info]
+                if save:
+                    base, ext = _ospath.splitext(path)
+                    info_path = base + '.yaml'
+                    save_info(info_path, info)
     dtype = _np.dtype(info[0]['Data Type'])
     shape = (info[0]['Frames'], info[0]['Height'], info[0]['Width'])
-    if memory_map:
-        movie = _np.memmap(path, dtype, 'r', shape=shape)
-    else:
-        movie = _np.fromfile(path, dtype)
-        movie = _np.reshape(movie, shape)
+    movie = _np.memmap(path, dtype, 'r', shape=shape)
     movie, info = to_little_endian(movie, info)
     return movie, info
 
@@ -62,11 +73,11 @@ def load_tif(path):
     return movie, [info]
 
 
-def load_movie(path):
+def load_movie(path, prompt_info=None):
     base, ext = _ospath.splitext(path)
     ext = ext.lower()
     if ext == '.raw':
-        return load_raw(path)
+        return load_raw(path, prompt_info=prompt_info)
     elif ext == '.tif':
         return load_tif(path)
 
@@ -219,13 +230,6 @@ class TiffMap:
         info = {'Byte Order': self.byte_order, 'File': self.path, 'Height': self.height,
                 'Width': self.width, 'Data Type': self.dtype.name, 'Frames': self.n_frames}
         # The following block is MM-specific
-        '''
-        self.file.seek(28)
-        comments_offset = self.read('L')
-        self.file.seek(36)
-        summary_length = self.read('L')
-        info['Summary'] = _json.loads(self.read('c', summary_length).decode())
-        '''
         self.file.seek(self.first_ifd_offset)
         n_entries = self.read('H')
         for i in range(n_entries):
@@ -236,44 +240,10 @@ class TiffMap:
             if count * self.TYPE_SIZES[type] > 4:
                 self.file.seek(self.read('L'))
             if tag == 51123:
+                # This is the Micro-Manager tag. We generate an info dict that contains any info we need.
                 readout = self.read(type, count).strip(b'\0')      # Strip null bytes which MM 1.4.22 adds
                 mm_info = _json.loads(readout.decode())
-                camera = mm_info['Camera']
-                info['Camera'] = camera
-                if camera + '-Output_Amplifier' in mm_info:
-                    em = (mm_info[camera + '-Output_Amplifier'] == 'Electron Multiplying')
-                    info['Electron Multiplying'] = em
-                if camera + '-Gain' in mm_info:
-                    info['EM Real Gain'] = int(mm_info[camera + '-Gain'])
-                if camera + '-Pre-Amp-Gain' in mm_info:
-                    info['Pre-Amp Gain'] = mm_info[camera + '-Pre-Amp-Gain']
-                if camera + '-ReadoutMode' in mm_info:
-                    info['Readout Mode'] = mm_info[camera + '-ReadoutMode']
-                if camera + '-PixelReadoutRate' in mm_info:
-                    info['Readout Rate'] = mm_info[camera + '-PixelReadoutRate'].split('-')[0].strip()
-                if camera + '-Sensitivity/DynamicRange' in mm_info:
-                    info['Gain Setting'] = mm_info[camera + '-Sensitivity/DynamicRange']
-                if 'TIFilterBlock1-Label' in mm_info:
-                    try:
-                        info['Excitation Wavelength'] = int(mm_info['TIFilterBlock1-Label'][-3:])
-                    except ValueError:      # Last three digits are not a number
-                        info['Excitation Wavelength'] = None
-                # Dump the rest
                 info['Micro-Manager Metadata'] = mm_info
-        # Again, MM-specific:
-        '''
-        if comments_offset:
-            self.file.seek(comments_offset + 4)
-            comments_length = self.read('L')
-            if comments_length:
-                comments_bytes = self.read('c', comments_length)
-                try:
-                    comments_json = comments_bytes.decode()
-                except UnicodeDecodeError:
-                    print('Did not find UTF-8 decoded comment bytes!')
-                else:
-                    info['Comments'] = _json.loads(comments_json)
-        '''
         return info
 
     def memmap_frame(self, index):

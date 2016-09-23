@@ -13,20 +13,27 @@ import traceback
 from PyQt4 import QtCore, QtGui
 import numpy as np
 from numpy.lib.recfunctions import stack_arrays
+import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
 import colorsys
 from math import ceil
+import yaml
 from .. import io, lib, render, postprocess
 
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 10 / 7
+N_GROUP_COLORS = 8
+
+
+matplotlib.rcParams.update({'axes.titlesize': 'large'})
 
 
 class NenaWorker(QtCore.QThread):
 
-    finished = QtCore.pyqtSignal(float)
+    finished = QtCore.pyqtSignal(tuple)
 
     def __init__(self, locs, info):
         super().__init__()
@@ -34,8 +41,54 @@ class NenaWorker(QtCore.QThread):
         self.info = info
 
     def run(self):
-        result, lp = postprocess.nena(self.locs, self.info)
-        self.finished.emit(lp)
+        out = postprocess.nena(self.locs, self.info)
+        self.finished.emit(out)
+
+
+class PickInfoWorker(QtCore.QThread):
+
+    finished = QtCore.pyqtSignal(dict)
+
+    def __init__(self, locs, info, picks, r, max_dark_time):
+        super().__init__()
+        self.locs = locs
+        self.info = info
+        self.picks = picks
+        self.r = r
+        self.t = max_dark_time
+
+    def picked_locs_iter(self):
+        d = 2 * self.r
+        index_blocks = postprocess.get_index_blocks(self.locs, self.info, d)
+        for i, pick in enumerate(self.picks):
+            x, y = pick
+            block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+            group_locs = lib.locs_at(x, y, block_locs, self.r)
+            group = i * np.ones(len(group_locs), dtype=np.int32)
+            group_locs = lib.append_to_rec(group_locs, group, 'group')
+            yield group_locs
+
+    def run(self):
+        d = 2 * self.r
+        index_blocks = postprocess.get_index_blocks(self.locs, self.info, d)
+        picked_locs = list(self.picked_locs_iter())
+        N = np.array([len(_) for _ in picked_locs])
+        info = {'# Localizations': N}
+        info_pool = {'photons': np.concatenate([_.photons for _ in picked_locs])}
+        com_x = [np.mean(_.x) for _ in picked_locs]
+        com_y = [np.mean(_.y) for _ in picked_locs]
+        rmsd = [np.sqrt(np.mean((locs.x - x)**2 + (locs.y - y)**2)) for locs, x, y in zip(picked_locs, com_x, com_y)]
+        info['RMSD to COM'] = np.array(rmsd)
+        info['Photons'] = np.array([np.mean(_.photons) for _ in picked_locs])
+        r_max = min(d, 1)
+        picked_locs = [postprocess.link(_, self.info, r_max=r_max, max_dark_time=self.t) for _ in picked_locs]
+        info['Length'] = np.array([np.mean(_.len[_.len > 0]) for _ in picked_locs])
+        picked_locs = [postprocess.compute_dark_times(_) for _ in picked_locs]
+        info['Dark time'] = np.array([np.mean(_.dark[_.dark > 0]) for _ in picked_locs])
+        info_pool['len'] = np.concatenate([_.len for _ in picked_locs])
+        info_pool['dark'] = np.concatenate([_.dark for _ in picked_locs])
+        info['pool'] = info_pool
+        self.finished.emit(info)
 
 
 class PickSimilarWorker(QtCore.QThread):
@@ -43,10 +96,10 @@ class PickSimilarWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(list)
 
-    def __init__(self, locs, infos, picks, d, std_range):
+    def __init__(self, locs, info, picks, d, std_range):
         super().__init__()
         self.locs = locs
-        self.infos = infos
+        self.info = info
         self.picks = picks
         self.d = d
         self.std_range = std_range
@@ -61,7 +114,7 @@ class PickSimilarWorker(QtCore.QThread):
         n_locs = []
         rmsd = []
         r = self.d / 2
-        for locs in [lib.locs_at(x, y, self.locs[0], r) for x, y in self.picks]:
+        for locs in [lib.locs_at(x, y, self.locs, r) for x, y in self.picks]:
             n_locs.append(len(locs))
             rmsd.append(self.rmsd_at_com(locs))
         mean_n_locs = np.mean(n_locs)
@@ -72,13 +125,13 @@ class PickSimilarWorker(QtCore.QThread):
         max_n_locs = mean_n_locs + self.std_range * std_n_locs
         min_rmsd = mean_rmsd - self.std_range * std_rmsd
         max_rmsd = mean_rmsd + self.std_range * std_rmsd
-        index_blocks = postprocess.get_index_blocks(self.locs[0], self.infos[0], self.d)
-        locs = index_blocks[0]
+        index_blocks = postprocess.get_index_blocks(self.locs, self.info, self.d)
+        locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
         x_similar = np.array([_[0] for _ in self.picks])
         y_similar = np.array([_[1] for _ in self.picks])
         # preparations for hex grid search
-        x_range = np.arange(self.d / 2, self.infos[0][0]['Width'], np.sqrt(3) * self.d / 2)
-        y_range_base = np.arange(self.d / 2, self.infos[0][0]['Height'] - self.d / 2, self.d)
+        x_range = np.arange(self.d / 2, self.info[0]['Width'], np.sqrt(3) * self.d / 2)
+        y_range_base = np.arange(self.d / 2, self.info[0]['Height'] - self.d / 2, self.d)
         y_range_shift = y_range_base + self.d / 2
         r = self.d / 2
         d2 = self.d**2
@@ -90,27 +143,195 @@ class PickSimilarWorker(QtCore.QThread):
             else:
                 y_range = y_range_base
             for y_grid in y_range:
-                block_locs = postprocess.get_block_locs_at(x_grid, y_grid, index_blocks)
-                picked_locs = lib.locs_at(x_grid, y_grid, block_locs, r)
-                if len(picked_locs):
-                    # Move to COM peak
-                    x_test_old = x_grid
-                    y_test_old = y_grid
-                    x_test = picked_locs.x.mean()
-                    y_test = picked_locs.y.mean()
-                    while np.abs(x_test - x_test_old) > 1e-3 or np.abs(y_test - y_test_old) > 1e-3:
-                        x_test_old = x_test
-                        y_test_old = y_test
-                        picked_locs = lib.locs_at(x_test, y_test, block_locs, r)
+                # The GIL causes this thread to take over the whole CPU,
+                # but sleeping shortly forces a thread context switch so that the GUI can update
+                # time.sleep(1e-10)
+                n_block_locs = postprocess.n_block_locs_at(x_grid, y_grid, size, K, L, block_starts, block_ends)
+                if n_block_locs > min_n_locs:
+                    block_locs = postprocess.get_block_locs_at(x_grid, y_grid, index_blocks)
+                    picked_locs = lib.locs_at(x_grid, y_grid, block_locs, r)
+                    if len(picked_locs) > 1:
+                        # Move to COM peak
+                        x_test_old = x_grid
+                        y_test_old = y_grid
                         x_test = picked_locs.x.mean()
                         y_test = picked_locs.y.mean()
-                    if np.all((x_similar - x_test)**2 + (y_similar - y_test)**2 > d2):
-                        if min_n_locs < len(picked_locs) < max_n_locs:
-                            if min_rmsd < self.rmsd_at_com(picked_locs) < max_rmsd:
-                                x_similar = np.append(x_similar, x_test)
-                                y_similar = np.append(y_similar, y_test)
+                        while np.abs(x_test - x_test_old) > 1e-3 or np.abs(y_test - y_test_old) > 1e-3:
+                            x_test_old = x_test
+                            y_test_old = y_test
+                            picked_locs = lib.locs_at(x_test, y_test, block_locs, r)
+                            x_test = picked_locs.x.mean()
+                            y_test = picked_locs.y.mean()
+                        if np.all((x_similar - x_test)**2 + (y_similar - y_test)**2 > d2):
+                            if min_n_locs < len(picked_locs) < max_n_locs:
+                                if min_rmsd < self.rmsd_at_com(picked_locs) < max_rmsd:
+                                    x_similar = np.append(x_similar, x_test)
+                                    y_similar = np.append(y_similar, y_test)
             self.progressMade.emit(int(round(100 * i / nx)))
         self.finished.emit(list(zip(x_similar, y_similar)))
+
+
+class PickPooledHistWindow(QtGui.QWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+
+    def plot(self, pick_info):
+        # Prepare the figure
+        self.figure.clear()
+        # Photons
+        axes = self.figure.add_subplot(131)
+        axes.set_title('Photons per frame')
+        data = pick_info['pool']['photons']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        # Length
+        axes = self.figure.add_subplot(132)
+        axes.set_title('Length (cumulative)')
+        data = pick_info['pool']['len']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        hist, bin_edges = np.histogram(data, bins=bins)
+        cumhist = np.cumsum(hist)
+        axes.step(bin_edges[:-1], cumhist, linewidth=1.5)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        # Dark
+        axes = self.figure.add_subplot(133)
+        axes.set_title('Dark time (cumulative)')
+        data = pick_info['pool']['dark']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        hist, bin_edges = np.histogram(data, bins=bins)
+        cumhist = np.cumsum(hist)
+        axes.step(bin_edges[:-1], cumhist, linewidth=1.5)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        self.canvas.draw()
+
+
+class PickPicksHistWindow(QtGui.QWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+
+    def plot(self, pick_info):
+        # Prepare the figure
+        self.figure.clear()
+        # Photons
+        axes = self.figure.add_subplot(131)
+        axes.set_title('Photons per frame')
+        data = pick_info['Photons']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        # Length
+        axes = self.figure.add_subplot(132)
+        axes.set_title('Length')
+        data = pick_info['Length']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        # Dark
+        axes = self.figure.add_subplot(133)
+        axes.set_title('Dark time')
+        data = pick_info['Dark time']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        self.canvas.draw()
+
+
+class PickHistWindow(QtGui.QTabWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('Pick Histograms')
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'icons/render.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(1000, 400)
+        self.addTab(PickPooledHistWindow(), 'Per Localization')
+        self.addTab(PickPicksHistWindow(), 'Per Pick')
+
+    def plot(self, pick_info):
+        for i in range(self.count()):
+            widget = self.widget(i)
+            widget.plot(pick_info)
+
+
+class ApplyDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        # vars = self.view.locs[0].dtype.names
+        self.setWindowTitle('Apply expression')
+        vbox = QtGui.QVBoxLayout(self)
+        layout = QtGui.QGridLayout()
+        vbox.addLayout(layout)
+        layout.addWidget(QtGui.QLabel('Channel:'), 0, 0)
+        self.channel = QtGui.QComboBox()
+        self.channel.addItems(self.window.view.locs_paths)
+        layout.addWidget(self.channel, 0, 1)
+        self.channel.currentIndexChanged.connect(self.update_vars)
+        layout.addWidget(QtGui.QLabel('Pre-defined variables:'), 1, 0)
+        self.label = QtGui.QLabel()
+        layout.addWidget(self.label, 1, 1)
+        self.update_vars(0)
+        layout.addWidget(QtGui.QLabel('Expression:'), 2, 0)
+        self.cmd = QtGui.QLineEdit()
+        layout.addWidget(self.cmd, 2, 1)
+        hbox = QtGui.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
+                                              QtCore.Qt.Horizontal,
+                                              self)
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    # static method to create the dialog and return (date, time, accepted)
+    @staticmethod
+    def getCmd(parent=None):
+        dialog = ApplyDialog(parent)
+        result = dialog.exec_()
+        cmd = dialog.cmd.text()
+        channel = dialog.channel.currentIndex()
+        return (cmd, channel, result == QtGui.QDialog.Accepted)
+
+    def update_vars(self, index):
+        vars = self.window.view.locs[index].dtype.names
+        self.label.setText(str(vars))
 
 
 class InfoDialog(QtGui.QDialog):
@@ -120,41 +341,137 @@ class InfoDialog(QtGui.QDialog):
         self.window = window
         self.setWindowTitle('Info')
         self.setModal(False)
-        self.layout = QtGui.QGridLayout(self)
-        self.layout.addWidget(QtGui.QLabel('Display Width:'), 0, 0)
+        vbox = QtGui.QVBoxLayout(self)
+        # Display
+        display_groupbox = QtGui.QGroupBox('Display')
+        vbox.addWidget(display_groupbox)
+        display_grid = QtGui.QGridLayout(display_groupbox)
+        display_grid.addWidget(QtGui.QLabel('Width:'), 0, 0)
         self.width_label = QtGui.QLabel()
-        self.layout.addWidget(self.width_label, 0, 1)
-        self.layout.addWidget(QtGui.QLabel('Display Height:'), 1, 0)
+        display_grid.addWidget(self.width_label, 0, 1)
+        display_grid.addWidget(QtGui.QLabel('Height:'), 1, 0)
         self.height_label = QtGui.QLabel()
-        self.layout.addWidget(self.height_label, 1, 1)
-        self.layout.addWidget(QtGui.QLabel('# Localizations:'), 2, 0)
-        self.locs_label = QtGui.QLabel()
-        self.layout.addWidget(self.locs_label, 2, 1)
-        self.layout.addWidget(QtGui.QLabel('Median CRLB precision:'), 3, 0)
+        display_grid.addWidget(self.height_label, 1, 1)
+        # Movie
+        movie_groupbox = QtGui.QGroupBox('Movie')
+        vbox.addWidget(movie_groupbox)
+        self.movie_grid = QtGui.QGridLayout(movie_groupbox)
+        self.movie_grid.addWidget(QtGui.QLabel('Median CRLB precision:'), 0, 0)
         self.crlb_precision = QtGui.QLabel('-')
-        self.layout.addWidget(self.crlb_precision, 3, 1)
-        self.layout.addWidget(QtGui.QLabel('NeNA precision:'), 4, 0)
+        self.movie_grid.addWidget(self.crlb_precision, 0, 1)
+        self.movie_grid.addWidget(QtGui.QLabel('NeNA precision:'), 1, 0)
         self.nena_button = QtGui.QPushButton('Calculate')
         self.nena_button.clicked.connect(self.calculate_nena_lp)
-        self.layout.addWidget(self.nena_button, 4, 1)
+        self.movie_grid.addWidget(self.nena_button, 1, 1)
+        # FOV
+        fov_groupbox = QtGui.QGroupBox('Field of view')
+        vbox.addWidget(fov_groupbox)
+        fov_grid = QtGui.QGridLayout(fov_groupbox)
+        fov_grid.addWidget(QtGui.QLabel('# Localizations:'), 0, 0)
+        self.locs_label = QtGui.QLabel()
+        fov_grid.addWidget(self.locs_label, 0, 1)
+        # Picks
+        picks_groupbox = QtGui.QGroupBox('Picks')
+        vbox.addWidget(picks_groupbox)
+        self.picks_grid = QtGui.QGridLayout(picks_groupbox)
+        self.picks_grid.addWidget(QtGui.QLabel('# Picks:'), 0, 0)
+        self.n_picks = QtGui.QLabel()
+        self.picks_grid.addWidget(self.n_picks, 0, 1)
+        compute_pick_info_button = QtGui.QPushButton('Calculate info below')
+        compute_pick_info_button.clicked.connect(self.window.view.calculate_pick_info_long)
+        self.picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 3)
+        self.picks_grid.addWidget(QtGui.QLabel('<b>Mean</b'), 2, 1)
+        self.picks_grid.addWidget(QtGui.QLabel('<b>Std</b>'), 2, 2)
+        self.picks_info_labels = {'mean': {}, 'std': {}, 'decimals': {}}
+        self.picks_grid_current = 3
+        self.add_pick_info_field('# Localizations')
+        self.add_pick_info_field('RMSD to COM', decimals=4)
+        self.add_pick_info_field('Photons')
+        self.picks_grid.addWidget(QtGui.QLabel('Ignore dark times <='), self.picks_grid_current, 0)
+        self.max_dark_time = QtGui.QSpinBox()
+        self.max_dark_time.setRange(0, 1e9)
+        self.max_dark_time.setValue(1)
+        # self.max_dark_time.valueChanged.connect(self.update_binding_sites)
+        self.picks_grid.addWidget(self.max_dark_time, self.picks_grid_current, 1, 1, 2)
+        self.picks_grid_current += 1
+        self.add_pick_info_field('Length', decimals=2)
+        self.add_pick_info_field('Dark time', decimals=2)
+        self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/s):'), self.picks_grid_current, 0)
+        self.influx_rate = QtGui.QDoubleSpinBox()
+        self.influx_rate.setRange(0, 1e10)
+        self.influx_rate.setDecimals(5)
+        self.influx_rate.setValue(0.03)
+        self.influx_rate.valueChanged.connect(self.update_binding_sites)
+        self.picks_grid.addWidget(self.influx_rate, self.picks_grid_current, 1, 1, 2)
+        self.picks_grid_current += 1
+        self.picks_grid.addWidget(QtGui.QLabel('# Binding sites:'), self.picks_grid_current, 0)
+        self.binding_sites = QtGui.QLabel()
+        self.picks_grid.addWidget(self.binding_sites, self.picks_grid_current, 1)
+        self.binding_sites_std = QtGui.QLabel()
+        self.picks_grid.addWidget(self.binding_sites_std, self.picks_grid_current, 2)
+        self.pick_hist_window = PickHistWindow()
+        pick_hists = QtGui.QPushButton('Histograms')
+        pick_hists.clicked.connect(self.pick_hist_window.show)
+        self.picks_grid.addWidget(pick_hists, self.picks_grid.rowCount(), 0, 1, 3)
+        self.pick_info = None
+
+    def add_pick_info_field(self, name, decimals=1):
+        self.picks_grid.addWidget(QtGui.QLabel(name + ':'), self.picks_grid_current, 0)
+        self.picks_info_labels['mean'][name] = QtGui.QLabel()
+        self.picks_info_labels['std'][name] = QtGui.QLabel()
+        self.picks_info_labels['decimals'][name] = decimals
+        self.picks_grid.addWidget(self.picks_info_labels['mean'][name], self.picks_grid_current, 1)
+        self.picks_grid.addWidget(self.picks_info_labels['std'][name], self.picks_grid_current, 2)
+        self.picks_grid_current += 1
 
     def calculate_nena_lp(self):
-        if len(self.window.view.locs):
+        channel = self.window.view.get_channel('Calculate NeNA precision')
+        if channel is not None:
             self.nena_button.setParent(None)
-            self.layout.removeWidget(self.nena_button)
+            self.movie_grid.removeWidget(self.nena_button)
             self.nena_label = QtGui.QLabel()
             this_directory = os.path.dirname(os.path.realpath(__file__))
             busy_path = os.path.join(this_directory, 'icons/busy2.gif')
             movie = QtGui.QMovie(busy_path)
             self.nena_label.setMovie(movie)
             movie.start()
-            self.layout.addWidget(self.nena_label, 4, 1)
-            self.nena_worker = NenaWorker(self.window.view.locs[0], self.window.view.infos[0])
+            self.movie_grid.addWidget(self.nena_label, 1, 1)
+            self.nena_worker = NenaWorker(self.window.view.locs[channel], self.window.view.infos[channel])
             self.nena_worker.finished.connect(self.update_nena_lp)
             self.nena_worker.start()
 
-    def update_nena_lp(self, lp):
+    def update_binding_sites(self, influx=None):
+        if self.pick_info is not None:
+            if influx is None:
+                influx = self.influx_rate.value()
+            if 'Dark time' in self.pick_info:
+                n_binding_sites = 1 / (influx * self.pick_info['Dark time'])
+                self.binding_sites.setText('{:,.3f}'.format(np.mean(n_binding_sites)))
+                self.binding_sites_std.setText('{:,.3f}'.format(np.std(n_binding_sites)))
+
+    def update_nena_lp(self, result_lp):
+        self.nena_result, lp = result_lp
         self.nena_label.setText('{:.3} pixel'.format(lp))
+        show_plot_button = QtGui.QPushButton('Show plot')
+        self.movie_grid.addWidget(show_plot_button, self.movie_grid.rowCount()-1, 2)
+        show_plot_button.clicked.connect(self.show_nena_plot)
+
+    def show_nena_plot(self):
+        d = self.nena_result.userkws['d']
+        figure = plt.Figure()
+        # canvas = FigureCanvasQTAgg(figure)
+        # figure.suptitle('Next frame neighbor distance histogram')
+        # axes = figure.add_subplot(111)
+        # axes.plot(d, self.nena_result.data, label='Data')
+        # axes.plot(d, self.nena_result.best_fit, label='Fit')
+        # axes.legend(loc='best')
+        # canvas.draw()
+        # self.movie_grid.addWidget(canvas, 2, 0, 1, 2)
+        plt.title('Next frame neighbor distance histogram')
+        plt.plot(d, self.nena_result.data, label='Data')
+        plt.plot(d, self.nena_result.best_fit, label='Fit')
+        plt.legend(loc='best')
+        plt.show()
 
 
 class ToolsSettingsDialog(QtGui.QDialog):
@@ -164,8 +481,11 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.window = window
         self.setWindowTitle('Tools Settings')
         self.setModal(False)
-        grid = QtGui.QGridLayout(self)
-        grid.addWidget(QtGui.QLabel('Pick Radius (cam. pixel):'), 0, 0)
+        vbox = QtGui.QVBoxLayout(self)
+        pick_groupbox = QtGui.QGroupBox('Pick')
+        vbox.addWidget(pick_groupbox)
+        pick_grid = QtGui.QGridLayout(pick_groupbox)
+        pick_grid.addWidget(QtGui.QLabel('Radius (cam. pixel):'), 0, 0)
         self.pick_diameter = QtGui.QDoubleSpinBox()
         self.pick_diameter.setRange(0, 999999)
         self.pick_diameter.setValue(1)
@@ -173,14 +493,14 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.pick_diameter.setDecimals(3)
         self.pick_diameter.setKeyboardTracking(False)
         self.pick_diameter.valueChanged.connect(self.on_pick_diameter_changed)
-        grid.addWidget(self.pick_diameter, 0, 1)
-        grid.addWidget(QtGui.QLabel('Pick similar +/- range (std)'), 1, 0)
+        pick_grid.addWidget(self.pick_diameter, 0, 1)
+        pick_grid.addWidget(QtGui.QLabel('Pick similar +/- range (std)'), 1, 0)
         self.pick_similar_range = QtGui.QDoubleSpinBox()
         self.pick_similar_range.setRange(0, 100000)
         self.pick_similar_range.setValue(2)
         self.pick_similar_range.setSingleStep(0.1)
         self.pick_similar_range.setDecimals(1)
-        grid.addWidget(self.pick_similar_range, 1, 1)
+        pick_grid.addWidget(self.pick_similar_range, 1, 1)
 
     def on_pick_diameter_changed(self, diameter):
         self.window.view.update_scene(use_cache=True)
@@ -341,6 +661,7 @@ class View(QtGui.QLabel):
         self._pixmap = None
         self.locs = []
         self.infos = []
+        self.locs_paths = []
         self._mode = 'Zoom'
         self._pan = False
         self._size_hint = (768, 768)
@@ -352,8 +673,8 @@ class View(QtGui.QLabel):
         locs = lib.ensure_sanity(locs, info)
         self.locs.append(locs)
         self.infos.append(info)
+        self.locs_paths.append(path)
         if len(self.locs) == 1:
-            self.locs_path = path
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
                 self.groups = np.unique(locs.group)
@@ -364,13 +685,14 @@ class View(QtGui.QLabel):
 
     def add_pick(self, position, update_scene=True):
         self._picks.append(position)
+        self.update_pick_info_short()
         if update_scene:
-            self.update_scene(use_cache=True)
+            self.update_scene(picks_only=True)
 
     def add_picks(self, positions):
         for position in positions:
             self.add_pick(position, update_scene=False)
-        self.update_scene(use_cache=True)
+        self.update_scene(picks_only=True)
 
     def adjust_viewport_to_view(self, viewport):
         viewport_height = viewport[1][0] - viewport[0][0]
@@ -395,6 +717,10 @@ class View(QtGui.QLabel):
             y_max = viewport[1][0] + y_margin
         return [(y_min, x_min), (y_max, x_max)]
 
+    def clear_picks(self):
+        self._picks = []
+        self.update_scene(picks_only=True)
+
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
             event.accept()
@@ -402,6 +728,7 @@ class View(QtGui.QLabel):
             event.ignore()
 
     def draw_picks(self, image):
+        image = image.copy()
         d = self.window.tools_settings_dialog.pick_diameter.value()
         d *= self.width() / self.viewport_width()
         # d = int(round(d))
@@ -428,12 +755,13 @@ class View(QtGui.QLabel):
             painter.drawRect(x, y, length_displaypxl + 0, height + 0)
         return image
 
-    def draw_scene(self, viewport, autoscale=False, use_cache=False):
-        self.viewport = self.adjust_viewport_to_view(viewport)
-        qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
-        qimage = qimage.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding)
-        qimage = self.draw_picks(qimage)
-        self.qimage = self.draw_scalebar(qimage)
+    def draw_scene(self, viewport, autoscale=False, use_cache=False, picks_only=False):
+        if not picks_only:
+            self.viewport = self.adjust_viewport_to_view(viewport)
+            qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
+            qimage = qimage.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding)
+            self.qimage_no_picks = self.draw_scalebar(qimage)
+        self.qimage = self.draw_picks(self.qimage_no_picks)
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(pixmap)
         self.window.update_info()
@@ -450,7 +778,20 @@ class View(QtGui.QLabel):
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
 
-    def get_render_kwargs(self):
+    def get_channel(self, title='Choose a channel'):
+        n_channels = len(self.locs_paths)
+        if n_channels == 0:
+            return None
+        elif n_channels == 1:
+            return 0
+        elif len(self.locs_paths) > 1:
+            index, ok = QtGui.QInputDialog.getItem(self, 'Save localizations', 'Channel:', self.locs_paths, editable=False)
+            if ok:
+                return self.locs_paths.index(index)
+            else:
+                return None
+
+    def get_render_kwargs(self, viewport=None):
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
         optimal_oversampling = self.optimal_oversampling()
         if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
@@ -464,10 +805,19 @@ class View(QtGui.QLabel):
                                               'Oversampling will be adjusted to match the display pixel density.')
                 oversampling = optimal_oversampling
                 self.window.display_settings_dialog.set_oversampling_silently(optimal_oversampling)
+        if viewport is None:
+            viewport = self.viewport
         return {'oversampling': oversampling,
-                'viewport': self.viewport,
+                'viewport': viewport,
                 'blur_method': self.window.display_settings_dialog.blur_methods[blur_button],
                 'min_blur_width': float(self.window.display_settings_dialog.min_blur_width.value())}
+
+    def load_picks(self, path):
+        with open(path, 'r') as f:
+            regions = yaml.load(f)
+        self._picks = regions['Centers']
+        self.update_pick_info_short()
+        self.window.tools_settings_dialog.pick_diameter.setValue(regions['Diameter'])
 
     def map_to_movie(self, position):
         x_rel = position.x() / self.width()
@@ -580,40 +930,44 @@ class View(QtGui.QLabel):
         self.update_scene(viewport)
 
     def pick_similar(self):
-        d = self.window.tools_settings_dialog.pick_diameter.value()
-        std_range = self.window.tools_settings_dialog.pick_similar_range.value()
-        self.pick_similar_worker = PickSimilarWorker(self.locs, self.infos, self._picks, d, std_range)
-        self.pick_similar_worker.progressMade.connect(self.on_pick_similar_progress)
-        self.pick_similar_worker.finished.connect(self.on_pick_similar_finished)
-        self.pick_similar_worker.start()
+        channel = self.get_channel('Pick similar')
+        if channel is not None:
+            d = self.window.tools_settings_dialog.pick_diameter.value()
+            std_range = self.window.tools_settings_dialog.pick_similar_range.value()
+            self.pick_similar_worker = PickSimilarWorker(self.locs[channel], self.infos[channel], self._picks, d, std_range)
+            self.pick_similar_worker.progressMade.connect(self.on_pick_similar_progress)
+            self.pick_similar_worker.finished.connect(self.on_pick_similar_finished)
+            self.pick_similar_worker.start()
 
-    def picked_locs_iter(self):
-        r = self.window.tools_settings_dialog.pick_diameter.value() / 2
+    def picked_locs(self, channel):
+        picked_locs = list(self.picked_locs_iter(channel))
+        return stack_arrays(picked_locs, asrecarray=True, usemask=False)
+
+    def picked_locs_iter(self, channel):
+        d = self.window.tools_settings_dialog.pick_diameter.value()
+        r = d / 2
+        index_blocks = postprocess.get_index_blocks(self.locs[channel], self.infos[channel], d)
         for i, pick in enumerate(self._picks):
-            group_locs = lib.locs_at(pick[0], pick[1], self.locs[0], r)
+            x, y = pick
+            block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+            group_locs = lib.locs_at(x, y, block_locs, r)
             group = i * np.ones(len(group_locs), dtype=np.int32)
             group_locs = lib.append_to_rec(group_locs, group, 'group')
             yield group_locs
 
     def remove_picks(self, position):
-        new_picks = []
         x, y = position
-        r2 = self.window.tools_settings_dialog.pick_diameter.value()**2
+        pick_diameter_2 = self.window.tools_settings_dialog.pick_diameter.value()**2
+        new_picks = []
         for x_, y_ in self._picks:
-            if ((x - x_)**2 + (y - y_)**2) < r2:
-                break
-        else:
-            self._picks = []
-            self.update_scene()
-            return
-        for x_, y_ in self._picks:
-            if ((x - x_)**2 + (y - y_)**2) > r2:
+            d2 = (x - x_)**2 + (y - y_)**2
+            if d2 > pick_diameter_2:
                 new_picks.append((x_, y_))
         self._picks = []
         self.add_picks(new_picks)
 
-    def render_scene(self, autoscale=False, use_cache=False, cache=True):
-        kwargs = self.get_render_kwargs()
+    def render_scene(self, autoscale=False, use_cache=False, cache=True, viewport=None):
+        kwargs = self.get_render_kwargs(viewport=viewport)
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache)
@@ -654,7 +1008,11 @@ class View(QtGui.QLabel):
     def render_single_channel(self, kwargs, autoscale=False, use_cache=False, cache=True):
         locs = self.locs[0]
         if hasattr(locs, 'group'):
-            locs = [locs[locs.group == _] for _ in self.groups]
+            groups = np.unique(locs.group)
+            np.random.shuffle(groups)
+            groups %= N_GROUP_COLORS
+            color = groups[locs.group]
+            locs = [locs[color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
         if use_cache:
             n_locs = self.n_locs
@@ -678,12 +1036,17 @@ class View(QtGui.QLabel):
     def resizeEvent(self, event):
         self.update_scene()
 
-    def save_picked_locs(self, path):
-        picked_locs = list(self.picked_locs_iter())
-        locs = stack_arrays(picked_locs, asrecarray=True, usemask=False)
+    def save_picked_locs(self, path, channel):
+        locs = self.picked_locs(channel)
         d = self.window.tools_settings_dialog.pick_diameter.value()
         pick_info = {'Generated by:': 'Picasso Render', 'Pick Diameter:': d}
-        io.save_locs(path, locs, self.infos[0] + [pick_info])
+        io.save_locs(path, locs, self.infos[channel] + [pick_info])
+
+    def save_picks(self, path):
+        d = self.window.tools_settings_dialog.pick_diameter.value()
+        picks = {'Diameter': d, 'Centers': [list(_) for _ in self._picks]}
+        with open(path, 'w') as f:
+            yaml.dump(picks, f)
 
     def scale_contrast(self, image, autoscale=False):
         if autoscale:
@@ -724,38 +1087,81 @@ class View(QtGui.QLabel):
         self.pan_relative(-0.8, 0)
 
     def undrift_from_picked(self):
+        channel = self.get_channel('Undrift from picked')
+        if channel is not None:
+            self._undrift_from_picked(channel)
+
+    def _undrift_from_picked(self, channel):
         n_picks = len(self._picks)
-        n_frames = self.infos[0][0]['Frames']
+        n_frames = self.infos[channel][0]['Frames']
         drift_x = np.empty((n_picks, n_frames))
         drift_y = np.empty((n_picks, n_frames))
         drift_x.fill(np.nan)
         drift_y.fill(np.nan)
-        for i, locs in enumerate(self.picked_locs_iter()):
+
+        # Remove center of mass offset
+        for i, locs in enumerate(self.picked_locs_iter(channel)):
             drift_x[i, locs.frame] = locs.x - np.mean(locs.x)
             drift_y[i, locs.frame] = locs.y - np.mean(locs.y)
-        drift_x = np.nanmean(drift_x, 0)
-        drift_y = np.nanmean(drift_y, 0)
 
+        # Mean drift per frame
+        drift_x_mean = np.nanmean(drift_x, 0)
+        drift_y_mean = np.nanmean(drift_y, 0)
+
+        # Filter outliers per frame
+        '''
+        drift_x_std = np.nanstd(drift_x, 0)
+        drift_y_std = np.nanstd(drift_y, 0)
+        is_outlier_x = np.abs(drift_x - drift_x_mean) > 2 * drift_x_std
+        is_outlier_y = np.abs(drift_y - drift_y_mean) > 2 * drift_y_std
+        is_outlier = np.logical_or(is_outlier_x, is_outlier_y)
+        drift_x[is_outlier] = np.nan
+        drift_y[is_outlier] = np.nan
+        drift_x_mean = np.nanmean(drift_x, 0)
+        drift_y_mean = np.nanmean(drift_y, 0)
+        '''
+
+        # New mean drift weighted by mean square deviation
+        msd_x = np.nanmean((drift_x - drift_x_mean)**2, 1)
+        msd_y = np.nanmean((drift_y - drift_y_mean)**2, 1)
+        # We are using a mask, because there is no function for weighted average ignoring nans:
+        nan_mask = np.isnan(drift_x)
+        drift_x = np.ma.MaskedArray(drift_x, mask=nan_mask)
+        drift_y = np.ma.MaskedArray(drift_y, mask=nan_mask)
+        drift_x_mean = np.ma.average(drift_x, axis=0, weights=1/msd_x)
+        drift_y_mean = np.ma.average(drift_y, axis=0, weights=1/msd_y)
+        drift_x_mean = drift_x_mean.filled(np.nan)
+        drift_y_mean = drift_y_mean.filled(np.nan)
+
+        # Linear interpolation for frames without localizations
         def nan_helper(y):
             return np.isnan(y), lambda z: z.nonzero()[0]
 
-        nans, nonzero = nan_helper(drift_x)
-        drift_x[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_x[~nans])
-        nans, nonzero = nan_helper(drift_y)
-        drift_y[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_y[~nans])
+        nans, nonzero = nan_helper(drift_x_mean)
+        drift_x_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_x_mean[~nans])
+        nans, nonzero = nan_helper(drift_y_mean)
+        drift_y_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_y_mean[~nans])
 
-        drift_x = np.convolve(drift_x, np.ones((100,))/100, mode='same')
-        drift_y = np.convolve(drift_y, np.ones((100,))/100, mode='same')
+        # Sliding window average
+        '''
+        drift_x_mean = np.convolve(drift_x_mean, np.ones((100,))/100, mode='same')
+        drift_y_mean = np.convolve(drift_y_mean, np.ones((100,))/100, mode='same')
+        '''
 
-        self.locs[0].x -= drift_x[self.locs[0].frame]
-        self.locs[0].y -= drift_y[self.locs[0].frame]
+        # Apply drift
+        self.locs[channel].x -= drift_x_mean[self.locs[channel].frame]
+        self.locs[channel].y -= drift_y_mean[self.locs[channel].frame]
         self.update_scene()
 
-        path = os.path.splitext(self.locs_path)[0] + '_undrift.hdf5'
+        # Save locs
+        '''
+        path = os.path.splitext(self.locs_paths[0])[0] + '_undrift.hdf5'
         self.infos[0].append({'Generated by': 'Picasso Render (Undrift from picked)',
                               'Pick Diameter': self.window.tools_settings_dialog.pick_diameter.value(),
                               '# Picks': n_picks})
         io.save_locs(path, self.locs[0], self.infos[0])
+        self.locs_paths[0] = path
+        '''
 
     def update_cursor(self):
         if self._mode == 'Zoom':
@@ -774,11 +1180,35 @@ class View(QtGui.QLabel):
             cursor = QtGui.QCursor(pixmap)
             self.setCursor(cursor)
 
-    def update_scene(self, viewport=None, autoscale=False, use_cache=False):
+    def calculate_pick_info_long(self):
+        channel = self.get_channel('Calculate pick info')
+        if channel is not None:
+            r = self.window.tools_settings_dialog.pick_diameter.value() / 2
+            t = self.window.info_dialog.max_dark_time.value()
+            self.pick_info_worker = PickInfoWorker(self.locs[channel], self.infos[channel], self._picks, r, t)
+            self.pick_info_worker.finished.connect(self.update_pick_info_long)
+            self.pick_info_worker.start()
+
+    def update_pick_info_long(self, info):
+        for name in info:
+            if name != 'pool':
+                mean = np.mean(info[name])
+                std = np.std(info[name])
+                decimals =  self.window.info_dialog.picks_info_labels['decimals'][name]
+                self.window.info_dialog.picks_info_labels['mean'][name].setText('{:,.{p}f}'.format(mean, p=decimals))
+                self.window.info_dialog.picks_info_labels['std'][name].setText('{:,.{p}f}'.format(std, p=decimals))
+        self.window.info_dialog.pick_info = info
+        self.window.info_dialog.update_binding_sites()
+        self.window.info_dialog.pick_hist_window.plot(info)
+
+    def update_pick_info_short(self):
+        self.window.info_dialog.n_picks.setText(str(len(self._picks)))
+
+    def update_scene(self, viewport=None, autoscale=False, use_cache=False, picks_only=False):
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
-            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache)
+            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache, picks_only=picks_only)
             self.update_cursor()
 
     def viewport_center(self, viewport=None):
@@ -839,9 +1269,19 @@ class Window(QtGui.QMainWindow):
         open_action = file_menu.addAction('Open')
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
+        save_action = file_menu.addAction('Save localizations')
+        save_action.setShortcut('Ctrl+S')
+        save_action.triggered.connect(self.save_locs)
         save_picked_action = file_menu.addAction('Save picked localizations')
-        save_picked_action.setShortcut('Ctrl+S')
+        save_picked_action.setShortcut('Ctrl+Shift+S')
         save_picked_action.triggered.connect(self.save_picked_locs)
+        file_menu.addSeparator()
+        save_picks_action = file_menu.addAction('Save pick regions')
+        save_picks_action.setShortcut('Ctrl+Shift+Alt+S')
+        save_picks_action.triggered.connect(self.save_picks)
+        load_picks_action = file_menu.addAction('Load pick regions')
+        load_picks_action.setShortcut('Ctrl+Shift+Alt+L')
+        load_picks_action.triggered.connect(self.load_picks)
         file_menu.addSeparator()
         export_current_action = file_menu.addAction('Export current view')
         export_current_action.setShortcut('Ctrl+E')
@@ -899,6 +1339,8 @@ class Window(QtGui.QMainWindow):
         pick_similar_action = tools_menu.addAction('Pick similar')
         pick_similar_action.setShortcut('Ctrl+Shift+P')
         pick_similar_action.triggered.connect(self.view.pick_similar)
+        clear_picks_action = tools_menu.addAction('Clear picks')
+        clear_picks_action.triggered.connect(self.view.clear_picks)
         tools_menu.addSeparator()
         tools_settings_action = tools_menu.addAction('Tools settings')
         tools_settings_action.setShortcut('Ctrl+T')
@@ -907,16 +1349,20 @@ class Window(QtGui.QMainWindow):
         undrift_action = postprocess_menu.addAction('Undrift from picked')
         undrift_action.setShortcut('Ctrl+U')
         undrift_action.triggered.connect(self.view.undrift_from_picked)
+        apply_action = postprocess_menu.addAction('Apply expression to localizations')
+        apply_action.setShortcut('Ctrl+A')
+        apply_action.triggered.connect(self.open_apply_dialog)
         self.load_user_settings()
 
     def closeEvent(self, event):
         settings = io.load_user_settings()
         settings['Render']['Colormap'] = self.display_settings_dialog.colormap.currentText()
         io.save_user_settings(settings)
+        QtGui.qApp.closeAllWindows()
 
     def export_current(self):
         try:
-            base, ext = os.path.splitext(self.view.locs_path)
+            base, ext = os.path.splitext(self.view.locs_paths[0])
         except AttributeError:
             return
         out_path = base + '.png'
@@ -927,7 +1373,7 @@ class Window(QtGui.QMainWindow):
 
     def export_complete(self):
         try:
-            base, ext = os.path.splitext(self.view.locs_path)
+            base, ext = os.path.splitext(self.view.locs_paths[0])
         except AttributeError:
             return
         out_path = base + '.png'
@@ -935,19 +1381,30 @@ class Window(QtGui.QMainWindow):
         if path:
             movie_height, movie_width = self.view.movie_size()
             viewport = [(0, 0), (movie_height, movie_width)]
-            qimage = self.view.render_scene(viewport, cache=False)
+            qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage.save(path)
+
+    def load_picks(self):
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
+        if path:
+            self.view.load_picks(path)
 
     def load_user_settings(self):
         settings = io.load_user_settings()
-        try:
-            colormap = settings['Render']['Colormap']
-        except KeyError:
-            colormap = 'viridis'
+        colormap = settings['Render']['Colormap']
+        if len(colormap) == 0:
+            colormap = 'magma'
         for index in range(self.display_settings_dialog.colormap.count()):
             if self.display_settings_dialog.colormap.itemText(index) == colormap:
                 self.display_settings_dialog.colormap.setCurrentIndex(index)
                 break
+
+    def open_apply_dialog(self):
+        cmd, channel, ok = ApplyDialog.getCmd(self)
+        if ok:
+            vars = self.view.locs[channel].dtype.names
+            exec(cmd, {k: self.view.locs[channel][k] for k in vars})
+            self.view.update_scene()
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Add localizations', filter='*.hdf5')
@@ -957,12 +1414,31 @@ class Window(QtGui.QMainWindow):
     def resizeEvent(self, event):
         self.update_info()
 
+    def save_locs(self):
+        channel = self.view.get_channel('Save localizations')
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '_render.hdf5'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', out_path, filter='*.hdf5')
+            if path:
+                info = self.view.infos[channel] + [{'Generated by': 'Picasso Render'}]
+                io.save_locs(path, self.view.locs[channel], info)
+
     def save_picked_locs(self):
-        base, ext = os.path.splitext(self.view.locs_path)
-        out_path = base + '_picked.hdf5'
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save picked localizations', out_path, filter='*.hdf5')
+        channel = self.view.get_channel('Save picked localizations')
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '_picked.hdf5'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save picked localizations', out_path, filter='*.hdf5')
+            if path:
+                self.view.save_picked_locs(path, channel)
+
+    def save_picks(self):
+        base, ext = os.path.splitext(self.view.locs_paths[0])
+        out_path = base + '_picks.yaml'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save pick regions', out_path, filter='*.yaml')
         if path:
-            self.view.save_picked_locs(path)
+            self.view.save_picks(path)
 
     def set_status(self, message):
         label = QtGui.QLabel(message)
@@ -981,7 +1457,6 @@ class Window(QtGui.QMainWindow):
             self.info_dialog.crlb_precision.setText('{:.3} pixel'.format(self.view.median_lp))
         except AttributeError:
             pass
-
 
 def main():
     app = QtGui.QApplication(sys.argv)

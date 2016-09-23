@@ -12,6 +12,7 @@ import numpy as _np
 import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
 from tqdm import tqdm as _tqdm
+from tqdm import trange as _trange
 from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
@@ -20,6 +21,8 @@ import matplotlib.pyplot as _plt
 from scipy.optimize import minimize as _minimize
 import itertools as _itertools
 import lmfit as _lmfit
+from collections import OrderedDict as _OrderedDict
+from . import io as _io
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
@@ -41,14 +44,27 @@ def get_index_blocks(locs, info, size):
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     # Fill in block starts and ends
     _fill_index_blocks(block_starts, block_ends, x_index, y_index)
-    return locs, size, x_index, y_index, block_starts, block_ends
+    K, L = block_starts.shape
+    return locs, size, x_index, y_index, block_starts, block_ends, K, L
+
+
+@_numba.jit(nopython=True, nogil=True)
+def n_block_locs_at(x, y, size, K, L, block_starts, block_ends):
+    x_index = _np.uint32(x / size)
+    y_index = _np.uint32(y / size)
+    n_block_locs = 0
+    for k in range(y_index - 1, y_index + 2):
+        if 0 < k < K:
+            for l in range(x_index - 1, x_index + 2):
+                if 0 < l < L:
+                    n_block_locs += block_ends[k, l] - block_starts[k, l]
+    return n_block_locs
 
 
 def get_block_locs_at(x, y, index_blocks):
-    locs, size, x_index, y_index, block_starts, block_ends = index_blocks
+    locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
     x_index = _np.uint32(x / size)
     y_index = _np.uint32(y / size)
-    K, L = block_starts.shape
     indices = []
     for k in range(y_index - 1, y_index+2):
         if 0 < k < K:
@@ -277,21 +293,33 @@ def compute_local_density(locs, info, radius):
     return _lib.append_to_rec(locs, density, 'density')
 
 
-def compute_dark_times(locs):
-    last_frame = locs.frame + locs.len - 1
-    dark = _compute_dark_times(locs, last_frame)
-    locs = _lib.append_to_rec(locs, _np.int32(dark), 'dark')        # int32 for Origin compatiblity
+def compute_dark_times(locs, group=None):
+    dark = dark_times(locs, group)
+    locs = _lib.append_to_rec(locs, _np.int32(dark), 'dark')
     return locs
 
 
-@_numba.jit(nopython=True, cache=False)
-def _compute_dark_times(locs, last_frame):
+def dark_times(locs, group=None, invalid=True):
+    last_frame = locs.frame + locs.len - 1
+    if group is None:
+        if hasattr(locs, 'group'):
+            group = locs.group
+        else:
+            group = _np.zeros(len(locs))
+    dark = _dark_times(locs, group, last_frame)
+    if not invalid:
+        dark = dark[dark != -1]
+    return dark
+
+
+@_numba.jit(nopython=True)
+def _dark_times(locs, group, last_frame):
     N = len(locs)
     max_frame = locs.frame.max()
     dark = max_frame * _np.ones(len(locs), dtype=_np.int32)
     for i in range(N):
         for j in range(N):
-            if (locs.group[i] == locs.group[j]) and (i != j):
+            if (group[i] == group[j]) and (i != j):
                 dark_ij = locs.frame[i] - last_frame[j]
                 if (dark_ij > 0) and (dark_ij < dark[i]):
                     dark[i] = dark_ij
@@ -364,73 +392,103 @@ def _get_next_loc_index_in_link_group(current_index, link_group, N, frame, x, y,
     return -1
 
 
-def link_loc_groups(locs, link_group):
-    is_grouped = hasattr(locs, 'group')
-    if is_grouped:
-        group = locs.group
-    else:
-        group = _np.zeros(len(locs), dtype=_np.int32)
-    linked_locs_data = _link_loc_groups(locs, link_group, group)
-    dtype = _LOCS_DTYPE[:-1] + [('iterations', 'f4'), ('len', 'i4'), ('n', 'u4'), ('photon_rate', 'f4')]
-    if is_grouped:
-        dtype.append(('group', 'i4'))
-        return _np.rec.array(linked_locs_data, dtype=dtype)
-    return _np.rec.array(linked_locs_data[:-1], dtype=dtype)
+@_numba.jit(nopython=True)
+def _link_group_count(link_group, n_locs, n_groups):
+    result = _np.zeros(n_groups, dtype=_np.uint32)
+    for i in range(n_locs):
+        i_ = link_group[i]
+        result[i_] += 1
+    return result
 
 
 @_numba.jit(nopython=True)
-def _link_loc_groups(locs, link_group, group):
-    N_linked = link_group.max() + 1
-    frame_ = locs.frame.max() * _np.ones(N_linked, dtype=_np.uint32)
-    x_ = _np.zeros(N_linked, dtype=_np.float32)
-    y_ = _np.zeros(N_linked, dtype=_np.float32)
-    photons_ = _np.zeros(N_linked, dtype=_np.float32)
-    sx_ = _np.zeros(N_linked, dtype=_np.float32)
-    sy_ = _np.zeros(N_linked, dtype=_np.float32)
-    bg_ = _np.zeros(N_linked, dtype=_np.float32)
-    lpx_ = _np.zeros(N_linked, dtype=_np.float32)
-    lpy_ = _np.zeros(N_linked, dtype=_np.float32)
-    likelihood_ = _np.zeros(N_linked, dtype=_np.float32)
-    iterations_ = _np.zeros(N_linked, dtype=_np.float32)
-    len_ = _np.zeros(N_linked, dtype=_np.int32)
-    n_ = _np.zeros(N_linked, dtype=_np.uint32)
-    last_frame_ = _np.zeros(N_linked, dtype=_np.uint32)
-    group_ = _np.zeros(N_linked, dtype=_np.int32)
-    weights_x = 1/locs.lpx**2
-    weights_y = 1/locs.lpy**2
-    sum_weights_x_ = _np.zeros(N_linked, dtype=_np.float32)
-    sum_weights_y_ = _np.zeros(N_linked, dtype=_np.float32)
-    N = len(link_group)
-    for i in range(N):
+def _link_group_sum(column, link_group, n_locs, n_groups):
+    result = _np.zeros(n_groups, dtype=column.dtype)
+    for i in range(n_locs):
         i_ = link_group[i]
-        n_[i_] += 1
-        x_[i_] += weights_x[i] * locs.x[i]
-        sum_weights_x_[i_] += weights_x[i]
-        y_[i_] += weights_y[i] * locs.y[i]
-        sum_weights_y_[i_] += weights_y[i]
-        photons_[i_] += locs.photons[i]
-        sx_[i_] += locs.sx[i]
-        sy_[i_] += locs.sy[i]
-        bg_[i_] += locs.bg[i]
-        likelihood_[i_] += locs.likelihood[i]
-        iterations_[i_] += locs.iterations[i]
-        if locs.frame[i] < frame_[i_]:
-            frame_[i_] = locs.frame[i]
-        if locs.frame[i] > last_frame_[i_]:
-            last_frame_[i_] = locs.frame[i]
-        group_[i_] = group[i]
-    x_ = x_ / sum_weights_x_
-    y_ = y_ / sum_weights_y_
-    sx_ = sx_ / n_
-    sy_ = sy_ / n_
-    bg_ = bg_ / n_
-    lpx_ = _np.sqrt(1/sum_weights_x_)
-    lpy_ = _np.sqrt(1/sum_weights_y_)
-    likelihood_ = likelihood_ / n_
-    iterations_ = iterations_ / n_
-    len_ = last_frame_ - frame_ + 1
-    photon_rate_ = photons_ / n_
-    return frame_, x_, y_, photons_, sx_, sy_, bg_, lpx_, lpy_, likelihood_, iterations_, len_, n_, photon_rate_, group_
+        result[i_] += column[i]
+    return result
+
+
+@_numba.jit(nopython=True)
+def _link_group_mean(column, link_group, n_locs, n_groups, n_locs_per_group):
+    group_sum = _link_group_sum(column, link_group, n_locs, n_groups)
+    result = _np.empty(n_groups, dtype=_np.float32)     # this ensures float32 after the division
+    result[:] = group_sum / n_locs_per_group
+    return result
+
+
+@_numba.jit(nopython=True)
+def _link_group_weighted_mean(column, weights, link_group, n_locs, n_groups, n_locs_per_group):
+    sum_weights = _link_group_sum(weights, link_group, n_locs, n_groups)
+    return _link_group_mean(column * weights, link_group, n_locs, n_groups, sum_weights), sum_weights
+
+
+@_numba.jit(nopython=True)
+def _link_group_min_max(column, link_group, n_locs, n_groups):
+    min_ = _np.empty(n_groups, dtype=column.dtype)
+    max_ = _np.empty(n_groups, dtype=column.dtype)
+    min_[:] = column.max()
+    max_[:] = column.min()
+    for i in range(n_locs):
+        i_ = link_group[i]
+        value = column[i]
+        if value < min_[i_]:
+            min_[i_] = value
+        if value > max_[i_]:
+            max_[i_] = value
+    return min_, max_
+
+
+@_numba.jit(nopython=True)
+def _link_group_last(column, link_group, n_locs, n_groups):
+    result = _np.zeros(n_groups, dtype=column.dtype)
+    for i in range(n_locs):
+        i_ = link_group[i]
+        result[i_] = column[i]
+    return result
+
+
+def link_loc_groups(locs, link_group):
+    n_locs = len(link_group)
+    n_groups = link_group.max() + 1
+    n_ = _link_group_count(link_group, n_locs, n_groups)
+    columns = _OrderedDict()
+    if hasattr(locs, 'frame'):
+        first_frame_, last_frame_ = _link_group_min_max(locs.frame, link_group, n_locs, n_groups)
+        columns['frame'] = first_frame_
+    if hasattr(locs, 'x'):
+        weights_x = 1 / locs.lpx**2
+        columns['x'], sum_weights_x_ = _link_group_weighted_mean(locs.x, weights_x, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'y'):
+        weights_y = 1 / locs.lpy**2
+        columns['y'], sum_weights_y_ = _link_group_weighted_mean(locs.y, weights_y, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'photons'):
+        columns['photons'] = _link_group_sum(locs.photons, link_group, n_locs, n_groups)
+    if hasattr(locs, 'sx'):
+        columns['sx'] = _link_group_mean(locs.sx, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'sy'):
+        columns['sy'] = _link_group_mean(locs.sy, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'bg'):
+        columns['bg'] = _link_group_sum(locs.bg, link_group, n_locs, n_groups)
+    if hasattr(locs, 'x'):
+        columns['lpx'] = _np.sqrt(1 / sum_weights_x_)
+    if hasattr(locs, 'y'):
+        columns['lpy'] = _np.sqrt(1 / sum_weights_y_)
+    if hasattr(locs, 'net_gradient'):
+        columns['net_gradient'] = _link_group_mean(locs.net_gradient, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'likelihood'):
+        columns['likelihood'] = _link_group_mean(locs.likelihood, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'iterations'):
+        columns['iterations'] = _link_group_mean(locs.iterations, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'group'):
+        columns['group'] = _link_group_last(locs.group, link_group, n_locs, n_groups)
+    if hasattr(locs, 'frame'):
+        columns['len'] = last_frame_ - first_frame_ + 1
+    columns['n'] = n_
+    if hasattr(locs, 'photons'):
+        columns['photon_rate'] = _np.float32(columns['photons'] / n_)
+    return _np.rec.array(list(columns.values()), names=list(columns.keys()))
 
 
 def undrift(locs, info, segmentation, mode='render', movie=None, display=True):
@@ -594,18 +652,40 @@ def get_drift_rcc(locs, info, segmentation, mode='render', movie=None, display=T
     return drift
 
 
-def align(target_locs, target_info, locs, info, affine=False, display=False):
-    N_target, target_image = _render.render(target_locs, target_info, oversampling=1,
-                                            blur_method='gaussian', min_blur_width=1)
-    N, image = _render.render(locs, info, oversampling=1, blur_method='gaussian', min_blur_width=1)
-    target_pad = [int(_/4) for _ in target_image.shape]
-    target_image_pad = _np.pad(target_image, target_pad, 'constant')
-    image_pad = [int(_/4) for _ in image.shape]
-    image = _np.pad(image, image_pad, 'constant')
-    dy, dx = _imageprocess.get_image_shift(target_image_pad, image, 7, None, display=display)
-    print('Image shift: dx={}, dy={}.'.format(dx, dy))
-    locs.y -= dy
-    locs.x -= dx
+def align(locs, infos, display=False):
+    kwargs = {'oversampling': 1, 'blur_method': 'gaussian', 'min_blur_width': 1}
+    renderings = [_render.render(locs_, info, **kwargs) for locs_, info in zip(locs, infos)]
+    images = [rendering[1] for rendering in renderings]
+    # padding = int(images[0].shape[0] / 4)
+    # images = [_np.pad(_, padding, 'constant') for _ in images]
+    # print(len(images))
+    n_images = len(images)
+
+    # RCC style shift estimation
+    n_pairs = int(n_images * (n_images - 1) / 2)
+    rij = _np.zeros((n_pairs, 2))
+    A = _np.zeros((n_pairs, n_images - 1))
+    flag = 0
+    for i in range(n_images - 1):
+        for j in range(i+1, n_images):
+            dyij, dxij = _imageprocess.get_image_shift(images[i], images[j], 5)
+            rij[flag, 0] = dyij
+            rij[flag, 1] = dxij
+            A[flag, i:j] = 1
+            flag += 1
+
+    Dj = _np.dot(_np.linalg.pinv(A), rij)
+    drift_y = _np.insert(_np.cumsum(Dj[:, 0]), 0, 0)
+    drift_x = _np.insert(_np.cumsum(Dj[:, 1]), 0, 0)
+
+    print('Image x shifts: {}'.format(drift_x))
+    print('Image y shifts: {}'.format(drift_y))
+
+    for locs_, dx, dy in zip(locs, drift_x, drift_y):
+        locs_.y -= dy
+        locs_.x -= dx
+
+    '''
     if affine:
         print('Attempting affine transformation - this may take a while...')
         locsT = _np.rec.array((locs.x, locs.y, locs.lpx, locs.lpy), dtype=[('x', 'f4'), ('y', 'f4'), ('lpx', 'f4'), ('lpy', 'f4')])
@@ -645,12 +725,9 @@ def align(target_locs, target_info, locs, info, affine=False, display=False):
         result = _minimize(affine_xcorr_negmax, T0, args=(target_image, locs),
                            method='COBYLA', options={'rhobeg': init_steps})
         Ox, Oy, W, H, theta, A, B, X, Y = result.x
-        print('''Origin shift (x,y): {}, {}
-Scale (x,y): {}, {}
-Rotation (deg): {}
-Shear (x,y): {}, {}
-Translation (x,y): {}, {}'''.format(Ox, Oy, W, H, 360*theta/(2*_np.pi), A, B, X, Y))
+        print('Origin shift (x,y): {}, {}\nScale (x,y): {}, {}\nRotation (deg): {}\nShear (x,y): {}, {}\nTranslation (x,y): {}, {}'.format(Ox, Oy, W, H, 360*theta/(2*_np.pi), A, B, X, Y))
         locs.x, locs.y = apply_transforms(locs, result.x)
+        '''
     return locs
 
 
@@ -673,3 +750,79 @@ def groupprops(locs):
             groups[name + '_mean'][i] = _np.mean(group_locs[name])
             groups[name + '_std'][i] = _np.std(group_locs[name])
     return groups
+
+
+def average(locs, info, iterations=50, oversampling=20, path_basename=None):
+    n_digits = len(str(iterations))
+    groups = _np.unique(locs.group)
+    n_groups = len(groups)
+    print('Indexing particle localizations...')
+    group_index = [(locs.group == _) for _ in groups]
+
+    # Translate all the groups by center of mass
+    for index in _tqdm(group_index, desc='Aligning by COM', unit='groups'):
+        locs.x[index] -= _np.mean(locs.x[index])
+        locs.y[index] -= _np.mean(locs.y[index])
+
+    r = 2 * _np.sqrt(_np.mean(locs.x**2 + locs.y**2))
+    a_step = _np.arcsin(1 / (oversampling * r))
+    angles = _np.arange(0, 2*_np.pi, a_step)
+    kwargs = {'oversampling': oversampling,
+              'viewport': [(-r, -r), (r, r)],
+              'blur_method': 'smooth'}
+    Y_half = info[0]['Height'] / 2
+    X_half = info[0]['Width'] / 2
+
+    print('# Particles:', n_groups)
+    print('Super-Resolution Pixel Size: {:.3f} cam. pixels'.format(1 / oversampling))
+    print('Translation Range: {:.3f} cam. pixels'.format(r))
+    print('Angle Step: {:.3f} degrees'.format(a_step * 360 / (2 * _np.pi)))
+
+    def save(n):
+        if path_basename is not None:
+            locs.x += X_half
+            locs.y += Y_half
+            _io.save_locs(path_basename + '_{:0{nd}d}.hdf5'.format(n, nd=n_digits), locs, info)
+            locs.x -= X_half
+            locs.y -= Y_half
+            _plt.imsave(path_basename + '_{:0{nd}d}.png'.format(n, nd=n_digits),
+                        image_avg,
+                        cmap='magma',
+                        vmin=0,
+                        vmax=0.9*_np.max(image_avg))
+
+    for it in _trange(iterations, desc='Iterations'):
+        # render average image
+        N_avg, image_avg = _render.render(locs, **kwargs)
+        save(it)
+        n_pixel, _ = image_avg.shape
+        image_half = n_pixel / 2
+        CF_image_avg = _np.conj(_np.fft.fft2(image_avg))
+        for i, index in enumerate(_tqdm(group_index, desc='Group alignment', unit='groups')):
+            group_locs = locs[index]
+            # Storing the original coordinates
+            x = group_locs.x.copy()
+            y = group_locs.y.copy()
+            xcorr_max = 0.0
+            for angle in angles:
+                # rotate locs
+                group_locs.x = _np.cos(angle) * x - _np.sin(angle) * y
+                group_locs.y = _np.sin(angle) * x + _np.cos(angle) * y
+                # render group image
+                N, image = _render.render(group_locs, **kwargs)
+                # calculate cross-correlation
+                F_image = _np.fft.fft2(image)
+                xcorr = _np.fft.fftshift(_np.real(_np.fft.ifft2((F_image * CF_image_avg))))
+                # find the brightest pixel
+                y_max, x_max = _np.unravel_index(xcorr.argmax(), xcorr.shape)
+                # store the transformation if the correlation is larger than before
+                if xcorr[y_max, x_max] > xcorr_max:
+                    xcorr_max = xcorr[y_max, x_max]
+                    rot = angle
+                    dy = (y_max - image_half + 0.5) / oversampling
+                    dx = (x_max - image_half + 0.5) / oversampling
+            # rotate and shift image group locs
+            locs.x[index] = _np.cos(rot) * x - _np.sin(rot) * y - dx
+            locs.y[index] = _np.sin(rot) * x + _np.cos(rot) * y - dy
+    save(iterations)
+    return locs

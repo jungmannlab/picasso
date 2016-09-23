@@ -16,7 +16,7 @@ from PyQt4 import QtCore, QtGui
 import time
 import numpy as np
 import traceback
-from .. import io, localize
+from .. import io, localize, CONFIG
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
@@ -162,6 +162,83 @@ class OddSpinBox(QtGui.QSpinBox):
             self.setValue(value + 1)
 
 
+class CamSettingComboBox(QtGui.QComboBox):
+
+    def __init__(self, cam_combos, camera, index):
+        super().__init__()
+        self.cam_combos = cam_combos
+        self.camera = camera
+        self.index = index
+
+    def change_target_choices(self, index):
+        cam_combos = self.cam_combos[self.camera]
+        sensitivity = CONFIG['Cameras'][self.camera]['Sensitivity']
+        for i in range(self.index + 1):
+            sensitivity = sensitivity[cam_combos[i].currentText()]
+        target = cam_combos[self.index + 1]
+        target.blockSignals(True)
+        target.clear()
+        target.blockSignals(False)
+        target.addItems(sorted(list(sensitivity.keys())))
+
+
+class PromptInfoDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Enter movie info')
+        vbox = QtGui.QVBoxLayout(self)
+        grid = QtGui.QGridLayout()
+        grid.addWidget(QtGui.QLabel('Byte Order:'), 0, 0)
+        self.byte_order = QtGui.QComboBox()
+        self.byte_order.addItems(['Little Endian (loads faster)', 'Big Endian'])
+        grid.addWidget(self.byte_order, 0, 1)
+        grid.addWidget(QtGui.QLabel('Data Type:'), 1, 0)
+        self.dtype = QtGui.QComboBox()
+        self.dtype.addItems(['float16', 'float32', 'float64', 'int8', 'int16', 'int32', 'uint8', 'uint16', 'uint32'])
+        grid.addWidget(self.dtype, 1, 1)
+        grid.addWidget(QtGui.QLabel('Frames:'), 2, 0)
+        self.frames = QtGui.QSpinBox()
+        self.frames.setRange(1, 1e9)
+        grid.addWidget(self.frames, 2, 1)
+        grid.addWidget(QtGui.QLabel('Height:'), 3, 0)
+        self.movie_height = QtGui.QSpinBox()
+        self.movie_height.setRange(1, 1e9)
+        grid.addWidget(self.movie_height, 3, 1)
+        grid.addWidget(QtGui.QLabel('Width'), 4, 0)
+        self.movie_width = QtGui.QSpinBox()
+        self.movie_width.setRange(1, 1e9)
+        grid.addWidget(self.movie_width, 4, 1)
+        self.save = QtGui.QCheckBox('Save info to yaml file')
+        self.save.setChecked(True)
+        grid.addWidget(self.save, 5, 0, 1, 2)
+        vbox.addLayout(grid)
+        hbox = QtGui.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
+                                              QtCore.Qt.Horizontal,
+                                              self)
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    # static method to create the dialog and return (date, time, accepted)
+    @staticmethod
+    def getMovieSpecs(parent=None):
+        dialog = PromptInfoDialog(parent)
+        result = dialog.exec_()
+        info = {}
+        info['Byte Order'] = '>' if dialog.byte_order == 'big endian' else '<'
+        info['Data Type'] = dialog.dtype.currentText()
+        info['Frames'] = dialog.frames.value()
+        info['Height'] = dialog.movie_height.value()
+        info['Width'] = dialog.movie_width.value()
+        save = dialog.save.isChecked()
+        return (info, save, result == QtGui.QDialog.Accepted)
+
+
 class ParametersDialog(QtGui.QDialog):
     """ The dialog showing analysis parameters """
 
@@ -187,7 +264,7 @@ class ParametersDialog(QtGui.QDialog):
         # Min. Net Gradient
         identification_grid.addWidget(QtGui.QLabel('Min. Net Gradient:'), 1, 0)
         self.mng_spinbox = QtGui.QSpinBox()
-        self.mng_spinbox.setRange(0, 999999)
+        self.mng_spinbox.setRange(0, 1e9)
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS['Min. Net Gradient'])
         self.mng_spinbox.setKeyboardTracking(False)
         self.mng_spinbox.valueChanged.connect(self.on_mng_spinbox_changed)
@@ -230,54 +307,96 @@ class ParametersDialog(QtGui.QDialog):
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
-        exp_groupbox = QtGui.QGroupBox('Experiment Settings')
-        vbox.addWidget(exp_groupbox)
-        exp_grid = QtGui.QGridLayout(exp_groupbox)
+        # Camera:
+        if 'Cameras' in CONFIG:
+            # Experiment settings
+            exp_groupbox = QtGui.QGroupBox('Experiment settings')
+            vbox.addWidget(exp_groupbox)
+            exp_grid = QtGui.QGridLayout(exp_groupbox)
+            exp_grid.addWidget(QtGui.QLabel('Camera:'), 0, 0)
+            self.camera = QtGui.QComboBox()
+            exp_grid.addWidget(self.camera, 0, 1)
+            cameras = sorted(list(CONFIG['Cameras'].keys()))
+            self.camera.addItems(cameras)
+            self.camera.currentIndexChanged.connect(self.on_camera_changed)
 
-        # Experiment settings
-        exp_grid.addWidget(QtGui.QLabel('Camera:'), 0, 0)
-        self.camera_combo = QtGui.QComboBox()
-        self.camera_combo.currentIndexChanged.connect(self.on_camera_changed)
-        exp_grid.addWidget(self.camera_combo, 0, 1)
-        self.camera_tabs = QtGui.QTabWidget()
-        exp_grid.addWidget(self.camera_tabs, 1, 0, 1, 2)
+            self.cam_settings = QtGui.QStackedWidget()
+            exp_grid.addWidget(self.cam_settings, 1, 0, 1, 2)
+            self.cam_combos = {}
+            self.emission_combos = {}
+            for camera in cameras:
+                cam_widget = QtGui.QWidget()
+                cam_grid = QtGui.QGridLayout(cam_widget)
+                self.cam_settings.addWidget(cam_widget)
+                cam_config = CONFIG['Cameras'][camera]
+                if 'Sensitivity' in cam_config:
+                    sensitivity = cam_config['Sensitivity']
+                    if 'Sensitivity Categories' in cam_config:
+                        self.cam_combos[camera] = []
+                        categories = cam_config['Sensitivity Categories']
+                        for i, category in enumerate(categories):
+                            row_count = cam_grid.rowCount()
+                            cam_grid.addWidget(QtGui.QLabel(category+':'), row_count, 0)
+                            cat_combo = CamSettingComboBox(self.cam_combos, camera, i)
+                            cam_grid.addWidget(cat_combo, row_count, 1)
+                            self.cam_combos[camera].append(cat_combo)
+                        self.cam_combos[camera][0].addItems(sorted(list(sensitivity.keys())))
+                        for cam_combo in self.cam_combos[camera][:-1]:
+                            cam_combo.currentIndexChanged.connect(cam_combo.change_target_choices)
+                        self.cam_combos[camera][0].change_target_choices(0)
+                        self.cam_combos[camera][-1].currentIndexChanged.connect(self.update_sensitivity)
+                if 'Quantum Efficiency' in cam_config:
+                    row_count = cam_grid.rowCount()
+                    cam_grid.addWidget(QtGui.QLabel('Emission Wavelength:'), row_count, 0)
+                    emission_combo = QtGui.QComboBox()
+                    cam_grid.addWidget(emission_combo, row_count, 1)
+                    qes = cam_config['Quantum Efficiency'].keys()
+                    wavelengths = sorted([str(_) for _ in qes])
+                    emission_combo.addItems(wavelengths)
+                    emission_combo.currentIndexChanged.connect(self.on_emission_changed)
+                    self.emission_combos[camera] = emission_combo
+                spacer = QtGui.QWidget()
+                spacer.setSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Expanding)
+                cam_grid.addWidget(spacer, cam_grid.rowCount(), 0)
 
-        # EMCCD
-        emccd_widget = QtGui.QWidget()
-        self.camera_tabs.addTab(emccd_widget, 'EMCCD')
-        emccd_grid = QtGui.QGridLayout(emccd_widget)
-        self.em_checkbox = QtGui.QCheckBox('Electron Multiplying')
-        self.em_checkbox.toggled.connect(self.update_readmodes)
-        emccd_grid.addWidget(self.em_checkbox, 1, 1)
-        emccd_grid.addWidget(QtGui.QLabel('EM Real Gain:'), 2, 0)
-        self.gain_spinbox = QtGui.QSpinBox()
-        self.gain_spinbox.setRange(1, 1000)
-        emccd_grid.addWidget(self.gain_spinbox, 2, 1)
-        emccd_grid.addWidget(QtGui.QLabel('Readout Mode:'), 3, 0)
-        self.readmode_combo = QtGui.QComboBox()
-        self.readmode_combo.currentIndexChanged.connect(self.update_preamps)
-        emccd_grid.addWidget(self.readmode_combo, 3, 1)
-        emccd_grid.addWidget(QtGui.QLabel('Pre-Amp Gain:'), 4, 0)
-        self.preamp_combo = QtGui.QComboBox()
-        emccd_grid.addWidget(self.preamp_combo, 4, 1)
+        # Photon conversion
+        photon_groupbox = QtGui.QGroupBox('Photon Conversion')
+        vbox.addWidget(photon_groupbox)
+        photon_grid = QtGui.QGridLayout(photon_groupbox)
 
-        # sCMOS
-        scmos_widget = QtGui.QWidget()
-        self.camera_tabs.addTab(scmos_widget, 'sCMOS')
-        scmos_grid = QtGui.QGridLayout(scmos_widget)
-        scmos_grid.addWidget(QtGui.QLabel('Readout Rate:'), 0, 0)
-        self.readoutrate_combo = QtGui.QComboBox()
-        self.readoutrate_combo.currentIndexChanged.connect(self.update_gains)
-        scmos_grid.addWidget(self.readoutrate_combo, 0, 1)
-        scmos_grid.addWidget(QtGui.QLabel('Gain Setting:'), 1, 0)
-        self.gain_combo = QtGui.QComboBox()
-        scmos_grid.addWidget(self.gain_combo, 1, 1)
+        # EM Gain
+        photon_grid.addWidget(QtGui.QLabel('EM Gain:'), 0, 0)
+        self.gain = QtGui.QSpinBox()
+        self.gain.setRange(1, 1e6)
+        self.gain.setValue(1)
+        photon_grid.addWidget(self.gain, 0, 1)
 
-        # Wavelength
-        exp_grid.addWidget(QtGui.QLabel('Excitation Wavelength:'), 5, 0)
-        self.excitation_combo = QtGui.QComboBox()
-        exp_grid.addWidget(self.excitation_combo, 5, 1)
-        self.camera_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'].keys())))
+        # Baseline
+        photon_grid.addWidget(QtGui.QLabel('Baseline:'), 1, 0)
+        self.baseline = QtGui.QDoubleSpinBox()
+        self.baseline.setRange(0, 1e6)
+        self.baseline.setValue(100.0)
+        self.baseline.setDecimals(1)
+        self.baseline.setSingleStep(0.1)
+        photon_grid.addWidget(self.baseline, 1, 1)
+
+        # Sensitivity
+        photon_grid.addWidget(QtGui.QLabel('Sensitivity:'), 2, 0)
+        self.sensitivity = QtGui.QDoubleSpinBox()
+        self.sensitivity.setRange(0, 1e6)
+        self.sensitivity.setValue(1.0)
+        self.sensitivity.setDecimals(2)
+        self.sensitivity.setSingleStep(0.01)
+        photon_grid.addWidget(self.sensitivity, 2, 1)
+
+        # QE
+        photon_grid.addWidget(QtGui.QLabel('Quantum Efficiency:'), 3, 0)
+        self.qe = QtGui.QDoubleSpinBox()
+        self.qe.setRange(0, 1)
+        self.qe.setValue(0.9)
+        self.qe.setDecimals(2)
+        self.qe.setSingleStep(0.1)
+        photon_grid.addWidget(self.qe, 3, 1)
 
         # Fit Settings
         fit_groupbox = QtGui.QGroupBox('Fit Settings')
@@ -290,7 +409,7 @@ class ParametersDialog(QtGui.QDialog):
         self.convergence_spinbox = QtGui.QDoubleSpinBox()
         self.convergence_spinbox.setRange(0, 1)
         self.convergence_spinbox.setDecimals(5)
-        self.convergence_spinbox.setValue(0.001)
+        self.convergence_spinbox.setValue(0.0001)
         self.convergence_spinbox.setSingleStep(0.001)
         fit_grid.addWidget(self.convergence_spinbox, 1, 1)
         fit_grid.addWidget(QtGui.QLabel('Max. Iterations:'), 2, 0)
@@ -300,63 +419,37 @@ class ParametersDialog(QtGui.QDialog):
         self.max_iterations_spinbox.setSingleStep(10)
         fit_grid.addWidget(self.max_iterations_spinbox, 2, 1)
 
-    def on_camera_changed(self, index):
-        self.update_readmodes()
-        self.update_readoutrates()
-        self.excitation_combo.clear()
-        camera = self.camera_combo.currentText()
-        if camera:
-            if 'Sensor' in localize.CONFIG['Cameras'][camera]:
-                sensor = localize.CONFIG['Cameras'][camera]['Sensor']
-                if sensor == 'EMCCD':
-                    self.camera_tabs.setCurrentIndex(0)
-                elif sensor == 'sCMOS':
-                    self.camera_tabs.setCurrentIndex(1)
-            if 'Quantum Efficiency' in localize.CONFIG['Cameras'][camera]:
-                wavelengths = sorted(list(localize.CONFIG['Cameras'][camera]['Quantum Efficiency'].keys()))
-                wavelengths = [str(_) for _ in wavelengths]
-                self.excitation_combo.addItems([''] + wavelengths)
-
-    def update_readmodes(self):
-        self.readmode_combo.clear()
-        camera = self.camera_combo.currentText()
-        if camera:
-            if 'Sensor' in localize.CONFIG['Cameras'][camera]:
-                sensor = localize.CONFIG['Cameras'][camera]['Sensor']
-                if sensor == 'EMCCD':
-                    em = self.em_checkbox.isChecked()
-                    self.readmode_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'][camera]['Sensitivity'][em].keys())))
-
-    def update_readoutrates(self):
-        self.readoutrate_combo.clear()
-        camera = self.camera_combo.currentText()
-        if camera:
-            if 'Sensor' in localize.CONFIG['Cameras'][camera]:
-                sensor = localize.CONFIG['Cameras'][camera]['Sensor']
-                if sensor == 'sCMOS':
-                    self.readoutrate_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'][camera]['Sensitivity'])))
-
-    def update_gains(self):
-        self.gain_combo.clear()
-        camera = self.camera_combo.currentText()
-        readout = self.readoutrate_combo.currentText()
-        if camera and readout:
-            self.gain_combo.addItems([''] + sorted(list(localize.CONFIG['Cameras'][camera]['Sensitivity'][readout])))
-
-    def update_preamps(self, index):
-        self.preamp_combo.clear()
-        camera = self.camera_combo.currentText()
-        if camera:
-            if localize.CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
-                em = self.em_checkbox.isChecked()
-                readmode = self.readmode_combo.currentText()
-                if readmode:
-                    preamps = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode]
-                    preamps = [''] + [str(_) for _ in preamps]
-                    self.preamp_combo.addItems(preamps)
+        if 'Cameras' in CONFIG:
+            camera = self.camera.currentText()
+            if camera in CONFIG['Cameras']:
+                self.on_camera_changed(0)
+                camera_config = CONFIG['Cameras'][camera]
+                if 'Sensitivity' in camera_config and 'Sensitivity Categories' in camera_config:
+                    self.update_sensitivity()
 
     def on_box_changed(self, value):
         self.window.on_parameters_changed()
+
+    def on_camera_changed(self, index):
+        self.cam_settings.setCurrentIndex(index)
+        camera = self.camera.currentText()
+        cam_config = CONFIG['Cameras'][camera]
+        if 'Baseline' in cam_config:
+            self.baseline.setValue(cam_config['Baseline'])
+        if 'Sensitivity' in cam_config:
+            sensitivity = cam_config['Sensitivity']
+            try:
+                self.sensitivity.setValue(sensitivity)
+            except TypeError:
+                # sensitivity is not a number
+                pass
+
+    def on_emission_changed(self, index):
+        camera = self.camera.currentText()
+        em_combo = self.emission_combos[camera]
+        wavelength = float(em_combo.currentText())
+        qe = CONFIG['Cameras'][camera]['Quantum Efficiency'][wavelength]
+        self.qe.setValue(qe)
 
     def on_mng_spinbox_changed(self, value):
         if value < self.mng_slider.minimum():
@@ -379,72 +472,59 @@ class ParametersDialog(QtGui.QDialog):
     def on_preview_changed(self, state):
         self.window.draw_frame()
 
-    def set_camera_parameters(self, parameters):
-        self.camera_combo.setCurrentIndex(0)
-        if 'Camera' in parameters:
-            camera = parameters['Camera']
-            for index in range(self.camera_combo.count()):
-                if self.camera_combo.itemText(index) == camera:
-                    self.camera_combo.setCurrentIndex(index)
-                    break
-        if 'Electron Multiplying' in parameters:
-            self.em_checkbox.setChecked(parameters['Electron Multiplying'])
-            if parameters['Electron Multiplying']:
-                if 'EM Real Gain' in parameters:
-                    self.gain_spinbox.setValue(parameters['EM Real Gain'])
-            self.readmode_combo.setCurrentIndex(0)
-        if 'Readout Mode' in parameters:
-            for index in range(self.readmode_combo.count()):
-                if self.readmode_combo.itemText(index) == parameters['Readout Mode']:
-                    self.readmode_combo.setCurrentIndex(index)
-                    break
-        self.preamp_combo.setCurrentIndex(0)
-        if 'Pre-Amp Gain' in parameters:
-            for index in range(self.preamp_combo.count()):
-                if self.preamp_combo.itemText(index) == str(parameters['Pre-Amp Gain']):
-                    self.preamp_combo.setCurrentIndex(index)
-                    break
-        self.readoutrate_combo.setCurrentIndex(0)
-        if 'Readout Rate' in parameters:
-            for index in range(self.readoutrate_combo.count()):
-                if self.readoutrate_combo.itemText(index) == parameters['Readout Rate']:
-                    self.readoutrate_combo.setCurrentIndex(index)
-                    break
-        if 'Gain Setting' in parameters:
-            for index in range(self.gain_combo.count()):
-                if self.gain_combo.itemText(index) == parameters['Gain Setting']:
-                    self.gain_combo.setCurrentIndex(index)
-                    break
-        self.excitation_combo.setCurrentIndex(0)
-        if 'Excitation Wavelength' in parameters:
-            for index in range(1, self.excitation_combo.count()):
-                if int(self.excitation_combo.itemText(index)) == parameters['Excitation Wavelength']:
-                    self.excitation_combo.setCurrentIndex(index)
-                    break
+    def set_camera_parameters(self, info):
+        if 'Micro-Manager Metadata' in info:
+            info = info['Micro-Manager Metadata']
+            if 'Cameras' in CONFIG:
+                cameras = [self.camera.itemText(_) for _ in range(self.camera.count())]
+                camera = info['Camera']
+                if camera in cameras:
+                    index = cameras.index(camera)
+                    self.camera.setCurrentIndex(index)
+                    cam_config = CONFIG['Cameras'][camera]
+                    if 'Gain Property Name' in cam_config:
+                        gain_property_name = cam_config['Gain Property Name']
+                        gain = info[camera + '-' + gain_property_name]
+                        self.gain.setValue(int(gain))
+                    else:
+                        self.gain.setValue(1)
+                    if 'Sensitivity Categories' in cam_config:
+                        cam_combos = self.cam_combos[camera]
+                        categories = cam_config['Sensitivity Categories']
+                        for i, category in enumerate(categories):
+                            exp_setting = info[camera + '-' + category]
+                            cam_combo = cam_combos[i]
+                            for index in range(cam_combo.count()):
+                                if cam_combo.itemText(index) == exp_setting:
+                                    cam_combo.setCurrentIndex(index)
+                                    break
+                            else:
+                                raise ValueError('No configuration for setting "{}": {}'.format(category,
+                                                 exp_setting))
+                    if 'Quantum Efficiency' in cam_config:
+                        if 'Channel Device' in cam_config:
+                            channel_device_name = cam_config['Channel Device']['Name']
+                            channel = info[channel_device_name]
+                            channels = cam_config['Channel Device']['Emission Wavelengths']
+                            if channel in channels:
+                                wavelength = str(channels[channel])
+                                em_combo = self.emission_combos[camera]
+                                for index in range(em_combo.count()):
+                                    if em_combo.itemText(index) == wavelength:
+                                        em_combo.setCurrentIndex(index)
+                                        break
+                                else:
+                                    raise ValueError('No quantum efficiency found for wavelength ' + wavelength)
 
-    def get_camera_parameters(self):
-        camera = self.camera_combo.currentText()
-        parameters = {'Camera': self.camera_combo.currentText()}
-        if localize.CONFIG['Cameras'][camera]['Sensor'] == 'EMCCD':
-            parameters['Electron Multiplying'] = self.em_checkbox.isChecked()
-            parameters['EM Real Gain'] = self.gain_spinbox.value()
-            parameters['Readout Mode'] = self.readmode_combo.currentText()
-            parameters['Pre-Amp Gain'] = self.preamp_combo.currentText()
-            parameters = self.add_wavelength_to_camera_parameters(parameters)
-        elif localize.CONFIG['Cameras'][camera]['Sensor'] == 'sCMOS':
-            parameters['Readout Rate'] = self.readoutrate_combo.currentText()
-            parameters['Gain Setting'] = self.gain_combo.currentText()
-            parameters = self.add_wavelength_to_camera_parameters(parameters)
-        elif localize.CONFIG['Cameras'][camera]['Sensor'] == 'Simulation':
-            pass
-        return parameters
-
-    def add_wavelength_to_camera_parameters(self, parameters):
-        try:
-            parameters['Excitation Wavelength'] = int(self.excitation_combo.currentText())
-        except ValueError:
-            raise ValueError('You must set the wavelength!')
-        return parameters
+    def update_sensitivity(self, index=None):
+        camera = self.camera.currentText()
+        cam_config = CONFIG['Cameras'][camera]
+        sensitivity = cam_config['Sensitivity']
+        categories = cam_config['Sensitivity Categories']
+        for i, category in enumerate(categories):
+            cat_combo = self.cam_combos[camera][i]
+            sensitivity = sensitivity[cat_combo.currentText()]
+        self.sensitivity.setValue(sensitivity)
 
 
 class ContrastDialog(QtGui.QDialog):
@@ -624,9 +704,10 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        try:
-            t0 = time.time()
-            self.movie, self.info = io.load_movie(path)
+        t0 = time.time()
+        result = io.load_movie(path, prompt_info=self.prompt_info)
+        if result is not None:
+            self.movie, self.info = result
             dt = time.time() - t0
             self.movie_path = path
             self.identifications = None
@@ -636,8 +717,11 @@ class Window(QtGui.QMainWindow):
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
             self.status_bar.showMessage('Opened movie in {:.2f} seconds.'.format(dt))
-        except FileNotFoundError:
-            pass  # TODO send a message
+
+    def prompt_info(self):
+        info, save, ok = PromptInfoDialog.getMovieSpecs(self)
+        if ok:
+            return info, save
 
     def previous_frame(self):
         if self.movie is not None:
@@ -788,31 +872,11 @@ class Window(QtGui.QMainWindow):
     def fit(self):
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage('Preparing fit...')
-            parameters = self.parameters_dialog.get_camera_parameters()
-            camera = parameters['Camera']
-            sensor = localize.CONFIG['Cameras'][camera]['Sensor']
-            camera_info = {'sensor': sensor}
-            if sensor == 'EMCCD':
-                em = parameters['Electron Multiplying']
-                readmode = parameters['Readout Mode']
-                preamp = parameters['Pre-Amp Gain']
-                camera_info['baseline'] = localize.CONFIG['Cameras'][camera]['Baseline']
-                camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][em][readmode][preamp]
-                if em:
-                    camera_info['gain'] = parameters['EM Real Gain']
-                else:
-                    camera_info['gain'] = 1
-                excitation = parameters['Excitation Wavelength']
-                camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
-            elif sensor == 'sCMOS':
-                camera_info['baseline'] = localize.CONFIG['Cameras'][camera]['Baseline']
-                readoutrate = parameters['Readout Rate']
-                gain = parameters['Gain Setting']
-                camera_info['sensitivity'] = localize.CONFIG['Cameras'][camera]['Sensitivity'][readoutrate][gain]
-                excitation = parameters['Excitation Wavelength']
-                camera_info['qe'] = localize.CONFIG['Cameras'][camera]['Quantum Efficiency'][excitation]
-            elif sensor == 'Simulation':
-                pass
+            camera_info = {}
+            camera_info['baseline'] = self.parameters_dialog.baseline.value()
+            camera_info['gain'] = self.parameters_dialog.gain.value()
+            camera_info['sensitivity'] = self.parameters_dialog.sensitivity.value()
+            camera_info['qe'] = self.parameters_dialog.qe.value()
             eps = self.parameters_dialog.convergence_spinbox.value()
             max_it = self.parameters_dialog.max_iterations_spinbox.value()
             method = {True: 'sigma', False: 'sigmaxy'}[self.parameters_dialog.symmetric_checkbox.isChecked()]

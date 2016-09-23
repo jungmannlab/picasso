@@ -15,6 +15,7 @@ from numpy.lib.recfunctions import drop_fields as _drop_fields
 import collections as _collections
 import glob as _glob
 import os.path as _ospath
+import numba as _numba
 from picasso import io as _io
 
 
@@ -35,13 +36,19 @@ def calculate_optimal_bins(data, max_n_bins=None):
     if data.dtype.kind in ('u', 'i') and bin_size < 1:
         bin_size = 1
     bin_min = data.min() - bin_size / 2
-    n_bins = int(_np.ceil((data.max() - bin_min) / bin_size))
+    n_bins = _np.ceil((data.max() - bin_min) / bin_size)
+    try:
+        n_bins = int(n_bins)
+    except ValueError:
+        return None
     if max_n_bins and n_bins > max_n_bins:
         n_bins = max_n_bins
     return _np.linspace(bin_min, data.max(), n_bins)
 
 
 def append_to_rec(rec_array, data, name):
+    if hasattr(rec_array, name):
+        rec_array = remove_from_rec(rec_array, name)
     return _append_fields(rec_array, name, data, dtypes=data.dtype, usemask=False, asrecarray=True)
     return rec_array
 
@@ -59,10 +66,15 @@ def ensure_sanity(locs, info):
     return locs
 
 
-def locs_at(x, y, locs, r):
+def is_loc_at(x, y, locs, r):
     dx = locs.x - x
     dy = locs.y - y
-    is_picked = _np.sqrt(dx**2 + dy**2) < r
+    r2 = r**2
+    return dx**2 + dy**2 < r2
+
+
+def locs_at(x, y, locs, r):
+    is_picked = is_loc_at(x, y, locs, r)
     return locs[is_picked]
 
 
