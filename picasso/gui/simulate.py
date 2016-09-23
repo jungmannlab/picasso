@@ -1424,7 +1424,6 @@ class CalibrationDialog(QtGui.QDialog):
         self.table.setWindowTitle('Noise Model Calibration')
         self.setWindowTitle('Noise Model Calibration')
         self.resize(800, 400)
-        self.oldpath = os.getcwd()
 
 
         layout.addWidget(self.table)
@@ -1453,7 +1452,6 @@ class CalibrationDialog(QtGui.QDialog):
 
 
     def evalTif(self):
-        os.chdir(self.path)
         counter = 0
         for element in self.tifFiles:
             counter = counter+1
@@ -1467,8 +1465,6 @@ class CalibrationDialog(QtGui.QDialog):
             self.table.setItem(counter-1,5, QtGui.QTableWidgetItem(str(_np.std(movie))))
             print(_np.mean(movie))
             print(_np.std(movie))
-
-        os.chdir(self.oldpath)
         self.pbar.setValue(100)
 
 
@@ -1478,7 +1474,7 @@ class CalibrationDialog(QtGui.QDialog):
         if self.path:
 
             self.tifCounter = len(_glob.glob1(self.path,"*.tif"))
-            self.tifFiles = _glob.glob1(self.path,"*.tif")
+            self.tifFiles = _glob.glob(os.path.join(self.path, "*.tif"))
 
             self.table.setRowCount(int(self.tifCounter))
             self.table.setColumnCount(6)
