@@ -30,6 +30,7 @@ _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
 BaseSequencesFile = os.path.join(_this_directory, '..', 'base_sequences.csv')
 
+
 def readPlate(filename):
     File = open(filename)
     Reader = csv.reader(File)
@@ -792,12 +793,19 @@ class MainWindow(QtGui.QWidget):
 
     def __init__(self):
         super(MainWindow, self).__init__()
+        self.setWindowTitle('Picasso: Design')
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'icons/design.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(800, 600)
         self.initUI()
 
     def initUI(self):
 
         #create window with canvas
         self.window = Window()
+
         #define buttons
         loadbtn = QtGui.QPushButton("Load")
         savebtn = QtGui.QPushButton("Save")
@@ -829,20 +837,26 @@ class MainWindow(QtGui.QWidget):
         vbox.addWidget(self.window)
         vbox.addLayout(hbox)
         self.setLayout(vbox)
-        self.resize(800, 600)
-        self.setWindowTitle('design')
-        self.show()
 
         #make white background
         palette = QtGui.QPalette()
         palette.setColor(QtGui.QPalette.Background,QtCore.Qt.white)
         self.setPalette(palette)
 
-def main():
 
+def main():
     app = QtGui.QApplication(sys.argv)
-    ex = MainWindow()
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec_())
+
+    def excepthook(type, value, tback):
+        message = ''.join(traceback.format_exception(type, value, tback))
+        errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
+        errorbox.exec_()
+        sys.__excepthook__(type, value, tback)
+    sys.excepthook = excepthook
+
 
 if __name__ == '__main__':
     main()
