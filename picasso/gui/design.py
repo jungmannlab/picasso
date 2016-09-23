@@ -201,7 +201,6 @@ class PipettingDialog(QtGui.QDialog):
 
     def loadFolder(self):
         path = QFileDialog.getExistingDirectory(self, "Select Directory")
-        #oldpath = os.getcwd()
         if path:
             self.folderEdit.setText(path)
             csvFiles = glob.glob(os.path.join(path, "*.csv"))
@@ -223,7 +222,6 @@ class PipettingDialog(QtGui.QDialog):
             self.plateCounter.setText('A total of '+str(len(set(platelist))-1)+ '  plates detected.')
             self.uniqueCounter.setText('A total of '+str(len(set(sequencelist))-2)+ '  unique sequences detected.')
             #print(sorted(set(fulllist)))
-            #os.chdir(oldpath)
             # SEQUENCE AND ' '(EMPTY)
 
 
