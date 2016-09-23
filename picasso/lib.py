@@ -36,7 +36,11 @@ def calculate_optimal_bins(data, max_n_bins=None):
     if data.dtype.kind in ('u', 'i') and bin_size < 1:
         bin_size = 1
     bin_min = data.min() - bin_size / 2
-    n_bins = int(_np.ceil((data.max() - bin_min) / bin_size))
+    n_bins = _np.ceil((data.max() - bin_min) / bin_size)
+    try:
+        n_bins = int(n_bins)
+    except ValueError:
+        return None
     if max_n_bins and n_bins > max_n_bins:
         n_bins = max_n_bins
     return _np.linspace(bin_min, data.max(), n_bins)

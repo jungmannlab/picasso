@@ -13,6 +13,7 @@ import traceback
 from PyQt4 import QtCore, QtGui
 import numpy as np
 from numpy.lib.recfunctions import stack_arrays
+import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
 import colorsys
@@ -25,6 +26,9 @@ DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 10 / 7
 N_GROUP_COLORS = 8
+
+
+matplotlib.rcParams.update({'axes.titlesize': 'large'})
 
 
 class NenaWorker(QtCore.QThread):
@@ -167,7 +171,7 @@ class PickSimilarWorker(QtCore.QThread):
         self.finished.emit(list(zip(x_similar, y_similar)))
 
 
-class PickHistWindow(QtGui.QWidget):
+class PickPooledHistWindow(QtGui.QWidget):
 
     def __init__(self):
         super().__init__()
@@ -177,45 +181,111 @@ class PickHistWindow(QtGui.QWidget):
         self.setLayout(vbox)
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
-        self.setWindowTitle('Picasso: Render')
-        this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons/render.ico')
-        icon = QtGui.QIcon(icon_path)
-        self.setWindowIcon(icon)
 
     def plot(self, pick_info):
         # Prepare the figure
         self.figure.clear()
-        self.figure.suptitle('Pooled localizations')
         # Photons
         axes = self.figure.add_subplot(131)
         axes.set_title('Photons per frame')
         data = pick_info['pool']['photons']
         bins = lib.calculate_optimal_bins(data, 1000)
-        axes.hist(data, bins, rwidth=1, linewidth=0)
+        if bins is None:
+            bins = 10
+        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
         data_range = data.ptp()
-        axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
         # Length
         axes = self.figure.add_subplot(132)
         axes.set_title('Length (cumulative)')
         data = pick_info['pool']['len']
         bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
         hist, bin_edges = np.histogram(data, bins=bins)
         cumhist = np.cumsum(hist)
         axes.step(bin_edges[:-1], cumhist, linewidth=1.5)
         data_range = data.ptp()
-        axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
         # Dark
         axes = self.figure.add_subplot(133)
         axes.set_title('Dark time (cumulative)')
         data = pick_info['pool']['dark']
         bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
         hist, bin_edges = np.histogram(data, bins=bins)
         cumhist = np.cumsum(hist)
         axes.step(bin_edges[:-1], cumhist, linewidth=1.5)
         data_range = data.ptp()
-        axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
         self.canvas.draw()
+
+
+class PickPicksHistWindow(QtGui.QWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+
+    def plot(self, pick_info):
+        # Prepare the figure
+        self.figure.clear()
+        # Photons
+        axes = self.figure.add_subplot(131)
+        axes.set_title('Photons per frame')
+        data = pick_info['Photons']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        # Length
+        axes = self.figure.add_subplot(132)
+        axes.set_title('Length')
+        data = pick_info['Length']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        # Dark
+        axes = self.figure.add_subplot(133)
+        axes.set_title('Dark time')
+        data = pick_info['Dark time']
+        bins = lib.calculate_optimal_bins(data, 1000)
+        if bins is None:
+            bins = 10
+        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
+        data_range = data.ptp()
+        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        self.canvas.draw()
+
+
+class PickHistWindow(QtGui.QTabWidget):
+
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle('Pick Histograms')
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'icons/render.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(1000, 400)
+        self.addTab(PickPooledHistWindow(), 'Per Localization')
+        self.addTab(PickPicksHistWindow(), 'Per Pick')
+
+    def plot(self, pick_info):
+        for i in range(self.count()):
+            widget = self.widget(i)
+            widget.plot(pick_info)
 
 
 class ApplyDialog(QtGui.QDialog):
@@ -340,7 +410,7 @@ class InfoDialog(QtGui.QDialog):
         self.binding_sites_std = QtGui.QLabel()
         self.picks_grid.addWidget(self.binding_sites_std, self.picks_grid_current, 2)
         self.pick_hist_window = PickHistWindow()
-        pick_hists = QtGui.QPushButton('Show histograms')
+        pick_hists = QtGui.QPushButton('Histograms')
         pick_hists.clicked.connect(self.pick_hist_window.show)
         self.picks_grid.addWidget(pick_hists, self.picks_grid.rowCount(), 0, 1, 3)
         self.pick_info = None
