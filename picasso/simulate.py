@@ -109,13 +109,13 @@ def distphotons(structures,itime,frames,taud,taub,photonrate,photonratestd,photo
     nosites  = len(bindingsitesx) # number of binding sites in image
 
     #PHOTONDIST: DISTRIBUTE PHOTONS FOR ALL BINDING SITES
-    photondist = _np.zeros((nosites,frames),dtype = _np.int)
+
     photonposall = _np.zeros((2,0))
     photonposall = [1,1]
-    for i in range(0,nosites):
-        photonsinframe,timetrace,spotkinetics = paintgen(meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget)
-        photondist[i,:] = photonsinframe
-    return photondist
+
+    photonsinframe,timetrace,spotkinetics = paintgen(meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget)
+
+    return photonsinframe
 
 
 def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,background, noise):
@@ -157,6 +157,7 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
         xx = photonposframe[:,0]
         yy = photonposframe[:,1]
         simframe, xedges, yedges = _np.histogram2d(yy,xx,bins=(edges,edges))
+        simframe = _np.flipud(simframe) # to be consistent with render
     simframenoise = noisy(simframe,background,noise)
     simframeout=_np.round(simframenoise).astype('<u2')
 
