@@ -12,6 +12,8 @@ ArchitecturesInstallIn64BitMode=x64
 Source: "dist\picasso\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
 
 [Icons]
+Name: "{group}\Design"; Filename: "{app}\picassow.exe"; Parameters: "design"; IconFilename: "{app}\picasso\gui\icons\design.ico"
+Name: "{group}\Simulate"; Filename: "{app}\picassow.exe"; Parameters: "simulate"; IconFilename: "{app}\picasso\gui\icons\simulate.ico"
 Name: "{group}\Localize"; Filename: "{app}\picassow.exe"; Parameters: "localize"; IconFilename: "{app}\picasso\gui\icons\localize.ico"
 Name: "{group}\Filter"; Filename: "{app}\picassow.exe"; Parameters: "filter"; IconFilename: "{app}\picasso\gui\icons\filter.ico"
 Name: "{group}\Render"; Filename: "{app}\picassow.exe"; Parameters: "render"; IconFilename: "{app}\picasso\gui\icons\render.ico"

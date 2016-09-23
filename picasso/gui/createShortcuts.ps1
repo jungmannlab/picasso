@@ -4,6 +4,18 @@ $s.Arguments="-m picasso toraw"
 $s.IconLocation="$PSScriptRoot/icons/toraw.ico"
 $s.Save()
 
+$s=(New-Object -COM WScript.Shell).CreateShortcut("$PSScriptRoot/../../Design.lnk")
+$s.TargetPath="pythonw"
+$s.Arguments="-m picasso design"
+$s.IconLocation="$PSScriptRoot/icons/design.ico"
+$s.Save()
+
+$s=(New-Object -COM WScript.Shell).CreateShortcut("$PSScriptRoot/../../Simulate.lnk")
+$s.TargetPath="pythonw"
+$s.Arguments="-m picasso simulate"
+$s.IconLocation="$PSScriptRoot/icons/simulate.ico"
+$s.Save()
+
 $s=(New-Object -COM WScript.Shell).CreateShortcut("$PSScriptRoot/../../Localize.lnk")
 $s.TargetPath="pythonw"
 $s.Arguments="-m picasso localize"
