@@ -514,7 +514,6 @@ class Window(QtGui.QMainWindow):
         mainWidget.setLayout(self.grid)
         self.setCentralWidget(mainWidget)
         self.setGeometry(300, 300, 300, 150)
-        self.setWindowTitle('simulate')
         #CALL FUNCTIONS
         self.generatePositions()
         self.mainpbar = QtGui.QProgressBar(self)
