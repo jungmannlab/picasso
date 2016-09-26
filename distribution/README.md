@@ -9,13 +9,19 @@ This document describes the procedure to generate a Windows installer for Picass
 ## Packaging
 We will build two distributions of picasso: one with console window and one without (for the command line interface and GUI programs, respectively). The two executables will be called picasso.exe and picassow.exe. Since picassow.exe depends on the exact same files than picasso.exe, we can simply copy picassow.exe from its distribution folder into the folder of picasso.exe. This way we will have both executables in the same directory, bundled with one Python distribution.
 
-1. Generate the executable with console window:  
+1. If you haven't yet, create a separate conda environment with `conda create -n picasso python=3`. Activate the environment.
+
+2. Install the required Python packages for Picasso as well as Picasso itself into the environment.
+
+3. Install PyInstaller into the environment.
+
+4. Generate the executable with console window:  
 `pyinstaller --hidden-import=h5py.defs --hidden-import=h5py.utils  --hidden-import=h5py.h5ac --hidden-import=h5py._proxy --hidden-import=sklearn.neighbors.typedefs -n picasso picasso-script.py`
 
-2. And one without console window:  
+5. And one without console window:  
 `pyinstaller --hidden-import=h5py.defs --hidden-import=h5py.utils  --hidden-import=h5py.h5ac --hidden-import=h5py._proxy --hidden-import=sklearn.neighbors.typedefs --noconsole -n picassow picasso-script.py`
 
-3. Copy `picassow.exe` and `picassow.exe.manifest` from `dist\picassow` to `dist\picasso`.
+6. Copy `picassow.exe` and `picassow.exe.manifest` from `dist\picassow` to `dist\picasso`.
 
 The folder `dist\picasso` now contains all files to run Picasso standalone (through picasso.exe or picassow.exe).
 
