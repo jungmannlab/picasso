@@ -829,12 +829,14 @@ class Window(QtGui.QMainWindow):
             self.statusBar().showMessage('Converting to Image ... ')
 
             movie = _np.zeros(shape=(frames,imagesize,imagesize), dtype='<u2')
+            app = QtCore.QCoreApplication.instance()
             for runner in range(0,frames):
                 movie[runner,:,:]=simulate.convertMovie(runner,photondist,partstruct,imagesize,frames,psf,photonrate,background, noise)
                 outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) +' %'
 
                 self.statusBar().showMessage(outputmsg)
                 self.mainpbar.setValue(_np.round(runner/frames*1000)/10)
+                app.processEvents()
             self.statusBar().showMessage('Converting to Image ... Complete.')
             self.statusBar().showMessage('Saving Movie ...')
 

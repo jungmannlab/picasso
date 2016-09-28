@@ -50,8 +50,9 @@ def savePlate(filename,data):
 
 def plotPlate(selection,platename):
     #DIMENSIONS OF 96 WELL PLATES ARE 9mm
-    radius = 4.5
-    radiusc = 4
+    inch = 25.4
+    radius = 4.5/inch
+    radiusc = 4/inch
     circles = dict()
     rows = 8
     cols = 12
@@ -60,7 +61,13 @@ def plotPlate(selection,platename):
     rowsStr = rowsStr[::-1]
 
 
-    fig, ax = plt.subplots() # note we must use plt.subplots, not plt.subplot
+    fig = plt.figure(frameon = False)
+    fig.set_size_inches(5, 8)
+    ax = plt.Axes(fig, [0., 0., 1., 1.], )
+    ax.set_axis_off()
+    fig.add_axes(ax)
+
+
     ax.cla()
     plt.axis('equal')
     for xcord in range(0,cols):
@@ -75,10 +82,10 @@ def plotPlate(selection,platename):
             else:
                 circle = plt.Circle((xpos,ypos),radiusc, facecolor='white',edgecolor='black')
             ax.add_artist(circle)
-        # INNER RECTANLGE
+    # INNER RECTANLGE
     ax.add_patch(patches.Rectangle((0, 0),cols*2*radius,rows*2*radius,fill=False))
     # OUTER RECTANGLE
-    ax.add_patch(patches.Rectangle((0-2*radius, 0),cols*2*radius+2*radius,rows*2*radius+2*radius,fill=False))
+    ax.add_patch(patches.Rectangle((0-2*radius, 0),(cols+1)*2*radius,(rows+1)*2*radius,fill=False))
 
     #ADD ROWS AND COLUMNS
     for xcord in range(0,cols):
@@ -87,20 +94,18 @@ def plotPlate(selection,platename):
     for ycord in range(0,rows):
         ax.text(-radius, ycord*2*radius+radius, rowsStr[ycord], fontsize=10, color = 'black',horizontalalignment='center',
                         verticalalignment='center')
+
     ax.set_xlim([-2*radius,cols*2*radius])
-    ax.set_ylim([0,rows*2*radius+2*radius])
-    print(fig.get_size_inches())
+    ax.set_ylim([0,(rows+1)*2*radius])
     plt.title(platename+' - '+str(len(selection))+' Staples')
     ax.set_xticks([])
     ax.set_yticks([])
-    print(fig.get_size_inches())
-    inch = 25.4
-    xsize = 13*2*radius/inch #Dont ask why
-    ysize = 9*2*radius/inch
+    xsize = 13*2*radius
+    ysize = 9*2*radius
+    fig.set_size_inches(xsize, ysize)
 
-    fig.set_size_inches(xsize,ysize)
-    print(fig.get_size_inches())
-    #plt.show()
+
+
     return fig
 
 BasePlate = readPlate(BaseSequencesFile)
@@ -250,7 +255,6 @@ class SeqDialog(QtGui.QDialog):
         layout = QtGui.QVBoxLayout(self)
 
         self.table = QtGui.QTableWidget()
-        tableitem = QtGui.QTableWidgetItem()
         self.table.setWindowTitle('Extension Table')
         self.setWindowTitle('Extenstion Table')
         self.resize(500, 285)
@@ -338,6 +342,112 @@ class SeqDialog(QtGui.QDialog):
     @staticmethod
     def setExt(parent = None):
         dialog = SeqDialog(parent)
+        result = dialog.exec_()
+        tablelong, tableshort = dialog.evalTable()
+        return (tablelong, tableshort, result == QDialog.Accepted)
+
+
+class FoldingDialog(QtGui.QDialog):
+    def __init__(self, parent = None):
+        super(FoldingDialog, self).__init__(parent)
+
+        layout = QtGui.QVBoxLayout(self)
+        self.table = QtGui.QTableWidget()
+        self.table.setWindowTitle('Folding Table')
+        self.setWindowTitle('Folding Table')
+        self.resize(1000, 285)
+        self.table.setRowCount(maxcolor-1)
+        self.table.setColumnCount(7)
+        #PRE-SET LABELS
+        self.table.setHorizontalHeaderLabels(('Component,Initial Concentration,Parts,Pool-Concentration,Target Concentration,Volume, Excess ').split(','))
+        layout.addWidget(self.table)
+        self.buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            Qt.Horizontal, self)
+
+        layout.addWidget(self.buttons)
+
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+
+    def outFunct(self):
+
+            for i in range(0,maxcolor-1):
+                self.table.setItem(i,0, QtGui.QTableWidgetItem("Ext "+str(i+1)))
+                self.table.item(i, 0).setBackground(allcolors[i+1])
+
+
+            self.ImagersShort = allSeqShort.split(",")
+            self.ImagersLong = allSeqLong.split(",")
+
+            comb = dict()
+
+            for i in range(0,maxcolor-1):
+                comb[i] = QtGui.QComboBox()
+
+            for element in self.ImagersShort:
+                for i in range(0,maxcolor-1):
+                    comb[i].addItem(element)
+
+            for i in range(0,maxcolor-1):
+                self.table.setCellWidget(i, 1, comb[i])
+                comb[i].currentIndexChanged.connect(lambda state, indexval=i: self.changeComb(indexval))
+
+
+    def calculatePool(self,pools):
+            for i in range(pools+2):
+                print(i)
+                #self.table.cellChanged(i,1).connect(print('Cell pressed'))
+                #self.table.cellChanged(i,1).connect(lambda state, indexval=i: self.changePool(indexval))
+
+    def changePool(self,indexval):
+        self.table.setItem(indexval,2, 'Piep')
+
+    def writeTable(self,row,col,content):
+        self.table.setItem(row,col, QtGui.QTableWidgetItem(content))
+
+    def changeComb(self, indexval):
+
+        sender = self.sender()
+        comboval = sender.currentIndex()
+        if comboval == 0:
+            self.table.setItem(indexval,5, QtGui.QTableWidgetItem(''))
+            self.table.setItem(indexval,6, QtGui.QTableWidgetItem(''))
+        else:
+            self.table.setItem(indexval,5, QtGui.QTableWidgetItem(self.ImagersShort[comboval]))
+            self.table.setItem(indexval,6, QtGui.QTableWidgetItem(self.ImagersLong[comboval]))
+
+    def readoutTable(self):
+        tableshort = dict()
+        tablelong = dict()
+
+        for i in range(0,maxcolor-1):
+            try:
+                tableshort[i] = self.table.item(i,2).text()
+                if tableshort[i] == '':
+                    tableshort[i] = 'None'
+            except AttributeError:
+                tableshort[i] = 'None'
+
+            try:
+                tablelong[i] = self.table.item(i,3).text()
+                if tablelong[i] == '':
+                    tablelong[i] = 'None'
+            except AttributeError:
+                tablelong[i] = 'None'
+        return tablelong, tableshort
+
+
+    def evalTable(self):
+
+        tablelong, tableshort = self.readoutTable()
+        return tablelong, tableshort
+
+    # static method to create the dialog and return (date, time, accepted)
+    #@staticmethod
+    def setExt(parent = None):
+        dialog = FoldingDialog(parent)
         result = dialog.exec_()
         tablelong, tableshort = dialog.evalTable()
         return (tablelong, tableshort, result == QDialog.Accepted)
@@ -523,6 +633,7 @@ class Scene(QtGui.QGraphicsScene):
         origamiitems = len(ORIGAMI_SITES)
         paletteindex = lenitems-bindingitems+9
         canvascolors = []
+        self.colorcounts = []
         for i in range(0,origamiitems):
             currentcolor = allitems[paletteindex+i].brush().color()
             for j in range(0,maxcolor):
@@ -537,6 +648,10 @@ class Scene(QtGui.QGraphicsScene):
                 self.alllbl[i].setPlainText('   ')
             else:
                 self.alllbl[i].setPlainText(str(canvascolors.count(tocount)))
+            self.colorcounts.append(count)
+
+        #MAKE A COLOR LIST
+
 
         return canvascolors
 
@@ -783,8 +898,72 @@ class Window(QtGui.QMainWindow):
             if path:
                 with PdfPages(path) as pdf:
                     for x in range(0,len(platenames)):
-                        pdf.savefig(allfig[x],  bbox_inches='tight', pad_inches=0.1)
+                        #pdf.savefig(allfig[x])
+                        pdf.savefig(allfig[x],  bbox_inches='tight', pad_inches=0.2, dpi = 200)
+                        #pdf.savefig(allfig[x],  bbox_inches='tight', pad_inches=0.1)
                 self.statusBar().showMessage('Pippetting Scheme saved to: '+path)
+
+    def foldingScheme(self):
+        print('Folding Scheme')
+
+        fdialog = FoldingDialog() # Intitialize FoldingDialog Class
+        #Fill with Data
+
+        colorcounts = self.mainscene.colorcounts
+        print(colorcounts)
+        noseq = _np.count_nonzero(colorcounts)
+        print(noseq)
+
+        fdialog.table.setRowCount(noseq+5)
+        mixno = 0
+        fdialog.writeTable(mixno,mixno,'Scaffold')
+        fdialog.writeTable(mixno,1,str(0.1))
+        fdialog.writeTable(mixno,2,str(1))
+        fdialog.writeTable(mixno,4,str(10))
+        fdialog.writeTable(mixno,6,str(1))
+
+        # BLK STAPLES: 10 x
+        fdialog.writeTable(mixno+1,0,'Core Mix')
+        fdialog.writeTable(mixno+1,1,str(100))
+        fdialog.writeTable(mixno+1,2,str(colorcounts[len(colorcounts)-1]))
+        fdialog.writeTable(mixno+1,6,str(10))
+
+        mixno = mixno+1
+        # MODIFIED STAPLES: 100x
+        for i in range(len(colorcounts)):
+            if colorcounts[i] != 0:
+                fdialog.writeTable(mixno+1,0,str(i)+' Mix')
+                fdialog.writeTable(mixno+1,2,str(colorcounts[i]))
+                fdialog.writeTable(mixno+1,1,str(100))
+                fdialog.writeTable(mixno+1,6,str(100))
+                mixno = mixno+1
+
+        fdialog.writeTable(mixno,0,'Biotin')
+        fdialog.writeTable(mixno,1,str(100))
+        fdialog.writeTable(mixno,2,str(8))
+        fdialog.writeTable(mixno,6,str(10))
+        mixno = mixno+1
+
+        fdialog.writeTable(mixno,0,'H2O')
+        mixno = mixno+1
+
+        fdialog.writeTable(mixno,0,'10x Folding Buffer')
+        mixno = mixno+1
+
+        fdialog.writeTable(mixno,0,'Total Volume')
+        fdialog.writeTable(mixno,5,str(40))
+        mixno = mixno+1
+
+        fdialog.calculatePool(noseq)
+        #MAKE TABLE INTERACTIVE
+        result = fdialog.exec()
+
+        #fulllist, ok = FoldingDialog.setExt()
+
+                #dialog = FoldingDialog(parent)
+                #result = dialog.exec_()
+                #tablelong, tableshort = dialog.evalTable()
+                #return (tablelong, tableshort, result == QDialog.Accepted)
 
 
 class MainWindow(QtGui.QWidget):
@@ -812,6 +991,7 @@ class MainWindow(QtGui.QWidget):
         seqbtn = QtGui.QPushButton("Extensions")
         platebtn = QtGui.QPushButton("Get Plates")
         pipettbtn = QtGui.QPushButton("Pipetting Scheme")
+        foldbtn = QtGui.QPushButton("Folding Scheme")
 
         loadbtn.clicked.connect(self.window.openDialog)
         savebtn.clicked.connect(self.window.saveDialog)
@@ -820,6 +1000,7 @@ class MainWindow(QtGui.QWidget):
         seqbtn.clicked.connect(self.window.setSeq)
         platebtn.clicked.connect(self.window.generatePlates)
         pipettbtn.clicked.connect(self.window.pipettingScheme)
+        foldbtn.clicked.connect(self.window.foldingScheme)
 
         hbox = QtGui.QHBoxLayout()
         hbox.addWidget(loadbtn)
@@ -829,6 +1010,7 @@ class MainWindow(QtGui.QWidget):
         hbox.addWidget(seqbtn)
         hbox.addWidget(platebtn)
         hbox.addWidget(pipettbtn)
+        hbox.addWidget(foldbtn)
 
         #set layout
         vbox = QtGui.QVBoxLayout()
