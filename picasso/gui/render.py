@@ -485,7 +485,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
         pick_groupbox = QtGui.QGroupBox('Pick')
         vbox.addWidget(pick_groupbox)
         pick_grid = QtGui.QGridLayout(pick_groupbox)
-        pick_grid.addWidget(QtGui.QLabel('Radius (cam. pixel):'), 0, 0)
+        pick_grid.addWidget(QtGui.QLabel('Diameter (cam. pixel):'), 0, 0)
         self.pick_diameter = QtGui.QDoubleSpinBox()
         self.pick_diameter.setRange(0, 999999)
         self.pick_diameter.setValue(1)
