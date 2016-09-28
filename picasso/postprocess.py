@@ -18,7 +18,6 @@ from scipy.special import iv as _iv
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import matplotlib.pyplot as _plt
-from scipy.optimize import minimize as _minimize
 import itertools as _itertools
 import lmfit as _lmfit
 from collections import OrderedDict as _OrderedDict
@@ -26,7 +25,6 @@ from . import io as _io
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
-from .localize import LOCS_DTYPE as _LOCS_DTYPE
 
 
 def get_index_blocks(locs, info, size):
