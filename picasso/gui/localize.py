@@ -492,15 +492,17 @@ class ParametersDialog(QtGui.QDialog):
                         cam_combos = self.cam_combos[camera]
                         categories = cam_config['Sensitivity Categories']
                         for i, category in enumerate(categories):
-                            exp_setting = info[camera + '-' + category]
-                            cam_combo = cam_combos[i]
-                            for index in range(cam_combo.count()):
-                                if cam_combo.itemText(index) == exp_setting:
-                                    cam_combo.setCurrentIndex(index)
-                                    break
-                            else:
-                                raise ValueError('No configuration for setting "{}": {}'.format(category,
-                                                 exp_setting))
+                            property_name = camera + '-' + category
+                            if property_name in info:
+                                exp_setting = info[camera + '-' + category]
+                                cam_combo = cam_combos[i]
+                                for index in range(cam_combo.count()):
+                                    if cam_combo.itemText(index) == exp_setting:
+                                        cam_combo.setCurrentIndex(index)
+                                        break
+                        # else:
+                        #     raise ValueError('No configuration for setting "{}": {}'.format(category,
+                        #                      exp_setting))
                     if 'Quantum Efficiency' in cam_config:
                         if 'Channel Device' in cam_config:
                             channel_device_name = cam_config['Channel Device']['Name']
@@ -938,7 +940,10 @@ class IdentificationWorker(QtCore.QThread):
 
     def run(self):
         N = len(self.movie)
-        current, futures = localize.identify_async(self.movie, self.parameters['Min. Net Gradient'], self.parameters['Box Size'], self.roi)
+        current, futures = localize.identify_async(self.movie,
+                                                   self.parameters['Min. Net Gradient'],
+                                                   self.parameters['Box Size'],
+                                                   self.roi)
         while current[0] < N:
             self.progressMade.emit(current[0], self.parameters)
             time.sleep(0.2)
