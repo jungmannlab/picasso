@@ -355,95 +355,73 @@ class FoldingDialog(QtGui.QDialog):
         self.table = QtGui.QTableWidget()
         self.table.setWindowTitle('Folding Table')
         self.setWindowTitle('Folding Table')
-        self.resize(1000, 285)
+        self.resize(800, 285)
+        #self.table.horizontalHeader().setStretchLastSection(True)
+
         self.table.setRowCount(maxcolor-1)
-        self.table.setColumnCount(7)
+        self.table.setColumnCount(8)
         #PRE-SET LABELS
-        self.table.setHorizontalHeaderLabels(('Component,Initial Concentration,Parts,Pool-Concentration,Target Concentration,Volume, Excess ').split(','))
+        self.table.setHorizontalHeaderLabels(('Component,Initial Concentration[uM],Parts,Pool-Concentration[nM],Target Concentration[nM],Volume[ul], Excess,Colorcode ').split(','))
+        self.clcButton = QtGui.QPushButton("Recalculate")
+        self.clcButton.clicked.connect(self.clcExcess)
         layout.addWidget(self.table)
+        layout.addWidget(self.clcButton)
         self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
             Qt.Horizontal, self)
 
         layout.addWidget(self.buttons)
-
+        self.table.resizeColumnsToContents()
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
+    def clcExcess(self):
+        print('calculateExcess Function')
+        rowCount = self.table.rowCount()
+        self.resize(800, 285+(rowCount-6)*30)
 
-    def outFunct(self):
+        #GET SIZE OF MIXES,
+        #Calculate pool concentration for all except the last 3 ()
+        totalvolume = float(self.table.item(rowCount-1,5).text())
 
-            for i in range(0,maxcolor-1):
-                self.table.setItem(i,0, QtGui.QTableWidgetItem("Ext "+str(i+1)))
-                self.table.item(i, 0).setBackground(allcolors[i+1])
+        #Calculate the Target concentration based on the excess
+        for i in range(1,rowCount-3):
+            target = float(self.table.item(0,4).text())
+            excess = int(self.table.item(i,6).text())
+            self.writeTable(i,4,str(target*excess))
 
+        #Calculate the pool concentration
+        for i in range(rowCount-3):
+            iconc = float(self.table.item(i,1).text())
+            parts = int(self.table.item(i,2).text())
+            self.writeTable(i,3,str(iconc/parts*1000))
 
-            self.ImagersShort = allSeqShort.split(",")
-            self.ImagersLong = allSeqLong.split(",")
+        #Calculate Volume based on pool and final concentration
+        volume = _np.zeros(rowCount-3)
+        for i in range(rowCount-3):
+            target = float(self.table.item(i,4).text())
+            pool = float(self.table.item(i,3).text())
+            volume[i]=target/pool*totalvolume
+            self.writeTable(i,5,str(volume[i]))
 
-            comb = dict()
+        foldingbuffer = totalvolume/10
+        #SET Folding Buffer
+        self.writeTable(rowCount-2,5,str(foldingbuffer))
 
-            for i in range(0,maxcolor-1):
-                comb[i] = QtGui.QComboBox()
+        #Calculate H20
+        water = totalvolume-foldingbuffer-_np.sum(volume)
 
-            for element in self.ImagersShort:
-                for i in range(0,maxcolor-1):
-                    comb[i].addItem(element)
+        self.writeTable(rowCount-3,5,str(water))
+        if water < 0:
+            self.table.item(rowCount-3,5).setBackground(QtGui.QColor('red'))
+        else:
+            self.table.item(rowCount-3,5).setBackground(QtGui.QColor('white'))
 
-            for i in range(0,maxcolor-1):
-                self.table.setCellWidget(i, 1, comb[i])
-                comb[i].currentIndexChanged.connect(lambda state, indexval=i: self.changeComb(indexval))
-
-
-    def calculatePool(self,pools):
-            for i in range(pools+2):
-                print(i)
-                #self.table.cellChanged(i,1).connect(print('Cell pressed'))
-                #self.table.cellChanged(i,1).connect(lambda state, indexval=i: self.changePool(indexval))
-
-    def changePool(self,indexval):
-        self.table.setItem(indexval,2, 'Piep')
 
     def writeTable(self,row,col,content):
         self.table.setItem(row,col, QtGui.QTableWidgetItem(content))
-
-    def changeComb(self, indexval):
-
-        sender = self.sender()
-        comboval = sender.currentIndex()
-        if comboval == 0:
-            self.table.setItem(indexval,5, QtGui.QTableWidgetItem(''))
-            self.table.setItem(indexval,6, QtGui.QTableWidgetItem(''))
-        else:
-            self.table.setItem(indexval,5, QtGui.QTableWidgetItem(self.ImagersShort[comboval]))
-            self.table.setItem(indexval,6, QtGui.QTableWidgetItem(self.ImagersLong[comboval]))
-
-    def readoutTable(self):
-        tableshort = dict()
-        tablelong = dict()
-
-        for i in range(0,maxcolor-1):
-            try:
-                tableshort[i] = self.table.item(i,2).text()
-                if tableshort[i] == '':
-                    tableshort[i] = 'None'
-            except AttributeError:
-                tableshort[i] = 'None'
-
-            try:
-                tablelong[i] = self.table.item(i,3).text()
-                if tablelong[i] == '':
-                    tablelong[i] = 'None'
-            except AttributeError:
-                tablelong[i] = 'None'
-        return tablelong, tableshort
-
-
-    def evalTable(self):
-
-        tablelong, tableshort = self.readoutTable()
-        return tablelong, tableshort
-
+    def colorTable(self,row,col,color):
+        self.table.item(row,col).setBackground(color)
     # static method to create the dialog and return (date, time, accepted)
     #@staticmethod
     def setExt(parent = None):
@@ -915,46 +893,52 @@ class Window(QtGui.QMainWindow):
         print(noseq)
 
         fdialog.table.setRowCount(noseq+5)
-        mixno = 0
-        fdialog.writeTable(mixno,mixno,'Scaffold')
-        fdialog.writeTable(mixno,1,str(0.1))
-        fdialog.writeTable(mixno,2,str(1))
-        fdialog.writeTable(mixno,4,str(10))
-        fdialog.writeTable(mixno,6,str(1))
+
+        fdialog.writeTable(0,0,'Scaffold')
+        fdialog.writeTable(0,1,str(0.1))
+        fdialog.writeTable(0,2,str(1))
+        fdialog.writeTable(0,4,str(10))
+        fdialog.writeTable(0,6,str(1))
 
         # BLK STAPLES: 10 x
-        fdialog.writeTable(mixno+1,0,'Core Mix')
-        fdialog.writeTable(mixno+1,1,str(100))
-        fdialog.writeTable(mixno+1,2,str(colorcounts[len(colorcounts)-1]))
-        fdialog.writeTable(mixno+1,6,str(10))
+        fdialog.writeTable(1,0,'Core Mix')
+        fdialog.writeTable(1,1,str(100))
+        fdialog.writeTable(1,2,str(colorcounts[len(colorcounts)-1]))
+        fdialog.writeTable(1,6,str(10))
+        fdialog.writeTable(1,7,'')
+        fdialog.colorTable(1,7,allcolors[0])
 
-        mixno = mixno+1
+        mixno = 0
         # MODIFIED STAPLES: 100x
-        for i in range(len(colorcounts)):
+        print(colorcounts)
+        for i in range(len(colorcounts)-1):
             if colorcounts[i] != 0:
-                fdialog.writeTable(mixno+1,0,str(i)+' Mix')
-                fdialog.writeTable(mixno+1,2,str(colorcounts[i]))
-                fdialog.writeTable(mixno+1,1,str(100))
-                fdialog.writeTable(mixno+1,6,str(100))
+                fdialog.writeTable(mixno+2,0,str(i)+' Mix')
+                fdialog.writeTable(mixno+2,2,str(colorcounts[i]))
+                fdialog.writeTable(mixno+2,1,str(100))
+                fdialog.writeTable(mixno+2,6,str(100))
+                fdialog.writeTable(mixno+2,7,'')
+                index = i+1
+                fdialog.colorTable(mixno+2,7,allcolors[index])
+                print(i)
                 mixno = mixno+1
 
-        fdialog.writeTable(mixno,0,'Biotin')
-        fdialog.writeTable(mixno,1,str(100))
-        fdialog.writeTable(mixno,2,str(8))
-        fdialog.writeTable(mixno,6,str(10))
-        mixno = mixno+1
 
-        fdialog.writeTable(mixno,0,'H2O')
-        mixno = mixno+1
+        fdialog.writeTable(mixno+2,0,'Biotin 1:10')
+        fdialog.writeTable(mixno+2,1,str(100))
+        fdialog.writeTable(mixno+2,2,str(80))
+        fdialog.writeTable(mixno+2,6,str(1))
 
-        fdialog.writeTable(mixno,0,'10x Folding Buffer')
-        mixno = mixno+1
+        fdialog.writeTable(mixno+3,0,'H2O')
 
-        fdialog.writeTable(mixno,0,'Total Volume')
-        fdialog.writeTable(mixno,5,str(40))
-        mixno = mixno+1
+        fdialog.writeTable(mixno+4,0,'10x Folding Buffer')
 
-        fdialog.calculatePool(noseq)
+        fdialog.writeTable(mixno+5,0,'Total Volume')
+        fdialog.writeTable(mixno+5,5,str(40))
+
+
+
+        fdialog.clcExcess()
         #MAKE TABLE INTERACTIVE
         result = fdialog.exec()
 
