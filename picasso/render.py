@@ -10,6 +10,7 @@
 import numpy as _np
 import numba as _numba
 import scipy.signal as _signal
+from tqdm import trange as _trange
 
 
 _DRAW_MAX_SIGMA = 3
@@ -65,6 +66,28 @@ def render(locs, info=None, oversampling=1, viewport=None, blur_method=None, min
         return len(x), _fill_gaussians(n_pixel_x, n_pixel_y, x, y, sx, sy)
     else:
         raise Exception('blur_method not understood.')
+
+
+def segment(locs, info, segmentation, kwargs={}, callback=None):
+    Y = info[0]['Height']
+    X = info[0]['Width']
+    n_frames = info[0]['Frames']
+    n_seg = n_segments(info, segmentation)
+    bounds = _np.linspace(0, n_frames-1, n_seg+1, dtype=_np.uint32)
+    segments = _np.zeros((n_seg, Y, X))
+    if callback is not None:
+        callback(0)
+    for i in _trange(n_seg, desc='Generating segments', unit='segments'):
+        segment_locs = locs[(locs.frame >= bounds[i]) & (locs.frame < bounds[i+1])]
+        _, segments[i] = render(segment_locs, info, **kwargs)
+        if callback is not None:
+            callback(i+1)
+    return bounds, segments
+
+
+def n_segments(info, segmentation):
+    n_frames = info[0]['Frames']
+    return int(_np.round(n_frames/segmentation))
 
 
 @_numba.jit(nopython=True)

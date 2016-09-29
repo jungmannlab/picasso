@@ -15,8 +15,21 @@ from numpy.lib.recfunctions import drop_fields as _drop_fields
 import collections as _collections
 import glob as _glob
 import os.path as _ospath
-import numba as _numba
 from picasso import io as _io
+from PyQt4 import QtGui, QtCore
+
+
+class ProgressDialog(QtGui.QProgressDialog):
+
+    def __init__(self, description, minimum, maximum, parent):
+        super().__init__(description, None, minimum, maximum, parent, QtCore.Qt.CustomizeWindowHint)
+        self.setMinimumDuration(500)
+        self.setModal(True)
+        self.app = QtCore.QCoreApplication.instance()
+
+    def set_value(self, value):
+        self.setValue(value)
+        self.app.processEvents()
 
 
 class AutoDict(_collections.defaultdict):

@@ -11,6 +11,7 @@ import matplotlib.pyplot as _plt
 import numpy as _np
 from numpy import fft as _fft
 import lmfit as _lmfit
+from tqdm import tqdm as _tqdm
 
 
 _plt.style.use('ggplot')
@@ -78,3 +79,28 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
     xc -= X / 2
     yc -= Y / 2
     return -yc, -xc
+
+
+def rcc(segments, max_shift=None, callback=None):
+    n_segments = len(segments)
+    n_pairs = int(n_segments * (n_segments - 1) / 2)
+    rij = _np.zeros((n_pairs, 2))
+    A = _np.zeros((n_pairs, n_segments - 1))
+    flag = 0
+    with _tqdm(total=n_pairs, desc='Correlating image pairs', unit='pairs') as progress_bar:
+        if callback is not None:
+            callback(0)
+        for i in range(n_segments - 1):
+            for j in range(i+1, n_segments):
+                progress_bar.update()
+                dyij, dxij = get_image_shift(segments[i], segments[j], 5, max_shift)
+                rij[flag, 0] = dyij
+                rij[flag, 1] = dxij
+                A[flag, i:j] = 1
+                flag += 1
+                if callback is not None:
+                    callback(flag)
+    Dj = _np.dot(_np.linalg.pinv(A), rij)
+    shift_y = _np.insert(_np.cumsum(Dj[:, 0]), 0, 0)
+    shift_x = _np.insert(_np.cumsum(Dj[:, 1]), 0, 0)
+    return shift_y, shift_x

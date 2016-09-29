@@ -11,8 +11,6 @@ import numpy as _np
 import numba as _numba
 import multiprocessing as _multiprocessing
 import ctypes as _ctypes
-import os.path as _ospath
-import yaml as _yaml
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import threading as _threading
 from itertools import chain as _chain
@@ -26,7 +24,7 @@ LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
               ('net_gradient', 'f4'), ('likelihood', 'f4'), ('iterations', 'i4')]
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def local_maxima(frame, box):
     """ Finds pixels with maximum value within a region of interest """
     Y, X = frame.shape
@@ -45,14 +43,14 @@ def local_maxima(frame, box):
     return y, x
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def gradient_at(frame, y, x, i):
     gy = frame[y+1, x] - frame[y-1, x]
     gx = frame[y, x+1] - frame[y, x-1]
     return gy, gx
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def net_gradient(frame, y, x, box, uy, ux):
     box_half = int(box / 2)
     ng = _np.zeros(len(x), dtype=_np.float32)
