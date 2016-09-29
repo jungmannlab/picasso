@@ -1051,19 +1051,6 @@ class View(QtGui.QLabel):
         drift_x_mean = np.nanmean(drift_x, 0)
         drift_y_mean = np.nanmean(drift_y, 0)
 
-        # Filter outliers per frame
-        '''
-        drift_x_std = np.nanstd(drift_x, 0)
-        drift_y_std = np.nanstd(drift_y, 0)
-        is_outlier_x = np.abs(drift_x - drift_x_mean) > 2 * drift_x_std
-        is_outlier_y = np.abs(drift_y - drift_y_mean) > 2 * drift_y_std
-        is_outlier = np.logical_or(is_outlier_x, is_outlier_y)
-        drift_x[is_outlier] = np.nan
-        drift_y[is_outlier] = np.nan
-        drift_x_mean = np.nanmean(drift_x, 0)
-        drift_y_mean = np.nanmean(drift_y, 0)
-        '''
-
         # New mean drift weighted by mean square deviation
         msd_x = np.nanmean((drift_x - drift_x_mean)**2, 1)
         msd_y = np.nanmean((drift_y - drift_y_mean)**2, 1)
