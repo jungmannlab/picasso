@@ -19,7 +19,7 @@ from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationTool
 import colorsys
 from math import ceil
 import yaml
-from .. import io, lib, render, postprocess
+from .. import io, lib, render, postprocess, imageprocess
 
 
 DEFAULT_OVERSAMPLING = 1.0
@@ -513,9 +513,8 @@ class View(QtGui.QLabel):
         self._size_hint = (768, 768)
         self.n_locs = 0
         self._picks = []
-        self.index_blocks = None
 
-    def add(self, path):
+    def add(self, path, render=True):
         locs, info = io.load_locs(path)
         locs = lib.ensure_sanity(locs, info)
         self.locs.append(locs)
@@ -526,6 +525,18 @@ class View(QtGui.QLabel):
             if hasattr(locs, 'group'):
                 self.groups = np.unique(locs.group)
                 np.random.shuffle(self.groups)
+            if render:
+                self.fit_in_view(autoscale=True)
+        else:
+            if render:
+                self.update_scene()
+
+    def add_multiple(self, paths):
+        fit_in_view = len(self.locs) == 0
+        paths = sorted(paths)
+        for path in paths:
+            self.add(path, render=False)
+        if fit_in_view:
             self.fit_in_view(autoscale=True)
         else:
             self.update_scene()
@@ -563,6 +574,30 @@ class View(QtGui.QLabel):
             y_min = viewport[0][0] - y_margin
             y_max = viewport[1][0] + y_margin
         return [(y_min, x_min), (y_max, x_max)]
+
+    def align(self):
+        locs = self.locs
+        if len(self._picks) > 0:
+            locs = [self.picked_locs(_) for _ in range(len(self.locs))]
+            locs = [stack_arrays(_, usemask=False, asrecarray=True) for _ in locs]
+        n_channels = len(locs)
+        rp = lib.ProgressDialog('Rendering images', 0, n_channels, self)
+        rp.set_value(0)
+        images = []
+        for i, (locs_, info_) in enumerate(zip(locs, self.infos)):
+            _, image = render.render(locs_, info_, blur_method='smooth')
+            images.append(image)
+            rp.set_value(i+1)
+        n_pairs = int(n_channels * (n_channels - 1) / 2)
+        rc = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
+        shift_y, shift_x = imageprocess.rcc(images, callback=rc.set_value)
+        sp = lib.ProgressDialog('Shifting channels', 0, n_channels, self)
+        sp.set_value(0)
+        for i, (locs_, dx, dy) in enumerate(zip(self.locs, shift_x, shift_y)):
+            locs_.y -= dy
+            locs_.x -= dx
+            sp.set_value(i+1)
+        self.update_scene()
 
     def clear_picks(self):
         self._picks = []
@@ -615,10 +650,10 @@ class View(QtGui.QLabel):
 
     def dropEvent(self, event):
         urls = event.mimeData().urls()
-        path = urls[0].toLocalFile()
-        extension = os.path.splitext(path)[1].lower()
-        if extension == '.hdf5':
-            self.add(path)
+        paths = [_.toLocalFile() for _ in urls]
+        extensions = [os.path.splitext(_)[1].lower() for _ in paths]
+        paths = [path for path, ext in zip(paths, extensions) if ext == '.hdf5']
+        self.add_multiple(paths)
 
     def fit_in_view(self, autoscale=False):
         movie_height, movie_width = self.movie_size()
@@ -781,9 +816,19 @@ class View(QtGui.QLabel):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
             std_range = self.window.tools_settings_dialog.pick_similar_range.value()
-            picked_locs = self.picked_locs(channel)
-            n_locs = [len(_) for _ in picked_locs]
-            rmsd = [self.rmsd_at_com(_) for _ in picked_locs]
+            K, L = postprocess.index_blocks_shape(info, d)
+            progress = lib.ProgressDialog('Indexing localizations', 0, K, self)
+            progress.show()
+            progress.set_value(0)
+            index_blocks = postprocess.get_index_blocks(locs, info, d, progress.set_value)
+            n_locs = []
+            rmsd = []
+            for i, pick in enumerate(self._picks):
+                x, y = pick
+                block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+                pick_locs = lib.locs_at(x, y, block_locs, r)
+                n_locs.append(len(pick_locs))
+                rmsd.append(self.rmsd_at_com(pick_locs))
             mean_n_locs = np.mean(n_locs)
             mean_rmsd = np.mean(rmsd)
             std_n_locs = np.std(n_locs)
@@ -792,7 +837,6 @@ class View(QtGui.QLabel):
             max_n_locs = mean_n_locs + std_range * std_n_locs
             min_rmsd = mean_rmsd - std_range * std_rmsd
             max_rmsd = mean_rmsd + std_range * std_rmsd
-            locs, size, x_index, y_index, block_starts, block_ends, K, L = self.index_blocks
             x_similar = np.array([_[0] for _ in self._picks])
             y_similar = np.array([_[1] for _ in self._picks])
             # preparations for hex grid search
@@ -801,6 +845,7 @@ class View(QtGui.QLabel):
             y_range_shift = y_range_base + d / 2
             d2 = d**2
             nx = len(x_range)
+            locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
             progress = lib.ProgressDialog('Pick similar', 0, nx, self)
             progress.set_value(0)
             for i, x_grid in enumerate(x_range):
@@ -812,7 +857,7 @@ class View(QtGui.QLabel):
                 for y_grid in y_range:
                     n_block_locs = postprocess.n_block_locs_at(x_grid, y_grid, size, K, L, block_starts, block_ends)
                     if n_block_locs > min_n_locs:
-                        block_locs = postprocess.get_block_locs_at(x_grid, y_grid, self.index_blocks)
+                        block_locs = postprocess.get_block_locs_at(x_grid, y_grid, index_blocks)
                         picked_locs = lib.locs_at(x_grid, y_grid, block_locs, r)
                         if len(picked_locs) > 1:
                             # Move to COM peak
@@ -840,19 +885,18 @@ class View(QtGui.QLabel):
         if len(self._picks):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
-            if self.index_blocks is None or self.index_blocks[1] != d:
-                info = self.infos[channel]
-                K, L = postprocess.index_blocks_shape(info, d)
-                progress = lib.ProgressDialog('Indexing localizations', 0, K, self)
-                progress.show()
-                progress.set_value(0)
-                self.index_blocks = postprocess.get_index_blocks(self.locs[channel], info, d, progress.set_value)
+            info = self.infos[channel]
+            K, L = postprocess.index_blocks_shape(info, d)
+            progress = lib.ProgressDialog('Indexing localizations', 0, K, self)
+            progress.show()
+            progress.set_value(0)
+            index_blocks = postprocess.get_index_blocks(self.locs[channel], info, d, progress.set_value)
             picked_locs = []
             progress = lib.ProgressDialog('Creating localization list', 0, len(self._picks), self)
             progress.set_value(0)
             for i, pick in enumerate(self._picks):
                 x, y = pick
-                block_locs = postprocess.get_block_locs_at(x, y, self.index_blocks)
+                block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
                 group_locs = lib.locs_at(x, y, block_locs, r)
                 group = i * np.ones(len(group_locs), dtype=np.int32)
                 group_locs = lib.append_to_rec(group_locs, group, 'group')
@@ -1297,6 +1341,8 @@ class Window(QtGui.QMainWindow):
         undrift_from_picked_action = postprocess_menu.addAction('Undrift from picked')
         undrift_from_picked_action.setShortcut('Ctrl+Shift+U')
         undrift_from_picked_action.triggered.connect(self.view.undrift_from_picked)
+        align_action = postprocess_menu.addAction('Align channels')
+        align_action.triggered.connect(self.view.align)
         apply_action = postprocess_menu.addAction('Apply expression to localizations')
         apply_action.setShortcut('Ctrl+A')
         apply_action.triggered.connect(self.open_apply_dialog)

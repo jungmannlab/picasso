@@ -546,13 +546,14 @@ def undrift(locs, info, segmentation, display=True, segmentation_callback=None, 
 
 
 def align(locs, infos, display=False):
-    kwargs = {'blur_method': 'smooth'}
-    renderings = [_render.render(locs_, info, **kwargs) for locs_, info in zip(locs, infos)]
-    images = [rendering[1] for rendering in renderings]
+    images = []
+    for i, (locs_, info_) in enumerate(zip(locs, infos)):
+        _, image = _render.render(locs_, info_, blur_method='smooth')
+        images.append(image)
     shift_y, shift_x = _imageprocess.rcc(images)
     print('Image x shifts: {}'.format(shift_x))
     print('Image y shifts: {}'.format(shift_y))
-    for locs_, dx, dy in zip(locs, shift_x, shift_y):
+    for i, (locs_, dx, dy) in enumerate(zip(locs, shift_x, shift_y)):
         locs_.y -= dy
         locs_.x -= dx
     return locs
