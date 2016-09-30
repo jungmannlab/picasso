@@ -380,7 +380,7 @@ def main():
     average_parser.add_argument('-o', '--oversampling', type=float, default=10,
                                 help='oversampling of the super-resolution images for alignment evaluation')
     average_parser.add_argument('-i', '--iterations', type=int, default=20)
-    average_parser.add_argument('file', help='a localization file with grouped localizations')
+    average_parser.add_argument('files', nargs='?', help='a localization file with grouped localizations')
 
     # Parse
     args = parser.parse_args()
@@ -403,6 +403,12 @@ def main():
             else:
                 from .gui import render
                 render.main()
+        elif args.command == 'average':
+            if args.files:
+                _average(args)
+            else:
+                from .gui import average
+                average.main()
         elif args.command == 'link':
             _link(args.files, args.distance, args.tolerance)
         elif args.command == 'undrift':
@@ -427,8 +433,6 @@ def main():
         elif args.command == 'design':
             from .gui import design
             design.main()
-        elif args.command == 'average':
-            _average(args)
     else:
         parser.print_help()
 

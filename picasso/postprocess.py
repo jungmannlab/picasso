@@ -25,6 +25,8 @@ from . import io as _io
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
+from threading import Thread as _Thread
+import time as _time
 
 
 def get_index_blocks(locs, info, size, callback=None):
@@ -41,16 +43,21 @@ def get_index_blocks(locs, info, size, callback=None):
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     K, L = block_starts.shape
     # Fill in block starts and ends
-    # _fill_index_blocks(block_starts, block_ends, x_index, y_index)
-    N = len(x_index)
-    k = 0
+    # We are running this in a thread with a nogil numba function. This helps updating a potential GUI with the callback.
     if callback is not None:
         callback(0)
-    for i in range(K):
-        for j in range(L):
-            k = _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k)
-        if callback is not None:
-            callback(i+1)
+        counter = [0]
+    else:
+        counter = None
+    thread = _Thread(target=_fill_index_blocks, args=(block_starts, block_ends, x_index, y_index, counter))
+    thread.start()
+    if callback is not None:
+        while counter[0] < K:
+            callback(counter[0])
+            _time.sleep(0.1)
+    thread.join()
+    if callback is not None:
+        callback(counter[0])
     return locs, size, x_index, y_index, block_starts, block_ends, K, L
 
 
@@ -87,20 +94,20 @@ def get_block_locs_at(x, y, index_blocks):
     return locs[indices]
 
 
-@_numba.jit(nopython=True)
-def _fill_index_blocks(block_starts, block_ends, x_index, y_index):
+def _fill_index_blocks(block_starts, block_ends, x_index, y_index, counter=None):
     Y, X = block_starts.shape
     N = len(x_index)
     k = 0
+    if counter is not None:
+        counter[0] = 0
     for i in range(Y):
         for j in range(X):
-            block_starts[i, j] = k
-            while k < N and y_index[k] == i and x_index[k] == j:
-                k += 1
-            block_ends[i, j] = k
+            k = _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k)
+        if counter is not None:
+            counter[0] = i+1
 
 
-@_numba.jit(nopython=True)
+@_numba.jit(nopython=True, nogil=True)
 def _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k):
     block_starts[i, j] = k
     while k < N and y_index[k] == i and x_index[k] == j:
@@ -351,16 +358,24 @@ def _dark_times(locs, group, last_frame):
 
 
 def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average'):
-    locs.sort(kind='mergesort', order='frame')
-    if hasattr(locs, 'group'):
-        group = locs.group
+    if len(locs) == 0:
+        linked_locs = locs.copy()
+        if hasattr(locs, 'frame'):
+            linked_locs = _lib.append_to_rec(linked_locs, _np.array([], dtype=_np.int32), 'len')
+            linked_locs = _lib.append_to_rec(linked_locs, _np.array([], dtype=_np.int32), 'n')
+        if hasattr(locs, 'photons'):
+            linked_locs = _lib.append_to_rec(linked_locs, _np.array([], dtype=_np.float32), 'photon_rate')
     else:
-        group = _np.zeros(len(locs), dtype=_np.int32)
-    link_group = get_link_groups(locs, r_max, max_dark_time, group)
-    if combine_mode == 'average':
-        linked_locs = link_loc_groups(locs, link_group)
-    elif combine_mode == 'refit':
-        pass    # TODO
+        locs.sort(kind='mergesort', order='frame')
+        if hasattr(locs, 'group'):
+            group = locs.group
+        else:
+            group = _np.zeros(len(locs), dtype=_np.int32)
+        link_group = get_link_groups(locs, r_max, max_dark_time, group)
+        if combine_mode == 'average':
+            linked_locs = link_loc_groups(locs, link_group)
+        elif combine_mode == 'refit':
+            pass    # TODO
     return linked_locs
 
 

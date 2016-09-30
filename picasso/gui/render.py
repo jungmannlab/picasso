@@ -349,6 +349,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
         pick_grid.addWidget(self.pick_similar_range, 1, 1)
 
     def on_pick_diameter_changed(self, diameter):
+        self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
         self.window.view.update_scene(use_cache=True)
 
 
@@ -513,6 +514,7 @@ class View(QtGui.QLabel):
         self._size_hint = (768, 768)
         self.n_locs = 0
         self._picks = []
+        self.index_blocks = []
 
     def add(self, path, render=True):
         locs, info = io.load_locs(path)
@@ -520,6 +522,7 @@ class View(QtGui.QLabel):
         self.locs.append(locs)
         self.infos.append(info)
         self.locs_paths.append(path)
+        self.index_blocks.append(None)
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
@@ -808,6 +811,23 @@ class View(QtGui.QLabel):
         com_y = locs.y.mean()
         return np.sqrt(np.mean((locs.x - com_x)**2 + (locs.y - com_y)**2))
 
+    def index_locs(self, channel):
+        locs = self.locs[channel]
+        info = self.infos[channel]
+        d = self.window.tools_settings_dialog.pick_diameter.value()
+        size = d / 2
+        K, L = postprocess.index_blocks_shape(info, size)
+        progress = lib.ProgressDialog('Indexing localizations', 0, K, self)
+        progress.show()
+        progress.set_value(0)
+        index_blocks = postprocess.get_index_blocks(locs, info, size, progress.set_value)
+        self.index_blocks[channel] = index_blocks
+
+    def get_index_blocks(self, channel):
+        if self.index_blocks[channel] is None:
+            self.index_locs(channel)
+        return self.index_blocks[channel]
+
     def pick_similar(self):
         channel = self.get_channel('Pick similar')
         if channel is not None:
@@ -816,11 +836,7 @@ class View(QtGui.QLabel):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
             std_range = self.window.tools_settings_dialog.pick_similar_range.value()
-            K, L = postprocess.index_blocks_shape(info, d)
-            progress = lib.ProgressDialog('Indexing localizations', 0, K, self)
-            progress.show()
-            progress.set_value(0)
-            index_blocks = postprocess.get_index_blocks(locs, info, d, progress.set_value)
+            index_blocks = self.get_index_blocks(channel)
             n_locs = []
             rmsd = []
             for i, pick in enumerate(self._picks):
@@ -885,12 +901,7 @@ class View(QtGui.QLabel):
         if len(self._picks):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
-            info = self.infos[channel]
-            K, L = postprocess.index_blocks_shape(info, d)
-            progress = lib.ProgressDialog('Indexing localizations', 0, K, self)
-            progress.show()
-            progress.set_value(0)
-            index_blocks = postprocess.get_index_blocks(self.locs[channel], info, d, progress.set_value)
+            index_blocks = self.get_index_blocks(channel)
             picked_locs = []
             progress = lib.ProgressDialog('Creating localization list', 0, len(self._picks), self)
             progress.set_value(0)
@@ -1070,6 +1081,7 @@ class View(QtGui.QLabel):
                 n_pairs = int(n_segments * (n_segments - 1) / 2)
                 rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
                 postprocess.undrift(self.locs[channel], self.infos[channel], segmentation, True, seg_progress.set_value, rcc_progress.set_value)
+                self.index_blocks[channel] = None
                 self.update_scene()
 
     def undrift_from_picked(self):
@@ -1119,6 +1131,7 @@ class View(QtGui.QLabel):
         # Apply drift
         self.locs[channel].x -= drift_x_mean[self.locs[channel].frame]
         self.locs[channel].y -= drift_y_mean[self.locs[channel].frame]
+        self.index_blocks[channel] = None
         self.update_scene()
 
     def update_cursor(self):
@@ -1398,6 +1411,7 @@ class Window(QtGui.QMainWindow):
         if ok:
             vars = self.view.locs[channel].dtype.names
             exec(cmd, {k: self.view.locs[channel][k] for k in vars})
+            self.view.index_blocks[channel] = None
             self.view.update_scene()
 
     def open_file_dialog(self):
