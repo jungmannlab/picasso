@@ -703,6 +703,7 @@ class View(QtGui.QLabel):
         self._picks = regions['Centers']
         self.update_pick_info_short()
         self.window.tools_settings_dialog.pick_diameter.setValue(regions['Diameter'])
+        self.update_scene(picks_only=True)
 
     def map_to_movie(self, position):
         x_rel = position.x() / self.width()
