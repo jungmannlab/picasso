@@ -528,7 +528,9 @@ def link_loc_groups(locs, link_group):
 
 
 def undrift(locs, info, segmentation, display=True, segmentation_callback=None, rcc_callback=None):
-    bounds, segments = _render.segment(locs, info, segmentation, {'blur_method': 'smooth'}, segmentation_callback)
+    bounds, segments = _render.segment(locs, info, segmentation,
+                                       {'blur_method': 'gaussian', 'min_blur_width': 1},
+                                       segmentation_callback)
     shift_y, shift_x = _imageprocess.rcc(segments, 32, rcc_callback)
     t = (bounds[1:] + bounds[:-1]) / 2
     drift_x_pol = _interpolate.InterpolatedUnivariateSpline(t, shift_x, k=3)
