@@ -256,7 +256,7 @@ class InfoDialog(QtGui.QDialog):
         self.picks_grid_current += 1
         self.add_pick_info_field('Length', decimals=2)
         self.add_pick_info_field('Dark time', decimals=2)
-        self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/s):'), self.picks_grid_current, 0)
+        self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/frames):'), self.picks_grid_current, 0)
         self.influx_rate = QtGui.QDoubleSpinBox()
         self.influx_rate.setRange(0, 1e10)
         self.influx_rate.setDecimals(5)
