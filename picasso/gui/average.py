@@ -100,7 +100,7 @@ class Worker(QtCore.QThread):
         manager = multiprocessing.Manager()
         counter = manager.Value('d', 0)
         lock = manager.Lock()
-        groups_per_worker = int(n_groups / n_workers)
+        groups_per_worker = max(1, int(n_groups / n_workers))
         for it in range(self.iterations):
             counter.value = 0
             # render average image
@@ -129,7 +129,7 @@ class ParametersDialog(QtGui.QDialog):
 
         grid.addWidget(QtGui.QLabel('Oversampling:'), 0, 0)
         self.oversampling = QtGui.QDoubleSpinBox()
-        self.oversampling.setRange(0, 1e7)
+        self.oversampling.setRange(1, 1e7)
         self.oversampling.setValue(10)
         self.oversampling.setDecimals(1)
         self.oversampling.setKeyboardTracking(False)
@@ -202,7 +202,7 @@ class View(QtGui.QLabel):
             progress.set_value(i+1)
         self.r = 2 * np.sqrt(np.mean(self.locs.x**2 + self.locs.y**2))
         self.update_image()
-        self.window.status_bar.showMessage('Starting parallel pool...')
+        status = lib.StatusDialog('Starting parallel pool...', self.window)
         global pool, x, y
         try:
             pool.close()
@@ -213,6 +213,7 @@ class View(QtGui.QLabel):
         n_workers = int(0.75 * multiprocessing.cpu_count())
         pool = multiprocessing.Pool(n_workers, init_pool, (x, y, self.group_index))
         self.window.status_bar.showMessage('Ready for processing!')
+        status.close()
 
     def resizeEvent(self, event):
         if self._pixmap is not None:

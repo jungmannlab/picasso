@@ -32,6 +32,17 @@ class ProgressDialog(QtGui.QProgressDialog):
         self.app.processEvents()
 
 
+class StatusDialog(QtGui.QDialog):
+
+    def __init__(self, description, parent):
+        super(StatusDialog, self).__init__(parent, QtCore.Qt.CustomizeWindowHint)
+        vbox = QtGui.QVBoxLayout(self)
+        label = QtGui.QLabel(description)
+        vbox.addWidget(label)
+        self.show()
+        QtCore.QCoreApplication.instance().processEvents()
+
+
 class AutoDict(_collections.defaultdict):
     '''
     A defaultdict whose auto-generated values are defaultdicts itself.
