@@ -526,8 +526,10 @@ class View(QtGui.QLabel):
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
-                self.groups = np.unique(locs.group)
-                np.random.shuffle(self.groups)
+                groups = np.unique(locs.group)
+                np.random.shuffle(groups)
+                groups %= N_GROUP_COLORS
+                self.group_color = groups[locs.group]
             if render:
                 self.fit_in_view(autoscale=True)
         else:
@@ -969,11 +971,7 @@ class View(QtGui.QLabel):
     def render_single_channel(self, kwargs, autoscale=False, use_cache=False, cache=True):
         locs = self.locs[0]
         if hasattr(locs, 'group'):
-            groups = np.unique(locs.group)
-            np.random.shuffle(groups)
-            groups %= N_GROUP_COLORS
-            color = groups[locs.group]
-            locs = [locs[color == _] for _ in range(N_GROUP_COLORS)]
+            locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
         if use_cache:
             n_locs = self.n_locs
