@@ -1076,12 +1076,14 @@ class View(QtGui.QLabel):
         if channel is not None:
             segmentation, ok = QtGui.QInputDialog.getInt(self, 'Undrift by RCC', 'Segmentation:', 1000)
             if ok:
+                locs = self.locs[channel]
                 info = self.infos[channel]
                 n_segments = render.n_segments(info, segmentation)
                 seg_progress = lib.ProgressDialog('Generating segments', 0, n_segments, self)
                 n_pairs = int(n_segments * (n_segments - 1) / 2)
                 rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
-                postprocess.undrift(self.locs[channel], self.infos[channel], segmentation, True, seg_progress.set_value, rcc_progress.set_value)
+                postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
+                self.locs[channel] = lib.ensure_sanity(locs, info)
                 self.index_blocks[channel] = None
                 self.update_scene()
 
