@@ -17,6 +17,7 @@ Name: "{group}\Simulate"; Filename: "{app}\picassow.exe"; Parameters: "simulate"
 Name: "{group}\Localize"; Filename: "{app}\picassow.exe"; Parameters: "localize"; IconFilename: "{app}\picasso\gui\icons\localize.ico"
 Name: "{group}\Filter"; Filename: "{app}\picassow.exe"; Parameters: "filter"; IconFilename: "{app}\picasso\gui\icons\filter.ico"
 Name: "{group}\Render"; Filename: "{app}\picassow.exe"; Parameters: "render"; IconFilename: "{app}\picasso\gui\icons\render.ico"
+Name: "{group}\Average"; Filename: "{app}\picassow.exe"; Parameters: "average"; IconFilename: "{app}\picasso\gui\icons\average.ico"
 
 [Registry]
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \
