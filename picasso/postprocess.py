@@ -27,6 +27,7 @@ import time as _time
 
 
 def get_index_blocks(locs, info, size, callback=None):
+    locs = _lib.ensure_sanity(locs, info)
     # Sort locs by indices
     x_index = _np.uint32(locs.x / size)
     y_index = _np.uint32(locs.y / size)
