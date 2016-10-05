@@ -52,8 +52,6 @@ def _render_setup(locs, oversampling, y_min, x_min, y_max, x_max):
 
 @_numba.jit(nopython=True, nogil=True)
 def _fill(image, x, y):
-    # x = _np.int32(x)
-    # y = _np.int32(y)
     x = x.astype(_np.int32)
     y = y.astype(_np.int32)
     for i, j in zip(x, y):
@@ -79,7 +77,7 @@ def _outer(a, b):
 
 @_numba.jit(nopython=True, nogil=True)
 def render_hist(locs, oversampling, y_min, x_min, y_max, x_max):
-    image, n_pixel_y, n_pixel_x, x, y, _ = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
     _fill(image, x, y)
     return len(x), image
 
@@ -114,13 +112,17 @@ def render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_wid
 
 def render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
     n, image, kernel = _render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width)
+    if n == 0:
+        return 0, image
     image = _signal.fftconvolve(image, kernel, mode='same')
     return n, image
 
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=False, nogil=True)
 def _render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+    if _np.sum(in_view) == 0:
+        return 0, image, image
     _fill(image, x, y)
     blur_width = oversampling * max(_np.median(locs.lpx[in_view]), min_blur_width)
     blur_height = oversampling * max(_np.median(locs.lpy[in_view]), min_blur_width)
@@ -135,6 +137,8 @@ def _render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_wi
 
 def render_smooth(locs, oversampling, y_min, x_min, y_max, x_max):
     n, image, kernel = _render_smooth(locs, oversampling, y_min, x_min, y_max, x_max)
+    if n == 0:
+        return 0, image
     image = _signal.fftconvolve(image, kernel, mode='same')
     return n, image
 
@@ -142,10 +146,12 @@ def render_smooth(locs, oversampling, y_min, x_min, y_max, x_max):
 @_numba.jit(nopython=True, nogil=True)
 def _render_smooth(locs, oversampling, y_min, x_min, y_max, x_max):
     n, image = render_hist(locs, oversampling, y_min, x_min, y_max, x_max)
+    if n == 0:
+        return 0, image, image
     kernel = _gaussian_kernel(11, 1)
-    kernel = _outer(kernel, kernel)
-    kernel /= kernel.sum()
-    return n, image, kernel
+    kernel2d = _outer(kernel, kernel)
+    kernel2d /= kernel2d.sum()
+    return n, image, kernel2d
 
 
 def segment(locs, info, segmentation, kwargs={}, callback=None):
