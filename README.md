@@ -36,7 +36,10 @@ Contributors: Joerg Schnitzbauer, Maximilian Strauss
 Copyright (c) 2015-2016 Jungmann Lab, Max Planck Institute of Biochemistry
 
 ## Credits
+- Design icon based on "Hexagon by Creative Stalls from the Noun Project"
+- Simulate icon based on "Microchip by Futishia from the Nount Project"
 - Localize icon based on "Mountains by MONTANA RUCOBO from the Noun Project"
 - ToRaw icon based on "Lion by Sathish Selladurai from the Noun Project"
 - Filter icon based on "Funnel by José Campos from the Noun Project"
 - Render icon based on "Paint Palette by Vectors Market from the Noun Project"
+- Average icon based on "Layers by Creative Stall from the Noun Project"
