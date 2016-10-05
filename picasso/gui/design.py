@@ -23,6 +23,7 @@ import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from matplotlib.backends.backend_pdf import PdfPages
+import os.path as _ospath
 
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
@@ -330,16 +331,37 @@ class FoldingDialog(QtGui.QDialog):
         self.table.setHorizontalHeaderLabels(('Component, Initial Concentration[uM], Parts, Pool-Concentration[nM], Target Concentration[nM], Volume[ul],  Excess, Colorcode ').split(', '))
         self.clcButton = QtGui.QPushButton("Recalculate")
         self.clcButton.clicked.connect(self.clcExcess)
+        self.exportButton = QtGui.QPushButton("Export")
+        self.exportButton.clicked.connect(self.exportTable)
         layout.addWidget(self.table)
         layout.addWidget(self.clcButton)
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
-            Qt.Horizontal,  self)
-
-        layout.addWidget(self.buttons)
+        layout.addWidget(self.exportButton)
         self.table.resizeColumnsToContents()
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
+
+
+    def exportTable(self):
+
+        table = dict()
+        tablecontent = []
+        print(self.table.rowCount())
+        tablecontent.append(['Component', 'Initial Concentration[uM]', 'Parts', 'Pool-Concentration[nM]', 'Target Concentration[nM]', 'Volume[ul]',  'Excess', 'Colorcode'])
+        for row in range(self.table.rowCount()):
+            rowdata = []
+            for column in range(self.table.columnCount()):
+                item = self.table.item(row, column)
+                if item is not None:
+                    rowdata.append(item.text())
+                else:
+                    rowdata.append('')
+            tablecontent.append(rowdata)
+
+        table[0] = tablecontent
+        print(tablecontent)
+        print(table)
+        path = QtGui.QFileDialog.getSaveFileName(self,  'Export folding table to.',  filter='*.csv')
+        if path:
+            design.savePlate(path, table)
+
 
     def clcExcess(self):
         rowCount = self.table.rowCount()
@@ -398,7 +420,7 @@ class PlateDialog(QtGui.QDialog):
         layout = QtGui.QVBoxLayout(self)
         self.info = QtGui.QLabel('Please make selection:  ')
         self.radio1 = QtGui.QRadioButton('Export only sequences in current design. (176 staples in 2 plates)')
-        self.radio2 = QtGui.QRadioButton('Export full plates for all sequences used (176 * Number of Sequences)')
+        self.radio2 = QtGui.QRadioButton('Export full plates for all sequences used (176 * Number of unique Sequences)')
 
         self.setWindowTitle('Plate Export')
         layout.addWidget(self.info)
@@ -506,7 +528,7 @@ class Scene(QtGui.QGraphicsScene):
             self.addItem(self.alllblseq[i])
 
         #MAKE A LABEL FOR THE CURRENTCOLOR
-        self.cclabel = QtGui.QGraphicsTextItem('Current Color')
+        self.cclabel = QtGui.QGraphicsTextItem('Selected Color')
         self.cclabel.setPos(*(1.5*HEX_SIDE_HALF * (labelspacer+COLOR_SITES[8-paletteindex][1]+xofflbl), -labelspacer-sqrt(3)*HEX_SIDE_HALF * (COLOR_SITES[8-paletteindex][0]+yoff)))
         self.addItem(self.cclabel)
         self.evaluateCanvas()
@@ -596,7 +618,7 @@ class Scene(QtGui.QGraphicsScene):
                  self.alllblseq[i].setPlainText('   ')
              else:
                  self.alllblseq[i].setPlainText(tableshort[i])
-
+                 #
     def saveExtensions(self, tableshort, tablelong):
         self.tableshort = tableshort
         self.tablelong = tablelong
@@ -693,7 +715,7 @@ class Scene(QtGui.QGraphicsScene):
                 ExportPlate[1+i][1] = ExportPlate[1+i][1][:-3]+self.tableshort[canvascolors[i]-1]
                 ExportPlate[1+i] = [ExportPlate[1+i][0],ExportPlate[1+i][1],ExportPlate[1+i][2],canvascolors[i]]
 
-        allplates[0] = design.convertPlateIndex2(ExportPlate, 'CUSTOM')
+        allplates[0] = design.convertPlateIndexColor(ExportPlate, 'CUSTOM')
         return allplates
 
 
@@ -778,99 +800,118 @@ class Window(QtGui.QMainWindow):
             self.mainscene.saveExtensions(tableshort, tablelong)
             self.statusBar().showMessage('Extensions set.')
 
-    def generatePlates(self):
-        selection,  ok = PlateDialog.getSelection()
-        if ok:
-            if selection == 0:
-                pass
-            else:
-                allplates = self.mainscene.preparePlate(selection)
-                self.statusBar().showMessage('A total of '+str(len(allplates)*2)+' Plates generated.')
-                path = QtGui.QFileDialog.getSaveFileName(self,  'Save csv files to.',  filter='*.csv')
-                if path:
-                    design.savePlate(path, allplates)
-                    self.statusBar().showMessage('Plates saved to : '+path)
-                else:
-                    self.statusBar().showMessage('Filename not specified. Plates not saved.')
+    def checkSeq(self):
+        colorcounts = self.mainscene.colorcounts
+        tableshort = self.mainscene.tableshort
+        errors = 0
+        for i in range(len(colorcounts)-1):
+            if colorcounts[i] != 0 and tableshort[i] == 'None':
+                errors+= 1
 
-    def pipettingScheme(self):
-        structureData = self.mainscene.readCanvas()[0]
-        #structureData = self.mainscene.preparePlate(2)[0]  #list of all sequences that should be pipetted
-        print(structureData)
-        fullpipettlist =  [['PLATE NAME','PLATE POSITION','OLIGO NAME','SEQUENCE','COLOR']]
-        fulllist,  ok = PipettingDialog.getSchemes()
-        if fulllist == []:
-            self.statusBar().showMessage('No *.csv found. Scheme not created.')
+        return errors
+
+
+    def generatePlates(self):
+        seqcheck = self.checkSeq()
+        if self.mainscene.tableshort == TABLESHORT_DEFAULT:
+            self.statusBar().showMessage('Error: No Extensions have been set. Please set Extensions first.')
+        elif seqcheck >= 1:
+            self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have Extensions. Please set first.')
         else:
-            pipettlist = []
-            notfound = []
-            platelist = []
-            for i in range(1, len(structureData)):
-                sequencerow = structureData[i]
-                sequence = sequencerow[3]
-                fullpipettlist.append(sequencerow)
-                if sequence == ' ':
+            selection,  ok = PlateDialog.getSelection()
+            if ok:
+                if selection == 0:
                     pass
                 else:
-                    for j in range(0, len(fulllist)):
-                        fulllistrow = fulllist[j]
-                        fulllistseq = fulllistrow[3]
-                        if sequence == fulllistseq:
-                            pipettlist.append([fulllist[j][0],fulllist[j][1],fulllist[j][2],fulllist[j][3],rgbcolors[sequencerow[4]]])
-                            platelist.append(fulllist[j][0])
-                            del fullpipettlist[-1]
-                            fullpipettlist.append(fulllist[j])
-                            break # first found will be taken
+                    allplates = self.mainscene.preparePlate(selection)
+                    self.statusBar().showMessage('A total of '+str(len(allplates)*2)+' Plates generated.')
+                    path = QtGui.QFileDialog.getSaveFileName(self,  'Save csv files to.',  filter='*.csv')
+                    if path:
+                        design.savePlate(path, allplates)
+                        self.statusBar().showMessage('Plates saved to : '+path)
+                    else:
+                        self.statusBar().showMessage('Filename not specified. Plates not saved.')
 
-            print(pipettlist)
-            exportlist = dict()
-            exportlist[0] = fullpipettlist
-            noplates = len(set(platelist))
-            platenames = list(set(platelist))
-            platenames.sort()
-            if (len(structureData)-1-16)==(len(pipettlist)):
-                self.statusBar().showMessage('All sequences found in '+str(noplates)+' Plates. Pipetting Scheme complete.')
+    def pipettingScheme(self):
+        seqcheck = self.checkSeq()
+        if self.mainscene.tableshort == TABLESHORT_DEFAULT:
+            self.statusBar().showMessage('Error: No Extensions have been set. Please set Extensions first.')
+        elif seqcheck >= 1:
+            self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have Extensions. Please set first.')
+        else:
+            structureData = self.mainscene.readCanvas()[0]
+            fullpipettlist =  [['PLATE NAME','PLATE POSITION','OLIGO NAME','SEQUENCE','COLOR']]
+            fulllist,  ok = PipettingDialog.getSchemes()
+            if fulllist == []:
+                self.statusBar().showMessage('No *.csv found. Scheme not created.')
             else:
-                self.statusBar().showMessage('Error: Sequences sequences missing. Please check *.csv file..')
-                path = QtGui.QFileDialog.getSaveFileName(self,  'Save csv files to.',  filter='*.csv')
-                if path:
-                    design.savePlate(path, exportlist)
-                    self.statusBar().showMessage('Export saved to : '+path)
+                pipettlist = []
+                notfound = []
+                platelist = []
+                for i in range(1, len(structureData)):
+                    sequencerow = structureData[i]
+                    sequence = sequencerow[3]
+                    fullpipettlist.append(sequencerow)
+                    fullpipettlist[i][0] = 'NOT FOUND'
+                    if fullpipettlist[i][2] == ' ':
+                        fullpipettlist[i][0] = 'BIOTIN PLACEHOLDER'
+                    if sequence == ' ':
+                        pass
+                    else:
+                        for j in range(0, len(fulllist)):
+                            fulllistrow = fulllist[j]
+                            fulllistseq = fulllistrow[3]
+                            if sequence == fulllistseq:
+                                pipettlist.append([fulllist[j][0],fulllist[j][1],fulllist[j][2],fulllist[j][3],rgbcolors[sequencerow[4]]])
+                                platelist.append(fulllist[j][0])
+                                del fullpipettlist[-1]
+                                fullpipettlist.append(fulllist[j])
+                                break # first found will be taken
+
+                exportlist = dict()
+                exportlist[0] = fullpipettlist
+                noplates = len(set(platelist))
+                platenames = list(set(platelist))
+                platenames.sort()
+                if (len(structureData)-1-16)==(len(pipettlist)):
+                    self.statusBar().showMessage('All sequences found in '+str(noplates)+' Plates. Pipetting Scheme complete.')
                 else:
-                    self.statusBar().showMessage('Filename not specified. Export not saved.')
+                    self.statusBar().showMessage('Error: Sequences sequences missing. Please check *.csv file..')
 
-            allfig = dict()
-            for x in range(0, len(platenames)):
-                platename = platenames[x]
-                print(platename)
-                selection = []
-                selectioncolors = []
-                for y in range(0, len(platelist)):
-                    if pipettlist[y][0]==platename:
-                        selection.append(pipettlist[y][1])
-                        selectioncolors.append(pipettlist[y][4])
-                print(selection)
-                print(selectioncolors)
-                allfig[x] = plotPlate(selection,selectioncolors, platename)
+                allfig = dict()
+                for x in range(0, len(platenames)):
+                    platename = platenames[x]
+                    print(platename)
+                    selection = []
+                    selectioncolors = []
+                    for y in range(0, len(platelist)):
+                        if pipettlist[y][0]==platename:
+                            selection.append(pipettlist[y][1])
+                            selectioncolors.append(pipettlist[y][4])
+                    print(selection)
+                    print(selectioncolors)
+                    allfig[x] = plotPlate(selection,selectioncolors, platename)
 
-            path = QtGui.QFileDialog.getSaveFileName(self,  'Save Pipetting Schemes to.',  filter='*.pdf')
-            if path:
-                with PdfPages(path) as pdf:
-                    for x in range(0, len(platenames)):
-                        #pdf.savefig(allfig[x])
-                        pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.2,  dpi = 200)
-                        #pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.1)
-                self.statusBar().showMessage('Pippetting Scheme saved to: '+path)
+                path = QtGui.QFileDialog.getSaveFileName(self,  'Save Pipetting Schemes to.',  filter='*.pdf')
+                if path:
+                    with PdfPages(path) as pdf:
+                        for x in range(0, len(platenames)):
+                            #pdf.savefig(allfig[x])
+                            pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.2,  dpi = 200)
+                            #pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.1)
+                            base, ext = _ospath.splitext(path)
+                            csv_path = base + '.csv'
+                            design.savePlate(csv_path, exportlist)
+                    self.statusBar().showMessage('Pippetting Scheme saved to: '+path)
 
     def foldingScheme(self):
-        print('Folding Scheme')
 
         fdialog = FoldingDialog() # Intitialize FoldingDialog Class
         #Fill with Data
         colorcounts = self.mainscene.colorcounts
-        print(colorcounts)
+
         noseq = _np.count_nonzero(colorcounts)
-        print(noseq)
+
 
         fdialog.table.setRowCount(noseq+5)
 
@@ -890,17 +931,17 @@ class Window(QtGui.QMainWindow):
 
         mixno = 0
         # MODIFIED STAPLES: 100x
-        print(colorcounts)
+
         for i in range(len(colorcounts)-1):
             if colorcounts[i] != 0:
-                fdialog.writeTable(mixno+2, 0, str(i)+' Mix')
+                fdialog.writeTable(mixno+2, 0, self.mainscene.tableshort[i]+' Mix')
                 fdialog.writeTable(mixno+2, 2, str(colorcounts[i]))
                 fdialog.writeTable(mixno+2, 1, str(100))
                 fdialog.writeTable(mixno+2, 6, str(100))
                 fdialog.writeTable(mixno+2, 7, '')
                 index = i+1
                 fdialog.colorTable(mixno+2, 7, allcolors[index])
-                print(i)
+
                 mixno = mixno+1
 
 

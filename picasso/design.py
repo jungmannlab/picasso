@@ -41,7 +41,7 @@ def convertPlateIndex(plate,platename):
 
     return newplate
 
-def convertPlateIndex2(plate,platename):
+def convertPlateIndexColor(plate,platename):
     #convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE] format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
 
     platerow = ['A','B','C','D','E','F','G','H','A','B','C','D','E','F','G','H']
