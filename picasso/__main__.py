@@ -375,6 +375,11 @@ def main():
     render_parser.add_argument('-c', '--cmap', choices=['viridis', 'inferno', 'plasma', 'magma', 'hot', 'gray'], help='the colormap to be applied')
     render_parser.add_argument('-s', '--silent', action='store_true', help='do not open the image file')
 
+    # design
+    design_parser = subparsers.add_parser('design', help='design RRO DNA origami structures')
+    # simulate
+    simualte_parser = subparsers.add_parser('simulate', help='simulate single molecule fluorescence data')
+
     # average
     average_parser = subparsers.add_parser('average', help='particle averaging')
     average_parser.add_argument('-o', '--oversampling', type=float, default=10,
