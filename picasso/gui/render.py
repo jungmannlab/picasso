@@ -614,8 +614,8 @@ class View(QtGui.QLabel):
         dx = np.zeros((n_channels, n_channels))
         for i in range(n_channels-1):
             for j in range(i+1, n_channels):
-                    dx[i, j] = np.mean([cj - ci for ci, cj in zip(coms_x[i], coms_x[j])])
-                    dy[i, j] = np.mean([cj - ci for ci, cj in zip(coms_y[i], coms_y[j])])
+                    dx[i, j] = np.nanmean([cj - ci for ci, cj in zip(coms_x[i], coms_x[j])])
+                    dy[i, j] = np.nanmean([cj - ci for ci, cj in zip(coms_y[i], coms_y[j])])
         return lib.minimize_shifts(dx, dy)
 
     def shift_from_rcc(self):
