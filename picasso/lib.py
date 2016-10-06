@@ -102,6 +102,24 @@ def locs_at(x, y, locs, r):
     return locs[is_picked]
 
 
+def minimize_shifts(shifts_x, shifts_y):
+    n_channels = shifts_x.shape[0]
+    n_pairs = int(n_channels * (n_channels - 1) / 2)
+    rij = _np.zeros((n_pairs, 2))
+    A = _np.zeros((n_pairs, n_channels - 1))
+    flag = 0
+    for i in range(n_channels - 1):
+        for j in range(i+1, n_channels):
+            rij[flag, 0] = shifts_y[i, j]
+            rij[flag, 1] = shifts_x[i, j]
+            A[flag, i:j] = 1
+            flag += 1
+    Dj = _np.dot(_np.linalg.pinv(A), rij)
+    shift_y = _np.insert(_np.cumsum(Dj[:, 0]), 0, 0)
+    shift_x = _np.insert(_np.cumsum(Dj[:, 1]), 0, 0)
+    return shift_y, shift_x
+
+
 def remove_from_rec(rec_array, name):
     return _drop_fields(rec_array, name, usemask=False, asrecarray=True)
 
