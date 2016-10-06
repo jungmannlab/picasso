@@ -76,8 +76,8 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
         _plt.plot(xc, yc, 'x')
         _plt.show()
 
-    xc -= X / 2
-    yc -= Y / 2
+    xc -= _np.ceil(X / 2)
+    yc -= _np.ceil(Y / 2)
     return -yc, -xc
 
 

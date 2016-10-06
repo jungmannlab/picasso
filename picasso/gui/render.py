@@ -596,6 +596,8 @@ class View(QtGui.QLabel):
         n_pairs = int(n_channels * (n_channels - 1) / 2)
         rc = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
         shift_y, shift_x = imageprocess.rcc(images, callback=rc.set_value)
+        print('Image x shifts: {}'.format(shift_x))
+        print('Image y shifts: {}'.format(shift_y))
         sp = lib.ProgressDialog('Shifting channels', 0, n_channels, self)
         sp.set_value(0)
         for i, (locs_, dx, dy) in enumerate(zip(self.locs, shift_x, shift_y)):
