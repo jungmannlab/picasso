@@ -27,11 +27,17 @@ from PyQt4.QtGui import QDialog, QVBoxLayout, QDialogButtonBox, QDateTimeEdit, Q
 from PyQt4.QtCore import Qt, QDateTime
 import time
 
+def fitFuncBg(x, a, b, c):
+    return (a + b*x[0])*x[1]*x[2]+c
+
+def fitFuncStd(x, a, b, c):
+    return (a*x[0]*x[1]+b*x[2]+c)
+
 plt.style.use('ggplot')
 
 "DEFAULT PARAMETERS"
 # CAMERA
-IMAGESIZE_DEFAULT = 64
+IMAGESIZE_DEFAULT = 32
 ITIME_DEFAULT = 300
 FRAMES_DEFAULT = 7500
 PIXELSIZE_DEFAULT = 160
@@ -48,8 +54,8 @@ PHOTONBUDGET_DEFAULT = 1500000
 PHOTONSLOPE_DEFAULT = 0.8
 PHOTONSLOPESTD_DEFAULT = 0.4
 #NOISE MODEL
-IMAGERC_DEFAULT = 0.002130
-LASERC_DEFAULT = 0.007152
+IMAGERC_DEFAULT = 0.007152
+LASERC_DEFAULT = 0.002130
 CAMERAC_DEFAULT = 238.230221
 EQA_DEFAULT = -0.001950
 EQB_DEFAULT = 0.259030
@@ -1111,11 +1117,7 @@ class Window(QtGui.QMainWindow):
             ax1.axes.set_ylim((min(structureyy_nm)-disty,max(structureyy_nm)+disty))
         self.canvas2.draw()
 
-    def fitFunc(x, a, b, c):
-        return (a + b*x[0])*x[1]*x[2]+c
 
-    def fitFuncStd(x, a, b, c):
-        return (a*x[0]*x[1]+b*x[2]+c)
 
 
 
@@ -1222,28 +1224,20 @@ class Window(QtGui.QMainWindow):
         _np.asarray(time)
         _np.asarray(conc)
 
-        #bg = _np.array([295.946426,233.0569123,274.4858148,492.9237402,350.7499474,427.8461072,686.6002138,450.1768474,578.2886671,317.4836201,263.7906357,295.183758,556.4378002,393.6139337,489.2362959,790.0168324,519.3466806,675.4153349,390.6218063,311.8076188,362.3901329,770.4890059,534.3767198,686.1671561,1139.555401,751.2064186,1001.537454,346.4805993,633.0231806,912.0119824])
-        #las = _np.array([110,50,80,110,50,80,110,50,80,110,50,80,110,50,80,110,50,80,110,50,80,110,50,80,110,50,80,50,50,50])
-        #time = _np.array([100,100,100,300,300,300,500,500,500,100,100,100,300,300,300,500,500,500,100,100,100,300,300,300,500,500,500,100,300,500])
-        #conc = _np.array([0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,2,2,5,5,5,5,5,5,5,5,5,8,8,8])
 
         x_3d = _np.array([conc,las,time])
-
         p0 = [1,1,100]
-
-        fitParamsBg, fitCovariances = curve_fit(self.fitFunc, x_3d, bg, p0)
+        fitParamsBg, fitCovariances = curve_fit(fitFuncBg, x_3d, bg, p0)
         print(' fit coefficients :\n', fitParamsBg)
 
         # SET VALUES TO PARAMETER
-
-
-        self.imagercEdit.setValue(fitParamsBg[0])
-        self.lasercEdit.setValue(fitParamsBg[1])
+        self.imagercEdit.setValue(fitParamsBg[1])
+        self.lasercEdit.setValue(fitParamsBg[0])
         self.cameracEdit.setValue(fitParamsBg[2])
 
         x_3dStd = _np.array([las,time,bg])
         p0S = [1,1,1]
-        fitParamsStd, fitCovariances = curve_fit(self.fitFuncStd, x_3dStd, bgstd, p0S)
+        fitParamsStd, fitCovariances = curve_fit(fitFuncStd, x_3dStd, bgstd, p0S)
 
         print(' fit coefficients2:\n', fitParamsStd)
 
@@ -1257,17 +1251,22 @@ class Window(QtGui.QMainWindow):
         #figure3.suptitle('hdf5 import')
 
         #Background
-        bgmodel = self.fitFunc(x_3d, fitParamsBg[0],fitParamsBg[1],fitParamsBg[2])
+        bgmodel = fitFuncBg(x_3d, fitParamsBg[0],fitParamsBg[1],fitParamsBg[2])
         ax1 = figure4.add_subplot(121)
         ax1.cla()
         ax1.plot(bg, bgmodel,'o')
+        x = _np.linspace(*ax1.get_xlim())
+        ax1.plot(x, x)
         title = "Background Model:"
         ax1.set_title(title)
 
         #Std
+        bgmodelstd = fitFuncStd(x_3dStd, fitParamsStd[0],fitParamsStd[1],fitParamsStd[2])
         ax2 = figure4.add_subplot(122)
         ax2.cla()
         ax2.plot(bgstd, bgmodelstd,'o')
+        x = _np.linspace(*ax2.get_xlim())
+        ax2.plot(x, x)
         title = "Background Model Std:"
         ax2.set_title(title)
 
@@ -1462,6 +1461,7 @@ class CalibrationDialog(QtGui.QDialog):
             counter = counter+1
             self.pbar.setValue((counter-1)/self.tifCounter*100)
             print('Current Dataset: '+str(counter)+' of ' +str(self.tifCounter))
+            QtGui.qApp.processEvents()
             movie, info = _io.load_movie(element)
             print(movie.shape)
             movie = movie[0:100,:,:]
