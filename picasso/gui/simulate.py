@@ -116,6 +116,7 @@ class Window(QtGui.QMainWindow):
 
         self.integrationtimeEdit.valueChanged.connect(self.changeTime)
         self.framesEdit.valueChanged.connect(self.changeTime)
+        self.camerasizeEdit.valueChanged.connect(self.generatePositions)
 
         cgrid.addWidget(camerasize,1,0)
         cgrid.addWidget(self.camerasizeEdit,1,1)
@@ -1374,8 +1375,7 @@ class Window(QtGui.QMainWindow):
                     photonrate = int(photonsmu/integrationtime)
 
                     #Calculate backgroundrate
-                    bgbase = self.backgroundbaseEdit.value()
-                    bgrate = int((bgmu-bgbase)/(integrationtime/1000))
+
 
                     # CALCULATE BG AND BG_STD FROM MODEL AND ADJUST OFFSET
 
