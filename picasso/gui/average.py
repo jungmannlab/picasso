@@ -115,6 +115,8 @@ class Worker(QtCore.QThread):
                 time.sleep(0.5)
             self.locs.x = np.ctypeslib.as_array(x)
             self.locs.y = np.ctypeslib.as_array(y)
+            self.locs.x -= np.mean(self.locs.x)
+            self.locs.y -= np.mean(self.locs.y)
             self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, True)
 
 
