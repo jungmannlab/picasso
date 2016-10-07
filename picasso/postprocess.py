@@ -24,7 +24,7 @@ from . import render as _render
 from . import imageprocess as _imageprocess
 from threading import Thread as _Thread
 import time as _time
-import tqdm as _tqdm
+from tqdm import tqdm as _tqdm
 
 
 def get_index_blocks(locs, info, size, callback=None):
@@ -588,7 +588,7 @@ def groupprops(locs, callback=None):
     groups = _np.recarray(n, formats=formats, names=names)
     if callback is not None:
         callback(0)
-    for i, group_id in enumerate(_tqdm(group_ids, description='Calculating group statistics', unit='Groups')):
+    for i, group_id in enumerate(_tqdm(group_ids, desc='Calculating group statistics', unit='Groups')):
         group_locs = locs[locs.group == group_id]
         groups['group'][i] = group_id
         groups['n_events'][i] = len(group_locs)
