@@ -24,6 +24,7 @@ from . import render as _render
 from . import imageprocess as _imageprocess
 from threading import Thread as _Thread
 import time as _time
+from tqdm import tqdm as _tqdm
 
 
 def get_index_blocks(locs, info, size, callback=None):
@@ -574,7 +575,7 @@ def align(locs, infos, display=False):
     return locs
 
 
-def groupprops(locs):
+def groupprops(locs, callback=None):
     try:
         locs = locs[locs.dark != -1]
     except AttributeError:
@@ -585,11 +586,15 @@ def groupprops(locs):
     names = ['group', 'n_events'] + list(_itertools.chain(*[(_ + '_mean', _ + '_std') for _ in locs.dtype.names]))
     formats = ['i4', 'i4'] + 2 * n_cols * ['f4']
     groups = _np.recarray(n, formats=formats, names=names)
-    for i, group_id in enumerate(group_ids):
+    if callback is not None:
+        callback(0)
+    for i, group_id in enumerate(_tqdm(group_ids, desc='Calculating group statistics', unit='Groups')):
         group_locs = locs[locs.group == group_id]
         groups['group'][i] = group_id
         groups['n_events'][i] = len(group_locs)
         for name in locs.dtype.names:
             groups[name + '_mean'][i] = _np.mean(group_locs[name])
             groups[name + '_std'][i] = _np.std(group_locs[name])
+        if callback is not None:
+            callback(i+1)
     return groups

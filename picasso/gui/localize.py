@@ -473,18 +473,19 @@ class ParametersDialog(QtGui.QDialog):
         self.window.draw_frame()
 
     def set_camera_parameters(self, info):
-        if 'Micro-Manager Metadata' in info:
-            info = info['Micro-Manager Metadata']
-            if 'Cameras' in CONFIG:
-                cameras = [self.camera.itemText(_) for _ in range(self.camera.count())]
-                camera = info['Camera']
-                if camera in cameras:
-                    index = cameras.index(camera)
-                    self.camera.setCurrentIndex(index)
+        if 'Cameras' in CONFIG and 'Camera' in info:
+            cameras = [self.camera.itemText(_) for _ in range(self.camera.count())]
+            camera = info['Camera']
+            if camera in cameras:
+                index = cameras.index(camera)
+                self.camera.setCurrentIndex(index)
+            if 'Micro-Manager Metadata' in info:
+                mm_info = info['Micro-Manager Metadata']
+                if 'Micro-Manager Metadata' in info:
                     cam_config = CONFIG['Cameras'][camera]
                     if 'Gain Property Name' in cam_config:
                         gain_property_name = cam_config['Gain Property Name']
-                        gain = info[camera + '-' + gain_property_name]
+                        gain = mm_info[camera + '-' + gain_property_name]
                         self.gain.setValue(int(gain))
                     else:
                         self.gain.setValue(1)
@@ -493,20 +494,17 @@ class ParametersDialog(QtGui.QDialog):
                         categories = cam_config['Sensitivity Categories']
                         for i, category in enumerate(categories):
                             property_name = camera + '-' + category
-                            if property_name in info:
-                                exp_setting = info[camera + '-' + category]
+                            if property_name in mm_info:
+                                exp_setting = mm_info[camera + '-' + category]
                                 cam_combo = cam_combos[i]
                                 for index in range(cam_combo.count()):
                                     if cam_combo.itemText(index) == exp_setting:
                                         cam_combo.setCurrentIndex(index)
                                         break
-                        # else:
-                        #     raise ValueError('No configuration for setting "{}": {}'.format(category,
-                        #                      exp_setting))
                     if 'Quantum Efficiency' in cam_config:
                         if 'Channel Device' in cam_config:
                             channel_device_name = cam_config['Channel Device']['Name']
-                            channel = info[channel_device_name]
+                            channel = mm_info[channel_device_name]
                             channels = cam_config['Channel Device']['Emission Wavelengths']
                             if channel in channels:
                                 wavelength = str(channels[channel])
