@@ -244,6 +244,7 @@ class TiffMap:
                 readout = self.read(type, count).strip(b'\0')      # Strip null bytes which MM 1.4.22 adds
                 mm_info = _json.loads(readout.decode())
                 info['Micro-Manager Metadata'] = mm_info
+                info['Camera'] = mm_info['Camera']
         return info
 
     def memmap_frame(self, index):
