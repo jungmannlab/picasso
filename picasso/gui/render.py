@@ -1044,6 +1044,8 @@ class View(QtGui.QLabel):
             out_locs.append(pick_locs_out)
             progress.set_value(i+1)
         out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
+        n_groups = len(picked_locs)
+        progress = lib.ProgressDialog('Calculating pick properties', 0, n_groups, self)
         pick_props = postprocess.groupprops(out_locs)
         influx = self.window.info_dialog.influx_rate.value()
         n_binding_sites = 1 / (influx * pick_props.dark_mean)
@@ -1118,6 +1120,8 @@ class View(QtGui.QLabel):
             self._undrift_from_picked(channel)
 
     def _undrift_from_picked(self, channel):
+        picked_locs = self.picked_locs(channel)
+        status = lib.StatusDialog('Calculating drift...', self)
         n_picks = len(self._picks)
         n_frames = self.infos[channel][0]['Frames']
         drift_x = np.empty((n_picks, n_frames))
@@ -1126,7 +1130,6 @@ class View(QtGui.QLabel):
         drift_y.fill(np.nan)
 
         # Remove center of mass offset
-        picked_locs = self.picked_locs(channel)
         for i, locs in enumerate(picked_locs):
             drift_x[i, locs.frame] = locs.x - np.mean(locs.x)
             drift_y[i, locs.frame] = locs.y - np.mean(locs.y)
@@ -1160,6 +1163,7 @@ class View(QtGui.QLabel):
         self.locs[channel].x -= drift_x_mean[self.locs[channel].frame]
         self.locs[channel].y -= drift_y_mean[self.locs[channel].frame]
         self.index_blocks[channel] = None
+        status.close()
         self.update_scene()
 
     def update_cursor(self):
