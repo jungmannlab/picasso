@@ -10,7 +10,6 @@
 import numpy as _np
 from . import io as _io
 
-
 def saveInfo(filename,info):
     _io.save_info(filename, [info], default_flow_style=True)
 
@@ -94,10 +93,6 @@ def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbud
     #spotkinetics is an output variable, that gives out the number of on-events, the number of localizations, the mean of the dark and bright times
     return photonsinframe,timetrace,spotkinetics
 
-
-
-#SUBFUNCTIONS
-
 def distphotons(structures,itime,frames,taud,taub,photonrate,photonratestd,photonbudget):
 
     time = itime
@@ -116,7 +111,6 @@ def distphotons(structures,itime,frames,taud,taub,photonrate,photonratestd,photo
     photonsinframe,timetrace,spotkinetics = paintgen(meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget)
 
     return photonsinframe
-
 
 def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,background, noise):
 
@@ -169,11 +163,6 @@ def saveMovie(filename,movie,info):
     _io.save_raw(filename, movie, [info])
 
 
-#structure = defineStructure(structurexx,structureyy,structureex,pixelsize)
-#gridpos = generatePositions(number,imagesize,frame,arrangement)
-#newstruct = prepareStructures(structure,gridpos,orientation,number,incorporation)
-
-
 def defineStructure(structurexxpx,structureyypx,structureex,pixelsize): #Function to store the coordinates of a structure in a container. The coordinates wil be adjustet so that the center of mass is the origin
     structurexxpx = structurexxpx-_np.mean(structurexxpx)
     structureyypx = structureyypx-_np.mean(structureyypx)
@@ -206,7 +195,6 @@ def generatePositions(number,imagesize,frame,arrangement): #GENERATE A SET OF PO
 
     return gridpos
 
-
 def rotateStructure(structure): #ROTATE A STRUCTURE RANDOMLY
     angle_rad = _np.random.rand(1)*2*3.141592
     newstructure = _np.array([(structure[0,:])*_np.cos(angle_rad)-(structure[1,:])*_np.sin(angle_rad),
@@ -223,7 +211,6 @@ def randomExchange(pos): # RANDOMLY SHUFFLE EXCHANGE PARAMETERS ('RANDOM LABELIN
     _np.random.shuffle(arraytoShuffle)
     newpos = _np.array([pos[0,:],pos[1,:],arraytoShuffle,pos[3,:]])
     return newpos
-
 
 def prepareStructures(structure,gridpos,orientation,number,incorporation,exchange): #prepareStructures: Input positions, the structure definition, consider rotation etc.
     newpos = []
