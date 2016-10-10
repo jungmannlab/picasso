@@ -8,6 +8,7 @@
     :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 import sys
+import os
 import os.path
 import traceback
 from PyQt4 import QtCore, QtGui
@@ -535,6 +536,7 @@ class View(QtGui.QLabel):
         else:
             if render:
                 self.update_scene()
+        os.chdir(os.path.dirname(path))
 
     def add_multiple(self, paths):
         fit_in_view = len(self.locs) == 0
