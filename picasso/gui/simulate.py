@@ -60,13 +60,12 @@ CAMERAC_DEFAULT = 238.230221
 EQA_DEFAULT = -0.001950
 EQB_DEFAULT = 0.259030
 EQC_DEFAULT = -42.905998
-
 #STRUCTURE
 STRUCTURE1_DEFAULT = 3
 STRUCTURE2_DEFAULT = 4
 STRUCTURE3_DEFAULT = '20,20'
-STRUCTUREXX_DEFAULT = '0,20,40,60,0,20,40,60,0,20,40,60'
-STRUCTUREYY_DEFAULT = '0,20,40,0,20,40,0,20,40,0,20,40'
+STRUCTUREYY_DEFAULT = '0,20,40,60,0,20,40,60,0,20,40,60'
+STRUCTUREXX_DEFAULT = '0,20,40,0,20,40,0,20,40,0,20,40'
 STRUCTUREEX_DEFAULT = '1,1,1,1,1,1,1,1,1,1,1,1'
 STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
@@ -133,6 +132,8 @@ class Window(QtGui.QMainWindow):
         cgrid.addWidget(self.pixelsizeEdit,5,1)
         cgrid.addWidget(QtGui.QLabel('nm'),5,2)
 
+        cgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
+
         #PAINT PARAMETERS
         paint_groupbox = QtGui.QGroupBox('PAINT Parameters')
         pgrid = QtGui.QGridLayout(paint_groupbox)
@@ -172,6 +173,7 @@ class Window(QtGui.QMainWindow):
         pgrid.addWidget(taub,4,0)
         pgrid.addWidget(self.taubEdit,4,1)
         pgrid.addWidget(QtGui.QLabel('ms'),4,2)
+        pgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         #IMAGER Parameters
         imager_groupbox = QtGui.QGroupBox('Imager Parameters')
@@ -356,8 +358,8 @@ class Window(QtGui.QMainWindow):
         structureno = QtGui.QLabel('Number of Structures')
         structureframe = QtGui.QLabel('Frame')
 
-        self.structure1 = QtGui.QLabel('Rows')
-        self.structure2 = QtGui.QLabel('Columns')
+        self.structure1 = QtGui.QLabel('Columns')
+        self.structure2 = QtGui.QLabel('Rows')
         self.structure3 = QtGui.QLabel('Spacing X,Y')
         self.structure3Label = QtGui.QLabel('nm')
 
@@ -459,14 +461,9 @@ class Window(QtGui.QMainWindow):
         generateButton = QtGui.QPushButton("Generate Positions")
         generateButton.clicked.connect(self.generatePositions)
         sgrid.addWidget(generateButton,14,0,1,3)
-
-        # POSITION PREVIEW WINDOW
-        posgrid = QtGui.QGridLayout()#
-        # STRUCTURE PREVIEW WINDOW
-        strgrid = QtGui.QGridLayout()
+        cgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         simulateButton = QtGui.QPushButton("Simulate Data")
-        #simulateButton.setStyleSheet("background-color: white")
         self.exchangeroundsEdit = QtGui.QLineEdit('1')
 
         quitButton = QtGui.QPushButton('Quit', self)
@@ -495,21 +492,28 @@ class Window(QtGui.QMainWindow):
         self.changeNoise()
         self.changePaint()
 
+        pos_groupbox = QtGui.QGroupBox('Positions [Px]')
+        str_groupbox = QtGui.QGroupBox('Structure [nm]')
+
+        posgrid = QtGui.QGridLayout(pos_groupbox)
+        strgrid = QtGui.QGridLayout(str_groupbox)
+
         self.figure1 = plt.figure()
         self.figure2 = plt.figure()
         self.canvas1 = FigureCanvas(self.figure1)
-        self.canvas1.setMinimumSize(200,220)
+        csize = 280
+        self.canvas1.setMinimumSize(csize,csize)
 
         self.canvas2 = FigureCanvas(self.figure2)
-        self.canvas2.setMinimumSize(200,220)
+        self.canvas2.setMinimumSize(csize,csize)
 
         posgrid.addWidget(self.canvas1)
         strgrid.addWidget(self.canvas2)
-        #strgrid.addWidget(self.button)
 
-        # DEFINE ARRANGEMENT
-        self.grid.addLayout(posgrid,1,0)
-        self.grid.addLayout(strgrid,1,1)
+
+        # Arrange Buttons
+        self.grid.addWidget(pos_groupbox,1,0)
+        self.grid.addWidget(str_groupbox,1,1)
         self.grid.addWidget(structure_groupbox,2,0,2,1)
         self.grid.addWidget(camera_groupbox,1,2)
         self.grid.addWidget(paint_groupbox,3,1)
@@ -598,7 +602,6 @@ class Window(QtGui.QMainWindow):
         bgstdoffset = self.BgStdoffsetEdit.value()
 
         bgmodelstd = equationA*laserpower*itime+equationB*bgmodel+equationC+bgstdoffset
-        #bgmodelstd = self.fitFuncStd(x_3d, fitParamsBg[0],fitParamsBg[1],fitParamsBg[2])
 
         self.backgroundframeEdit.setText(str(int(bgmodel)))
         self.noiseEdit.setText(str(int(bgmodelstd)))
@@ -615,8 +618,8 @@ class Window(QtGui.QMainWindow):
             self.structure2Edit.show()
             self.structure3Edit.show()
             self.structure3Label.show()
-            self.structure1.setText('Rows')
-            self.structure2.setText('Columns')
+            self.structure1.setText('Columns')
+            self.structure2.setText('Rows')
             self.structure3.setText('Spacing X,Y')
             self.structure1Edit.setValue(3)
             self.structure2Edit.setValue(4)
@@ -668,7 +671,6 @@ class Window(QtGui.QMainWindow):
             else:
                 spacingy = 1
 
-
             structurexx = ''
             structureyy = ''
             structureex = ''
@@ -700,10 +702,8 @@ class Window(QtGui.QMainWindow):
 
             circdata = _np.arange(0,twopi,twopi/labels)
 
-
             xxval = _np.round(_np.cos(circdata)*diameter*100)/100
             yyval = _np.round(_np.sin(circdata)*diameter*100)/100
-
 
             structurexx = ''
             structureyy = ''
@@ -713,7 +713,6 @@ class Window(QtGui.QMainWindow):
                     structurexx = structurexx +str(xxval[i])+','
                     structureyy = structureyy +str(yyval[i])+','
                     structureex = structureex +'1,'
-
 
             structurexx = structurexx[:-1]
             structureyy = structureyy[:-1]
@@ -806,7 +805,6 @@ class Window(QtGui.QMainWindow):
 
         t0 = time.time()
 
-
         for i in range(0,noexchangecolors):
             if noexchangecolors > 1:
                 fileName = _io.multiple_filenames(fileNameOld, i)
@@ -894,8 +892,6 @@ class Window(QtGui.QMainWindow):
         dt = time.time() - t0
         self.statusBar().showMessage('All computations finished. Last file saved to: '+fileName+'. Total Simulation time: {:.2f} Seconds.'.format(dt))
 
-
-
     def loadSettings(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open yaml', filter='*.yaml')
         if path:
@@ -940,7 +936,6 @@ class Window(QtGui.QMainWindow):
             self.BgStdoffsetEdit.setValue(info[0]['Noise.BackgroundStdOff'])
 
             #SET POSITIONS
-
             handlexx = _np.asarray((info[0]['Structure.HandleX']).split(","))
             handleyy = _np.asarray((info[0]['Structure.HandleY']).split(","))
             handleex = _np.asarray((info[0]['Structure.HandleEx']).split(","))
@@ -957,7 +952,6 @@ class Window(QtGui.QMainWindow):
             structure = _np.array([handlexx,handleyy,handleex,handless])
 
             self.newstruct = structure
-
             self.plotPositions()
             self.statusBar().showMessage('Settings loaded from: '+path)
 
@@ -968,8 +962,6 @@ class Window(QtGui.QMainWindow):
                 self.structurexxEdit.setText(info[0]['Structure.StructureX'])
                 self.structureyyEdit.setText(info[0]['Structure.StructureY'])
                 self.structureexEdit.setText(info[0]['Structure.StructureEx'])
-
-
 
     def readStructure(self):
         structurexxtxt = _np.asarray((self.structurexxEdit.text()).split(","))
@@ -996,8 +988,6 @@ class Window(QtGui.QMainWindow):
             except ValueError:
                 pass
 
-
-
         minlen = min(len(structureex),len(structurexx),len(structureyy))
 
         structurexx = structurexx[0:minlen]
@@ -1011,7 +1001,7 @@ class Window(QtGui.QMainWindow):
             structurexx,structureyy,structureex = self.readStructure()
             noexchangecolors = len(set(structureex))
             exchangecolors = list(set(structureex))
-            self.figure2.suptitle('Structure [nm]')
+            #self.figure2.suptitle('Structure [nm]')
             ax1 = self.figure2.add_subplot(111)
             ax1.cla()
             ax1.hold(True)
@@ -1037,8 +1027,6 @@ class Window(QtGui.QMainWindow):
             #UPDATE THE EXCHANGE COLORS IN BUTTON TO BE simulated
             self.exchangeroundsEdit.setText(str(exchangecolorsList))
 
-
-
     def generatePositions(self):
         self.plotStructure()
         structurexx,structureyy,structureex = self.readStructure()
@@ -1056,7 +1044,7 @@ class Window(QtGui.QMainWindow):
         exchange = 0
         self.newstruct = simulate.prepareStructures(structure,gridpos,orientation,number,incorporation,exchange)
 
-        self.figure1.suptitle('Positions [Px]')
+        #self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
         ax1.cla()
         ax1.hold(True)
@@ -1085,7 +1073,7 @@ class Window(QtGui.QMainWindow):
         noexchangecolors = len(set(struct1[2,:]))
         exchangecolors = list(set(struct1[2,:]))
         self.noexchangecolors = exchangecolors
-        self.figure2.suptitle('Structure [nm]')
+        #self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
         ax1.hold(True)
@@ -1106,21 +1094,12 @@ class Window(QtGui.QMainWindow):
                     plotyy.append(structureyy_nm[j])
             ax1.plot(plotxx,plotyy,'o')
 
-            #plotxx = structurexx(structureex == exchangecolors[i])
-            #print(plotxx)
-
-        #ax1.plot(structurexx,structureyy,'o')
-        #ax1.axis('equal')
             distx = round(1/10*(max(structurexx_nm)-min(structurexx_nm)))
             disty = round(1/10*(max(structureyy_nm)-min(structureyy_nm)))
 
             ax1.axes.set_xlim((min(structurexx_nm)-distx,max(structurexx_nm)+distx))
             ax1.axes.set_ylim((min(structureyy_nm)-disty,max(structureyy_nm)+disty))
         self.canvas2.draw()
-
-
-
-
 
     def plotPositions(self):
         structurexx,structureyy,structureex = self.readStructure()
@@ -1137,7 +1116,7 @@ class Window(QtGui.QMainWindow):
         incorporation = self.structureIncorporationEdit.value()/100
         exchange = 0
 
-        self.figure1.suptitle('Positions [Px]')
+        #self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
         ax1.cla()
         ax1.hold(True)
@@ -1166,7 +1145,7 @@ class Window(QtGui.QMainWindow):
         noexchangecolors = len(set(struct1[2,:]))
         exchangecolors = list(set(struct1[2,:]))
         self.noexchangecolors = exchangecolors
-        self.figure2.suptitle('Structure [nm]')
+        #self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
         ax1.hold(True)
@@ -1186,11 +1165,6 @@ class Window(QtGui.QMainWindow):
                     plotyy.append(structureyy_nm[j])
             ax1.plot(plotxx,plotyy,'o')
 
-            #plotxx = structurexx(structureex == exchangecolors[i])
-            #print(plotxx)
-
-        #ax1.plot(structurexx,structureyy,'o')
-        #ax1.axis('equal')
             distx = round(1/10*(max(structurexx_nm)-min(structurexx_nm)))
             disty = round(1/10*(max(structureyy_nm)-min(structureyy_nm)))
 
@@ -1225,7 +1199,6 @@ class Window(QtGui.QMainWindow):
         _np.asarray(time)
         _np.asarray(conc)
 
-
         x_3d = _np.array([conc,las,time])
         p0 = [1,1,100]
         fitParamsBg, fitCovariances = curve_fit(fitFuncBg, x_3d, bg, p0)
@@ -1249,7 +1222,6 @@ class Window(QtGui.QMainWindow):
         #Noise model working point
 
         figure4 = plt.figure()
-        #figure3.suptitle('hdf5 import')
 
         #Background
         bgmodel = fitFuncBg(x_3d, fitParamsBg[0],fitParamsBg[1],fitParamsBg[2])
@@ -1272,14 +1244,6 @@ class Window(QtGui.QMainWindow):
         ax2.set_title(title)
 
         figure4.show()
-
-
-
-
-
-
-
-
 
     def sigmafilter(self,data,sigmas):
         #Filter data to be withing +- sigma
@@ -1318,10 +1282,8 @@ class Window(QtGui.QMainWindow):
                     sigmay = self.sigmafilter(sigmay,nosigmas)
                     bg = self.sigmafilter(bg,nosigmas)
 
-                    #Clean up data:
 
                     figure3 = plt.figure()
-                    #figure3.suptitle('hdf5 import')
 
                     #Photons
                     photonsmu, photonsstd = norm.fit(photons)
@@ -1363,7 +1325,7 @@ class Window(QtGui.QMainWindow):
                     ax3.plot(x, p)
                     title = "Background:\n mu = %.2f\n  std = %.2f" % (bgmu, bgstd)
                     ax3.set_title(title)
-
+                    figure3.tight_layout()
                     figure3.show()
 
                     #Calculate Rates
@@ -1374,15 +1336,10 @@ class Window(QtGui.QMainWindow):
                     psf = int(sigmamu*100)/100
                     photonrate = int(photonsmu/integrationtime)
 
-                    #Calculate backgroundrate
-
-
                     # CALCULATE BG AND BG_STD FROM MODEL AND ADJUST OFFSET
-
                     laserc = self.lasercEdit.value()
                     imagerc = self.imagercEdit.value()
                     camerac = self.cameracEdit.value()
-
 
                     bgmodel = (laserc + imagerc*imagerconcentration)*laserpower*integrationtime+camerac
 
@@ -1390,11 +1347,7 @@ class Window(QtGui.QMainWindow):
                     equationB = self.EquationBEdit.value()
                     equationC = self.EquationCEdit.value()
 
-
-
                     bgmodelstd = equationA*laserpower*integrationtime+equationB*bgmu+equationC
-                    #bgmodelstd = self.fitFuncStd(x_3d, fitParamsBg[0],fitParamsBg[1],fitParamsBg[2])
-                    #return (a*x[0]*x[1]+b*x[2]+c)
 
                     #SET VALUES TO FIELDS AND CALL DEPENDENCIES
                     self.psfEdit.setValue(psf)
@@ -1406,16 +1359,11 @@ class Window(QtGui.QMainWindow):
                     self.photonslopeStdEdit.setValue(photonratestd/laserpower)
 
                     #SET NOISE AND FRAME
-                    #self.backgroundrateEdit.setValue(bgrate)
                     self.BgoffsetEdit.setValue(bgmu-bgmodel)
                     self.BgStdoffsetEdit.setValue(bgstd-bgmodelstd)
 
                     self.imagerconcentrationEdit.setValue(imagerconcentration)
                     self.laserpowerEdit.setValue(laserpower)
-
-
-
-
 
 class CalibrationDialog(QtGui.QDialog):
     def __init__(self, parent = None):
@@ -1428,7 +1376,6 @@ class CalibrationDialog(QtGui.QDialog):
         self.table.setWindowTitle('Noise Model Calibration')
         self.setWindowTitle('Noise Model Calibration')
         self.resize(800, 400)
-
 
         layout.addWidget(self.table)
 
@@ -1487,7 +1434,6 @@ class CalibrationDialog(QtGui.QDialog):
 
             for i in range(0,self.tifCounter):
                 self.table.setItem(i,0, QtGui.QTableWidgetItem(self.tifFiles[i]))
-
 
     def changeComb(self, indexval):
 
