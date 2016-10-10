@@ -292,7 +292,7 @@ class InfoDialog(QtGui.QDialog):
             info = self.window.view.infos[channel]
             self.nena_button.setParent(None)
             self.movie_grid.removeWidget(self.nena_button)
-            progress = lib.ProgressDialog('Calculating NeNA precision', 0, len(locs), self)
+            progress = lib.ProgressDialog('Calculating NeNA precision', 0, 100, self)
             result_lp = postprocess.nena(locs, info, progress.set_value)
             self.nena_label = QtGui.QLabel()
             self.movie_grid.addWidget(self.nena_label, 1, 1)

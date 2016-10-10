@@ -199,12 +199,13 @@ def _nfndh(frame, x, y, group, d_max, bin_size, callback=None):
     N = len(frame)
     bins = _np.arange(0, d_max, bin_size)
     dnfl = _np.zeros(len(bins))
-    if callback is not None:
-        callback(0)
-    for i in range(N):
-        _fill_dnfl(N, frame, x, y, group, i, d_max, dnfl, bin_size)
+    one_percent = int(N / 100)
+    starts = one_percent * _np.arange(100)
+    for k, start in enumerate(starts):
+        for i in range(start, start + one_percent):
+            _fill_dnfl(N, frame, x, y, group, i, d_max, dnfl, bin_size)
         if callback is not None:
-            callback(i+1)
+            callback(k+1)
     bin_centers = bins + bin_size / 2
     return bin_centers, dnfl
 
