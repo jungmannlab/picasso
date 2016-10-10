@@ -108,6 +108,7 @@ class Worker(QtCore.QThread):
             n_pixel, _ = image_avg.shape
             image_half = n_pixel / 2
             CF_image_avg = np.conj(np.fft.fft2(image_avg))
+            # TODO: blur auf average !!!
             fc = functools.partial(align_group, angles, self.oversampling, self.t_min, self.t_max, CF_image_avg, image_half, counter, lock)
             result = pool.map_async(fc, range(n_groups), groups_per_worker)
             while not result.ready():
@@ -300,6 +301,9 @@ class Window(QtGui.QMainWindow):
 
 
 def main():
+    # This line is needed to support the pyinstaller exe:
+    multiprocessing.freeze_support()
+
     app = QtGui.QApplication(sys.argv)
     window = Window()
     window.show()
