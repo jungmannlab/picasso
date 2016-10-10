@@ -376,9 +376,9 @@ def main():
     render_parser.add_argument('-s', '--silent', action='store_true', help='do not open the image file')
 
     # design
-    design_parser = subparsers.add_parser('design', help='design RRO DNA origami structures')
+    subparsers.add_parser('design', help='design RRO DNA origami structures')
     # simulate
-    simualte_parser = subparsers.add_parser('simulate', help='simulate single molecule fluorescence data')
+    subparsers.add_parser('simulate', help='simulate single molecule fluorescence data')
 
     # average
     average_parser = subparsers.add_parser('average', help='particle averaging')
