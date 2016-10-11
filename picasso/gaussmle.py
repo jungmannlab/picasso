@@ -220,18 +220,18 @@ def gaussmle_async(spots, eps, max_it, method='sigma'):
         func = _mlefit_sigmaxy
     else:
         raise ValueError('Method not available.')
-    # executor = _futures.ThreadPoolExecutor(n_workers)
-    # for i in range(n_workers):
-    #     executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
-    # executor.shutdown(wait=False)
+    executor = _futures.ThreadPoolExecutor(n_workers)
+    for i in range(n_workers):
+        executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
+    executor.shutdown(wait=False)
     # A synchronous single-threaded version for debugging:
-    for i in range(N):
-        print('Spot', i)
-        func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
+    # for i in range(N):
+    #     print('Spot', i)
+    #     func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
     return current, thetas, CRLBs, likelihoods, iterations
 
 
-#@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     n_params = 5
 
@@ -243,7 +243,6 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     max_step = _np.zeros(n_params, dtype=_np.float32)
     max_step[0:2] = theta[4]
     max_step[2:5] = 0.1 * theta[2:5]
-    print(theta)
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
@@ -315,8 +314,6 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     thetas[index, 5] = theta[4]
     iterations[index] = kk
 
-    print(theta)
-
     # Calculating the CRLB and LogLikelihood
     Div = 0.0
     M = _np.zeros((n_params, n_params), dtype=_np.float32)
@@ -372,7 +369,6 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
     max_step = _np.zeros(n_params, dtype=_np.float32)
     max_step[0:2] = theta[4]
     max_step[2:6] = 0.1 * theta[2:6]
-    print(theta)
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
@@ -441,8 +437,6 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
 
     thetas[index] = theta
     iterations[index] = kk
-
-    print(theta)
 
     # Calculating the CRLB and LogLikelihood
     Div = 0.0
