@@ -19,7 +19,7 @@ MAX_STEP = _np.array([1.0, 1.0, 100.0, 5.0, 0.5, 0.5])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
-# @_numba.jit(nopython=True, nogil=True, cache=False)
+@_numba.jit(nopython=True, nogil=True)
 def _center_of_mass(spot, size):
     x = 0.0
     y = 0.0
@@ -34,7 +34,7 @@ def _center_of_mass(spot, size):
     return y, x
 
 
-# @_numba.jit(nopython=True, nogil=True, cache=False)
+@_numba.jit(nopython=True, nogil=True)
 def mean_filter(spot, size):
     filtered_spot = _np.zeros_like(spot)
     for k in range(size):
@@ -52,7 +52,7 @@ def mean_filter(spot, size):
     return filtered_spot
 
 
-# @_numba.jit(nopython=True, nogil=True, cache=False)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def centroid(spot, size):
     y, x = _center_of_mass(spot, size)
     bg = _np.min(mean_filter(spot, size))
@@ -60,16 +60,33 @@ def centroid(spot, size):
     return x, y, photons, bg
 
 
-# # @_numba.jit(nopython=True, nogil=True)
-def _initial_parameters_xy(spot, size):
+@_numba.jit(nopython=True, nogil=True)
+def _initial_sigmax(spot_bg, center, size, sum_spot_bg):
+    sum_ = 0.0
+    for i in range(size):
+        for j in range(size):
+            sum_ += spot_bg[i, j] * (j-center)**2
+    return _np.sqrt(sum_ / sum_spot_bg)
+
+
+@_numba.jit(nopython=True, nogil=True)
+def _initial_sigmay(spot_bg, center, size, sum_spot_bg):
+    sum_ = 0.0
+    for i in range(size):
+        for j in range(size):
+            sum_ += spot_bg[i, j] * (i-center)**2
+    return _np.sqrt(sum_ / sum_spot_bg)
+
+
+@_numba.jit(nopython=True, nogil=True)
+def _initial_parameters_sigmaxy(spot, size):
     y, x = _center_of_mass(spot, size)
     bg = _np.min(mean_filter(spot, size))
     photons = _np.maximum(1.0, _np.sum(spot) - size * size * bg)
-    Y, X = _np.indices((size, size), dtype=_np.float32)
-    Y -= y
-    X -= x
-    sy = _np.sqrt(_np.sum(spot*Y**2)/_np.sum(spot))
-    sx = _np.sqrt(_np.sum(spot*Y**2)/_np.sum(spot))
+    spot_bg = spot - bg
+    sum_spot_bg = _np.sum(spot_bg)
+    sy = _initial_sigmay(spot_bg, y, size, sum_spot_bg)
+    sx = _initial_sigmax(spot_bg, x, size, sum_spot_bg)
     theta = _np.zeros(6, dtype=_np.float32)
     theta[0] = x
     theta[1] = y
@@ -77,11 +94,10 @@ def _initial_parameters_xy(spot, size):
     theta[3] = bg
     theta[4] = sx
     theta[5] = sy
-    print(theta)
     return theta
 
 
-# @_numba.vectorize(nopython=True)
+@_numba.vectorize(nopython=True)
 def _erf(x):
     ''' Currently not needed, but might be useful for a CUDA implementation '''
     ax = _np.abs(x)
@@ -110,14 +126,14 @@ def _erf(x):
     return _np.sign(x)
 
 
-# @_numba.jit(nopython=True, nogil=True, cache=False)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _gaussian_integral(x, mu, sigma):
     sq_norm = 0.70710678118654757 / sigma       # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
     return 0.5 * (_math.erf((d + 0.5) * sq_norm) - _math.erf((d - 0.5) * sq_norm))
 
 
-# @_numba.jit(nopython=True, nogil=True, cache=False)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
     d = x - mu
     a = _np.exp(-0.5 * ((d + 0.5) / sigma)**2)
@@ -127,7 +143,7 @@ def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-# @_numba.jit(nopython=True, nogil=True, cache=False)
+@_numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFc):
     ax = _np.exp(-0.5 * ((x + 0.5 - mu) / sigma)**2)
     bx = _np.exp(-0.5 * ((x - 0.5 - mu) / sigma)**2)
@@ -136,7 +152,7 @@ def _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFc):
     return dudt, d2udt2
 
 
-# @_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True)
 def _derivative_gaussian_integral_2d_sigma(x, y, mu, nu, sigma, photons, PSFx, PSFy):
     dSx, ddSx = _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFy)
     dSy, ddSy = _derivative_gaussian_integral_1d_sigma(y, nu, sigma, photons, PSFx)
@@ -212,18 +228,18 @@ def gaussmle_async(spots, eps, max_it, method='sigma'):
         func = _mlefit_sigmaxy
     else:
         raise ValueError('Method not available.')
-    # executor = _futures.ThreadPoolExecutor(n_workers)
-    # for i in range(n_workers):
-    #     executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
-    # executor.shutdown(wait=False)
+    executor = _futures.ThreadPoolExecutor(n_workers)
+    for i in range(n_workers):
+        executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
+    executor.shutdown(wait=False)
     # A synchronous single-threaded version for debugging:
-    for i in range(N):
-        print('Spot', i)
-        func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
+    # for i in range(N):
+    #     print('Spot', i)
+    #     func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
     return current, thetas, CRLBs, likelihoods, iterations
 
 
-# @_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     initial_sigma = 1.0
     n_params = 5
@@ -349,7 +365,7 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     CRLBs[index, 5] = CRLB[4]
 
 
-# # @_numba.jit(nopython=True, nogil=True, cache=False)
+@_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     n_params = 6
 
@@ -358,8 +374,7 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
 
     # Initial values
     # theta is [x, y, N, bg, Sx, Sy]
-    theta = _initial_parameters_xy(spot, size)
-    print(theta)
+    theta = _initial_parameters_sigmaxy(spot, size)
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
