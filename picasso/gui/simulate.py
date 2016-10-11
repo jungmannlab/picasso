@@ -54,8 +54,8 @@ PHOTONBUDGET_DEFAULT = 1500000
 PHOTONSLOPE_DEFAULT = 0.8
 PHOTONSLOPESTD_DEFAULT = 0.4
 #NOISE MODEL
-IMAGERC_DEFAULT = 0.007152
-LASERC_DEFAULT = 0.002130
+LASERC_DEFAULT = 0.007152
+IMAGERC_DEFAULT = 0.002130
 CAMERAC_DEFAULT = 238.230221
 EQA_DEFAULT = -0.001950
 EQB_DEFAULT = 0.259030
@@ -1205,8 +1205,8 @@ class Window(QtGui.QMainWindow):
         print(' fit coefficients :\n', fitParamsBg)
 
         # SET VALUES TO PARAMETER
-        self.imagercEdit.setValue(fitParamsBg[1])
         self.lasercEdit.setValue(fitParamsBg[0])
+        self.imagercEdit.setValue(fitParamsBg[1])
         self.cameracEdit.setValue(fitParamsBg[2])
 
         x_3dStd = _np.array([las,time,bg])

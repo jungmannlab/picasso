@@ -28,6 +28,7 @@ import os.path as _ospath
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
 BaseSequencesFile = os.path.join(_this_directory,  '..',  'base_sequences.csv')
+PaintSequencesFile = os.path.join(_this_directory,  '..',  'paint_sequences.csv')
 
 
 
@@ -88,10 +89,18 @@ def plotPlate(selection,selectioncolors, platename):
     return fig
 
 BasePlate = design.readPlate(BaseSequencesFile)
+PaintHandles = design.readPlate(PaintSequencesFile)
 
 #list of standard paint sequences
-allSeqShort = ('None, P1, P2, P3, P4, P5, P6, P7, P8, P9, P10')
-allSeqLong = (' , TTATACATCTA, TTATCTACATA, TTTCTTCATTA, TTATGAATCTA, TTTCAATGTAT, TTTTAGGTAAA, TTAATTGAGTA, TTATGTTAATG, TTAATTAGGAT, TTATAATGGAT')
+allSeqShort = ('None')
+allSeqLong = (' ')
+
+for i in range(1,len(PaintHandles)):
+
+    allSeqShort = allSeqShort+', '+PaintHandles[i][0]
+    allSeqLong = allSeqLong+', '+PaintHandles[i][1]
+
+
 TABLESHORT_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
 TABLELONG_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
 
