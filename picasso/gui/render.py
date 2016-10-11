@@ -32,6 +32,28 @@ N_GROUP_COLORS = 8
 matplotlib.rcParams.update({'axes.titlesize': 'large'})
 
 
+class FloatEdit(QtGui.QLineEdit):
+
+    valueChanged = QtCore.pyqtSignal(float)
+
+    def __init__(self):
+        super().__init__()
+        self.editingFinished.connect(self.onEditingFinished)
+
+    def onEditingFinished(self):
+        value = self.value()
+        self.valueChanged.emit(value)
+
+    def setValue(self, value):
+        text = '{:e}'.format(value)
+        self.setText(text)
+
+    def value(self):
+        text = self.text()
+        value = float(text)
+        return value
+
+
 class PickPooledHistWindow(QtGui.QWidget):
 
     def __init__(self):
@@ -258,9 +280,7 @@ class InfoDialog(QtGui.QDialog):
         self.add_pick_info_field('Length', decimals=2)
         self.add_pick_info_field('Dark time', decimals=2)
         self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/frames):'), self.picks_grid_current, 0)
-        self.influx_rate = QtGui.QDoubleSpinBox()
-        self.influx_rate.setRange(0, 1e10)
-        self.influx_rate.setDecimals(5)
+        self.influx_rate = FloatEdit()
         self.influx_rate.setValue(0.03)
         self.influx_rate.valueChanged.connect(self.update_binding_sites)
         self.picks_grid.addWidget(self.influx_rate, self.picks_grid_current, 1, 1, 2)
