@@ -112,6 +112,7 @@ class PickPooledHistWindow(QtGui.QWidget):
         params.add('t', value=np.mean(data), vary=True, min=data_min, max=data_max)
         params.add('c', value=data_min, vary=True, min=0)
         result = lib.CumulativeExponentialModel.fit(y, params, x=data)
+        print('DARK TIME FROM FIT:', result.best_values['t'])
         axes.semilogx(data, result.best_fit, label='fit (dark time  = {:.2f})'.format(result.best_values['t']))
         axes.legend(loc='best')
         self.canvas.draw()
