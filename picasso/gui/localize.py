@@ -626,7 +626,11 @@ class Window(QtGui.QMainWindow):
         save_action.setShortcut('Ctrl+S')
         save_action.triggered.connect(self.save_locs_dialog)
         file_menu.addAction(save_action)
-        file_menu.addSeparator()
+        save_spots_action = file_menu.addAction('Save spots')
+        save_spots_action.setShortcut('Ctrl+Shift+S')
+        save_spots_action.triggered.connect(self.save_spots_dialog)
+        file_menu.addAction(save_spots_action)
+        # file_menu.addSeparator()
         # open_parameters_action = file_menu.addAction('Load parameters')
         # open_parameters_action.setShortcut('Ctrl+Shift+O')
         # open_parameters_action.triggered.connect(self.open_parameters)
@@ -697,6 +701,15 @@ class Window(QtGui.QMainWindow):
         localize_action.setShortcut('Ctrl+L')
         localize_action.triggered.connect(self.localize)
         analyze_menu.addAction(localize_action)
+
+    @property
+    def camera_info(self):
+        camera_info = {}
+        camera_info['baseline'] = self.parameters_dialog.baseline.value()
+        camera_info['gain'] = self.parameters_dialog.gain.value()
+        camera_info['sensitivity'] = self.parameters_dialog.sensitivity.value()
+        camera_info['qe'] = self.parameters_dialog.qe.value()
+        return camera_info
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw; *.tif')
@@ -872,15 +885,10 @@ class Window(QtGui.QMainWindow):
     def fit(self):
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage('Preparing fit...')
-            camera_info = {}
-            camera_info['baseline'] = self.parameters_dialog.baseline.value()
-            camera_info['gain'] = self.parameters_dialog.gain.value()
-            camera_info['sensitivity'] = self.parameters_dialog.sensitivity.value()
-            camera_info['qe'] = self.parameters_dialog.qe.value()
             eps = self.parameters_dialog.convergence_spinbox.value()
             max_it = self.parameters_dialog.max_iterations_spinbox.value()
             method = {True: 'sigma', False: 'sigmaxy'}[self.parameters_dialog.symmetric_checkbox.isChecked()]
-            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'],
+            self.fit_worker = FitWorker(self.movie, self.camera_info, self.identifications, self.parameters['Box Size'],
                                         eps, max_it, method)
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
@@ -905,6 +913,18 @@ class Window(QtGui.QMainWindow):
 
     def zoom_out(self):
         self.view.scale(7 / 10, 7 / 10)
+
+    def save_spots(self, path):
+        box = self.parameters['Box Size']
+        spots = localize.get_spots(self.movie, self.identifications, box, self.camera_info)
+        io.save_datasets(path, self.info, spots=spots)
+
+    def save_spots_dialog(self):
+        base, ext = os.path.splitext(self.movie_path)
+        path = base + '_spots.hdf5'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save spots', path, filter='*.hdf5')
+        if path:
+            self.save_spots(path)
 
     def save_locs(self, path):
         localize_info = self.last_identification_info.copy()

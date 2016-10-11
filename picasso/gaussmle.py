@@ -164,30 +164,6 @@ def _worker(func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, cu
         func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
 
 
-def gaussmle_sigmaxy(spots, eps, max_it, threaded=True):
-    N = len(spots)
-    thetas = _np.zeros((N, 6), dtype=_np.float32)
-    CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
-    likelihoods = _np.zeros(N, dtype=_np.float32)
-    iterations = _np.zeros(N, dtype=_np.int32)
-    if threaded:
-        n_workers = int(0.75 * _multiprocessing.cpu_count())
-        with _futures.ThreadPoolExecutor(n_workers) as executor:
-            lock = _threading.Lock()
-            current = [0]
-            futures = []
-            for i in range(n_workers):
-                f = executor.submit(_worker, _mlefit_sigmaxy, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
-                futures.append(f)
-            while _futures.wait(futures, 1.0)[1]:
-                print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
-            print('{:,} / {:,}'.format(current[0] - n_workers, N), end='\r')
-    else:
-        for i, spot in enumerate(spots):
-            _mlefit_sigmaxy(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
-    return thetas, CRLBs, likelihoods, iterations
-
-
 def gaussmle(spots, eps, max_it, method='sigma'):
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
