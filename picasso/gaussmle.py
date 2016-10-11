@@ -65,7 +65,7 @@ def _initial_parameters_xy(spot, size):
     y, x = _center_of_mass(spot, size)
     bg = _np.min(mean_filter(spot, size))
     photons = _np.maximum(1.0, _np.sum(spot) - size * size * bg)
-    Y, X = _np.indices((size, size))
+    Y, X = _np.indices((size, size), dtype=_np.float32)
     Y -= y
     X -= x
     sy = _np.sqrt(_np.sum(spot*Y**2)/_np.sum(spot))
