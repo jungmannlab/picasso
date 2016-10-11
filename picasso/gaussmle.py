@@ -60,6 +60,27 @@ def centroid(spot, size):
     return x, y, photons, bg
 
 
+#@_numba.jit(nopython=True, nogil=True)
+def _initial_parameters_xy(spot, size):
+    y, x = _center_of_mass(spot, size)
+    bg = _np.min(mean_filter(spot, size))
+    photons = _np.maximum(1.0, _np.sum(spot) - size * size * bg)
+    Y, X = _np.indices((size, size))
+    Y -= y
+    X -= x
+    sy = _np.sqrt(_np.sum(spot*Y**2)/_np.sum(spot))
+    sx = _np.sqrt(_np.sum(spot*Y**2)/_np.sum(spot))
+    theta = _np.zeros(6, dtype=_np.float32)
+    theta[0] = x
+    theta[1] = y
+    theta[2] = photons
+    theta[3] = bg
+    theta[4] = sx
+    theta[5] = sy
+    print(theta)
+    return theta
+
+
 @_numba.vectorize(nopython=True)
 def _erf(x):
     ''' Currently not needed, but might be useful for a CUDA implementation '''
@@ -193,7 +214,7 @@ def gaussmle_async(spots, eps, max_it, method='sigma'):
         raise ValueError('Method not available.')
     executor = _futures.ThreadPoolExecutor(n_workers)
     for i in range(n_workers):
-       executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
+        executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
     executor.shutdown(wait=False)
     # A synchronous single-threaded version for debugging:
     # for i in range(N):
@@ -327,9 +348,8 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     CRLBs[index, 5] = CRLB[4]
 
 
-@_numba.jit(nopython=True, nogil=True, cache=False)
+#@_numba.jit(nopython=True, nogil=True, cache=False)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
-    initial_sigma = 1.0
     n_params = 6
 
     spot = spots[index]
@@ -337,9 +357,7 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
 
     # Initial values
     # theta is [x, y, N, bg, Sx, Sy]
-    theta = _np.zeros(n_params, dtype=_np.float32)
-    theta[0], theta[1], theta[2], theta[3] = centroid(spot, size)
-    theta[4] = theta[5] = initial_sigma
+    theta = _initial_parameters_xy(spot, size)
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
