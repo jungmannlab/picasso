@@ -536,6 +536,7 @@ class View(QtGui.QLabel):
         self.n_locs = 0
         self._picks = []
         self.index_blocks = []
+        self._drift = []
 
     def add(self, path, render=True):
         locs, info = io.load_locs(path)
@@ -544,6 +545,7 @@ class View(QtGui.QLabel):
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
+        self._drift.append(None)
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
@@ -1120,6 +1122,15 @@ class View(QtGui.QLabel):
     def to_down(self):
         self.pan_relative(-0.8, 0)
 
+    def add_drift(self, channel, drift):
+        if self._drift[channel] is None:
+            self._drift[channel] = drift
+        else:
+            self._drift[channel].x += drift.x
+            self._drift[channel].y += drift.y
+        base, ext = os.path.splitext(self.locs_paths[channel])
+        np.savetxt(base + '_drift.txt', self._drift[channel], header='dx\tdy', newline='\r\n')
+
     def undrift(self):
         channel = self.get_channel('Undrift')
         if channel is not None:
@@ -1131,9 +1142,10 @@ class View(QtGui.QLabel):
                 seg_progress = lib.ProgressDialog('Generating segments', 0, n_segments, self)
                 n_pairs = int(n_segments * (n_segments - 1) / 2)
                 rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
-                postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
+                drift, _ = postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
                 self.locs[channel] = lib.ensure_sanity(locs, info)
                 self.index_blocks[channel] = None
+                self.add_drift(channel, drift)
                 self.update_scene()
 
     def undrift_from_picked(self):
@@ -1184,7 +1196,12 @@ class View(QtGui.QLabel):
         # Apply drift
         self.locs[channel].x -= drift_x_mean[self.locs[channel].frame]
         self.locs[channel].y -= drift_y_mean[self.locs[channel].frame]
+
+        # Cleanup
         self.index_blocks[channel] = None
+        drift = (drift_x_mean, drift_y_mean)
+        drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
+        self.add_drift(channel, drift)
         status.close()
         self.update_scene()
 
