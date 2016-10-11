@@ -38,6 +38,7 @@ class FloatEdit(QtGui.QLineEdit):
 
     def __init__(self):
         super().__init__()
+        self.setSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Preferred)
         self.editingFinished.connect(self.onEditingFinished)
 
     def onEditingFinished(self):
@@ -45,7 +46,7 @@ class FloatEdit(QtGui.QLineEdit):
         self.valueChanged.emit(value)
 
     def setValue(self, value):
-        text = '{:e}'.format(value)
+        text = '{:.10e}'.format(value)
         self.setText(text)
 
     def value(self):
@@ -279,6 +280,16 @@ class InfoDialog(QtGui.QDialog):
         self.picks_grid_current += 1
         self.add_pick_info_field('Length', decimals=2)
         self.add_pick_info_field('Dark time', decimals=2)
+        self.picks_grid.addWidget(QtGui.QLabel('# Units per pick:'), self.picks_grid_current, 0)
+        self.units_per_pick = QtGui.QSpinBox()
+        self.units_per_pick.setRange(1, 1e6)
+        self.units_per_pick.setValue(1)
+        self.picks_grid.addWidget(self.units_per_pick, self.picks_grid_current, 1, 1, 2)
+        self.picks_grid_current += 1
+        calculate_influx_button = QtGui.QPushButton('Calibrate influx')
+        calculate_influx_button.clicked.connect(self.calibrate_influx)
+        self.picks_grid.addWidget(calculate_influx_button, self.picks_grid_current, 0, 1, 3)
+        self.picks_grid_current += 1
         self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/frames):'), self.picks_grid_current, 0)
         self.influx_rate = FloatEdit()
         self.influx_rate.setValue(0.03)
@@ -321,6 +332,11 @@ class InfoDialog(QtGui.QDialog):
             show_plot_button = QtGui.QPushButton('Show plot')
             self.movie_grid.addWidget(show_plot_button, self.movie_grid.rowCount()-1, 2)
             show_plot_button.clicked.connect(self.show_nena_plot)
+
+    def calibrate_influx(self):
+        influx = np.mean(1 / self.pick_info['Dark time']) / self.units_per_pick.value()
+        self.influx_rate.setValue(influx)
+        self.update_binding_sites()
 
     def update_binding_sites(self, influx=None):
         if self.pick_info is not None:
