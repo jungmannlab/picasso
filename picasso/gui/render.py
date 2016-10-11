@@ -20,6 +20,7 @@ from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationTool
 import colorsys
 from math import ceil
 import yaml
+import lmfit
 from .. import io, lib, render, postprocess, imageprocess
 
 
@@ -83,26 +84,36 @@ class PickPooledHistWindow(QtGui.QWidget):
         axes = self.figure.add_subplot(132)
         axes.set_title('Length (cumulative)')
         data = pick_info['pool']['len']
-        bins = lib.calculate_optimal_bins(data, 1000)
-        if bins is None:
-            bins = 10
-        hist, bin_edges = np.histogram(data, bins=bins)
-        cumhist = np.cumsum(hist)
-        axes.step(bin_edges[:-1], cumhist, linewidth=1.5)
-        data_range = data.ptp()
-        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        data.sort()
+        n = len(data)
+        y = np.arange(n)
+        axes.semilogx(data, y, label='data')
+        data_min = data.min()
+        data_max = data.max()
+        params = lmfit.Parameters()
+        params.add('a', value=n, vary=True, min=0)
+        params.add('t', value=np.mean(data), vary=True, min=data_min, max=data_max)
+        params.add('c', value=data_min, vary=True, min=0)
+        result = lib.CumulativeExponentialModel.fit(y, params, x=data)
+        axes.semilogx(data, result.best_fit, label='fit (length  = {:.2f})'.format(result.best_values['t']))
+        axes.legend(loc='best')
         # Dark
         axes = self.figure.add_subplot(133)
         axes.set_title('Dark time (cumulative)')
         data = pick_info['pool']['dark']
-        bins = lib.calculate_optimal_bins(data, 1000)
-        if bins is None:
-            bins = 10
-        hist, bin_edges = np.histogram(data, bins=bins)
-        cumhist = np.cumsum(hist)
-        axes.step(bin_edges[:-1], cumhist, linewidth=1.5)
-        data_range = data.ptp()
-        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
+        data.sort()
+        n = len(data)
+        y = np.arange(n)
+        axes.semilogx(data, y, label='data')
+        data_min = data.min()
+        data_max = data.max()
+        params = lmfit.Parameters()
+        params.add('a', value=n, vary=True, min=0)
+        params.add('t', value=np.mean(data), vary=True, min=data_min, max=data_max)
+        params.add('c', value=data_min, vary=True, min=0)
+        result = lib.CumulativeExponentialModel.fit(y, params, x=data)
+        axes.semilogx(data, result.best_fit, label='fit (dark time  = {:.2f})'.format(result.best_values['t']))
+        axes.legend(loc='best')
         self.canvas.draw()
 
 
@@ -1261,9 +1272,9 @@ class View(QtGui.QLabel):
                 com_y = np.mean(locs.y)
                 rmsd.append(np.sqrt(np.mean((locs.x - com_x)**2 + (locs.y - com_y)**2)))
                 locs = postprocess.link(locs, info, r_max=r_max, max_dark_time=t)
-                length.append(np.mean(locs.len[locs.len > 0]))
+                length.append(np.mean(locs.len))
                 locs = postprocess.compute_dark_times(locs)
-                dark.append(np.mean(locs.dark[locs.dark > 0]))
+                dark.append(np.mean(locs.dark))
                 new_locs.append(locs)
                 progress.set_value(i+1)
             pick_info = {'# Localizations': N}
@@ -1498,6 +1509,7 @@ class Window(QtGui.QMainWindow):
         if ok:
             vars = self.view.locs[channel].dtype.names
             exec(cmd, {k: self.view.locs[channel][k] for k in vars})
+            lib.ensure_sanity(self.view.locs[channel], self.view.infos[channel])
             self.view.index_blocks[channel] = None
             self.view.update_scene()
 

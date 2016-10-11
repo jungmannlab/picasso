@@ -17,6 +17,7 @@ import glob as _glob
 import os.path as _ospath
 from picasso import io as _io
 from PyQt4 import QtGui, QtCore
+from lmfit import Model as _Model
 
 
 class ProgressDialog(QtGui.QProgressDialog):
@@ -52,6 +53,13 @@ class AutoDict(_collections.defaultdict):
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(AutoDict, *args, **kwargs)
+
+
+def cumulative_exponential(x, a, t, c):
+    return a * (1 - _np.exp(-(x/t))) + c
+
+
+CumulativeExponentialModel = _Model(cumulative_exponential)
 
 
 def calculate_optimal_bins(data, max_n_bins=None):

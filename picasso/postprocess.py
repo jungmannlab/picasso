@@ -324,10 +324,11 @@ def compute_local_density(locs, info, radius):
 def compute_dark_times(locs, group=None):
     dark = dark_times(locs, group)
     locs = _lib.append_to_rec(locs, _np.int32(dark), 'dark')
+    locs = locs[locs.dark != -1]
     return locs
 
 
-def dark_times(locs, group=None, invalid=True):
+def dark_times(locs, group=None):
     last_frame = locs.frame + locs.len - 1
     if group is None:
         if hasattr(locs, 'group'):
@@ -335,8 +336,6 @@ def dark_times(locs, group=None, invalid=True):
         else:
             group = _np.zeros(len(locs))
     dark = _dark_times(locs, group, last_frame)
-    if not invalid:
-        dark = dark[dark != -1]
     return dark
 
 
@@ -373,7 +372,7 @@ def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average'):
             group = _np.zeros(len(locs), dtype=_np.int32)
         link_group = get_link_groups(locs, r_max, max_dark_time, group)
         if combine_mode == 'average':
-            linked_locs = link_loc_groups(locs, link_group)
+            linked_locs = link_loc_groups(locs, info, link_group)
         elif combine_mode == 'refit':
             pass    # TODO
     return linked_locs
@@ -485,7 +484,7 @@ def _link_group_last(column, link_group, n_locs, n_groups):
     return result
 
 
-def link_loc_groups(locs, link_group):
+def link_loc_groups(locs, info, link_group):
     n_locs = len(link_group)
     n_groups = link_group.max() + 1
     n_ = _link_group_count(link_group, n_locs, n_groups)
@@ -524,7 +523,10 @@ def link_loc_groups(locs, link_group):
     columns['n'] = n_
     if hasattr(locs, 'photons'):
         columns['photon_rate'] = _np.float32(columns['photons'] / n_)
-    return _np.rec.array(list(columns.values()), names=list(columns.keys()))
+    linked_locs = _np.rec.array(list(columns.values()), names=list(columns.keys()))
+    valid = _np.logical_and(first_frame_ > 0, last_frame_ < info[0]['Frames'])
+    linked_locs = linked_locs[valid]
+    return linked_locs
 
 
 def undrift(locs, info, segmentation, display=True, segmentation_callback=None, rcc_callback=None):
