@@ -61,6 +61,7 @@ def save_raw(path, movie, info):
     info_path = _ospath.splitext(path)[0] + '.yaml'
     save_info(info_path, info)
 
+
 def multiple_filenames(path, index):
     base, ext = _ospath.splitext(path)
     filename = base + '_' + str(index) + ext
