@@ -385,7 +385,7 @@ class ParametersDialog(QtGui.QDialog):
         self.sensitivity = QtGui.QDoubleSpinBox()
         self.sensitivity.setRange(0, 1e6)
         self.sensitivity.setValue(1.0)
-        self.sensitivity.setDecimals(2)
+        self.sensitivity.setDecimals(4)
         self.sensitivity.setSingleStep(0.01)
         photon_grid.addWidget(self.sensitivity, 2, 1)
 
