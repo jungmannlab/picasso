@@ -38,6 +38,7 @@ class FloatEdit(QtGui.QLineEdit):
 
     def __init__(self):
         super().__init__()
+        self.setSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Preferred)
         self.editingFinished.connect(self.onEditingFinished)
 
     def onEditingFinished(self):
@@ -45,7 +46,7 @@ class FloatEdit(QtGui.QLineEdit):
         self.valueChanged.emit(value)
 
     def setValue(self, value):
-        text = '{:e}'.format(value)
+        text = '{:.10e}'.format(value)
         self.setText(text)
 
     def value(self):
@@ -279,6 +280,16 @@ class InfoDialog(QtGui.QDialog):
         self.picks_grid_current += 1
         self.add_pick_info_field('Length', decimals=2)
         self.add_pick_info_field('Dark time', decimals=2)
+        self.picks_grid.addWidget(QtGui.QLabel('# Units per pick:'), self.picks_grid_current, 0)
+        self.units_per_pick = QtGui.QSpinBox()
+        self.units_per_pick.setRange(1, 1e6)
+        self.units_per_pick.setValue(1)
+        self.picks_grid.addWidget(self.units_per_pick, self.picks_grid_current, 1, 1, 2)
+        self.picks_grid_current += 1
+        calculate_influx_button = QtGui.QPushButton('Calibrate influx')
+        calculate_influx_button.clicked.connect(self.calibrate_influx)
+        self.picks_grid.addWidget(calculate_influx_button, self.picks_grid_current, 0, 1, 3)
+        self.picks_grid_current += 1
         self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/frames):'), self.picks_grid_current, 0)
         self.influx_rate = FloatEdit()
         self.influx_rate.setValue(0.03)
@@ -321,6 +332,11 @@ class InfoDialog(QtGui.QDialog):
             show_plot_button = QtGui.QPushButton('Show plot')
             self.movie_grid.addWidget(show_plot_button, self.movie_grid.rowCount()-1, 2)
             show_plot_button.clicked.connect(self.show_nena_plot)
+
+    def calibrate_influx(self):
+        influx = np.mean(1 / self.pick_info['Dark time']) / self.units_per_pick.value()
+        self.influx_rate.setValue(influx)
+        self.update_binding_sites()
 
     def update_binding_sites(self, influx=None):
         if self.pick_info is not None:
@@ -536,6 +552,7 @@ class View(QtGui.QLabel):
         self.n_locs = 0
         self._picks = []
         self.index_blocks = []
+        self._drift = []
 
     def add(self, path, render=True):
         locs, info = io.load_locs(path)
@@ -544,6 +561,7 @@ class View(QtGui.QLabel):
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
+        self._drift.append(None)
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
@@ -1120,6 +1138,15 @@ class View(QtGui.QLabel):
     def to_down(self):
         self.pan_relative(-0.8, 0)
 
+    def add_drift(self, channel, drift):
+        if self._drift[channel] is None:
+            self._drift[channel] = drift
+        else:
+            self._drift[channel].x += drift.x
+            self._drift[channel].y += drift.y
+        base, ext = os.path.splitext(self.locs_paths[channel])
+        np.savetxt(base + '_drift.txt', self._drift[channel], header='dx\tdy', newline='\r\n')
+
     def undrift(self):
         channel = self.get_channel('Undrift')
         if channel is not None:
@@ -1131,9 +1158,10 @@ class View(QtGui.QLabel):
                 seg_progress = lib.ProgressDialog('Generating segments', 0, n_segments, self)
                 n_pairs = int(n_segments * (n_segments - 1) / 2)
                 rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
-                postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
+                drift, _ = postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
                 self.locs[channel] = lib.ensure_sanity(locs, info)
                 self.index_blocks[channel] = None
+                self.add_drift(channel, drift)
                 self.update_scene()
 
     def undrift_from_picked(self):
@@ -1184,7 +1212,12 @@ class View(QtGui.QLabel):
         # Apply drift
         self.locs[channel].x -= drift_x_mean[self.locs[channel].frame]
         self.locs[channel].y -= drift_y_mean[self.locs[channel].frame]
+
+        # Cleanup
         self.index_blocks[channel] = None
+        drift = (drift_x_mean, drift_y_mean)
+        drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
+        self.add_drift(channel, drift)
         status.close()
         self.update_scene()
 
