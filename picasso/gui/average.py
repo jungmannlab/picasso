@@ -301,8 +301,6 @@ class Window(QtGui.QMainWindow):
 
 
 def main():
-    # This line is needed to support the pyinstaller exe:
-    multiprocessing.freeze_support()
 
     app = QtGui.QApplication(sys.argv)
     window = Window()
