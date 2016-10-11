@@ -218,7 +218,8 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     theta = _initial_theta_sigma(spot, size)
     max_step = _np.zeros(n_params, dtype=_np.float32)
     max_step[0:2] = theta[4]
-    max_step[2:5] = 0.1 * theta[2:5]
+    max_step[2:4] = 0.1 * theta[2:4]
+    max_step[4] = 0.2 * theta[4]
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
@@ -344,7 +345,8 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
     theta = _initial_theta_sigmaxy(spot, size)
     max_step = _np.zeros(n_params, dtype=_np.float32)
     max_step[0:2] = theta[4]
-    max_step[2:6] = 0.1 * theta[2:6]
+    max_step[2:4] = 0.1 * theta[2:4]
+    max_step[4:6] = 0.2 * theta[4:6]
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
