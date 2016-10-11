@@ -15,12 +15,11 @@ import threading as _threading
 from concurrent import futures as _futures
 
 
-MAX_STEP = _np.array([1.0, 1.0, 100.0, 5.0, 0.5, 0.5])
 GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _center_of_mass(spot, size):
+def _sum_and_center_of_mass(spot, size):
     x = 0.0
     y = 0.0
     _sum_ = 0.0
@@ -31,7 +30,7 @@ def _center_of_mass(spot, size):
             _sum_ += spot[i, j]
     x /= _sum_
     y /= _sum_
-    return y, x
+    return _sum_, y, x
 
 
 @_numba.jit(nopython=True, nogil=True)
@@ -52,48 +51,41 @@ def mean_filter(spot, size):
     return filtered_spot
 
 
-@_numba.jit(nopython=True, nogil=True, cache=False)
-def centroid(spot, size):
-    y, x = _center_of_mass(spot, size)
-    bg = _np.min(mean_filter(spot, size))
-    photons = _np.maximum(1.0, _np.sum(spot) - size * size * bg)
-    return x, y, photons, bg
-
-
 @_numba.jit(nopython=True, nogil=True)
-def _initial_sigmax(spot_bg, center, size, sum_spot_bg):
-    sum_ = 0.0
+def _initial_sigmas(spot, y, x, sum, size):
+    sum_deviation_y = 0.0
+    sum_deviation_x = 0.0
     for i in range(size):
         for j in range(size):
-            sum_ += spot_bg[i, j] * (j-center)**2
-    return _np.sqrt(sum_ / sum_spot_bg)
+            sum_deviation_y += spot[i, j] * (i - y)**2
+            sum_deviation_x += spot[i, j] * (j - x)**2
+    sy = _np.sqrt(sum_deviation_y / sum)
+    sx = _np.sqrt(sum_deviation_x / sum)
+    return sy, sx
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _initial_sigmay(spot_bg, center, size, sum_spot_bg):
-    sum_ = 0.0
-    for i in range(size):
-        for j in range(size):
-            sum_ += spot_bg[i, j] * (i-center)**2
-    return _np.sqrt(sum_ / sum_spot_bg)
-
-
-@_numba.jit(nopython=True, nogil=True)
-def _initial_parameters_sigmaxy(spot, size):
-    y, x = _center_of_mass(spot, size)
+def _initial_parameters(spot, size):
+    sum, y, x = _sum_and_center_of_mass(spot, size)
     bg = _np.min(mean_filter(spot, size))
-    photons = _np.maximum(1.0, _np.sum(spot) - size * size * bg)
-    spot_bg = spot - bg
-    sum_spot_bg = _np.sum(spot_bg)
-    sy = _initial_sigmay(spot_bg, y, size, sum_spot_bg)
-    sx = _initial_sigmax(spot_bg, x, size, sum_spot_bg)
+    photons = sum - size * size * bg
+    photons_sane = _np.maximum(1.0, photons)
+    sy, sx = _initial_sigmas(spot-bg, y, x, photons, size)
+    return x, y, photons_sane, bg, sx, sy
+
+
+@_numba.jit(nopython=True, nogil=True)
+def _initial_theta_sigma(spot, size):
+    theta = _np.zeros(5, dtype=_np.float32)
+    theta[0], theta[1], theta[2], theta[3], sx, sy = _initial_parameters(spot, size)
+    theta[4] = (sx + sy) / 2
+    return theta
+
+
+@_numba.jit(nopython=True, nogil=True)
+def _initial_theta_sigmaxy(spot, size):
     theta = _np.zeros(6, dtype=_np.float32)
-    theta[0] = x
-    theta[1] = y
-    theta[2] = photons
-    theta[3] = bg
-    theta[4] = sx
-    theta[5] = sy
+    theta[0], theta[1], theta[2], theta[3], theta[4], theta[5] = _initial_parameters(spot, size)
     return theta
 
 
@@ -228,30 +220,30 @@ def gaussmle_async(spots, eps, max_it, method='sigma'):
         func = _mlefit_sigmaxy
     else:
         raise ValueError('Method not available.')
-    executor = _futures.ThreadPoolExecutor(n_workers)
-    for i in range(n_workers):
-        executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
-    executor.shutdown(wait=False)
+    # executor = _futures.ThreadPoolExecutor(n_workers)
+    # for i in range(n_workers):
+    #     executor.submit(_worker, func, spots, thetas, CRLBs, likelihoods, iterations, eps, max_it, current, lock)
+    # executor.shutdown(wait=False)
     # A synchronous single-threaded version for debugging:
-    # for i in range(N):
-    #     print('Spot', i)
-    #     func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
+    for i in range(N):
+        print('Spot', i)
+        func(spots, i, thetas, CRLBs, likelihoods, iterations, eps, max_it)
     return current, thetas, CRLBs, likelihoods, iterations
 
 
-@_numba.jit(nopython=True, nogil=True)
+#@_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
-    initial_sigma = 1.0
     n_params = 5
 
     spot = spots[index]
     size, _ = spot.shape
 
-    # Initial values
     # theta is [x, y, N, bg, S]
-    theta = _np.zeros(n_params, dtype=_np.float32)
-    theta[0], theta[1], theta[2], theta[3] = centroid(spot, size)
-    theta[4] = initial_sigma
+    theta = _initial_theta_sigma(spot, size)
+    max_step = _np.zeros(n_params, dtype=_np.float32)
+    max_step[0:2] = theta[4]
+    max_step[2:5] = 0.1 * theta[2:5]
+    print(theta)
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
@@ -299,9 +291,9 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
         # The update
         for ll in range(n_params):
             if denominator[ll] == 0.0:
-                update = _np.sign(numerator[ll] * MAX_STEP[ll])
+                update = _np.sign(numerator[ll] * max_step[ll])
             else:
-                update = _np.minimum(_np.maximum(numerator[ll] / denominator[ll], -MAX_STEP[ll]), MAX_STEP[ll])
+                update = _np.minimum(_np.maximum(numerator[ll] / denominator[ll], -max_step[ll]), max_step[ll])
             if kk < 5:
                 update *= GAMMA[ll]
             theta[ll] -= update
@@ -322,6 +314,8 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     thetas[index, 0:5] = theta
     thetas[index, 5] = theta[4]
     iterations[index] = kk
+
+    print(theta)
 
     # Calculating the CRLB and LogLikelihood
     Div = 0.0
@@ -365,7 +359,7 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     CRLBs[index, 5] = CRLB[4]
 
 
-@_numba.jit(nopython=True, nogil=True)
+# @_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     n_params = 6
 
@@ -374,7 +368,11 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
 
     # Initial values
     # theta is [x, y, N, bg, Sx, Sy]
-    theta = _initial_parameters_sigmaxy(spot, size)
+    theta = _initial_theta_sigmaxy(spot, size)
+    max_step = _np.zeros(n_params, dtype=_np.float32)
+    max_step[0:2] = theta[4]
+    max_step[2:6] = 0.1 * theta[2:6]
+    print(theta)
 
     # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
@@ -424,9 +422,9 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
         for ll in range(n_params):
             if denominator[ll] == 0.0:
                 # This is case is not handled in Lidke's code, but it seems to be a problem here (maybe due to many iterations)
-                theta[ll] -= GAMMA[ll] * _np.sign(numerator[ll]) * MAX_STEP[ll]
+                theta[ll] -= GAMMA[ll] * _np.sign(numerator[ll]) * max_step[ll]
             else:
-                theta[ll] -= GAMMA[ll] * _np.minimum(_np.maximum(numerator[ll] / denominator[ll], -MAX_STEP[ll]), MAX_STEP[ll])
+                theta[ll] -= GAMMA[ll] * _np.minimum(_np.maximum(numerator[ll] / denominator[ll], -max_step[ll]), max_step[ll])
 
         # Other constraints
         theta[2] = _np.maximum(theta[2], 1.0)
@@ -443,6 +441,8 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
 
     thetas[index] = theta
     iterations[index] = kk
+
+    print(theta)
 
     # Calculating the CRLB and LogLikelihood
     Div = 0.0

@@ -870,6 +870,7 @@ class Window(QtGui.QMainWindow):
                 self.fit()
 
     def fit(self):
+        import matplotlib.pyplot as plt
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage('Preparing fit...')
             camera_info = {}
@@ -880,11 +881,12 @@ class Window(QtGui.QMainWindow):
             eps = self.parameters_dialog.convergence_spinbox.value()
             max_it = self.parameters_dialog.max_iterations_spinbox.value()
             method = {True: 'sigma', False: 'sigmaxy'}[self.parameters_dialog.symmetric_checkbox.isChecked()]
-            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'],
-                                        eps, max_it, method)
-            self.fit_worker.progressMade.connect(self.on_fit_progress)
-            self.fit_worker.finished.connect(self.on_fit_finished)
-            self.fit_worker.start()
+            # self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'],
+            #                             eps, max_it, method)
+            # self.fit_worker.progressMade.connect(self.on_fit_progress)
+            # self.fit_worker.finished.connect(self.on_fit_finished)
+            # self.fit_worker.start()
+            localize.fit_async(self.movie, camera_info, self.identifications, self.parameters['Box Size'], eps, max_it, method)
 
     def on_fit_progress(self, current, total):
         message = 'Fitting spot {:,} / {:,} ...'.format(current, total)
