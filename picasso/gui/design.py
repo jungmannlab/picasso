@@ -30,6 +30,9 @@ _this_directory = os.path.dirname(_this_file)
 BaseSequencesFile = os.path.join(_this_directory,  '..',  'base_sequences.csv')
 PaintSequencesFile = os.path.join(_this_directory,  '..',  'paint_sequences.csv')
 
+TABLESHORT_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
+TABLELONG_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
+
 
 
 def plotPlate(selection,selectioncolors, platename):
@@ -101,8 +104,7 @@ for i in range(1,len(PaintHandles)):
     allSeqLong = allSeqLong+', '+PaintHandles[i][1]
 
 
-TABLESHORT_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
-TABLELONG_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
+
 
 HEX_SIDE_HALF = 20
 HEX_SCALE = 1
@@ -244,31 +246,10 @@ class SeqDialog(QtGui.QDialog):
         self.table.setWindowTitle('Extension Table')
         self.setWindowTitle('Extenstion Table')
         self.resize(500,  285)
-        self.table.setRowCount(maxcolor-1)
-        self.table.setColumnCount(4)
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(('Pos, Color, Preselection, Shortname, Sequence').split(', '))
         self.table.horizontalHeader().setStretchLastSection(True)
-        #table defintion
-        self.table.setHorizontalHeaderLabels(('Color, Pre, Shortname, Sequence').split(', '))
-
-        for i in range(0, maxcolor-1):
-            self.table.setItem(i, 0,  QtGui.QTableWidgetItem("Ext "+str(i+1)))
-            self.table.item(i,  0).setBackground(allcolors[i+1])
-
-        self.ImagersShort = allSeqShort.split(", ")
-        self.ImagersLong = allSeqLong.split(", ")
-
-        comb = dict()
-
-        for i in range(0, maxcolor-1):
-            comb[i] = QtGui.QComboBox()
-
-        for element in self.ImagersShort:
-            for i in range(0, maxcolor-1):
-                comb[i].addItem(element)
-
-        for i in range(0, maxcolor-1):
-            self.table.setCellWidget(i,  1,  comb[i])
-            comb[i].currentIndexChanged.connect(lambda state,  indexval=i: self.changeComb(indexval))
+        self.table.resizeColumnsToContents()
 
         layout.addWidget(self.table)
 
@@ -281,47 +262,67 @@ class SeqDialog(QtGui.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
+    def  initTable(self,colorcounts,tableshort,tablelong):
+        noseq = _np.count_nonzero(colorcounts)
+        #table defintion
+        self.table.setRowCount(noseq-1)
+        rowRunner = 0
+        for i in range(len(colorcounts)-1):
+            if colorcounts[i] > 0:
+                self.table.setItem(rowRunner, 0,  QtGui.QTableWidgetItem(str(i+1)))
+                self.table.setItem(rowRunner, 1,  QtGui.QTableWidgetItem("Ext "+str(i+1)))
+                self.table.item(rowRunner,  1).setBackground(allcolors[i+1])
+                self.table.setItem(rowRunner, 3,  QtGui.QTableWidgetItem(tableshort[i]))
+                self.table.setItem(rowRunner, 4,  QtGui.QTableWidgetItem(tablelong[i]))
+                rowRunner+=1
+
+        self.ImagersShort = allSeqShort.split(", ")
+        self.ImagersLong = allSeqLong.split(", ")
+
+        comb = dict()
+
+        for i in range(self.table.rowCount()):
+            comb[i] = QtGui.QComboBox()
+
+        for element in self.ImagersShort:
+            for i in range(self.table.rowCount()):
+                comb[i].addItem(element)
+
+        for i in range(self.table.rowCount()):
+            self.table.setCellWidget(i,  2,  comb[i])
+            comb[i].currentIndexChanged.connect(lambda state,  indexval=i: self.changeComb(indexval))
+
     def changeComb(self,  indexval):
 
         sender = self.sender()
         comboval = sender.currentIndex()
         if comboval == 0:
-            self.table.setItem(indexval, 2,  QtGui.QTableWidgetItem(''))
-            self.table.setItem(indexval, 3,  QtGui.QTableWidgetItem(''))
+            self.table.setItem(indexval, 3,  QtGui.QTableWidgetItem('None'))
+            self.table.setItem(indexval, 4,  QtGui.QTableWidgetItem('None'))
         else:
-            self.table.setItem(indexval, 2,  QtGui.QTableWidgetItem(self.ImagersShort[comboval]))
-            self.table.setItem(indexval, 3,  QtGui.QTableWidgetItem(self.ImagersLong[comboval]))
+            self.table.setItem(indexval, 3,  QtGui.QTableWidgetItem(self.ImagersShort[comboval]))
+            self.table.setItem(indexval, 4,  QtGui.QTableWidgetItem(self.ImagersLong[comboval]))
 
     def readoutTable(self):
-        tableshort = dict()
-        tablelong = dict()
+        tableshort = TABLESHORT_DEFAULT
+        tablelong = TABLELONG_DEFAULT
 
-        for i in range(0, maxcolor-1):
+        for i in range(self.table.rowCount()):
             try:
-                tableshort[i] = self.table.item(i, 2).text()
+                tableshort[int(self.table.item(i,0).text())-1] = self.table.item(i, 3).text()
                 if tableshort[i] == '':
                     tableshort[i] = 'None'
             except AttributeError:
                 tableshort[i] = 'None'
 
             try:
-                tablelong[i] = self.table.item(i, 3).text()
+                tablelong[int(self.table.item(i,0).text())-1] = self.table.item(i, 4).text()
                 if tablelong[i] == '':
                     tablelong[i] = 'None'
             except AttributeError:
                 tablelong[i] = 'None'
         return tablelong,  tableshort
 
-    def evalTable(self):
-        tablelong,  tableshort = self.readoutTable()
-        return tablelong,  tableshort
-
-    @staticmethod
-    def setExt(parent = None):
-        dialog = SeqDialog(parent)
-        result = dialog.exec_()
-        tablelong,  tableshort = dialog.evalTable()
-        return (tablelong,  tableshort,  result == QDialog.Accepted)
 
 class FoldingDialog(QtGui.QDialog):
     def __init__(self,  parent = None):
@@ -641,11 +642,12 @@ class Scene(QtGui.QGraphicsScene):
 
             for i in range(0, origamiitems):
                 allitems[paletteindex+i].setBrush(QtGui.QBrush(defaultcolor))
+            TABLESHORT_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
+            TABLELONG_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
 
-            self.tableshort = TABLESHORT_DEFAULT
-            self.tablelong = TABLELONG_DEFAULT
+            self.saveExtensions(TABLESHORT_DEFAULT,TABLELONG_DEFAULT)
+            self.updateExtensions(TABLESHORT_DEFAULT)
             self.evaluateCanvas()
-            self.updateExtensions(self.tableshort)
 
     def vectorToString(self, x):
         x_arrstr = _np.char.mod('%f',  x)
@@ -791,7 +793,7 @@ class Window(QtGui.QMainWindow):
 
     def clearDialog(self):
         self.mainscene.clearCanvas()
-        self.statusBar().showMessage('Canvas clearead.')
+        self.statusBar().showMessage('Clearead.')
 
     def takeScreenshot(self):
         path = QtGui.QFileDialog.getSaveFileName(self,  'Save Screenshot to..',  filter='*.png')
@@ -803,11 +805,27 @@ class Window(QtGui.QMainWindow):
             self.statusBar().showMessage('Filename not specified. Screenshot not saved.')
 
     def setSeq(self):
-        tablelong,  tableshort,  ok = SeqDialog.setExt()
-        if ok:
-            self.mainscene.updateExtensions(tableshort)
-            self.mainscene.saveExtensions(tableshort, tablelong)
-            self.statusBar().showMessage('Extensions set.')
+
+        colorcounts = self.mainscene.colorcounts
+
+        if sum(colorcounts[0:-1]) > 0:
+
+            sdialog = SeqDialog()
+            sdialog.initTable(colorcounts,self.mainscene.tableshort,self.mainscene.tablelong)
+            ok = sdialog.exec()
+
+            tablelong,  tableshort = sdialog.readoutTable()
+
+            if ok:
+                self.mainscene.updateExtensions(tableshort)
+                self.mainscene.saveExtensions(tableshort, tablelong)
+                self.statusBar().showMessage('Extensions set.')
+
+        else:
+            self.statusBar().showMessage('No hexagons marked. Please select first.')
+
+
+
 
     def checkSeq(self):
         colorcounts = self.mainscene.colorcounts
@@ -918,9 +936,7 @@ class Window(QtGui.QMainWindow):
         fdialog = FoldingDialog() # Intitialize FoldingDialog Class
         #Fill with Data
         colorcounts = self.mainscene.colorcounts
-
         noseq = _np.count_nonzero(colorcounts)
-
 
         fdialog.table.setRowCount(noseq+5)
 
@@ -991,7 +1007,7 @@ class MainWindow(QtGui.QWidget):
         #define buttons
         loadbtn = QtGui.QPushButton("Load")
         savebtn = QtGui.QPushButton("Save")
-        clearbtn =  QtGui.QPushButton("Clear Canvas")
+        clearbtn =  QtGui.QPushButton("Clear")
         sshotbtn = QtGui.QPushButton("Screenshot")
         seqbtn = QtGui.QPushButton("Extensions")
         platebtn = QtGui.QPushButton("Get Plates")
