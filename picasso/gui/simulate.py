@@ -26,6 +26,7 @@ import os
 from PyQt4.QtGui import QDialog, QVBoxLayout, QDialogButtonBox, QDateTimeEdit, QApplication
 from PyQt4.QtCore import Qt, QDateTime
 import time
+import csv
 
 def fitFuncBg(x, a, b, c):
     return (a + b*x[0])*x[1]*x[2]+c
@@ -54,12 +55,12 @@ PHOTONBUDGET_DEFAULT = 1500000
 PHOTONSLOPE_DEFAULT = 0.8
 PHOTONSLOPESTD_DEFAULT = 0.4
 #NOISE MODEL
-LASERC_DEFAULT = 0.007152
-IMAGERC_DEFAULT = 0.002130
-CAMERAC_DEFAULT = 238.230221
-EQA_DEFAULT = -0.001950
-EQB_DEFAULT = 0.259030
-EQC_DEFAULT = -42.905998
+LASERC_DEFAULT = 0.010513
+IMAGERC_DEFAULT = 0.003131
+CAMERAC_DEFAULT = 56.198425
+EQA_DEFAULT = -0.002866
+EQB_DEFAULT = 0.259038
+EQC_DEFAULT = 13.085473
 #STRUCTURE
 STRUCTURE1_DEFAULT = 3
 STRUCTURE2_DEFAULT = 4
@@ -1189,6 +1190,7 @@ class Window(QtGui.QMainWindow):
         if path:
             self.readhdf5(path)
 
+
     def calibrateNoise(self):
 
         bg,bgstd, las, time, conc, ok = CalibrationDialog.setExt()
@@ -1401,8 +1403,57 @@ class CalibrationDialog(QtGui.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
+    def exportTable(self):
 
+        table = dict()
+        tablecontent = []
+        print(self.table.rowCount())
+        tablecontent.append(['FileName','Imager concentration[nM]','Integration time [ms]','Laserpower','Mean [Photons]','Std [Photons]'])
+        for row in range(self.table.rowCount()):
+            rowdata = []
+            for column in range(self.table.columnCount()):
+                item = self.table.item(row, column)
+                if item is not None:
+                    rowdata.append(item.text())
+                else:
+                    rowdata.append('')
+            tablecontent.append(rowdata)
+
+        table[0] = tablecontent
+        print(tablecontent)
+        print(table)
+        path = QtGui.QFileDialog.getSaveFileName(self,  'Export calibration table to.',  filter='*.csv')
+        if path:
+            self.savePlate(path, table)
+
+
+    def savePlate(self, filename, data):
+        with open(filename,  'w',  newline='') as csvfile:
+            Writer = csv.writer(csvfile,  delimiter=',',
+                                quotechar='|',  quoting=csv.QUOTE_MINIMAL)
+            for j in range(0, len(data)):
+                exportdata = data[j]
+                for i in range(0, len(exportdata)):
+                    Writer.writerow(exportdata[i])
     def evalTif(self):
+
+        baseline, ok1 = QtGui.QInputDialog.getText(self, 'Input Dialog',
+            'Enter Camera Baseline:')
+        if ok1:
+            baseline= int(baseline)
+        else:
+            baseline = 200 #default
+
+        sensitvity, ok2 = QtGui.QInputDialog.getText(self, 'Input Dialog',
+            'Enter Camera Sensitivity:')
+        if ok2:
+            sensitvity = float(sensitvity)
+        else:
+            sensitvity = 1.47
+
+        print(baseline)
+        print(sensitvity)
+
         counter = 0
         for element in self.tifFiles:
             counter = counter+1
@@ -1410,14 +1461,40 @@ class CalibrationDialog(QtGui.QDialog):
             print('Current Dataset: '+str(counter)+' of ' +str(self.tifCounter))
             QtGui.qApp.processEvents()
             movie, info = _io.load_movie(element)
-            print(movie.shape)
+
             movie = movie[0:100,:,:]
-            print(movie.shape)
-            self.table.setItem(counter-1,4, QtGui.QTableWidgetItem(str(_np.mean(movie))))
-            self.table.setItem(counter-1,5, QtGui.QTableWidgetItem(str(_np.std(movie))))
+
+            movie = (movie-baseline)*sensitvity
+            self.table.setItem(counter-1,4, QtGui.QTableWidgetItem(str((_np.mean(movie)))))
+            self.table.setItem(counter-1,5, QtGui.QTableWidgetItem(str((_np.std(movie)))))
+
+            self.table.setItem(counter-1,1, QtGui.QTableWidgetItem(str((self.ValueFind(element,'nM_')))))
+            self.table.setItem(counter-1,2, QtGui.QTableWidgetItem(str((self.ValueFind(element,'ms_')))))
+            self.table.setItem(counter-1,3, QtGui.QTableWidgetItem(str((self.ValueFind(element,'mW_')))))
+
+
+
             print(_np.mean(movie))
             print(_np.std(movie))
         self.pbar.setValue(100)
+
+    def ValueFind(self, filename,unit):
+        index = filename.index(unit)
+
+        value = 0
+
+        for i in range(4):
+            try:
+                value+=int(filename[index-1-i])*(10**i)
+            except ValueError:
+                pass
+
+        return(value)
+
+
+
+
+
 
 
     def loadTif(self):
@@ -1430,7 +1507,7 @@ class CalibrationDialog(QtGui.QDialog):
 
             self.table.setRowCount(int(self.tifCounter))
             self.table.setColumnCount(6)
-            self.table.setHorizontalHeaderLabels(('FileName,Imager concentration[nM],Integration time [ms],Laserpower,Mean,Std').split(','))
+            self.table.setHorizontalHeaderLabels(('FileName,Imager concentration[nM],Integration time [ms],Laserpower,Mean [Photons],Std [Photons]').split(','))
 
             for i in range(0,self.tifCounter):
                 self.table.setItem(i,0, QtGui.QTableWidgetItem(self.tifFiles[i]))
@@ -1483,7 +1560,7 @@ class CalibrationDialog(QtGui.QDialog):
             bg.append(float(self.table.item(i,4).text()))
             bgstd.append(float(self.table.item(i,5).text()))
 
-
+        #self.exportTable()
         return bg,bgstd, las, time, conc
 
     # static method to create the dialog and return (date, time, accepted)
