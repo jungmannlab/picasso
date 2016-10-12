@@ -161,6 +161,9 @@ class TiffMap:
         while offset != 0:
             self.file.seek(offset)
             n_entries = self.read('H')
+            if n_entries is None:
+                # Some MM files have trailing nonsense bytes
+                break
             for i in range(n_entries):
                 self.file.seek(offset + 2 + i * 12)
                 tag = self.read('H')
@@ -266,7 +269,10 @@ class TiffMap:
     def read_numbers(self, type, count=1):
         size = self.TYPE_SIZES[type]
         fmt = self.byte_order + count * type
-        return _struct.unpack(fmt, self.file.read(count * size))[0]
+        try:
+            return _struct.unpack(fmt, self.file.read(count * size))[0]
+        except _struct.error:
+            return None
 
     def close(self):
         self.file.close()
