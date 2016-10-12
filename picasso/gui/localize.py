@@ -346,15 +346,19 @@ class ParametersDialog(QtGui.QDialog):
                         self.cam_combos[camera][0].change_target_choices(0)
                         self.cam_combos[camera][-1].currentIndexChanged.connect(self.update_sensitivity)
                 if 'Quantum Efficiency' in cam_config:
-                    row_count = cam_grid.rowCount()
-                    cam_grid.addWidget(QtGui.QLabel('Emission Wavelength:'), row_count, 0)
-                    emission_combo = QtGui.QComboBox()
-                    cam_grid.addWidget(emission_combo, row_count, 1)
-                    qes = cam_config['Quantum Efficiency'].keys()
-                    wavelengths = sorted([str(_) for _ in qes])
-                    emission_combo.addItems(wavelengths)
-                    emission_combo.currentIndexChanged.connect(self.on_emission_changed)
-                    self.emission_combos[camera] = emission_combo
+                    try:
+                        qes = cam_config['Quantum Efficiency'].keys()
+                    except AttributeError:
+                        pass
+                    else:
+                        row_count = cam_grid.rowCount()
+                        cam_grid.addWidget(QtGui.QLabel('Emission Wavelength:'), row_count, 0)
+                        emission_combo = QtGui.QComboBox()
+                        cam_grid.addWidget(emission_combo, row_count, 1)
+                        wavelengths = sorted([str(_) for _ in qes])
+                        emission_combo.addItems(wavelengths)
+                        emission_combo.currentIndexChanged.connect(self.on_emission_changed)
+                        self.emission_combos[camera] = emission_combo
                 spacer = QtGui.QWidget()
                 spacer.setSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Expanding)
                 cam_grid.addWidget(spacer, cam_grid.rowCount(), 0)
@@ -431,25 +435,31 @@ class ParametersDialog(QtGui.QDialog):
         self.window.on_parameters_changed()
 
     def on_camera_changed(self, index):
+        self.gain.setValue(1)
         self.cam_settings.setCurrentIndex(index)
         camera = self.camera.currentText()
         cam_config = CONFIG['Cameras'][camera]
         if 'Baseline' in cam_config:
             self.baseline.setValue(cam_config['Baseline'])
-        if 'Sensitivity' in cam_config:
-            sensitivity = cam_config['Sensitivity']
+        self.update_sensitivity()
+        self.update_qe()
+
+    def update_qe(self):
+        camera = self.camera.currentText()
+        cam_config = CONFIG['Cameras'][camera]
+        if 'Quantum Efficiency' in cam_config:
+            qe = cam_config['Quantum Efficiency']
             try:
-                self.sensitivity.setValue(sensitivity)
+                self.qe.setValue(qe)
             except TypeError:
-                # sensitivity is not a number
-                pass
+                # qe is not a number
+                em_combo = self.emission_combos[camera]
+                wavelength = float(em_combo.currentText())
+                qe = cam_config['Quantum Efficiency'][wavelength]
+                self.qe.setValue(qe)
 
     def on_emission_changed(self, index):
-        camera = self.camera.currentText()
-        em_combo = self.emission_combos[camera]
-        wavelength = float(em_combo.currentText())
-        qe = CONFIG['Cameras'][camera]['Quantum Efficiency'][wavelength]
-        self.qe.setValue(qe)
+        self.update_qe()
 
     def on_mng_spinbox_changed(self, value):
         if value < self.mng_slider.minimum():
@@ -479,16 +489,13 @@ class ParametersDialog(QtGui.QDialog):
             if camera in cameras:
                 index = cameras.index(camera)
                 self.camera.setCurrentIndex(index)
-            if 'Micro-Manager Metadata' in info:
-                mm_info = info['Micro-Manager Metadata']
                 if 'Micro-Manager Metadata' in info:
+                    mm_info = info['Micro-Manager Metadata']
                     cam_config = CONFIG['Cameras'][camera]
                     if 'Gain Property Name' in cam_config:
                         gain_property_name = cam_config['Gain Property Name']
                         gain = mm_info[camera + '-' + gain_property_name]
                         self.gain.setValue(int(gain))
-                    else:
-                        self.gain.setValue(1)
                     if 'Sensitivity Categories' in cam_config:
                         cam_combos = self.cam_combos[camera]
                         categories = cam_config['Sensitivity Categories']
@@ -520,11 +527,16 @@ class ParametersDialog(QtGui.QDialog):
         camera = self.camera.currentText()
         cam_config = CONFIG['Cameras'][camera]
         sensitivity = cam_config['Sensitivity']
-        categories = cam_config['Sensitivity Categories']
-        for i, category in enumerate(categories):
-            cat_combo = self.cam_combos[camera][i]
-            sensitivity = sensitivity[cat_combo.currentText()]
-        self.sensitivity.setValue(sensitivity)
+        if 'Sensitivity' in cam_config:
+            try:
+                self.sensitivity.setValue(sensitivity)
+            except TypeError:
+                # sensitivity is not a number
+                categories = cam_config['Sensitivity Categories']
+                for i, category in enumerate(categories):
+                    cat_combo = self.cam_combos[camera][i]
+                    sensitivity = sensitivity[cat_combo.currentText()]
+                self.sensitivity.setValue(sensitivity)
 
 
 class ContrastDialog(QtGui.QDialog):
@@ -626,7 +638,11 @@ class Window(QtGui.QMainWindow):
         save_action.setShortcut('Ctrl+S')
         save_action.triggered.connect(self.save_locs_dialog)
         file_menu.addAction(save_action)
-        file_menu.addSeparator()
+        save_spots_action = file_menu.addAction('Save spots')
+        save_spots_action.setShortcut('Ctrl+Shift+S')
+        save_spots_action.triggered.connect(self.save_spots_dialog)
+        file_menu.addAction(save_spots_action)
+        # file_menu.addSeparator()
         # open_parameters_action = file_menu.addAction('Load parameters')
         # open_parameters_action.setShortcut('Ctrl+Shift+O')
         # open_parameters_action.triggered.connect(self.open_parameters)
@@ -697,6 +713,15 @@ class Window(QtGui.QMainWindow):
         localize_action.setShortcut('Ctrl+L')
         localize_action.triggered.connect(self.localize)
         analyze_menu.addAction(localize_action)
+
+    @property
+    def camera_info(self):
+        camera_info = {}
+        camera_info['baseline'] = self.parameters_dialog.baseline.value()
+        camera_info['gain'] = self.parameters_dialog.gain.value()
+        camera_info['sensitivity'] = self.parameters_dialog.sensitivity.value()
+        camera_info['qe'] = self.parameters_dialog.qe.value()
+        return camera_info
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw; *.tif')
@@ -872,15 +897,10 @@ class Window(QtGui.QMainWindow):
     def fit(self):
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage('Preparing fit...')
-            camera_info = {}
-            camera_info['baseline'] = self.parameters_dialog.baseline.value()
-            camera_info['gain'] = self.parameters_dialog.gain.value()
-            camera_info['sensitivity'] = self.parameters_dialog.sensitivity.value()
-            camera_info['qe'] = self.parameters_dialog.qe.value()
             eps = self.parameters_dialog.convergence_spinbox.value()
             max_it = self.parameters_dialog.max_iterations_spinbox.value()
             method = {True: 'sigma', False: 'sigmaxy'}[self.parameters_dialog.symmetric_checkbox.isChecked()]
-            self.fit_worker = FitWorker(self.movie, camera_info, self.identifications, self.parameters['Box Size'],
+            self.fit_worker = FitWorker(self.movie, self.camera_info, self.identifications, self.parameters['Box Size'],
                                         eps, max_it, method)
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
@@ -905,6 +925,18 @@ class Window(QtGui.QMainWindow):
 
     def zoom_out(self):
         self.view.scale(7 / 10, 7 / 10)
+
+    def save_spots(self, path):
+        box = self.parameters['Box Size']
+        spots = localize.get_spots(self.movie, self.identifications, box, self.camera_info)
+        io.save_datasets(path, self.info, spots=spots)
+
+    def save_spots_dialog(self):
+        base, ext = os.path.splitext(self.movie_path)
+        path = base + '_spots.hdf5'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save spots', path, filter='*.hdf5')
+        if path:
+            self.save_spots(path)
 
     def save_locs(self, path):
         localize_info = self.last_identification_info.copy()

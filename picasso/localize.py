@@ -189,19 +189,19 @@ def _to_photons(spots, camera_info):
     return (spots - baseline) * sensitivity / (gain * qe)
 
 
-def _get_spots(movie, identifications, box, camera_info):
+def get_spots(movie, identifications, box, camera_info):
     spots = _cut_spots(movie, identifications, box)
     return _to_photons(spots, camera_info)
 
 
-def fit(movie, camera_info, identifications, box, eps=0.001):
-    spots = _get_spots(movie, identifications, box, camera_info)
-    theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle_sigmaxy(spots, eps)
+def fit(movie, camera_info, identifications, box, eps=0.001, method='sigma'):
+    spots = get_spots(movie, identifications, box, camera_info)
+    theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle(spots, eps, method=method)
     return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
 
 
 def fit_async(movie, camera_info, identifications, box, eps=0.001, max_it=100, method='sigma'):
-    spots = _get_spots(movie, identifications, box, camera_info)
+    spots = get_spots(movie, identifications, box, camera_info)
     return _gaussmle.gaussmle_async(spots, eps, max_it, method=method)
 
 

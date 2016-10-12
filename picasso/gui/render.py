@@ -58,8 +58,9 @@ class FloatEdit(QtGui.QLineEdit):
 
 class PickPooledHistWindow(QtGui.QWidget):
 
-    def __init__(self):
+    def __init__(self, info_dialog):
         super().__init__()
+        self.info_dialog = info_dialog
         self.figure = plt.Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
         vbox = QtGui.QVBoxLayout()
@@ -97,6 +98,11 @@ class PickPooledHistWindow(QtGui.QWidget):
         result = lib.CumulativeExponentialModel.fit(y, params, x=data)
         axes.semilogx(data, result.best_fit, label='fit (length  = {:.2f})'.format(result.best_values['t']))
         axes.legend(loc='best')
+        print('\n')
+        print('~~~ LENGTH ~~~')
+        print('Mean over picks:        ', np.mean(pick_info['Length']))
+        print('Mean over localizations:', np.mean(data))
+        print('From fit:               ', result.best_values['t'])
         # Dark
         axes = self.figure.add_subplot(133)
         axes.set_title('Dark time (cumulative)')
@@ -114,6 +120,14 @@ class PickPooledHistWindow(QtGui.QWidget):
         result = lib.CumulativeExponentialModel.fit(y, params, x=data)
         axes.semilogx(data, result.best_fit, label='fit (dark time  = {:.2f})'.format(result.best_values['t']))
         axes.legend(loc='best')
+        print('~~~ DARK TIME ~~~')
+        print('Mean over picks:        ', np.mean(pick_info['Dark time']))
+        print('Mean over localizations:', np.mean(data))
+        print('From fit:               ', result.best_values['t'])
+        print('~~~ INFLUX ~~~')
+        print('Mean over picks:        ', np.mean(1 / pick_info['Dark time']) / self.info_dialog.units_per_pick.value())
+        print('Mean over localizations:', 1 / np.mean(data) / self.info_dialog.units_per_pick.value())
+        print('From fit:               ', 1 / result.best_values['t'] / self.info_dialog.units_per_pick.value())
         self.canvas.draw()
 
 
@@ -166,7 +180,7 @@ class PickPicksHistWindow(QtGui.QWidget):
 
 class PickHistWindow(QtGui.QTabWidget):
 
-    def __init__(self):
+    def __init__(self, info_dialog):
         super().__init__()
         self.setWindowTitle('Pick Histograms')
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -174,7 +188,7 @@ class PickHistWindow(QtGui.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 400)
-        self.addTab(PickPooledHistWindow(), 'Per Localization')
+        self.addTab(PickPooledHistWindow(info_dialog), 'Per Localization')
         self.addTab(PickPicksHistWindow(), 'Per Pick')
 
     def plot(self, pick_info):
@@ -312,7 +326,7 @@ class InfoDialog(QtGui.QDialog):
         self.picks_grid.addWidget(self.binding_sites, self.picks_grid_current, 1)
         self.binding_sites_std = QtGui.QLabel()
         self.picks_grid.addWidget(self.binding_sites_std, self.picks_grid_current, 2)
-        self.pick_hist_window = PickHistWindow()
+        self.pick_hist_window = PickHistWindow(self)
         pick_hists = QtGui.QPushButton('Histograms')
         pick_hists.clicked.connect(self.pick_hist_window.show)
         self.picks_grid.addWidget(pick_hists, self.picks_grid.rowCount(), 0, 1, 3)
