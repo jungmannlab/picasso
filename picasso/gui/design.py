@@ -30,8 +30,7 @@ _this_directory = os.path.dirname(_this_file)
 BaseSequencesFile = os.path.join(_this_directory,  '..',  'base_sequences.csv')
 PaintSequencesFile = os.path.join(_this_directory,  '..',  'paint_sequences.csv')
 
-TABLESHORT_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
-TABLELONG_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
+
 
 
 
@@ -304,8 +303,8 @@ class SeqDialog(QtGui.QDialog):
             self.table.setItem(indexval, 4,  QtGui.QTableWidgetItem(self.ImagersLong[comboval]))
 
     def readoutTable(self):
-        tableshort = TABLESHORT_DEFAULT
-        tablelong = TABLELONG_DEFAULT
+        tableshort = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
+        tablelong = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
 
         for i in range(self.table.rowCount()):
             try:
@@ -489,8 +488,8 @@ class Scene(QtGui.QGraphicsScene):
         self.allcords = []
         self.indices = []
 
-        self.tableshort = TABLESHORT_DEFAULT
-        self.tablelong = TABLELONG_DEFAULT
+        self.tableshort = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
+        self.tablelong = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
 
         for coords in BINDING_SITES:
             y = coords[0]
@@ -642,11 +641,10 @@ class Scene(QtGui.QGraphicsScene):
 
             for i in range(0, origamiitems):
                 allitems[paletteindex+i].setBrush(QtGui.QBrush(defaultcolor))
-            TABLESHORT_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
-            TABLELONG_DEFAULT = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
 
-            self.saveExtensions(TABLESHORT_DEFAULT,TABLELONG_DEFAULT)
-            self.updateExtensions(TABLESHORT_DEFAULT)
+
+            self.saveExtensions(['None', 'None', 'None', 'None', 'None', 'None', 'None'],['None', 'None', 'None', 'None', 'None', 'None', 'None'])
+            self.updateExtensions(['None', 'None', 'None', 'None', 'None', 'None', 'None'])
             self.evaluateCanvas()
 
     def vectorToString(self, x):
@@ -840,7 +838,7 @@ class Window(QtGui.QMainWindow):
 
     def generatePlates(self):
         seqcheck = self.checkSeq()
-        if self.mainscene.tableshort == TABLESHORT_DEFAULT:
+        if self.mainscene.tableshort == ['None', 'None', 'None', 'None', 'None', 'None', 'None']:
             self.statusBar().showMessage('Error: No Extensions have been set. Please set Extensions first.')
         elif seqcheck >= 1:
             self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have Extensions. Please set first.')
@@ -861,7 +859,7 @@ class Window(QtGui.QMainWindow):
 
     def pipettingScheme(self):
         seqcheck = self.checkSeq()
-        if self.mainscene.tableshort == TABLESHORT_DEFAULT:
+        if self.mainscene.tableshort == ['None', 'None', 'None', 'None', 'None', 'None', 'None']:
             self.statusBar().showMessage('Error: No Extensions have been set. Please set Extensions first.')
         elif seqcheck >= 1:
             self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have Extensions. Please set first.')
