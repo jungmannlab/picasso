@@ -33,6 +33,28 @@ N_GROUP_COLORS = 8
 matplotlib.rcParams.update({'axes.titlesize': 'large'})
 
 
+def fit_cum_exp(data):
+    data.sort()
+    n = len(data)
+    y = np.arange(1, n+1)
+    data_min = data.min()
+    data_max = data.max()
+    params = lmfit.Parameters()
+    params.add('a', value=n, vary=True, min=0)
+    params.add('t', value=np.mean(data), vary=True, min=data_min, max=data_max)
+    params.add('c', value=data_min, vary=True, min=0)
+    result = lib.CumulativeExponentialModel.fit(y, params, x=data)
+    return result
+
+
+def kinetic_rate_from_fit(data):
+    result = fit_cum_exp(data)
+    return result.best_values['t']
+
+
+estimate_kinetic_rate = np.mean  # kinetic_rate_from_fit
+
+
 class FloatEdit(QtGui.QLineEdit):
 
     valueChanged = QtCore.pyqtSignal(float)
@@ -56,128 +78,6 @@ class FloatEdit(QtGui.QLineEdit):
         return value
 
 
-class PickPooledHistWindow(QtGui.QWidget):
-
-    def __init__(self, info_dialog):
-        super().__init__()
-        self.info_dialog = info_dialog
-        self.figure = plt.Figure()
-        self.canvas = FigureCanvasQTAgg(self.figure)
-        vbox = QtGui.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
-
-    def plot(self, pick_info):
-        # Prepare the figure
-        self.figure.clear()
-        # Photons
-        axes = self.figure.add_subplot(131)
-        axes.set_title('Photons per frame')
-        data = pick_info['pool']['photons']
-        bins = lib.calculate_optimal_bins(data, 1000)
-        if bins is None:
-            bins = 10
-        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
-        data_range = data.ptp()
-        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
-        # Length
-        axes = self.figure.add_subplot(132)
-        axes.set_title('Length (cumulative)')
-        data = pick_info['pool']['len']
-        data.sort()
-        n = len(data)
-        y = np.arange(n)
-        axes.semilogx(data, y, label='data')
-        data_min = data.min()
-        data_max = data.max()
-        params = lmfit.Parameters()
-        params.add('a', value=n, vary=True, min=0)
-        params.add('t', value=np.mean(data), vary=True, min=data_min, max=data_max)
-        params.add('c', value=data_min, vary=True, min=0)
-        result = lib.CumulativeExponentialModel.fit(y, params, x=data)
-        axes.semilogx(data, result.best_fit, label='fit (length  = {:.2f})'.format(result.best_values['t']))
-        axes.legend(loc='best')
-        print('\n')
-        print('~~~ LENGTH ~~~')
-        print('Mean over picks:        ', np.mean(pick_info['Length']))
-        print('Mean over localizations:', np.mean(data))
-        print('From fit:               ', result.best_values['t'])
-        # Dark
-        axes = self.figure.add_subplot(133)
-        axes.set_title('Dark time (cumulative)')
-        data = pick_info['pool']['dark']
-        data.sort()
-        n = len(data)
-        y = np.arange(n)
-        axes.semilogx(data, y, label='data')
-        data_min = data.min()
-        data_max = data.max()
-        params = lmfit.Parameters()
-        params.add('a', value=n, vary=True, min=0)
-        params.add('t', value=np.mean(data), vary=True, min=data_min, max=data_max)
-        params.add('c', value=data_min, vary=True, min=0)
-        result = lib.CumulativeExponentialModel.fit(y, params, x=data)
-        axes.semilogx(data, result.best_fit, label='fit (dark time  = {:.2f})'.format(result.best_values['t']))
-        axes.legend(loc='best')
-        print('~~~ DARK TIME ~~~')
-        print('Mean over picks:        ', np.mean(pick_info['Dark time']))
-        print('Mean over localizations:', np.mean(data))
-        print('From fit:               ', result.best_values['t'])
-        print('~~~ INFLUX ~~~')
-        print('Mean over picks:        ', np.mean(1 / pick_info['Dark time']) / self.info_dialog.units_per_pick.value())
-        print('Mean over localizations:', 1 / np.mean(data) / self.info_dialog.units_per_pick.value())
-        print('From fit:               ', 1 / result.best_values['t'] / self.info_dialog.units_per_pick.value())
-        self.canvas.draw()
-
-
-class PickPicksHistWindow(QtGui.QWidget):
-
-    def __init__(self):
-        super().__init__()
-        self.figure = plt.Figure()
-        self.canvas = FigureCanvasQTAgg(self.figure)
-        vbox = QtGui.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
-
-    def plot(self, pick_info):
-        # Prepare the figure
-        self.figure.clear()
-        # Photons
-        axes = self.figure.add_subplot(131)
-        axes.set_title('Photons per frame')
-        data = pick_info['Photons']
-        bins = lib.calculate_optimal_bins(data, 1000)
-        if bins is None:
-            bins = 10
-        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
-        data_range = data.ptp()
-        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
-        # Length
-        axes = self.figure.add_subplot(132)
-        axes.set_title('Length')
-        data = pick_info['Length']
-        bins = lib.calculate_optimal_bins(data, 1000)
-        if bins is None:
-            bins = 10
-        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
-        data_range = data.ptp()
-        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
-        # Dark
-        axes = self.figure.add_subplot(133)
-        axes.set_title('Dark time')
-        data = pick_info['Dark time']
-        bins = lib.calculate_optimal_bins(data, 1000)
-        if bins is None:
-            bins = 10
-        _, bin_edges, _ = axes.hist(data, bins, rwidth=1, linewidth=0)
-        data_range = data.ptp()
-        axes.set_xlim([bin_edges[0] - 0.05*data_range, data.max() + 0.05*data_range])
-        self.canvas.draw()
-
-
 class PickHistWindow(QtGui.QTabWidget):
 
     def __init__(self, info_dialog):
@@ -188,13 +88,34 @@ class PickHistWindow(QtGui.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 400)
-        self.addTab(PickPooledHistWindow(info_dialog), 'Per Localization')
-        self.addTab(PickPicksHistWindow(), 'Per Pick')
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        vbox = QtGui.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
-    def plot(self, pick_info):
-        for i in range(self.count()):
-            widget = self.widget(i)
-            widget.plot(pick_info)
+    def plot(self, pooled_locs, fit_result_len, fit_result_dark):
+        self.figure.clear()
+        # Length
+        axes = self.figure.add_subplot(121)
+        axes.set_title('Length (cumulative)')
+        data = pooled_locs.len
+        data.sort()
+        y = np.arange(1, len(data)+1)
+        axes.semilogx(data, y, label='data')
+        axes.semilogx(data, fit_result_len.best_fit, label='fit')
+        axes.legend(loc='best')
+        # Dark
+        axes = self.figure.add_subplot(122)
+        axes.set_title('Dark time (cumulative)')
+        data = pooled_locs.dark
+        data.sort()
+        y = np.arange(1, len(data)+1)
+        axes.semilogx(data, y, label='data')
+        axes.semilogx(data, fit_result_dark.best_fit, label='fit')
+        axes.legend(loc='best')
+        self.canvas.draw()
 
 
 class ApplyDialog(QtGui.QDialog):
@@ -287,59 +208,65 @@ class InfoDialog(QtGui.QDialog):
         self.n_picks = QtGui.QLabel()
         self.picks_grid.addWidget(self.n_picks, 0, 1)
         compute_pick_info_button = QtGui.QPushButton('Calculate info below')
-        compute_pick_info_button.clicked.connect(self.window.view.calculate_pick_info_long)
+        compute_pick_info_button.clicked.connect(self.window.view.update_pick_info_long)
         self.picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 3)
         self.picks_grid.addWidget(QtGui.QLabel('<b>Mean</b'), 2, 1)
         self.picks_grid.addWidget(QtGui.QLabel('<b>Std</b>'), 2, 2)
-        self.picks_info_labels = {'mean': {}, 'std': {}, 'decimals': {}}
-        self.picks_grid_current = 3
-        self.add_pick_info_field('# Localizations')
-        self.add_pick_info_field('RMSD to COM', decimals=4)
-        self.add_pick_info_field('Photons')
-        self.picks_grid.addWidget(QtGui.QLabel('Ignore dark times <='), self.picks_grid_current, 0)
+        row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('# Localizations:'), row, 0)
+        self.n_localizations_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(self.n_localizations_mean, row, 1)
+        self.n_localizations_std = QtGui.QLabel()
+        self.picks_grid.addWidget(self.n_localizations_std, row, 2)
+        row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('RMSD to COM:'), row, 0)
+        self.rmsd_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(self.rmsd_mean, row, 1)
+        self.rmsd_std = QtGui.QLabel()
+        self.picks_grid.addWidget(self.rmsd_std, row, 2)
+        row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('Ignore dark times <='), row, 0)
         self.max_dark_time = QtGui.QSpinBox()
         self.max_dark_time.setRange(0, 1e9)
         self.max_dark_time.setValue(1)
-        # self.max_dark_time.valueChanged.connect(self.update_binding_sites)
-        self.picks_grid.addWidget(self.max_dark_time, self.picks_grid_current, 1, 1, 2)
-        self.picks_grid_current += 1
-        self.add_pick_info_field('Length', decimals=2)
-        self.add_pick_info_field('Dark time', decimals=2)
-        self.picks_grid.addWidget(QtGui.QLabel('# Units per pick:'), self.picks_grid_current, 0)
+        self.picks_grid.addWidget(self.max_dark_time, row, 1, 1, 2)
+        row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('Length:'), row, 0)
+        self.length_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(self.length_mean, row, 1)
+        self.length_std = QtGui.QLabel()
+        self.picks_grid.addWidget(self.length_std, row, 2)
+        row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('Dark time:'), row, 0)
+        self.dark_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(self.dark_mean, row, 1)
+        self.dark_std = QtGui.QLabel()
+        self.picks_grid.addWidget(self.dark_std, row, 2)
+        row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('# Units per pick:'), row, 0)
         self.units_per_pick = QtGui.QSpinBox()
         self.units_per_pick.setRange(1, 1e6)
         self.units_per_pick.setValue(1)
-        self.picks_grid.addWidget(self.units_per_pick, self.picks_grid_current, 1, 1, 2)
-        self.picks_grid_current += 1
+        self.picks_grid.addWidget(self.units_per_pick, row, 1, 1, 2)
         calculate_influx_button = QtGui.QPushButton('Calibrate influx')
         calculate_influx_button.clicked.connect(self.calibrate_influx)
-        self.picks_grid.addWidget(calculate_influx_button, self.picks_grid_current, 0, 1, 3)
-        self.picks_grid_current += 1
-        self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/frames):'), self.picks_grid_current, 0)
+        self.picks_grid.addWidget(calculate_influx_button, self.picks_grid.rowCount(), 0, 1, 3)
+        row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('Influx rate (1/frames):'), row, 0)
         self.influx_rate = FloatEdit()
         self.influx_rate.setValue(0.03)
-        self.influx_rate.valueChanged.connect(self.update_binding_sites)
-        self.picks_grid.addWidget(self.influx_rate, self.picks_grid_current, 1, 1, 2)
-        self.picks_grid_current += 1
-        self.picks_grid.addWidget(QtGui.QLabel('# Units:'), self.picks_grid_current, 0)
-        self.binding_sites = QtGui.QLabel()
-        self.picks_grid.addWidget(self.binding_sites, self.picks_grid_current, 1)
-        self.binding_sites_std = QtGui.QLabel()
-        self.picks_grid.addWidget(self.binding_sites_std, self.picks_grid_current, 2)
+        self.influx_rate.valueChanged.connect(self.update_n_units)
+        self.picks_grid.addWidget(self.influx_rate, row, 1, 1, 2)
+        row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('# Units:'), row, 0)
+        self.n_units_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(self.n_units_mean, row, 1)
+        self.n_units_std = QtGui.QLabel()
+        self.picks_grid.addWidget(self.n_units_std, row, 2)
         self.pick_hist_window = PickHistWindow(self)
         pick_hists = QtGui.QPushButton('Histograms')
         pick_hists.clicked.connect(self.pick_hist_window.show)
         self.picks_grid.addWidget(pick_hists, self.picks_grid.rowCount(), 0, 1, 3)
-        self.pick_info = None
-
-    def add_pick_info_field(self, name, decimals=1):
-        self.picks_grid.addWidget(QtGui.QLabel(name + ':'), self.picks_grid_current, 0)
-        self.picks_info_labels['mean'][name] = QtGui.QLabel()
-        self.picks_info_labels['std'][name] = QtGui.QLabel()
-        self.picks_info_labels['decimals'][name] = decimals
-        self.picks_grid.addWidget(self.picks_info_labels['mean'][name], self.picks_grid_current, 1)
-        self.picks_grid.addWidget(self.picks_info_labels['std'][name], self.picks_grid_current, 2)
-        self.picks_grid_current += 1
 
     def calculate_nena_lp(self):
         channel = self.window.view.get_channel('Calculate NeNA precision')
@@ -359,18 +286,15 @@ class InfoDialog(QtGui.QDialog):
             show_plot_button.clicked.connect(self.show_nena_plot)
 
     def calibrate_influx(self):
-        influx = np.mean(1 / self.pick_info['Dark time']) / self.units_per_pick.value()
+        influx = np.mean(1 / self.pick_info['dark']) / self.units_per_pick.value()
         self.influx_rate.setValue(influx)
-        self.update_binding_sites()
+        self.update_n_units()
 
-    def update_binding_sites(self, influx=None):
-        if self.pick_info is not None:
-            if influx is None:
-                influx = self.influx_rate.value()
-            if 'Dark time' in self.pick_info:
-                n_binding_sites = 1 / (influx * self.pick_info['Dark time'])
-                self.binding_sites.setText('{:,.3f}'.format(np.mean(n_binding_sites)))
-                self.binding_sites_std.setText('{:,.3f}'.format(np.std(n_binding_sites)))
+    def update_n_units(self):
+        influx = self.influx_rate.value()
+        n_units = 1 / (influx * self.pick_info['dark'])
+        self.n_units_mean.setText('{:,.2f}'.format(np.mean(n_units)))
+        self.n_units_std.setText('{:,.2f}'.format(np.std(n_units)))
 
     def show_nena_plot(self):
         d = self.nena_result.userkws['d']
@@ -1263,7 +1187,7 @@ class View(QtGui.QLabel):
             cursor = QtGui.QCursor(pixmap)
             self.setCursor(cursor)
 
-    def calculate_pick_info_long(self):
+    def update_pick_info_long(self, info):
         channel = self.get_channel('Calculate pick info')
         if channel is not None:
             d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -1271,49 +1195,41 @@ class View(QtGui.QLabel):
             r_max = min(d, 1)
             info = self.infos[channel]
             picked_locs = self.picked_locs(channel)
-            N = []
-            photons = []
-            rmsd = []
-            length = []
-            dark = []
+            n_picks = len(picked_locs)
+            N = np.empty(n_picks)
+            rmsd = np.empty(n_picks)
+            length = np.empty(n_picks)
+            dark = np.empty(n_picks)
             new_locs = []
             progress = lib.ProgressDialog('Calculating pick statistics', 0, len(picked_locs), self)
             progress.set_value(0)
             for i, locs in enumerate(picked_locs):
-                N.append(len(locs))
-                photons.append(np.mean(locs.photons))
+                N[i] = len(locs)
                 com_x = np.mean(locs.x)
                 com_y = np.mean(locs.y)
-                rmsd.append(np.sqrt(np.mean((locs.x - com_x)**2 + (locs.y - com_y)**2)))
+                rmsd[i] = np.sqrt(np.mean((locs.x - com_x)**2 + (locs.y - com_y)**2))
                 locs = postprocess.link(locs, info, r_max=r_max, max_dark_time=t)
-                length.append(np.mean(locs.len))
+                length[i] = estimate_kinetic_rate(locs.len)
                 locs = postprocess.compute_dark_times(locs)
-                dark.append(np.mean(locs.dark))
+                dark[i] = estimate_kinetic_rate(locs.dark)
                 new_locs.append(locs)
                 progress.set_value(i+1)
-            pick_info = {'# Localizations': N}
-            pick_info['Photons'] = np.array(photons)
-            pick_info['RMSD to COM'] = np.array(rmsd)
-            pick_info['Length'] = np.array(length)
-            pick_info['Dark time'] = np.array(dark)
-            info_pool = {'photons': np.concatenate([_.photons for _ in picked_locs])}
-            stacked = stack_arrays(new_locs, usemask=False, asrecarray=True)
-            info_pool['len'] = stacked.len
-            info_pool['dark'] = stacked.dark
-            pick_info['pool'] = info_pool
-            self.update_pick_info_long(pick_info)
-
-    def update_pick_info_long(self, info):
-        for name in info:
-            if name != 'pool':
-                mean = np.mean(info[name])
-                std = np.std(info[name])
-                decimals = self.window.info_dialog.picks_info_labels['decimals'][name]
-                self.window.info_dialog.picks_info_labels['mean'][name].setText('{:,.{p}f}'.format(mean, p=decimals))
-                self.window.info_dialog.picks_info_labels['std'][name].setText('{:,.{p}f}'.format(std, p=decimals))
-        self.window.info_dialog.pick_info = info
-        self.window.info_dialog.update_binding_sites()
-        self.window.info_dialog.pick_hist_window.plot(info)
+            self.window.info_dialog.n_localizations_mean.setText('{:.2f}'.format(np.mean(N)))
+            self.window.info_dialog.n_localizations_std.setText('{:.2f}'.format(np.std(N)))
+            self.window.info_dialog.rmsd_mean.setText('{:.2}'.format(np.mean(rmsd)))
+            self.window.info_dialog.rmsd_std.setText('{:.2}'.format(np.std(rmsd)))
+            pooled_locs = stack_arrays(new_locs, usemask=False, asrecarray=True)
+            fit_result_len = fit_cum_exp(pooled_locs.len)
+            fit_result_dark = fit_cum_exp(pooled_locs.dark)
+            self.window.info_dialog.length_mean.setText('{:.2f}'.format(np.mean(length)))
+            self.window.info_dialog.length_std.setText('{:.2f}'.format(np.std(length)))
+            self.window.info_dialog.dark_mean.setText('{:.2f}'.format(np.mean(dark)))
+            self.window.info_dialog.dark_std.setText('{:.2f}'.format(np.std(dark)))
+            self.window.info_dialog.pick_info = {'pooled dark': fit_result_dark.best_values['t'],
+                                                 'length': length,
+                                                 'dark': dark}
+            self.window.info_dialog.update_n_units()
+            self.window.info_dialog.pick_hist_window.plot(pooled_locs, fit_result_len, fit_result_dark)
 
     def update_pick_info_short(self):
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
