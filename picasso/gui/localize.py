@@ -155,9 +155,10 @@ class OddSpinBox(QtGui.QSpinBox):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setSingleStep(2)
-        self.valueChanged.connect(self.on_value_changed)
+        self.editingFinished.connect(self.on_editing_finished)
 
-    def on_value_changed(self, value):
+    def on_editing_finished(self):
+        value = self.value()
         if value % 2 == 0:
             self.setValue(value + 1)
 
@@ -257,6 +258,7 @@ class ParametersDialog(QtGui.QDialog):
         # Box Size
         identification_grid.addWidget(QtGui.QLabel('Box side length:'), 0, 0)
         self.box_spinbox = OddSpinBox()
+        self.box_spinbox.setKeyboardTracking(False)
         self.box_spinbox.setValue(DEFAULT_PARAMETERS['Box Size'])
         self.box_spinbox.valueChanged.connect(self.on_box_changed)
         identification_grid.addWidget(self.box_spinbox, 0, 1)
