@@ -59,23 +59,6 @@ def _fill(image, x, y):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _gaussian_kernel(size, sigma):
-    x = _np.arange(size)
-    x0 = 0.5 * (size - 1)
-    return _np.exp(-(x-x0)**2/(2*sigma**2))
-
-
-@_numba.jit(nopython=True, nogil=True)
-def _outer(a, b):
-    n = len(a)
-    out = _np.zeros((n, n), dtype=_np.float32)
-    for i in range(n):
-        for j in range(n):
-            out[i, j] = a[i]*b[j]
-    return out
-
-
-@_numba.jit(nopython=True, nogil=True)
 def render_hist(locs, oversampling, y_min, x_min, y_max, x_max):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
     _fill(image, x, y)
@@ -111,47 +94,35 @@ def render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_wid
 
 
 def render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
-    n, image, kernel = _render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width)
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+    _fill(image, x, y)
+    n = len(x)
     if n == 0:
         return 0, image
-    image = _signal.fftconvolve(image, kernel, mode='same')
-    return n, image
-
-
-@_numba.jit(nopython=False, nogil=True)
-def _render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
-    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
-    if _np.sum(in_view) == 0:
-        return 0, image, image
-    _fill(image, x, y)
-    blur_width = oversampling * max(_np.median(locs.lpx[in_view]), min_blur_width)
-    blur_height = oversampling * max(_np.median(locs.lpy[in_view]), min_blur_width)
-    kernel_width = 10 * int(_np.round(blur_width)) + 1
-    kernel_height = 10 * int(_np.round(blur_height)) + 1
-    kernel_y = _gaussian_kernel(kernel_height, blur_height)
-    kernel_x = _gaussian_kernel(kernel_width, blur_width)
-    kernel = _outer(kernel_y, kernel_x)
-    kernel /= kernel.sum()
-    return len(x), image, kernel
+    else:
+        blur_width = oversampling * max(_np.median(locs.lpx[in_view]), min_blur_width)
+        blur_height = oversampling * max(_np.median(locs.lpy[in_view]), min_blur_width)
+        return n, _fftconvolve(image, blur_width, blur_height)
 
 
 def render_smooth(locs, oversampling, y_min, x_min, y_max, x_max):
-    n, image, kernel = _render_smooth(locs, oversampling, y_min, x_min, y_max, x_max)
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+    _fill(image, x, y)
+    n = len(x)
     if n == 0:
         return 0, image
-    image = _signal.fftconvolve(image, kernel, mode='same')
-    return n, image
+    else:
+        return n, _fftconvolve(image, 1, 1)
 
 
-@_numba.jit(nopython=True, nogil=True)
-def _render_smooth(locs, oversampling, y_min, x_min, y_max, x_max):
-    n, image = render_hist(locs, oversampling, y_min, x_min, y_max, x_max)
-    if n == 0:
-        return 0, image, image
-    kernel = _gaussian_kernel(11, 1)
-    kernel2d = _outer(kernel, kernel)
-    kernel2d /= kernel2d.sum()
-    return n, image, kernel2d
+def _fftconvolve(image, blur_width, blur_height):
+    kernel_width = 10 * int(_np.round(blur_width)) + 1
+    kernel_height = 10 * int(_np.round(blur_height)) + 1
+    kernel_y = _signal.gaussian(kernel_height, blur_height)
+    kernel_x = _signal.gaussian(kernel_width, blur_width)
+    kernel = _np.outer(kernel_y, kernel_x)
+    kernel /= kernel.sum()
+    return _signal.fftconvolve(image, kernel, mode='same')
 
 
 def segment(locs, info, segmentation, kwargs={}, callback=None):
