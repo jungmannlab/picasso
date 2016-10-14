@@ -31,9 +31,6 @@ BaseSequencesFile = os.path.join(_this_directory,  '..',  'base_sequences.csv')
 PaintSequencesFile = os.path.join(_this_directory,  '..',  'paint_sequences.csv')
 
 
-
-
-
 def plotPlate(selection,selectioncolors, platename):
     inch = 25.4
     radius = 4.5/inch #diameter of 96 well plates is 9mm
@@ -305,6 +302,14 @@ class SeqDialog(QtGui.QDialog):
     def readoutTable(self):
         tableshort = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
         tablelong = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
+
+        print('Global Variable TABLELONG_DEFAULT:')
+        print(TABLELONG_DEFAULT)
+
+        tablelong = TABLELONG_DEFAULT
+
+        print('Called Global Variable TABLELONG_DEFAULT:')
+        print(TABLELONG_DEFAULT)
 
         for i in range(self.table.rowCount()):
             try:

@@ -70,6 +70,7 @@ STRUCTUREXX_DEFAULT = '0,20,40,0,20,40,0,20,40,0,20,40'
 STRUCTUREEX_DEFAULT = '1,1,1,1,1,1,1,1,1,1,1,1'
 STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
+INCORPORATION_DEFAULT = 85
 
 
 class Window(QtGui.QMainWindow):
@@ -139,10 +140,10 @@ class Window(QtGui.QMainWindow):
         paint_groupbox = QtGui.QGroupBox('PAINT Parameters')
         pgrid = QtGui.QGridLayout(paint_groupbox)
 
-        kon = QtGui.QLabel('K_On')
+        kon = QtGui.QLabel('k<sub>On</sub>')
         imagerconcentration = QtGui.QLabel('Imager Concentration')
-        taud = QtGui.QLabel('Tau D')
-        taub = QtGui.QLabel('Tau B')
+        taud = QtGui.QLabel('Dark Time')
+        taub = QtGui.QLabel('Bright Time')
 
         self.konEdit = QtGui.QDoubleSpinBox()
         self.konEdit.setRange(1,10000000)
@@ -165,6 +166,7 @@ class Window(QtGui.QMainWindow):
 
         pgrid.addWidget(kon,1,0)
         pgrid.addWidget(self.konEdit,1,1)
+        pgrid.addWidget(QtGui.QLabel('M<sup>−1</sup>s<sup>−1</sup>'),1,2)
         pgrid.addWidget(imagerconcentration,2,0)
         pgrid.addWidget(self.imagerconcentrationEdit,2,1)
         pgrid.addWidget(QtGui.QLabel('nM'),2,2)
@@ -230,6 +232,7 @@ class Window(QtGui.QMainWindow):
 
         igrid.addWidget(laserpower,0,0)
         igrid.addWidget(self.laserpowerEdit,0,1)
+        igrid.addWidget(QtGui.QLabel('mW'),0,2)
         igrid.addWidget(psf,1,0)
         igrid.addWidget(self.psfEdit,1,1)
         igrid.addWidget(QtGui.QLabel('Px'),1,2)
@@ -238,13 +241,13 @@ class Window(QtGui.QMainWindow):
         igrid.addWidget(QtGui.QLabel('nm'),2,2)
         igrid.addWidget(photonrate,3,0)
         igrid.addWidget(self.photonrateEdit,3,1)
-        igrid.addWidget(QtGui.QLabel('Photons/ms'),3,2)
+        igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup'),3,2)
         igrid.addWidget(photonsframe,4,0)
         igrid.addWidget(self.photonsframeEdit,4,1)
         igrid.addWidget(QtGui.QLabel('Photons'),4,2)
         igrid.addWidget(photonratestd,5,0)
         igrid.addWidget(self.photonratestdEdit,5,1)
-        igrid.addWidget(QtGui.QLabel('Photons/ms'),5,2)
+        igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup'),5,2)
         igrid.addWidget(photonstdframe,6,0)
         igrid.addWidget(self.photonstdframeEdit,6,1)
         igrid.addWidget(QtGui.QLabel('Photons'),6,2)
@@ -253,8 +256,10 @@ class Window(QtGui.QMainWindow):
         igrid.addWidget(QtGui.QLabel('Photons'),7,2)
         igrid.addWidget(photonslope,8,0)
         igrid.addWidget(self.photonslopeEdit,8,1)
+        igrid.addWidget(QtGui.QLabel('mW<sup>-1</sup> Photons<sup>-1</sup> ms'),8,2)
         igrid.addWidget(photonslopeStd,9,0)
         igrid.addWidget(self.photonslopeStdEdit,9,1)
+        igrid.addWidget(QtGui.QLabel('mW<sup>-1</sup> Photons<sup>-1</sup> ms'),9,2)
 
          #NOISE MODEL
         noise_groupbox = QtGui.QGroupBox('Noise Model')
@@ -350,7 +355,11 @@ class Window(QtGui.QMainWindow):
 
         calibrateNoiseButton = QtGui.QPushButton("Calibrate Noise Model")
         calibrateNoiseButton.clicked.connect(self.calibrateNoise)
+        importButton = QtGui.QPushButton("Import from Experiment (hdf5)")
+        importButton.clicked.connect(self.importhdf5)
+
         ngrid.addWidget(calibrateNoiseButton,10,0,1,3)
+        ngrid.addWidget(importButton,11,0,1,3)
 
         # STRUCTURE DEFINITIONS
         structure_groupbox = QtGui.QGroupBox('Structure')
@@ -382,7 +391,7 @@ class Window(QtGui.QMainWindow):
         self.structureIncorporationEdit = QtGui.QDoubleSpinBox()
         self.structureIncorporationEdit.setRange(1,100)
         self.structureIncorporationEdit.setDecimals(0)
-        self.structureIncorporationEdit.setValue(100)
+        self.structureIncorporationEdit.setValue(INCORPORATION_DEFAULT)
 
         self.structurecombo = QtGui.QComboBox()
         self.structurecombo.addItem("Grid")
@@ -413,6 +422,7 @@ class Window(QtGui.QMainWindow):
 
         self.structurerandomOrientationEdit = QtGui.QCheckBox()
         self.structurerandomEdit = QtGui.QCheckBox()
+
 
         structurerandom = QtGui.QLabel('Random Arrangement')
         structurerandomOrientation = QtGui.QLabel('Random Orientation')
@@ -472,10 +482,10 @@ class Window(QtGui.QMainWindow):
         quitButton.resize(quitButton.sizeHint())
 
         loadButton = QtGui.QPushButton("Load Settings from Previous Simulation")
-        importButton = QtGui.QPushButton("Import from Experiment (hdf5)")
+
 
         btngridR = QtGui.QGridLayout()
-        btngridR.addWidget(importButton)
+
         btngridR.addWidget(loadButton)
 
         btngridR.addWidget(QtGui.QLabel('Exchange Rounds to be simulated:'))
@@ -484,7 +494,7 @@ class Window(QtGui.QMainWindow):
         btngridR.addWidget(quitButton)
 
         simulateButton.clicked.connect(self.saveDialog)
-        importButton.clicked.connect(self.importhdf5)
+
         loadButton.clicked.connect(self.loadSettings)
 
         self.show()

@@ -21,6 +21,12 @@ def noisy(image,mu,sigma):        #Add gaussian noise to an image.
     noisy[noisy<0]=0
     return noisy
 
+def noisy_p(image,mu): #Add poissonian noise to an image
+    poiss = _np.random.poisson(mu,image.shape).astype(float)
+    noisy = image + poiss
+    return noisy
+
+
 def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget ): #Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
     meanlocs = int(_np.ceil(frames*time/(meandark+meanbright))) #This is an estimate for the total number of binding events
     if meanlocs < 10:
@@ -152,7 +158,8 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
         yy = photonposframe[:,1]
         simframe, xedges, yedges = _np.histogram2d(yy,xx,bins=(edges,edges))
         simframe = _np.flipud(simframe) # to be consistent with render
-    simframenoise = noisy(simframe,background,noise)
+    #simframenoise = noisy(simframe,background,noise)
+    simframenoise = noisy_p(simframe,background)
     simframeout=_np.round(simframenoise).astype('<u2')
 
     return simframeout
