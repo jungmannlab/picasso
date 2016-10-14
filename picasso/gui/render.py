@@ -356,7 +356,13 @@ class DisplaySettingsDialog(QtGui.QDialog):
         general_groupbox = QtGui.QGroupBox('General')
         vbox.addWidget(general_groupbox)
         general_grid = QtGui.QGridLayout(general_groupbox)
-        general_grid.addWidget(QtGui.QLabel('Oversampling:'), 0, 0)
+        general_grid.addWidget(QtGui.QLabel('Zoom:'), 0, 0)
+        self.zoom = QtGui.QDoubleSpinBox()
+        self.zoom.setKeyboardTracking(False)
+        self.zoom.setRange(10**(-self.zoom.decimals()), 1e6)
+        self.zoom.valueChanged.connect(self.on_zoom_changed)
+        general_grid.addWidget(self.zoom, 0, 1)
+        general_grid.addWidget(QtGui.QLabel('Oversampling:'), 1, 0)
         self._oversampling = DEFAULT_OVERSAMPLING
         self.oversampling = QtGui.QDoubleSpinBox()
         self.oversampling.setRange(0.001, 1000)
@@ -364,11 +370,11 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.oversampling.setValue(self._oversampling)
         self.oversampling.setKeyboardTracking(False)
         self.oversampling.valueChanged.connect(self.on_oversampling_changed)
-        general_grid.addWidget(self.oversampling, 0, 1)
+        general_grid.addWidget(self.oversampling, 1, 1)
         self.dynamic_oversampling = QtGui.QCheckBox('dynamic')
         self.dynamic_oversampling.setChecked(True)
         self.dynamic_oversampling.toggled.connect(self.set_dynamic_oversampling)
-        general_grid.addWidget(self.dynamic_oversampling, 1, 1)
+        general_grid.addWidget(self.dynamic_oversampling, 2, 1)
         # Contrast
         contrast_groupbox = QtGui.QGroupBox('Contrast')
         vbox.addWidget(contrast_groupbox)
@@ -460,10 +466,18 @@ class DisplaySettingsDialog(QtGui.QDialog):
             self.dynamic_oversampling.setChecked(False)
             self.window.view.update_scene()
 
+    def on_zoom_changed(self, value):
+        self.window.view.set_zoom(value)
+
     def set_oversampling_silently(self, oversampling):
         self._silent_oversampling_update = True
         self.oversampling.setValue(oversampling)
         self._silent_oversampling_update = False
+
+    def set_zoom_silently(self, zoom):
+        self.zoom.blockSignals(True)
+        self.zoom.setValue(zoom)
+        self.zoom.blockSignals(False)
 
     def silent_minimum_update(self, value):
         self.minimum.blockSignals(True)
@@ -668,6 +682,8 @@ class View(QtGui.QLabel):
             qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
             qimage = qimage.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding)
             self.qimage_no_picks = self.draw_scalebar(qimage)
+            dppvp = self.display_pixels_per_viewport_pixels()
+            self.window.display_settings_dialog.set_zoom_silently(dppvp)
         self.qimage = self.draw_picks(self.qimage_no_picks)
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(pixmap)
@@ -700,7 +716,7 @@ class View(QtGui.QLabel):
 
     def get_render_kwargs(self, viewport=None):
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
-        optimal_oversampling = self.optimal_oversampling()
+        optimal_oversampling = self.display_pixels_per_viewport_pixels()
         if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
             oversampling = optimal_oversampling
             self.window.display_settings_dialog.set_oversampling_silently(optimal_oversampling)
@@ -812,7 +828,7 @@ class View(QtGui.QLabel):
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
 
-    def optimal_oversampling(self):
+    def display_pixels_per_viewport_pixels(self):
         os_horizontal = self.width() / self.viewport_width()
         os_vertical = self.height() / self.viewport_height()
         # The values should be identical, but just in case, we choose the max:
@@ -1065,6 +1081,7 @@ class View(QtGui.QLabel):
         upper = self.window.display_settings_dialog.maximum.value()
         lower = self.window.display_settings_dialog.minimum.value()
         image = (image - lower) / (upper - lower)
+        image[~np.isfinite(image)] = 0
         image = np.minimum(image, 1.0)
         image = np.maximum(image, 0.0)
         return image
@@ -1072,6 +1089,10 @@ class View(QtGui.QLabel):
     def set_mode(self, action):
         self._mode = action.text()
         self.update_cursor()
+
+    def set_zoom(self, zoom):
+        current_zoom = self.display_pixels_per_viewport_pixels()
+        self.zoom(current_zoom / zoom)
 
     def sizeHint(self):
         return QtCore.QSize(*self._size_hint)
