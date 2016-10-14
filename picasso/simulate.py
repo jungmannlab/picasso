@@ -221,16 +221,19 @@ def randomExchange(pos): # RANDOMLY SHUFFLE EXCHANGE PARAMETERS ('RANDOM LABELIN
 
 def prepareStructures(structure,gridpos,orientation,number,incorporation,exchange): #prepareStructures: Input positions, the structure definition, consider rotation etc.
     newpos = []
-    oldstructure = structure
+    oldstructure = _np.array([structure[0,:],structure[1,:],structure[2,:]])
+
     for i in range(0,len(gridpos)):#LOOP THROUGH ALL POSITIONS
         if orientation == 0:
-            pass
+            structure = oldstructure
         else:
             structure = rotateStructure(oldstructure)
+
         if incorporation == 1:
             pass
         else:
             structure = incorporateStructure(structure,incorporation)
+
         newx = structure[0,:]+gridpos[i,0]
         newy = structure[1,:]+gridpos[i,1]
         newstruct = _np.array([newx,newy,structure[2,:],structure[2,:]*0+i])
