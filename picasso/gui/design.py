@@ -125,31 +125,55 @@ COLOR_SITES = [(0, maxbinding[1]+3), (2, maxbinding[1]+3), (3, maxbinding[1]+3),
 
 BINDING_SITES = ORIGAMI_SITES+COLOR_SITES
 
+colorscheme = 0
+
 
 rgbcolors = dict()
-rgbcolors[0] = [205, 205, 205]
-rgbcolors[1] = [166, 206, 227]
-rgbcolors[2] = [31, 120, 180]
-rgbcolors[3] = [178, 223, 138]
-rgbcolors[4] = [51, 160, 44]
-rgbcolors[5] = [251, 154, 153]
-rgbcolors[6] = [227, 26, 28]
-rgbcolors[7] = [255,255,255]
-rgbcolors[8] = [205,205,205]
+allcolors = dict()
+if colorscheme:
+    rgbcolors[0] = [205, 205, 205]
+    rgbcolors[1] = [166, 206, 227]
+    rgbcolors[2] = [31, 120, 180]
+    rgbcolors[3] = [178, 223, 138]
+    rgbcolors[4] = [51, 160, 44]
+    rgbcolors[5] = [251, 154, 153]
+    rgbcolors[6] = [227, 26, 28]
+    rgbcolors[7] = [255,255,255]
+    rgbcolors[8] = [205,205,205]
+    allcolors[0] = QtGui.QColor(205,205,205,255) #DEFAULT,  GREY
+    allcolors[1] = QtGui.QColor(166, 206, 227,  255)
+    allcolors[2] = QtGui.QColor(31, 120, 180,  255)
+    allcolors[3] = QtGui.QColor(178, 223, 138,  255)
+    allcolors[4] = QtGui.QColor(51, 160, 44,  255)
+    allcolors[5] = QtGui.QColor(251, 154, 153,  255)
+    allcolors[6] = QtGui.QColor(227, 26, 28,  255)
+    allcolors[7] = QtGui.QColor(0, 0, 0,  255) # BLACK
+    allcolors[8] = QtGui.QColor(255,255,255,255) # WHITE
+
+else:
+    rgbcolors[0] = [0,0,0] # is black to increase visibility
+    rgbcolors[1] = [166,206,227]
+    rgbcolors[2] = [31,120,180]
+    rgbcolors[3] = [178,223,138]
+    rgbcolors[4] = [51, 160, 44]
+    rgbcolors[5] = [251,154,153]
+    rgbcolors[6] = [227, 26, 28]
+    rgbcolors[7] = [253,191,111]
+    rgbcolors[8] = [205,205,205]
+    allcolors[0] = QtGui.QColor(205,205,205,255) #DEFAULT,  GREY
+    allcolors[1] = QtGui.QColor(166,206,227,  255)
+    allcolors[2] = QtGui.QColor(31,120,180,  255)
+    allcolors[3] = QtGui.QColor(178,223,138,  255)
+    allcolors[4] = QtGui.QColor(51, 160, 44,  255)
+    allcolors[5] = QtGui.QColor(251, 154, 153,  255)
+    allcolors[6] = QtGui.QColor(227, 26, 28,  255)
+    allcolors[7] = QtGui.QColor(253,191,111,  255) # B
+    allcolors[8] = QtGui.QColor(255,255,255,255) # WHITE
 
 for element in rgbcolors:
     rgbcolors[element][:] = [x / 255 for x in rgbcolors[element]]
 
-allcolors = dict()
-allcolors[0] = QtGui.QColor(205,205,205,255) #DEFAULT,  GREY
-allcolors[1] = QtGui.QColor(166, 206, 227,  255)
-allcolors[2] = QtGui.QColor(31, 120, 180,  255)
-allcolors[3] = QtGui.QColor(178, 223, 138,  255)
-allcolors[4] = QtGui.QColor(51, 160, 44,  255)
-allcolors[5] = QtGui.QColor(251, 154, 153,  255)
-allcolors[6] = QtGui.QColor(227, 26, 28,  255)
-allcolors[7] = QtGui.QColor(0, 0, 0,  255) # BLACK
-allcolors[8] = QtGui.QColor(255,255,255,255) # WHITE
+
 defaultcolor = allcolors[0]
 maxcolor = 8
 
@@ -303,14 +327,6 @@ class SeqDialog(QtGui.QDialog):
         tableshort = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
         tablelong = ['None', 'None', 'None', 'None', 'None', 'None', 'None']
 
-        print('Global Variable TABLELONG_DEFAULT:')
-        print(TABLELONG_DEFAULT)
-
-        tablelong = TABLELONG_DEFAULT
-
-        print('Called Global Variable TABLELONG_DEFAULT:')
-        print(TABLELONG_DEFAULT)
-
         for i in range(self.table.rowCount()):
             try:
                 tableshort[int(self.table.item(i,0).text())-1] = self.table.item(i, 3).text()
@@ -357,7 +373,6 @@ class FoldingDialog(QtGui.QDialog):
 
         table = dict()
         tablecontent = []
-        print(self.table.rowCount())
         tablecontent.append(['Component', 'Initial Concentration[uM]', 'Parts', 'Pool-Concentration[nM]', 'Target Concentration[nM]', 'Volume[ul]',  'Excess', 'Colorcode'])
         for row in range(self.table.rowCount()):
             rowdata = []
@@ -370,8 +385,6 @@ class FoldingDialog(QtGui.QDialog):
             tablecontent.append(rowdata)
 
         table[0] = tablecontent
-        print(tablecontent)
-        print(table)
         path = QtGui.QFileDialog.getSaveFileName(self,  'Export folding table to.',  filter='*.csv')
         if path:
             design.savePlate(path, table)
@@ -693,7 +706,7 @@ class Scene(QtGui.QGraphicsScene):
                 'Structure.StructureY':structurey,
                 'Structure.StructureEx':structureex}
         design.saveInfo(path,  info)
-        print('Data saved.')
+
 
     def loadCanvas(self, path):
         info = _io.load_info(path)
@@ -911,15 +924,14 @@ class Window(QtGui.QMainWindow):
                 allfig = dict()
                 for x in range(0, len(platenames)):
                     platename = platenames[x]
-                    print(platename)
+
                     selection = []
                     selectioncolors = []
                     for y in range(0, len(platelist)):
                         if pipettlist[y][0]==platename:
                             selection.append(pipettlist[y][1])
                             selectioncolors.append(pipettlist[y][4])
-                    print(selection)
-                    print(selectioncolors)
+
                     allfig[x] = plotPlate(selection,selectioncolors, platename)
 
                 path = QtGui.QFileDialog.getSaveFileName(self,  'Save Pipetting Schemes to.',  filter='*.pdf')
