@@ -45,15 +45,15 @@ PIXELSIZE_DEFAULT = 160
 #PAINT
 KON_DEFAULT = 1600000
 IMAGERCONCENTRATION_DEFAULT = 5
-MEANBRIGHT_DEFAULT = 700
+MEANBRIGHT_DEFAULT = 500
 #IMAGER
-LASERPOWER_DEFAULT = 80
-PSF_DEFAULT = 0.84
-PHOTONRATE_DEFAULT = 56
-PHOTONRATESTD_DEFAULT = 32
+LASERPOWER_DEFAULT = 30
+PSF_DEFAULT = 0.82
+PHOTONRATE_DEFAULT = 53
+PHOTONRATESTD_DEFAULT = 29
 PHOTONBUDGET_DEFAULT = 1500000
-PHOTONSLOPE_DEFAULT = 0.8
-PHOTONSLOPESTD_DEFAULT = 0.4
+PHOTONSLOPE_DEFAULT = 1.77
+PHOTONSLOPESTD_DEFAULT = 0.97
 #NOISE MODEL
 LASERC_DEFAULT = 0.010513
 IMAGERC_DEFAULT = 0.003131
@@ -1278,15 +1278,19 @@ class Window(QtGui.QMainWindow):
 
             if ok2:
                 laserpower, ok3 = QtGui.QInputDialog.getText(self, 'Input Dialog',
-                    'Enter Laserpower in a.u.:')
+                    'Enter Laserpower in mW:')
                 laserpower = float(laserpower)
                 if ok3:
+                    cbaseline, ok4 = QtGui.QInputDialog.getText(self, 'Input Dialog',
+                        'Enter camera baseline')
+                    cbaseline = float(cbaseline)
                     #self.le.setText(str(text))
 
                     photons = locs['photons']
                     sigmax = locs['sx']
                     sigmay = locs['sy']
                     bg = locs['bg']
+                    bg = bg-cbaseline
 
                     nosigmas = 3
                     photons = self.sigmafilter(photons,nosigmas)
