@@ -2,8 +2,8 @@
 A collection of tools for painting super-resolution images
 
 ## Installation
-### One-click installer
-Download and run the Windows 64 bit installer: [Picasso-Windows-64bit.exe](https://gitlab.com/jungmannlab/picasso/raw/master/distribution/Output/Picasso-Windows-64bit.exe)
+Simply download and run the installer:  
+[Picasso-Windows-64bit.exe](https://gitlab.com/jungmannlab/picasso/raw/master/distribution/Output/Picasso-Windows-64bit.exe)
 
 ### Advanced installation for Python programmers
 As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso's internal routines in custom Python programs. At the same time, it is still possible to use Picasso as an end-user by creating the respective Windows shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
