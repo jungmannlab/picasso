@@ -4,7 +4,7 @@ A collection of tools for painting super-resolution images
 ## Installation
 ### Simple installation for end-users
 1. Run the setup file for Windows 64-bit.
-2. Configure Picasso for your data acquisition setup:
+2. (Optional) Configure Picasso for your data acquisition setup:
   - Rename the file `<installation directory>\picasso\config_template.yaml` to `config.yaml`.
   - Edit the file's content according to your acquisition setup.
 
@@ -26,7 +26,6 @@ When using Anaconda or Miniconda, most can be installed via `conda install <pack
 1. Open the console, `cd` to the directory where you want to install and run
 `git clone https://gitlab.com/jungmannlab/picasso.git`
 Alternatively, [download](https://gitlab.com/jungmannlab/picasso) the zip file and unzip it.
-Currently, for both options you need approved access on Gitlab.
 2. Change to the downloaded directory and run `python setup.py install`.
 3. Run the PowerShell script "createShortcuts.ps1" in the gui directory.
 This should be doable by right-clicking on the script and choosing "Run with PowerShell". Alternatively, run the command `powershell ./createShortcuts.ps1` in the command line. Use the generated shortcuts in the top level directory to start GUI components. Users can drag these shortcuts to their Desktop, Start Menu or Task Bar.
