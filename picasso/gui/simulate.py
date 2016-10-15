@@ -28,8 +28,8 @@ from PyQt4.QtCore import Qt, QDateTime
 import time
 import csv
 
-def fitFuncBg(x, a, b, c):
-    return (a + b*x[0])*x[1]*x[2]+c
+def fitFuncBg(x, a, b):
+    return (a + b*x[0])*x[1]*x[2]
 
 def fitFuncStd(x, a, b, c):
     return (a*x[0]*x[1]+b*x[2]+c)
@@ -37,6 +37,8 @@ def fitFuncStd(x, a, b, c):
 plt.style.use('ggplot')
 
 "DEFAULT PARAMETERS"
+
+ADVANCEDMODE = 0 #1 is with calibration of noise model
 # CAMERA
 IMAGESIZE_DEFAULT = 32
 ITIME_DEFAULT = 300
@@ -55,12 +57,13 @@ PHOTONBUDGET_DEFAULT = 1500000
 PHOTONSLOPE_DEFAULT = 1.77
 PHOTONSLOPESTD_DEFAULT = 0.97
 #NOISE MODEL
-LASERC_DEFAULT = 0.010513
-IMAGERC_DEFAULT = 0.003131
-CAMERAC_DEFAULT = 56.198425
+LASERC_DEFAULT = 0.012063
+IMAGERC_DEFAULT = 0.003195
 EQA_DEFAULT = -0.002866
 EQB_DEFAULT = 0.259038
 EQC_DEFAULT = 13.085473
+BGOFFSET_DEFAULT = 0
+BGSTDOFFSET_DEFAULT = 0
 #STRUCTURE
 STRUCTURE1_DEFAULT = 3
 STRUCTURE2_DEFAULT = 4
@@ -229,37 +232,58 @@ class Window(QtGui.QMainWindow):
         self.photonrateEdit.valueChanged.connect(self.changeImager)
         self.photonratestdEdit.valueChanged.connect(self.changeImager)
         self.laserpowerEdit.valueChanged.connect(self.changeImager)
+        self.photonslopeEdit.valueChanged.connect(self.changeImager)
+        self.photonslopeStdEdit.valueChanged.connect(self.changeImager)
 
-        igrid.addWidget(laserpower,0,0)
-        igrid.addWidget(self.laserpowerEdit,0,1)
-        igrid.addWidget(QtGui.QLabel('mW'),0,2)
-        igrid.addWidget(psf,1,0)
-        igrid.addWidget(self.psfEdit,1,1)
-        igrid.addWidget(QtGui.QLabel('Px'),1,2)
-        igrid.addWidget(psf_fwhm,2,0)
-        igrid.addWidget(self.psf_fwhmEdit,2,1)
-        igrid.addWidget(QtGui.QLabel('nm'),2,2)
-        igrid.addWidget(photonrate,3,0)
-        igrid.addWidget(self.photonrateEdit,3,1)
-        igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup'),3,2)
-        igrid.addWidget(photonsframe,4,0)
-        igrid.addWidget(self.photonsframeEdit,4,1)
-        igrid.addWidget(QtGui.QLabel('Photons'),4,2)
-        igrid.addWidget(photonratestd,5,0)
-        igrid.addWidget(self.photonratestdEdit,5,1)
-        igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup'),5,2)
-        igrid.addWidget(photonstdframe,6,0)
-        igrid.addWidget(self.photonstdframeEdit,6,1)
-        igrid.addWidget(QtGui.QLabel('Photons'),6,2)
-        igrid.addWidget(photonbudget,7,0)
-        igrid.addWidget(self.photonbudgetEdit,7,1)
-        igrid.addWidget(QtGui.QLabel('Photons'),7,2)
-        igrid.addWidget(photonslope,8,0)
-        igrid.addWidget(self.photonslopeEdit,8,1)
-        igrid.addWidget(QtGui.QLabel('mW<sup>-1</sup> Photons<sup>-1</sup> ms'),8,2)
-        igrid.addWidget(photonslopeStd,9,0)
-        igrid.addWidget(self.photonslopeStdEdit,9,1)
-        igrid.addWidget(QtGui.QLabel('mW<sup>-1</sup> Photons<sup>-1</sup> ms'),9,2)
+
+
+        igrid.addWidget(psf,0,0)
+        igrid.addWidget(self.psfEdit,0,1)
+        igrid.addWidget(QtGui.QLabel('Px'),0,2)
+        igrid.addWidget(psf_fwhm,1,0)
+        igrid.addWidget(self.psf_fwhmEdit,1,1)
+        igrid.addWidget(QtGui.QLabel('nm'),1,2)
+
+        igrid.addWidget(laserpower,2,0)
+        igrid.addWidget(self.laserpowerEdit,2,1)
+        igrid.addWidget(QtGui.QLabel('mW'),2,2)
+
+        igridindex = 1
+        if ADVANCEDMODE:
+            igrid.addWidget(photonrate,3,0)
+            igrid.addWidget(self.photonrateEdit,3,1)
+            igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup'),3,2)
+
+            igridindex = 0
+
+        igrid.addWidget(photonsframe,4-igridindex,0)
+        igrid.addWidget(self.photonsframeEdit,4-igridindex,1)
+        igrid.addWidget(QtGui.QLabel('Photons'),4-igridindex,2)
+        igridindex = 2
+        if ADVANCEDMODE:
+            igrid.addWidget(photonratestd,5,0)
+            igrid.addWidget(self.photonratestdEdit,5,1)
+            igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup'),5,2)
+            igridindex = 0
+
+        igrid.addWidget(photonstdframe,6-igridindex,0)
+        igrid.addWidget(self.photonstdframeEdit,6-igridindex,1)
+        igrid.addWidget(QtGui.QLabel('Photons'),6-igridindex,2)
+        igrid.addWidget(photonbudget,7-igridindex,0)
+        igrid.addWidget(self.photonbudgetEdit,7-igridindex,1)
+        igrid.addWidget(QtGui.QLabel('Photons'),7-igridindex,2)
+        igrid.addWidget(photonslope,8-igridindex,0)
+        igrid.addWidget(self.photonslopeEdit,8-igridindex,1)
+        igrid.addWidget(QtGui.QLabel('mW<sup>-1</sup> Photons<sup>-1</sup> ms'),8-igridindex,2)
+        igrid.addWidget(photonslopeStd,9-igridindex,0)
+        igrid.addWidget(self.photonslopeStdEdit,9-igridindex,1)
+        igrid.addWidget(QtGui.QLabel('mW<sup>-1</sup> Photons<sup>-1</sup> ms'),9-igridindex,2)
+
+        if not ADVANCEDMODE:
+            backgroundframesimple = QtGui.QLabel('Background (Frame)')
+            self.backgroundframesimpleEdit = QtGui.QLabel()
+            igrid.addWidget(backgroundframesimple,10-igridindex,0)
+            igrid.addWidget(self.backgroundframesimpleEdit,10-igridindex,1)
 
          #NOISE MODEL
         noise_groupbox = QtGui.QGroupBox('Noise Model')
@@ -267,7 +291,6 @@ class Window(QtGui.QMainWindow):
 
         laserc = QtGui.QLabel('Lasercoefficient')
         imagerc = QtGui.QLabel('Imagercoefficient')
-        camerac = QtGui.QLabel('Cameracoefficient')
 
         EquationA = QtGui.QLabel('Equation A')
         EquationB = QtGui.QLabel('Equation B')
@@ -287,10 +310,6 @@ class Window(QtGui.QMainWindow):
         self.imagercEdit.setRange(0,100000)
         self.imagercEdit.setDecimals(6)
 
-        self.cameracEdit = QtGui.QDoubleSpinBox()
-        self.cameracEdit.setRange(0,100000)
-        self.cameracEdit.setDecimals(6)
-
         self.EquationBEdit = QtGui.QDoubleSpinBox()
         self.EquationBEdit.setRange(-100000,100000)
         self.EquationBEdit.setDecimals(6)
@@ -305,7 +324,6 @@ class Window(QtGui.QMainWindow):
 
         self.lasercEdit.setValue(LASERC_DEFAULT)
         self.imagercEdit.setValue(IMAGERC_DEFAULT)
-        self.cameracEdit.setValue(CAMERAC_DEFAULT)
 
         self.EquationAEdit.setValue(EQA_DEFAULT)
         self.EquationBEdit.setValue(EQB_DEFAULT)
@@ -321,7 +339,6 @@ class Window(QtGui.QMainWindow):
 
         self.lasercEdit.valueChanged.connect(self.changeNoise)
         self.imagercEdit.valueChanged.connect(self.changeNoise)
-        self.cameracEdit.valueChanged.connect(self.changeNoise)
         self.EquationAEdit.valueChanged.connect(self.changeNoise)
         self.EquationBEdit.valueChanged.connect(self.changeNoise)
         self.EquationCEdit.valueChanged.connect(self.changeNoise)
@@ -336,22 +353,20 @@ class Window(QtGui.QMainWindow):
         ngrid.addWidget(self.lasercEdit,0,1)
         ngrid.addWidget(imagerc,1,0)
         ngrid.addWidget(self.imagercEdit,1,1)
-        ngrid.addWidget(camerac,2,0)
-        ngrid.addWidget(self.cameracEdit,2,1)
-        ngrid.addWidget(EquationA,3,0)
-        ngrid.addWidget(self.EquationAEdit,3,1)
-        ngrid.addWidget(EquationB,4,0)
-        ngrid.addWidget(self.EquationBEdit,4,1)
-        ngrid.addWidget(EquationC,5,0)
-        ngrid.addWidget(self.EquationCEdit,5,1)
-        ngrid.addWidget(Bgoffset,6,0)
-        ngrid.addWidget(self.BgoffsetEdit,6,1)
-        ngrid.addWidget(BgStdoffset,7,0)
-        ngrid.addWidget(self.BgStdoffsetEdit,7,1)
-        ngrid.addWidget(backgroundframe,8,0)
-        ngrid.addWidget(self.backgroundframeEdit,8,1)
-        ngrid.addWidget(noiseLabel,9,0)
-        ngrid.addWidget(self.noiseEdit,9,1)
+        ngrid.addWidget(EquationA,2,0)
+        ngrid.addWidget(self.EquationAEdit,2,1)
+        ngrid.addWidget(EquationB,3,0)
+        ngrid.addWidget(self.EquationBEdit,3,1)
+        ngrid.addWidget(EquationC,4,0)
+        ngrid.addWidget(self.EquationCEdit,4,1)
+        ngrid.addWidget(Bgoffset,5,0)
+        ngrid.addWidget(self.BgoffsetEdit,5,1)
+        ngrid.addWidget(BgStdoffset,6,0)
+        ngrid.addWidget(self.BgStdoffsetEdit,6,1)
+        ngrid.addWidget(backgroundframe,7,0)
+        ngrid.addWidget(self.backgroundframeEdit,7,1)
+        ngrid.addWidget(noiseLabel,8,0)
+        ngrid.addWidget(self.noiseEdit,8,1)
 
         calibrateNoiseButton = QtGui.QPushButton("Calibrate Noise Model")
         calibrateNoiseButton.clicked.connect(self.calibrateNoise)
@@ -521,25 +536,35 @@ class Window(QtGui.QMainWindow):
         posgrid.addWidget(self.canvas1)
         strgrid.addWidget(self.canvas2)
 
-
+        self.mainpbar = QtGui.QProgressBar(self)
         # Arrange Buttons
-        self.grid.addWidget(pos_groupbox,1,0)
-        self.grid.addWidget(str_groupbox,1,1)
-        self.grid.addWidget(structure_groupbox,2,0,2,1)
-        self.grid.addWidget(camera_groupbox,1,2)
-        self.grid.addWidget(paint_groupbox,3,1)
-        self.grid.addWidget(imager_groupbox,2,1)
-        self.grid.addWidget(noise_groupbox,2,2)
-        self.grid.addLayout(btngridR,3,2)
-
+        if ADVANCEDMODE:
+            self.grid.addWidget(pos_groupbox,1,0)
+            self.grid.addWidget(str_groupbox,1,1)
+            self.grid.addWidget(structure_groupbox,2,0,2,1)
+            self.grid.addWidget(camera_groupbox,1,2)
+            self.grid.addWidget(paint_groupbox,3,1)
+            self.grid.addWidget(imager_groupbox,2,1)
+            self.grid.addWidget(noise_groupbox,2,2)
+            self.grid.addLayout(btngridR,3,2)
+            self.grid.addWidget(self.mainpbar,4,0,1,4)
+        else:
+            self.grid.addWidget(pos_groupbox,1,0)
+            self.grid.addWidget(str_groupbox,1,1)
+            self.grid.addWidget(structure_groupbox,2,0,2,1)
+            self.grid.addWidget(camera_groupbox,3,1)
+            self.grid.addWidget(paint_groupbox,4,0)
+            self.grid.addWidget(imager_groupbox,2,1)
+            self.grid.addLayout(btngridR,4,1)
+            self.grid.addWidget(self.mainpbar,5,0,1,4)
         mainWidget = QtGui.QWidget()
         mainWidget.setLayout(self.grid)
         self.setCentralWidget(mainWidget)
         self.setGeometry(300, 300, 300, 150)
         #CALL FUNCTIONS
         self.generatePositions()
-        self.mainpbar = QtGui.QProgressBar(self)
-        self.grid.addWidget(self.mainpbar,4,0,1,4)
+
+
         self.mainpbar.setValue(0)
         self.statusBar().showMessage('Simulate Ready.')
 
@@ -595,27 +620,25 @@ class Window(QtGui.QMainWindow):
 
     def changeNoise(self):
         itime = self.integrationtimeEdit.value()
-
-        #NEW NOISE MODEL
-        laserc = self.lasercEdit.value()
-        imagerc = self.imagercEdit.value()
-        camerac = self.cameracEdit.value()
-        bgoffset = self.BgoffsetEdit.value()
-
-        laserpower = self.laserpowerEdit.value()
         imagerconcentration = self.imagerconcentrationEdit.value()
+        laserpower = self.laserpowerEdit.value()
+        if ADVANCEDMODE:
+        #NEW NOISE MODEL
+            laserc = self.lasercEdit.value()
+            imagerc = self.imagercEdit.value()
+            bgoffset = self.BgoffsetEdit.value()
+            bgmodel = (laserc + imagerc*imagerconcentration)*laserpower*itime+bgoffset
+            equationA = self.EquationAEdit.value()
+            equationB = self.EquationBEdit.value()
+            equationC = self.EquationCEdit.value()
+            bgstdoffset = self.BgStdoffsetEdit.value()
+            bgmodelstd = equationA*laserpower*itime+equationB*bgmodel+equationC+bgstdoffset
+            self.backgroundframeEdit.setText(str(int(bgmodel)))
+            self.noiseEdit.setText(str(int(bgmodelstd)))
+        else:
+            bgmodel = (LASERC_DEFAULT + IMAGERC_DEFAULT*imagerconcentration)*laserpower*itime
+            self.backgroundframesimpleEdit.setText(str(int(bgmodel)))
 
-        bgmodel = (laserc + imagerc*imagerconcentration)*laserpower*itime+camerac+bgoffset
-
-        equationA = self.EquationAEdit.value()
-        equationB = self.EquationBEdit.value()
-        equationC = self.EquationCEdit.value()
-        bgstdoffset = self.BgStdoffsetEdit.value()
-
-        bgmodelstd = equationA*laserpower*itime+equationB*bgmodel+equationC+bgstdoffset
-
-        self.backgroundframeEdit.setText(str(int(bgmodel)))
-        self.noiseEdit.setText(str(int(bgmodelstd)))
 
     def changeStructureType(self):
         typeindex = self.structurecombo.currentIndex()
@@ -783,18 +806,26 @@ class Window(QtGui.QMainWindow):
         pixelsize = self.pixelsizeEdit.value()
 
         #NOISE MODEL
-        background = int(self.backgroundframeEdit.text())
-        noise = int(self.noiseEdit.text())
-
-        laserc = self.lasercEdit.value()
-        imagerc = self.imagercEdit.value()
-        camerac = self.cameracEdit.value()
-        bgoffset = self.BgoffsetEdit.value()
-
-        equationA = self.EquationAEdit.value()
-        equationB = self.EquationBEdit.value()
-        equationC = self.EquationCEdit.value()
-        bgstdoffset = self.BgStdoffsetEdit.value()
+        if ADVANCEDMODE:
+            background = int(self.backgroundframeEdit.text())
+            noise = int(self.noiseEdit.text())
+            laserc = self.lasercEdit.value()
+            imagerc = self.imagercEdit.value()
+            bgoffset = self.BgoffsetEdit.value()
+            equationA = self.EquationAEdit.value()
+            equationB = self.EquationBEdit.value()
+            equationC = self.EquationCEdit.value()
+            bgstdoffset = self.BgStdoffsetEdit.value()
+        else:
+            background = int(self.backgroundframesimpleEdit.text())
+            noise = _np.sqrt(background)
+            laserc = LASERC_DEFAULT
+            imagerc = IMAGERC_DEFAULT
+            bgoffset = BGOFFSET_DEFAULT
+            equationA = EQA_DEFAULT
+            equationB = EQB_DEFAULT
+            equationC = EQC_DEFAULT
+            bgstdoffset = BGSTDOFFSET_DEFAULT
 
         structurexx,structureyy,structureex = self.readStructure()
 
@@ -811,8 +842,6 @@ class Window(QtGui.QMainWindow):
         noexchangecolors = len(set(exchangeroundstoSim))
         exchangecolors = list(set(exchangeroundstoSim))
 
-        print(noexchangecolors)
-        print(exchangecolors)
 
         t0 = time.time()
 
@@ -882,14 +911,13 @@ class Window(QtGui.QMainWindow):
                     'Imager.Photonbudget':photonbudget,
                     'Imager.Laserpower':laserpower,
                     'Imager.Photonslope':photonslope,
-                    'Imager.PhotonslopeStd':photonslope,
+                    'Imager.PhotonslopeStd':photonslopeStd,
                     'Camera.Image Size':imagesize,
                     'Camera.Integration Time':itime,
                     'Camera.Frames':frames,
                     'Camera.Pixelsize':pixelsize,
                     'Noise.Lasercoefficient':laserc,
                     'Noise.Imagercoefficient':imagerc,
-                    'Noise.Cameracoefficient':camerac,
                     'Noise.EquationA':equationA,
                     'Noise.EquationB':equationB,
                     'Noise.EquationC':equationC,
@@ -936,15 +964,15 @@ class Window(QtGui.QMainWindow):
             self.framesEdit.setValue(info[0]['Camera.Frames'])
             self.pixelsizeEdit.setValue(info[0]['Camera.Pixelsize'])
 
-            self.lasercEdit.setValue(info[0]['Noise.Lasercoefficient'])
-            self.imagercEdit.setValue(info[0]['Noise.Imagercoefficient'])
-            self.cameracEdit.setValue(info[0]['Noise.Cameracoefficient'])
-            self.BgoffsetEdit.setValue(info[0]['Noise.BackgroundOff'])
+            if ADVANCEDMODE:
+                self.lasercEdit.setValue(info[0]['Noise.Lasercoefficient'])
+                self.imagercEdit.setValue(info[0]['Noise.Imagercoefficient'])
+                self.BgoffsetEdit.setValue(info[0]['Noise.BackgroundOff'])
 
-            self.EquationAEdit.setValue(info[0]['Noise.EquationA'])
-            self.EquationBEdit.setValue(info[0]['Noise.EquationB'])
-            self.EquationCEdit.setValue(info[0]['Noise.EquationC'])
-            self.BgStdoffsetEdit.setValue(info[0]['Noise.BackgroundStdOff'])
+                self.EquationAEdit.setValue(info[0]['Noise.EquationA'])
+                self.EquationBEdit.setValue(info[0]['Noise.EquationB'])
+                self.EquationCEdit.setValue(info[0]['Noise.EquationC'])
+                self.BgStdoffsetEdit.setValue(info[0]['Noise.BackgroundStdOff'])
 
             #SET POSITIONS
             handlexx = _np.asarray((info[0]['Structure.HandleX']).split(","))
@@ -1212,14 +1240,14 @@ class Window(QtGui.QMainWindow):
         _np.asarray(conc)
 
         x_3d = _np.array([conc,las,time])
-        p0 = [1,1,100]
+        p0 = [1,1]
         fitParamsBg, fitCovariances = curve_fit(fitFuncBg, x_3d, bg, p0)
         print(' fit coefficients :\n', fitParamsBg)
 
         # SET VALUES TO PARAMETER
         self.lasercEdit.setValue(fitParamsBg[0])
         self.imagercEdit.setValue(fitParamsBg[1])
-        self.cameracEdit.setValue(fitParamsBg[2])
+
 
         x_3dStd = _np.array([las,time,bg])
         p0S = [1,1,1]
@@ -1236,7 +1264,7 @@ class Window(QtGui.QMainWindow):
         figure4 = plt.figure()
 
         #Background
-        bgmodel = fitFuncBg(x_3d, fitParamsBg[0],fitParamsBg[1],fitParamsBg[2])
+        bgmodel = fitFuncBg(x_3d, fitParamsBg[0],fitParamsBg[1])
         ax1 = figure4.add_subplot(121)
         ax1.cla()
         ax1.plot(bg, bgmodel,'o')
@@ -1355,9 +1383,9 @@ class Window(QtGui.QMainWindow):
                     # CALCULATE BG AND BG_STD FROM MODEL AND ADJUST OFFSET
                     laserc = self.lasercEdit.value()
                     imagerc = self.imagercEdit.value()
-                    camerac = self.cameracEdit.value()
 
-                    bgmodel = (laserc + imagerc*imagerconcentration)*laserpower*integrationtime+camerac
+
+                    bgmodel = (laserc + imagerc*imagerconcentration)*laserpower*integrationtime
 
                     equationA = self.EquationAEdit.value()
                     equationB = self.EquationBEdit.value()
