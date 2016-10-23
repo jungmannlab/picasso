@@ -93,12 +93,12 @@ class Window(QtGui.QMainWindow):
         self.grid.setSpacing(5)
 
         # CAMERA PARAMETERS
-        camera_groupbox = QtGui.QGroupBox('Camera Parameters')
+        camera_groupbox = QtGui.QGroupBox('Camera parameters')
         cgrid = QtGui.QGridLayout(camera_groupbox)
 
-        camerasize = QtGui.QLabel('Image Size')
-        integrationtime = QtGui.QLabel('Integration Time')
-        totaltime = QtGui.QLabel('Total Integration Time')
+        camerasize = QtGui.QLabel('Image size')
+        integrationtime = QtGui.QLabel('Integration time')
+        totaltime = QtGui.QLabel('Total Integration time')
         frames = QtGui.QLabel('Frames')
         pixelsize = QtGui.QLabel('Pixelsize')
 
@@ -140,13 +140,13 @@ class Window(QtGui.QMainWindow):
         cgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         #PAINT PARAMETERS
-        paint_groupbox = QtGui.QGroupBox('PAINT Parameters')
+        paint_groupbox = QtGui.QGroupBox('PAINT parameters')
         pgrid = QtGui.QGridLayout(paint_groupbox)
 
         kon = QtGui.QLabel('k<sub>On</sub>')
-        imagerconcentration = QtGui.QLabel('Imager Concentration')
-        taud = QtGui.QLabel('Dark Time')
-        taub = QtGui.QLabel('Bright Time')
+        imagerconcentration = QtGui.QLabel('Imager concentration')
+        taud = QtGui.QLabel('Dark time')
+        taub = QtGui.QLabel('Bright time')
 
         self.konEdit = QtGui.QDoubleSpinBox()
         self.konEdit.setRange(1,10000000)
@@ -182,19 +182,19 @@ class Window(QtGui.QMainWindow):
         pgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         #IMAGER Parameters
-        imager_groupbox = QtGui.QGroupBox('Imager Parameters')
+        imager_groupbox = QtGui.QGroupBox('Imager parameters')
         igrid = QtGui.QGridLayout(imager_groupbox)
 
         laserpower = QtGui.QLabel('Laserpower')
         psf = QtGui.QLabel('PSF')
         psf_fwhm = QtGui.QLabel('PSF(FWHM)')
         photonrate = QtGui.QLabel('Photonrate')
-        photonsframe = QtGui.QLabel('Photons (Frame)')
+        photonsframe = QtGui.QLabel('Photons (frame)')
         photonratestd = QtGui.QLabel('Photonrate Std')
-        photonstdframe = QtGui.QLabel('Photonrate Std (Frame)')
+        photonstdframe = QtGui.QLabel('Photonrate Std (frame)')
         photonbudget = QtGui.QLabel('Photonbudget')
-        photonslope = QtGui.QLabel('Photonrate / Laser')
-        photonslopeStd = QtGui.QLabel('Photonrate Std / Laser')
+        photonslope = QtGui.QLabel('Photonrate / laser')
+        photonslopeStd = QtGui.QLabel('Photonrate Std / laser')
 
         self.laserpowerEdit = QtGui.QSpinBox()
         self.laserpowerEdit.setRange(0,1000)
@@ -380,7 +380,7 @@ class Window(QtGui.QMainWindow):
         structure_groupbox = QtGui.QGroupBox('Structure')
         sgrid = QtGui.QGridLayout(structure_groupbox)
 
-        structureno = QtGui.QLabel('Number of Structures')
+        structureno = QtGui.QLabel('Number of structures')
         structureframe = QtGui.QLabel('Frame')
 
         self.structure1 = QtGui.QLabel('Columns')
@@ -390,7 +390,7 @@ class Window(QtGui.QMainWindow):
 
         structurexx = QtGui.QLabel('Stucture X')
         structureyy = QtGui.QLabel('Structure Y')
-        structureex = QtGui.QLabel('Exchange Labels')
+        structureex = QtGui.QLabel('Exchange labels')
 
         structurecomboLabel = QtGui.QLabel('Type')
 
@@ -439,8 +439,8 @@ class Window(QtGui.QMainWindow):
         self.structurerandomEdit = QtGui.QCheckBox()
 
 
-        structurerandom = QtGui.QLabel('Random Arrangement')
-        structurerandomOrientation = QtGui.QLabel('Random Orientation')
+        structurerandom = QtGui.QLabel('Random arrangement')
+        structurerandomOrientation = QtGui.QLabel('Random orientation')
 
         self.structurerandomEdit.stateChanged.connect(self.generatePositions)
         self.structurerandomOrientationEdit.stateChanged.connect(self.generatePositions)
@@ -480,30 +480,30 @@ class Window(QtGui.QMainWindow):
         sgrid.addWidget(structurerandomOrientation,12,1)
         sgrid.addWidget(self.structurerandomOrientationEdit,12,0)
 
-        importDesignButton = QtGui.QPushButton("Import Structure from Design")
+        importDesignButton = QtGui.QPushButton("Import structure from design")
         importDesignButton.clicked.connect(self.importDesign)
         sgrid.addWidget(importDesignButton,13,0,1,3)
 
-        generateButton = QtGui.QPushButton("Generate Positions")
+        generateButton = QtGui.QPushButton("Generate positions")
         generateButton.clicked.connect(self.generatePositions)
         sgrid.addWidget(generateButton,14,0,1,3)
         cgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
-        simulateButton = QtGui.QPushButton("Simulate Data")
+        simulateButton = QtGui.QPushButton("Simulate data")
         self.exchangeroundsEdit = QtGui.QLineEdit('1')
 
         quitButton = QtGui.QPushButton('Quit', self)
         quitButton.clicked.connect(QtCore.QCoreApplication.instance().quit)
         quitButton.resize(quitButton.sizeHint())
 
-        loadButton = QtGui.QPushButton("Load Settings from Previous Simulation")
+        loadButton = QtGui.QPushButton("Load settings from previous simulation")
 
 
         btngridR = QtGui.QGridLayout()
 
         btngridR.addWidget(loadButton)
 
-        btngridR.addWidget(QtGui.QLabel('Exchange Rounds to be simulated:'))
+        btngridR.addWidget(QtGui.QLabel('Exchange rounds to be simulated:'))
         btngridR.addWidget(self.exchangeroundsEdit)
         btngridR.addWidget(simulateButton)
         btngridR.addWidget(quitButton)
@@ -566,7 +566,7 @@ class Window(QtGui.QMainWindow):
 
 
         self.mainpbar.setValue(0)
-        self.statusBar().showMessage('Simulate Ready.')
+        self.statusBar().showMessage('Simulate ready.')
 
     def changeTime(self):
         itime = self.integrationtimeEdit.value()
@@ -854,7 +854,7 @@ class Window(QtGui.QMainWindow):
                 fileName = fileNameOld
                 partstruct = struct[:,struct[2,:]==exchangecolors[0]]
 
-            self.statusBar().showMessage('Distributing Photons ...')
+            self.statusBar().showMessage('Distributing photons ...')
 
 
             bindingsitesx = partstruct[0,:]
@@ -867,11 +867,11 @@ class Window(QtGui.QMainWindow):
                 photondisttemp = simulate.distphotons(partstruct,itime,frames,taud,taub,photonrate,photonratestd,photonbudget)
 
                 photondist[i,:] = photondisttemp
-                outputmsg = 'Distributing Photons ... ' + str(_np.round(i/nosites*1000)/10) +' %'
+                outputmsg = 'Distributing photons ... ' + str(_np.round(i/nosites*1000)/10) +' %'
                 self.statusBar().showMessage(outputmsg)
                 self.mainpbar.setValue(_np.round(i/nosites*1000)/10)
 
-            self.statusBar().showMessage('Converting to Image ... ')
+            self.statusBar().showMessage('Converting to image ... ')
 
             movie = _np.zeros(shape=(frames,imagesize,imagesize), dtype='<u2')
             app = QtCore.QCoreApplication.instance()
@@ -882,8 +882,8 @@ class Window(QtGui.QMainWindow):
                 self.statusBar().showMessage(outputmsg)
                 self.mainpbar.setValue(_np.round(runner/frames*1000)/10)
                 app.processEvents()
-            self.statusBar().showMessage('Converting to Image ... Complete.')
-            self.statusBar().showMessage('Saving Movie ...')
+            self.statusBar().showMessage('Converting to image ... complete.')
+            self.statusBar().showMessage('Saving movie ...')
 
             info = {'Generated by':'Picasso simulate',
                     'Byte Order': '<',
@@ -929,7 +929,7 @@ class Window(QtGui.QMainWindow):
             simulate.saveMovie(fileName,movie,info)
             self.statusBar().showMessage('Movie saved to: '+fileName)
         dt = time.time() - t0
-        self.statusBar().showMessage('All computations finished. Last file saved to: '+fileName+'. Total Simulation time: {:.2f} Seconds.'.format(dt))
+        self.statusBar().showMessage('All computations finished. Last file saved to: '+fileName+'. Time elapsed: {:.2f} Seconds.'.format(dt))
 
     def loadSettings(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open yaml', filter='*.yaml')
