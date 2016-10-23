@@ -28,11 +28,9 @@ def noisy_p(image,mu): #Add poissonian noise to an image
 
 
 def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget ): #Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
-    meanlocs = int(_np.ceil(frames*time/(meandark+meanbright))) #This is an estimate for the total number of binding events
+    meanlocs = 4*int(_np.ceil(frames*time/(meandark+meanbright))) #This is an estimate for the total number of binding events
     if meanlocs < 10:
-        meanlocs = meanlocs*5
-    else:
-        meanlocs = meanlocs*2
+        meanlocs = meanlocs*10
 
     ## GENERATE ON AND OFF-EVENTS
     dark_times = _np.random.exponential(meandark,meanlocs)
@@ -43,8 +41,7 @@ def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbud
     simulatedmeanbright = _np.mean(events[1::2])
     eventsum = _np.cumsum(events)
 
-    maxloc = next(x[0] for x in enumerate(eventsum) if x[1] > frames*time) #Find the first event that exceeds the total integration time
-
+    maxloc = _np.argmax(eventsum>(frames*time)) #Find the first event that exceeds the total integration time
     ## CHECK Trace
     if _np.mod(maxloc,2): #uneven -> ends with an OFF-event
         onevents = int(_np.floor(maxloc/2));
