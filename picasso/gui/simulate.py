@@ -98,7 +98,7 @@ class Window(QtGui.QMainWindow):
 
         camerasize = QtGui.QLabel('Image size')
         integrationtime = QtGui.QLabel('Integration time')
-        totaltime = QtGui.QLabel('Total Integration time')
+        totaltime = QtGui.QLabel('Total acquisition time')
         frames = QtGui.QLabel('Frames')
         pixelsize = QtGui.QLabel('Pixelsize')
 
