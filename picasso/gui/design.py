@@ -197,9 +197,9 @@ class PipettingDialog(QtGui.QDialog):
     def __init__(self,  parent = None):
         super(PipettingDialog,  self).__init__(parent)
         layout = QtGui.QVBoxLayout(self)
-        self.setWindowTitle('Pipetting Dialog')
+        self.setWindowTitle('Pipetting dialog')
 
-        self.loadButton = QtGui.QPushButton("Select Folder")
+        self.loadButton = QtGui.QPushButton("Select folder")
         self.folderEdit = QtGui.QLabel('')
         self.csvCounter = QtGui.QLabel('')
         self.plateCounter = QtGui.QLabel('')
@@ -263,8 +263,8 @@ class SeqDialog(QtGui.QDialog):
         layout = QtGui.QVBoxLayout(self)
 
         self.table = QtGui.QTableWidget()
-        self.table.setWindowTitle('Extension Table')
-        self.setWindowTitle('Extenstion Table')
+        self.table.setWindowTitle('Extension table')
+        self.setWindowTitle('Extension table')
         self.resize(500,  285)
         self.table.setColumnCount(5)
         self.table.setHorizontalHeaderLabels(('Pos, Color, Preselection, Shortname, Sequence').split(', '))
@@ -350,15 +350,15 @@ class FoldingDialog(QtGui.QDialog):
 
         layout = QtGui.QVBoxLayout(self)
         self.table = QtGui.QTableWidget()
-        self.table.setWindowTitle('Folding Table')
-        self.setWindowTitle('Folding Table')
+        self.table.setWindowTitle('Folding table')
+        self.setWindowTitle('Folding table')
         self.resize(800,  285)
         self.table.horizontalHeader().setStretchLastSection(True)
 
         self.table.setRowCount(maxcolor-1)
         self.table.setColumnCount(8)
         #PRE-SET LABELS
-        self.table.setHorizontalHeaderLabels(('Component, Initial Concentration[uM], Parts, Pool-Concentration[nM], Target Concentration[nM], Volume[ul],  Excess, Colorcode ').split(', '))
+        self.table.setHorizontalHeaderLabels(('Component, Initial concentration[uM], Parts, Pool-concentration[nM], Target concentration[nM], Volume[ul],  Excess, Colorcode ').split(', '))
         self.clcButton = QtGui.QPushButton("Recalculate")
         self.clcButton.clicked.connect(self.clcExcess)
         self.exportButton = QtGui.QPushButton("Export")
@@ -446,10 +446,10 @@ class PlateDialog(QtGui.QDialog):
         super(PlateDialog,  self).__init__(parent)
         layout = QtGui.QVBoxLayout(self)
         self.info = QtGui.QLabel('Please make selection:  ')
-        self.radio1 = QtGui.QRadioButton('Export only sequences in current design. (176 staples in 2 plates)')
-        self.radio2 = QtGui.QRadioButton('Export full plates for all sequences used (176 * Number of unique Sequences)')
+        self.radio1 = QtGui.QRadioButton('Export only the sequences needed for this design. (176 staples in 2 plates)')
+        self.radio2 = QtGui.QRadioButton('Export full 2 full plates for all sequences used (176 staples * number of unique sequences)')
 
-        self.setWindowTitle('Plate Export')
+        self.setWindowTitle('Plate export')
         layout.addWidget(self.info)
         layout.addWidget(self.radio1)
         layout.addWidget(self.radio2)
@@ -555,7 +555,7 @@ class Scene(QtGui.QGraphicsScene):
             self.addItem(self.alllblseq[i])
 
         #MAKE A LABEL FOR THE CURRENTCOLOR
-        self.cclabel = QtGui.QGraphicsTextItem('Selected Color')
+        self.cclabel = QtGui.QGraphicsTextItem('Selected color')
         self.cclabel.setPos(*(1.5*HEX_SIDE_HALF * (labelspacer+COLOR_SITES[8-paletteindex][1]+xofflbl), -labelspacer-sqrt(3)*HEX_SIDE_HALF * (COLOR_SITES[8-paletteindex][0]+yoff)))
         self.addItem(self.cclabel)
         self.evaluateCanvas()
@@ -857,9 +857,9 @@ class Window(QtGui.QMainWindow):
     def generatePlates(self):
         seqcheck = self.checkSeq()
         if self.mainscene.tableshort == ['None', 'None', 'None', 'None', 'None', 'None', 'None']:
-            self.statusBar().showMessage('Error: No Extensions have been set. Please set Extensions first.')
+            self.statusBar().showMessage('Error: No extensions have been set. Please set extensions first.')
         elif seqcheck >= 1:
-            self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have Extensions. Please set first.')
+            self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have extensions. Please set first.')
         else:
             selection,  ok = PlateDialog.getSelection()
             if ok:
@@ -878,9 +878,9 @@ class Window(QtGui.QMainWindow):
     def pipettingScheme(self):
         seqcheck = self.checkSeq()
         if self.mainscene.tableshort == ['None', 'None', 'None', 'None', 'None', 'None', 'None']:
-            self.statusBar().showMessage('Error: No Extensions have been set. Please set Extensions first.')
+            self.statusBar().showMessage('Error: No extensions have been set. Please set extensions first.')
         elif seqcheck >= 1:
-            self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have Extensions. Please set first.')
+            self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have extensions. Please set first.')
         else:
             structureData = self.mainscene.readCanvas()[0]
             fullpipettlist =  [['PLATE NAME','PLATE POSITION','OLIGO NAME','SEQUENCE','COLOR']]
@@ -917,7 +917,7 @@ class Window(QtGui.QMainWindow):
                 platenames = list(set(platelist))
                 platenames.sort()
                 if (len(structureData)-1-16)==(len(pipettlist)):
-                    self.statusBar().showMessage('All sequences found in '+str(noplates)+' Plates. Pipetting Scheme complete.')
+                    self.statusBar().showMessage('All sequences found in '+str(noplates)+' Plates. Pipetting scheme complete.')
                 else:
                     self.statusBar().showMessage('Error: Sequences sequences missing. Please check *.csv file..')
 
@@ -934,7 +934,7 @@ class Window(QtGui.QMainWindow):
 
                     allfig[x] = plotPlate(selection,selectioncolors, platename)
 
-                path = QtGui.QFileDialog.getSaveFileName(self,  'Save Pipetting Schemes to.',  filter='*.pdf')
+                path = QtGui.QFileDialog.getSaveFileName(self,  'Save pipetting schemes to.',  filter='*.pdf')
                 if path:
                     with PdfPages(path) as pdf:
                         for x in range(0, len(platenames)):
@@ -944,7 +944,7 @@ class Window(QtGui.QMainWindow):
                             base, ext = _ospath.splitext(path)
                             csv_path = base + '.csv'
                             design.savePlate(csv_path, exportlist)
-                    self.statusBar().showMessage('Pippetting Scheme saved to: '+path)
+                    self.statusBar().showMessage('Pippetting scheme saved to: '+path)
 
     def foldingScheme(self):
 
