@@ -1025,9 +1025,9 @@ class MainWindow(QtGui.QWidget):
         clearbtn =  QtGui.QPushButton("Clear")
         sshotbtn = QtGui.QPushButton("Screenshot")
         seqbtn = QtGui.QPushButton("Extensions")
-        platebtn = QtGui.QPushButton("Get Plates")
-        pipettbtn = QtGui.QPushButton("Pipetting Scheme")
-        foldbtn = QtGui.QPushButton("Folding Scheme")
+        platebtn = QtGui.QPushButton("Get plates")
+        pipettbtn = QtGui.QPushButton("Pipetting scheme")
+        foldbtn = QtGui.QPushButton("Folding scheme")
 
         loadbtn.clicked.connect(self.window.openDialog)
         savebtn.clicked.connect(self.window.saveDialog)
