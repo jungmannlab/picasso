@@ -333,7 +333,7 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
     CRLBs[index, 5] = CRLB[4]
 
 
-# @_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     n_params = 6
 
