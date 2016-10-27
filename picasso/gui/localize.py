@@ -231,7 +231,7 @@ class PromptInfoDialog(QtGui.QDialog):
         dialog = PromptInfoDialog(parent)
         result = dialog.exec_()
         info = {}
-        info['Byte Order'] = '>' if dialog.byte_order == 'big endian' else '<'
+        info['Byte Order'] = '>' if dialog.byte_order.currentText() == 'Big Endian' else '<'
         info['Data Type'] = dialog.dtype.currentText()
         info['Frames'] = dialog.frames.value()
         info['Height'] = dialog.movie_height.value()

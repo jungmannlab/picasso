@@ -25,13 +25,6 @@ def _user_settings_filename():
     return _ospath.join(home, '.picasso', 'settings.yaml')
 
 
-def to_little_endian(movie, info):
-    if info[0]['Byte Order'] != '<':
-        movie = movie.byteswap()
-        info[0]['Byte Order'] = '<'
-    return movie, info
-
-
 def load_raw(path, prompt_info=None):
     try:
         info = load_info(path)
@@ -52,7 +45,9 @@ def load_raw(path, prompt_info=None):
     dtype = _np.dtype(info[0]['Data Type'])
     shape = (info[0]['Frames'], info[0]['Height'], info[0]['Width'])
     movie = _np.memmap(path, dtype, 'r', shape=shape)
-    movie, info = to_little_endian(movie, info)
+    if info[0]['Byte Order'] != '<':
+        movie = movie.byteswap()
+        info[0]['Byte Order'] = '<'
     return movie, info
 
 
@@ -128,12 +123,12 @@ class TiffMap:
     TIFF_TYPES = {1: 'B', 2: 'c', 3: 'H', 4: 'L', 5: 'RATIONAL'}
     TYPE_SIZES = {'c': 1, 'B': 1, 'h': 2, 'H': 2, 'i': 4, 'I': 4, 'L': 4, 'RATIONAL': 8}
 
-    def __init__(self, path, memmap_frames=False, verbose=False):
+    def __init__(self, path, verbose=False):
         if verbose:
             print('Reading info from {}'.format(path))
         self.path = _ospath.abspath(path)
         self.file = open(self.path, 'rb')
-        self.byte_order = {b'II': '<', b'MM': '>'}[self.file.read(2)]
+        self._tif_byte_order = {b'II': '<', b'MM': '>'}[self.file.read(2)]
         self.file.seek(4)
         self.first_ifd_offset = self.read('L')
 
@@ -151,7 +146,11 @@ class TiffMap:
                 self.height = self.read(type, count)
             elif tag == 258:
                 bits_per_sample = self.read(type, count)
-                self.dtype = _np.dtype(self.byte_order + 'u' + str(int(bits_per_sample/8)))
+                dtype_str = 'u' + str(int(bits_per_sample/8))
+                # Picasso uses internatlly exclusively little endian byte order...
+                self.dtype = _np.dtype(dtype_str)
+                # ... the tif byte order might be different, so we also store the file dtype
+                self._tif_dtype = _np.dtype(self._tif_byte_order + dtype_str)
         self.frame_shape = (self.height, self.width)
         self.frame_size = self.height*self.width
 
@@ -175,11 +174,6 @@ class TiffMap:
             self.file.seek(offset + 2 + n_entries * 12)
             offset = self.read('L')
         self.n_frames = len(self.image_offsets)
-
-        if memmap_frames:
-            self.get_frame = self.memmap_frame
-        else:
-            self.get_frame = self.read_frame
 
         self.lock = _threading.Lock()
 
@@ -231,7 +225,7 @@ class TiffMap:
         return self.n_frames
 
     def info(self):
-        info = {'Byte Order': self.byte_order, 'File': self.path, 'Height': self.height,
+        info = {'Byte Order': self._tif_byte_order, 'File': self.path, 'Height': self.height,
                 'Width': self.width, 'Data Type': self.dtype.name, 'Frames': self.n_frames}
         # The following block is MM-specific
         self.file.seek(self.first_ifd_offset)
@@ -251,12 +245,14 @@ class TiffMap:
                 info['Camera'] = mm_info['Camera']
         return info
 
-    def memmap_frame(self, index):
-        return _np.memmap(self.path, dtype=self.dtype, mode='r', offset=self.image_offsets[index], shape=self.frame_shape)
-
-    def read_frame(self, index, array=None):
+    def get_frame(self, index, array=None):
         self.file.seek(self.image_offsets[index])
-        return _np.reshape(_np.fromfile(self.file, dtype=self.dtype, count=self.frame_size), self.frame_shape)
+        frame = _np.reshape(_np.fromfile(self.file, dtype=self._tif_dtype, count=self.frame_size), self.frame_shape)
+        # We only want to deal with little endian byte order downstream:
+        if self._tif_byte_order == '>':
+            frame.byteswap(True)
+            frame = frame.newbyteorder('<')
+        return frame
 
     def read(self, type, count=1):
         if type == 'c':
@@ -268,7 +264,7 @@ class TiffMap:
 
     def read_numbers(self, type, count=1):
         size = self.TYPE_SIZES[type]
-        fmt = self.byte_order + count * type
+        fmt = self._tif_byte_order + count * type
         try:
             return _struct.unpack(fmt, self.file.read(count * size))[0]
         except _struct.error:
