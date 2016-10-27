@@ -21,7 +21,7 @@ When using Anaconda or Miniconda, most can be installed via `conda install <pack
 #### Installation
 
 1. Open the console, `cd` to the directory where you want to install and run
-`git clone https://github.com/jungmannlab/picasso.git`
+`git clone https://github.com/jungmannlab/picasso`
 Alternatively, [download](https://github.com/jungmannlab/picasso/archive/master.zip) the zip file and unzip it.
 2. Change to the downloaded directory and run `python setup.py install`.
 3. Run the PowerShell script "createShortcuts.ps1" in the gui directory.
