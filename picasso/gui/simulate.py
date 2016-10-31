@@ -49,13 +49,20 @@ KON_DEFAULT = 1600000
 IMAGERCONCENTRATION_DEFAULT = 5
 MEANBRIGHT_DEFAULT = 500
 #IMAGER
-LASERPOWER_DEFAULT = 30
+LASERPOWER_DEFAULT = 1.5 #POWER DENSITY
+POWERDENSITY_CONVERSION = 20
+STDFACTOR = 1.82
+if ADVANCEDMODE:
+    LASERPOWER_DEFAULT =30
 PSF_DEFAULT = 0.82
 PHOTONRATE_DEFAULT = 53
 PHOTONRATESTD_DEFAULT = 29
 PHOTONBUDGET_DEFAULT = 1500000
-PHOTONSLOPE_DEFAULT = 1.77
-PHOTONSLOPESTD_DEFAULT = 0.97
+PHOTONSLOPE_DEFAULT = 35
+PHOTONSLOPESTD_DEFAULT = 19
+if ADVANCEDMODE:
+    PHOTONSLOPE_DEFAULT = 1.77
+    PHOTONSLOPESTD_DEFAULT = 0.97
 #NOISE MODEL
 LASERC_DEFAULT = 0.012063
 IMAGERC_DEFAULT = 0.003195
@@ -185,20 +192,22 @@ class Window(QtGui.QMainWindow):
         imager_groupbox = QtGui.QGroupBox('Imager parameters')
         igrid = QtGui.QGridLayout(imager_groupbox)
 
-        laserpower = QtGui.QLabel('Laserpower')
+        laserpower = QtGui.QLabel('Power density')
+        if ADVANCEDMODE:
+            laserpower = QtGui.QLabel('Laserpower')
         psf = QtGui.QLabel('PSF')
         psf_fwhm = QtGui.QLabel('PSF(FWHM)')
         photonrate = QtGui.QLabel('Photonrate')
         photonsframe = QtGui.QLabel('Photons (frame)')
         photonratestd = QtGui.QLabel('Photonrate Std')
-        photonstdframe = QtGui.QLabel('Photonrate Std (frame)')
+        photonstdframe = QtGui.QLabel('Photons Std (frame)')
         photonbudget = QtGui.QLabel('Photonbudget')
-        photonslope = QtGui.QLabel('Photonrate / laser')
-        photonslopeStd = QtGui.QLabel('Photonrate Std / laser')
+        photonslope = QtGui.QLabel('Photon detection rate')
+        photonslopeStd = QtGui.QLabel('Photonrate Std ')
 
-        self.laserpowerEdit = QtGui.QSpinBox()
-        self.laserpowerEdit.setRange(0,1000)
-        self.laserpowerEdit.setSingleStep(1)
+        self.laserpowerEdit = QtGui.QDoubleSpinBox()
+        self.laserpowerEdit.setRange(0,10)
+        self.laserpowerEdit.setSingleStep(0.1)
         self.psfEdit = QtGui.QDoubleSpinBox()
         self.psfEdit.setRange(0,3)
         self.psfEdit.setSingleStep(0.01)
@@ -216,7 +225,7 @@ class Window(QtGui.QMainWindow):
         self.photonbudgetEdit.setSingleStep(100000)
         self.photonbudgetEdit.setDecimals(0)
 
-        self.photonslopeEdit = QtGui.QDoubleSpinBox()
+        self.photonslopeEdit = QtGui.QSpinBox()
         self.photonslopeStdEdit = QtGui.QDoubleSpinBox()
 
         self.laserpowerEdit.setValue(LASERPOWER_DEFAULT)
@@ -246,13 +255,15 @@ class Window(QtGui.QMainWindow):
 
         igrid.addWidget(laserpower,2,0)
         igrid.addWidget(self.laserpowerEdit,2,1)
-        igrid.addWidget(QtGui.QLabel('mW'),2,2)
+        igrid.addWidget(QtGui.QLabel('kW cm<sup>-2<sup>'),2,2)
+        if ADVANCEDMODE:
+            igrid.addWidget(QtGui.QLabel('mW'),2,2)
 
         igridindex = 1
         if ADVANCEDMODE:
             igrid.addWidget(photonrate,3,0)
             igrid.addWidget(self.photonrateEdit,3,1)
-            igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup'),3,2)
+            igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup>'),3,2)
 
             igridindex = 0
 
@@ -260,6 +271,7 @@ class Window(QtGui.QMainWindow):
         igrid.addWidget(self.photonsframeEdit,4-igridindex,1)
         igrid.addWidget(QtGui.QLabel('Photons'),4-igridindex,2)
         igridindex = 2
+
         if ADVANCEDMODE:
             igrid.addWidget(photonratestd,5,0)
             igrid.addWidget(self.photonratestdEdit,5,1)
@@ -274,10 +286,13 @@ class Window(QtGui.QMainWindow):
         igrid.addWidget(QtGui.QLabel('Photons'),7-igridindex,2)
         igrid.addWidget(photonslope,8-igridindex,0)
         igrid.addWidget(self.photonslopeEdit,8-igridindex,1)
-        igrid.addWidget(QtGui.QLabel('mW<sup>-1</sup> Photons<sup>-1</sup> ms'),8-igridindex,2)
-        igrid.addWidget(photonslopeStd,9-igridindex,0)
-        igrid.addWidget(self.photonslopeStdEdit,9-igridindex,1)
-        igrid.addWidget(QtGui.QLabel('mW<sup>-1</sup> Photons<sup>-1</sup> ms'),9-igridindex,2)
+        igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'),8-igridindex,2)
+
+        if ADVANCEDMODE:
+            igrid.addWidget(photonslopeStd,9-igridindex,0)
+            igrid.addWidget(self.photonslopeStdEdit,9-igridindex,1)
+            igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'),9-igridindex,2)
+
 
         if not ADVANCEDMODE:
             backgroundframesimple = QtGui.QLabel('Background (Frame)')
@@ -565,18 +580,25 @@ class Window(QtGui.QMainWindow):
         self.generatePositions()
 
 
+
         self.mainpbar.setValue(0)
         self.statusBar().showMessage('Simulate ready.')
 
     def changeTime(self):
+        laserpower = self.laserpowerEdit.value()
         itime = self.integrationtimeEdit.value()
         frames = self.framesEdit.value()
         totaltime = itime*frames/1000/60
         totaltime = round(totaltime*100)/100
         self.totaltimeEdit.setText(str(totaltime))
 
-        photonrate = self.photonrateEdit.value()
-        photonratestd = self.photonratestdEdit.value()
+
+        photonslope = self.photonslopeEdit.value()
+        photonslopestd = photonslope/STDFACTOR
+        if ADVANCEDMODE:
+            photonslopestd = self.photonslopeStdEdit.value()
+        photonrate = photonslope*laserpower
+        photonratestd = photonslopestd*laserpower
 
         photonsframe = round(photonrate*itime)
         photonsframestd = round(photonratestd*itime)
@@ -604,7 +626,9 @@ class Window(QtGui.QMainWindow):
 
         itime = self.integrationtimeEdit.value()
         photonslope = self.photonslopeEdit.value()
-        photonslopestd = self.photonslopeStdEdit.value()
+        photonslopestd = photonslope/STDFACTOR
+        if ADVANCEDMODE:
+            photonslopestd = self.photonslopeStdEdit.value()
         photonrate = photonslope*laserpower
         photonratestd = photonslopestd*laserpower
 
@@ -621,7 +645,7 @@ class Window(QtGui.QMainWindow):
     def changeNoise(self):
         itime = self.integrationtimeEdit.value()
         imagerconcentration = self.imagerconcentrationEdit.value()
-        laserpower = self.laserpowerEdit.value()
+        laserpower = self.laserpowerEdit.value()*POWERDENSITY_CONVERSION
         if ADVANCEDMODE:
         #NEW NOISE MODEL
             laserc = self.lasercEdit.value()
@@ -797,7 +821,9 @@ class Window(QtGui.QMainWindow):
         photonbudget = self.photonbudgetEdit.value()
         laserpower = self.laserpowerEdit.value()
         photonslope = self.photonslopeEdit.value()
-        photonslopeStd = self.photonslopeStdEdit.value()
+        photonslopeStd = photonslope/STDFACTOR
+        if ADVANCEDMODE:
+            photonslopeStd = self.photonslopeStdEdit.value()
 
         #CAMERA PARAMETERS
         imagesize = self.camerasizeEdit.value()

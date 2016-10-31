@@ -55,6 +55,7 @@ def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbud
     ## CALCULATE PHOTON NUMBERS
     for i in range(1,maxloc,2):
         photons = _np.round(_np.random.normal(photonrate,photonratestd)*time) #Number of Photons that are emitted in one frame
+
         if photons < 0:
             photons = 0
 
