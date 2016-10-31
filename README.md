@@ -2,8 +2,7 @@
 A collection of tools for painting super-resolution images
 
 ## Installation
-Simply download and run the installer:  
-[Picasso-Windows-64bit.exe](# TODO enter link here) (Link needs to be updated)
+Download and run the installer file from [http://picasso.jungmannlab.org/](http://picasso.jungmannlab.org/).
 
 ### Advanced installation for Python programmers
 As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso's internal routines in custom Python programs. At the same time, it is still possible to use Picasso as an end-user by creating the respective Windows shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
@@ -35,7 +34,6 @@ Copyright (c) 2015-2016 Jungmann Lab, Max Planck Institute of Biochemistry
 - Design icon based on "Hexagon by Creative Stalls from the Noun Project"
 - Simulate icon based on "Microchip by Futishia from the Nount Project"
 - Localize icon based on "Mountains by MONTANA RUCOBO from the Noun Project"
-- ToRaw icon based on "Lion by Sathish Selladurai from the Noun Project"
 - Filter icon based on "Funnel by José Campos from the Noun Project"
 - Render icon based on "Paint Palette by Vectors Market from the Noun Project"
 - Average icon based on "Layers by Creative Stall from the Noun Project"
