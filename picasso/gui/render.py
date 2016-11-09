@@ -164,6 +164,43 @@ class ApplyDialog(QtGui.QDialog):
         self.label.setText(str(vars))
 
 
+class LinkDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Enter parameters')
+        vbox = QtGui.QVBoxLayout(self)
+        grid = QtGui.QGridLayout()
+        grid.addWidget(QtGui.QLabel('Max. distance (pixels):'), 0, 0)
+        self.max_distance = QtGui.QDoubleSpinBox()
+        self.max_distance.setRange(0, 1e6)
+        self.max_distance.setValue(1)
+        grid.addWidget(self.max_distance, 0, 1)
+        grid.addWidget(QtGui.QLabel('Max. transient dark frames:'), 1, 0)
+        self.max_dark_time = QtGui.QDoubleSpinBox()
+        self.max_dark_time.setRange(0, 1e9)
+        self.max_dark_time.setValue(1)
+        grid.addWidget(self.max_dark_time, 1, 1)
+        vbox.addLayout(grid)
+        hbox = QtGui.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
+                                              QtCore.Qt.Horizontal,
+                                              self)
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    # static method to create the dialog and return input
+    @staticmethod
+    def getParams(parent=None):
+        dialog = LinkDialog(parent)
+        result = dialog.exec_()
+        return (dialog.max_distance.value(), dialog.max_dark_time.value(), result == QtGui.QDialog.Accepted)
+
+
 class InfoDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -602,6 +639,30 @@ class View(QtGui.QLabel):
             sp.set_value(i+1)
         self.update_scene()
 
+    def link(self):
+        channel = self.get_channel()
+        if hasattr(self.locs[channel], 'len'):
+            QtGui.QMessageBox.information(self, 'Link', 'Localizations are already linked. Aborting...')
+            return
+        else:
+            r_max, max_dark, ok = LinkDialog.getParams()
+            if ok:
+                if len(self._picks) > 0:
+                    picked_locs = self.picked_locs(channel, add_group=False)
+                    out_locs = []
+                    progress = lib.ProgressDialog('Linking localizations in picks', 0, len(picked_locs), self)
+                    progress.set_value(0)
+                    for i, pick_locs in enumerate(picked_locs):
+                        pick_locs_out = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
+                        out_locs.append(pick_locs_out)
+                        progress.set_value(i+1)
+                    self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
+                else:
+                    status = lib.StatusDialog('Linking localizations...', self)
+                    self.locs[channel] = postprocess.link(self.locs[channel], self.infos[channel], r_max=r_max, max_dark_time=max_dark)
+                    status.close()
+                self.update_scene()
+
     def shift_from_picked(self):
         n_channels = len(self.locs)
         locs = [self.picked_locs(_) for _ in range(n_channels)]
@@ -936,7 +997,7 @@ class View(QtGui.QLabel):
             self._picks = []
             self.add_picks(similar)
 
-    def picked_locs(self, channel):
+    def picked_locs(self, channel, add_group=True):
         if len(self._picks):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
@@ -948,8 +1009,9 @@ class View(QtGui.QLabel):
                 x, y = pick
                 block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
                 group_locs = lib.locs_at(x, y, block_locs, r)
-                group = i * np.ones(len(group_locs), dtype=np.int32)
-                group_locs = lib.append_to_rec(group_locs, group, 'group')
+                if add_group:
+                    group = i * np.ones(len(group_locs), dtype=np.int32)
+                    group_locs = lib.append_to_rec(group_locs, group, 'group')
                 picked_locs.append(group_locs)
                 progress.set_value(i+1)
             return picked_locs
@@ -1048,9 +1110,10 @@ class View(QtGui.QLabel):
         progress = lib.ProgressDialog('Calculating kinetics', 0, len(picked_locs), self)
         progress.set_value(0)
         for i, pick_locs in enumerate(picked_locs):
-            pick_locs_out = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
-            pick_locs_out = postprocess.compute_dark_times(pick_locs_out)
-            out_locs.append(pick_locs_out)
+            if not hasattr(pick_locs, 'len'):
+                pick_locs = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
+            pick_locs = postprocess.compute_dark_times(pick_locs)
+            out_locs.append(pick_locs)
             progress.set_value(i+1)
         out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
         n_groups = len(picked_locs)
@@ -1233,7 +1296,8 @@ class View(QtGui.QLabel):
                 com_x = np.mean(locs.x)
                 com_y = np.mean(locs.y)
                 rmsd[i] = np.sqrt(np.mean((locs.x - com_x)**2 + (locs.y - com_y)**2))
-                locs = postprocess.link(locs, info, r_max=r_max, max_dark_time=t)
+                if not hasattr(locs, 'len'):
+                    locs = postprocess.link(locs, info, r_max=r_max, max_dark_time=t)
                 length[i] = estimate_kinetic_rate(locs.len)
                 locs = postprocess.compute_dark_times(locs)
                 dark[i] = estimate_kinetic_rate(locs.dark)
@@ -1407,6 +1471,8 @@ class Window(QtGui.QMainWindow):
         undrift_from_picked_action = postprocess_menu.addAction('Undrift from picked')
         undrift_from_picked_action.setShortcut('Ctrl+Shift+U')
         undrift_from_picked_action.triggered.connect(self.view.undrift_from_picked)
+        link_action = postprocess_menu.addAction('Link localizations')
+        link_action.triggered.connect(self.view.link)
         align_action = postprocess_menu.addAction('Align channels')
         align_action.triggered.connect(self.view.align)
         apply_action = postprocess_menu.addAction('Apply expression to localizations')
