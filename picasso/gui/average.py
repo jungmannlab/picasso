@@ -155,14 +155,17 @@ class View(QtGui.QLabel):
         self.setAlignment(QtCore.Qt.AlignCenter)
         self.setAcceptDrops(True)
         self._pixmap = None
+        self.running = False
 
     def average(self):
-        oversampling = self.window.parameters_dialog.oversampling.value()
-        iterations = self.window.parameters_dialog.iterations.value()
-        self.thread = Worker(self.locs, self.r, self.group_index, oversampling, iterations)
-        self.thread.progressMade.connect(self.on_progress)
-        self.thread.start()
-        self.window.status_bar.showMessage('Starting parallel pool...')
+        if not self.running:
+            self.running = True
+            oversampling = self.window.parameters_dialog.oversampling.value()
+            iterations = self.window.parameters_dialog.iterations.value()
+            self.thread = Worker(self.locs, self.r, self.group_index, oversampling, iterations)
+            self.thread.progressMade.connect(self.on_progress)
+            self.thread.finished.connect(self.on_finished)
+            self.thread.start()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():
@@ -176,6 +179,10 @@ class View(QtGui.QLabel):
         ext = os.path.splitext(path)[1].lower()
         if ext == '.hdf5':
             self.open(path)
+
+    def on_finished(self):
+        self.window.status_bar.showMessage('Done!')
+        self.running = False
 
     def on_progress(self, it, total_it, g, n_groups, locs, update_image):
         self.locs = locs.copy()
