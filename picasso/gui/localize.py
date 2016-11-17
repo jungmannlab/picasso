@@ -411,19 +411,22 @@ class ParametersDialog(QtGui.QDialog):
         self.symmetric_checkbox = QtGui.QCheckBox('Symmetric PSF')
         self.symmetric_checkbox.setChecked(True)
         fit_grid.addWidget(self.symmetric_checkbox, 0, 1)
-        fit_grid.addWidget(QtGui.QLabel('Convergence Criterion:'), 1, 0)
+        self.fit_z_checkbox = QtGui.QCheckBox('3D Fit')
+        self.fit_z_checkbox.stateChanged.connect(self.on_fit_z_changed)
+        fit_grid.addWidget(self.fit_z_checkbox, 1, 1)
+        fit_grid.addWidget(QtGui.QLabel('Convergence Criterion:'), 2, 0)
         self.convergence_spinbox = QtGui.QDoubleSpinBox()
         self.convergence_spinbox.setRange(0, 1)
         self.convergence_spinbox.setDecimals(5)
         self.convergence_spinbox.setValue(0.0001)
         self.convergence_spinbox.setSingleStep(0.001)
-        fit_grid.addWidget(self.convergence_spinbox, 1, 1)
-        fit_grid.addWidget(QtGui.QLabel('Max. Iterations:'), 2, 0)
+        fit_grid.addWidget(self.convergence_spinbox, 2, 1)
+        fit_grid.addWidget(QtGui.QLabel('Max. Iterations:'), 3, 0)
         self.max_iterations_spinbox = QtGui.QSpinBox()
         self.max_iterations_spinbox.setRange(0, 999999)
         self.max_iterations_spinbox.setValue(100)
         self.max_iterations_spinbox.setSingleStep(10)
-        fit_grid.addWidget(self.max_iterations_spinbox, 2, 1)
+        fit_grid.addWidget(self.max_iterations_spinbox, 3, 1)
 
         if 'Cameras' in CONFIG:
             camera = self.camera.currentText()
@@ -462,6 +465,13 @@ class ParametersDialog(QtGui.QDialog):
 
     def on_emission_changed(self, index):
         self.update_qe()
+
+    def on_fit_z_changed(self, state):
+        if state:
+            self.symmetric_checkbox.setEnabled(False)
+            self.symmetric_checkbox.setChecked(False)
+        else:
+            self.symmetric_checkbox.setEnabled(True)
 
     def on_mng_spinbox_changed(self, value):
         if value < self.mng_slider.minimum():
@@ -902,20 +912,26 @@ class Window(QtGui.QMainWindow):
             eps = self.parameters_dialog.convergence_spinbox.value()
             max_it = self.parameters_dialog.max_iterations_spinbox.value()
             method = {True: 'sigma', False: 'sigmaxy'}[self.parameters_dialog.symmetric_checkbox.isChecked()]
+            fit_z = self.parameters_dialog.fit_z_checkbox.isChecked()
             self.fit_worker = FitWorker(self.movie, self.camera_info, self.identifications, self.parameters['Box Size'],
-                                        eps, max_it, method)
+                                        eps, max_it, method, fit_z)
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
+
+    def fit_z(self, locs):
+        localize.fit_z(locs)
 
     def on_fit_progress(self, current, total):
         message = 'Fitting spot {:,} / {:,} ...'.format(current, total)
         self.status_bar.showMessage(message)
 
-    def on_fit_finished(self, locs, elapsed_time):
+    def on_fit_finished(self, locs, elapsed_time, fit_z):
         self.status_bar.showMessage('Fitted {:,} spots in {:.2f} seconds.'.format(len(locs), elapsed_time))
         self.locs = locs
         self.draw_frame()
+        if fit_z:
+            self.fit_z(locs)
         base, ext = os.path.splitext(self.movie_path)
         self.save_locs(base + '_locs.hdf5')
 
@@ -987,9 +1003,9 @@ class IdentificationWorker(QtCore.QThread):
 class FitWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(np.recarray, float)
+    finished = QtCore.pyqtSignal(np.recarray, float, bool)
 
-    def __init__(self, movie, camera_info, identifications, box, eps, max_it, method):
+    def __init__(self, movie, camera_info, identifications, box, eps, max_it, method, fit_z):
         super().__init__()
         self.movie = movie
         self.camera_info = camera_info
@@ -998,6 +1014,7 @@ class FitWorker(QtCore.QThread):
         self.eps = eps
         self.max_it = max_it
         self.method = method
+        self.fit_z = fit_z
 
     def run(self):
         N = len(self.identifications)
@@ -1011,7 +1028,7 @@ class FitWorker(QtCore.QThread):
         self.progressMade.emit(current[0], N)
         dt = time.time() - t0
         locs = localize.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, iterations, self.box)
-        self.finished.emit(locs, dt)
+        self.finished.emit(locs, dt, self.fit_z)
 
 
 def main():

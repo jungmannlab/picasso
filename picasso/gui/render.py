@@ -609,6 +609,7 @@ class View(QtGui.QLabel):
         self.update_scene(picks_only=True)
 
     def adjust_viewport_to_view(self, viewport):
+        ''' Adds space to a desired viewport so that it matches the window aspect ratio. '''
         viewport_height = viewport[1][0] - viewport[0][0]
         viewport_width = viewport[1][1] - viewport[0][1]
         view_height = self.height()
@@ -671,6 +672,7 @@ class View(QtGui.QLabel):
                 self.update_scene()
 
     def shift_from_picked(self):
+        ''' Used by align. For each pick, calculate the center of mass and does rcc based on shifts '''
         n_channels = len(self.locs)
         locs = [self.picked_locs(_) for _ in range(n_channels)]
         # Calculating center of mass for each channel and pick
@@ -694,6 +696,7 @@ class View(QtGui.QLabel):
         return lib.minimize_shifts(dx, dy)
 
     def shift_from_rcc(self):
+        ''' Used by align. Estimates image shifts based on image correlation. '''
         n_channels = len(self.locs)
         rp = lib.ProgressDialog('Rendering images', 0, n_channels, self)
         rp.set_value(0)

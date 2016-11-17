@@ -14,7 +14,14 @@ import ctypes as _ctypes
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import threading as _threading
 from itertools import chain as _chain
+from scipy.optimize import minimize_scalar as _minimize_scalar
+from scipy.optimize import minimize as _minimize
+from tqdm import trange as _trange
+import matplotlib.pyplot as _plt
 from . import gaussmle as _gaussmle
+from . import CONFIG as _CONFIG
+from . import lib as _lib
+from . import io as _io
 
 
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
@@ -133,7 +140,7 @@ def identify_async(movie, minimum_ng, box, roi=None):
     return current, f
 
 
-def identify(movie, minimum_ng, box, threaded=True):
+def identify(movie, minimum_ng, box, threaded=False):
     if threaded:
         N = len(movie)
         current, futures = identify_async(movie, minimum_ng, box)
@@ -224,3 +231,51 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
 def localize(movie, info, parameters):
     identifications = identify(movie, parameters)
     return fit(movie, info, identifications, parameters['Box Size'])
+
+
+def calibrate_z(locs, d, range):
+    z = locs.frame*d - range/2
+    Cx = _np.polyfit(z, locs.sx, 4, full=False)
+    Cy = _np.polyfit(z, locs.sy, 4, full=False)
+    _plt.plot(z, locs.sx, '.', label='sx')
+    _plt.plot(z, locs.sy, '.', label='sy')
+    _plt.plot(z, _np.polyval(Cx, z))
+    _plt.plot(z, _np.polyval(Cy, z))
+    _plt.show()
+
+
+def _fit_z_target(z, sx, sy, cx, cy):
+    wx = _np.polynomial.polynomial.polyval(z, cx)
+    wy = _np.polynomial.polynomial.polyval(z, cy)
+    # return _np.sqrt((sx**0.5 - wx**0.5)**2 + (sy**0.5 - wy**0.5)**2)
+    return (sx-wx)**2 + (sy-wy)**2
+
+
+def fit_z(locs, info):
+    locs = locs[0:10000]
+    z = _np.zeros_like(locs.x)
+    d_zcalib = _np.zeros_like(z)
+    cx = _np.array(_CONFIG['3D Calibration']['X Coefficients'])
+    cy = _np.array(_CONFIG['3D Calibration']['Y Coefficients'])
+    sx = locs.sx
+    sy = locs.sy
+    for i in _trange(len(z)):
+        result = _minimize_scalar(_fit_z_target, args=(sx[i], sy[i], cx, cy))
+        # result = _minimize(_fit_z_target, 0, args=(sx[i], sy[i], cx, cy))
+        z[i] = result.x
+        d_zcalib[i] = _np.sqrt(result.fun)
+    import matplotlib.pyplot as plt
+    plt.style.use('ggplot')
+    plt.figure()
+    z_plt = _np.linspace(-400, 400, 100)
+    plt.scatter(z, sx, c=d_zcalib, cmap='Reds', vmax=_np.percentile(d_zcalib, 90))
+    plt.scatter(z, sy, c=d_zcalib, cmap='Blues', vmax=_np.percentile(d_zcalib, 90))
+    plt.plot(z_plt, _np.polynomial.polynomial.polyval(z_plt, cx), '0.3', lw=1.5)
+    plt.plot(z_plt, _np.polynomial.polynomial.polyval(z_plt, cy), '0.3', lw=1.5)
+    plt.figure()
+    plt.scatter(sx, sy, c='k', lw=0, alpha=0.01)
+    plt.plot(_np.polynomial.polynomial.polyval(z_plt, cx), _np.polynomial.polynomial.polyval(z_plt, cy), lw=1.5)
+    plt.show()
+    locs = _lib.append_to_rec(locs, z, 'z')
+    locs = _lib.append_to_rec(locs, d_zcalib, 'd_zcalib')
+    _io.save_locs('3d_test.hdf5', locs, info)
