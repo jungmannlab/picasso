@@ -122,6 +122,7 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
 
     bindingsitesx = structures[0,:]
     bindingsitesy = structures[1,:]
+    bindingsitesz = structures[4,:]
     nosites  = len(bindingsitesx) # number of binding sites in image
 
 
@@ -138,10 +139,14 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
         tempphotons = photondist[i,:]
         photoncount = int(tempphotons[runner])
 
+
         if photoncount > 0:
             flag = flag+1
             mu = [bindingsitesx[i],bindingsitesy[i]]
-            cov = [[psf*psf, 0], [0, psf*psf]]
+            if bindingsitesz[i]>0:
+                cov = [[psf*psf*bindingsitesz[i]**2, 0], [0, psf*psf]]
+            else:
+                cov = [[psf*psf, 0], [0, psf*psf*bindingsitesz[i]**2]]
             photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
             if flag == 1:
                 photonposframe = photonpos
@@ -168,7 +173,7 @@ def saveMovie(filename,movie,info):
     _io.save_raw(filename, movie, [info])
 
 
-def defineStructure(structurexxpx,structureyypx,structureex,pixelsize): #Function to store the coordinates of a structure in a container. The coordinates wil be adjustet so that the center of mass is the origin
+def defineStructure(structurexxpx,structureyypx,structureex,structure3d,pixelsize): #Function to store the coordinates of a structure in a container. The coordinates wil be adjustet so that the center of mass is the origin
     structurexxpx = structurexxpx-_np.mean(structurexxpx)
     structureyypx = structureyypx-_np.mean(structureyypx)
     #from px to nm
@@ -179,7 +184,7 @@ def defineStructure(structurexxpx,structureyypx,structureex,pixelsize): #Functio
     for x in structureyypx:
         structureyy.append(x/pixelsize)
 
-    structure = _np.array([structurexx, structureyy,structureex]) #FORMAT: x-pos,y-pos,exchange information
+    structure = _np.array([structurexx, structureyy,structureex,structure3d]) #FORMAT: x-pos,y-pos,exchange information
 
     return structure
 
@@ -204,7 +209,7 @@ def rotateStructure(structure): #ROTATE A STRUCTURE RANDOMLY
     angle_rad = _np.random.rand(1)*2*3.141592
     newstructure = _np.array([(structure[0,:])*_np.cos(angle_rad)-(structure[1,:])*_np.sin(angle_rad),
                 (structure[0,:])*_np.sin(angle_rad)+(structure[1,:])*_np.cos(angle_rad),
-                structure[2,:]])
+                structure[2,:],structure[3,:]])
     return newstructure
 
 def incorporateStructure(structure,incorporation): #CONSIDER STAPLE INCORPORATION
@@ -219,7 +224,7 @@ def randomExchange(pos): # RANDOMLY SHUFFLE EXCHANGE PARAMETERS ('RANDOM LABELIN
 
 def prepareStructures(structure,gridpos,orientation,number,incorporation,exchange): #prepareStructures: Input positions, the structure definition, consider rotation etc.
     newpos = []
-    oldstructure = _np.array([structure[0,:],structure[1,:],structure[2,:]])
+    oldstructure = _np.array([structure[0,:],structure[1,:],structure[2,:],structure[3,:]])
 
     for i in range(0,len(gridpos)):#LOOP THROUGH ALL POSITIONS
         if orientation == 0:
@@ -234,7 +239,7 @@ def prepareStructures(structure,gridpos,orientation,number,incorporation,exchang
 
         newx = structure[0,:]+gridpos[i,0]
         newy = structure[1,:]+gridpos[i,1]
-        newstruct = _np.array([newx,newy,structure[2,:],structure[2,:]*0+i])
+        newstruct = _np.array([newx,newy,structure[2,:],structure[2,:]*0+i,structure[3,:]])
         if i == 0:
             newpos = newstruct
         else:
