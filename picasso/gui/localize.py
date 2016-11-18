@@ -421,7 +421,7 @@ class ParametersDialog(QtGui.QDialog):
         fit_grid.addWidget(QtGui.QLabel('Max. Iterations:'), 2, 0)
         self.max_iterations_spinbox = QtGui.QSpinBox()
         self.max_iterations_spinbox.setRange(0, 999999)
-        self.max_iterations_spinbox.setValue(100)
+        self.max_iterations_spinbox.setValue(1000)
         self.max_iterations_spinbox.setSingleStep(10)
         fit_grid.addWidget(self.max_iterations_spinbox, 2, 1)
 

@@ -361,6 +361,8 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
 
     old_x = theta[0]
     old_y = theta[1]
+    old_sx = theta[4]
+    old_sy = theta[5]
 
     kk = 0
     while kk < max_it:      # we do this instead of a for loop for the special case of max_it=0
@@ -412,11 +414,15 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
         theta[5] = _np.maximum(theta[5], 0.01)
 
         # Check for convergence
-        if (_np.abs(old_x - theta[0]) < eps) and (_np.abs(old_y - theta[1]) < eps):
-            break
-        else:
-            old_x = theta[0]
-            old_y = theta[1]
+        if _np.abs(old_x - theta[0]) < eps:
+            if _np.abs(old_y - theta[1]) < eps:
+                if _np.abs(old_sx - theta[4]) < eps:
+                    if _np.abs(old_sy - theta[5]) < eps:
+                        break
+        old_x = theta[0]
+        old_y = theta[1]
+        old_sx = theta[4]
+        old_sy = theta[5]
 
     thetas[index] = theta
     iterations[index] = kk
