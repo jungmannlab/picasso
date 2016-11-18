@@ -39,6 +39,7 @@ plt.style.use('ggplot')
 "DEFAULT PARAMETERS"
 
 ADVANCEDMODE = 0 #1 is with calibration of noise model
+MODE3D = 1
 # CAMERA
 IMAGESIZE_DEFAULT = 32
 ITIME_DEFAULT = 300
@@ -78,6 +79,7 @@ STRUCTURE3_DEFAULT = '20,20'
 STRUCTUREYY_DEFAULT = '0,20,40,60,0,20,40,60,0,20,40,60'
 STRUCTUREXX_DEFAULT = '0,20,40,0,20,40,0,20,40,0,20,40'
 STRUCTUREEX_DEFAULT = '1,1,1,1,1,1,1,1,1,1,1,1'
+STRUCTURE3D_DEFAULT = '1,1,1,1,1,1,1,1,1,1,1,1'
 STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
 INCORPORATION_DEFAULT = 85
@@ -405,6 +407,7 @@ class Window(QtGui.QMainWindow):
 
         structurexx = QtGui.QLabel('Stucture X')
         structureyy = QtGui.QLabel('Structure Y')
+        structure3d = QtGui.QLabel('Structure 3D')
         structureex = QtGui.QLabel('Exchange labels')
 
         structurecomboLabel = QtGui.QLabel('Type')
@@ -418,6 +421,7 @@ class Window(QtGui.QMainWindow):
         self.structurexxEdit = QtGui.QLineEdit(STRUCTUREXX_DEFAULT)
         self.structureyyEdit = QtGui.QLineEdit(STRUCTUREYY_DEFAULT)
         self.structureexEdit = QtGui.QLineEdit(STRUCTUREEX_DEFAULT)
+        self.structure3DEdit = QtGui.QLineEdit(STRUCTURE3D_DEFAULT)
         self.structureIncorporationEdit = QtGui.QDoubleSpinBox()
         self.structureIncorporationEdit.setRange(1,100)
         self.structureIncorporationEdit.setDecimals(0)
@@ -446,6 +450,7 @@ class Window(QtGui.QMainWindow):
         self.structurexxEdit.textChanged.connect(self.generatePositions)
         self.structureyyEdit.textChanged.connect(self.generatePositions)
         self.structureexEdit.textChanged.connect(self.generatePositions)
+        self.structure3DEdit.textChanged.connect(self.generatePositions)
 
         self.structurenoEdit.valueChanged.connect(self.generatePositions)
         self.structureframeEdit.valueChanged.connect(self.generatePositions)
@@ -485,23 +490,30 @@ class Window(QtGui.QMainWindow):
         sgrid.addWidget(structureyy,8,0)
         sgrid.addWidget(self.structureyyEdit,8,1)
         sgrid.addWidget(QtGui.QLabel('nm'),8,2)
-        sgrid.addWidget(structureex,9,0)
-        sgrid.addWidget(self.structureexEdit,9,1)
-        sgrid.addWidget(structureIncorporation,10,0)
-        sgrid.addWidget(self.structureIncorporationEdit,10,1)
-        sgrid.addWidget(QtGui.QLabel('%'),10,2)
-        sgrid.addWidget(structurerandom,11,1)
-        sgrid.addWidget(self.structurerandomEdit,11,0)
-        sgrid.addWidget(structurerandomOrientation,12,1)
-        sgrid.addWidget(self.structurerandomOrientationEdit,12,0)
+        sindex = 0
+        if MODE3D:
+            sgrid.addWidget(structure3d,9,0)
+            sgrid.addWidget(self.structure3DEdit,9,1)
+            sindex = 1
+
+
+        sgrid.addWidget(structureex,9+sindex,0)
+        sgrid.addWidget(self.structureexEdit,9+sindex,1)
+        sgrid.addWidget(structureIncorporation,10+sindex,0)
+        sgrid.addWidget(self.structureIncorporationEdit,10+sindex,1)
+        sgrid.addWidget(QtGui.QLabel('%'),10+sindex,2)
+        sgrid.addWidget(structurerandom,11+sindex,1)
+        sgrid.addWidget(self.structurerandomEdit,11+sindex,0)
+        sgrid.addWidget(structurerandomOrientation,12+sindex,1)
+        sgrid.addWidget(self.structurerandomOrientationEdit,12+sindex,0)
 
         importDesignButton = QtGui.QPushButton("Import structure from design")
         importDesignButton.clicked.connect(self.importDesign)
-        sgrid.addWidget(importDesignButton,13,0,1,3)
+        sgrid.addWidget(importDesignButton,13+sindex,0,1,3)
 
         generateButton = QtGui.QPushButton("Generate positions")
         generateButton.clicked.connect(self.generatePositions)
-        sgrid.addWidget(generateButton,14,0,1,3)
+        sgrid.addWidget(generateButton,14+sindex,0,1,3)
         cgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         simulateButton = QtGui.QPushButton("Simulate data")
@@ -807,6 +819,8 @@ class Window(QtGui.QMainWindow):
         structurex =self.structurexxEdit.text()
         structurey = self.structureyyEdit.text()
         structureextxt = self.structureexEdit.text()
+        if MODE3D:
+            structure3dxt = self.structure3DEdit.text()
 
         #PAINT
         kon = self.konEdit.value()
@@ -853,21 +867,24 @@ class Window(QtGui.QMainWindow):
             equationC = EQC_DEFAULT
             bgstdoffset = BGSTDOFFSET_DEFAULT
 
-        structurexx,structureyy,structureex = self.readStructure()
+        structurexx,structureyy,structureex,structure3d = self.readStructure()
+
 
         self.statusBar().showMessage('Simulation started')
         struct = self.newstruct
+
         handlex = self.vectorToString(struct[0,:])
         handley = self.vectorToString(struct[1,:])
         handleex = self.vectorToString(struct[2,:])
         handless = self.vectorToString(struct[3,:])
+        handle3d = self.vectorToString(struct[4,:])
+
 
         exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
         exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
 
         noexchangecolors = len(set(exchangeroundstoSim))
         exchangecolors = list(set(exchangeroundstoSim))
-
 
         t0 = time.time()
 
@@ -1032,10 +1049,12 @@ class Window(QtGui.QMainWindow):
         structurexxtxt = _np.asarray((self.structurexxEdit.text()).split(","))
         structureyytxt = _np.asarray((self.structureyyEdit.text()).split(","))
         structureextxt = _np.asarray((self.structureexEdit.text()).split(","))
+        structure3dtxt = _np.asarray((self.structure3DEdit.text()).split(","))
 
         structurexx = []
         structureyy = []
         structureex = []
+        structure3d = []
 
         for element in structurexxtxt:
             try:
@@ -1053,17 +1072,24 @@ class Window(QtGui.QMainWindow):
             except ValueError:
                 pass
 
+        for element in structure3dtxt:
+            try:
+                structure3d.append(float(element))
+            except ValueError:
+                pass
+
         minlen = min(len(structureex),len(structurexx),len(structureyy))
 
         structurexx = structurexx[0:minlen]
         structureyy = structureyy[0:minlen]
         structureex = structureex[0:minlen]
+        structure3d = structure3d[0:minlen]
 
-        return structurexx,structureyy,structureex
+        return structurexx,structureyy,structureex,structure3d
 
     def plotStructure(self):
 
-            structurexx,structureyy,structureex = self.readStructure()
+            structurexx,structureyy,structureex,structure3d = self.readStructure()
             noexchangecolors = len(set(structureex))
             exchangecolors = list(set(structureex))
             #self.figure2.suptitle('Structure [nm]')
@@ -1094,9 +1120,9 @@ class Window(QtGui.QMainWindow):
 
     def generatePositions(self):
         self.plotStructure()
-        structurexx,structureyy,structureex = self.readStructure()
+        structurexx,structureyy,structureex,structure3d = self.readStructure()
         pixelsize = self.pixelsizeEdit.value()
-        structure = simulate.defineStructure(structurexx,structureyy,structureex,pixelsize)
+        structure = simulate.defineStructure(structurexx,structureyy,structureex,structure3d,pixelsize)
 
         number = self.structurenoEdit.value()
         imageSize =self.camerasizeEdit.value()
@@ -1167,9 +1193,9 @@ class Window(QtGui.QMainWindow):
         self.canvas2.draw()
 
     def plotPositions(self):
-        structurexx,structureyy,structureex = self.readStructure()
+        structurexx,structureyy,structureex,structure3d = self.readStructure()
         pixelsize = self.pixelsizeEdit.value()
-        structure = simulate.defineStructure(structurexx,structureyy,structureex,pixelsize)
+        structure = simulate.defineStructure(structurexx,structureyy,structureex,structure3d,pixelsize)
 
         number = self.structurenoEdit.value()
         imageSize =self.camerasizeEdit.value()
