@@ -786,6 +786,7 @@ class View(QtGui.QLabel):
                 return None
 
     def get_render_kwargs(self, viewport=None):
+        ''' Returns a dictionary to be used for the keyword arguments of render. '''
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
         optimal_oversampling = self.display_pixels_per_viewport_pixels()
         if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
@@ -807,6 +808,7 @@ class View(QtGui.QLabel):
                 'min_blur_width': float(self.window.display_settings_dialog.min_blur_width.value())}
 
     def load_picks(self, path):
+        ''' Loads picks centers and diameter from yaml file. '''
         with open(path, 'r') as f:
             regions = yaml.load(f)
         self._picks = regions['Centers']
@@ -815,6 +817,7 @@ class View(QtGui.QLabel):
         self.update_scene(picks_only=True)
 
     def map_to_movie(self, position):
+        ''' Converts coordinates from display units to camera units. '''
         x_rel = position.x() / self.width()
         x_movie = x_rel * self.viewport_width() + self.viewport[0][1]
         y_rel = position.y() / self.height()
@@ -822,11 +825,13 @@ class View(QtGui.QLabel):
         return x_movie, y_movie
 
     def map_to_view(self, x, y):
+        ''' Converts coordinates from camera units to display units. '''
         cx = self.width() * (x - self.viewport[0][1]) / self.viewport_width()
         cy = self.height() * (y - self.viewport[0][0]) / self.viewport_height()
         return cx, cy
 
     def max_movie_height(self):
+        ''' Returns maximum height of all loaded images. '''
         return max(info[0]['Height'] for info in self.infos)
 
     def max_movie_width(self):

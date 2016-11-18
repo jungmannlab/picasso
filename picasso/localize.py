@@ -201,9 +201,9 @@ def get_spots(movie, identifications, box, camera_info):
     return _to_photons(spots, camera_info)
 
 
-def fit(movie, camera_info, identifications, box, eps=0.001, method='sigma'):
+def fit(movie, camera_info, identifications, box, eps=0.001, max_it=100, method='sigma'):
     spots = get_spots(movie, identifications, box, camera_info)
-    theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle(spots, eps, method=method)
+    theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle(spots, eps, max_it, method=method)
     return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
 
 
