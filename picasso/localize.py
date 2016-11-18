@@ -31,6 +31,9 @@ LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
               ('net_gradient', 'f4'), ('likelihood', 'f4'), ('iterations', 'i4')]
 
 
+_plt.style.use('ggplot')
+
+
 @_numba.jit(nopython=True, nogil=True, cache=False)
 def local_maxima(frame, box):
     """ Finds pixels with maximum value within a region of interest """
@@ -242,21 +245,22 @@ def calibrate_z(locs, d, range):
     _plt.plot(z, _np.polyval(Cx, z))
     _plt.plot(z, _np.polyval(Cy, z))
     _plt.show()
+    return Cx, Cy
 
 
 def _fit_z_target(z, sx, sy, cx, cy):
-    wx = _np.polynomial.polynomial.polyval(z, cx)
-    wy = _np.polynomial.polynomial.polyval(z, cy)
+    wx = _np.polyval(cx, z)
+    wy = _np.polyval(cy, z)
     # return _np.sqrt((sx**0.5 - wx**0.5)**2 + (sy**0.5 - wy**0.5)**2)
     return (sx-wx)**2 + (sy-wy)**2
 
 
-def fit_z(locs, info):
+def fit_z(locs, info, cx, cy):
     locs = locs[0:10000]
     z = _np.zeros_like(locs.x)
     d_zcalib = _np.zeros_like(z)
-    cx = _np.array(_CONFIG['3D Calibration']['X Coefficients'])
-    cy = _np.array(_CONFIG['3D Calibration']['Y Coefficients'])
+    # cx = _np.array(_CONFIG['3D Calibration']['X Coefficients'])
+    # cy = _np.array(_CONFIG['3D Calibration']['Y Coefficients'])
     sx = locs.sx
     sy = locs.sy
     for i in _trange(len(z)):
@@ -265,16 +269,17 @@ def fit_z(locs, info):
         z[i] = result.x
         d_zcalib[i] = _np.sqrt(result.fun)
     import matplotlib.pyplot as plt
-    plt.style.use('ggplot')
     plt.figure()
-    z_plt = _np.linspace(-400, 400, 100)
+    plt.plot(locs.frame, z, '.')
+    plt.figure()
+    z_plt = _np.linspace(z.min(), z.max(), 100)
     plt.scatter(z, sx, c=d_zcalib, cmap='Reds', vmax=_np.percentile(d_zcalib, 90))
     plt.scatter(z, sy, c=d_zcalib, cmap='Blues', vmax=_np.percentile(d_zcalib, 90))
-    plt.plot(z_plt, _np.polynomial.polynomial.polyval(z_plt, cx), '0.3', lw=1.5)
-    plt.plot(z_plt, _np.polynomial.polynomial.polyval(z_plt, cy), '0.3', lw=1.5)
+    plt.plot(z_plt, _np.polyval(cx, z_plt), '0.3', lw=1.5)
+    plt.plot(z_plt, _np.polyval(cy, z_plt), '0.3', lw=1.5)
     plt.figure()
-    plt.scatter(sx, sy, c='k', lw=0, alpha=0.01)
-    plt.plot(_np.polynomial.polynomial.polyval(z_plt, cx), _np.polynomial.polynomial.polyval(z_plt, cy), lw=1.5)
+    plt.scatter(sx, sy, c='k', lw=0, alpha=0.1)
+    plt.plot(_np.polyval(cx, z_plt), _np.polyval(cy, z_plt), lw=1.5)
     plt.show()
     locs = _lib.append_to_rec(locs, z, 'z')
     locs = _lib.append_to_rec(locs, d_zcalib, 'd_zcalib')
