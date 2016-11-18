@@ -52,15 +52,20 @@ def mean_filter(spot, size):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _initial_sigmas(spot, y, x, sum, size):
+def _initial_sigmas(spot, y, x, size):
+    size_half = int(size/2)
     sum_deviation_y = 0.0
     sum_deviation_x = 0.0
+    sum_y = 0.0
+    sum_x = 0.0
     for i in range(size):
-        for j in range(size):
-            sum_deviation_y += spot[i, j] * (i - y)**2
-            sum_deviation_x += spot[i, j] * (j - x)**2
-    sy = _np.sqrt(sum_deviation_y / sum)
-    sx = _np.sqrt(sum_deviation_x / sum)
+        d2 = (i - size_half)**2
+        sum_deviation_y += spot[i, size_half] * d2
+        sum_deviation_x += spot[size_half, i] * d2
+        sum_y += spot[i, size_half]
+        sum_x += spot[size_half, i]
+    sy = _np.sqrt(sum_deviation_y / sum_y)
+    sx = _np.sqrt(sum_deviation_x / sum_x)
     return sy, sx
 
 
@@ -70,7 +75,7 @@ def _initial_parameters(spot, size):
     bg = _np.min(mean_filter(spot, size))
     photons = sum - size * size * bg
     photons_sane = _np.maximum(1.0, photons)
-    sy, sx = _initial_sigmas(spot-bg, y, x, photons, size)
+    sy, sx = _initial_sigmas(spot-bg, y, x, size)
     return x, y, photons_sane, bg, sx, sy
 
 
