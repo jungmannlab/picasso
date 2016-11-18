@@ -919,6 +919,7 @@ class View(QtGui.QLabel):
         return np.sqrt(np.mean((locs.x - com_x)**2 + (locs.y - com_y)**2))
 
     def index_locs(self, channel):
+        ''' Indexes localizations in a grid with grid size equal to the pick radius. '''
         locs = self.locs[channel]
         info = self.infos[channel]
         d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -1005,6 +1006,7 @@ class View(QtGui.QLabel):
             self.add_picks(similar)
 
     def picked_locs(self, channel, add_group=True):
+        ''' Returns picked localizations in the specified channel '''
         if len(self._picks):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
@@ -1194,6 +1196,7 @@ class View(QtGui.QLabel):
         np.savetxt(base + '_drift.txt', self._drift[channel], header='dx\tdy', newline='\r\n')
 
     def undrift(self):
+        ''' Undrifts with rcc. '''
         channel = self.get_channel('Undrift')
         if channel is not None:
             segmentation, ok = QtGui.QInputDialog.getInt(self, 'Undrift by RCC', 'Segmentation:', 1000)
@@ -1285,6 +1288,7 @@ class View(QtGui.QLabel):
             self.setCursor(cursor)
 
     def update_pick_info_long(self, info):
+        ''' Gets called when "Show info below" '''
         channel = self.get_channel('Calculate pick info')
         if channel is not None:
             d = self.window.tools_settings_dialog.pick_diameter.value()

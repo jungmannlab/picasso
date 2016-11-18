@@ -61,6 +61,7 @@ def get_index_blocks(locs, info, size, callback=None):
 
 
 def index_blocks_shape(info, size):
+    ''' Returns the shape of the index grid, given the movie and grid sizes '''
     n_blocks_x = int(_np.ceil(info[0]['Width'] / size))
     n_blocks_y = int(_np.ceil(info[0]['Height'] / size))
     return n_blocks_y, n_blocks_x
@@ -81,8 +82,8 @@ def n_block_locs_at(x, y, size, K, L, block_starts, block_ends):
 
 def get_block_locs_at(x, y, index_blocks):
     locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
-    x_index = _np.uint32(x / size)
-    y_index = _np.uint32(y / size)
+    x_index = _np.uint32(x / size)  # is this really necessary?
+    y_index = _np.uint32(y / size)  # is this really necessary?
     indices = []
     for k in range(y_index - 1, y_index+2):
         if 0 < k < K:
