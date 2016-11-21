@@ -116,7 +116,7 @@ class Window(QtGui.QMainWindow):
         self.integrationtimeEdit = QtGui.QSpinBox()
         self.integrationtimeEdit.setRange(1,10000) #1-10.000ms
         self.framesEdit = QtGui.QSpinBox()
-        self.framesEdit.setRange(10,1000000) #10-1.000.000 frames
+        self.framesEdit.setRange(10,100000000) #10-100.000.000 frames
         self.framesEdit.setSingleStep(1000)
         self.pixelsizeEdit = QtGui.QSpinBox()
         self.pixelsizeEdit.setRange(1,1000) #1 to 1000 nm frame size
@@ -758,6 +758,7 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(structurexx)
             self.structureyyEdit.setText(structureyy)
             self.structureexEdit.setText(structureex)
+            self.structure3DEdit.setText(structureex)
             self.generatePositions()
 
         elif typeindex == 1: # CIRCLE
@@ -791,6 +792,7 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(structurexx)
             self.structureyyEdit.setText(structureyy)
             self.structureexEdit.setText(structureex)
+            self.structure3DEdit.setText(structureex)
             self.generatePositions()
 
         elif typeindex == 2: # Custom
@@ -1078,7 +1080,7 @@ class Window(QtGui.QMainWindow):
             except ValueError:
                 pass
 
-        minlen = min(len(structureex),len(structurexx),len(structureyy))
+        minlen = min(len(structureex),len(structurexx),len(structureyy),len(structure3d))
 
         structurexx = structurexx[0:minlen]
         structureyy = structureyy[0:minlen]

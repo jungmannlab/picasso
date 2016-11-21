@@ -163,6 +163,7 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
         simframe = _np.flipud(simframe) # to be consistent with render
     #simframenoise = noisy(simframe,background,noise)
     simframenoise = noisy_p(simframe,background)
+    simframenoise[simframenoise > 2**16-1] = 2**16-1
     simframeout=_np.round(simframenoise).astype('<u2')
 
     return simframeout
