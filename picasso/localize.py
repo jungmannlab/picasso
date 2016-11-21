@@ -236,16 +236,18 @@ def localize(movie, info, parameters):
     return fit(movie, info, identifications, parameters['Box Size'])
 
 
-def calibrate_z(locs, d, range):
+def calibrate_z(locs, info, d, range):
     z = locs.frame*d - range/2
-    Cx = _np.polyfit(z, locs.sx, 4, full=False)
-    Cy = _np.polyfit(z, locs.sy, 4, full=False)
+    cx = _np.polyfit(z, locs.sx, 4, full=False)
+    cy = _np.polyfit(z, locs.sy, 4, full=False)
+
+    _plt.figure()
+    _plt.subplot()
     _plt.plot(z, locs.sx, '.', label='sx')
     _plt.plot(z, locs.sy, '.', label='sy')
     _plt.plot(z, _np.polyval(Cx, z))
     _plt.plot(z, _np.polyval(Cy, z))
     _plt.show()
-    return Cx, Cy
 
 
 def _fit_z_target(z, sx, sy, cx, cy):

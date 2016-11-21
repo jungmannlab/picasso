@@ -26,6 +26,12 @@ def _average(args):
             average(locs, info, **kwargs)
 
 
+def _calibrate3d(path, step, range):
+    from .io import load_locs
+    from .localize import calibrate_z
+    locs, info = load_locs(path)
+    calibrate_z(locs, info, step, range)
+
 def _link(files, d_max, tolerance):
     import glob
     paths = glob.glob(files)
@@ -387,6 +393,11 @@ def main():
     average_parser.add_argument('-i', '--iterations', type=int, default=20)
     average_parser.add_argument('files', nargs='?', help='a localization file with grouped localizations')
 
+    calibrate3d_parser = subparsers.add_parser('calibrate3d')
+    calibrate3d_parser.add_argument('file')
+    calibrate3d_parser.add_argument('step')
+    calibrate3d_parser.add_argument('range')
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -438,6 +449,8 @@ def main():
         elif args.command == 'design':
             from .gui import design
             design.main()
+        elif args.command == 'calibrate3d':
+            _calibrate3d(args.file, args.step, args.range)
     else:
         parser.print_help()
 
