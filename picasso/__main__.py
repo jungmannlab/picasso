@@ -395,8 +395,8 @@ def main():
 
     calibrate3d_parser = subparsers.add_parser('calibrate3d')
     calibrate3d_parser.add_argument('file')
-    calibrate3d_parser.add_argument('step')
-    calibrate3d_parser.add_argument('range')
+    calibrate3d_parser.add_argument('step', type=float)
+    calibrate3d_parser.add_argument('range', type=float)
 
     # Parse
     args = parser.parse_args()

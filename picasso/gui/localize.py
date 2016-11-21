@@ -919,8 +919,10 @@ class Window(QtGui.QMainWindow):
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
 
-    def fit_z(self, locs):
-        localize.fit_z(locs)
+    def fit_z(self):
+        self.status_bar.showMessage('Fitting z position...')
+        self.locs = localize.fit_z(self.locs, self.info)
+        self.status_bar.showMessage('Z fitting done.')
 
     def on_fit_progress(self, current, total):
         message = 'Fitting spot {:,} / {:,} ...'.format(current, total)
@@ -931,7 +933,7 @@ class Window(QtGui.QMainWindow):
         self.locs = locs
         self.draw_frame()
         if fit_z:
-            self.fit_z(locs)
+            self.fit_z()
         base, ext = os.path.splitext(self.movie_path)
         self.save_locs(base + '_locs.hdf5')
 
