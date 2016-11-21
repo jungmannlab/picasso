@@ -267,8 +267,8 @@ def calibrate_z(locs, info, d, range):
     _plt.legend(loc='best')
 
     _plt.subplot(223)
-    _plt.plot(locs.z, locs.sx, '.', label='x')
-    _plt.plot(locs.z, locs.sy, '.', label='y')
+    _plt.plot(locs.z, locs.sx, '.', label='x', alpha=0.2)
+    _plt.plot(locs.z, locs.sy, '.', label='y', alpha=0.2)
     _plt.plot(z_plt, _np.polyval(cx, z_plt), '0.3', lw=1.5, label='calibration')
     _plt.plot(z_plt, _np.polyval(cy, z_plt), '0.3', lw=1.5)
     _plt.xlim(-range/2, range/2)
