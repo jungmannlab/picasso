@@ -529,6 +529,14 @@ def link_loc_groups(locs, info, link_group):
     return linked_locs
 
 
+def localization_precision(photons, s, bg):
+    ''' Calculates the theoretical localization preicision according to Mortensen et al., Nat Meth, 2010 '''
+    s2 = s**2
+    sa2 = s2 + 1/12
+    v = sa2 * (16/9 + (8 * _np.pi * sa2 * bg**2) / photons) / photons
+    return _np.sqrt(v)
+
+
 def undrift(locs, info, segmentation, display=True, segmentation_callback=None, rcc_callback=None):
     bounds, segments = _render.segment(locs, info, segmentation,
                                        {'blur_method': 'gaussian', 'min_blur_width': 1},

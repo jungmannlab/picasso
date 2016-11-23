@@ -6,7 +6,7 @@ from tqdm import tqdm
 import numba
 import multiprocessing
 from concurrent import futures
-import time
+from . import postprocess
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -104,8 +104,8 @@ def locs_from_fits(identifications, theta, box):
     # box_offset = int(box/2)
     x = theta[:, 0] + identifications.x     # - box_offset
     y = theta[:, 1] + identifications.y     # - box_offset
-    lpy = theta[:, 4] / np.sqrt(theta[:, 2])
-    lpx = theta[:, 5] / np.sqrt(theta[:, 2])
+    lpx = postprocess.localization_precision(theta[:, 2], theta[:, 4], theta[:, 3])
+    lpy = postprocess.localization_precision(theta[:, 2], theta[:, 5], theta[:, 3])
     locs = np.rec.array((identifications.frame, x, y,
                          theta[:, 2], theta[:, 4], theta[:, 5],
                          theta[:, 3], lpx, lpy,
