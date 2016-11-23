@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numba
 import multiprocessing
+from concurrent import futures
+import time
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -42,63 +44,66 @@ def compute_residuals(theta, spot, grid, size, model_x, model_y, model, residual
     return residuals.flatten()
 
 
-def fit_spots(spots):
-    theta = np.empty((len(spots), 6), dtype=np.float32)
-    theta.fill(np.nan)
-    size = spots.shape[1]
+def fit_spot(spot):
+    size = spot.shape[0]
     size_half = int(size / 2)
     grid = np.arange(-size_half, size_half + 1, dtype=np.float32)
     model_x = np.empty(size, dtype=np.float32)
     model_y = np.empty(size, dtype=np.float32)
     model = np.empty((size, size), dtype=np.float32)
     residuals = np.empty((size, size), dtype=np.float32)
-    print('worker starts fitting')
-    # for i, spot in enumerate(tqdm(spots)):
+    # theta is [x, y, photons, bg, sx, sy]
+    theta0 = np.array([0, 0, np.sum(spot-spot.min()), spot.min(), 1, 1], dtype=np.float32)  # make it smarter
+    args = (spot, grid, size, model_x, model_y, model, residuals)
+    result = optimize.leastsq(compute_residuals, theta0, args=args, ftol=1e-2, xtol=1e-2)   # leastsq is much faster than least_squares
+    '''
+    model = compute_model(result[0], grid, size, model_x, model_y, model)
+    plt.figure()
+    plt.subplot(121)
+    plt.imshow(spot, interpolation='none')
+    plt.subplot(122)
+    plt.imshow(model, interpolation='none')
+    plt.colorbar()
+    plt.show()
+    '''
+    return result[0]
+
+
+def fit_spots(spots):
+    theta = np.empty((len(spots), 6), dtype=np.float32)
+    theta.fill(np.nan)
     for i, spot in enumerate(spots):
-        # theta is [x, y, photons, bg, sx, sy]
-        theta0 = np.array([0, 0, np.sum(spot-spot.min()), spot.min(), 1, 1], dtype=np.float32)  # make it smarter
-        args = (spot, grid, size, model_x, model_y, model, residuals)
-        result = optimize.leastsq(compute_residuals, theta0, args=args, ftol=1e-2, xtol=1e-2)   # leastsq is much faster than least_squares
-        theta[i] = result[0]
-        '''
-        model = compute_model(result[0], grid, size, model_x, model_y, model)
-        plt.figure()
-        plt.subplot(121)
-        plt.imshow(spot, interpolation='none')
-        plt.subplot(122)
-        plt.imshow(model, interpolation='none')
-        plt.colorbar()
-        plt.show()
-        '''
+        theta[i] = fit_spot(spot)
     return theta
 
 
-def fit_spots_parallel(spots):
-    import time
+def fit_spots_parallel(spots, async=False):
     n_workers = int(0.75 * multiprocessing.cpu_count())
     n_spots = len(spots)
-    spots_per_worker = int(n_spots / _n_workers) + 1
-    results = []
-    pool = multiprocessing.Pool(n_workers)
-    t0 = time.time()
-    for i in range(0, n_spots, spots_per_worker):
-        print('Starting worker', i)
-        results.append(_pool.apply_async(fit_spots, (spots[i:i+spots_per_worker],)))
-    t1 = time.time()
-    pool.close()
-    t0 = time.time()
-    for result in results:
-        result.wait()
-    t1 = time.time()
-    print('Fit time: {:.10f} seconds'.format(t1-t0))
-    theta = [_.get() for _ in results]
+    n_tasks = 100 * n_workers
+    spots_per_task = [int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(n_spots / n_tasks) for _ in range(n_tasks)]
+    start_indices = np.cumsum([0] + spots_per_task[:-1])
+    fs = []
+    executor = futures.ProcessPoolExecutor(n_workers)
+    for i, n_spots_task in zip(start_indices, spots_per_task):
+        fs.append(executor.submit(fit_spots, spots[i:i+n_spots_task]))
+    if async:
+        return fs
+    with tqdm(total=n_tasks, unit='task') as progress_bar:
+        for f in futures.as_completed(fs):
+            progress_bar.update()
+    return fits_from_parallel_results(fs)
+
+
+def fits_from_futures(futures):
+    theta = [_.result() for _ in futures]
     return np.vstack(theta)
 
 
 def locs_from_fits(identifications, theta, box):
-    box_offset = int(box/2)
-    x = theta[:, 0] + identifications.x - box_offset
-    y = theta[:, 1] + identifications.y - box_offset
+    # box_offset = int(box/2)
+    x = theta[:, 0] + identifications.x     # - box_offset
+    y = theta[:, 1] + identifications.y     # - box_offset
     lpy = theta[:, 4] / np.sqrt(theta[:, 2])
     lpx = theta[:, 5] / np.sqrt(theta[:, 2])
     locs = np.rec.array((identifications.frame, x, y,

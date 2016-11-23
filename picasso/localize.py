@@ -148,6 +148,7 @@ def identify(movie, minimum_ng, box, threaded=True):
         N = len(movie)
         current, futures = identify_async(movie, minimum_ng, box)
         identifications = [_.result() for _ in futures]
+        identifications = [_np.hstack(_) for _ in identifications]
     else:
         identifications = [identify_by_frame_number(movie, minimum_ng, box, i) for i in range(len(movie))]
     return _np.hstack(identifications).view(_np.recarray)
