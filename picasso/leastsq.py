@@ -4,6 +4,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numba
+import multiprocessing
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -41,7 +42,7 @@ def compute_residuals(theta, spot, grid, size, model_x, model_y, model, residual
     return residuals.flatten()
 
 
-def leastsq(spots):
+def fit_spots(spots):
     theta = np.empty((len(spots), 6), dtype=np.float32)
     theta.fill(np.nan)
     size = spots.shape[1]
@@ -51,9 +52,11 @@ def leastsq(spots):
     model_y = np.empty(size, dtype=np.float32)
     model = np.empty((size, size), dtype=np.float32)
     residuals = np.empty((size, size), dtype=np.float32)
-    for i, spot in enumerate(tqdm(spots)):
+    print('worker starts fitting')
+    # for i, spot in enumerate(tqdm(spots)):
+    for i, spot in enumerate(spots):
         # theta is [x, y, photons, bg, sx, sy]
-        theta0 = np.array([0, 0, np.sum(spot-spot.min()), spot.min(), 1, 1], dtype=np.float32)
+        theta0 = np.array([0, 0, np.sum(spot-spot.min()), spot.min(), 1, 1], dtype=np.float32)  # make it smarter
         args = (spot, grid, size, model_x, model_y, model, residuals)
         result = optimize.leastsq(compute_residuals, theta0, args=args, ftol=1e-2, xtol=1e-2)   # leastsq is much faster than least_squares
         theta[i] = result[0]
@@ -68,6 +71,28 @@ def leastsq(spots):
         plt.show()
         '''
     return theta
+
+
+def fit_spots_parallel(spots):
+    import time
+    n_workers = int(0.75 * multiprocessing.cpu_count())
+    n_spots = len(spots)
+    spots_per_worker = int(n_spots / _n_workers) + 1
+    results = []
+    pool = multiprocessing.Pool(n_workers)
+    t0 = time.time()
+    for i in range(0, n_spots, spots_per_worker):
+        print('Starting worker', i)
+        results.append(_pool.apply_async(fit_spots, (spots[i:i+spots_per_worker],)))
+    t1 = time.time()
+    pool.close()
+    t0 = time.time()
+    for result in results:
+        result.wait()
+    t1 = time.time()
+    print('Fit time: {:.10f} seconds'.format(t1-t0))
+    theta = [_.get() for _ in results]
+    return np.vstack(theta)
 
 
 def locs_from_fits(identifications, theta, box):

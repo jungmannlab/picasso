@@ -143,13 +143,11 @@ def identify_async(movie, minimum_ng, box, roi=None):
     return current, f
 
 
-def identify(movie, minimum_ng, box, threaded=False):
+def identify(movie, minimum_ng, box, threaded=True):
     if threaded:
         N = len(movie)
         current, futures = identify_async(movie, minimum_ng, box)
-        while current[0] < N:
-            pass
-        return  # TODO
+        identifications = [_.result() for _ in futures]
     else:
         identifications = [identify_by_frame_number(movie, minimum_ng, box, i) for i in range(len(movie))]
     return _np.hstack(identifications).view(_np.recarray)
