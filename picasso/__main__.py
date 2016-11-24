@@ -32,6 +32,7 @@ def _calibrate3d(path, step, range):
     locs, info = load_locs(path)
     calibrate_z(locs, info, step, range)
 
+
 def _link(files, d_max, tolerance):
     import glob
     paths = glob.glob(files)
