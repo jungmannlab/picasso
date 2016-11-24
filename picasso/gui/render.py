@@ -236,6 +236,8 @@ class InfoDialog(QtGui.QDialog):
         self.movie_grid.addWidget(QtGui.QLabel('NeNA precision:'), 1, 0)
         self.nena_button = QtGui.QPushButton('Calculate')
         self.nena_button.clicked.connect(self.calculate_nena_lp)
+        self.nena_button.setDefault(False)
+        self.nena_button.setAutoDefault(False)
         self.movie_grid.addWidget(self.nena_button, 1, 1)
         # FOV
         fov_groupbox = QtGui.QGroupBox('Field of view')
