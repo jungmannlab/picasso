@@ -26,11 +26,11 @@ def _average(args):
             average(locs, info, **kwargs)
 
 
-def _calibrate3d(path, step, range):
+def _calibrate3d(path, step, range, magnification_factor):
     from .io import load_locs
     from .zfit import calibrate_z
     locs, info = load_locs(path)
-    calibrate_z(locs, info, step, range)
+    calibrate_z(locs, info, step, range, magnification_factor)
 
 
 def _link(files, d_max, tolerance):
@@ -398,6 +398,7 @@ def main():
     calibrate3d_parser.add_argument('file')
     calibrate3d_parser.add_argument('step', type=float)
     calibrate3d_parser.add_argument('range', type=float)
+    calibrate3d_parser.add_argument('factor', type=float)
 
     # Parse
     args = parser.parse_args()
@@ -451,7 +452,7 @@ def main():
             from .gui import design
             design.main()
         elif args.command == 'calibrate3d':
-            _calibrate3d(args.file, args.step, args.range)
+            _calibrate3d(args.file, args.step, args.range, args.factor)
     else:
         parser.print_help()
 

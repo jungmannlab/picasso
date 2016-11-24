@@ -14,7 +14,7 @@ from . import io as _io
 _plt.style.use('ggplot')
 
 
-def calibrate_z(locs, info, d, range):
+def calibrate_z(locs, info, d, range, magnification_factor):
     n_frames = info[0]['Frames']
     frame_range = _np.arange(n_frames)
     z_range = frame_range * d - range / 2
@@ -40,10 +40,10 @@ def calibrate_z(locs, info, d, range):
     # cx = _np.polyfit(true_z, locs_.sx, 6, full=False)
     # cy = _np.polyfit(true_z, locs_.sy, 6, full=False)
 
-    _CONFIG['3D Calibration'] = {'X Coefficients': [float(_) for _ in cx], 'Y Coefficients': [float(_) for _ in cy]}
+    _CONFIG['3D Calibration'] = {'X Coefficients': [float(_) for _ in cx], 'Y Coefficients': [float(_) for _ in cy], 'Magnification Factor': magnification_factor}
     _io.save_config(_CONFIG)
     locs = fit_z(locs, info)
-    _io.save_locs('3dcaliblocs.hdf5', locs, info)
+    locs.z /= magnification_factor
 
     _plt.figure(figsize=(18, 10))
 
@@ -136,6 +136,7 @@ def fit_z(locs, info, filter=2):
         result = _minimize_scalar(_fit_z_target, args=(sx[i], sy[i], cx, cy))
         z[i] = result.x
         square_d_zcalib[i] = result.fun
+    z *= _CONFIG['3D Calibration']['Magnification Factor']
     locs = _lib.append_to_rec(locs, z, 'z')
     locs = _lib.append_to_rec(locs, _np.sqrt(square_d_zcalib), 'd_zcalib')
     locs = _lib.ensure_sanity(locs, info)
