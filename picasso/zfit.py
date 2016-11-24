@@ -157,10 +157,10 @@ def fit_z_parallel(locs, info, filter=2, async=False):
     with _tqdm(total=n_tasks, unit='task') as progress_bar:
         for f in _futures.as_completed(fs):
             progress_bar.update()
-    return locs_from_parallel_results(fs, filter=filter)
+    return locs_from_futures(fs, filter=filter)
 
 
-def locs_from_parallel_results(futures, filter=2):
+def locs_from_futures(futures, filter=2):
     locs = [_.result() for _ in futures]
     locs = _np.hstack(locs).view(_np.recarray)
     return filter_z_fits(locs, filter)
