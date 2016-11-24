@@ -125,25 +125,27 @@ def _fit_z_target(z, sx, sy, cx, cy):
     # return (sx-wx)**2 + (sy-wy)**2
 
 
-def fit_z(locs, info, filter=2):
+def fit_z(locs, info, calibration=None, filter=2):
+    if calibration is None:
+        calibration = _CONFIG['3D Calibration']
+    cx = _np.array(calibration['X Coefficients'])
+    cy = _np.array(calibration['Y Coefficients'])
     z = _np.zeros_like(locs.x)
     square_d_zcalib = _np.zeros_like(z)
-    cx = _np.array(_CONFIG['3D Calibration']['X Coefficients'])
-    cy = _np.array(_CONFIG['3D Calibration']['Y Coefficients'])
     sx = locs.sx
     sy = locs.sy
     for i in range(len(z)):
         result = _minimize_scalar(_fit_z_target, args=(sx[i], sy[i], cx, cy))
         z[i] = result.x
         square_d_zcalib[i] = result.fun
-    z *= _CONFIG['3D Calibration']['Magnification Factor']
+    z *= calibration['Magnification Factor']
     locs = _lib.append_to_rec(locs, z, 'z')
     locs = _lib.append_to_rec(locs, _np.sqrt(square_d_zcalib), 'd_zcalib')
     locs = _lib.ensure_sanity(locs, info)
     return filter_z_fits(locs, filter)
 
 
-def fit_z_parallel(locs, info, filter=2, async=False):
+def fit_z_parallel(locs, info, calibration=None, filter=2, async=False):
     n_workers = int(0.75 * _multiprocessing.cpu_count())
     n_locs = len(locs)
     n_tasks = 100 * n_workers
@@ -152,7 +154,7 @@ def fit_z_parallel(locs, info, filter=2, async=False):
     fs = []
     executor = _ProcessPoolExecutor(n_workers)
     for i, n_locs_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_z, locs[i:i+n_locs_task], info, filter=0))
+        fs.append(executor.submit(fit_z, locs[i:i+n_locs_task], info, calibration, filter=0))
     if async:
         return fs
     with _tqdm(total=n_tasks, unit='task') as progress_bar:

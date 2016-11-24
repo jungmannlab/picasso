@@ -240,6 +240,32 @@ class PromptInfoDialog(QtGui.QDialog):
         return (info, save, result == QtGui.QDialog.Accepted)
 
 
+class ZCalibrationDialog(QtGui.QDialog):
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.parameters_dialog = parent
+        self.setWindowTitle('3D Calibration')
+        self.setModal(False)
+        grid = QtGui.QGridLayout(self)
+        grid.addWidget(QtGui.QLabel('X Coefficients:'), 0, 0)
+        self.cx = QtGui.QLineEdit()
+        grid.addWidget(self.cx, 0, 1)
+        grid.addWidget(QtGui.QLabel('Y Coefficients:'), 1, 0)
+        self.cy = QtGui.QLineEdit()
+        grid.addWidget(self.cy, 1, 1)
+        grid.addWidget(QtGui.QLabel('Magnification Factor:'), 2, 0)
+        self.magnification_factor = QtGui.QDoubleSpinBox()
+        self.magnification_factor.setRange(0, 1e6)
+        self.magnification_factor.setSingleStep(0.01)
+        grid.addWidget(self.magnification_factor, 2, 1)
+
+    def get_calibration(self):
+        return {'X Coefficients': eval(self.cx.text()),
+                'Y Coefficients': eval(self.cy.text()),
+                'Magnification Factor': self.magnification_factor.value()}
+
+
 class ParametersDialog(QtGui.QDialog):
     """ The dialog showing analysis parameters """
 
@@ -249,6 +275,7 @@ class ParametersDialog(QtGui.QDialog):
         self.setWindowTitle('Parameters')
         self.resize(300, 0)
         self.setModal(False)
+        self.z_calibration_dialog = ZCalibrationDialog(self)
 
         vbox = QtGui.QVBoxLayout(self)
         identification_groupbox = QtGui.QGroupBox('Identification')
@@ -409,7 +436,10 @@ class ParametersDialog(QtGui.QDialog):
         vbox.addWidget(fit_groupbox)
         fit_grid = QtGui.QGridLayout(fit_groupbox)
         self.fit_z_checkbox = QtGui.QCheckBox('3D Fit')
-        fit_grid.addWidget(self.fit_z_checkbox, 1, 1)
+        fit_grid.addWidget(self.fit_z_checkbox, 0, 0)
+        show_z_calib = QtGui.QPushButton('Show calibration')
+        show_z_calib.clicked.connect(self.z_calibration_dialog.show)
+        fit_grid.addWidget(show_z_calib, 0, 1)
 
         if 'Cameras' in CONFIG:
             camera = self.camera.currentText()
@@ -418,6 +448,15 @@ class ParametersDialog(QtGui.QDialog):
                 camera_config = CONFIG['Cameras'][camera]
                 if 'Sensitivity' in camera_config and 'Sensitivity Categories' in camera_config:
                     self.update_sensitivity()
+
+        if '3D Calibration' in CONFIG:
+            z_config = CONFIG['3D Calibration']
+            self.z_calibration_dialog.cx.setText(str(z_config['X Coefficients']))
+            self.z_calibration_dialog.cy.setText(str(z_config['Y Coefficients']))
+            self.z_calibration_dialog.magnification_factor.setValue(z_config['Magnification Factor'])
+
+        show_z_calib.setDefault(False)
+        show_z_calib.setAutoDefault(False)
 
     def on_box_changed(self, value):
         self.window.on_parameters_changed()
@@ -893,7 +932,8 @@ class Window(QtGui.QMainWindow):
 
     def fit_z(self):
         self.status_bar.showMessage('Fitting z position...')
-        self.fit_z_worker = FitZWorker(self.locs, self.info)
+        calibration = self.parameters_dialog.z_calibration_dialog.get_calibration()
+        self.fit_z_worker = FitZWorker(self.locs, self.info, calibration)
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
         self.fit_z_worker.start()
@@ -1020,15 +1060,16 @@ class FitZWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float)
 
-    def __init__(self, locs, info):
+    def __init__(self, locs, info, calibration):
         super().__init__()
         self.locs = locs
         self.info = info
+        self.calibration = calibration
 
     def run(self):
         t0 = time.time()
         N = len(self.locs)
-        fs = zfit.fit_z_parallel(self.locs, self.info, filter=0, async=True)
+        fs = zfit.fit_z_parallel(self.locs, self.info, calibration=self.calibration, filter=0, async=True)
         n_tasks = len(fs)
         while lib.n_futures_done(fs) < n_tasks:
             self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
