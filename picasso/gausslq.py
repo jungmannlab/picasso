@@ -1,7 +1,5 @@
 from scipy import optimize
-from scipy.special import erf
 import numpy as np
-import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numba
 import multiprocessing
@@ -92,7 +90,7 @@ def fit_spots_parallel(spots, async=False):
     with tqdm(total=n_tasks, unit='task') as progress_bar:
         for f in futures.as_completed(fs):
             progress_bar.update()
-    return fits_from_parallel_results(fs)
+    return fits_from_futures(fs)
 
 
 def fits_from_futures(futures):
