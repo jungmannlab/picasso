@@ -230,9 +230,9 @@ class InfoDialog(QtGui.QDialog):
         movie_groupbox = QtGui.QGroupBox('Movie')
         vbox.addWidget(movie_groupbox)
         self.movie_grid = QtGui.QGridLayout(movie_groupbox)
-        self.movie_grid.addWidget(QtGui.QLabel('Median CRLB precision:'), 0, 0)
-        self.crlb_precision = QtGui.QLabel('-')
-        self.movie_grid.addWidget(self.crlb_precision, 0, 1)
+        self.movie_grid.addWidget(QtGui.QLabel('Median fit precision:'), 0, 0)
+        self.fit_precision = QtGui.QLabel('-')
+        self.movie_grid.addWidget(self.fit_precision, 0, 1)
         self.movie_grid.addWidget(QtGui.QLabel('NeNA precision:'), 1, 0)
         self.nena_button = QtGui.QPushButton('Calculate')
         self.nena_button.clicked.connect(self.calculate_nena_lp)
@@ -1599,7 +1599,7 @@ class Window(QtGui.QMainWindow):
         self.info_dialog.height_label.setText('{} pixel'.format((self.view.height())))
         self.info_dialog.locs_label.setText('{:,}'.format(self.view.n_locs))
         try:
-            self.info_dialog.crlb_precision.setText('{:.3} pixel'.format(self.view.median_lp))
+            self.info_dialog.fit_precision.setText('{:.3} pixel'.format(self.view.median_lp))
         except AttributeError:
             pass
 
