@@ -14,14 +14,8 @@ import ctypes as _ctypes
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import threading as _threading
 from itertools import chain as _chain
-from scipy.optimize import minimize_scalar as _minimize_scalar
-from scipy.optimize import minimize as _minimize
-from tqdm import trange as _trange
 import matplotlib.pyplot as _plt
 from . import gaussmle as _gaussmle
-from . import CONFIG as _CONFIG
-from . import lib as _lib
-from . import io as _io
 
 
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
@@ -145,7 +139,6 @@ def identify_async(movie, minimum_ng, box, roi=None):
 
 def identify(movie, minimum_ng, box, threaded=True):
     if threaded:
-        N = len(movie)
         current, futures = identify_async(movie, minimum_ng, box)
         identifications = [_.result() for _ in futures]
         identifications = [_np.hstack(_) for _ in identifications]
@@ -233,79 +226,3 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
 def localize(movie, info, parameters):
     identifications = identify(movie, parameters)
     return fit(movie, info, identifications, parameters['Box Size'])
-
-
-def calibrate_z(locs, info, d, range):
-    z = locs.frame*d - range/2
-    cx = _np.polyfit(z, locs.sx, 4, full=False)
-    cy = _np.polyfit(z, locs.sy, 4, full=False)
-    _CONFIG['3D Calibration'] = {'X Coefficients': [float(_) for _ in cx],
-                                 'Y Coefficients': [float(_) for _ in cy]}
-    _io.save_config(_CONFIG)
-    locs = fit_z(locs, info)
-
-    _plt.figure()
-
-    _plt.subplot(221)
-    _plt.plot(z, locs.sx, '.', label='x', alpha=0.2)
-    _plt.plot(z, locs.sy, '.', label='y', alpha=0.2)
-    _plt.plot(z, _np.polyval(cx, z), '0.3', lw=1.5, label='x fit')
-    _plt.plot(z, _np.polyval(cy, z), '0.3', lw=1.5, label='y fit')
-    _plt.xlabel('Stage position')
-    _plt.ylabel('Spot width/height')
-    _plt.xlim(-range/2, range/2)
-    _plt.legend(loc='best')
-
-    ax = _plt.subplot(222)
-    z_plt = _np.linspace(z.min(), z.max(), 100)
-    _plt.scatter(locs.sx, locs.sy, c='k', lw=0, alpha=0.1)
-    _plt.plot(_np.polyval(cx, z_plt), _np.polyval(cy, z_plt), lw=1.5, label='fit')
-    ax.set_aspect('equal')
-    _plt.xlabel('Spot width')
-    _plt.ylabel('Spot height')
-    _plt.legend(loc='best')
-
-    _plt.subplot(223)
-    _plt.plot(locs.z, locs.sx, '.', label='x', alpha=0.2)
-    _plt.plot(locs.z, locs.sy, '.', label='y', alpha=0.2)
-    _plt.plot(z_plt, _np.polyval(cx, z_plt), '0.3', lw=1.5, label='calibration')
-    _plt.plot(z_plt, _np.polyval(cy, z_plt), '0.3', lw=1.5)
-    _plt.xlim(-range/2, range/2)
-    _plt.xlabel('Estimated z')
-    _plt.ylabel('Spot width/height')
-    _plt.legend(loc='best')
-
-    ax = _plt.subplot(224)
-    _plt.plot(z, locs.z, '.k', alpha=0.1)
-    _plt.plot([-range/2, range/2], [-range/2, range/2], lw=1.5, label='identity')
-    _plt.xlim(-range/2, range/2)
-    _plt.ylim(-range/2, range/2)
-    ax.set_aspect('equal')
-    _plt.xlabel('Stage position')
-    _plt.ylabel('Estimated z')
-    _plt.legend(loc='best')
-
-    _plt.show()
-
-
-def _fit_z_target(z, sx, sy, cx, cy):
-    wx = _np.polyval(cx, z)
-    wy = _np.polyval(cy, z)
-    # return _np.sqrt((sx**0.5 - wx**0.5)**2 + (sy**0.5 - wy**0.5)**2)
-    return (sx-wx)**2 + (sy-wy)**2
-
-
-def fit_z(locs, info):
-    z = _np.zeros_like(locs.x)
-    d_zcalib = _np.zeros_like(z)
-    cx = _np.array(_CONFIG['3D Calibration']['X Coefficients'])
-    cy = _np.array(_CONFIG['3D Calibration']['Y Coefficients'])
-    sx = locs.sx
-    sy = locs.sy
-    for i in _trange(len(z)):
-        result = _minimize_scalar(_fit_z_target, args=(sx[i], sy[i], cx, cy))
-        z[i] = result.x
-        d_zcalib[i] = _np.sqrt(result.fun)
-    locs = _lib.append_to_rec(locs, z, 'z')
-    locs = _lib.append_to_rec(locs, d_zcalib, 'd_zcalib')
-    return locs
