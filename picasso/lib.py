@@ -128,6 +128,10 @@ def minimize_shifts(shifts_x, shifts_y):
     return shift_y, shift_x
 
 
+def n_futures_done(futures):
+    return sum([_.done() for _ in futures])
+
+
 def remove_from_rec(rec_array, name):
     return _drop_fields(rec_array, name, usemask=False, asrecarray=True)
 
