@@ -533,7 +533,7 @@ def localization_precision(photons, s, bg):
     ''' Calculates the theoretical localization preicision according to Mortensen et al., Nat Meth, 2010 '''
     s2 = s**2
     sa2 = s2 + 1/12
-    v = sa2 * (16/9 + (8 * _np.pi * sa2 * bg**2) / photons) / photons
+    v = sa2 * (16/9 + (8 * _np.pi * sa2 * bg) / photons) / photons
     return _np.sqrt(v)
 
 
