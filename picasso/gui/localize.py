@@ -522,7 +522,13 @@ class ParametersDialog(QtGui.QDialog):
                     if 'Gain Property Name' in cam_config:
                         gain_property_name = cam_config['Gain Property Name']
                         gain = mm_info[camera + '-' + gain_property_name]
-                        self.gain.setValue(int(gain))
+                        if 'EM Switch Property' in cam_config:
+                            switch_property_name = cam_config['EM Switch Property']['Name']
+                            switch_property_value = mm_info[camera + '-' + switch_property_name]
+                            if switch_property_value == cam_config['EM Switch Property'][True]:
+                                self.gain.setValue(int(gain))
+                            else:
+                                self.gain.setValue(1)
                     if 'Sensitivity Categories' in cam_config:
                         cam_combos = self.cam_combos[camera]
                         categories = cam_config['Sensitivity Categories']
@@ -1051,7 +1057,8 @@ class FitWorker(QtCore.QThread):
             time.sleep(0.2)
         theta = gausslq.fits_from_futures(fs)
         dt = time.time() - t0
-        locs = gausslq.locs_from_fits(self.identifications, theta, self.box)
+        em = self.camera_info['gain'] > 1
+        locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
         self.finished.emit(locs, dt, self.fit_z)
 
 

@@ -138,12 +138,12 @@ def fits_from_futures(futures):
     return _np.vstack(theta)
 
 
-def locs_from_fits(identifications, theta, box):
+def locs_from_fits(identifications, theta, box, em):
     # box_offset = int(box/2)
     x = theta[:, 0] + identifications.x     # - box_offset
     y = theta[:, 1] + identifications.y     # - box_offset
-    lpx = _postprocess.localization_precision(theta[:, 2], theta[:, 4], theta[:, 3])
-    lpy = _postprocess.localization_precision(theta[:, 2], theta[:, 5], theta[:, 3])
+    lpx = _postprocess.localization_precision(theta[:, 2], theta[:, 4], theta[:, 3], em=em)
+    lpy = _postprocess.localization_precision(theta[:, 2], theta[:, 5], theta[:, 3], em=em)
     locs = _np.rec.array((identifications.frame, x, y,
                           theta[:, 2], theta[:, 4], theta[:, 5],
                           theta[:, 3], lpx, lpy,

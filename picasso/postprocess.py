@@ -529,11 +529,13 @@ def link_loc_groups(locs, info, link_group):
     return linked_locs
 
 
-def localization_precision(photons, s, bg):
+def localization_precision(photons, s, bg, em):
     ''' Calculates the theoretical localization preicision according to Mortensen et al., Nat Meth, 2010 '''
     s2 = s**2
     sa2 = s2 + 1/12
     v = sa2 * (16/9 + (8 * _np.pi * sa2 * bg) / photons) / photons
+    if em:
+        v *= 2
     return _np.sqrt(v)
 
 
