@@ -28,7 +28,7 @@ def _average(args):
 
 def _calibrate3d(path, step, range):
     from .io import load_locs
-    from .localize import calibrate_z
+    from .zfit import calibrate_z
     locs, info = load_locs(path)
     calibrate_z(locs, info, step, range)
 
