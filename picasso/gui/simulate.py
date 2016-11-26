@@ -881,7 +881,6 @@ class Window(QtGui.QMainWindow):
         handless = self.vectorToString(struct[3,:])
         handle3d = self.vectorToString(struct[4,:])
 
-
         exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
         exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
 
@@ -906,18 +905,24 @@ class Window(QtGui.QMainWindow):
             bindingsitesy = partstruct[1,:]
             nosites  = len(bindingsitesx) # number of binding sites in image
             photondist = _np.zeros((nosites,frames),dtype = _np.int)
+            spotkinetics = _np.zeros((nosites,4),dtype = _np.float)
             meandark = int(taud)
             meanbright = int(taub)
             for i in range(0,nosites):
-                photondisttemp = simulate.distphotons(partstruct,itime,frames,taud,taub,photonrate,photonratestd,photonbudget)
+                photondisttemp, spotkineticstemp = simulate.distphotons(partstruct,itime,frames,taud,taub,photonrate,photonratestd,photonbudget)
 
                 photondist[i,:] = photondisttemp
+                spotkinetics[i,:] = spotkineticstemp
+
                 outputmsg = 'Distributing photons ... ' + str(_np.round(i/nosites*1000)/10) +' %'
                 self.statusBar().showMessage(outputmsg)
                 self.mainpbar.setValue(_np.round(i/nosites*1000)/10)
 
             self.statusBar().showMessage('Converting to image ... ')
-
+            onevents = self.vectorToString(spotkinetics[:,0])
+            localizations = self.vectorToString(spotkinetics[:,1])
+            meandarksim = self.vectorToString(spotkinetics[:,2])
+            meanbrightsim = self.vectorToString(spotkinetics[:,3])
             movie = _np.zeros(shape=(frames,imagesize,imagesize), dtype='<u2')
             app = QtCore.QCoreApplication.instance()
             for runner in range(0,frames):
@@ -968,6 +973,10 @@ class Window(QtGui.QMainWindow):
                     'Noise.EquationC':equationC,
                     'Noise.BackgroundOff':bgoffset,
                     'Noise.BackgroundStdOff':bgstdoffset,
+                    'Spotkinetics.ON_Events':onevents,
+                    'Spotkinetics.Localizations':localizations,
+                    'Spotkinetics.MEAN_DARK':meandarksim,
+                    'Spotkinetics.MEAN_BRIGHT':meanbrightsim,
                     'Height': imagesize,
                     'Width': imagesize}
 
