@@ -51,6 +51,13 @@ def load_raw(path, prompt_info=None):
     return movie, info
 
 
+def save_config(CONFIG):
+    this_file = _ospath.abspath(__file__)
+    this_directory = _ospath.dirname(this_file)
+    with open(_ospath.join(this_directory, 'config.yaml'), 'w') as config_file:
+        _yaml.dump(CONFIG, config_file, width=1000)
+
+
 def save_raw(path, movie, info):
     movie.tofile(path)
     info_path = _ospath.splitext(path)[0] + '.yaml'

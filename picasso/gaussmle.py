@@ -423,7 +423,6 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
         old_y = theta[1]
         old_sx = theta[4]
         old_sy = theta[5]
-
     thetas[index] = theta
     iterations[index] = kk
 

@@ -14,6 +14,7 @@ import ctypes as _ctypes
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import threading as _threading
 from itertools import chain as _chain
+import matplotlib.pyplot as _plt
 from . import gaussmle as _gaussmle
 
 
@@ -22,6 +23,9 @@ LOCS_DTYPE = [('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
               ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
               ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
               ('net_gradient', 'f4'), ('likelihood', 'f4'), ('iterations', 'i4')]
+
+
+_plt.style.use('ggplot')
 
 
 @_numba.jit(nopython=True, nogil=True, cache=False)
@@ -135,11 +139,9 @@ def identify_async(movie, minimum_ng, box, roi=None):
 
 def identify(movie, minimum_ng, box, threaded=True):
     if threaded:
-        N = len(movie)
         current, futures = identify_async(movie, minimum_ng, box)
-        while current[0] < N:
-            pass
-        return  # TODO
+        identifications = [_.result() for _ in futures]
+        identifications = [_np.hstack(_) for _ in identifications]
     else:
         identifications = [identify_by_frame_number(movie, minimum_ng, box, i) for i in range(len(movie))]
     return _np.hstack(identifications).view(_np.recarray)
@@ -194,9 +196,9 @@ def get_spots(movie, identifications, box, camera_info):
     return _to_photons(spots, camera_info)
 
 
-def fit(movie, camera_info, identifications, box, eps=0.001, method='sigma'):
+def fit(movie, camera_info, identifications, box, eps=0.001, max_it=100, method='sigma'):
     spots = get_spots(movie, identifications, box, camera_info)
-    theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle(spots, eps, method=method)
+    theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle(spots, eps, max_it, method=method)
     return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
 
 

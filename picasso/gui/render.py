@@ -230,12 +230,14 @@ class InfoDialog(QtGui.QDialog):
         movie_groupbox = QtGui.QGroupBox('Movie')
         vbox.addWidget(movie_groupbox)
         self.movie_grid = QtGui.QGridLayout(movie_groupbox)
-        self.movie_grid.addWidget(QtGui.QLabel('Median CRLB precision:'), 0, 0)
-        self.crlb_precision = QtGui.QLabel('-')
-        self.movie_grid.addWidget(self.crlb_precision, 0, 1)
+        self.movie_grid.addWidget(QtGui.QLabel('Median fit precision:'), 0, 0)
+        self.fit_precision = QtGui.QLabel('-')
+        self.movie_grid.addWidget(self.fit_precision, 0, 1)
         self.movie_grid.addWidget(QtGui.QLabel('NeNA precision:'), 1, 0)
         self.nena_button = QtGui.QPushButton('Calculate')
         self.nena_button.clicked.connect(self.calculate_nena_lp)
+        self.nena_button.setDefault(False)
+        self.nena_button.setAutoDefault(False)
         self.movie_grid.addWidget(self.nena_button, 1, 1)
         # FOV
         fov_groupbox = QtGui.QGroupBox('Field of view')
@@ -609,6 +611,7 @@ class View(QtGui.QLabel):
         self.update_scene(picks_only=True)
 
     def adjust_viewport_to_view(self, viewport):
+        ''' Adds space to a desired viewport so that it matches the window aspect ratio. '''
         viewport_height = viewport[1][0] - viewport[0][0]
         viewport_width = viewport[1][1] - viewport[0][1]
         view_height = self.height()
@@ -671,6 +674,7 @@ class View(QtGui.QLabel):
                 self.update_scene()
 
     def shift_from_picked(self):
+        ''' Used by align. For each pick, calculate the center of mass and does rcc based on shifts '''
         n_channels = len(self.locs)
         locs = [self.picked_locs(_) for _ in range(n_channels)]
         # Calculating center of mass for each channel and pick
@@ -694,6 +698,7 @@ class View(QtGui.QLabel):
         return lib.minimize_shifts(dx, dy)
 
     def shift_from_rcc(self):
+        ''' Used by align. Estimates image shifts based on image correlation. '''
         n_channels = len(self.locs)
         rp = lib.ProgressDialog('Rendering images', 0, n_channels, self)
         rp.set_value(0)
@@ -783,6 +788,7 @@ class View(QtGui.QLabel):
                 return None
 
     def get_render_kwargs(self, viewport=None):
+        ''' Returns a dictionary to be used for the keyword arguments of render. '''
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
         optimal_oversampling = self.display_pixels_per_viewport_pixels()
         if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
@@ -804,6 +810,7 @@ class View(QtGui.QLabel):
                 'min_blur_width': float(self.window.display_settings_dialog.min_blur_width.value())}
 
     def load_picks(self, path):
+        ''' Loads picks centers and diameter from yaml file. '''
         with open(path, 'r') as f:
             regions = yaml.load(f)
         self._picks = regions['Centers']
@@ -812,6 +819,7 @@ class View(QtGui.QLabel):
         self.update_scene(picks_only=True)
 
     def map_to_movie(self, position):
+        ''' Converts coordinates from display units to camera units. '''
         x_rel = position.x() / self.width()
         x_movie = x_rel * self.viewport_width() + self.viewport[0][1]
         y_rel = position.y() / self.height()
@@ -819,11 +827,13 @@ class View(QtGui.QLabel):
         return x_movie, y_movie
 
     def map_to_view(self, x, y):
+        ''' Converts coordinates from camera units to display units. '''
         cx = self.width() * (x - self.viewport[0][1]) / self.viewport_width()
         cy = self.height() * (y - self.viewport[0][0]) / self.viewport_height()
         return cx, cy
 
     def max_movie_height(self):
+        ''' Returns maximum height of all loaded images. '''
         return max(info[0]['Height'] for info in self.infos)
 
     def max_movie_width(self):
@@ -1595,7 +1605,7 @@ class Window(QtGui.QMainWindow):
         self.info_dialog.height_label.setText('{} pixel'.format((self.view.height())))
         self.info_dialog.locs_label.setText('{:,}'.format(self.view.n_locs))
         try:
-            self.info_dialog.crlb_precision.setText('{:.3} pixel'.format(self.view.median_lp))
+            self.info_dialog.fit_precision.setText('{:.3} pixel'.format(self.view.median_lp))
         except AttributeError:
             pass
 
