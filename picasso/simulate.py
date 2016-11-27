@@ -5,20 +5,20 @@
     Simulate single molcule fluorescence data
 
     :author: Maximilian Thomas Strauss, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 import numpy as _np
 from . import io as _io
 
-def saveInfo(filename,info):
+def saveInfo(filename, info):
     _io.save_info(filename, [info], default_flow_style=True)
 
-def noisy(image,mu,sigma):        #Add gaussian noise to an image.
-    row,col= image.shape  #Variance for _np.random is 1
-    gauss = sigma*_np.random.normal(0,1,(row,col)) + mu
-    gauss = gauss.reshape(row,col)
+def noisy(image, mu, sigma):        #Add gaussian noise to an image.
+    row, col= image.shape  #Variance for _np.random is 1
+    gauss = sigma*_np.random.normal(0,1,(row, col)) + mu
+    gauss = gauss.reshape(row, col)
     noisy = image + gauss
-    noisy[noisy<0]=0
+    noisy[noisy < 0] = 0
     return noisy
 
 def noisy_p(image,mu): #Add poissonian noise to an image
@@ -27,20 +27,42 @@ def noisy_p(image,mu): #Add poissonian noise to an image
     return noisy
 
 
-def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget ): #Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
+def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget): #Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
     meanlocs = 4*int(_np.ceil(frames*time/(meandark+meanbright))) #This is an estimate for the total number of binding events
     if meanlocs < 10:
         meanlocs = meanlocs*10
 
-    ## GENERATE ON AND OFF-EVENTS
-    dark_times = _np.random.exponential(meandark,meanlocs)
-    bright_times = _np.random.exponential(meanbright,meanlocs)
+    #Generate a pool of dark and brighttimes
+    dark_times_pool = _np.random.exponential(meandark, meanlocs)
+    bright_times_pool = _np.random.exponential(meanbright, meanlocs)
 
-    events = _np.vstack((dark_times,bright_times)).reshape((-1,),order='F') # Interweave dark_times and bright_times [dt,bt,dt,bt..]
+    darksum = _np.cumsum(dark_times_pool)
+    maxlocdark = _np.argmax(darksum>(frames*time))+1
+
+    #Simulate binding and unbinding and consider blocked binding sites
+    dark_times = _np.zeros(maxlocdark)
+    bright_times = _np.zeros(maxlocdark)
+
+    dark_times[0] = dark_times_pool[0]
+    bright_times[0] = bright_times_pool[0]
+
+    for i in range(1,maxlocdark):
+        bright_times[i] = bright_times_pool[i]
+
+        dark_time_temp = dark_times_pool[i]-bright_times_pool[i]
+        while dark_time_temp < 0:
+            _np.delete(dark_times_pool,i)
+            dark_time_temp +=dark_times_pool[i]
+
+        dark_times[i] = dark_time_temp
+
+    #dark_times = _np.random.exponential(meandark, meanlocs)
+    #bright_times = _np.random.exponential(meanbright, meanlocs)
+
+    events = _np.vstack((dark_times, bright_times)).reshape((-1,), order='F') # Interweave dark_times and bright_times [dt,bt,dt,bt..]
     simulatedmeandark = _np.mean(events[::2])
     simulatedmeanbright = _np.mean(events[1::2])
     eventsum = _np.cumsum(events)
-
     maxloc = _np.argmax(eventsum>(frames*time)) #Find the first event that exceeds the total integration time
     ## CHECK Trace
     if _np.mod(maxloc,2): #uneven -> ends with an OFF-event
@@ -87,7 +109,7 @@ def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbud
         if totalphotons > photonbudget:
             photonsinframe[onFrames+tempFrame]=int(photonsinframe[onFrames+tempFrame]-(totalphotons-photonbudget))
 
-    photonsinframe = photonsinframe[0:frames] #Cach exception if a trace should be longer than the movie
+    photonsinframe = photonsinframe[0:frames] #Catch exception if a trace should be longer than the movie
     timetrace = events[0:maxloc]
 
     if onevents > 0:
@@ -114,7 +136,7 @@ def distphotons(structures,itime,frames,taud,taub,photonrate,photonratestd,photo
 
     photonsinframe,timetrace,spotkinetics = paintgen(meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget)
 
-    return photonsinframe
+    return photonsinframe, spotkinetics
 
 def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,background, noise):
 
@@ -163,6 +185,7 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
         simframe = _np.flipud(simframe) # to be consistent with render
     #simframenoise = noisy(simframe,background,noise)
     simframenoise = noisy_p(simframe,background)
+    simframenoise[simframenoise > 2**16-1] = 2**16-1
     simframeout=_np.round(simframenoise).astype('<u2')
 
     return simframeout

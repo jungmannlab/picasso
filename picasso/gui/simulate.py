@@ -116,7 +116,7 @@ class Window(QtGui.QMainWindow):
         self.integrationtimeEdit = QtGui.QSpinBox()
         self.integrationtimeEdit.setRange(1,10000) #1-10.000ms
         self.framesEdit = QtGui.QSpinBox()
-        self.framesEdit.setRange(10,1000000) #10-1.000.000 frames
+        self.framesEdit.setRange(10,100000000) #10-100.000.000 frames
         self.framesEdit.setSingleStep(1000)
         self.pixelsizeEdit = QtGui.QSpinBox()
         self.pixelsizeEdit.setRange(1,1000) #1 to 1000 nm frame size
@@ -758,6 +758,7 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(structurexx)
             self.structureyyEdit.setText(structureyy)
             self.structureexEdit.setText(structureex)
+            self.structure3DEdit.setText(structureex)
             self.generatePositions()
 
         elif typeindex == 1: # CIRCLE
@@ -791,6 +792,7 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(structurexx)
             self.structureyyEdit.setText(structureyy)
             self.structureexEdit.setText(structureex)
+            self.structure3DEdit.setText(structureex)
             self.generatePositions()
 
         elif typeindex == 2: # Custom
@@ -879,7 +881,6 @@ class Window(QtGui.QMainWindow):
         handless = self.vectorToString(struct[3,:])
         handle3d = self.vectorToString(struct[4,:])
 
-
         exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
         exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
 
@@ -904,18 +905,24 @@ class Window(QtGui.QMainWindow):
             bindingsitesy = partstruct[1,:]
             nosites  = len(bindingsitesx) # number of binding sites in image
             photondist = _np.zeros((nosites,frames),dtype = _np.int)
+            spotkinetics = _np.zeros((nosites,4),dtype = _np.float)
             meandark = int(taud)
             meanbright = int(taub)
             for i in range(0,nosites):
-                photondisttemp = simulate.distphotons(partstruct,itime,frames,taud,taub,photonrate,photonratestd,photonbudget)
+                photondisttemp, spotkineticstemp = simulate.distphotons(partstruct,itime,frames,taud,taub,photonrate,photonratestd,photonbudget)
 
                 photondist[i,:] = photondisttemp
+                spotkinetics[i,:] = spotkineticstemp
+
                 outputmsg = 'Distributing photons ... ' + str(_np.round(i/nosites*1000)/10) +' %'
                 self.statusBar().showMessage(outputmsg)
                 self.mainpbar.setValue(_np.round(i/nosites*1000)/10)
 
             self.statusBar().showMessage('Converting to image ... ')
-
+            onevents = self.vectorToString(spotkinetics[:,0])
+            localizations = self.vectorToString(spotkinetics[:,1])
+            meandarksim = self.vectorToString(spotkinetics[:,2])
+            meanbrightsim = self.vectorToString(spotkinetics[:,3])
             movie = _np.zeros(shape=(frames,imagesize,imagesize), dtype='<u2')
             app = QtCore.QCoreApplication.instance()
             for runner in range(0,frames):
@@ -966,6 +973,10 @@ class Window(QtGui.QMainWindow):
                     'Noise.EquationC':equationC,
                     'Noise.BackgroundOff':bgoffset,
                     'Noise.BackgroundStdOff':bgstdoffset,
+                    'Spotkinetics.ON_Events':onevents,
+                    'Spotkinetics.Localizations':localizations,
+                    'Spotkinetics.MEAN_DARK':meandarksim,
+                    'Spotkinetics.MEAN_BRIGHT':meanbrightsim,
                     'Height': imagesize,
                     'Width': imagesize}
 
@@ -1078,7 +1089,7 @@ class Window(QtGui.QMainWindow):
             except ValueError:
                 pass
 
-        minlen = min(len(structureex),len(structurexx),len(structureyy))
+        minlen = min(len(structureex),len(structurexx),len(structureyy),len(structure3d))
 
         structurexx = structurexx[0:minlen]
         structureyy = structureyy[0:minlen]
