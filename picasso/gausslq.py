@@ -144,13 +144,16 @@ def locs_from_fits(identifications, theta, box, em):
     y = theta[:, 1] + identifications.y     # - box_offset
     lpx = _postprocess.localization_precision(theta[:, 2], theta[:, 4], theta[:, 3], em=em)
     lpy = _postprocess.localization_precision(theta[:, 2], theta[:, 5], theta[:, 3], em=em)
+    a = _np.maximum(theta[:, 4], theta[:, 5])
+    b = _np.minimum(theta[:, 4], theta[:, 5])
+    ellipticity = (a - b) / a
     locs = _np.rec.array((identifications.frame, x, y,
                           theta[:, 2], theta[:, 4], theta[:, 5],
-                          theta[:, 3], lpx, lpy,
+                          theta[:, 3], lpx, lpy, ellipticity,
                           identifications.net_gradient),
                          dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
                                 ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
                                 ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
-                                ('net_gradient', 'f4')])
+                                ('ellipticity', 'f4'), ('net_gradient', 'f4')])
     locs.sort(kind='mergesort', order='frame')
     return locs

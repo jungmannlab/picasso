@@ -14,8 +14,9 @@ from . import io as _io
 _plt.style.use('ggplot')
 
 
-def calibrate_z(locs, info, d, range, magnification_factor):
+def calibrate_z(locs, info, d, magnification_factor):
     n_frames = info[0]['Frames']
+    range = (n_frames - 1) * d
     frame_range = _np.arange(n_frames)
     z_range = frame_range * d - range / 2
 
@@ -27,18 +28,18 @@ def calibrate_z(locs, info, d, range, magnification_factor):
     keep_x = (locs.sx - mean_sx[locs.frame])**2 < var_sx[locs.frame]
     keep_y = (locs.sy - mean_sy[locs.frame])**2 < var_sy[locs.frame]
     keep = keep_x & keep_y
-    locs_ = locs[keep]
+    locs = locs[keep]
 
     # Fits calibration curve to the mean of each frame
-    mean_sx = _np.array([_np.mean(locs_.sx[locs_.frame == _]) for _ in frame_range])
-    mean_sy = _np.array([_np.mean(locs_.sy[locs_.frame == _]) for _ in frame_range])
+    mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
+    mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
     cx = _np.polyfit(z_range, mean_sx, 6, full=False)
     cy = _np.polyfit(z_range, mean_sy, 6, full=False)
 
     # Fits calibration curve to each localization
-    # true_z = locs_.frame * d - range / 2
-    # cx = _np.polyfit(true_z, locs_.sx, 6, full=False)
-    # cy = _np.polyfit(true_z, locs_.sy, 6, full=False)
+    # true_z = locs.frame * d - range / 2
+    # cx = _np.polyfit(true_z, locs.sx, 6, full=False)
+    # cy = _np.polyfit(true_z, locs.sy, 6, full=False)
 
     _CONFIG['3D Calibration'] = {'X Coefficients': [float(_) for _ in cx], 'Y Coefficients': [float(_) for _ in cy], 'Magnification Factor': magnification_factor}
     _io.save_config(_CONFIG)
@@ -49,8 +50,8 @@ def calibrate_z(locs, info, d, range, magnification_factor):
 
     _plt.subplot(231)
     # Plot this if calibration curve is fitted to each localization
-    # _plt.plot(true_z, locs_.sx, '.', label='x', alpha=0.2)
-    # _plt.plot(true_z, locs_.sy, '.', label='y', alpha=0.2)
+    # _plt.plot(true_z, locs.sx, '.', label='x', alpha=0.2)
+    # _plt.plot(true_z, locs.sy, '.', label='y', alpha=0.2)
     # _plt.plot(true_z, _np.polyval(cx, true_z), '0.3', lw=1.5, label='x fit')
     # _plt.plot(true_z, _np.polyval(cy, true_z), '0.3', lw=1.5, label='y fit')
     _plt.plot(z_range, mean_sx, '.-', label='x')

@@ -1228,54 +1228,62 @@ class View(QtGui.QLabel):
         if channel is not None:
             self._undrift_from_picked(channel)
 
-    def _undrift_from_picked(self, channel):
-        picked_locs = self.picked_locs(channel)
-        status = lib.StatusDialog('Calculating drift...', self)
-        n_picks = len(self._picks)
+    def _undrift_from_picked_coordinate(self, channel, picked_locs, coordinate):
+        n_picks = len(picked_locs)
         n_frames = self.infos[channel][0]['Frames']
-        drift_x = np.empty((n_picks, n_frames))
-        drift_y = np.empty((n_picks, n_frames))
-        drift_x.fill(np.nan)
-        drift_y.fill(np.nan)
+
+        # Drift per pick per frame
+        drift = np.empty((n_picks, n_frames))
+        drift.fill(np.nan)
 
         # Remove center of mass offset
         for i, locs in enumerate(picked_locs):
-            drift_x[i, locs.frame] = locs.x - np.mean(locs.x)
-            drift_y[i, locs.frame] = locs.y - np.mean(locs.y)
+            coordinates = getattr(locs, coordinate)
+            drift[i, locs.frame] = coordinates - np.mean(coordinates)
 
-        # Mean drift per frame
-        drift_x_mean = np.nanmean(drift_x, 0)
-        drift_y_mean = np.nanmean(drift_y, 0)
-
-        # New mean drift weighted by mean square deviation
-        msd_x = np.nanmean((drift_x - drift_x_mean)**2, 1)
-        msd_y = np.nanmean((drift_y - drift_y_mean)**2, 1)
-        # We are using a mask, because there is no function for weighted average ignoring nans:
-        nan_mask = np.isnan(drift_x)
-        drift_x = np.ma.MaskedArray(drift_x, mask=nan_mask)
-        drift_y = np.ma.MaskedArray(drift_y, mask=nan_mask)
-        drift_x_mean = np.ma.average(drift_x, axis=0, weights=1/msd_x)
-        drift_y_mean = np.ma.average(drift_y, axis=0, weights=1/msd_y)
-        drift_x_mean = drift_x_mean.filled(np.nan)
-        drift_y_mean = drift_y_mean.filled(np.nan)
+        # Mean drift over picks
+        drift_mean = np.nanmean(drift, 0)
+        # Square deviation of each pick's drift to mean drift along frames
+        sd = (drift - drift_mean)**2
+        # Mean of square deviation for each pick
+        msd = np.nanmean(sd, 1)
+        # New mean drift over picks, where each pick is weighted according to its msd
+        nan_mask = np.isnan(drift)
+        drift = np.ma.MaskedArray(drift, mask=nan_mask)
+        drift_mean = np.ma.average(drift, axis=0, weights=1/msd)
+        drift_mean = drift_mean.filled(np.nan)
 
         # Linear interpolation for frames without localizations
         def nan_helper(y):
             return np.isnan(y), lambda z: z.nonzero()[0]
+        nans, nonzero = nan_helper(drift_mean)
+        drift_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_mean[~nans])
 
-        nans, nonzero = nan_helper(drift_x_mean)
-        drift_x_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_x_mean[~nans])
-        nans, nonzero = nan_helper(drift_y_mean)
-        drift_y_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_y_mean[~nans])
+        return drift_mean
+
+    def _undrift_from_picked(self, channel):
+        picked_locs = self.picked_locs(channel)
+        status = lib.StatusDialog('Calculating drift...', self)
+
+        drift_x = self._undrift_from_picked_coordinate(channel, picked_locs, 'x')
+        drift_y = self._undrift_from_picked_coordinate(channel, picked_locs, 'y')
 
         # Apply drift
-        self.locs[channel].x -= drift_x_mean[self.locs[channel].frame]
-        self.locs[channel].y -= drift_y_mean[self.locs[channel].frame]
+        self.locs[channel].x -= drift_x[self.locs[channel].frame]
+        self.locs[channel].y -= drift_y[self.locs[channel].frame]
+
+        # A rec array to store the applied drift
+        drift = (drift_x, drift_y)
+        drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
+
+        # If z coordinate exists, also apply drift there
+        if all([hasattr(_, 'z') for _ in picked_locs]):
+            drift_z = self._undrift_from_picked_coordinate(channel, picked_locs, 'z')
+            self.locs[channel].z -= drift_z[self.locs[channel].frame]
+            drift = lib.append_to_rec(drift, drift_z, 'z')
 
         # Cleanup
         self.index_blocks[channel] = None
-        drift = (drift_x_mean, drift_y_mean)
-        drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
         self.add_drift(channel, drift)
         status.close()
         self.update_scene()
