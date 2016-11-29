@@ -18,7 +18,7 @@ def calibrate_z(locs, info, d, magnification_factor):
     n_frames = info[0]['Frames']
     range = (n_frames - 1) * d
     frame_range = _np.arange(n_frames)
-    z_range = frame_range * d - range / 2
+    z_range = -(frame_range * d - range / 2)    # negative so that the first frames of a bottom-to-up scan are positive z coordinates.
 
     mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
     mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
@@ -60,7 +60,7 @@ def calibrate_z(locs, info, d, magnification_factor):
     _plt.plot(z_range, _np.polyval(cy, z_range), '0.3', lw=1.5, label='y fit')
     _plt.xlabel('Stage position')
     _plt.ylabel('Mean spot width/height')
-    _plt.xlim(-range/2, range/2)
+    _plt.xlim(z_range.min(), z_range.max())
     _plt.legend(loc='best')
 
     ax = _plt.subplot(232)
@@ -77,16 +77,16 @@ def calibrate_z(locs, info, d, magnification_factor):
     _plt.plot(locs.z, locs.sy, '.', label='y', alpha=0.2)
     _plt.plot(z_range, _np.polyval(cx, z_range), '0.3', lw=1.5, label='calibration')
     _plt.plot(z_range, _np.polyval(cy, z_range), '0.3', lw=1.5)
-    _plt.xlim(-range/2, range/2)
+    _plt.xlim(z_range.min(), z_range.max())
     _plt.xlabel('Estimated z')
     _plt.ylabel('Spot width/height')
     _plt.legend(loc='best')
 
     ax = _plt.subplot(234)
     _plt.plot(z_range[locs.frame], locs.z, '.k', alpha=0.1)
-    _plt.plot([-range/2, range/2], [-range/2, range/2], lw=1.5, label='identity')
-    _plt.xlim(-range/2, range/2)
-    _plt.ylim(-range/2, range/2)
+    _plt.plot([z_range.min(), z_range.max()], [z_range.min(), z_range.max()], lw=1.5, label='identity')
+    _plt.xlim(z_range.min(), z_range.max())
+    _plt.ylim(z_range.min(), z_range.max())
     ax.set_aspect('equal')
     _plt.xlabel('Stage position')
     _plt.ylabel('Estimated z')
@@ -104,7 +104,7 @@ def calibrate_z(locs, info, d, magnification_factor):
     mean_square_deviation_frame = [_np.mean(square_deviation[locs.frame == _]) for _ in frame_range]
     rmsd_frame = _np.sqrt(mean_square_deviation_frame)
     _plt.plot(z_range, rmsd_frame, '.-', color='0.3')
-    _plt.xlim(-range/2, range/2)
+    _plt.xlim(z_range.min(), z_range.max())
     _plt.gca().set_ylim(bottom=0)
     _plt.xlabel('Stage position')
     _plt.ylabel('Mean z precision')
