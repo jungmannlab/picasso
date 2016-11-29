@@ -357,7 +357,7 @@ def _dark_times(locs, group, last_frame):
     return dark
 
 
-def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average'):
+def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average', remove_ambiguous_lengths=True):
     if len(locs) == 0:
         linked_locs = locs.copy()
         if hasattr(locs, 'frame'):
@@ -373,7 +373,7 @@ def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average'):
             group = _np.zeros(len(locs), dtype=_np.int32)
         link_group = get_link_groups(locs, r_max, max_dark_time, group)
         if combine_mode == 'average':
-            linked_locs = link_loc_groups(locs, info, link_group)
+            linked_locs = link_loc_groups(locs, info, link_group, remove_ambiguous_lengths=remove_ambiguous_lengths)
         elif combine_mode == 'refit':
             pass    # TODO
     return linked_locs
@@ -485,7 +485,7 @@ def _link_group_last(column, link_group, n_locs, n_groups):
     return result
 
 
-def link_loc_groups(locs, info, link_group):
+def link_loc_groups(locs, info, link_group, remove_ambiguous_lengths=True):
     n_locs = len(link_group)
     n_groups = link_group.max() + 1
     n_ = _link_group_count(link_group, n_locs, n_groups)
@@ -525,8 +525,9 @@ def link_loc_groups(locs, info, link_group):
     if hasattr(locs, 'photons'):
         columns['photon_rate'] = _np.float32(columns['photons'] / n_)
     linked_locs = _np.rec.array(list(columns.values()), names=list(columns.keys()))
-    valid = _np.logical_and(first_frame_ > 0, last_frame_ < info[0]['Frames'])
-    linked_locs = linked_locs[valid]
+    if remove_ambiguous_lengths:
+        valid = _np.logical_and(first_frame_ > 0, last_frame_ < info[0]['Frames'])
+        linked_locs = linked_locs[valid]
     return linked_locs
 
 

@@ -649,6 +649,22 @@ class View(QtGui.QLabel):
             sp.set_value(i+1)
         self.update_scene()
 
+    def combine(self):
+        if len(self._picks) > 0:
+            channel = self.get_channel()
+            picked_locs = self.picked_locs(channel, add_group=False)
+            out_locs = []
+            r_max = 2 * max(self.infos[channel][0]['Height'], self.infos[channel][0]['Width'])
+            max_dark = self.infos[channel][0]['Frames']
+            progress = lib.ProgressDialog('Combining localizations in picks', 0, len(picked_locs), self)
+            progress.set_value(0)
+            for i, pick_locs in enumerate(picked_locs):
+                pick_locs_out = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark, remove_ambiguous_lengths=False)
+                out_locs.append(pick_locs_out)
+                progress.set_value(i+1)
+            self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
+            self.update_scene()
+
     def link(self):
         channel = self.get_channel()
         if hasattr(self.locs[channel], 'len'):
@@ -657,20 +673,9 @@ class View(QtGui.QLabel):
         else:
             r_max, max_dark, ok = LinkDialog.getParams()
             if ok:
-                if len(self._picks) > 0:
-                    picked_locs = self.picked_locs(channel, add_group=False)
-                    out_locs = []
-                    progress = lib.ProgressDialog('Linking localizations in picks', 0, len(picked_locs), self)
-                    progress.set_value(0)
-                    for i, pick_locs in enumerate(picked_locs):
-                        pick_locs_out = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
-                        out_locs.append(pick_locs_out)
-                        progress.set_value(i+1)
-                    self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
-                else:
-                    status = lib.StatusDialog('Linking localizations...', self)
-                    self.locs[channel] = postprocess.link(self.locs[channel], self.infos[channel], r_max=r_max, max_dark_time=max_dark)
-                    status.close()
+                status = lib.StatusDialog('Linking localizations...', self)
+                self.locs[channel] = postprocess.link(self.locs[channel], self.infos[channel], r_max=r_max, max_dark_time=max_dark)
+                status.close()
                 self.update_scene()
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
@@ -1510,6 +1515,8 @@ class Window(QtGui.QMainWindow):
         link_action.triggered.connect(self.view.link)
         align_action = postprocess_menu.addAction('Align channels (3D if picked)')
         align_action.triggered.connect(self.view.align)
+        combine_action = postprocess_menu.addAction('Combine picked')
+        combine_action.triggered.connect(self.view.combine)
         apply_action = postprocess_menu.addAction('Apply expression to localizations')
         apply_action.setShortcut('Ctrl+A')
         apply_action.triggered.connect(self.open_apply_dialog)
