@@ -9,6 +9,29 @@
 """
 import numpy as _np
 from . import io as _io
+from . import CONFIG as _CONFIG
+
+if _CONFIG:
+    cx = _CONFIG['3D Calibration']['X Coefficients']
+    cy = _CONFIG['3D Calibration']['Y Coefficients']
+    magfac = _CONFIG['3D Calibration']['Magnification Factor']
+else:
+    magfac = 0.76
+    cx = [3.1638306844743706e-17, -2.2103661248660896e-14, -9.775815406044296e-12, 8.2178622893072e-09, 4.91181990105529e-06, -0.0028759382006135654, 1.1756537760039398]
+    cy = [1.710907877866197e-17, -2.4986657766862576e-15, -8.405284979510355e-12, 1.1548322314075128e-11, 5.4270591055277476e-06, 0.0018155881468011011, 1.011468185618154]
+
+
+def calculate_zpsf(z, cx, cy):
+    z = z/magfac
+    z2 = z * z
+    z3 = z * z2
+    z4 = z * z3
+    z5 = z * z4
+    z6 = z * z5
+    wx = cx[0]*z6 + cx[1]*z5 + cx[2]*z4 + cx[3]*z3 + cx[4]*z2 + cx[5]*z + cx[6]
+    wy = cy[0]*z6 + cy[1]*z5 + cy[2]*z4 + cy[3]*z3 + cy[4]*z2 + cy[5]*z + cy[6]
+
+    return (wx, wy)
 
 def saveInfo(filename, info):
     _io.save_info(filename, [info], default_flow_style=True)
@@ -27,37 +50,38 @@ def noisy_p(image,mu): #Add poissonian noise to an image
     return noisy
 
 
-def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget): #Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
+def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget,simple): #Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
     meanlocs = 4*int(_np.ceil(frames*time/(meandark+meanbright))) #This is an estimate for the total number of binding events
     if meanlocs < 10:
         meanlocs = meanlocs*10
 
-    #Generate a pool of dark and brighttimes
-    dark_times_pool = _np.random.exponential(meandark, meanlocs)
-    bright_times_pool = _np.random.exponential(meanbright, meanlocs)
+    if simple:
+        dark_times = _np.random.exponential(meandark, meanlocs)
+        bright_times = _np.random.exponential(meanbright, meanlocs)
+    else:
+        #Generate a pool of dark and brighttimes
+        dark_times_pool = _np.random.exponential(meandark, meanlocs)
+        bright_times_pool = _np.random.exponential(meanbright, meanlocs)
 
-    darksum = _np.cumsum(dark_times_pool)
-    maxlocdark = _np.argmax(darksum>(frames*time))+1
+        darksum = _np.cumsum(dark_times_pool)
+        maxlocdark = _np.argmax(darksum>(frames*time))+1
 
-    #Simulate binding and unbinding and consider blocked binding sites
-    dark_times = _np.zeros(maxlocdark)
-    bright_times = _np.zeros(maxlocdark)
+        #Simulate binding and unbinding and consider blocked binding sites
+        dark_times = _np.zeros(maxlocdark)
+        bright_times = _np.zeros(maxlocdark)
 
-    dark_times[0] = dark_times_pool[0]
-    bright_times[0] = bright_times_pool[0]
+        dark_times[0] = dark_times_pool[0]
+        bright_times[0] = bright_times_pool[0]
 
-    for i in range(1,maxlocdark):
-        bright_times[i] = bright_times_pool[i]
+        for i in range(1,maxlocdark):
+            bright_times[i] = bright_times_pool[i]
 
-        dark_time_temp = dark_times_pool[i]-bright_times_pool[i]
-        while dark_time_temp < 0:
-            _np.delete(dark_times_pool,i)
-            dark_time_temp +=dark_times_pool[i]
+            dark_time_temp = dark_times_pool[i]-bright_times_pool[i]
+            while dark_time_temp < 0:
+                _np.delete(dark_times_pool,i)
+                dark_time_temp +=dark_times_pool[i]
 
-        dark_times[i] = dark_time_temp
-
-    #dark_times = _np.random.exponential(meandark, meanlocs)
-    #bright_times = _np.random.exponential(meanbright, meanlocs)
+            dark_times[i] = dark_time_temp
 
     events = _np.vstack((dark_times, bright_times)).reshape((-1,), order='F') # Interweave dark_times and bright_times [dt,bt,dt,bt..]
     simulatedmeandark = _np.mean(events[::2])
@@ -119,7 +143,7 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
     #spotkinetics is an output variable, that gives out the number of on-events, the number of localizations, the mean of the dark and bright times
     return photonsinframe,timetrace,spotkinetics
 
-def distphotons(structures,itime,frames,taud,taub,photonrate,photonratestd,photonbudget):
+def distphotons(structures,itime,frames,taud,taub,photonrate,photonratestd,photonbudget,simple):
 
     time = itime
     meandark = int(taud)
@@ -134,11 +158,11 @@ def distphotons(structures,itime,frames,taud,taub,photonrate,photonratestd,photo
     photonposall = _np.zeros((2,0))
     photonposall = [1,1]
 
-    photonsinframe,timetrace,spotkinetics = paintgen(meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget)
+    photonsinframe,timetrace,spotkinetics = paintgen(meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget,simple)
 
     return photonsinframe, spotkinetics
 
-def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,background, noise):
+def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,background, noise, mode3Dstate):
 
     pixels = imagesize
 
@@ -161,14 +185,15 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
         tempphotons = photondist[i,:]
         photoncount = int(tempphotons[runner])
 
+        if mode3Dstate:
+            wx, wy = calculate_zpsf(bindingsitesz[i], cx, cy)
+            cov = [[wx*wx, 0], [0, wy*wy]]
+        else:
+            cov = [[psf*psf, 0], [0, psf*psf]]
 
         if photoncount > 0:
             flag = flag+1
             mu = [bindingsitesx[i],bindingsitesy[i]]
-            if bindingsitesz[i]>0:
-                cov = [[psf*psf*bindingsitesz[i]**2, 0], [0, psf*psf]]
-            else:
-                cov = [[psf*psf, 0], [0, psf*psf*bindingsitesz[i]**2]]
             photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
             if flag == 1:
                 photonposframe = photonpos
