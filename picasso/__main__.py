@@ -33,6 +33,23 @@ def _calibrate3d(path, step, magnification_factor):
     calibrate_z(locs, info, step, magnification_factor)
 
 
+def _hdf2visp(path, pixel_size):
+    from glob import glob
+    paths = glob(path)
+    if paths:
+        from .io import load_locs
+        import os.path
+        from numpy import savetxt
+        for path in paths:
+            print('Converting {}'.format(path))
+            locs, info = load_locs(path)
+            locs = locs[['x', 'y', 'z', 'photons', 'frame']].copy()
+            locs.x *= pixel_size
+            locs.y *= pixel_size
+            outname = os.path.splitext(path)[0] + '.3d'
+            savetxt(outname, locs, fmt=['%.1f', '%.1f', '%.1f', '%.1f', '%d'], newline='\r\n')
+
+
 def _link(files, d_max, tolerance):
     import glob
     paths = glob.glob(files)
@@ -399,6 +416,10 @@ def main():
     calibrate3d_parser.add_argument('step', type=float)
     calibrate3d_parser.add_argument('factor', type=float)
 
+    hdf2visp_parser = subparsers.add_parser('hdf2visp')
+    hdf2visp_parser.add_argument('files')
+    hdf2visp_parser.add_argument('pixelsize', type=float)
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -452,6 +473,8 @@ def main():
             design.main()
         elif args.command == 'calibrate3d':
             _calibrate3d(args.file, args.step, args.factor)
+        elif args.command == 'hdf2visp':
+            _hdf2visp(args.files, args.pixelsize)
     else:
         parser.print_help()
 
