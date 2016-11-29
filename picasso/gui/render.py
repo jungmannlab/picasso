@@ -981,6 +981,7 @@ class View(QtGui.QLabel):
             max_n_locs = mean_n_locs + std_range * std_n_locs
             min_rmsd = mean_rmsd - std_range * std_rmsd
             max_rmsd = mean_rmsd + std_range * std_rmsd
+            # x, y coordinates of found similar regions:
             x_similar = np.array([_[0] for _ in self._picks])
             y_similar = np.array([_[1] for _ in self._picks])
             # preparations for hex grid search
