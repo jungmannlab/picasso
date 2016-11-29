@@ -110,22 +110,29 @@ def locs_at(x, y, locs, r):
     return locs[is_picked]
 
 
-def minimize_shifts(shifts_x, shifts_y):
+def minimize_shifts(shifts_x, shifts_y, shifts_z=None):
     n_channels = shifts_x.shape[0]
     n_pairs = int(n_channels * (n_channels - 1) / 2)
-    rij = _np.zeros((n_pairs, 2))
+    n_dims = 2 if shifts_z is None else 3
+    rij = _np.zeros((n_pairs, n_dims))
     A = _np.zeros((n_pairs, n_channels - 1))
     flag = 0
     for i in range(n_channels - 1):
         for j in range(i+1, n_channels):
             rij[flag, 0] = shifts_y[i, j]
             rij[flag, 1] = shifts_x[i, j]
+            if n_dims == 3:
+                rij[flag, 2] = shifts_z[i, j]
             A[flag, i:j] = 1
             flag += 1
     Dj = _np.dot(_np.linalg.pinv(A), rij)
     shift_y = _np.insert(_np.cumsum(Dj[:, 0]), 0, 0)
     shift_x = _np.insert(_np.cumsum(Dj[:, 1]), 0, 0)
-    return shift_y, shift_x
+    if n_dims == 2:
+        return shift_y, shift_x
+    else:
+        shift_z = _np.insert(_np.cumsum(Dj[:, 2]), 0, 0)
+        return shift_y, shift_x, shift_z
 
 
 def n_futures_done(futures):
