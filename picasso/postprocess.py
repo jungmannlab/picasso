@@ -511,12 +511,18 @@ def link_loc_groups(locs, info, link_group, remove_ambiguous_lengths=True):
         columns['lpx'] = _np.sqrt(1 / sum_weights_x_)
     if hasattr(locs, 'y'):
         columns['lpy'] = _np.sqrt(1 / sum_weights_y_)
+    if hasattr(locs, 'ellipticity'):
+        columns['ellipticity'] = _link_group_mean(locs.ellipticity, link_group, n_locs, n_groups, n_)
     if hasattr(locs, 'net_gradient'):
         columns['net_gradient'] = _link_group_mean(locs.net_gradient, link_group, n_locs, n_groups, n_)
     if hasattr(locs, 'likelihood'):
         columns['likelihood'] = _link_group_mean(locs.likelihood, link_group, n_locs, n_groups, n_)
     if hasattr(locs, 'iterations'):
         columns['iterations'] = _link_group_mean(locs.iterations, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'z'):
+        columns['z'] = _link_group_mean(locs.z, link_group, n_locs, n_groups, n_)
+    if hasattr(locs, 'd_zcalib'):
+        columns['d_zcalib'] = _link_group_mean(locs.d_zcalib, link_group, n_locs, n_groups, n_)
     if hasattr(locs, 'group'):
         columns['group'] = _link_group_last(locs.group, link_group, n_locs, n_groups)
     if hasattr(locs, 'frame'):
