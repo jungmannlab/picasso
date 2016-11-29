@@ -636,16 +636,16 @@ class View(QtGui.QLabel):
 
     def align(self):
         if len(self._picks) > 0:
-            shift_y, shift_x = self.shift_from_picked()
+            shift = self.shift_from_picked()
         else:
-            shift_y, shift_x = self.shift_from_rcc()
-        print('Image x shifts: {}'.format(shift_x))
-        print('Image y shifts: {}'.format(shift_y))
+            shift = self.shift_from_rcc()
         sp = lib.ProgressDialog('Shifting channels', 0, len(self.locs), self)
         sp.set_value(0)
-        for i, (locs_, dx, dy) in enumerate(zip(self.locs, shift_x, shift_y)):
-            locs_.y -= dy
-            locs_.x -= dx
+        for i, locs_ in enumerate(self.locs):
+            locs_.y -= shift[0][i]
+            locs_.x -= shift[1][i]
+            if len(shift) == 3:
+                locs_.z -= shift[2][i]
             sp.set_value(i+1)
         self.update_scene()
 
@@ -673,29 +673,34 @@ class View(QtGui.QLabel):
                     status.close()
                 self.update_scene()
 
+    def shifts_from_picked_coordinate(self, locs, coordinate):
+        ''' Calculates the shift from each channel to each other along a given coordinate. '''
+        n_channels = len(locs)
+        # Calculating center of mass for each channel and pick
+        coms = []
+        for channel_locs in locs:
+            coms.append([])
+            for group_locs in channel_locs:
+                group_com = np.mean(getattr(group_locs, coordinate))
+                coms[-1].append(group_com)
+        # Calculating image shifts
+        d = np.zeros((n_channels, n_channels))
+        for i in range(n_channels-1):
+            for j in range(i+1, n_channels):
+                    d[i, j] = np.nanmean([cj - ci for ci, cj in zip(coms[i], coms[j])])
+        return d
+
     def shift_from_picked(self):
         ''' Used by align. For each pick, calculate the center of mass and does rcc based on shifts '''
         n_channels = len(self.locs)
         locs = [self.picked_locs(_) for _ in range(n_channels)]
-        # Calculating center of mass for each channel and pick
-        coms_x = []
-        coms_y = []
-        for channel_locs in locs:
-            coms_x.append([])
-            coms_y.append([])
-            for group_locs in channel_locs:
-                group_com_x = np.mean(group_locs.x)
-                group_com_y = np.mean(group_locs.y)
-                coms_x[-1].append(group_com_x)
-                coms_y[-1].append(group_com_y)
-        # Calculating image shifts
-        dy = np.zeros((n_channels, n_channels))
-        dx = np.zeros((n_channels, n_channels))
-        for i in range(n_channels-1):
-            for j in range(i+1, n_channels):
-                    dx[i, j] = np.nanmean([cj - ci for ci, cj in zip(coms_x[i], coms_x[j])])
-                    dy[i, j] = np.nanmean([cj - ci for ci, cj in zip(coms_y[i], coms_y[j])])
-        return lib.minimize_shifts(dx, dy)
+        dy = self.shifts_from_picked_coordinate(locs, 'y')
+        dx = self.shifts_from_picked_coordinate(locs, 'x')
+        if all([hasattr(_[0], 'z') for _ in locs]):
+            dz = self.shifts_from_picked_coordinate(locs, 'z')
+        else:
+            dz = None
+        return lib.minimize_shifts(dx, dy, shifts_z=dz)
 
     def shift_from_rcc(self):
         ''' Used by align. Estimates image shifts based on image correlation. '''

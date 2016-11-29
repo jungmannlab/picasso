@@ -26,6 +26,8 @@ def xcorr(imageA, imageB):
 
 def get_image_shift(imageA, imageB, box, roi=None, display=False):
     """ Computes the shift from imageA to imageB """
+    if (_np.sum(imageA) == 0) or (_np.sum(imageB) == 0):
+        return 0, 0
     # Compute image correlation
     XCorr = xcorr(imageA, imageB)
     # Cut out center roi
