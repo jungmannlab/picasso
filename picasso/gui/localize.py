@@ -16,7 +16,7 @@ from PyQt4 import QtCore, QtGui
 import time
 import numpy as np
 import traceback
-from .. import io, localize, gausslq, zfit, lib, CONFIG
+from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
@@ -240,32 +240,6 @@ class PromptInfoDialog(QtGui.QDialog):
         return (info, save, result == QtGui.QDialog.Accepted)
 
 
-class ZCalibrationDialog(QtGui.QDialog):
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.parameters_dialog = parent
-        self.setWindowTitle('3D Calibration')
-        self.setModal(False)
-        grid = QtGui.QGridLayout(self)
-        grid.addWidget(QtGui.QLabel('X Coefficients:'), 0, 0)
-        self.cx = QtGui.QLineEdit()
-        grid.addWidget(self.cx, 0, 1)
-        grid.addWidget(QtGui.QLabel('Y Coefficients:'), 1, 0)
-        self.cy = QtGui.QLineEdit()
-        grid.addWidget(self.cy, 1, 1)
-        grid.addWidget(QtGui.QLabel('Magnification Factor:'), 2, 0)
-        self.magnification_factor = QtGui.QDoubleSpinBox()
-        self.magnification_factor.setRange(0, 1e6)
-        self.magnification_factor.setSingleStep(0.01)
-        grid.addWidget(self.magnification_factor, 2, 1)
-
-    def get_calibration(self):
-        return {'X Coefficients': eval(self.cx.text()),
-                'Y Coefficients': eval(self.cy.text()),
-                'Magnification Factor': self.magnification_factor.value()}
-
-
 class ParametersDialog(QtGui.QDialog):
     """ The dialog showing analysis parameters """
 
@@ -275,7 +249,6 @@ class ParametersDialog(QtGui.QDialog):
         self.setWindowTitle('Parameters')
         self.resize(300, 0)
         self.setModal(False)
-        self.z_calibration_dialog = ZCalibrationDialog(self)
 
         vbox = QtGui.QVBoxLayout(self)
         identification_groupbox = QtGui.QGroupBox('Identification')
@@ -435,11 +408,57 @@ class ParametersDialog(QtGui.QDialog):
         fit_groupbox = QtGui.QGroupBox('Fit Settings')
         vbox.addWidget(fit_groupbox)
         fit_grid = QtGui.QGridLayout(fit_groupbox)
-        self.fit_z_checkbox = QtGui.QCheckBox('3D Fit')
-        fit_grid.addWidget(self.fit_z_checkbox, 0, 0)
-        show_z_calib = QtGui.QPushButton('Show calibration')
-        show_z_calib.clicked.connect(self.z_calibration_dialog.show)
-        fit_grid.addWidget(show_z_calib, 0, 1)
+        fit_grid.addWidget(QtGui.QLabel('Method:'), 0, 0)
+        self.fit_method = QtGui.QComboBox()
+        self.fit_method.addItems(['MLE, integrated Gaussian', 'LQ, Gaussian'])
+        fit_grid.addWidget(self.fit_method, 0, 1)
+        fit_stack = QtGui.QStackedWidget()
+        fit_grid.addWidget(fit_stack, 1, 0, 1, 2)
+        self.fit_method.currentIndexChanged.connect(fit_stack.setCurrentIndex)
+
+        # MLE
+        mle_widget = QtGui.QWidget()
+        fit_stack.addWidget(mle_widget)
+        mle_grid = QtGui.QGridLayout(mle_widget)
+        mle_grid.addWidget(QtGui.QLabel('Convergence criterion:'), 0, 0)
+        self.convergence_criterion = QtGui.QDoubleSpinBox()
+        self.convergence_criterion.setRange(0, 1e6)
+        self.convergence_criterion.setDecimals(6)
+        self.convergence_criterion.setValue(0.001)
+        mle_grid.addWidget(self.convergence_criterion, 0, 1)
+        mle_grid.addWidget(QtGui.QLabel('Max. iterations:'), 1, 0)
+        self.max_it = QtGui.QSpinBox()
+        self.max_it.setRange(1, 1e6)
+        self.max_it.setValue(1000)
+        mle_grid.addWidget(self.max_it, 1, 1)
+
+        # LQ
+        lq_widget = QtGui.QWidget()
+        fit_stack.addWidget(lq_widget)
+        # lq_grid = QtGui.QGridLayout(lq_widget)
+
+        # 3D
+        z_groupbox = QtGui.QGroupBox('3D via Astigmatism')
+        vbox.addWidget(z_groupbox)
+        z_grid = QtGui.QGridLayout(z_groupbox)
+        z_grid.addWidget(QtGui.QLabel('Non-integrated Gaussian fitting is recommend!'), 0, 0, 1, 2)
+        load_z_calib = QtGui.QPushButton('Load calibration')
+        load_z_calib.setAutoDefault(False)
+        load_z_calib.clicked.connect(self.load_z_calib)
+        z_grid.addWidget(load_z_calib, 1, 1)
+        self.fit_z_checkbox = QtGui.QCheckBox('Fit Z')
+        self.fit_z_checkbox.setEnabled(False)
+        z_grid.addWidget(self.fit_z_checkbox, 3, 1)
+        self.z_calib_label = QtGui.QLabel('-- no calibration loaded --')
+        self.z_calib_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.z_calib_label.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Fixed)
+        z_grid.addWidget(self.z_calib_label, 1, 0)
+        z_grid.addWidget(QtGui.QLabel('Magnification factor:'), 2, 0)
+        self.magnification_factor = QtGui.QDoubleSpinBox()
+        self.magnification_factor.setRange(0, 1e6)
+        self.magnification_factor.setDecimals(4)
+        self.magnification_factor.setValue(0.79)
+        z_grid.addWidget(self.magnification_factor, 2, 1)
 
         if 'Cameras' in CONFIG:
             camera = self.camera.currentText()
@@ -449,14 +468,19 @@ class ParametersDialog(QtGui.QDialog):
                 if 'Sensitivity' in camera_config and 'Sensitivity Categories' in camera_config:
                     self.update_sensitivity()
 
-        if '3D Calibration' in CONFIG:
-            z_config = CONFIG['3D Calibration']
-            self.z_calibration_dialog.cx.setText(str(z_config['X Coefficients']))
-            self.z_calibration_dialog.cy.setText(str(z_config['Y Coefficients']))
-            self.z_calibration_dialog.magnification_factor.setValue(z_config['Magnification Factor'])
-
-        show_z_calib.setDefault(False)
-        show_z_calib.setAutoDefault(False)
+    def load_z_calib(self):
+        if hasattr(self.window, 'movie_path'):
+            dir = os.path.dirname(self.window.movie_path)
+        else:
+            dir = None
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Load 3d calibration', directory=dir, filter='*.yaml')
+        if path:
+            with open(path, 'r') as f:
+                self.z_calibration = yaml.load(f)
+            self.z_calib_label.setAlignment(QtCore.Qt.AlignRight)
+            self.z_calib_label.setText(os.path.basename(path))
+            self.fit_z_checkbox.setEnabled(True)
+            self.fit_z_checkbox.setChecked(True)
 
     def on_box_changed(self, value):
         self.window.on_parameters_changed()
@@ -746,6 +770,9 @@ class Window(QtGui.QMainWindow):
         localize_action.setShortcut('Ctrl+L')
         localize_action.triggered.connect(self.localize)
         analyze_menu.addAction(localize_action)
+        analyze_menu.addSeparator()
+        calibrate_z_action = analyze_menu.addAction('Calibrate 3D')
+        calibrate_z_action.triggered.connect(self.calibrate_z)
 
     @property
     def camera_info(self):
@@ -755,6 +782,9 @@ class Window(QtGui.QMainWindow):
         camera_info['sensitivity'] = self.parameters_dialog.sensitivity.value()
         camera_info['qe'] = self.parameters_dialog.qe.value()
         return camera_info
+
+    def calibrate_z(self):
+        self.localize(calibrate_z=True)
 
     def open_file_dialog(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw; *.tif')
@@ -880,7 +910,7 @@ class Window(QtGui.QMainWindow):
         path = QtGui.QFileDialog.getSaveFileName(self, 'Save parameters', filter='*.yaml')
         if path:
             with open(path, 'w') as file:
-                yaml.dump(self.parameters, file, default_flow_style=False)
+                yaml.dump(self.parameters, file)
 
     @property
     def parameters(self):
@@ -892,10 +922,10 @@ class Window(QtGui.QMainWindow):
         self.ready_for_fit = False
         self.draw_frame()
 
-    def identify(self, fit_afterwards=False):
+    def identify(self, fit_afterwards=False, calibrate_z=False):
         if self.movie is not None:
             self.status_bar.showMessage('Preparing identification...')
-            self.identificaton_worker = IdentificationWorker(self, fit_afterwards)
+            self.identificaton_worker = IdentificationWorker(self, fit_afterwards, calibrate_z)
             self.identificaton_worker.progressMade.connect(self.on_identify_progress)
             self.identificaton_worker.finished.connect(self.on_identify_finished)
             self.identificaton_worker.start()
@@ -910,7 +940,7 @@ class Window(QtGui.QMainWindow):
                                                                                                           mng)
         self.status_bar.showMessage(message)
 
-    def on_identify_finished(self, parameters, roi, identifications, fit_afterwards):
+    def on_identify_finished(self, parameters, roi, identifications, fit_afterwards, calibrate_z):
         if len(identifications):
             self.locs = None
             self.last_identification_info = parameters.copy()
@@ -925,21 +955,24 @@ class Window(QtGui.QMainWindow):
             self.ready_for_fit = True
             self.draw_frame()
             if fit_afterwards:
-                self.fit()
+                self.fit(calibrate_z=calibrate_z)
 
-    def fit(self):
+    def fit(self, calibrate_z=False):
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage('Preparing fit...')
+            method = self.parameters_dialog.fit_method.currentText()
+            method = {'MLE, integrated Gaussian': 'mle', 'LQ, Gaussian': 'lq'}[method]
+            eps = self.parameters_dialog.convergence_criterion.value()
+            max_it = self.parameters_dialog.max_it.value()
             fit_z = self.parameters_dialog.fit_z_checkbox.isChecked()
-            self.fit_worker = FitWorker(self.movie, self.camera_info, self.identifications, self.parameters['Box Size'], fit_z)
+            self.fit_worker = FitWorker(self.movie, self.camera_info, self.identifications, self.parameters['Box Size'], method, eps, max_it, fit_z, calibrate_z)
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
 
     def fit_z(self):
         self.status_bar.showMessage('Fitting z position...')
-        calibration = self.parameters_dialog.z_calibration_dialog.get_calibration()
-        self.fit_z_worker = FitZWorker(self.locs, self.info, calibration)
+        self.fit_z_worker = FitZWorker(self.locs, self.info, self.parameters_dialog.z_calibration, self.parameters_dialog.magnification_factor.value())
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
         self.fit_z_worker.start()
@@ -948,15 +981,25 @@ class Window(QtGui.QMainWindow):
         message = 'Fitting spot {:,} / {:,} ...'.format(current, total)
         self.status_bar.showMessage(message)
 
-    def on_fit_finished(self, locs, elapsed_time, fit_z):
+    def on_fit_finished(self, locs, elapsed_time, fit_z, calibrate_z):
         self.status_bar.showMessage('Fitted {:,} spots in {:.2f} seconds.'.format(len(locs), elapsed_time))
         self.locs = locs
         self.draw_frame()
-        if fit_z:
-            self.fit_z()
+        base, ext = os.path.splitext(self.movie_path)
+        if calibrate_z:
+            step, ok = QtGui.QInputDialog.getDouble(self, '3D Calibration', 'Calibration step size:', value=5, decimals=2)
+            if ok:
+                base, ext = os.path.splitext(self.movie_path)
+                out_path = base + '_3d_calib.yaml'
+                path = QtGui.QFileDialog.getSaveFileName(self, 'Save 3D calibration', out_path, filter='*.yaml')
+                if path:
+                    zfit.calibrate_z(locs, self.info, step, self.parameters_dialog.magnification_factor.value(), path=path)
         else:
-            base, ext = os.path.splitext(self.movie_path)
-            self.save_locs(base + '_locs.hdf5')
+            if fit_z:
+                self.fit_z()
+            else:
+                locs_path = base + '_locs.hdf5'
+                self.save_locs(locs_path)
 
     def on_fit_z_progress(self, current, total):
         message = 'Fitting z coordinate {:,} / {:,} ...'.format(current, total)
@@ -1002,22 +1045,23 @@ class Window(QtGui.QMainWindow):
         if path:
             self.save_locs(path)
 
-    def localize(self):
-        self.identify(fit_afterwards=True)
+    def localize(self, calibrate_z=False):
+        self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
 
 
 class IdentificationWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, dict)
-    finished = QtCore.pyqtSignal(dict, object, np.recarray, bool)
+    finished = QtCore.pyqtSignal(dict, object, np.recarray, bool, bool)
 
-    def __init__(self, window, fit_afterwards):
+    def __init__(self, window, fit_afterwards, calibrate_z):
         super().__init__()
         self.window = window
         self.movie = window.movie
         self.roi = window.view.roi
         self.parameters = window.parameters
         self.fit_afterwards = fit_afterwards
+        self.calibrate_z = calibrate_z
 
     def run(self):
         N = len(self.movie)
@@ -1030,36 +1074,50 @@ class IdentificationWorker(QtCore.QThread):
             time.sleep(0.2)
         self.progressMade.emit(current[0], self.parameters)
         identifications = localize.identifications_from_futures(futures)
-        self.finished.emit(self.parameters, self.roi, identifications, self.fit_afterwards)
+        self.finished.emit(self.parameters, self.roi, identifications, self.fit_afterwards, self.calibrate_z)
 
 
 class FitWorker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(np.recarray, float, bool)
+    finished = QtCore.pyqtSignal(np.recarray, float, bool, bool)
 
-    def __init__(self, movie, camera_info, identifications, box, fit_z):
+    def __init__(self, movie, camera_info, identifications, box, method, eps, max_it, fit_z, calibrate_z):
         super().__init__()
         self.movie = movie
         self.camera_info = camera_info
         self.identifications = identifications
         self.box = box
+        self.method = method
+        self.eps = eps
+        self.max_it = max_it
         self.fit_z = fit_z
+        self.calibrate_z = calibrate_z
 
     def run(self):
         N = len(self.identifications)
         t0 = time.time()
         spots = localize.get_spots(self.movie, self.identifications, self.box, self.camera_info)
-        fs = gausslq.fit_spots_parallel(spots, async=True)
-        n_tasks = len(fs)
-        while lib.n_futures_done(fs) < n_tasks:
-            self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
-            time.sleep(0.2)
-        theta = gausslq.fits_from_futures(fs)
+        if self.method == 'lq':
+            fs = gausslq.fit_spots_parallel(spots, async=True)
+            n_tasks = len(fs)
+            while lib.n_futures_done(fs) < n_tasks:
+                self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
+                time.sleep(0.2)
+            theta = gausslq.fits_from_futures(fs)
+            em = self.camera_info['gain'] > 1
+            locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
+        elif self.method == 'mle':
+            current, thetas, CRLBs, likelihoods, iterations = gaussmle.gaussmle_async(spots, self.eps, self.max_it, method='sigmaxy')
+            while current[0] < N:
+                self.progressMade.emit(current[0], N)
+                time.sleep(0.2)
+            locs = gaussmle.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, iterations, self.box)
+        else:
+            print('This should never happen...')
+        self.progressMade.emit(N+1, N)
         dt = time.time() - t0
-        em = self.camera_info['gain'] > 1
-        locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
-        self.finished.emit(locs, dt, self.fit_z)
+        self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
 
 
 class FitZWorker(QtCore.QThread):
@@ -1067,16 +1125,17 @@ class FitZWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float)
 
-    def __init__(self, locs, info, calibration):
+    def __init__(self, locs, info, calibration, magnification_factor):
         super().__init__()
         self.locs = locs
         self.info = info
         self.calibration = calibration
+        self.magnification_factor = magnification_factor
 
     def run(self):
         t0 = time.time()
         N = len(self.locs)
-        fs = zfit.fit_z_parallel(self.locs, self.info, calibration=self.calibration, filter=0, async=True)
+        fs = zfit.fit_z_parallel(self.locs, self.info, self.calibration, self.magnification_factor, filter=0, async=True)
         n_tasks = len(fs)
         while lib.n_futures_done(fs) < n_tasks:
             self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
