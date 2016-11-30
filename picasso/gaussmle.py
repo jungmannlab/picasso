@@ -466,3 +466,26 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
     for kk in range(n_params):
         CRLB[kk] = Minv[kk, kk]
     CRLBs[index] = CRLB
+
+
+def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
+    box_offset = int(box/2)
+    y = theta[:, 0] + identifications.y - box_offset
+    x = theta[:, 1] + identifications.x - box_offset
+    lpy = _np.sqrt(CRLBs[:, 0])
+    lpx = _np.sqrt(CRLBs[:, 1])
+    a = _np.maximum(theta[:, 4], theta[:, 5])
+    b = _np.minimum(theta[:, 4], theta[:, 5])
+    ellipticity = (a - b) / a
+    locs = _np.rec.array((identifications.frame, x, y,
+                          theta[:, 2], theta[:, 5], theta[:, 4],
+                          theta[:, 3], lpx, lpy, ellipticity,
+                          identifications.net_gradient,
+                          likelihoods, iterations),
+                         dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
+                                ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
+                                ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
+                                ('ellipticity', 'f4'), ('net_gradient', 'f4'),
+                                ('likelihood', 'f4'), ('iterations', 'i4')])
+    locs.sort(kind='mergesort', order='frame')
+    return locs

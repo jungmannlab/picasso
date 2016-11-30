@@ -26,13 +26,6 @@ def _average(args):
             average(locs, info, **kwargs)
 
 
-def _calibrate3d(path, step, magnification_factor):
-    from .io import load_locs
-    from .zfit import calibrate_z
-    locs, info = load_locs(path)
-    calibrate_z(locs, info, step, magnification_factor)
-
-
 def _hdf2visp(path, pixel_size):
     from glob import glob
     paths = glob(path)
@@ -411,11 +404,6 @@ def main():
     average_parser.add_argument('-i', '--iterations', type=int, default=20)
     average_parser.add_argument('files', nargs='?', help='a localization file with grouped localizations')
 
-    calibrate3d_parser = subparsers.add_parser('calibrate3d')
-    calibrate3d_parser.add_argument('file')
-    calibrate3d_parser.add_argument('step', type=float)
-    calibrate3d_parser.add_argument('factor', type=float)
-
     hdf2visp_parser = subparsers.add_parser('hdf2visp')
     hdf2visp_parser.add_argument('files')
     hdf2visp_parser.add_argument('pixelsize', type=float)
@@ -471,8 +459,6 @@ def main():
         elif args.command == 'design':
             from .gui import design
             design.main()
-        elif args.command == 'calibrate3d':
-            _calibrate3d(args.file, args.step, args.factor)
         elif args.command == 'hdf2visp':
             _hdf2visp(args.files, args.pixelsize)
     else:
