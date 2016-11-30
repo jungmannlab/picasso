@@ -834,7 +834,7 @@ class Window(QtGui.QMainWindow):
         structurey = self.structureyyEdit.text()
         structureextxt = self.structureexEdit.text()
         if MODE3D:
-            structure3dxt = self.structure3DEdit.text()
+            structure3dtxt = self.structure3DEdit.text()
 
         #PAINT
         kon = self.konEdit.value()
@@ -961,16 +961,20 @@ class Window(QtGui.QMainWindow):
                     'Structure.StructureX':structurex,
                     'Structure.StructureY':structurey,
                     'Structure.StructureEx':structureextxt,
+                    'Structure.Structure3D':structure3dtxt,
                     'Structure.HandleX':handlex,
                     'Structure.HandleY':handley,
                     'Structure.HandleEx':handleex,
+                    'Structure.Handle3d':handle3d,
                     'Structure.HandleStruct':handless,
                     'Structure.Incorporation':structureIncorporation,
                     'Structure.Arrangement':structureArrangement,
                     'Structure.Orientation':structureOrientation,
+                    'Structure.3D':mode3Dstate,
                     'PAINT.k_on':kon,
                     'PAINT.imager':imagerconcentration,
                     'PAINT.taub':taub,
+                    'PAINT.Independent':simple,
                     'Imager.PSF':psf,
                     'Imager.Photonrate':photonrate,
                     'Imager.Photonrate Std':photonratestd,
@@ -1012,6 +1016,11 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(info[0]['Structure.StructureX'])
             self.structureyyEdit.setText(info[0]['Structure.StructureY'])
             self.structureexEdit.setText(info[0]['Structure.StructureEx'])
+            try:
+                self.structure3DEdit.setText(info[0]['Structure.Structure3D'])
+                self.mode3DEdit.setCheckState(info[0]['Structure.3D'])
+            except:
+                pass
             self.structureIncorporationEdit.setValue(info[0]['Structure.Incorporation'])
 
             self.structurerandomEdit.setCheckState(info[0]['Structure.Arrangement'])
@@ -1020,6 +1029,10 @@ class Window(QtGui.QMainWindow):
             self.konEdit.setValue(info[0]['PAINT.k_on'])
             self.imagerconcentrationEdit.setValue(info[0]['PAINT.imager'])
             self.taubEdit.setValue(info[0]['PAINT.taub'])
+            try:
+                self.simplePAINTEdit.setCheckState(info[0]['PAINT.Independent'])
+            except:
+                pass
 
             self.psfEdit.setValue(info[0]['Imager.PSF'])
             self.photonrateEdit.setValue(info[0]['Imager.Photonrate'])
@@ -1059,7 +1072,7 @@ class Window(QtGui.QMainWindow):
             handless = handless.astype(_np.int)
 
             structure = _np.array([handlexx,handleyy,handleex,handless])
-
+            self.structurecombo.setCurrentIndex(2)
             self.newstruct = structure
             self.plotPositions()
             self.statusBar().showMessage('Settings loaded from: '+path)
