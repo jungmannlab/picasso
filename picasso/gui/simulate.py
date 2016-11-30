@@ -79,7 +79,7 @@ STRUCTURE3_DEFAULT = '20,20'
 STRUCTUREYY_DEFAULT = '0,20,40,60,0,20,40,60,0,20,40,60'
 STRUCTUREXX_DEFAULT = '0,20,40,0,20,40,0,20,40,0,20,40'
 STRUCTUREEX_DEFAULT = '1,1,1,1,1,1,1,1,1,1,1,1'
-STRUCTURE3D_DEFAULT = '1,1,1,1,1,1,1,1,1,1,1,1'
+STRUCTURE3D_DEFAULT = '0,0,0,0,0,0,0,0,0,0,0,0'
 STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
 INCORPORATION_DEFAULT = 85
@@ -168,6 +168,7 @@ class Window(QtGui.QMainWindow):
         self.taubEdit.setRange(1,10000)
         self.taubEdit.setDecimals(0)
         self.taubEdit.setSingleStep(10)
+        self.simplePAINTEdit = QtGui.QCheckBox()
 
         self.konEdit.setValue(KON_DEFAULT)
         self.imagerconcentrationEdit.setValue(IMAGERCONCENTRATION_DEFAULT)
@@ -188,6 +189,8 @@ class Window(QtGui.QMainWindow):
         pgrid.addWidget(taub,4,0)
         pgrid.addWidget(self.taubEdit,4,1)
         pgrid.addWidget(QtGui.QLabel('ms'),4,2)
+        pgrid.addWidget(QtGui.QLabel('Independent dark times'),5,0)
+        pgrid.addWidget(self.simplePAINTEdit,5,1)
         pgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         #IMAGER Parameters
@@ -458,6 +461,7 @@ class Window(QtGui.QMainWindow):
         self.structurerandomOrientationEdit = QtGui.QCheckBox()
         self.structurerandomEdit = QtGui.QCheckBox()
 
+        self.mode3DEdit = QtGui.QCheckBox()
 
         structurerandom = QtGui.QLabel('Random arrangement')
         structurerandomOrientation = QtGui.QLabel('Random orientation')
@@ -507,13 +511,17 @@ class Window(QtGui.QMainWindow):
         sgrid.addWidget(structurerandomOrientation,12+sindex,1)
         sgrid.addWidget(self.structurerandomOrientationEdit,12+sindex,0)
 
+        sgrid.addWidget(self.mode3DEdit,13+sindex,0)
+        sgrid.addWidget(QtGui.QLabel('3D'),13+sindex,1)
+
         importDesignButton = QtGui.QPushButton("Import structure from design")
         importDesignButton.clicked.connect(self.importDesign)
-        sgrid.addWidget(importDesignButton,13+sindex,0,1,3)
+        sgrid.addWidget(importDesignButton,14+sindex,0,1,3)
+
 
         generateButton = QtGui.QPushButton("Generate positions")
         generateButton.clicked.connect(self.generatePositions)
-        sgrid.addWidget(generateButton,14+sindex,0,1,3)
+        sgrid.addWidget(generateButton,15+sindex,0,1,3)
         cgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         simulateButton = QtGui.QPushButton("Simulate data")
@@ -744,12 +752,14 @@ class Window(QtGui.QMainWindow):
             structurexx = ''
             structureyy = ''
             structureex = ''
+            structure3d = ''
 
             for i in range(0,rows):
                 for j in range(0,cols):
                     structurexx = structurexx +str(i*spacingx)+','
                     structureyy = structureyy +str(j*spacingy)+','
                     structureex = structureex +'1,'
+                    structure3d = structure3d +'0,'
 
             structurexx = structurexx[:-1]
             structureyy = structureyy[:-1]
@@ -758,7 +768,7 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(structurexx)
             self.structureyyEdit.setText(structureyy)
             self.structureexEdit.setText(structureex)
-            self.structure3DEdit.setText(structureex)
+            self.structure3DEdit.setText(structure3d)
             self.generatePositions()
 
         elif typeindex == 1: # CIRCLE
@@ -779,11 +789,13 @@ class Window(QtGui.QMainWindow):
             structurexx = ''
             structureyy = ''
             structureex = ''
+            structure3d = ''
 
             for i in range(0,xxval.size):
                     structurexx = structurexx +str(xxval[i])+','
                     structureyy = structureyy +str(yyval[i])+','
                     structureex = structureex +'1,'
+                    structure3d = structure3d +'0,'
 
             structurexx = structurexx[:-1]
             structureyy = structureyy[:-1]
@@ -792,7 +804,7 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(structurexx)
             self.structureyyEdit.setText(structureyy)
             self.structureexEdit.setText(structureex)
-            self.structure3DEdit.setText(structureex)
+            self.structure3DEdit.setText(structure3d)
             self.generatePositions()
 
         elif typeindex == 2: # Custom
@@ -829,6 +841,8 @@ class Window(QtGui.QMainWindow):
         imagerconcentration = self.imagerconcentrationEdit.value()
         taub = self.taubEdit.value()
         taud =int(self.taudEdit.text())
+
+        simple = int(self.simplePAINTEdit.checkState())
 
         #IMAGER PARAMETERS
         psf = self.psfEdit.value()
@@ -881,6 +895,8 @@ class Window(QtGui.QMainWindow):
         handless = self.vectorToString(struct[3,:])
         handle3d = self.vectorToString(struct[4,:])
 
+        mode3Dstate = int(self.mode3DEdit.checkState())
+
         exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
         exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
 
@@ -909,7 +925,7 @@ class Window(QtGui.QMainWindow):
             meandark = int(taud)
             meanbright = int(taub)
             for i in range(0,nosites):
-                photondisttemp, spotkineticstemp = simulate.distphotons(partstruct,itime,frames,taud,taub,photonrate,photonratestd,photonbudget)
+                photondisttemp, spotkineticstemp = simulate.distphotons(partstruct,itime,frames,taud,taub,photonrate,photonratestd,photonbudget,simple)
 
                 photondist[i,:] = photondisttemp
                 spotkinetics[i,:] = spotkineticstemp
@@ -926,7 +942,7 @@ class Window(QtGui.QMainWindow):
             movie = _np.zeros(shape=(frames,imagesize,imagesize), dtype='<u2')
             app = QtCore.QCoreApplication.instance()
             for runner in range(0,frames):
-                movie[runner,:,:]=simulate.convertMovie(runner,photondist,partstruct,imagesize,frames,psf,photonrate,background, noise)
+                movie[runner,:,:]=simulate.convertMovie(runner,photondist,partstruct,imagesize,frames,psf,photonrate,background, noise, mode3Dstate)
                 outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) +' %'
 
                 self.statusBar().showMessage(outputmsg)
