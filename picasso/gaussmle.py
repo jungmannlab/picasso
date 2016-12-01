@@ -66,6 +66,10 @@ def _initial_sigmas(spot, y, x, size):
         sum_x += spot[size_half, i]
     sy = _np.sqrt(sum_deviation_y / sum_y)
     sx = _np.sqrt(sum_deviation_x / sum_x)
+    if ~_np.isfinite(sy):
+        sy = 0.01
+    if ~_np.isfinite(sx):
+        sx = 0.01
     return sy, sx
 
 
