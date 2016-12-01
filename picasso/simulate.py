@@ -9,16 +9,16 @@
 """
 import numpy as _np
 from . import io as _io
-from . import CONFIG as _CONFIG
+#from . import CONFIG as _CONFIG
 
-if _CONFIG:
-    cx = _CONFIG['3D Calibration']['X Coefficients']
-    cy = _CONFIG['3D Calibration']['Y Coefficients']
-    magfac = _CONFIG['3D Calibration']['Magnification Factor']
-else:
-    magfac = 0.76
-    cx = [3.1638306844743706e-17, -2.2103661248660896e-14, -9.775815406044296e-12, 8.2178622893072e-09, 4.91181990105529e-06, -0.0028759382006135654, 1.1756537760039398]
-    cy = [1.710907877866197e-17, -2.4986657766862576e-15, -8.405284979510355e-12, 1.1548322314075128e-11, 5.4270591055277476e-06, 0.0018155881468011011, 1.011468185618154]
+#if _CONFIG:
+#    cx = _CONFIG['3D Calibration']['X Coefficients']
+#    cy = _CONFIG['3D Calibration']['Y Coefficients']
+#    magfac = _CONFIG['3D Calibration']['Magnification Factor']
+#else:
+magfac = 0.76
+cx = [3.1638306844743706e-17, -2.2103661248660896e-14, -9.775815406044296e-12, 8.2178622893072e-09, 4.91181990105529e-06, -0.0028759382006135654, 1.1756537760039398]
+cy = [1.710907877866197e-17, -2.4986657766862576e-15, -8.405284979510355e-12, 1.1548322314075128e-11, 5.4270591055277476e-06, 0.0018155881468011011, 1.011468185618154]
 
 
 def calculate_zpsf(z, cx, cy):
