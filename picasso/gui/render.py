@@ -271,6 +271,12 @@ class InfoDialog(QtGui.QDialog):
         self.rmsd_std = QtGui.QLabel()
         self.picks_grid.addWidget(self.rmsd_std, row, 2)
         row = self.picks_grid.rowCount()
+        self.picks_grid.addWidget(QtGui.QLabel('RMSD in z:'), row, 0)
+        self.rmsd_z_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(self.rmsd_z_mean, row, 1)
+        self.rmsd_z_std = QtGui.QLabel()
+        self.picks_grid.addWidget(self.rmsd_z_std, row, 2)
+        row = self.picks_grid.rowCount()
         self.picks_grid.addWidget(QtGui.QLabel('Ignore dark times <='), row, 0)
         self.max_dark_time = QtGui.QSpinBox()
         self.max_dark_time.setRange(0, 1e9)
@@ -1330,6 +1336,9 @@ class View(QtGui.QLabel):
             rmsd = np.empty(n_picks)
             length = np.empty(n_picks)
             dark = np.empty(n_picks)
+            has_z = hasattr(picked_locs[0], 'z')
+            if has_z:
+                rmsd_z = np.empty(n_picks)
             new_locs = []
             progress = lib.ProgressDialog('Calculating pick statistics', 0, len(picked_locs), self)
             progress.set_value(0)
@@ -1338,6 +1347,8 @@ class View(QtGui.QLabel):
                 com_x = np.mean(locs.x)
                 com_y = np.mean(locs.y)
                 rmsd[i] = np.sqrt(np.mean((locs.x - com_x)**2 + (locs.y - com_y)**2))
+                if has_z:
+                    rmsd_z[i] = np.sqrt(np.mean((locs.z - np.mean(locs.z))**2))
                 if not hasattr(locs, 'len'):
                     locs = postprocess.link(locs, info, r_max=r_max, max_dark_time=t)
                 length[i] = estimate_kinetic_rate(locs.len)
@@ -1349,6 +1360,9 @@ class View(QtGui.QLabel):
             self.window.info_dialog.n_localizations_std.setText('{:.2f}'.format(np.std(N)))
             self.window.info_dialog.rmsd_mean.setText('{:.2}'.format(np.mean(rmsd)))
             self.window.info_dialog.rmsd_std.setText('{:.2}'.format(np.std(rmsd)))
+            if has_z:
+                self.window.info_dialog.rmsd_z_mean.setText('{:.2f}'.format(np.mean(rmsd_z)))
+                self.window.info_dialog.rmsd_z_std.setText('{:.2f}'.format(np.std(rmsd_z)))
             pooled_locs = stack_arrays(new_locs, usemask=False, asrecarray=True)
             fit_result_len = fit_cum_exp(pooled_locs.len)
             fit_result_dark = fit_cum_exp(pooled_locs.dark)
