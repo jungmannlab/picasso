@@ -192,7 +192,10 @@ class View(QtGui.QLabel):
 
     def open(self, path):
         self.path = path
-        self.locs, self.info = io.load_locs(path)
+        try:
+            self.locs, self.info = io.load_locs(path, qt_parent=self)
+        except io.NoMetadataFileError:
+            return
         groups = np.unique(self.locs.group)
         n_groups = len(groups)
         n_locs = len(self.locs)
