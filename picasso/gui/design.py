@@ -9,21 +9,25 @@
     :copyright: Copyright (c) 2016 Jungmann Lab,  Max Planck Institute of Biochemistry
 """
 
-import sys
-from PyQt4 import QtCore,  QtGui
-from PyQt4.QtCore import pyqtSlot
-from PyQt4.QtGui import *
-from PyQt4.QtGui import QDialog,  QVBoxLayout,  QDialogButtonBox,  QDateTimeEdit,  QApplication
-from PyQt4.QtCore import Qt,  QDateTime
-from math import sqrt
-import numpy as _np
-from .. import io as _io,  design
 import glob
 import os
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
-from matplotlib.backends.backend_pdf import PdfPages
 import os.path as _ospath
+import sys
+from math import sqrt
+
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+import numpy as _np
+from matplotlib.backends.backend_pdf import PdfPages
+from PyQt4 import QtCore, QtGui
+from PyQt4.QtCore import QDateTime, Qt, pyqtSlot
+from PyQt4.QtGui import *
+from PyQt4.QtGui import (QApplication, QDateTimeEdit, QDialog,
+                         QDialogButtonBox, QVBoxLayout)
+
+from .. import io as _io
+from .. import design
+from .. import lib
 
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
@@ -31,9 +35,9 @@ BaseSequencesFile = os.path.join(_this_directory,  '..',  'base_sequences.csv')
 PaintSequencesFile = os.path.join(_this_directory,  '..',  'paint_sequences.csv')
 
 
-def plotPlate(selection,selectioncolors, platename):
+def plotPlate(selection, selectioncolors, platename):
     inch = 25.4
-    radius = 4.5/inch #diameter of 96 well plates is 9mm
+    radius = 4.5/inch  # diameter of 96 well plates is 9mm
     radiusc = 4/inch
     circles = dict()
     rows = 8
@@ -42,9 +46,9 @@ def plotPlate(selection,selectioncolors, platename):
     rowsStr = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
     rowsStr = rowsStr[::-1]
 
-    fig = plt.figure(frameon = False)
+    fig = plt.figure(frameon=False)
     fig.set_size_inches(5,  8)
-    ax = plt.Axes(fig,  [0.,  0.,  1.,  1.],  )
+    ax = plt.Axes(fig,  [0.,  0.,  1.,  1.],)
     ax.set_axis_off()
     fig.add_axes(ax)
 
@@ -56,9 +60,9 @@ def plotPlate(selection,selectioncolors, platename):
             xpos = xcord*radius*2+radius
             ypos = ycord*radius*2+radius
             if string in selection:
-                #circle = plt.Circle((xpos, ypos), radiusc,  facecolor='black', edgecolor='black')
+                # circle = plt.Circle((xpos, ypos), radiusc,  facecolor='black', edgecolor='black')
                 circle = plt.Circle((xpos, ypos), radiusc,  facecolor=selectioncolors[selection.index(string)], edgecolor='black')
-                ax.text(xpos,  ypos,  string,  fontsize=10,  color = 'white', horizontalalignment='center',
+                ax.text(xpos,  ypos,  string,  fontsize=10,  color='white', horizontalalignment='center',
                         verticalalignment='center')
             else:
                 circle = plt.Circle((xpos, ypos), radiusc,  facecolor='white', edgecolor='black')
@@ -68,13 +72,13 @@ def plotPlate(selection,selectioncolors, platename):
     # outer Rectangle
     ax.add_patch(patches.Rectangle((0-2*radius,  0), (cols+1)*2*radius, (rows+1)*2*radius, fill=False))
 
-    #add rows and columns
+    # add rows and columns
     for xcord in range(0, cols):
-        ax.text(xcord*2*radius+radius,  rows*2*radius+radius,  colsStr[xcord],  fontsize=10,  color = 'black', horizontalalignment='center',
-                        verticalalignment='center')
+        ax.text(xcord*2*radius+radius,  rows*2*radius+radius,  colsStr[xcord],  fontsize=10,  color='black', horizontalalignment='center',
+                verticalalignment='center')
     for ycord in range(0, rows):
-        ax.text(-radius,  ycord*2*radius+radius,  rowsStr[ycord],  fontsize=10,  color = 'black', horizontalalignment='center',
-                        verticalalignment='center')
+        ax.text(-radius,  ycord*2*radius+radius,  rowsStr[ycord],  fontsize=10,  color='black', horizontalalignment='center',
+                verticalalignment='center')
 
     ax.set_xlim([-2*radius, cols*2*radius])
     ax.set_ylim([0, (rows+1)*2*radius])
@@ -90,27 +94,25 @@ def plotPlate(selection,selectioncolors, platename):
 BasePlate = design.readPlate(BaseSequencesFile)
 PaintHandles = design.readPlate(PaintSequencesFile)
 
-#list of standard paint sequences
+# list of standard paint sequences
 allSeqShort = ('None')
 allSeqLong = (' ')
 
-for i in range(1,len(PaintHandles)):
+for i in range(1, len(PaintHandles)):
 
     allSeqShort = allSeqShort+', '+PaintHandles[i][0]
     allSeqLong = allSeqLong+', '+PaintHandles[i][1]
-
-
 
 
 HEX_SIDE_HALF = 20
 HEX_SCALE = 1
 HEX_PEN = QtGui.QPen(QtGui.QBrush(QtGui.QColor('black')),  2)
 
-#origami definition
+# origami definition
 rows = 12
 rowIndex = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
 columns = 16
-columnIndex= range(1, columns+1)
+columnIndex = range(1, columns+1)
 ORIGAMI_SITES = [(x,  y) for x in range(rows) for y in range(columns)]
 
 ind2remove = [(1, 2), (2, 2), (8, 2), (9, 2), (1, 6), (2, 6), (8, 6), (9, 6), (1, 10), (2, 10), (8, 10), (9, 10), (1, 14), (2, 14), (8, 14), (9, 14)]
@@ -119,9 +121,10 @@ for element1 in ind2remove:
         if element1 == element2:
             ORIGAMI_SITES.remove(element2)
 
-#add color palette
+# add color palette
 maxbinding = max(ORIGAMI_SITES)
-COLOR_SITES = [(0, maxbinding[1]+3), (2, maxbinding[1]+3), (3, maxbinding[1]+3), (4, maxbinding[1]+3), (5, maxbinding[1]+3), (6, maxbinding[1]+3), (7, maxbinding[1]+3), (8, maxbinding[1]+3), (10, maxbinding[1]+3)]
+COLOR_SITES = [(0, maxbinding[1]+3), (2, maxbinding[1]+3), (3, maxbinding[1]+3), (4, maxbinding[1]+3), (5, maxbinding[1]+3),
+               (6, maxbinding[1]+3), (7, maxbinding[1]+3), (8, maxbinding[1]+3), (10, maxbinding[1]+3)]
 
 BINDING_SITES = ORIGAMI_SITES+COLOR_SITES
 
@@ -138,37 +141,37 @@ if colorscheme:
     rgbcolors[4] = [51, 160, 44]
     rgbcolors[5] = [251, 154, 153]
     rgbcolors[6] = [227, 26, 28]
-    rgbcolors[7] = [255,255,255]
-    rgbcolors[8] = [205,205,205]
-    allcolors[0] = QtGui.QColor(205,205,205,255) #DEFAULT,  GREY
+    rgbcolors[7] = [255, 255, 255]
+    rgbcolors[8] = [205, 205, 205]
+    allcolors[0] = QtGui.QColor(205, 205, 205, 255)  # DEFAULT,  GREY
     allcolors[1] = QtGui.QColor(166, 206, 227,  255)
     allcolors[2] = QtGui.QColor(31, 120, 180,  255)
     allcolors[3] = QtGui.QColor(178, 223, 138,  255)
     allcolors[4] = QtGui.QColor(51, 160, 44,  255)
     allcolors[5] = QtGui.QColor(251, 154, 153,  255)
     allcolors[6] = QtGui.QColor(227, 26, 28,  255)
-    allcolors[7] = QtGui.QColor(0, 0, 0,  255) # BLACK
-    allcolors[8] = QtGui.QColor(255,255,255,255) # WHITE
+    allcolors[7] = QtGui.QColor(0, 0, 0,  255)  # BLACK
+    allcolors[8] = QtGui.QColor(255, 255, 255, 255)  # WHITE
 
 else:
-    rgbcolors[0] = [0,0,0] # is black to increase visibility
-    rgbcolors[1] = [166,206,227]
-    rgbcolors[2] = [31,120,180]
-    rgbcolors[3] = [178,223,138]
+    rgbcolors[0] = [0, 0, 0]  # is black to increase visibility
+    rgbcolors[1] = [166, 206, 227]
+    rgbcolors[2] = [31, 120, 180]
+    rgbcolors[3] = [178, 223, 138]
     rgbcolors[4] = [51, 160, 44]
-    rgbcolors[5] = [251,154,153]
+    rgbcolors[5] = [251, 154, 153]
     rgbcolors[6] = [227, 26, 28]
-    rgbcolors[7] = [253,191,111]
-    rgbcolors[8] = [205,205,205]
-    allcolors[0] = QtGui.QColor(205,205,205,255) #DEFAULT,  GREY
-    allcolors[1] = QtGui.QColor(166,206,227,  255)
-    allcolors[2] = QtGui.QColor(31,120,180,  255)
-    allcolors[3] = QtGui.QColor(178,223,138,  255)
+    rgbcolors[7] = [253, 191, 111]
+    rgbcolors[8] = [205, 205, 205]
+    allcolors[0] = QtGui.QColor(205, 205, 205, 255)  # DEFAULT,  GREY
+    allcolors[1] = QtGui.QColor(166, 206, 227,  255)
+    allcolors[2] = QtGui.QColor(31, 120, 180,  255)
+    allcolors[3] = QtGui.QColor(178, 223, 138,  255)
     allcolors[4] = QtGui.QColor(51, 160, 44,  255)
     allcolors[5] = QtGui.QColor(251, 154, 153,  255)
     allcolors[6] = QtGui.QColor(227, 26, 28,  255)
-    allcolors[7] = QtGui.QColor(253,191,111,  255) # B
-    allcolors[8] = QtGui.QColor(255,255,255,255) # WHITE
+    allcolors[7] = QtGui.QColor(253, 191, 111,  255)  # B
+    allcolors[8] = QtGui.QColor(255, 255, 255, 255)  # WHITE
 
 for element in rgbcolors:
     rgbcolors[element][:] = [x / 255 for x in rgbcolors[element]]
@@ -178,14 +181,14 @@ defaultcolor = allcolors[0]
 maxcolor = 8
 
 
-
 def indextoHex(y, x):
-        hex_center_x = x*1.5*HEX_SIDE_HALF
-        if _np.mod(x, 2)==0:
-            hex_center_y = -y*sqrt(3)/2*HEX_SIDE_HALF*2
-        else:
-            hex_center_y = -(y+0.5)*sqrt(3)/2*HEX_SIDE_HALF*2
-        return hex_center_x, hex_center_y
+    hex_center_x = x*1.5*HEX_SIDE_HALF
+    if _np.mod(x, 2) == 0:
+        hex_center_y = -y*sqrt(3)/2*HEX_SIDE_HALF*2
+    else:
+        hex_center_y = -(y+0.5)*sqrt(3)/2*HEX_SIDE_HALF*2
+    return hex_center_x, hex_center_y
+
 
 def indextoStr(x, y):
     rowStr = rowIndex[y]
@@ -193,8 +196,10 @@ def indextoStr(x, y):
     strIndex = (rowStr, colStr)
     return strIndex
 
+
 class PipettingDialog(QtGui.QDialog):
-    def __init__(self,  parent = None):
+
+    def __init__(self,  parent=None):
         super(PipettingDialog,  self).__init__(parent)
         layout = QtGui.QVBoxLayout(self)
         self.setWindowTitle('Pipetting dialog')
@@ -230,7 +235,7 @@ class PipettingDialog(QtGui.QDialog):
             self.folderEdit.setText(path)
             csvFiles = glob.glob(os.path.join(path,  "*.csv"))
             csvCounter = len(csvFiles)
-            self.csvCounter.setText('A total of '+str(csvCounter)+ ' *.csv files detected.')
+            self.csvCounter.setText('A total of '+str(csvCounter) + ' *.csv files detected.')
             platelist = []
             sequencelist = []
             for element in csvFiles:
@@ -241,23 +246,25 @@ class PipettingDialog(QtGui.QDialog):
                     sequencelist.append(data[i][3])
                     self.fulllist.append(data[i][0:4])
 
-            self.plateCounter.setText('A total of '+str(len(set(platelist))-1)+ '  plates detected.')
-            self.uniqueCounter.setText('A total of '+str(len(set(sequencelist))-2)+ '  unique sequences detected.')
+            self.plateCounter.setText('A total of '+str(len(set(platelist))-1) + '  plates detected.')
+            self.uniqueCounter.setText('A total of '+str(len(set(sequencelist))-2) + '  unique sequences detected.')
 
     def getfulllist(self):
         fulllist = self.fulllist
         return fulllist
 
     @staticmethod
-    def getSchemes(parent = None):
+    def getSchemes(parent=None):
         dialog = PipettingDialog(parent)
         result = dialog.exec_()
-        fulllist= dialog.getfulllist()
+        fulllist = dialog.getfulllist()
 
         return (fulllist,  result == QDialog.Accepted)
 
+
 class SeqDialog(QtGui.QDialog):
-    def __init__(self,  parent = None):
+
+    def __init__(self,  parent=None):
         super(SeqDialog,  self).__init__(parent)
 
         layout = QtGui.QVBoxLayout(self)
@@ -282,9 +289,9 @@ class SeqDialog(QtGui.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
-    def  initTable(self,colorcounts,tableshort,tablelong):
+    def initTable(self, colorcounts, tableshort, tablelong):
         noseq = _np.count_nonzero(colorcounts)
-        #table defintion
+        # table defintion
         self.table.setRowCount(noseq-1)
         rowRunner = 0
         for i in range(len(colorcounts)-1):
@@ -294,7 +301,7 @@ class SeqDialog(QtGui.QDialog):
                 self.table.item(rowRunner,  1).setBackground(allcolors[i+1])
                 self.table.setItem(rowRunner, 3,  QtGui.QTableWidgetItem(tableshort[i]))
                 self.table.setItem(rowRunner, 4,  QtGui.QTableWidgetItem(tablelong[i]))
-                rowRunner+=1
+                rowRunner += 1
 
         self.ImagersShort = allSeqShort.split(", ")
         self.ImagersLong = allSeqLong.split(", ")
@@ -329,14 +336,14 @@ class SeqDialog(QtGui.QDialog):
 
         for i in range(self.table.rowCount()):
             try:
-                tableshort[int(self.table.item(i,0).text())-1] = self.table.item(i, 3).text()
+                tableshort[int(self.table.item(i, 0).text())-1] = self.table.item(i, 3).text()
                 if tableshort[i] == '':
                     tableshort[i] = 'None'
             except AttributeError:
                 tableshort[i] = 'None'
 
             try:
-                tablelong[int(self.table.item(i,0).text())-1] = self.table.item(i, 4).text()
+                tablelong[int(self.table.item(i, 0).text())-1] = self.table.item(i, 4).text()
                 if tablelong[i] == '':
                     tablelong[i] = 'None'
             except AttributeError:
@@ -345,7 +352,8 @@ class SeqDialog(QtGui.QDialog):
 
 
 class FoldingDialog(QtGui.QDialog):
-    def __init__(self,  parent = None):
+
+    def __init__(self,  parent=None):
         super(FoldingDialog,  self).__init__(parent)
 
         layout = QtGui.QVBoxLayout(self)
@@ -357,7 +365,7 @@ class FoldingDialog(QtGui.QDialog):
 
         self.table.setRowCount(maxcolor-1)
         self.table.setColumnCount(8)
-        #PRE-SET LABELS
+        # PRE-SET LABELS
         self.table.setHorizontalHeaderLabels(('Component, Initial concentration[uM], Parts, Pool-concentration[nM], Target concentration[nM], Volume[ul],  Excess, Colorcode ').split(', '))
         self.clcButton = QtGui.QPushButton("Recalculate")
         self.clcButton.clicked.connect(self.clcExcess)
@@ -367,7 +375,6 @@ class FoldingDialog(QtGui.QDialog):
         layout.addWidget(self.clcButton)
         layout.addWidget(self.exportButton)
         self.table.resizeColumnsToContents()
-
 
     def exportTable(self):
 
@@ -389,39 +396,38 @@ class FoldingDialog(QtGui.QDialog):
         if path:
             design.savePlate(path, table)
 
-
     def clcExcess(self):
         rowCount = self.table.rowCount()
         self.resize(800,  285+(rowCount-6)*30)
 
-        #Calculate pool concentration for all except the last 3 ()
+        # Calculate pool concentration for all except the last 3 ()
         totalvolume = float(self.table.item(rowCount-1, 5).text())
 
-        #Calculate the Target concentration based on the excess
+        # Calculate the Target concentration based on the excess
         for i in range(1, rowCount-3):
             target = float(self.table.item(0, 4).text())
             excess = int(self.table.item(i, 6).text())
             self.writeTable(i, 4, str(target*excess))
 
-        #Calculate the pool concentration
+        # Calculate the pool concentration
         for i in range(rowCount-3):
             iconc = float(self.table.item(i, 1).text())
             parts = int(self.table.item(i, 2).text())
             self.writeTable(i, 3, str(iconc/parts*1000))
 
-        #Calculate Volume based on pool and final concentration
+        # Calculate Volume based on pool and final concentration
         volume = _np.zeros(rowCount-3)
         for i in range(rowCount-3):
             target = float(self.table.item(i, 4).text())
             pool = float(self.table.item(i, 3).text())
-            volume[i]=target/pool*totalvolume
+            volume[i] = target/pool*totalvolume
             self.writeTable(i, 5, str(volume[i]))
         foldingbuffer = totalvolume/10
 
-        #Calculate Folding Buffer
+        # Calculate Folding Buffer
         self.writeTable(rowCount-2, 5, str(foldingbuffer))
 
-        #Calculate remainging H20
+        # Calculate remainging H20
         water = totalvolume-foldingbuffer-_np.sum(volume)
 
         self.writeTable(rowCount-3, 5, str(water))
@@ -432,17 +438,20 @@ class FoldingDialog(QtGui.QDialog):
 
     def writeTable(self, row, col, content):
         self.table.setItem(row, col,  QtGui.QTableWidgetItem(content))
+
     def colorTable(self, row, col, color):
         self.table.item(row, col).setBackground(color)
 
-    def setExt(parent = None):
+    def setExt(parent=None):
         dialog = FoldingDialog(parent)
         result = dialog.exec_()
         tablelong,  tableshort = dialog.evalTable()
         return (tablelong,  tableshort,  result == QDialog.Accepted)
 
+
 class PlateDialog(QtGui.QDialog):
-    def __init__(self,  parent = None):
+
+    def __init__(self,  parent=None):
         super(PlateDialog,  self).__init__(parent)
         layout = QtGui.QVBoxLayout(self)
         self.info = QtGui.QLabel('Please make selection:  ')
@@ -473,11 +482,12 @@ class PlateDialog(QtGui.QDialog):
         return selection
 
     @staticmethod
-    def getSelection(parent = None):
+    def getSelection(parent=None):
         dialog = PlateDialog(parent)
         result = dialog.exec_()
         selection = dialog.evalSelection()
         return (selection,  result == QDialog.Accepted)
+
 
 class BindingSiteItem(QtGui.QGraphicsPolygonItem):
 
@@ -485,16 +495,17 @@ class BindingSiteItem(QtGui.QGraphicsPolygonItem):
         hex_center_x,  hex_center_y = indextoHex(y, x)
         center = QtCore.QPointF(hex_center_x,  hex_center_y)
         points = [HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(-1,  0) + center,
-                    HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(-0.5, sqrt(3)/2)  + center,
-                    HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(0.5, sqrt(3)/2) + center,
-                    HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(1, 0) + center,
-                    HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(0.5, -sqrt(3)/2) + center,
-                    HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(-0.5, -sqrt(3)/2) + center]
+                  HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(-0.5, sqrt(3)/2) + center,
+                  HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(0.5, sqrt(3)/2) + center,
+                  HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(1, 0) + center,
+                  HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(0.5, -sqrt(3)/2) + center,
+                  HEX_SCALE*HEX_SIDE_HALF * QtCore.QPointF(-0.5, -sqrt(3)/2) + center]
 
         hexagonPointsF = QtGui.QPolygonF(points)
         super().__init__(hexagonPointsF)
         self.setPen(HEX_PEN)
-        self.setBrush(defaultcolor) #initialize all as grey
+        self.setBrush(defaultcolor)  # initialize all as grey
+
 
 class Scene(QtGui.QGraphicsScene):
 
@@ -513,9 +524,9 @@ class Scene(QtGui.QGraphicsScene):
             y = coords[0]
             x = coords[1]
             hex_center_x,  hex_center_y = indextoHex(y, x)
-            self.allcords.append((hex_center_x*0.125*4/3, 2.5-hex_center_y*0.125*2/sqrt(3))) # 5nm spacing
+            self.allcords.append((hex_center_x*0.125*4/3, 2.5-hex_center_y*0.125*2/sqrt(3)))  # 5nm spacing
 
-        #Pprepare file format for origami definition
+        # Pprepare file format for origami definition
         self.origamicoords = []
         self.origamiindices = []
         for coords in ORIGAMI_SITES:
@@ -526,7 +537,7 @@ class Scene(QtGui.QGraphicsScene):
             hex_center_x,  hex_center_y = indextoHex(y, x)
             self.origamicoords.append((hex_center_x*0.125, hex_center_y*0.125))
 
-        #color palette
+        # color palette
         allitems = self.items()
         lenitems = len(allitems)
         bindingitems = len(BINDING_SITES)
@@ -537,8 +548,8 @@ class Scene(QtGui.QGraphicsScene):
         for i in range(1, maxcolor):
             allitems[paletteindex+i].setBrush(allcolors[i])
 
-        self.alllbl = dict() # LABELS FOR COUNTING
-        self.alllblseq = dict() # LABELS FOR EXTENSIONS
+        self.alllbl = dict()  # LABELS FOR COUNTING
+        self.alllblseq = dict()  # LABELS FOR EXTENSIONS
 
         labelspacer = 0.5
         yoff = 0.2
@@ -554,7 +565,7 @@ class Scene(QtGui.QGraphicsScene):
             self.alllblseq[i].setPos(*(1.5*HEX_SIDE_HALF * (labelspacer+COLOR_SITES[7-paletteindex-i][1]+xofflbl), -labelspacer-sqrt(3)*HEX_SIDE_HALF * (COLOR_SITES[7-paletteindex-i][0]+yoff)))
             self.addItem(self.alllblseq[i])
 
-        #MAKE A LABEL FOR THE CURRENTCOLOR
+        # MAKE A LABEL FOR THE CURRENTCOLOR
         self.cclabel = QtGui.QGraphicsTextItem('Selected color')
         self.cclabel.setPos(*(1.5*HEX_SIDE_HALF * (labelspacer+COLOR_SITES[8-paletteindex][1]+xofflbl), -labelspacer-sqrt(3)*HEX_SIDE_HALF * (COLOR_SITES[8-paletteindex][0]+yoff)))
         self.addItem(self.cclabel)
@@ -568,44 +579,44 @@ class Scene(QtGui.QGraphicsScene):
                 lenitems = len(allitems)
                 bindingitems = len(BINDING_SITES)
                 paletteindex = lenitems-bindingitems
-                selectedcolor  = allitems[paletteindex].brush().color()
+                selectedcolor = allitems[paletteindex].brush().color()
 
-                if clicked_item == allitems[paletteindex]: # DO NOTHING
+                if clicked_item == allitems[paletteindex]:  # DO NOTHING
                     pass
-                elif clicked_item == allitems[paletteindex+1]: #
+                elif clicked_item == allitems[paletteindex+1]:
                     allitems[paletteindex].setBrush(allcolors[1])
                     selectedcolor = allcolors[1]
-                elif clicked_item == allitems[paletteindex+2]: #
+                elif clicked_item == allitems[paletteindex+2]:
                     allitems[paletteindex].setBrush(allcolors[2])
                     selectedcolor = allcolors[2]
-                elif clicked_item == allitems[paletteindex+3]: #
+                elif clicked_item == allitems[paletteindex+3]:
                     allitems[paletteindex].setBrush(allcolors[3])
                     selectedcolor = allcolors[3]
-                elif clicked_item == allitems[paletteindex+4]: #
+                elif clicked_item == allitems[paletteindex+4]:
                     allitems[paletteindex].setBrush(allcolors[4])
                     selectedcolor = allcolors[4]
-                elif clicked_item == allitems[paletteindex+5]: #
+                elif clicked_item == allitems[paletteindex+5]:
                     selectedcolor = allcolors[5]
                     allitems[paletteindex].setBrush(allcolors[5])
-                elif clicked_item == allitems[paletteindex+6]: #
+                elif clicked_item == allitems[paletteindex+6]:
                     allitems[paletteindex].setBrush(allcolors[6])
                     selectedcolor = allcolors[6]
-                elif clicked_item == allitems[paletteindex+7]: #
+                elif clicked_item == allitems[paletteindex+7]:
                     allitems[paletteindex].setBrush(allcolors[7])
                     selectedcolor = allcolors[7]
-                elif clicked_item == allitems[paletteindex+8]: #
+                elif clicked_item == allitems[paletteindex+8]:
                     allitems[paletteindex].setBrush(QtGui.QBrush(defaultcolor))
-                    selectedcolor = defaultcolor;
+                    selectedcolor = defaultcolor
                 else:
-                    currentcolor  = clicked_item.brush().color()
+                    currentcolor = clicked_item.brush().color()
                     if currentcolor == selectedcolor:
-                        clicked_item.setBrush(defaultcolor) # TURN WHITE AGAIN IF NOT USED
+                        clicked_item.setBrush(defaultcolor)  # TURN WHITE AGAIN IF NOT USED
                     else:
                         clicked_item.setBrush(QtGui.QBrush(selectedcolor))
                 self.evaluateCanvas()
 
     def evaluateCanvas(self):
-    #READS OUT COLOR VALUES AND MAKES A LIST WITH CORRESPONDING COLORS
+        # READS OUT COLOR VALUES AND MAKES A LIST WITH CORRESPONDING COLORS
         allitems = self.items()
         lenitems = len(allitems)
         bindingitems = len(BINDING_SITES)
@@ -632,38 +643,38 @@ class Scene(QtGui.QGraphicsScene):
         return canvascolors
 
     def updateExtensions(self, tableshort):
-     # Takes a list of tableshort and updates the display
-         allitems = self.items()
-         lenitems = len(allitems)
-         bindingitems = len(BINDING_SITES)
-         origamiitems = len(ORIGAMI_SITES)
-         paletteindex = lenitems-bindingitems+9
-         canvascolors = []
+        # Takes a list of tableshort and updates the display
+        allitems = self.items()
+        lenitems = len(allitems)
+        bindingitems = len(BINDING_SITES)
+        origamiitems = len(ORIGAMI_SITES)
+        paletteindex = lenitems-bindingitems+9
+        canvascolors = []
 
-         for i in range(0, maxcolor-1):
-             if tableshort[i] == 'None':
-                 self.alllblseq[i].setPlainText('   ')
-             else:
-                 self.alllblseq[i].setPlainText(tableshort[i])
-                 #
+        for i in range(0, maxcolor-1):
+            if tableshort[i] == 'None':
+                self.alllblseq[i].setPlainText('   ')
+            else:
+                self.alllblseq[i].setPlainText(tableshort[i])
+                #
+
     def saveExtensions(self, tableshort, tablelong):
         self.tableshort = tableshort
         self.tablelong = tablelong
 
     def clearCanvas(self):
-            allitems = self.items()
-            lenitems = len(allitems)
-            bindingitems = len(BINDING_SITES)
-            origamiitems = len(ORIGAMI_SITES)
-            paletteindex = lenitems-bindingitems+9
+        allitems = self.items()
+        lenitems = len(allitems)
+        bindingitems = len(BINDING_SITES)
+        origamiitems = len(ORIGAMI_SITES)
+        paletteindex = lenitems-bindingitems+9
 
-            for i in range(0, origamiitems):
-                allitems[paletteindex+i].setBrush(QtGui.QBrush(defaultcolor))
+        for i in range(0, origamiitems):
+            allitems[paletteindex+i].setBrush(QtGui.QBrush(defaultcolor))
 
-
-            self.saveExtensions(['None', 'None', 'None', 'None', 'None', 'None', 'None'],['None', 'None', 'None', 'None', 'None', 'None', 'None'])
-            self.updateExtensions(['None', 'None', 'None', 'None', 'None', 'None', 'None'])
-            self.evaluateCanvas()
+        self.saveExtensions(['None', 'None', 'None', 'None', 'None', 'None', 'None'], ['None', 'None', 'None', 'None', 'None', 'None', 'None'])
+        self.updateExtensions(['None', 'None', 'None', 'None', 'None', 'None', 'None'])
+        self.evaluateCanvas()
 
     def vectorToString(self, x):
         x_arrstr = _np.char.mod('%f',  x)
@@ -680,12 +691,12 @@ class Scene(QtGui.QGraphicsScene):
         structurec = []
         structureInd = []
         for x in range(0, len(canvascolors)):
-                structurec.append((self.allcords[x][0],self.allcords[x][1], canvascolors[x]))
+            structurec.append((self.allcords[x][0], self.allcords[x][1], canvascolors[x]))
 
         for x in range(0, len(canvascolors)):
-                structureInd.append([self.origamiindices[x][0],self.origamiindices[x][1],canvascolors[x]])
+            structureInd.append([self.origamiindices[x][0], self.origamiindices[x][1], canvascolors[x]])
 
-        #Coordinates for picasso simulate
+        # Coordinates for picasso simulate
         structurex = []
         structurey = []
         structureex = []
@@ -698,15 +709,14 @@ class Scene(QtGui.QGraphicsScene):
         structurey = self.vectorToString(structurey)
         structureex = self.vectorToStringInt(structureex)
 
-        info = {'Generated by':'Picasso design',
-                'Structure':structureInd,
-                'Extensions Short':self.tableshort,
-                'Extensions Long':self.tablelong,
-                'Structure.StructureX':structurex,
-                'Structure.StructureY':structurey,
-                'Structure.StructureEx':structureex}
+        info = {'Generated by': 'Picasso design',
+                'Structure': structureInd,
+                'Extensions Short': self.tableshort,
+                'Extensions Long': self.tablelong,
+                'Structure.StructureX': structurex,
+                'Structure.StructureY': structurey,
+                'Structure.StructureEx': structureex}
         design.saveInfo(path,  info)
-
 
     def loadCanvas(self, path):
         info = _io.load_info(path)
@@ -732,30 +742,28 @@ class Scene(QtGui.QGraphicsScene):
         canvascolors = self.evaluateCanvas()[::-1]
         ExportPlate = design.readPlate(BaseSequencesFile)
 
-        ExportPlate[0] = ['Position', 'Name', 'Sequence','Color']
+        ExportPlate[0] = ['Position', 'Name', 'Sequence', 'Color']
         for i in range(0, len(canvascolors)):
             if canvascolors[i] == 0:
-                ExportPlate[1+i] = [ExportPlate[1+i][0],ExportPlate[1+i][1],ExportPlate[1+i][2],canvascolors[i]]
+                ExportPlate[1+i] = [ExportPlate[1+i][0], ExportPlate[1+i][1], ExportPlate[1+i][2], canvascolors[i]]
                 pass
             else:
                 ExportPlate[1+i][2] = ExportPlate[1+i][2]+' '+self.tablelong[canvascolors[i]-1]
                 ExportPlate[1+i][1] = ExportPlate[1+i][1][:-3]+self.tableshort[canvascolors[i]-1]
-                ExportPlate[1+i] = [ExportPlate[1+i][0],ExportPlate[1+i][1],ExportPlate[1+i][2],canvascolors[i]]
+                ExportPlate[1+i] = [ExportPlate[1+i][0], ExportPlate[1+i][1], ExportPlate[1+i][2], canvascolors[i]]
 
         allplates[0] = design.convertPlateIndexColor(ExportPlate, 'CUSTOM')
         return allplates
 
-
-
     def preparePlate(self,  mode):
-        #reads out the canvas, modifies BasePlate
+        # reads out the canvas, modifies BasePlate
         canvascolors = self.evaluateCanvas()[::-1]
 
         colors = list(set(canvascolors))
         allplates = dict()
 
-        if mode == 2: #generate a full plate for each used extension
-            #get number of plates
+        if mode == 2:  # generate a full plate for each used extension
+            # get number of plates
             noplates = len(set(canvascolors))
             for j in range(0, noplates):
                 if colors[j] == 0:
@@ -767,7 +775,7 @@ class Scene(QtGui.QGraphicsScene):
                         ExportPlate[1+i][1] = ExportPlate[1+i][1][:-3]+self.tableshort[colors[j]-1]
                     allplates[j] = design.convertPlateIndex(ExportPlate, self.tableshort[colors[j]-1])
 
-        elif mode == 1: # only one plate with the modifications
+        elif mode == 1:  # only one plate with the modifications
             ExportPlate = design.readPlate(BaseSequencesFile)
             for i in range(0, len(canvascolors)):
                 if canvascolors[i] == 0:
@@ -827,7 +835,7 @@ class Window(QtGui.QMainWindow):
         if sum(colorcounts[0:-1]) > 0:
 
             sdialog = SeqDialog()
-            sdialog.initTable(colorcounts,self.mainscene.tableshort,self.mainscene.tablelong)
+            sdialog.initTable(colorcounts, self.mainscene.tableshort, self.mainscene.tablelong)
             ok = sdialog.exec()
 
             tablelong,  tableshort = sdialog.readoutTable()
@@ -840,19 +848,15 @@ class Window(QtGui.QMainWindow):
         else:
             self.statusBar().showMessage('No hexagons marked. Please select first.')
 
-
-
-
     def checkSeq(self):
         colorcounts = self.mainscene.colorcounts
         tableshort = self.mainscene.tableshort
         errors = 0
         for i in range(len(colorcounts)-1):
             if colorcounts[i] != 0 and tableshort[i] == 'None':
-                errors+= 1
+                errors += 1
 
         return errors
-
 
     def generatePlates(self):
         seqcheck = self.checkSeq()
@@ -883,7 +887,7 @@ class Window(QtGui.QMainWindow):
             self.statusBar().showMessage('Error: '+str(seqcheck)+' Color(s) do not have extensions. Please set first.')
         else:
             structureData = self.mainscene.readCanvas()[0]
-            fullpipettlist =  [['PLATE NAME','PLATE POSITION','OLIGO NAME','SEQUENCE','COLOR']]
+            fullpipettlist = [['PLATE NAME', 'PLATE POSITION', 'OLIGO NAME', 'SEQUENCE', 'COLOR']]
             fulllist,  ok = PipettingDialog.getSchemes()
             if fulllist == []:
                 self.statusBar().showMessage('No *.csv found. Scheme not created.')
@@ -905,18 +909,18 @@ class Window(QtGui.QMainWindow):
                             fulllistrow = fulllist[j]
                             fulllistseq = fulllistrow[3]
                             if sequence == fulllistseq:
-                                pipettlist.append([fulllist[j][0],fulllist[j][1],fulllist[j][2],fulllist[j][3],rgbcolors[sequencerow[4]]])
+                                pipettlist.append([fulllist[j][0], fulllist[j][1], fulllist[j][2], fulllist[j][3], rgbcolors[sequencerow[4]]])
                                 platelist.append(fulllist[j][0])
                                 del fullpipettlist[-1]
                                 fullpipettlist.append(fulllist[j])
-                                break # first found will be taken
+                                break  # first found will be taken
 
                 exportlist = dict()
                 exportlist[0] = fullpipettlist
                 noplates = len(set(platelist))
                 platenames = list(set(platelist))
                 platenames.sort()
-                if (len(structureData)-1-16)==(len(pipettlist)):
+                if (len(structureData)-1-16) == (len(pipettlist)):
                     self.statusBar().showMessage('All sequences found in '+str(noplates)+' Plates. Pipetting scheme complete.')
                 else:
                     self.statusBar().showMessage('Error: Sequences sequences missing. Please check *.csv file..')
@@ -928,19 +932,19 @@ class Window(QtGui.QMainWindow):
                     selection = []
                     selectioncolors = []
                     for y in range(0, len(platelist)):
-                        if pipettlist[y][0]==platename:
+                        if pipettlist[y][0] == platename:
                             selection.append(pipettlist[y][1])
                             selectioncolors.append(pipettlist[y][4])
 
-                    allfig[x] = plotPlate(selection,selectioncolors, platename)
+                    allfig[x] = plotPlate(selection, selectioncolors, platename)
 
                 path = QtGui.QFileDialog.getSaveFileName(self,  'Save pipetting schemes to.',  filter='*.pdf')
                 if path:
                     with PdfPages(path) as pdf:
                         for x in range(0, len(platenames)):
-                            #pdf.savefig(allfig[x])
-                            pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.2,  dpi = 200)
-                            #pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.1)
+                            # pdf.savefig(allfig[x])
+                            pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.2,  dpi=200)
+                            # pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.1)
                             base, ext = _ospath.splitext(path)
                             csv_path = base + '.csv'
                             design.savePlate(csv_path, exportlist)
@@ -948,8 +952,8 @@ class Window(QtGui.QMainWindow):
 
     def foldingScheme(self):
 
-        fdialog = FoldingDialog() # Intitialize FoldingDialog Class
-        #Fill with Data
+        fdialog = FoldingDialog()  # Intitialize FoldingDialog Class
+        # Fill with Data
         colorcounts = self.mainscene.colorcounts
         noseq = _np.count_nonzero(colorcounts)
 
@@ -984,7 +988,6 @@ class Window(QtGui.QMainWindow):
 
                 mixno = mixno+1
 
-
         fdialog.writeTable(mixno+2, 0, 'Biotin 1:10')
         fdialog.writeTable(mixno+2, 1, str(100))
         fdialog.writeTable(mixno+2, 2, str(80))
@@ -999,8 +1002,9 @@ class Window(QtGui.QMainWindow):
 
         fdialog.clcExcess()
 
-        #MAKE TABLE INTERACTIVE
+        # MAKE TABLE INTERACTIVE
         result = fdialog.exec()
+
 
 class MainWindow(QtGui.QWidget):
 
@@ -1016,13 +1020,13 @@ class MainWindow(QtGui.QWidget):
 
     def initUI(self):
 
-        #create window with canvas
+        # create window with canvas
         self.window = Window()
 
-        #define buttons
+        # define buttons
         loadbtn = QtGui.QPushButton("Load")
         savebtn = QtGui.QPushButton("Save")
-        clearbtn =  QtGui.QPushButton("Clear")
+        clearbtn = QtGui.QPushButton("Clear")
         sshotbtn = QtGui.QPushButton("Screenshot")
         seqbtn = QtGui.QPushButton("Extensions")
         platebtn = QtGui.QPushButton("Get plates")
@@ -1048,13 +1052,13 @@ class MainWindow(QtGui.QWidget):
         hbox.addWidget(pipettbtn)
         hbox.addWidget(foldbtn)
 
-        #set layout
+        # set layout
         vbox = QtGui.QVBoxLayout()
         vbox.addWidget(self.window)
         vbox.addLayout(hbox)
         self.setLayout(vbox)
 
-        #make white background
+        # make white background
         palette = QtGui.QPalette()
         palette.setColor(QtGui.QPalette.Background, QtCore.Qt.white)
         self.setPalette(palette)
@@ -1067,6 +1071,7 @@ def main():
     sys.exit(app.exec_())
 
     def excepthook(type,  value,  tback):
+        lib.cancel_dialogs()
         message = ''.join(traceback.format_exception(type,  value,  tback))
         errorbox = QtGui.QMessageBox.critical(window,  'An error occured',  message)
         errorbox.exec_()
