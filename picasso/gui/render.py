@@ -1609,6 +1609,8 @@ def main():
     window.show()
 
     def excepthook(type, value, tback):
+        lib.cancel_dialogs()
+        QtCore.QCoreApplication.instance().processEvents()
         message = ''.join(traceback.format_exception(type, value, tback))
         errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
         errorbox.exec_()

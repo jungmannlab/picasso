@@ -20,10 +20,16 @@ from PyQt4 import QtGui, QtCore
 from lmfit import Model as _Model
 
 
+# A global variable where we store all open progress and status dialogs.
+# In case of an exception, we close them all, so that the GUI remains responsive.
+_dialogs = []
+
+
 class ProgressDialog(QtGui.QProgressDialog):
 
     def __init__(self, description, minimum, maximum, parent):
         super().__init__(description, None, minimum, maximum, parent, QtCore.Qt.CustomizeWindowHint)
+        _dialogs.append(self)
         self.setMinimumDuration(500)
         self.setModal(True)
         self.app = QtCore.QCoreApplication.instance()
@@ -32,16 +38,23 @@ class ProgressDialog(QtGui.QProgressDialog):
         self.setValue(value)
         self.app.processEvents()
 
+    def closeEvent(self, event):
+        _dialogs.remove(self)
+
 
 class StatusDialog(QtGui.QDialog):
 
     def __init__(self, description, parent):
         super(StatusDialog, self).__init__(parent, QtCore.Qt.CustomizeWindowHint)
+        _dialogs.append(self)
         vbox = QtGui.QVBoxLayout(self)
         label = QtGui.QLabel(description)
         vbox.addWidget(label)
         self.show()
         QtCore.QCoreApplication.instance().processEvents()
+
+    def closeEvent(self, event):
+        _dialogs.remove(self)
 
 
 class AutoDict(_collections.defaultdict):
@@ -53,6 +66,16 @@ class AutoDict(_collections.defaultdict):
     '''
     def __init__(self, *args, **kwargs):
         super().__init__(AutoDict, *args, **kwargs)
+
+
+def cancel_dialogs():
+    dialogs = [_ for _ in _dialogs]
+    for dialog in dialogs:
+        if isinstance(dialog, ProgressDialog):
+            dialog.cancel()
+        else:
+            dialog.close()
+    QtCore.QCoreApplication.instance().processEvents()  # just in case...
 
 
 def cumulative_exponential(x, a, t, c):

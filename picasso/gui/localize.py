@@ -16,7 +16,7 @@ from PyQt4 import QtCore, QtGui
 import time
 import numpy as np
 import traceback
-from .. import io, localize, CONFIG
+from .. import io, localize, lib, CONFIG
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
@@ -1020,6 +1020,7 @@ def main():
     window.show()
 
     def excepthook(type, value, tback):
+        lib.cancel_dialogs()
         message = ''.join(traceback.format_exception(type, value, tback))
         errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
         errorbox.exec_()
