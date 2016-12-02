@@ -7,18 +7,20 @@
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
-import sys
-import os.path
-from PyQt4 import QtCore, QtGui
-import traceback
-import numpy as np
-import time
-import matplotlib.pyplot as plt
-import multiprocessing
-from multiprocessing import sharedctypes
 import functools
+import multiprocessing
+import os.path
+import sys
+import time
+import traceback
+from multiprocessing import sharedctypes
+
+import matplotlib.pyplot as plt
 import numba
+import numpy as np
 import scipy
+from PyQt4 import QtCore, QtGui
+
 from .. import io, lib, render
 
 
