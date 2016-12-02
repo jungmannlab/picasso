@@ -27,6 +27,7 @@ from PyQt4.QtGui import (QApplication, QDateTimeEdit, QDialog,
 
 from .. import io as _io
 from .. import design
+from .. import lib
 
 _this_file = os.path.abspath(__file__)
 _this_directory = os.path.dirname(_this_file)
@@ -59,7 +60,7 @@ def plotPlate(selection, selectioncolors, platename):
             xpos = xcord*radius*2+radius
             ypos = ycord*radius*2+radius
             if string in selection:
-                #circle = plt.Circle((xpos, ypos), radiusc,  facecolor='black', edgecolor='black')
+                # circle = plt.Circle((xpos, ypos), radiusc,  facecolor='black', edgecolor='black')
                 circle = plt.Circle((xpos, ypos), radiusc,  facecolor=selectioncolors[selection.index(string)], edgecolor='black')
                 ax.text(xpos,  ypos,  string,  fontsize=10,  color='white', horizontalalignment='center',
                         verticalalignment='center')
@@ -642,7 +643,7 @@ class Scene(QtGui.QGraphicsScene):
         return canvascolors
 
     def updateExtensions(self, tableshort):
-     # Takes a list of tableshort and updates the display
+        # Takes a list of tableshort and updates the display
         allitems = self.items()
         lenitems = len(allitems)
         bindingitems = len(BINDING_SITES)
@@ -943,7 +944,7 @@ class Window(QtGui.QMainWindow):
                         for x in range(0, len(platenames)):
                             # pdf.savefig(allfig[x])
                             pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.2,  dpi=200)
-                            #pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.1)
+                            # pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.1)
                             base, ext = _ospath.splitext(path)
                             csv_path = base + '.csv'
                             design.savePlate(csv_path, exportlist)
@@ -1070,6 +1071,7 @@ def main():
     sys.exit(app.exec_())
 
     def excepthook(type,  value,  tback):
+        lib.cancel_dialogs()
         message = ''.join(traceback.format_exception(type,  value,  tback))
         errorbox = QtGui.QMessageBox.critical(window,  'An error occured',  message)
         errorbox.exec_()

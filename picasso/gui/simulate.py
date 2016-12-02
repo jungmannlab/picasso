@@ -16,8 +16,10 @@ import random
 import sys
 import time
 
-import matplotlib.patches as patches
+from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from .. import io as _io, simulate
 import numpy as _np
 from matplotlib.backends.backend_qt4agg import \
     FigureCanvasQTAgg as FigureCanvas
@@ -28,18 +30,26 @@ from PyQt4.QtCore import QDateTime, Qt
 from PyQt4.QtGui import (QApplication, QDateTimeEdit, QDialog,
                          QDialogButtonBox, QVBoxLayout)
 from scipy.optimize import curve_fit
+import glob as _glob
+import os
+from PyQt4.QtGui import QDialog, QVBoxLayout, QDialogButtonBox, QApplication
+from PyQt4.QtCore import Qt
+import time
+import csv
 from scipy.stats import norm
 
 from .. import io as _io
 from .. import simulate
 
 
+
 def fitFuncBg(x, a, b):
-    return (a + b*x[0])*x[1]*x[2]
+    return (a + b * x[0]) * x[1] * x[2]
+
 
 
 def fitFuncStd(x, a, b, c):
-    return (a*x[0]*x[1]+b*x[2]+c)
+    return (a * x[0] * x[1] + b * x[2] + c)
 
 plt.style.use('ggplot')
 
@@ -57,7 +67,7 @@ KON_DEFAULT = 1600000
 IMAGERCONCENTRATION_DEFAULT = 5
 MEANBRIGHT_DEFAULT = 500
 # IMAGER
-LASERPOWER_DEFAULT = 1.5  # POWER DENSITY
+LASERPOWER_DEFAULT = 1.5    # POWER DENSITY
 POWERDENSITY_CONVERSION = 20
 STDFACTOR = 1.82
 if ADVANCEDMODE:
@@ -277,9 +287,9 @@ class Window(QtGui.QMainWindow):
 
             igridindex = 0
 
-        igrid.addWidget(photonsframe, 4-igridindex, 0)
-        igrid.addWidget(self.photonsframeEdit, 4-igridindex, 1)
-        igrid.addWidget(QtGui.QLabel('Photons'), 4-igridindex, 2)
+        igrid.addWidget(photonsframe, 4 - igridindex, 0)
+        igrid.addWidget(self.photonsframeEdit, 4 - igridindex, 1)
+        igrid.addWidget(QtGui.QLabel('Photons'), 4 - igridindex, 2)
         igridindex = 2
 
         if ADVANCEDMODE:
@@ -288,20 +298,20 @@ class Window(QtGui.QMainWindow):
             igrid.addWidget(QtGui.QLabel('Photons ms<sup>-1<sup'), 5, 2)
             igridindex = 0
 
-        igrid.addWidget(photonstdframe, 6-igridindex, 0)
-        igrid.addWidget(self.photonstdframeEdit, 6-igridindex, 1)
-        igrid.addWidget(QtGui.QLabel('Photons'), 6-igridindex, 2)
-        igrid.addWidget(photonbudget, 7-igridindex, 0)
-        igrid.addWidget(self.photonbudgetEdit, 7-igridindex, 1)
-        igrid.addWidget(QtGui.QLabel('Photons'), 7-igridindex, 2)
-        igrid.addWidget(photonslope, 8-igridindex, 0)
-        igrid.addWidget(self.photonslopeEdit, 8-igridindex, 1)
-        igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'), 8-igridindex, 2)
+        igrid.addWidget(photonstdframe, 6 - igridindex, 0)
+        igrid.addWidget(self.photonstdframeEdit, 6 - igridindex, 1)
+        igrid.addWidget(QtGui.QLabel('Photons'), 6 - igridindex, 2)
+        igrid.addWidget(photonbudget, 7 - igridindex, 0)
+        igrid.addWidget(self.photonbudgetEdit, 7 - igridindex, 1)
+        igrid.addWidget(QtGui.QLabel('Photons'), 7 - igridindex, 2)
+        igrid.addWidget(photonslope, 8 - igridindex, 0)
+        igrid.addWidget(self.photonslopeEdit, 8 - igridindex, 1)
+        igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'), 8 - igridindex, 2)
 
         if ADVANCEDMODE:
-            igrid.addWidget(photonslopeStd, 9-igridindex, 0)
-            igrid.addWidget(self.photonslopeStdEdit, 9-igridindex, 1)
-            igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'), 9-igridindex, 2)
+            igrid.addWidget(photonslopeStd, 9 - igridindex, 0)
+            igrid.addWidget(self.photonslopeStdEdit, 9 - igridindex, 1)
+            igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'), 9 - igridindex, 2)
 
         if not ADVANCEDMODE:
             backgroundframesimple = QtGui.QLabel('Background (Frame)')
@@ -607,19 +617,19 @@ class Window(QtGui.QMainWindow):
         laserpower = self.laserpowerEdit.value()
         itime = self.integrationtimeEdit.value()
         frames = self.framesEdit.value()
-        totaltime = itime*frames/1000/60
-        totaltime = round(totaltime*100)/100
+        totaltime = itime * frames / 1000 / 60
+        totaltime = round(totaltime * 100) / 100
         self.totaltimeEdit.setText(str(totaltime))
 
         photonslope = self.photonslopeEdit.value()
-        photonslopestd = photonslope/STDFACTOR
+        photonslopestd = photonslope / STDFACTOR
         if ADVANCEDMODE:
             photonslopestd = self.photonslopeStdEdit.value()
-        photonrate = photonslope*laserpower
-        photonratestd = photonslopestd*laserpower
+        photonrate = photonslope * laserpower
+        photonratestd = photonslopestd * laserpower
 
-        photonsframe = round(photonrate*itime)
-        photonsframestd = round(photonratestd*itime)
+        photonsframe = round(photonrate * itime)
+        photonsframestd = round(photonratestd * itime)
 
         self.photonsframeEdit.setText(str(photonsframe))
         self.photonstdframeEdit.setText(str(photonsframestd))
@@ -629,14 +639,14 @@ class Window(QtGui.QMainWindow):
     def changePaint(self):
         kon = self.konEdit.value()
         imagerconcentration = self.imagerconcentrationEdit.value()
-        taud = round(1/(kon*imagerconcentration*1/10**9)*1000)
+        taud = round(1 / (kon * imagerconcentration * 1 / 10**9) * 1000)
         self.taudEdit.setText(str(taud))
         self.changeNoise()
 
     def changePSF(self):
         psf = self.psfEdit.value()
         pixelsize = self.pixelsizeEdit.value()
-        psf_fwhm = round(psf*pixelsize*2.355)
+        psf_fwhm = round(psf * pixelsize * 2.355)
         self.psf_fwhmEdit.setText(str(psf_fwhm))
 
     def changeImager(self):
@@ -644,14 +654,14 @@ class Window(QtGui.QMainWindow):
 
         itime = self.integrationtimeEdit.value()
         photonslope = self.photonslopeEdit.value()
-        photonslopestd = photonslope/STDFACTOR
+        photonslopestd = photonslope / STDFACTOR
         if ADVANCEDMODE:
             photonslopestd = self.photonslopeStdEdit.value()
-        photonrate = photonslope*laserpower
-        photonratestd = photonslopestd*laserpower
+        photonrate = photonslope * laserpower
+        photonratestd = photonslopestd * laserpower
 
-        photonsframe = round(photonrate*itime)
-        photonsframestd = round(photonratestd*itime)
+        photonsframe = round(photonrate * itime)
+        photonsframestd = round(photonratestd * itime)
 
         self.photonsframeEdit.setText(str(photonsframe))
         self.photonstdframeEdit.setText(str(photonsframestd))
@@ -663,22 +673,22 @@ class Window(QtGui.QMainWindow):
     def changeNoise(self):
         itime = self.integrationtimeEdit.value()
         imagerconcentration = self.imagerconcentrationEdit.value()
-        laserpower = self.laserpowerEdit.value()*POWERDENSITY_CONVERSION
+        laserpower = self.laserpowerEdit.value() * POWERDENSITY_CONVERSION
         if ADVANCEDMODE:
             # NEW NOISE MODEL
             laserc = self.lasercEdit.value()
             imagerc = self.imagercEdit.value()
             bgoffset = self.BgoffsetEdit.value()
-            bgmodel = (laserc + imagerc*imagerconcentration)*laserpower*itime+bgoffset
+            bgmodel = (laserc + imagerc * imagerconcentration) * laserpower * itime + bgoffset
             equationA = self.EquationAEdit.value()
             equationB = self.EquationBEdit.value()
             equationC = self.EquationCEdit.value()
             bgstdoffset = self.BgStdoffsetEdit.value()
-            bgmodelstd = equationA*laserpower*itime+equationB*bgmodel+equationC+bgstdoffset
+            bgmodelstd = equationA * laserpower * itime + equationB * bgmodel + equationC + bgstdoffset
             self.backgroundframeEdit.setText(str(int(bgmodel)))
             self.noiseEdit.setText(str(int(bgmodelstd)))
         else:
-            bgmodel = (LASERC_DEFAULT + IMAGERC_DEFAULT*imagerconcentration)*laserpower*itime
+            bgmodel = (LASERC_DEFAULT + IMAGERC_DEFAULT * imagerconcentration) * laserpower * itime
             self.backgroundframesimpleEdit.setText(str(int(bgmodel)))
 
     def changeStructureType(self):
@@ -776,12 +786,12 @@ class Window(QtGui.QMainWindow):
             except ValueError:
                 diameter = 100
 
-            twopi = 2*3.1415926535
+            twopi = 2 * 3.1415926535
 
             circdata = _np.arange(0, twopi, twopi/labels)
 
-            xxval = _np.round(_np.cos(circdata)*diameter*100)/100
-            yyval = _np.round(_np.sin(circdata)*diameter*100)/100
+            xxval = _np.round(_np.cos(circdata) * diameter * 100) / 100
+            yyval = _np.round(_np.sin(circdata) * diameter * 100) / 100
 
             structurexx = ''
             structureyy = ''
@@ -848,7 +858,7 @@ class Window(QtGui.QMainWindow):
         photonbudget = self.photonbudgetEdit.value()
         laserpower = self.laserpowerEdit.value()
         photonslope = self.photonslopeEdit.value()
-        photonslopeStd = photonslope/STDFACTOR
+        photonslopeStd = photonslope / STDFACTOR
         if ADVANCEDMODE:
             photonslopeStd = self.photonslopeStdEdit.value()
 
@@ -927,7 +937,7 @@ class Window(QtGui.QMainWindow):
 
                 outputmsg = 'Distributing photons ... ' + str(_np.round(i/nosites*1000)/10) + ' %'
                 self.statusBar().showMessage(outputmsg)
-                self.mainpbar.setValue(_np.round(i/nosites*1000)/10)
+                self.mainpbar.setValue(_np.round(i / nosites * 1000) / 10)
 
             self.statusBar().showMessage('Converting to image ... ')
             onevents = self.vectorToString(spotkinetics[:, 0])
@@ -941,7 +951,7 @@ class Window(QtGui.QMainWindow):
                 outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) + ' %'
 
                 self.statusBar().showMessage(outputmsg)
-                self.mainpbar.setValue(_np.round(runner/frames*1000)/10)
+                self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
                 app.processEvents()
             self.statusBar().showMessage('Converting to image ... complete.')
             self.statusBar().showMessage('Saving movie ...')
@@ -996,9 +1006,9 @@ class Window(QtGui.QMainWindow):
                     'Width': imagesize}
 
             simulate.saveMovie(fileName, movie, info)
-            self.statusBar().showMessage('Movie saved to: '+fileName)
+            self.statusBar().showMessage('Movie saved to: ' + fileName)
         dt = time.time() - t0
-        self.statusBar().showMessage('All computations finished. Last file saved to: '+fileName+'. Time elapsed: {:.2f} Seconds.'.format(dt))
+        self.statusBar().showMessage('All computations finished. Last file saved to: ' + fileName + '. Time elapsed: {:.2f} Seconds.'.format(dt))
 
     def loadSettings(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open yaml', filter='*.yaml')
@@ -1070,7 +1080,7 @@ class Window(QtGui.QMainWindow):
             self.structurecombo.setCurrentIndex(2)
             self.newstruct = structure
             self.plotPositions()
-            self.statusBar().showMessage('Settings loaded from: '+path)
+            self.statusBar().showMessage('Settings loaded from: ' + path)
 
     def importDesign(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open yaml', filter='*.yaml')
@@ -1142,11 +1152,11 @@ class Window(QtGui.QMainWindow):
                     plotyy.append(structureyy[j])
             ax1.plot(plotxx, plotyy, 'o')
 
-        distx = round(1/10*(max(structurexx)-min(structurexx)))
-        disty = round(1/10*(max(structureyy)-min(structureyy)))
+        distx = round(1 / 10 * (max(structurexx) - min(structurexx)))
+        disty = round(1 / 10 * (max(structureyy) - min(structureyy)))
 
-        ax1.axes.set_xlim((min(structurexx)-distx, max(structurexx)+distx))
-        ax1.axes.set_ylim((min(structureyy)-disty, max(structureyy)+disty))
+        ax1.axes.set_xlim((min(structurexx) - distx, max(structurexx) + distx))
+        ax1.axes.set_ylim((min(structureyy) - disty, max(structureyy) + disty))
         self.canvas2.draw()
 
         exchangecolorsList = ','.join(map(str, exchangecolors))
@@ -1166,11 +1176,11 @@ class Window(QtGui.QMainWindow):
         gridpos = simulate.generatePositions(number, imageSize, frame, arrangement)
 
         orientation = int(self.structurerandomOrientationEdit.checkState())
-        incorporation = self.structureIncorporationEdit.value()/100
+        incorporation = self.structureIncorporationEdit.value() / 100
         exchange = 0
         self.newstruct = simulate.prepareStructures(structure, gridpos, orientation, number, incorporation, exchange)
 
-        #self.figure1.suptitle('Positions [Px]')
+        # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
         ax1.cla()
         ax1.hold(True)
@@ -1180,8 +1190,8 @@ class Window(QtGui.QMainWindow):
         ax1.add_patch(
             patches.Rectangle(
                 (frame, frame),
-                imageSize-2*frame,
-                imageSize-2*frame,
+                imageSize - 2 * frame,
+                imageSize - 2 * frame,
                 linestyle='dashed',
                 edgecolor="#000000",
                 fill=False      # remove background
@@ -1208,8 +1218,8 @@ class Window(QtGui.QMainWindow):
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
         structureex = struct1[2, :]
-        structurexx_nm = _np.multiply(structurexx-min(structurexx), pixelsize)
-        structureyy_nm = _np.multiply(structureyy-min(structureyy), pixelsize)
+        structurexx_nm = _np.multiply(structurexx - min(structurexx), pixelsize)
+        structureyy_nm = _np.multiply(structureyy - min(structureyy), pixelsize)
 
         for i in range(0, noexchangecolors):
             plotxx = []
@@ -1220,8 +1230,8 @@ class Window(QtGui.QMainWindow):
                     plotyy.append(structureyy_nm[j])
             ax1.plot(plotxx, plotyy, 'o')
 
-            distx = round(1/10*(max(structurexx_nm)-min(structurexx_nm)))
-            disty = round(1/10*(max(structureyy_nm)-min(structureyy_nm)))
+            distx = round(1 / 10 * (max(structurexx_nm) - min(structurexx_nm)))
+            disty = round(1 / 10 * (max(structureyy_nm) - min(structureyy_nm)))
 
             ax1.axes.set_xlim((min(structurexx_nm)-distx, max(structurexx_nm)+distx))
             ax1.axes.set_ylim((min(structureyy_nm)-disty, max(structureyy_nm)+disty))
@@ -1239,10 +1249,10 @@ class Window(QtGui.QMainWindow):
         gridpos = simulate.generatePositions(number, imageSize, frame, arrangement)
 
         orientation = int(self.structurerandomOrientationEdit.checkState())
-        incorporation = self.structureIncorporationEdit.value()/100
+        incorporation = self.structureIncorporationEdit.value() / 100
         exchange = 0
 
-        #self.figure1.suptitle('Positions [Px]')
+        # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
         ax1.cla()
         ax1.hold(True)
@@ -1252,8 +1262,8 @@ class Window(QtGui.QMainWindow):
         ax1.add_patch(
             patches.Rectangle(
                 (frame, frame),
-                imageSize-2*frame,
-                imageSize-2*frame,
+                imageSize - 2 * frame,
+                imageSize - 2 * frame,
                 linestyle='dashed',
                 edgecolor="#000000",
                 fill=False      # remove background
@@ -1271,7 +1281,7 @@ class Window(QtGui.QMainWindow):
         noexchangecolors = len(set(struct1[2, :]))
         exchangecolors = list(set(struct1[2, :]))
         self.noexchangecolors = exchangecolors
-        #self.figure2.suptitle('Structure [nm]')
+        # self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
         ax1.hold(True)
@@ -1279,8 +1289,8 @@ class Window(QtGui.QMainWindow):
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
         structureex = struct1[2, :]
-        structurexx_nm = _np.multiply(structurexx-min(structurexx), pixelsize)
-        structureyy_nm = _np.multiply(structureyy-min(structureyy), pixelsize)
+        structurexx_nm = _np.multiply(structurexx - min(structurexx), pixelsize)
+        structureyy_nm = _np.multiply(structureyy - min(structureyy), pixelsize)
 
         for i in range(0, noexchangecolors):
             plotxx = []
@@ -1291,11 +1301,11 @@ class Window(QtGui.QMainWindow):
                     plotyy.append(structureyy_nm[j])
             ax1.plot(plotxx, plotyy, 'o')
 
-            distx = round(1/10*(max(structurexx_nm)-min(structurexx_nm)))
-            disty = round(1/10*(max(structureyy_nm)-min(structureyy_nm)))
+            distx = round(1 / 10 * (max(structurexx_nm) - min(structurexx_nm)))
+            disty = round(1 / 10 * (max(structureyy_nm) - min(structureyy_nm)))
 
-            ax1.axes.set_xlim((min(structurexx_nm)-distx, max(structurexx_nm)+distx))
-            ax1.axes.set_ylim((min(structureyy_nm)-disty, max(structureyy_nm)+disty))
+            ax1.axes.set_xlim((min(structurexx_nm) - distx, max(structurexx_nm) + distx))
+            ax1.axes.set_ylim((min(structureyy_nm) - disty, max(structureyy_nm) + disty))
         self.canvas2.draw()
 
     def openDialog(self):
@@ -1303,7 +1313,7 @@ class Window(QtGui.QMainWindow):
         if path:
             self.mainscene.loadCanvas(path)
             print(path)
-            self.statusBar().showMessage('File loaded from: '+path)
+            self.statusBar().showMessage('File loaded from: ' + path)
 
     def saveDialog(self):
         path = QtGui.QFileDialog.getSaveFileName(self, 'Save movie to..', filter='*.raw')
@@ -1375,12 +1385,15 @@ class Window(QtGui.QMainWindow):
         sigma = _np.std(data)
         mean = _np.mean(data)
 
-        datanew = data[data < (mean+sigmas*sigma)]
-        datanew = datanew[datanew > (mean-sigmas*sigma)]
+        datanew = data[data < (mean + sigmas * sigma)]
+        datanew = datanew[datanew > (mean - sigmas * sigma)]
         return datanew
 
     def readhdf5(self, path):
-        locs, self.info = _io.load_locs(path)
+        try:
+            locs, self.info = _io.load_locs(path, qt_parent=self)
+        except _io.NoMetadataFileError:
+            return
         integrationtime, ok1 = QtGui.QInputDialog.getText(self, 'Input Dialog',
                                                           'Enter integration time in ms:')
         integrationtime = int(integrationtime)
@@ -1403,7 +1416,7 @@ class Window(QtGui.QMainWindow):
                     sigmax = locs['sx']
                     sigmay = locs['sy']
                     bg = locs['bg']
-                    bg = bg-cbaseline
+                    bg = bg - cbaseline
 
                     nosigmas = 3
                     photons = self.sigmafilter(photons, nosigmas)
@@ -1459,22 +1472,22 @@ class Window(QtGui.QMainWindow):
                     # Calculate Rates
                     # Photonrate, Photonrate Std, PSF
 
-                    photonrate = int(photonsmu/integrationtime)
-                    photonratestd = int(photonsstd/integrationtime)
-                    psf = int(sigmamu*100)/100
-                    photonrate = int(photonsmu/integrationtime)
+                    photonrate = int(photonsmu / integrationtime)
+                    photonratestd = int(photonsstd / integrationtime)
+                    psf = int(sigmamu * 100) / 100
+                    photonrate = int(photonsmu / integrationtime)
 
                     # CALCULATE BG AND BG_STD FROM MODEL AND ADJUST OFFSET
                     laserc = self.lasercEdit.value()
                     imagerc = self.imagercEdit.value()
 
-                    bgmodel = (laserc + imagerc*imagerconcentration)*laserpower*integrationtime
+                    bgmodel = (laserc + imagerc * imagerconcentration) * laserpower * integrationtime
 
                     equationA = self.EquationAEdit.value()
                     equationB = self.EquationBEdit.value()
                     equationC = self.EquationCEdit.value()
 
-                    bgmodelstd = equationA*laserpower*integrationtime+equationB*bgmu+equationC
+                    bgmodelstd = equationA * laserpower * integrationtime + equationB * bgmu + equationC
 
                     # SET VALUES TO FIELDS AND CALL DEPENDENCIES
                     self.psfEdit.setValue(psf)
@@ -1482,12 +1495,12 @@ class Window(QtGui.QMainWindow):
                     self.integrationtimeEdit.setValue(integrationtime)
                     self.photonrateEdit.setValue(photonrate)
                     self.photonratestdEdit.setValue(photonratestd)
-                    self.photonslopeEdit.setValue(photonrate/laserpower)
-                    self.photonslopeStdEdit.setValue(photonratestd/laserpower)
+                    self.photonslopeEdit.setValue(photonrate / laserpower)
+                    self.photonslopeStdEdit.setValue(photonratestd / laserpower)
 
                     # SET NOISE AND FRAME
-                    self.BgoffsetEdit.setValue(bgmu-bgmodel)
-                    self.BgStdoffsetEdit.setValue(bgstd-bgmodelstd)
+                    self.BgoffsetEdit.setValue(bgmu - bgmodel)
+                    self.BgStdoffsetEdit.setValue(bgstd - bgmodelstd)
 
                     self.imagerconcentrationEdit.setValue(imagerconcentration)
                     self.laserpowerEdit.setValue(laserpower)
@@ -1583,9 +1596,9 @@ class CalibrationDialog(QtGui.QDialog):
 
         counter = 0
         for element in self.tifFiles:
-            counter = counter+1
-            self.pbar.setValue((counter-1)/self.tifCounter*100)
-            print('Current Dataset: '+str(counter)+' of ' + str(self.tifCounter))
+            counter = counter + 1
+            self.pbar.setValue((counter - 1) / self.tifCounter * 100)
+            print('Current Dataset: ' + str(counter) + ' of ' + str(self.tifCounter))
             QtGui.qApp.processEvents()
             movie, info = _io.load_movie(element)
 
@@ -1699,6 +1712,7 @@ def main():
     sys.exit(app.exec_())
 
     def excepthook(type, value, tback):
+        lib.cancel_dialogs()
         message = ''.join(traceback.format_exception(type, value, tback))
         errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
         errorbox.exec_()

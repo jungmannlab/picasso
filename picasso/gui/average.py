@@ -7,18 +7,20 @@
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
-import sys
-import os.path
-from PyQt4 import QtCore, QtGui
-import traceback
-import numpy as np
-import time
-import matplotlib.pyplot as plt
-import multiprocessing
-from multiprocessing import sharedctypes
 import functools
+import multiprocessing
+import os.path
+import sys
+import time
+import traceback
+from multiprocessing import sharedctypes
+
+import matplotlib.pyplot as plt
 import numba
+import numpy as np
 import scipy
+from PyQt4 import QtCore, QtGui
+
 from .. import io, lib, render
 
 
@@ -192,7 +194,10 @@ class View(QtGui.QLabel):
 
     def open(self, path):
         self.path = path
-        self.locs, self.info = io.load_locs(path)
+        try:
+            self.locs, self.info = io.load_locs(path, qt_parent=self)
+        except io.NoMetadataFileError:
+            return
         groups = np.unique(self.locs.group)
         n_groups = len(groups)
         n_locs = len(self.locs)
@@ -319,6 +324,7 @@ def main():
     window.show()
 
     def excepthook(type, value, tback):
+        lib.cancel_dialogs()
         message = ''.join(traceback.format_exception(type, value, tback))
         errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
         errorbox.exec_()

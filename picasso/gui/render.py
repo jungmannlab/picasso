@@ -7,22 +7,25 @@
     :author: Joerg Schnitzbauer, 2016
     :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
-import sys
 import os
 import os.path
+import sys
 import traceback
-from PyQt4 import QtCore, QtGui
-import numpy as np
-from numpy.lib.recfunctions import stack_arrays
+from math import ceil
+
+import lmfit
 import matplotlib
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
-import colorsys
-from math import ceil
+import numpy as np
 import yaml
-import lmfit
-from .. import io, lib, render, postprocess, imageprocess
+from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
+                                                NavigationToolbar2QT)
+from numpy.lib.recfunctions import stack_arrays
+from PyQt4 import QtCore, QtGui
 
+import colorsys
+
+from .. import imageprocess, io, lib, postprocess, render
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -36,7 +39,7 @@ matplotlib.rcParams.update({'axes.titlesize': 'large'})
 def fit_cum_exp(data):
     data.sort()
     n = len(data)
-    y = np.arange(1, n+1)
+    y = np.arange(1, n + 1)
     data_min = data.min()
     data_max = data.max()
     params = lmfit.Parameters()
@@ -109,7 +112,7 @@ class PickHistWindow(QtGui.QTabWidget):
         axes.set_title('Length (cumulative)')
         data = pooled_locs.len
         data.sort()
-        y = np.arange(1, len(data)+1)
+        y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label='data')
         axes.semilogx(data, fit_result_len.best_fit, label='fit')
         axes.legend(loc='best')
@@ -118,7 +121,7 @@ class PickHistWindow(QtGui.QTabWidget):
         axes.set_title('Dark time (cumulative)')
         data = pooled_locs.dark
         data.sort()
-        y = np.arange(1, len(data)+1)
+        y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label='data')
         axes.semilogx(data, fit_result_dark.best_fit, label='fit')
         axes.legend(loc='best')
@@ -334,7 +337,7 @@ class InfoDialog(QtGui.QDialog):
             self.nena_result, lp = result_lp
             self.nena_label.setText('{:.3} pixel'.format(lp))
             show_plot_button = QtGui.QPushButton('Show plot')
-            self.movie_grid.addWidget(show_plot_button, self.movie_grid.rowCount()-1, 2)
+            self.movie_grid.addWidget(show_plot_button, self.movie_grid.rowCount() - 1, 2)
             show_plot_button.clicked.connect(self.show_nena_plot)
 
     def calibrate_influx(self):
@@ -574,7 +577,10 @@ class View(QtGui.QLabel):
         self._drift = []
 
     def add(self, path, render=True):
-        locs, info = io.load_locs(path)
+        try:
+            locs, info = io.load_locs(path, qt_parent=self)
+        except io.NoMetadataFileError:
+            return
         locs = lib.ensure_sanity(locs, info)
         self.locs.append(locs)
         self.infos.append(info)
@@ -600,10 +606,11 @@ class View(QtGui.QLabel):
         paths = sorted(paths)
         for path in paths:
             self.add(path, render=False)
-        if fit_in_view:
-            self.fit_in_view(autoscale=True)
-        else:
-            self.update_scene()
+        if len(self.locs):  # In case loading was not succesful.
+            if fit_in_view:
+                self.fit_in_view(autoscale=True)
+            else:
+                self.update_scene()
 
     def add_pick(self, position, update_scene=True):
         self._picks.append(position)
@@ -722,7 +729,7 @@ class View(QtGui.QLabel):
         for i, (locs_, info_) in enumerate(zip(self.locs, self.infos)):
             _, image = render.render(locs_, info_, blur_method='smooth')
             images.append(image)
-            rp.set_value(i+1)
+            rp.set_value(i + 1)
         n_pairs = int(n_channels * (n_channels - 1) / 2)
         rc = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
         return imageprocess.rcc(images, callback=rc.set_value)
@@ -746,7 +753,7 @@ class View(QtGui.QLabel):
         painter.setPen(QtGui.QColor('yellow'))
         for pick in self._picks:
             cx, cy = self.map_to_view(*pick)
-            painter.drawEllipse(cx-d/2, cy-d/2, d, d)
+            painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
         painter.end()
         return image
 
@@ -1027,7 +1034,7 @@ class View(QtGui.QLabel):
                                     if min_rmsd < self.rmsd_at_com(picked_locs) < max_rmsd:
                                         x_similar = np.append(x_similar, x_test)
                                         y_similar = np.append(y_similar, y_test)
-                progress.set_value(i+1)
+                progress.set_value(i + 1)
             similar = list(zip(x_similar, y_similar))
             self._picks = []
             self.add_picks(similar)
@@ -1049,7 +1056,7 @@ class View(QtGui.QLabel):
                     group = i * np.ones(len(group_locs), dtype=np.int32)
                     group_locs = lib.append_to_rec(group_locs, group, 'group')
                 picked_locs.append(group_locs)
-                progress.set_value(i+1)
+                progress.set_value(i + 1)
             return picked_locs
 
     def remove_picks(self, position):
@@ -1079,7 +1086,7 @@ class View(QtGui.QLabel):
         if locs is None:
             locs = self.locs
         n_channels = len(locs)
-        hues = np.arange(0, 1, 1/n_channels)
+        hues = np.arange(0, 1, 1 / n_channels)
         colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
         if use_cache:
             n_locs = self.n_locs
@@ -1152,7 +1159,7 @@ class View(QtGui.QLabel):
             pick_locs = postprocess.compute_dark_times(pick_locs)
             out_locs.append(pick_locs)
             dark[i] = estimate_kinetic_rate(pick_locs.dark)
-            progress.set_value(i+1)
+            progress.set_value(i + 1)
         out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
         n_groups = len(picked_locs)
         progress = lib.ProgressDialog('Calculating pick properties', 0, n_groups, self)
@@ -1355,7 +1362,7 @@ class View(QtGui.QLabel):
                 locs = postprocess.compute_dark_times(locs)
                 dark[i] = estimate_kinetic_rate(locs.dark)
                 new_locs.append(locs)
-                progress.set_value(i+1)
+                progress.set_value(i + 1)
             self.window.info_dialog.n_localizations_mean.setText('{:.2f}'.format(np.mean(N)))
             self.window.info_dialog.n_localizations_std.setText('{:.2f}'.format(np.std(N)))
             self.window.info_dialog.rmsd_mean.setText('{:.2}'.format(np.mean(rmsd)))
@@ -1418,7 +1425,7 @@ class View(QtGui.QLabel):
         self.update_scene(new_viewport)
 
     def zoom_in(self):
-        self.zoom(1/ZOOM)
+        self.zoom(1 / ZOOM)
 
     def zoom_out(self):
         self.zoom(ZOOM)
@@ -1650,6 +1657,8 @@ def main():
     window.show()
 
     def excepthook(type, value, tback):
+        lib.cancel_dialogs()
+        QtCore.QCoreApplication.instance().processEvents()
         message = ''.join(traceback.format_exception(type, value, tback))
         errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
         errorbox.exec_()

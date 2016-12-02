@@ -253,7 +253,10 @@ class Window(QtGui.QMainWindow):
             self.open(path)
 
     def open(self, path):
-        locs, self.info = io.load_locs(path)
+        try:
+            locs, self.info = io.load_locs(path, qt_parent=self)
+        except io.NoMetadataFileError:
+            return
         if self.locs is not None:
             for field in self.locs.dtype.names:
                 if self.hist_windows[field]:
@@ -344,6 +347,7 @@ def main():
     window.show()
 
     def excepthook(type, value, tback):
+        lib.cancel_dialogs()
         message = ''.join(traceback.format_exception(type, value, tback))
         errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
         errorbox.exec_()

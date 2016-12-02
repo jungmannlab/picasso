@@ -13,7 +13,7 @@ import os.path
 
 def _average(args):
     from glob import glob
-    from .io import load_locs
+    from .io import load_locs, NoMetadataFileError
     from .postprocess import average
     kwargs = {'iterations': args.iterations,
               'oversampling': args.oversampling}
@@ -21,7 +21,10 @@ def _average(args):
     if paths:
         for path in paths:
             print('Averaging {}'.format(path))
-            locs, info = load_locs(path)
+            try:
+                locs, info = load_locs(path)
+            except NoMetadataFileError:
+                continue
             kwargs['path_basename'] = os.path.splitext(path)[0] + '_avg'
             average(locs, info, **kwargs)
 
@@ -49,7 +52,10 @@ def _link(files, d_max, tolerance):
     if paths:
         from . import io, postprocess
         for path in paths:
-            locs, info = io.load_locs(path)
+            try:
+                locs, info = io.load_locs(path)
+            except io.NoMetadataFileError:
+                continue
             linked_locs = postprocess.link(locs, info, d_max, tolerance)
             base, ext = os.path.splitext(path)
             link_info = {'Maximum Distance': d_max,
@@ -71,7 +77,10 @@ def _undrift(files, segmentation, display, fromfile):
     else:
         undrift_info['Segmentation'] = segmentation
     for path in paths:
-        locs, info = io.load_locs(path)
+        try:
+            locs, info = io.load_locs(path)
+        except io.NoMetadataFileError:
+            continue
         info.append(undrift_info)
         if fromfile is not None:
             locs.x -= drift[:, 0][locs.frame]
