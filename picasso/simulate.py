@@ -32,9 +32,29 @@ def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbud
     if meanlocs < 10:
         meanlocs = meanlocs*10
 
-    ## GENERATE ON AND OFF-EVENTS
-    dark_times = _np.random.exponential(meandark,meanlocs)
-    bright_times = _np.random.exponential(meanbright,meanlocs)
+    #Generate a pool of dark and brighttimes
+    dark_times_pool = _np.random.exponential(meandark, meanlocs)
+    bright_times_pool = _np.random.exponential(meanbright, meanlocs)
+
+    darksum = _np.cumsum(dark_times_pool)
+    maxlocdark = _np.argmax(darksum>(frames*time))+1
+
+    #Simulate binding and unbinding and consider blocked binding sites
+    dark_times = _np.zeros(maxlocdark)
+    bright_times = _np.zeros(maxlocdark)
+
+    dark_times[0] = dark_times_pool[0]
+    bright_times[0] = bright_times_pool[0]
+
+    for i in range(1,maxlocdark):
+        bright_times[i] = bright_times_pool[i]
+
+        dark_time_temp = dark_times_pool[i]-bright_times_pool[i]
+        while dark_time_temp < 0:
+            _np.delete(dark_times_pool,i)
+            dark_time_temp +=dark_times_pool[i]
+
+        dark_times[i] = dark_time_temp
 
     events = _np.vstack((dark_times,bright_times)).reshape((-1,),order='F') # Interweave dark_times and bright_times [dt,bt,dt,bt..]
     simulatedmeandark = _np.mean(events[::2])
@@ -158,6 +178,7 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
         simframe = _np.flipud(simframe) # to be consistent with render
     #simframenoise = noisy(simframe,background,noise)
     simframenoise = noisy_p(simframe,background)
+    simframenoise[simframenoise > 2**16-1] = 2**16-1
     simframeout=_np.round(simframenoise).astype('<u2')
 
     return simframeout
