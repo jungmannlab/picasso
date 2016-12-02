@@ -7,25 +7,28 @@
     :author: Maximilian Thomas Strauss, 2016
     :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
-import numpy as _np
-from . import io as _io
 import csv
 
+import numpy as _np
 
-def saveInfo(filename,info):
+from . import io as _io
+
+
+def saveInfo(filename, info):
     _io.save_info(filename, [info], default_flow_style=True)
 
-def convertPlateIndex(plate,platename):
-    #convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE] format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
 
-    platerow = ['A','B','C','D','E','F','G','H','A','B','C','D','E','F','G','H']
-    platecol = [1,2,3,4,5,6,7,8,9,10,11,12]
-    structurerow = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P']
-    structurecol = [1,2,3,4,5,6,7,8,9,10,11,12]
+def convertPlateIndex(plate, platename):
+    # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE] format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
 
-    newplate = [['PLATE NAME','PLATE POSITION','OLIGO NAME','SEQUENCE']]
-    for row in range(0,len(platerow)):
-        for col in range(0,len(platecol)):
+    platerow = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+    platecol = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    structurerow = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
+    structurecol = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+    newplate = [['PLATE NAME', 'PLATE POSITION', 'OLIGO NAME', 'SEQUENCE']]
+    for row in range(0, len(platerow)):
+        for col in range(0, len(platecol)):
             if row < 8:
                 platenameindex = platename+'_1'
             else:
@@ -33,25 +36,26 @@ def convertPlateIndex(plate,platename):
             structureindex = structurerow[row]+str(structurecol[col])
             oligoname = ' '
             sequence = ' '
-            for i in range(0,len(plate)):
+            for i in range(0, len(plate)):
                 if plate[i][0] == structureindex:
                     oligoname = plate[i][1]
                     sequence = plate[i][2]
-            newplate.append([platenameindex,platerow[row]+str(platecol[col]),oligoname,sequence])
+            newplate.append([platenameindex, platerow[row]+str(platecol[col]), oligoname, sequence])
 
     return newplate
 
-def convertPlateIndexColor(plate,platename):
-    #convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE] format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
 
-    platerow = ['A','B','C','D','E','F','G','H','A','B','C','D','E','F','G','H']
-    platecol = [1,2,3,4,5,6,7,8,9,10,11,12]
-    structurerow = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P']
-    structurecol = [1,2,3,4,5,6,7,8,9,10,11,12]
+def convertPlateIndexColor(plate, platename):
+    # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE] format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
 
-    newplate = [['PLATE NAME','PLATE POSITION','OLIGO NAME','SEQUENCE','COLOR']]
-    for row in range(0,len(platerow)):
-        for col in range(0,len(platecol)):
+    platerow = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']
+    platecol = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+    structurerow = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
+    structurecol = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+
+    newplate = [['PLATE NAME', 'PLATE POSITION', 'OLIGO NAME', 'SEQUENCE', 'COLOR']]
+    for row in range(0, len(platerow)):
+        for col in range(0, len(platecol)):
             if row < 8:
                 platenameindex = platename+'_1'
             else:
@@ -59,20 +63,22 @@ def convertPlateIndexColor(plate,platename):
             structureindex = structurerow[row]+str(structurecol[col])
             oligoname = ' '
             sequence = ' '
-            for i in range(0,len(plate)):
+            for i in range(0, len(plate)):
                 if plate[i][0] == structureindex:
                     oligoname = plate[i][1]
                     sequence = plate[i][2]
                     color = plate[i][3]
-            newplate.append([platenameindex,platerow[row]+str(platecol[col]),oligoname,sequence,color])
+            newplate.append([platenameindex, platerow[row]+str(platecol[col]), oligoname, sequence, color])
 
     return newplate
+
 
 def readPlate(filename):
     File = open(filename)
     Reader = csv.reader(File)
     data = list(Reader)
     return data
+
 
 def savePlate(filename, data):
     with open(filename,  'w',  newline='') as csvfile:
