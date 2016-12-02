@@ -16,36 +16,23 @@ import random
 import sys
 import time
 
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from .. import io as _io, simulate
+import matplotlib.pyplot as plt
 import numpy as _np
-from matplotlib.backends.backend_qt4agg import \
-    FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4agg import \
-    NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 from PyQt4 import QtCore, QtGui
 from PyQt4.QtCore import QDateTime, Qt
-from PyQt4.QtGui import (QApplication, QDateTimeEdit, QDialog,
-                         QDialogButtonBox, QVBoxLayout)
+from PyQt4.QtGui import QApplication, QDateTimeEdit, QDialog, QDialogButtonBox, QVBoxLayout
 from scipy.optimize import curve_fit
-import glob as _glob
-import os
-from PyQt4.QtGui import QDialog, QVBoxLayout, QDialogButtonBox, QApplication
-from PyQt4.QtCore import Qt
-import time
-import csv
 from scipy.stats import norm
 
 from .. import io as _io
-from .. import simulate
-
+from .. import lib, simulate
 
 
 def fitFuncBg(x, a, b):
     return (a + b * x[0]) * x[1] * x[2]
-
 
 
 def fitFuncStd(x, a, b, c):
