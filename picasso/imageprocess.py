@@ -26,6 +26,8 @@ def xcorr(imageA, imageB):
 
 def get_image_shift(imageA, imageB, box, roi=None, display=False):
     """ Computes the shift from imageA to imageB """
+    if (_np.sum(imageA) == 0) or (_np.sum(imageB) == 0):
+        return 0, 0
     # Compute image correlation
     XCorr = xcorr(imageA, imageB)
     # Cut out center roi
@@ -33,17 +35,23 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
     if roi is not None:
         Y_ = int((Y - roi) / 2)
         X_ = int((X - roi) / 2)
-        XCorr_ = XCorr[Y_:-Y_, X_:-X_]
+        if Y_ > 0:
+            XCorr = XCorr[Y_:-Y_, :]
+        else:
+            Y_ = 0
+        if X_ > 0:
+            XCorr = XCorr[:, X_:-X_]
+        else:
+            X_ = 0
     else:
         Y_ = X_ = 0
-        XCorr_ = XCorr
     # A quarter of the fit ROI
     fit_X = int(box / 2)
     # A coordinate grid for the fitting ROI
     y, x = _np.mgrid[-fit_X:fit_X+1, -fit_X:fit_X+1]
     # Find the brightest pixel and cut out the fit ROI
-    y_max_, x_max_ = _np.unravel_index(XCorr_.argmax(), XCorr_.shape)
-    FitROI = XCorr[y_max_ - fit_X + Y_:y_max_ + fit_X + Y_ + 1, x_max_ - fit_X + X_:x_max_ + fit_X + X_ + 1]
+    y_max_, x_max_ = _np.unravel_index(XCorr.argmax(), XCorr.shape)
+    FitROI = XCorr[y_max_ - fit_X:y_max_ + fit_X + 1, x_max_ - fit_X:x_max_ + fit_X + 1]
 
     # The fit model
     def flat_2d_gaussian(a, xc, yc, s, b):
@@ -77,8 +85,8 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
         _plt.plot(xc, yc, 'x')
         _plt.show()
 
-    xc -= _np.ceil(X / 2)
-    yc -= _np.ceil(Y / 2)
+    xc -= _np.floor(X / 2)
+    yc -= _np.floor(Y / 2)
     return -yc, -xc
 
 
