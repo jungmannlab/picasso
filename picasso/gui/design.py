@@ -13,6 +13,7 @@ import glob
 import os
 import os.path as _ospath
 import sys
+import traceback
 from math import sqrt
 
 import matplotlib.patches as patches
