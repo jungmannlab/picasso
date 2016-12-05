@@ -116,7 +116,7 @@ def fit_spots(spots):
 
 
 def fit_spots_parallel(spots, async=False):
-    n_workers = int(0.75 * _multiprocessing.cpu_count())
+    n_workers = max(1, int(0.75 * _multiprocessing.cpu_count()))
     n_spots = len(spots)
     n_tasks = 100 * n_workers
     spots_per_task = [int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(n_spots / n_tasks) for _ in range(n_tasks)]

@@ -128,7 +128,7 @@ def identifications_from_futures(futures):
 
 
 def identify_async(movie, minimum_ng, box, roi=None):
-    n_workers = int(0.75 * _multiprocessing.cpu_count())
+    n_workers = max(1, int(0.75 * _multiprocessing.cpu_count()))
     current = [0]
     executor = _ThreadPoolExecutor(n_workers)
     lock = _threading.Lock()

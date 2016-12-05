@@ -149,7 +149,7 @@ def fit_z(locs, info, calibration, magnification_factor, filter=2):
 
 
 def fit_z_parallel(locs, info, calibration, magnification_factor, filter=2, async=False):
-    n_workers = int(0.75 * _multiprocessing.cpu_count())
+    n_workers = max(1, int(0.75 * _multiprocessing.cpu_count()))
     n_locs = len(locs)
     n_tasks = 100 * n_workers
     spots_per_task = [int(n_locs / n_tasks + 1) if _ < n_locs % n_tasks else int(n_locs / n_tasks) for _ in range(n_tasks)]
