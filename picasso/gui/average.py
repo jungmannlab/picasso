@@ -98,7 +98,7 @@ class Worker(QtCore.QThread):
         n_groups = self.group_index.shape[0]
         a_step = np.arcsin(1 / (self.oversampling * self.r))
         angles = np.arange(0, 2*np.pi, a_step)
-        n_workers = int(0.75 * multiprocessing.cpu_count())
+        n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
         manager = multiprocessing.Manager()
         counter = manager.Value('d', 0)
         lock = manager.Lock()
@@ -225,7 +225,7 @@ class View(QtGui.QLabel):
             pass
         x = sharedctypes.RawArray('f', self.locs.x)
         y = sharedctypes.RawArray('f', self.locs.y)
-        n_workers = int(0.75 * multiprocessing.cpu_count())
+        n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
         pool = multiprocessing.Pool(n_workers, init_pool, (x, y, self.group_index))
         self.window.status_bar.showMessage('Ready for processing!')
         status.close()
