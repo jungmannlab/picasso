@@ -951,7 +951,7 @@ class Window(QtGui.QMainWindow):
                     if (len(structureData)-1-16) == (len(pipettlist)):
                         self.statusBar().showMessage('Pippetting scheme saved to: '+path +'All sequences found.')
                     else:
-                        self.statusBar().showMessage('Error: Some sequences missing. Please check *.csv file for "NOT FOUND" ', +path)
+                        self.statusBar().showMessage('Error: Some sequences missing. Please check *.csv file for "NOT FOUND" ' +path)
 
     def foldingScheme(self):
 
