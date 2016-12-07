@@ -661,20 +661,9 @@ class View(QtGui.QLabel):
         else:
             r_max, max_dark, ok = LinkDialog.getParams()
             if ok:
-                if len(self._picks) > 0:
-                    picked_locs = self.picked_locs(channel, add_group=False)
-                    out_locs = []
-                    progress = lib.ProgressDialog('Linking localizations in picks', 0, len(picked_locs), self)
-                    progress.set_value(0)
-                    for i, pick_locs in enumerate(picked_locs):
-                        pick_locs_out = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
-                        out_locs.append(pick_locs_out)
-                        progress.set_value(i + 1)
-                    self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
-                else:
-                    status = lib.StatusDialog('Linking localizations...', self)
-                    self.locs[channel] = postprocess.link(self.locs[channel], self.infos[channel], r_max=r_max, max_dark_time=max_dark)
-                    status.close()
+                status = lib.StatusDialog('Linking localizations...', self)
+                self.locs[channel] = postprocess.link(self.locs[channel], self.infos[channel], r_max=r_max, max_dark_time=max_dark)
+                status.close()
                 self.update_scene()
 
     def shift_from_picked(self):
