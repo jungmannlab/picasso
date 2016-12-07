@@ -1005,6 +1005,7 @@ class Window(QtGui.QMainWindow):
 
             structure = _np.array([handlexx, handleyy, handleex, handless])
 
+            self.structurecombo.setCurrentIndex(2)
             self.newstruct = structure
             self.plotPositions()
             self.statusBar().showMessage('Settings loaded from: ' + path)
