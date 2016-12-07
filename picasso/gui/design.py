@@ -923,7 +923,7 @@ class Window(QtGui.QMainWindow):
                 if (len(structureData)-1-16) == (len(pipettlist)):
                     self.statusBar().showMessage('All sequences found in '+str(noplates)+' Plates. Pipetting scheme complete.')
                 else:
-                    self.statusBar().showMessage('Error: Sequences sequences missing. Please check *.csv file..')
+                    self.statusBar().showMessage('Error: Some sequences missing. Please check *.csv file for "NOT FOUND"')
 
                 allfig = dict()
                 for x in range(0, len(platenames)):
@@ -948,7 +948,10 @@ class Window(QtGui.QMainWindow):
                             base, ext = _ospath.splitext(path)
                             csv_path = base + '.csv'
                             design.savePlate(csv_path, exportlist)
-                    self.statusBar().showMessage('Pippetting scheme saved to: '+path)
+                    if (len(structureData)-1-16) == (len(pipettlist)):
+                        self.statusBar().showMessage('Pippetting scheme saved to: '+path +'All sequences found.')
+                    else:
+                        self.statusBar().showMessage('Error: Some sequences missing. Please check *.csv file for "NOT FOUND" ', +path)
 
     def foldingScheme(self):
 
