@@ -414,6 +414,8 @@ def _get_next_loc_index_in_link_group(current_index, link_group, N, frame, x, y,
     for max_index in range(min_index, N):
         if frame[max_index] > max_frame:
             break
+    else:
+        max_index = N
     d_max_2 = d_max**2
     for j in range(min_index, max_index):
         if group[j] == current_group:

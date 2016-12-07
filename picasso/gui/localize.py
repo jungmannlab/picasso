@@ -399,7 +399,7 @@ class ParametersDialog(QtGui.QDialog):
         photon_grid.addWidget(QtGui.QLabel('Quantum Efficiency:'), 3, 0)
         self.qe = QtGui.QDoubleSpinBox()
         self.qe.setRange(0, 1)
-        self.qe.setValue(0.9)
+        self.qe.setValue(1.0)
         self.qe.setDecimals(2)
         self.qe.setSingleStep(0.1)
         photon_grid.addWidget(self.qe, 3, 1)
