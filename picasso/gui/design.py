@@ -949,7 +949,7 @@ class Window(QtGui.QMainWindow):
                             csv_path = base + '.csv'
                             design.savePlate(csv_path, exportlist)
                     if (len(structureData)-1-16) == (len(pipettlist)):
-                        self.statusBar().showMessage('Pippetting scheme saved to: '+path +'All sequences found.')
+                        self.statusBar().showMessage('Pippetting scheme saved to: '+path +' All sequences found.')
                     else:
                         self.statusBar().showMessage('Error: Some sequences missing. Please check *.csv file for "NOT FOUND". Pippetting scheme saved to: '+path)
 
