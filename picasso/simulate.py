@@ -67,7 +67,7 @@ def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbud
         onevents = int(_np.floor(maxloc/2));
     else: #even -> ends with bright event
         onevents = int(maxloc/2);
-    bright_events = _np.floor(maxloc/2); #number of bright_events
+    #bright_events = _np.floor(maxloc/2); #number of bright_events
 
     #AN ON-EVENT MIGHT BE LONGER THAN THE MOVIE, SO ALLOCATE MORE MEMORY, AS AN ESTIMATE: MEANBRIGHT/time*10
     photonsinframe = _np.zeros(int(frames+_np.ceil(meanbright/time*20)))
@@ -90,7 +90,7 @@ def paintgen( meandark,meanbright,frames,time,photonrate,photonratestd,photonbud
             if onFrames == 1: #CASE 1: ALL PHOTONS ARE EMITTED IN ONE FRAME
                 photonsinframe[1+tempFrame]=int(_np.random.poisson(((tempFrame+1)*time-eventsum[i-1])/time*photons))
             elif onFrames == 2: #CASE 2: ALL PHOTONS ARE EMITTED IN TWO FRAMES
-                emittedphotons = (((tempFrame+1)*time-eventsum[i-1])/time*photons)
+                #emittedphotons = (((tempFrame+1)*time-eventsum[i-1])/time*photons)
                 if j == 1: # PHOTONS IN FIRST ONFRAME
                     photonsinframe[1+tempFrame]=int(_np.random.poisson(((tempFrame+1)*time-eventsum[i-1])/time*photons))
                 else: # PHOTONS IN SECOND ONFRAME
@@ -123,15 +123,6 @@ def distphotons(structures,itime,frames,taud,taub,photonrate,photonratestd,photo
     meandark = int(taud)
     meanbright = int(taub)
 
-    bindingsitesx = structures[0,:]
-    bindingsitesy = structures[1,:]
-    nosites  = len(bindingsitesx) # number of binding sites in image
-
-    #PHOTONDIST: DISTRIBUTE PHOTONS FOR ALL BINDING SITES
-
-    photonposall = _np.zeros((2,0))
-    photonposall = [1,1]
-
     photonsinframe,timetrace,spotkinetics = paintgen(meandark,meanbright,frames,time,photonrate,photonratestd,photonbudget)
 
     return photonsinframe
@@ -149,7 +140,6 @@ def convertMovie(runner, photondist,structures,imagesize,frames,psf,photonrate,b
     #ALL PHOTONS FOR 1 STRUCTURE IN ALL FRAMES
     edges = range(0,pixels+1)
     #ALLCOATE MEMORY
-    movie = _np.zeros(shape=(frames,pixels,pixels), dtype='<u2')
 
     flag = 0
     photonposframe = _np.zeros((2,0))
@@ -205,7 +195,6 @@ def defineStructure(structurexxpx,structureyypx,structureex,pixelsize): #Functio
     return structure
 
 def generatePositions(number,imagesize,frame,arrangement): #GENERATE A SET OF POSITIONS WHERE STRUCTURES WILL BE PLACED
-
     if arrangement==0:
         spacing = _np.ceil((number**0.5))
         linpos = _np.linspace(frame,imagesize-frame,spacing)

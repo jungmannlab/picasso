@@ -39,7 +39,6 @@ def plotPlate(selection, selectioncolors, platename):
     inch = 25.4
     radius = 4.5/inch  # diameter of 96 well plates is 9mm
     radiusc = 4/inch
-    circles = dict()
     rows = 8
     cols = 12
     colsStr = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
@@ -644,13 +643,6 @@ class Scene(QtGui.QGraphicsScene):
 
     def updateExtensions(self, tableshort):
         # Takes a list of tableshort and updates the display
-        allitems = self.items()
-        lenitems = len(allitems)
-        bindingitems = len(BINDING_SITES)
-        origamiitems = len(ORIGAMI_SITES)
-        paletteindex = lenitems-bindingitems+9
-        canvascolors = []
-
         for i in range(0, maxcolor-1):
             if tableshort[i] == 'None':
                 self.alllblseq[i].setPlainText('   ')
@@ -893,7 +885,6 @@ class Window(QtGui.QMainWindow):
                 self.statusBar().showMessage('No *.csv found. Scheme not created.')
             else:
                 pipettlist = []
-                notfound = []
                 platelist = []
                 for i in range(1, len(structureData)):
                     sequencerow = structureData[i]

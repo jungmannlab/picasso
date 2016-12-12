@@ -15,7 +15,7 @@ from PyQt4 import QtGui, QtCore
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
-from .. import io as _io, simulate
+from .. import io as _io, simulate, lib
 import numpy as _np
 from scipy.stats import norm
 from scipy.optimize import curve_fit
@@ -873,11 +873,9 @@ class Window(QtGui.QMainWindow):
             self.statusBar().showMessage('Distributing photons ...')
 
             bindingsitesx = partstruct[0, :]
-            bindingsitesy = partstruct[1, :]
             nosites = len(bindingsitesx)  # number of binding sites in image
             photondist = _np.zeros((nosites, frames), dtype=_np.int)
-            meandark = int(taud)
-            meanbright = int(taub)
+
             for i in range(0, nosites):
                 photondisttemp = simulate.distphotons(partstruct, itime, frames, taud, taub, photonrate, photonratestd, photonbudget)
 
@@ -1165,11 +1163,7 @@ class Window(QtGui.QMainWindow):
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
         arrangement = int(self.structurerandomEdit.checkState())
-        gridpos = simulate.generatePositions(number, imageSize, frame, arrangement)
 
-        orientation = int(self.structurerandomOrientationEdit.checkState())
-        incorporation = self.structureIncorporationEdit.value() / 100
-        exchange = 0
 
         # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
@@ -1433,7 +1427,6 @@ class CalibrationDialog(QtGui.QDialog):
         layout = QtGui.QVBoxLayout(self)
 
         self.table = QtGui.QTableWidget()
-        tableitem = QtGui.QTableWidgetItem()
         self.table.setWindowTitle('Noise Model Calibration')
         self.setWindowTitle('Noise Model Calibration')
         self.resize(800, 400)

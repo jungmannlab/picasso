@@ -7,7 +7,6 @@
     :author: Maximilian Thomas Strauss, 2016
     :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
-import numpy as _np
 from . import io as _io
 import csv
 
