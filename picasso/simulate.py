@@ -170,9 +170,7 @@ def distphotons(structures, itime, frames, taud, taub, photonrate, photonratestd
     return photonsinframe, spotkinetics
 
 
-def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate):
-
-    pixels = imagesize
+def distphotonsxy(runner, photondist, structures, psf, mode3Dstate):
 
     bindingsitesx = structures[0, :]
     bindingsitesy = structures[1, :]
@@ -181,7 +179,65 @@ def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonr
 
     # FRAMEWISE SIMULATION OF PSF
     # ALL PHOTONS FOR 1 STRUCTURE IN ALL FRAMES
+    flag = 0
+    photonposframe = _np.zeros((2, 0))
+
+    for i in range(0, nosites):
+        tempphotons = photondist[i, :]
+        photoncount = int(tempphotons[runner])
+
+        if mode3Dstate:
+            wx, wy = calculate_zpsf(bindingsitesz[i], cx, cy)
+            cov = [[wx*wx, 0], [0, wy*wy]]
+        else:
+            cov = [[psf*psf, 0], [0, psf*psf]]
+
+        if photoncount > 0:
+            flag = flag+1
+            mu = [bindingsitesx[i], bindingsitesy[i]]
+            photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
+            if flag == 1:
+                photonposframe = photonpos
+            else:
+                photonposframe = _np.concatenate((photonposframe, photonpos), axis=0)
+
+    return photonposframe
+
+def photonsToFrame(photonposframe,imagesize,background):
+        pixels = imagesize
+        edges = range(0, pixels+1)
+            # HANDLE CASE FOR NO PHOTONS DETECTED AT ALL IN FRAME
+        if photonposframe.size == 0:
+            simframe = _np.zeros((pixels, pixels))
+        else:
+            xx = photonposframe[:, 0]
+            yy = photonposframe[:, 1]
+
+            simframe, xedges, yedges = _np.histogram2d(yy, xx, bins=(edges, edges))
+            simframe = _np.flipud(simframe)  # to be consistent with render
+
+        #simframenoise = noisy(simframe,background,noise)
+        simframenoise = noisy_p(simframe, background)
+        simframenoise[simframenoise > 2**16-1] = 2**16-1
+        simframeout = _np.round(simframenoise).astype('<u2')
+
+        return simframeout
+
+
+
+def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate):
+
+    pixels = imagesize
     edges = range(0, pixels+1)
+
+    bindingsitesx = structures[0, :]
+    bindingsitesy = structures[1, :]
+    bindingsitesz = structures[4, :]
+    nosites = len(bindingsitesx)  # number of binding sites in image
+
+    # FRAMEWISE SIMULATION OF PSF
+    # ALL PHOTONS FOR 1 STRUCTURE IN ALL FRAMES
+
     # ALLCOATE MEMORY
     movie = _np.zeros(shape=(frames, pixels, pixels), dtype='<u2')
 
