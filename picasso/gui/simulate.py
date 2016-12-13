@@ -785,8 +785,8 @@ class Window(QtGui.QMainWindow):
 
             circdata = _np.arange(0, twopi, twopi/labels)
 
-            xxval = _np.round(_np.cos(circdata) * diameter * 100) / 100
-            yyval = _np.round(_np.sin(circdata) * diameter * 100) / 100
+            xxval = _np.round(_np.cos(circdata) * diameter/2 * 100) / 100
+            yyval = _np.round(_np.sin(circdata) * diameter/2 * 100) / 100
 
             structurexx = ''
             structureyy = ''
@@ -831,7 +831,10 @@ class Window(QtGui.QMainWindow):
 
         if self.currentround == 1:
             fileNameOld = QtGui.QFileDialog.getSaveFileName(self, 'Save movie to..', filter='*.raw')
-            self.fileName = fileNameOld
+            if fileNameOld:
+                self.fileName = fileNameOld
+            else:
+                self.currentround -= 1
         else:
             fileNameOld = self.fileName
 
@@ -1149,7 +1152,7 @@ class Window(QtGui.QMainWindow):
                 structure3d = structure3d + '0,'
 
             self.structure3DEdit.setText(structure3d)
-
+            self.structurecombo.setCurrentIndex(2)
 
 
     def readStructure(self):
