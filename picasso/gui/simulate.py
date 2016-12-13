@@ -1173,6 +1173,13 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(info[0]['Structure.StructureX'])
             self.structureyyEdit.setText(info[0]['Structure.StructureY'])
             self.structureexEdit.setText(info[0]['Structure.StructureEx'])
+            structure3d = ''
+            for i in range(0, len(self.structurexxEdit.text())):
+                structure3d = structure3d + '0,'
+
+            self.structure3DEdit.setText(structure3d)
+
+
 
     def readStructure(self):
         structurexxtxt = _np.asarray((self.structurexxEdit.text()).split(","))
