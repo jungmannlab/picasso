@@ -69,7 +69,7 @@ IMAGERC_DEFAULT = 0.003195
 EQA_DEFAULT = -0.002866
 EQB_DEFAULT = 0.259038
 EQC_DEFAULT = 13.085473
-BGOFFSET_DEFAULT = 0
+BGOFFSET_DEFAULT = 100
 BGSTDOFFSET_DEFAULT = 0
 # STRUCTURE
 STRUCTURE1_DEFAULT = 3
@@ -652,7 +652,7 @@ class Window(QtGui.QMainWindow):
             self.backgroundframeEdit.setText(str(int(bgmodel)))
             self.noiseEdit.setText(str(int(bgmodelstd)))
         else:
-            bgmodel = (LASERC_DEFAULT + IMAGERC_DEFAULT * imagerconcentration) * laserpower * itime
+            bgmodel = (LASERC_DEFAULT + IMAGERC_DEFAULT * imagerconcentration) * laserpower * itime + BGOFFSET_DEFAULT #100 for NP
             self.backgroundframesimpleEdit.setText(str(int(bgmodel)))
 
     def changeStructureType(self):
@@ -751,8 +751,8 @@ class Window(QtGui.QMainWindow):
 
             circdata = _np.arange(0, twopi, twopi / labels)
 
-            xxval = _np.round(_np.cos(circdata) * diameter * 100) / 100
-            yyval = _np.round(_np.sin(circdata) * diameter * 100) / 100
+            xxval = _np.round(_np.cos(circdata) * diameter/2 * 100) / 100
+            yyval = _np.round(_np.sin(circdata) * diameter/2 * 100) / 100
 
             structurexx = ''
             structureyy = ''
@@ -1015,6 +1015,7 @@ class Window(QtGui.QMainWindow):
             self.structurexxEdit.setText(info[0]['Structure.StructureX'])
             self.structureyyEdit.setText(info[0]['Structure.StructureY'])
             self.structureexEdit.setText(info[0]['Structure.StructureEx'])
+            self.structurecombo.setCurrentIndex(2)
 
     def readStructure(self):
         structurexxtxt = _np.asarray((self.structurexxEdit.text()).split(","))
