@@ -26,6 +26,7 @@ from PyQt4.QtCore import QDateTime, Qt
 from PyQt4.QtGui import QApplication, QDateTimeEdit, QDialog, QDialogButtonBox, QVBoxLayout
 from scipy.optimize import curve_fit
 from scipy.stats import norm
+import os.path as _ospath
 
 from .. import io as _io
 from .. import lib, simulate
@@ -548,7 +549,7 @@ class Window(QtGui.QMainWindow):
         btngridR.addWidget(simulateButton)
         btngridR.addWidget(quitButton)
 
-        simulateButton.clicked.connect(self.saveDialog)
+        simulateButton.clicked.connect(self.simulate)
 
         loadButton.clicked.connect(self.loadSettings)
 
@@ -822,222 +823,140 @@ class Window(QtGui.QMainWindow):
         x_str = ",".join(x_arrstr)
         return x_str
 
-    def simulate(self, fileNameOld):
+    def simulate(self):
 
         conrounds = self.conroundsEdit.value()
         print(conrounds)
         self.currentround += 1
 
-
-        self.statusBar().showMessage('Set round '+str(self.currentround)+' of '+str(conrounds))
-        print(self.currentround)
-        # READ IN PARAMETERS
-        # STRUCTURE
-        structureNo = self.structurenoEdit.value()
-        structureFrame = self.structureframeEdit.value()
-        structureIncorporation = self.structureIncorporationEdit.value()
-        structureArrangement = int(self.structurerandomEdit.checkState())
-        structureOrientation = int(self.structurerandomOrientationEdit.checkState())
-        structurex = self.structurexxEdit.text()
-        structurey = self.structureyyEdit.text()
-        structureextxt = self.structureexEdit.text()
-        if MODE3D:
-            structure3dtxt = self.structure3DEdit.text()
-
-        # PAINT
-        kon = self.konEdit.value()
-        imagerconcentration = self.imagerconcentrationEdit.value()
-        taub = self.taubEdit.value()
-        taud = int(self.taudEdit.text())
-
-        simple = int(self.simplePAINTEdit.checkState())
-
-        # IMAGER PARAMETERS
-        psf = self.psfEdit.value()
-        photonrate = self.photonrateEdit.value()
-        photonratestd = self.photonratestdEdit.value()
-        photonbudget = self.photonbudgetEdit.value()
-        laserpower = self.laserpowerEdit.value()
-        photonslope = self.photonslopeEdit.value()
-        photonslopeStd = photonslope / STDFACTOR
-        if ADVANCEDMODE:
-            photonslopeStd = self.photonslopeStdEdit.value()
-
-        # CAMERA PARAMETERS
-        imagesize = self.camerasizeEdit.value()
-        itime = self.integrationtimeEdit.value()
-        frames = self.framesEdit.value()
-        pixelsize = self.pixelsizeEdit.value()
-
-        # NOISE MODEL
-        if ADVANCEDMODE:
-            background = int(self.backgroundframeEdit.text())
-            noise = int(self.noiseEdit.text())
-            laserc = self.lasercEdit.value()
-            imagerc = self.imagercEdit.value()
-            bgoffset = self.BgoffsetEdit.value()
-            equationA = self.EquationAEdit.value()
-            equationB = self.EquationBEdit.value()
-            equationC = self.EquationCEdit.value()
-            bgstdoffset = self.BgStdoffsetEdit.value()
+        if self.currentround == 1:
+            fileNameOld = QtGui.QFileDialog.getSaveFileName(self, 'Save movie to..', filter='*.raw')
+            self.fileName = fileNameOld
         else:
-            background = int(self.backgroundframesimpleEdit.text())
-            noise = _np.sqrt(background)
-            laserc = LASERC_DEFAULT
-            imagerc = IMAGERC_DEFAULT
-            bgoffset = BGOFFSET_DEFAULT
-            equationA = EQA_DEFAULT
-            equationB = EQB_DEFAULT
-            equationC = EQC_DEFAULT
-            bgstdoffset = BGSTDOFFSET_DEFAULT
+            fileNameOld = self.fileName
 
-        structurexx, structureyy, structureex, structure3d = self.readStructure()
+        if fileNameOld:
 
-        self.statusBar().showMessage('Simulation started')
-        struct = self.newstruct
+            self.statusBar().showMessage('Set round '+str(self.currentround)+' of '+str(conrounds))
+            print(self.currentround)
+            # READ IN PARAMETERS
+            # STRUCTURE
+            structureNo = self.structurenoEdit.value()
+            structureFrame = self.structureframeEdit.value()
+            structureIncorporation = self.structureIncorporationEdit.value()
+            structureArrangement = int(self.structurerandomEdit.checkState())
+            structureOrientation = int(self.structurerandomOrientationEdit.checkState())
+            structurex = self.structurexxEdit.text()
+            structurey = self.structureyyEdit.text()
+            structureextxt = self.structureexEdit.text()
+            if MODE3D:
+                structure3dtxt = self.structure3DEdit.text()
 
-        handlex = self.vectorToString(struct[0, :])
-        handley = self.vectorToString(struct[1, :])
-        handleex = self.vectorToString(struct[2, :])
-        handless = self.vectorToString(struct[3, :])
-        handle3d = self.vectorToString(struct[4, :])
+            # PAINT
+            kon = self.konEdit.value()
+            imagerconcentration = self.imagerconcentrationEdit.value()
+            taub = self.taubEdit.value()
+            taud = int(self.taudEdit.text())
 
-        mode3Dstate = int(self.mode3DEdit.checkState())
+            simple = int(self.simplePAINTEdit.checkState())
 
-        exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
-        exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
+            # IMAGER PARAMETERS
+            psf = self.psfEdit.value()
+            photonrate = self.photonrateEdit.value()
+            photonratestd = self.photonratestdEdit.value()
+            photonbudget = self.photonbudgetEdit.value()
+            laserpower = self.laserpowerEdit.value()
+            photonslope = self.photonslopeEdit.value()
+            photonslopeStd = photonslope / STDFACTOR
+            if ADVANCEDMODE:
+                photonslopeStd = self.photonslopeStdEdit.value()
 
-        noexchangecolors = len(set(exchangeroundstoSim))
-        exchangecolors = list(set(exchangeroundstoSim))
+            # CAMERA PARAMETERS
+            imagesize = self.camerasizeEdit.value()
+            itime = self.integrationtimeEdit.value()
+            frames = self.framesEdit.value()
+            pixelsize = self.pixelsizeEdit.value()
 
-        t0 = time.time()
-
-        for i in range(0, noexchangecolors):
-            if noexchangecolors > 1:
-                fileName = _io.multiple_filenames(fileNameOld, i)
-                partstruct = struct[:, struct[2, :] == exchangecolors[i]]
-
+            # NOISE MODEL
+            if ADVANCEDMODE:
+                background = int(self.backgroundframeEdit.text())
+                noise = int(self.noiseEdit.text())
+                laserc = self.lasercEdit.value()
+                imagerc = self.imagercEdit.value()
+                bgoffset = self.BgoffsetEdit.value()
+                equationA = self.EquationAEdit.value()
+                equationB = self.EquationBEdit.value()
+                equationC = self.EquationCEdit.value()
+                bgstdoffset = self.BgStdoffsetEdit.value()
             else:
-                fileName = fileNameOld
-                partstruct = struct[:, struct[2, :] == exchangecolors[0]]
+                background = int(self.backgroundframesimpleEdit.text())
+                noise = _np.sqrt(background)
+                laserc = LASERC_DEFAULT
+                imagerc = IMAGERC_DEFAULT
+                bgoffset = BGOFFSET_DEFAULT
+                equationA = EQA_DEFAULT
+                equationB = EQB_DEFAULT
+                equationC = EQC_DEFAULT
+                bgstdoffset = BGSTDOFFSET_DEFAULT
 
-            self.statusBar().showMessage('Distributing photons ...')
+            structurexx, structureyy, structureex, structure3d = self.readStructure()
 
-            bindingsitesx = partstruct[0, :]
-            bindingsitesy = partstruct[1, :]
-            nosites = len(bindingsitesx)  # number of binding sites in image
-            photondist = _np.zeros((nosites, frames), dtype=_np.int)
-            spotkinetics = _np.zeros((nosites, 4), dtype=_np.float)
-            meandark = int(taud)
-            meanbright = int(taub)
+            self.statusBar().showMessage('Simulation started')
+            struct = self.newstruct
 
-            for i in range(0, nosites):
-                photondisttemp, spotkineticstemp = simulate.distphotons(partstruct, itime, frames, taud, taub, photonrate, photonratestd, photonbudget, simple)
+            handlex = self.vectorToString(struct[0, :])
+            handley = self.vectorToString(struct[1, :])
+            handleex = self.vectorToString(struct[2, :])
+            handless = self.vectorToString(struct[3, :])
+            handle3d = self.vectorToString(struct[4, :])
 
-                photondist[i, :] = photondisttemp
-                spotkinetics[i, :] = spotkineticstemp
+            mode3Dstate = int(self.mode3DEdit.checkState())
 
-                outputmsg = 'Distributing photons ... ' + str(_np.round(i/nosites*1000)/10) + ' %'
-                self.statusBar().showMessage(outputmsg)
-                self.mainpbar.setValue(_np.round(i / nosites * 1000) / 10)
+            exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
+            exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
 
-            self.statusBar().showMessage('Converting to image ... ')
-            onevents = self.vectorToString(spotkinetics[:, 0])
-            localizations = self.vectorToString(spotkinetics[:, 1])
-            meandarksim = self.vectorToString(spotkinetics[:, 2])
-            meanbrightsim = self.vectorToString(spotkinetics[:, 3])
+            noexchangecolors = len(set(exchangeroundstoSim))
+            exchangecolors = list(set(exchangeroundstoSim))
 
+            t0 = time.time()
 
+            for i in range(0, noexchangecolors):
 
-            if conrounds is not 1:
-                movie = _np.zeros(shape=(frames, imagesize, imagesize), dtype='<u2')
+                if noexchangecolors > 1:
+                    fileName = _io.multiple_filenames(fileNameOld, i)
+                    partstruct = struct[:, struct[2, :] == exchangecolors[i]]
 
-                app = QtCore.QCoreApplication.instance()
-                for runner in range(0, frames):
-                    movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate)
-                    outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) + ' %'
-
-                    self.statusBar().showMessage(outputmsg)
-                    self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
-                    app.processEvents()
-                self.statusBar().showMessage('Converting to image ... complete.')
-                if self.currentround == 1:
-                    self.movie = movie
                 else:
-                    movie = movie+self.movie
-                    self.movie = movie
+                    fileName = fileNameOld
+                    partstruct = struct[:, struct[2, :] == exchangecolors[0]]
 
-                if self.currentround == conrounds:
-                    self.statusBar().showMessage('Saving movie ...')
+                self.statusBar().showMessage('Distributing photons ...')
 
-                    info = {'Generated by': 'Picasso simulate',
-                            'Byte Order': '<',
-                            'Camera': 'Simulation',
-                            'Data Type': movie.dtype.name,
-                            'Frames': frames,
-                            'Structure.Frame': structureFrame,
-                            'Structure.Number': structureNo,
-                            'Structure.StructureX': structurex,
-                            'Structure.StructureY': structurey,
-                            'Structure.StructureEx': structureextxt,
-                            'Structure.Structure3D': structure3dtxt,
-                            'Structure.HandleX': handlex,
-                            'Structure.HandleY': handley,
-                            'Structure.HandleEx': handleex,
-                            'Structure.Handle3d': handle3d,
-                            'Structure.HandleStruct': handless,
-                            'Structure.Incorporation': structureIncorporation,
-                            'Structure.Arrangement': structureArrangement,
-                            'Structure.Orientation': structureOrientation,
-                            'Structure.3D': mode3Dstate,
-                            'PAINT.k_on': kon,
-                            'PAINT.imager': imagerconcentration,
-                            'PAINT.taub': taub,
-                            'PAINT.Independent': simple,
-                            'Imager.PSF': psf,
-                            'Imager.Photonrate': photonrate,
-                            'Imager.Photonrate Std': photonratestd,
-                            'Imager.Photonbudget': photonbudget,
-                            'Imager.Laserpower': laserpower,
-                            'Imager.Photonslope': photonslope,
-                            'Imager.PhotonslopeStd': photonslopeStd,
-                            'Camera.Image Size': imagesize,
-                            'Camera.Integration Time': itime,
-                            'Camera.Frames': frames,
-                            'Camera.Pixelsize': pixelsize,
-                            'Noise.Lasercoefficient': laserc,
-                            'Noise.Imagercoefficient': imagerc,
-                            'Noise.EquationA': equationA,
-                            'Noise.EquationB': equationB,
-                            'Noise.EquationC': equationC,
-                            'Noise.BackgroundOff': bgoffset,
-                            'Noise.BackgroundStdOff': bgstdoffset,
-                            'Spotkinetics.ON_Events': onevents,
-                            'Spotkinetics.Localizations': localizations,
-                            'Spotkinetics.MEAN_DARK': meandarksim,
-                            'Spotkinetics.MEAN_BRIGHT': meanbrightsim,
-                            'Height': imagesize,
-                            'Width': imagesize}
+                bindingsitesx = partstruct[0, :]
+                bindingsitesy = partstruct[1, :]
+                nosites = len(bindingsitesx)  # number of binding sites in image
+                photondist = _np.zeros((nosites, frames), dtype=_np.int)
+                spotkinetics = _np.zeros((nosites, 4), dtype=_np.float)
+                meandark = int(taud)
+                meanbright = int(taub)
 
-                    simulate.saveMovie(fileName, movie, info)
-                    self.statusBar().showMessage('Movie saved to: ' + fileName)
-                    dt = time.time() - t0
-                    self.statusBar().showMessage('All computations finished. Last file saved to: ' + fileName + '. Time elapsed: {:.2f} Seconds.'.format(dt))
-                    self.currentround = 0
-            else:
-                movie = _np.zeros(shape=(frames, imagesize, imagesize), dtype='<u2')
+                for i in range(0, nosites):
+                    photondisttemp, spotkineticstemp = simulate.distphotons(partstruct, itime, frames, taud, taub, photonrate, photonratestd, photonbudget, simple)
 
-                app = QtCore.QCoreApplication.instance()
-                for runner in range(0, frames):
-                    movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate)
-                    outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) + ' %'
+                    photondist[i, :] = photondisttemp
+                    spotkinetics[i, :] = spotkineticstemp
 
+                    outputmsg = 'Distributing photons ... ' + str(_np.round(i/nosites*1000)/10) + ' %'
                     self.statusBar().showMessage(outputmsg)
-                    self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
-                    app.processEvents()
+                    self.mainpbar.setValue(_np.round(i / nosites * 1000) / 10)
 
-                self.statusBar().showMessage('Converting to image ... complete.')
-                self.statusBar().showMessage('Saving movie ...')
+                self.statusBar().showMessage('Converting to image ... ')
+                onevents = self.vectorToString(spotkinetics[:, 0])
+                localizations = self.vectorToString(spotkinetics[:, 1])
+                meandarksim = self.vectorToString(spotkinetics[:, 2])
+                meanbrightsim = self.vectorToString(spotkinetics[:, 3])
+
+                movie = _np.zeros(shape=(frames, imagesize, imagesize), dtype='<u2')
 
                 info = {'Generated by': 'Picasso simulate',
                         'Byte Order': '<',
@@ -1088,10 +1007,62 @@ class Window(QtGui.QMainWindow):
                         'Height': imagesize,
                         'Width': imagesize}
 
-                simulate.saveMovie(fileName, movie, info)
-                self.statusBar().showMessage('Movie saved to: ' + fileName)
-                dt = time.time() - t0
-                self.statusBar().showMessage('All computations finished. Last file saved to: ' + fileName + '. Time elapsed: {:.2f} Seconds.'.format(dt))
+
+
+                if conrounds is not 1:
+
+
+                    app = QtCore.QCoreApplication.instance()
+                    for runner in range(0, frames):
+                        movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate)
+                        outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) + ' %'
+
+                        self.statusBar().showMessage(outputmsg)
+                        self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
+                        app.processEvents()
+
+
+                    if self.currentround == 1:
+                        self.movie = movie
+                    else:
+                        movie = movie+self.movie
+                        self.movie = movie
+
+                    self.statusBar().showMessage('Converting to image ... complete. Current round: '+str(self.currentround)+' of '+str(conrounds)+'. Please set and start next round.')
+                    if self.currentround == conrounds:
+                        self.statusBar().showMessage('Saving movie ...')
+
+                        simulate.saveMovie(fileName, movie, info)
+                        self.statusBar().showMessage('Movie saved to: ' + fileName)
+                        dt = time.time() - t0
+                        self.statusBar().showMessage('All computations finished. Last file saved to: ' + fileName + '. Time elapsed: {:.2f} Seconds.'.format(dt))
+                        self.currentround = 0
+                    else: # just save info file
+                        #self.statusBar().showMessage('Saving yaml ...')
+                        info_path = _ospath.splitext(fileName)[0] + '_'+ str(self.currentround) + '.yaml'
+                        _io.save_info(info_path, [info])
+
+
+                else:
+
+
+                    app = QtCore.QCoreApplication.instance()
+                    for runner in range(0, frames):
+                        movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate)
+                        outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) + ' %'
+
+                        self.statusBar().showMessage(outputmsg)
+                        self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
+                        app.processEvents()
+
+                    self.statusBar().showMessage('Converting to image ... complete.')
+                    self.statusBar().showMessage('Saving movie ...')
+
+                    simulate.saveMovie(fileName, movie, info)
+                    self.statusBar().showMessage('Movie saved to: ' + fileName)
+                    dt = time.time() - t0
+                    self.statusBar().showMessage('All computations finished. Last file saved to: ' + fileName + '. Time elapsed: {:.2f} Seconds.'.format(dt))
+                    self.currentround = 0
 
 
     def loadSettings(self):
@@ -1406,10 +1377,6 @@ class Window(QtGui.QMainWindow):
             print(path)
             self.statusBar().showMessage('File loaded from: ' + path)
 
-    def saveDialog(self):
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save movie to..', filter='*.raw')
-        if path:
-            self.simulate(path)
 
     def importhdf5(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open localizations', filter='*.hdf5')
