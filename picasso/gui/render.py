@@ -805,6 +805,7 @@ class View(QtGui.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
+            pathlist.append('Save all at once')
             pathlist.append('Combine all channels')
             index, ok = QtGui.QInputDialog.getItem(self, 'Save localizations', 'Channel:', pathlist, editable=False)
             if ok:
@@ -1653,14 +1654,22 @@ class Window(QtGui.QMainWindow):
 
     def save_picked_locs(self):
         channel = self.view.get_channel('Save picked localizations')
+
         if channel is not None:
-            if channel is (len(self.view.locs_paths)):
+            if channel is (len(self.view.locs_paths)+1):
                 print('Multichannel')
-                base, ext = os.path.splitext(self.view.locs_paths[channel-1])
+                base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + '_picked_multi.hdf5'
                 path = QtGui.QFileDialog.getSaveFileName(self, 'Save picked localizations', out_path, filter='*.hdf5')
                 if path:
                     self.view.save_picked_locs_multi(path)
+            elif channel is (len(self.view.locs_paths)):
+                print('Save all at once')
+                for i in range(len(self.view.locs_paths)):
+                    channel = i
+                    base, ext = os.path.splitext(self.view.locs_paths[channel])
+                    out_path = base + '_picked.hdf5'
+                    self.view.save_picked_locs(out_path, channel)
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + '_picked.hdf5'
