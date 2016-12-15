@@ -20,6 +20,7 @@ import numpy as np
 import yaml
 from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
                                                 NavigationToolbar2QT)
+from mpl_toolkits.mplot3d import Axes3D
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
 
@@ -949,6 +950,32 @@ class View(QtGui.QLabel):
         viewport = [(y_min, x_min), (y_max, x_max)]
         self.update_scene(viewport)
 
+
+
+    def plot3d(self):
+        print('Plot3d')
+        channel = self.get_channel('Undrift from picked')
+        if channel is not None:
+            locs = self.picked_locs(channel)
+            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+            fig = plt.figure()
+            ax = fig.add_subplot(111, projection='3d')
+            ax.set_title('3d view of pick')
+            colors = locs['z'][:]
+            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+            ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+            ax.set_xlabel('X [Px]')
+            ax.set_ylabel('Y [Px]')
+            ax.set_zlabel('Z [nm]')
+            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            plt.show()
+
+
+
+
     def rmsd_at_com(self, locs):
         com_x = locs.x.mean()
         com_y = locs.y.mean()
@@ -1554,6 +1581,10 @@ class Window(QtGui.QMainWindow):
         tools_settings_action.setShortcut('Ctrl+T')
         tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
         postprocess_menu = self.menu_bar.addMenu('Postprocess')
+        threed_menu = self.menu_bar.addMenu('3D Tools')
+        plotpick3d_action = threed_menu.addAction('Plot pick 3D')
+        plotpick3d_action.triggered.connect(self.view.plot3d)
+        plotpick3d_action.setShortcut('Ctrl+3')
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
         undrift_action.setShortcut('Ctrl+U')
         undrift_action.triggered.connect(self.view.undrift)
