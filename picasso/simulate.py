@@ -49,10 +49,13 @@ def noisy(image, mu, sigma):  # Add gaussian noise to an image.
     return noisy
 
 
-def noisy_p(image, mu):  # Add poissonian noise to an image
+def noisy_p(image, mu):  # Add poissonian noise to an image or movie
     poiss = _np.random.poisson(mu, image.shape).astype(float)
     noisy = image + poiss
+    noisy[noisy > 2**16-1] = 2**16-1
+    noisy = _np.round(noisy).astype('<u2')
     return noisy
+
 
 
 # Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
@@ -161,7 +164,6 @@ def distphotons(structures, itime, frames, taud, taub, photonrate, photonratestd
     nosites = len(bindingsitesx)  # number of binding sites in image
 
     # PHOTONDIST: DISTRIBUTE PHOTONS FOR ALL BINDING SITES
-
     photonposall = _np.zeros((2, 0))
     photonposall = [1, 1]
 
@@ -239,7 +241,6 @@ def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonr
     # ALL PHOTONS FOR 1 STRUCTURE IN ALL FRAMES
 
     # ALLCOATE MEMORY
-    movie = _np.zeros(shape=(frames, pixels, pixels), dtype='<u2')
 
     flag = 0
     photonposframe = _np.zeros((2, 0))
@@ -271,12 +272,8 @@ def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonr
         yy = photonposframe[:, 1]
         simframe, xedges, yedges = _np.histogram2d(yy, xx, bins=(edges, edges))
         simframe = _np.flipud(simframe)  # to be consistent with render
-    #simframenoise = noisy(simframe,background,noise)
-    simframenoise = noisy_p(simframe, background)
-    simframenoise[simframenoise > 2**16-1] = 2**16-1
-    simframeout = _np.round(simframenoise).astype('<u2')
 
-    return simframeout
+    return simframe
 
 
 def saveMovie(filename, movie, info):

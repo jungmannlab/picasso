@@ -540,17 +540,21 @@ class Window(QtGui.QMainWindow):
 
         btngridR = QtGui.QGridLayout()
 
-        btngridR.addWidget(loadButton)
+        self.concatExchangeEdit = QtGui.QCheckBox()
 
-        btngridR.addWidget(QtGui.QLabel('Exchange rounds to be simulated:'))
-        btngridR.addWidget(self.exchangeroundsEdit)
-        btngridR.addWidget(QtGui.QLabel('Concatenate several rounds:'))
-        btngridR.addWidget(self.conroundsEdit)
-        btngridR.addWidget(simulateButton)
-        btngridR.addWidget(quitButton)
+        btngridR.addWidget(loadButton,0,0,1,2)
+        btngridR.addWidget(QtGui.QLabel('Exchange rounds to be simulated:'),1,0)
+        btngridR.addWidget(self.exchangeroundsEdit,1,1)
+        btngridR.addWidget(QtGui.QLabel('Concatenate several rounds:'),2,0)
+        btngridR.addWidget(self.conroundsEdit,2,1)
+        btngridR.addWidget(QtGui.QLabel('Concatenate Exchange'))
+        btngridR.addWidget(self.concatExchangeEdit,3,1)
+        btngridR.addWidget(simulateButton,4,0,1,2)
+        btngridR.addWidget(quitButton,5,0,1,2)
+
+
 
         simulateButton.clicked.connect(self.simulate)
-
         loadButton.clicked.connect(self.loadSettings)
 
         self.show()
@@ -824,8 +828,17 @@ class Window(QtGui.QMainWindow):
         return x_str
 
     def simulate(self):
+        exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
+        exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
 
-        conrounds = self.conroundsEdit.value()
+        noexchangecolors = len(set(exchangeroundstoSim))
+        exchangecolors = list(set(exchangeroundstoSim))
+
+        if self.concatExchangeEdit.checkState(): #If exchange rounds shall be considered as rounds to be concatenated the number of conrounds is equel to the exchangerounds
+            conrounds = noexchangecolors
+        else:
+            conrounds = self.conroundsEdit.value()
+
         print(conrounds)
         self.currentround += 1
 
@@ -915,20 +928,19 @@ class Window(QtGui.QMainWindow):
 
             mode3Dstate = int(self.mode3DEdit.checkState())
 
-            exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
-            exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
-
-            noexchangecolors = len(set(exchangeroundstoSim))
-            exchangecolors = list(set(exchangeroundstoSim))
-
             t0 = time.time()
+
+            if self.concatExchangeEdit.checkState():
+                noexchangecolors = 1 #Overwrite the number to not trigger the for loop
 
             for i in range(0, noexchangecolors):
 
                 if noexchangecolors > 1:
                     fileName = _io.multiple_filenames(fileNameOld, i)
                     partstruct = struct[:, struct[2, :] == exchangecolors[i]]
-
+                elif self.concatExchangeEdit.checkState():
+                    fileName = fileNameOld
+                    partstruct = struct[:, struct[2, :] == exchangecolors[self.currentround-1]]
                 else:
                     fileName = fileNameOld
                     partstruct = struct[:, struct[2, :] == exchangecolors[0]]
@@ -1013,8 +1025,6 @@ class Window(QtGui.QMainWindow):
 
 
                 if conrounds is not 1:
-
-
                     app = QtCore.QCoreApplication.instance()
                     for runner in range(0, frames):
                         movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate)
@@ -1024,7 +1034,6 @@ class Window(QtGui.QMainWindow):
                         self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
                         app.processEvents()
 
-
                     if self.currentround == 1:
                         self.movie = movie
                     else:
@@ -1033,6 +1042,8 @@ class Window(QtGui.QMainWindow):
 
                     self.statusBar().showMessage('Converting to image ... complete. Current round: '+str(self.currentround)+' of '+str(conrounds)+'. Please set and start next round.')
                     if self.currentround == conrounds:
+                        self.statusBar().showMessage('Adding noise to movie ...')
+                        movie = simulate.noisy_p(movie,background)
                         self.statusBar().showMessage('Saving movie ...')
 
                         simulate.saveMovie(fileName, movie, info)
@@ -1057,7 +1068,7 @@ class Window(QtGui.QMainWindow):
                         self.statusBar().showMessage(outputmsg)
                         self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
                         app.processEvents()
-
+                    movie = simulate.noisy_p(movie,background)
                     self.statusBar().showMessage('Converting to image ... complete.')
                     self.statusBar().showMessage('Saving movie ...')
 
