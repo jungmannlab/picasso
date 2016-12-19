@@ -59,38 +59,13 @@ def noisy_p(image, mu):  # Add poissonian noise to an image or movie
 
 
 # Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
-def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget, simple):
+def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget):
     meanlocs = 4*int(_np.ceil(frames*time/(meandark+meanbright)))  # This is an estimate for the total number of binding events
     if meanlocs < 10:
         meanlocs = meanlocs*10
 
-    if simple:
-        dark_times = _np.random.exponential(meandark, meanlocs)
-        bright_times = _np.random.exponential(meanbright, meanlocs)
-    else:
-        # Generate a pool of dark and brighttimes
-        dark_times_pool = _np.random.exponential(meandark, meanlocs)
-        bright_times_pool = _np.random.exponential(meanbright, meanlocs)
-
-        darksum = _np.cumsum(dark_times_pool)
-        maxlocdark = _np.argmax(darksum > (frames*time))+1
-
-        # Simulate binding and unbinding and consider blocked binding sites
-        dark_times = _np.zeros(maxlocdark)
-        bright_times = _np.zeros(maxlocdark)
-
-        dark_times[0] = dark_times_pool[0]
-        bright_times[0] = bright_times_pool[0]
-
-        for i in range(1, maxlocdark):
-            bright_times[i] = bright_times_pool[i]
-
-            dark_time_temp = dark_times_pool[i]-bright_times_pool[i]
-            while dark_time_temp < 0:
-                _np.delete(dark_times_pool, i)
-                dark_time_temp += dark_times_pool[i]
-
-            dark_times[i] = dark_time_temp
+    dark_times = _np.random.exponential(meandark, meanlocs)
+    bright_times = _np.random.exponential(meanbright, meanlocs)
 
     events = _np.vstack((dark_times, bright_times)).reshape((-1,), order='F')  # Interweave dark_times and bright_times [dt,bt,dt,bt..]
     simulatedmeandark = _np.mean(events[::2])

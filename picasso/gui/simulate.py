@@ -165,7 +165,7 @@ class Window(QtGui.QMainWindow):
         taub = QtGui.QLabel('Bright time')
 
         self.konEdit = QtGui.QDoubleSpinBox()
-        self.konEdit.setRange(1, 10000000)
+        self.konEdit.setRange(1, 10000000000)
         self.konEdit.setDecimals(0)
         self.konEdit.setSingleStep(100000)
         self.imagerconcentrationEdit = QtGui.QDoubleSpinBox()
@@ -175,7 +175,6 @@ class Window(QtGui.QMainWindow):
         self.taubEdit.setRange(1, 10000)
         self.taubEdit.setDecimals(0)
         self.taubEdit.setSingleStep(10)
-        self.simplePAINTEdit = QtGui.QCheckBox()
 
         self.konEdit.setValue(KON_DEFAULT)
         self.imagerconcentrationEdit.setValue(IMAGERCONCENTRATION_DEFAULT)
@@ -196,8 +195,6 @@ class Window(QtGui.QMainWindow):
         pgrid.addWidget(taub, 4, 0)
         pgrid.addWidget(self.taubEdit, 4, 1)
         pgrid.addWidget(QtGui.QLabel('ms'), 4, 2)
-        pgrid.addWidget(QtGui.QLabel('Independent dark times'), 5, 0)
-        pgrid.addWidget(self.simplePAINTEdit, 5, 1)
         pgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         # IMAGER Parameters
@@ -874,8 +871,6 @@ class Window(QtGui.QMainWindow):
             taub = self.taubEdit.value()
             taud = int(self.taudEdit.text())
 
-            simple = int(self.simplePAINTEdit.checkState())
-
             # IMAGER PARAMETERS
             psf = self.psfEdit.value()
             photonrate = self.photonrateEdit.value()
@@ -956,7 +951,7 @@ class Window(QtGui.QMainWindow):
                 meanbright = int(taub)
 
                 for i in range(0, nosites):
-                    photondisttemp, spotkineticstemp = simulate.distphotons(partstruct, itime, frames, taud, taub, photonrate, photonratestd, photonbudget, simple)
+                    photondisttemp, spotkineticstemp = simulate.distphotons(partstruct, itime, frames, taud, taub, photonrate, photonratestd, photonbudget)
 
                     photondist[i, :] = photondisttemp
                     spotkinetics[i, :] = spotkineticstemp
@@ -996,7 +991,6 @@ class Window(QtGui.QMainWindow):
                         'PAINT.k_on': kon,
                         'PAINT.imager': imagerconcentration,
                         'PAINT.taub': taub,
-                        'PAINT.Independent': simple,
                         'Imager.PSF': psf,
                         'Imager.Photonrate': photonrate,
                         'Imager.Photonrate Std': photonratestd,
@@ -1103,10 +1097,6 @@ class Window(QtGui.QMainWindow):
             self.konEdit.setValue(info[0]['PAINT.k_on'])
             self.imagerconcentrationEdit.setValue(info[0]['PAINT.imager'])
             self.taubEdit.setValue(info[0]['PAINT.taub'])
-            try:
-                self.simplePAINTEdit.setCheckState(info[0]['PAINT.Independent'])
-            except:
-                pass
 
             self.psfEdit.setValue(info[0]['Imager.PSF'])
             self.photonrateEdit.setValue(info[0]['Imager.Photonrate'])
