@@ -156,7 +156,7 @@ class Window(QtGui.QMainWindow):
         taub = QtGui.QLabel('Bright time')
 
         self.konEdit = QtGui.QDoubleSpinBox()
-        self.konEdit.setRange(1, 10000000)
+        self.konEdit.setRange(1, 10000000000)
         self.konEdit.setDecimals(0)
         self.konEdit.setSingleStep(100000)
         self.imagerconcentrationEdit = QtGui.QDoubleSpinBox()
