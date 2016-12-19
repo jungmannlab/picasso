@@ -128,7 +128,7 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
     return photonsinframe, timetrace, spotkinetics
 
 
-def distphotons(structures, itime, frames, taud, taub, photonrate, photonratestd, photonbudget, simple):
+def distphotons(structures, itime, frames, taud, taub, photonrate, photonratestd, photonbudget):
 
     time = itime
     meandark = int(taud)
@@ -142,7 +142,7 @@ def distphotons(structures, itime, frames, taud, taub, photonrate, photonratestd
     photonposall = _np.zeros((2, 0))
     photonposall = [1, 1]
 
-    photonsinframe, timetrace, spotkinetics = paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget, simple)
+    photonsinframe, timetrace, spotkinetics = paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget)
 
     return photonsinframe, spotkinetics
 
