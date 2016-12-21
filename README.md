@@ -2,7 +2,7 @@
 A collection of tools for painting super-resolution images
 
 ## Installation
-Download and run the installer file from [http://picasso.jungmannlab.org/](http://picasso.jungmannlab.org/).
+Download and run the installer file from [http://www.jungmannlab.org/](http://www.jungmannlab.org).
 
 ### Advanced installation for Python programmers
 As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso's internal routines in custom Python programs. At the same time, it is still possible to use Picasso as an end-user by creating the respective Windows shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
