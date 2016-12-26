@@ -68,10 +68,14 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
     bright_times = _np.random.exponential(meanbright, meanlocs)
 
     events = _np.vstack((dark_times, bright_times)).reshape((-1,), order='F')  # Interweave dark_times and bright_times [dt,bt,dt,bt..]
-    simulatedmeandark = _np.mean(events[::2])
-    simulatedmeanbright = _np.mean(events[1::2])
     eventsum = _np.cumsum(events)
     maxloc = _np.argmax(eventsum > (frames*time))  # Find the first event that exceeds the total integration time
+    simulatedmeandark = _np.mean(events[:maxloc:2])
+    print('Dark')
+    print(events[:maxloc:2])
+    simulatedmeanbright = _np.mean(events[1:maxloc:2])
+    print('Bright')
+    print(events[1:maxloc:2])
     # CHECK Trace
     if _np.mod(maxloc, 2):  # uneven -> ends with an OFF-event
         onevents = int(_np.floor(maxloc/2))
