@@ -5,6 +5,7 @@
     Graphical user interface for averaging particles
 
     :author: Joerg Schnitzbauer, 2015
+    :author 3d averaging: Maximilian Strauss, 2016
     :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 import functools
@@ -21,7 +22,11 @@ import numpy as np
 import scipy
 from PyQt4 import QtCore, QtGui
 
+from mpl_toolkits.mplot3d import Axes3D
+from numpy.lib.recfunctions import stack_arrays
+
 from .. import io, lib, render
+
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -201,6 +206,7 @@ class View(QtGui.QLabel):
         groups = np.unique(self.locs.group)
         n_groups = len(groups)
         n_locs = len(self.locs)
+        has_z = hasattr(self.locs[0], 'z')
         self.group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
         progress = lib.ProgressDialog('Creating group index', 0, len(groups), self)
         progress.set_value(0)
@@ -214,9 +220,17 @@ class View(QtGui.QLabel):
             index = self.group_index[i, :].nonzero()[1]
             self.locs.x[index] -= np.mean(self.locs.x[index])
             self.locs.y[index] -= np.mean(self.locs.y[index])
+            if has_z:
+                self.locs.z[index] -= np.mean(self.locs.z[index])
             progress.set_value(i+1)
         self.r = 2 * np.sqrt(np.mean(self.locs.x**2 + self.locs.y**2))
+        if has_z:
+            self.plot3d()
+            print('3D mode activated')
+
         self.update_image()
+
+
         status = lib.StatusDialog('Starting parallel pool...', self.window)
         global pool, x, y
         try:
@@ -271,6 +285,54 @@ class View(QtGui.QLabel):
         t_max = self.r
         N_avg, image_avg = render.render_hist(self.locs, oversampling, t_min, t_min, t_max, t_max)
         self.set_image(image_avg)
+        has_z = hasattr(self.locs[0], 'z')
+        if has_z:
+            print('Updating..')
+            self.update3dplot()
+
+    def plot3d(self):
+        locs = self.locs
+        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+        fig = plt.figure()
+        self.fig = fig
+        print(fig)
+        fig.canvas.set_window_title('3D - Average')
+        ax = fig.add_subplot(111, projection='3d')
+        self.ax = ax
+        ax.set_title('3D Average')
+        colors = locs['z'][:]
+        colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+        colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+        ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+        ax.set_xlabel('X [Px]')
+        ax.set_ylabel('Y [Px]')
+        ax.set_zlabel('Z [nm]')
+        ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+        ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+        ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+        plt.show()
+
+    def update3dplot(self):
+        locs = self.locs
+        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+        fig = self.fig
+        ax = self.ax
+        ax.cla()
+        ax.set_title('3D Average')
+        colors = locs['z'][:]
+        colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+        colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+        ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+        ax.set_xlabel('X [Px]')
+        ax.set_ylabel('Y [Px]')
+        ax.set_zlabel('Z [nm]')
+        ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+        ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+        ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+        fig.canvas.draw()
+        plt.axis('equal')
+        #plt.show()
+
 
 
 class Window(QtGui.QMainWindow):
