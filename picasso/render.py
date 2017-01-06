@@ -57,6 +57,15 @@ def _fill(image, x, y):
     for i, j in zip(x, y):
         image[j, i] += 1
 
+@_numba.jit(nopython=True, nogil=True)
+def _fill3d(image, x, y, z):
+    x = x.astype(_np.int32)
+    y = y.astype(_np.int32)
+    z = z.astype(_np.int32)
+    for i, j, k in zip(x, y, z):
+        image[j, i, k] += 1
+    return image
+
 
 @_numba.jit(nopython=True, nogil=True)
 def render_hist(locs, oversampling, y_min, x_min, y_max, x_max):

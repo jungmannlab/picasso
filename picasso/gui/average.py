@@ -41,11 +41,43 @@ def render_hist(x, y, oversampling, t_min, t_max):
     render._fill(image, x, y)
     return len(x), image
 
+@numba.jit(nopython=True, nogil=True)
+def render_hist3d(x, y, z, oversampling, t_min, t_max):
+    n_pixel = int(np.ceil(oversampling * (t_max - t_min)))
+    in_view = (x > t_min) & (y > t_min) & (x < t_max) & (y < t_max)
+    x = x[in_view]
+    y = y[in_view]
+    z = z[in_view]
+    x = oversampling * (x - t_min)
+    y = oversampling * (y - t_min)
+    #Attention: z is in nm, while x and y is in pixels
+    image = np.zeros((n_pixel, n_pixel, n_pixel), dtype=np.float32)
+    render._fill3d(image, x, y, z)
+    return len(x), image
+
+
 
 def compute_xcorr(CF_image_avg, image):
     F_image = np.fft.fft2(image)
     xcorr = np.fft.fftshift(np.real(np.fft.ifft2((F_image * CF_image_avg))))
     return xcorr
+
+
+def compute_xcorr3(T,A):
+    intImgA = integralImage(A,T.shape)
+    intImgA2 = integralImage(np.multiply(A,A),T.shape)
+
+    rotT = np.flipud(np.fliplr(T[:,:,::-1]))
+    fftRotT  = np.fft.fftn(rotT,intImgA.shape)
+    fftA = np.fft.fftn(A,intImgA.shape)
+
+    C = np.real(np.fft.ifftn(np.multiply(fftA,fftRotT)))
+
+    shiftco = (np.subtract(np.subtract(A.shape,1),(np.unravel_index(C.argmax(),C.shape))))
+    shiftco = [shiftco[1],shiftco[0],shiftco[2]]
+    maxval = C.argmax()
+
+    return shiftco, maxval
 
 
 def align_group(angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group):
@@ -77,6 +109,37 @@ def align_group(angles, oversampling, t_min, t_max, CF_image_avg, image_half, co
     x[index] = np.cos(rot) * x_original - np.sin(rot) * y_original - dx
     y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
 
+def align_group3d(angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group):
+    #with lock:
+        #counter.value += 1
+    index = group_index[group].nonzero()[1]
+    x_rot = x[index]
+    y_rot = y[index]
+    z_rot = z[index]
+    x_original = x_rot.copy()
+    y_original = y_rot.copy()
+    z_original = z.rot.copy()
+
+    # CALCULATE A DIRECTION parameter to see how the average structure is algined in 3d space
+    xcorr_max = 0.0
+    for angle in angles:
+        # rotate locs
+        x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
+        y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
+        # render group image
+        N, image = render_hist(x_rot, y_rot, oversampling, t_min, t_max)
+        # calculate cross-correlation
+        shiftco, maxval = compute_xcorr3d(CF_image_avg, image)
+        # store the transformation if the correlation is larger than before
+        if maxval > xcorr_max:
+            xcorr_max = maxval
+            rot = angle
+            dy = shiftco[1]
+            dx = shiftco[0]
+
+    x[index] = np.cos(rot) * x_original - np.sin(rot) * y_original - dx
+    y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
+    #z[index] =z_original +shiftco[2]
 
 def init_pool(x_, y_, group_index_):
     global x, y, group_index
@@ -126,6 +189,21 @@ class Worker(QtCore.QThread):
             self.locs.x -= np.mean(self.locs.x)
             self.locs.y -= np.mean(self.locs.y)
             self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, True)
+            has_z = hasattr(self.locs[0], 'z')
+            if result.ready():
+                print('3d Align')
+                if has_z:
+                    fc = functools.partial(align_group3d, angles, self.oversampling, self.t_min, self.t_max, CF_image_avg, image_half, counter, lock)
+                    result = pool.map_async(fc, range(n_groups), groups_per_worker)
+                    while not result.ready():
+                        self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, False)
+                        time.sleep(0.5)
+                    self.locs.x = np.ctypeslib.as_array(x)
+                    self.locs.y = np.ctypeslib.as_array(y)
+                    self.locs.x -= np.mean(self.locs.x)
+                    self.locs.y -= np.mean(self.locs.y)
+                    self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, True)
+
 
 
 class ParametersDialog(QtGui.QDialog):
