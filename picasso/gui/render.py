@@ -441,7 +441,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.minimum.setRange(0, 999999)
         self.minimum.setSingleStep(5)
         self.minimum.setValue(0)
-        self.minimum.setDecimals(3)
+        self.minimum.setDecimals(5)
         self.minimum.setKeyboardTracking(False)
         self.minimum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.minimum, 0, 1)
@@ -451,7 +451,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.maximum.setRange(0, 999999)
         self.maximum.setSingleStep(5)
         self.maximum.setValue(100)
-        self.maximum.setDecimals(3)
+        self.maximum.setDecimals(5)
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
@@ -1648,6 +1648,8 @@ class Window(QtGui.QMainWindow):
         apply_action = postprocess_menu.addAction('Apply expression to localizations')
         apply_action.setShortcut('Ctrl+A')
         apply_action.triggered.connect(self.open_apply_dialog)
+        group_action = postprocess_menu.addAction('Remove group info')
+        group_action.triggered.connect(self.remove_group)
         self.load_user_settings()
 
     def closeEvent(self, event):
@@ -1711,6 +1713,20 @@ class Window(QtGui.QMainWindow):
 
     def resizeEvent(self, event):
         self.update_info()
+
+    def remove_group(self):
+        print('Removing groups')
+        name = 'group'
+        names = list(self.view.locs[0].dtype.names)
+        if name in names:
+            names.remove(name)
+        locs = []
+        locs.append(self.view.locs[0][names])
+        self.view.locs = locs
+        self.view.update_scene
+        print('Groups removed')
+
+
 
     def save_pick_properties(self):
         channel = self.view.get_channel('Save localizations')
