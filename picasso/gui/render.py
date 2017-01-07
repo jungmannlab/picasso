@@ -16,6 +16,7 @@ from math import ceil
 import lmfit
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.widgets import Button
 import numpy as np
 import yaml
 from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
@@ -210,7 +211,6 @@ class LinkDialog(QtGui.QDialog):
         dialog = LinkDialog(parent)
         result = dialog.exec_()
         return (dialog.max_distance.value(), dialog.max_dark_time.value(), result == QtGui.QDialog.Accepted)
-
 
 class InfoDialog(QtGui.QDialog):
 
@@ -441,7 +441,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.minimum.setRange(0, 999999)
         self.minimum.setSingleStep(5)
         self.minimum.setValue(0)
-        self.minimum.setDecimals(5)
+        self.minimum.setDecimals(6)
         self.minimum.setKeyboardTracking(False)
         self.minimum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.minimum, 0, 1)
@@ -451,7 +451,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.maximum.setRange(0, 999999)
         self.maximum.setSingleStep(5)
         self.maximum.setValue(100)
-        self.maximum.setDecimals(5)
+        self.maximum.setDecimals(6)
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
@@ -674,7 +674,10 @@ class View(QtGui.QLabel):
             progress.set_value(0)
             for i, pick_locs in enumerate(picked_locs):
                 pick_locs_out = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark, remove_ambiguous_lengths=False)
-                out_locs.append(pick_locs_out)
+                if not pick_locs_out:
+                    print('skip')
+                else:
+                    out_locs.append(pick_locs_out)
                 progress.set_value(i+1)
             self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
             self.update_scene()
@@ -987,6 +990,7 @@ class View(QtGui.QLabel):
             ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
             plt.show()
 
+
     def show_trace(self):
         print('Show trace')
         channel = self.get_channel('Undrift from picked')
@@ -1019,7 +1023,32 @@ class View(QtGui.QLabel):
             plt.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
             plt.show()
 
-
+        def show_pick(self):
+        print('Show pick')
+        channel = self.get_channel('Pick similar')
+        if channel is not None:
+            locs = self.locs[channel]
+            info = self.infos[channel]
+            d = self.window.tools_settings_dialog.pick_diameter.value()
+            r = d / 2
+            std_range = self.window.tools_settings_dialog.pick_similar_range.value()
+            index_blocks = self.get_index_blocks(channel)
+            n_locs = []
+            rmsd = []
+            for i, pick in enumerate(self._picks):
+                x, y = pick
+                block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+                pick_locs = lib.locs_at(x, y, block_locs, r)
+                locs = stack_arrays(pick_locs, asrecarray=True, usemask=False)
+                fig = plt.figure()
+                fig.canvas.set_window_title('Scatterplot of Pick')
+                ax = fig.add_subplot(111)
+                ax.set_title('Scatterplot of Pick ')
+                ax.scatter(locs['x'], locs['y'])
+                ax.set_xlabel('X [Px]')
+                ax.set_ylabel('Y [Px]')
+                plt.axis('equal')
+                plt.show()
 
 
 
@@ -1633,6 +1662,8 @@ class Window(QtGui.QMainWindow):
         plotpick3d_action = tools_menu.addAction('Plot pick 3D')
         plotpick3d_action.triggered.connect(self.view.plot3d)
         plotpick3d_action.setShortcut('Ctrl+3')
+        plotpick_action = tools_menu.addAction('Plot picks')
+        plotpick_action.triggered.connect(self.view.show_pick)
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
         undrift_action.setShortcut('Ctrl+U')
         undrift_action.triggered.connect(self.view.undrift)
