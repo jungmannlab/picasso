@@ -365,7 +365,6 @@ class InfoDialog(QtGui.QDialog):
         plt.legend(loc='best')
         plt.show()
 
-
 class ToolsSettingsDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -1023,7 +1022,7 @@ class View(QtGui.QLabel):
             plt.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
             plt.show()
 
-        def show_pick(self):
+    def show_pick(self):
         print('Show pick')
         channel = self.get_channel('Pick similar')
         if channel is not None:
@@ -1035,20 +1034,35 @@ class View(QtGui.QLabel):
             index_blocks = self.get_index_blocks(channel)
             n_locs = []
             rmsd = []
-            for i, pick in enumerate(self._picks):
-                x, y = pick
-                block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
-                pick_locs = lib.locs_at(x, y, block_locs, r)
-                locs = stack_arrays(pick_locs, asrecarray=True, usemask=False)
-                fig = plt.figure()
-                fig.canvas.set_window_title('Scatterplot of Pick')
-                ax = fig.add_subplot(111)
-                ax.set_title('Scatterplot of Pick ')
-                ax.scatter(locs['x'], locs['y'])
-                ax.set_xlabel('X [Px]')
-                ax.set_ylabel('Y [Px]')
-                plt.axis('equal')
-                plt.show()
+            if self._picks:
+                removelist = []
+                for i, pick in enumerate(self._picks):
+                    pickindex = 0
+                    x, y = pick
+                    block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+                    pick_locs = lib.locs_at(x, y, block_locs, r)
+                    locs = stack_arrays(pick_locs, asrecarray=True, usemask=False)
+                    fig = plt.figure()
+                    fig.canvas.set_window_title('Scatterplot of Pick')
+                    ax = fig.add_subplot(111)
+                    ax.set_title('Scatterplot of Pick ')
+                    ax.scatter(locs['x'], locs['y'])
+                    ax.set_xlabel('X [Px]')
+                    ax.set_ylabel('Y [Px]')
+                    plt.axis('equal')
+                    plt.show()
+                    segmentation, ok = QtGui.QInputDialog.getInt(self, 'Use Pick?', 'No:', i)
+
+                    if ok:
+                        print('Accepted')
+                        plt.close()
+                    else:
+                        print('Discard')
+                        removelist.append(pick)
+                        plt.close()
+                for pick in removelist:
+                    self._picks.remove(pick)
+                self.update_scene()
 
 
 
