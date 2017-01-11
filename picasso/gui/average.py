@@ -87,8 +87,9 @@ def compute_xcorr3(T,A):
     shiftco = (np.subtract(np.subtract(A.shape,1),(np.unravel_index(C.argmax(),C.shape))))
     shiftco = [shiftco[1],shiftco[0],shiftco[2]]
     maxval = C.argmax()
+    sumval = np.sum(C)
 
-    return shiftco, maxval
+    return shiftco, maxval, sumval
 
 
 def align_group(angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group):
@@ -127,20 +128,14 @@ def align_group3d(angles, oversampling, t_min, t_max, z_min, z_max, CF_image_avg
     index = group_index[group].nonzero()[1]
     x_rot = x[index]
     y_rot = y[index]
-    z_rot = z[index]
     x_original = x_rot.copy()
     y_original = y_rot.copy()
-    z_original = z_rot.copy()
-    print('Zmin')
-    print(z_min)
-
-    print('Calculating... align_group3d')
-    # CALCULATE A DIRECTION parameter to see how the average structure is aligned in 3d space
     xcorr_max = 0.0
-
     for angle in angles:
         # rotate locs
-
+        x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
+        y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
+        # render group image
         N, image = render_hist(x_rot, y_rot, oversampling, t_min, t_max)
         # calculate cross-correlation
         xcorr = compute_xcorr(CF_image_avg, image)
@@ -152,41 +147,49 @@ def align_group3d(angles, oversampling, t_min, t_max, z_min, z_max, CF_image_avg
             rot = angle
             dy = np.ceil(y_max - image_half) / oversampling
             dx = np.ceil(x_max - image_half) / oversampling
-
-        x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
-        y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
-        z_rot = z_original
-
-
-        # render group image
-
-
-        N, image = render_hist(x_rot, y_rot, oversampling, t_min, t_max)
-
-        xcorr = compute_xcorr(CF_image_avg, image)
-        # find the brightest pixel
-        y_max, x_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
-        # store the transformation if the correlation is larger than before
-        if xcorr[y_max, x_max] > xcorr_max:
-            xcorr_max = xcorr[y_max, x_max]
-            rot = angle
-            dy = np.ceil(y_max - image_half) / oversampling
-            dx = np.ceil(x_max - image_half) / oversampling
-
-            #dy = shiftco[1]/oversampling
-            #dx = shiftco[0]/oversampling
-            #dz = shiftco[2]*pixelsize/oversampling
-
-    x_rot = np.cos(rot) * x_original - np.sin(rot) * y_original
-    y_rot = np.sin(rot) * x_original + np.cos(rot) * y_original
-    z_rot = z_original
-
-    N, image3 = render_hist3d(x_rot, y_rot, z_rot, oversampling, t_min, t_max, z_min, z_max, pixelsize)
-    shiftco, maxval = compute_xcorr3(CF_image_avg3, image3)
-    dz = shiftco[2]*pixelsize/oversampling
+    # rotate and shift image group locs
     x[index] = np.cos(rot) * x_original - np.sin(rot) * y_original - dx
     y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
-    z[index] = z_original + dz
+
+def align_group3d_2(angles, oversampling, t_min, t_max, z_min, z_max, CF_image_avg3, CF_image_avg, image_half, pixelsize, counter, lock, group):
+    print('align_group3d_2')
+    with lock:
+        counter.value += 1
+    index = group_index[group].nonzero()[1]
+    x_rot = x[index]
+    y_rot = y[index]
+    z_rot = z[index]
+    x_original = x_rot.copy()
+    y_original = y_rot.copy()
+    z_original = z_rot.copy()
+
+    # CALCULATE A DIRECTION parameter to see how the average structure is aligned in 3d space
+    xcorr_max = 0.0
+    for angle in angles:
+        # rotate locs
+        x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
+        y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
+        N, image3 = render_hist3d(x_rot, y_rot, z_rot, oversampling, t_min, t_max, z_min, z_max, pixelsize)
+        # find the brightest pixel
+        shiftco, maxval, sumval = compute_xcorr3(CF_image_avg3, image3)
+        # store the transformation if the correlation is larger than before
+        if maxval > xcorr_max:
+            print('Rotationmax')
+            print(maxval)
+            print(angle)
+            xcorr_max = maxval
+            rot = angle
+            dy = shiftco[1]/oversampling
+            dx = shiftco[0]/oversampling
+            dz = shiftco[2]*pixelsize/oversampling
+
+    print('--- Shift ---')
+    print(shiftco)
+    print([dx,dy,dz])
+
+    x[index] = np.cos(rot) * x_original - np.sin(rot) * y_original #+ dx
+    y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original #+ dy
+    #z[index] = z_original + dz
 
 def init_pool(x_, y_, group_index_):
     global x, y, group_index
@@ -244,7 +247,30 @@ class Worker(QtCore.QThread):
                 CF_image_avg = np.conj(np.fft.fft2(image_avg)) #TODO: Check what this does actually for the 3d image
                 CF_image_avg3 = image_avg3
                 # TODO: blur auf average !!!
-                fc = functools.partial(align_group3d, angles, self.oversampling, self.t_min, self.t_max, self.z_min, self.z_max, CF_image_avg3, CF_image_avg, image_half, self.pixelsize, counter, lock)
+                skip = 0
+                if skip == 1:
+                    fc = functools.partial(align_group3d, angles, self.oversampling, self.t_min, self.t_max, self.z_min, self.z_max, CF_image_avg3, CF_image_avg, image_half, self.pixelsize, counter, lock)
+                    result = pool3d.map_async(fc, range(n_groups), groups_per_worker)
+                    while not result.ready():
+                        self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, False)
+                        time.sleep(0.5)
+                    self.locs.x = np.ctypeslib.as_array(x)
+                    self.locs.y = np.ctypeslib.as_array(y)
+                    self.locs.z = np.ctypeslib.as_array(z)
+                    self.locs.x -= np.mean(self.locs.x)
+                    self.locs.y -= np.mean(self.locs.y)
+                    self.locs.z -= np.mean(self.locs.z)
+                #Second part of alignment
+                print('2nd alignment')
+                counter.value = 0
+                N_avg, image_avg = render.render_hist(self.locs, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max)
+                N_avg, image_avg3 = render.render_hist3d(self.locs, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize)
+                n_pixel, _ = image_avg.shape
+                image_half = n_pixel / 2
+                CF_image_avg = np.conj(np.fft.fft2(image_avg)) #TODO: Check what this does actually for the 3d image
+                CF_image_avg3 = image_avg3
+                # TODO: blur auf average !!!
+                fc = functools.partial(align_group3d_2, angles, self.oversampling, self.t_min, self.t_max, self.z_min, self.z_max, CF_image_avg3, CF_image_avg, image_half, self.pixelsize, counter, lock)
                 result = pool3d.map_async(fc, range(n_groups), groups_per_worker)
                 while not result.ready():
                     self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, False)
@@ -256,6 +282,7 @@ class Worker(QtCore.QThread):
                 self.locs.y -= np.mean(self.locs.y)
                 self.locs.z -= np.mean(self.locs.z)
                 self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, True)
+
         else:
             n_groups = self.group_index.shape[0]
             a_step = np.arcsin(1 / (self.oversampling * self.r))
