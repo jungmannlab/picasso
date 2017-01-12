@@ -1770,6 +1770,8 @@ class Window(QtGui.QMainWindow):
         self.view.locs = locs
         self.view.update_scene
         print('Groups removed')
+        self.view.zoom_in()
+        self.view.zoom_out()
 
 
 

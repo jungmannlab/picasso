@@ -1038,7 +1038,7 @@ class Window(QtGui.QMainWindow):
                         'Imager.PSF': psf,
                         'Imager.Photonrate': photonrate,
                         'Imager.Photonrate Std': photonratestd,
-                        'Imager.Constant Photonrate Std': self.photonslopemodeEdit.checkState(),
+                        'Imager.Constant Photonrate Std': int(self.photonslopemodeEdit.checkState()),
                         'Imager.Photonbudget': photonbudget,
                         'Imager.Laserpower': laserpower,
                         'Imager.Photonslope': photonslope,
