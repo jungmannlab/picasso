@@ -16,6 +16,8 @@ import random
 import sys
 import time
 
+import yaml
+
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
@@ -89,6 +91,9 @@ STRUCTURE3D_DEFAULT = '0,0,0,0,0,0,0,0,0,0,0,0'
 STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
 INCORPORATION_DEFAULT = 85
+CX_DEFAULT = [3.1638306844743706e-17, -2.2103661248660896e-14, -9.775815406044296e-12, 8.2178622893072e-09, 4.91181990105529e-06, -0.0028759382006135654, 1.1756537760039398]
+CY_DEFAULT = [1.710907877866197e-17, -2.4986657766862576e-15, -8.405284979510355e-12, 1.1548322314075128e-11, 5.4270591055277476e-06, 0.0018155881468011011, 1.011468185618154]
+
 
 
 class Window(QtGui.QMainWindow):
@@ -253,6 +258,11 @@ class Window(QtGui.QMainWindow):
         self.photonslopeEdit.valueChanged.connect(self.changeImager)
         self.photonslopeStdEdit.valueChanged.connect(self.changeImager)
 
+        self.cx = CX_DEFAULT
+        self.cy = CY_DEFAULT
+
+        self.photonslopemodeEdit = QtGui.QCheckBox()
+
         igrid.addWidget(psf, 0, 0)
         igrid.addWidget(self.psfEdit, 0, 1)
         igrid.addWidget(QtGui.QLabel('Px'), 0, 2)
@@ -295,16 +305,19 @@ class Window(QtGui.QMainWindow):
         igrid.addWidget(self.photonslopeEdit, 8 - igridindex, 1)
         igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'), 8 - igridindex, 2)
 
+        igrid.addWidget(self.photonslopemodeEdit, 9 - igridindex, 1)
+        igrid.addWidget(QtGui.QLabel('Constant detection rate'), 9 - igridindex, 0)
+
         if ADVANCEDMODE:
-            igrid.addWidget(photonslopeStd, 9 - igridindex, 0)
-            igrid.addWidget(self.photonslopeStdEdit, 9 - igridindex, 1)
-            igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'), 9 - igridindex, 2)
+            igrid.addWidget(photonslopeStd, 10 - igridindex, 0)
+            igrid.addWidget(self.photonslopeStdEdit, 10 - igridindex, 1)
+            igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'), 10 - igridindex, 2)
 
         if not ADVANCEDMODE:
             backgroundframesimple = QtGui.QLabel('Background (Frame)')
             self.backgroundframesimpleEdit = QtGui.QLabel()
-            igrid.addWidget(backgroundframesimple, 10-igridindex, 0)
-            igrid.addWidget(self.backgroundframesimpleEdit, 10-igridindex, 1)
+            igrid.addWidget(backgroundframesimple, 11-igridindex, 0)
+            igrid.addWidget(self.backgroundframesimpleEdit, 11-igridindex, 1)
 
          # NOISE MODEL
         noise_groupbox = QtGui.QGroupBox('Noise Model')
@@ -514,13 +527,17 @@ class Window(QtGui.QMainWindow):
         sgrid.addWidget(self.mode3DEdit, 13+sindex, 0)
         sgrid.addWidget(QtGui.QLabel('3D'), 13+sindex, 1)
 
+        load3dCalibrationButton = QtGui.QPushButton("Load 3D Calibration")
+        load3dCalibrationButton.clicked.connect(self.load3dCalibration)
+        sgrid.addWidget(load3dCalibrationButton, 14+sindex, 0, 1, 3)
+
         importDesignButton = QtGui.QPushButton("Import structure from design")
         importDesignButton.clicked.connect(self.importDesign)
-        sgrid.addWidget(importDesignButton, 14+sindex, 0, 1, 3)
+        sgrid.addWidget(importDesignButton, 15+sindex, 0, 1, 3)
 
         generateButton = QtGui.QPushButton("Generate positions")
         generateButton.clicked.connect(self.generatePositions)
-        sgrid.addWidget(generateButton, 15+sindex, 0, 1, 3)
+        sgrid.addWidget(generateButton, 16+sindex, 0, 1, 3)
         cgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         simulateButton = QtGui.QPushButton("Simulate data")
@@ -608,6 +625,27 @@ class Window(QtGui.QMainWindow):
 
         self.mainpbar.setValue(0)
         self.statusBar().showMessage('Simulate ready.')
+
+
+    def load3dCalibration(self):
+        #if hasattr(self.window, 'movie_path'):
+        #    dir = os.path.dirname(self.window.movie_path)
+        #else:
+        dir = None
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Load 3d calibration', directory=dir, filter='*.yaml')
+        if path:
+            with open(path, 'r') as f:
+                z_calibration = yaml.load(f)
+                self.cx = _np.array(z_calibration['X Coefficients'])
+                self.cy = _np.array(z_calibration['Y Coefficients'])
+                print(self.cx)
+                print(self.cy)
+                self.statusBar().showMessage('Caliration loaded from: ' + path)
+
+            #self.z_calib_label.setAlignment(QtCore.Qt.AlignRight)
+            #self.z_calib_label.setText(os.path.basename(path))
+            #self.fit_z_checkbox.setEnabled(True)
+            #self.fit_z_checkbox.setChecked(True)
 
     def changeTime(self):
         laserpower = self.laserpowerEdit.value()
@@ -882,6 +920,10 @@ class Window(QtGui.QMainWindow):
             if ADVANCEDMODE:
                 photonslopeStd = self.photonslopeStdEdit.value()
 
+            if self.photonslopemodeEdit.checkState():
+                photonratestd = 0
+
+
             # CAMERA PARAMETERS
             imagesize = self.camerasizeEdit.value()
             itime = self.integrationtimeEdit.value()
@@ -988,12 +1030,15 @@ class Window(QtGui.QMainWindow):
                         'Structure.Arrangement': structureArrangement,
                         'Structure.Orientation': structureOrientation,
                         'Structure.3D': mode3Dstate,
+                        'Structure.CX': self.cx,
+                        'Structure.CY': self.cy,
                         'PAINT.k_on': kon,
                         'PAINT.imager': imagerconcentration,
                         'PAINT.taub': taub,
                         'Imager.PSF': psf,
                         'Imager.Photonrate': photonrate,
                         'Imager.Photonrate Std': photonratestd,
+                        'Imager.Constant Photonrate Std': self.photonslopemodeEdit.checkState(),
                         'Imager.Photonbudget': photonbudget,
                         'Imager.Laserpower': laserpower,
                         'Imager.Photonslope': photonslope,
@@ -1021,7 +1066,7 @@ class Window(QtGui.QMainWindow):
                 if conrounds is not 1:
                     app = QtCore.QCoreApplication.instance()
                     for runner in range(0, frames):
-                        movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate)
+                        movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate, self.cx, self.cy)
                         outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) + ' %'
 
                         self.statusBar().showMessage(outputmsg)
@@ -1056,7 +1101,7 @@ class Window(QtGui.QMainWindow):
 
                     app = QtCore.QCoreApplication.instance()
                     for runner in range(0, frames):
-                        movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate)
+                        movie[runner, :, :] = simulate.convertMovie(runner, photondist, partstruct, imagesize, frames, psf, photonrate, background, noise, mode3Dstate, self.cx, self.cy)
                         outputmsg = 'Converting to Image ... ' + str(_np.round(runner/frames*1000)/10) + ' %'
 
                         self.statusBar().showMessage(outputmsg)
@@ -1087,6 +1132,12 @@ class Window(QtGui.QMainWindow):
             try:
                 self.structure3DEdit.setText(info[0]['Structure.Structure3D'])
                 self.mode3DEdit.setCheckState(info[0]['Structure.3D'])
+                self.cx(info[0]['Structure.CX'])
+                self.cy(info[0]['Structure.CY'])
+            except:
+                pass
+            try:
+                self.photonslopemodeEdit.setCheckState(info[0]['Imager.Constant Photonrate Std'])
             except:
                 pass
             self.structureIncorporationEdit.setValue(info[0]['Structure.Incorporation'])

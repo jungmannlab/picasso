@@ -18,9 +18,8 @@ from . import io as _io
 #    cy = _CONFIG['3D Calibration']['Y Coefficients']
 #    magfac = _CONFIG['3D Calibration']['Magnification Factor']
 # else:
-magfac = 0.76
-cx = [3.1638306844743706e-17, -2.2103661248660896e-14, -9.775815406044296e-12, 8.2178622893072e-09, 4.91181990105529e-06, -0.0028759382006135654, 1.1756537760039398]
-cy = [1.710907877866197e-17, -2.4986657766862576e-15, -8.405284979510355e-12, 1.1548322314075128e-11, 5.4270591055277476e-06, 0.0018155881468011011, 1.011468185618154]
+magfac = 0.79
+
 
 
 def calculate_zpsf(z, cx, cy):
@@ -76,6 +75,7 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
     simulatedmeanbright = _np.mean(events[1:maxloc:2])
     print('Bright')
     print(events[1:maxloc:2])
+
     # CHECK Trace
     if _np.mod(maxloc, 2):  # uneven -> ends with an OFF-event
         onevents = int(_np.floor(maxloc/2))
@@ -88,7 +88,10 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
 
     # CALCULATE PHOTON NUMBERS
     for i in range(1, maxloc, 2):
-        photons = _np.round(_np.random.normal(photonrate, photonratestd)*time)  # Number of Photons that are emitted in one frame
+        if photonratestd == 0:
+            photons = _np.round(photonrate*time)
+        else:
+            photons = _np.round(_np.random.normal(photonrate, photonratestd)*time)  # Number of Photons that are emitted in one frame
 
         if photons < 0:
             photons = 0
@@ -206,7 +209,7 @@ def photonsToFrame(photonposframe,imagesize,background):
 
 
 
-def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate):
+def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate, cx,cy):
 
     pixels = imagesize
     edges = range(0, pixels+1)
