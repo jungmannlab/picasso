@@ -559,6 +559,10 @@ class View(QtGui.QLabel):
 
     def __init__(self, window):
         super().__init__()
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, 'icons', 'render.ico')
+        icon = QtGui.QIcon(icon_path)
+        self.icon = icon
         self.setAcceptDrops(True)
         self.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
         self.rubberband = QtGui.QRubberBand(QtGui.QRubberBand.Rectangle, self)
@@ -1034,6 +1038,9 @@ class View(QtGui.QLabel):
             index_blocks = self.get_index_blocks(channel)
             n_locs = []
             rmsd = []
+
+            #pixmap = QtGui.QPixmap.fromImage(/icons/filter.ico)
+
             if self._picks:
                 removelist = []
                 for i, pick in enumerate(self._picks):
@@ -1050,16 +1057,45 @@ class View(QtGui.QLabel):
                     ax.set_xlabel('X [Px]')
                     ax.set_ylabel('Y [Px]')
                     plt.axis('equal')
-                    plt.show()
-                    segmentation, ok = QtGui.QInputDialog.getInt(self, 'Use Pick?', 'No:', i)
+                    fig.canvas.draw()
 
-                    if ok:
+
+                    size = fig.canvas.size()
+                    width, height = size.width(), size.height()
+
+                    im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+
+                    self.setPixmap((QtGui.QPixmap(im)))
+                    self.setAlignment(QtCore.Qt.AlignCenter)
+
+                    #message = "Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?"
+                    #reply = QtGui.QMessageBox.question(self, 'Message',
+                    #message, QtGui.QMessageBox.Yes |
+                    #QtGui.QMessageBox.No | QtGui.QMessageBox.Cancel, QtGui.QMessageBox.No)
+
+                    msgBox = QtGui.QMessageBox()
+                    msgBox.setWindowTitle('Select picks')
+                    msgBox.setWindowIcon(self.icon)
+                    msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
+                    msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
+                    msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
+                    msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
+                    qr = self.frameGeometry()
+                    msgBox.move(qr.topRight())
+                    reply = msgBox.exec()
+
+
+
+                    if reply == 0:
                         print('Accepted')
-                        plt.close()
+                    elif reply == 2:
+                        break
                     else:
                         print('Discard')
                         removelist.append(pick)
-                        plt.close()
+
+
+                        #break to skip loop
                 for pick in removelist:
                     self._picks.remove(pick)
                 self.update_scene()
@@ -1581,6 +1617,7 @@ class Window(QtGui.QMainWindow):
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, 'icons', 'render.ico')
         icon = QtGui.QIcon(icon_path)
+        self.icon = icon
         self.setWindowIcon(icon)
         self.view = View(self)
         self.view.setMinimumSize(1, 1)
