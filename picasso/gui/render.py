@@ -1084,8 +1084,6 @@ class View(QtGui.QLabel):
                     msgBox.move(qr.topRight())
                     reply = msgBox.exec()
 
-
-
                     if reply == 0:
                         print('Accepted')
                     elif reply == 2:
