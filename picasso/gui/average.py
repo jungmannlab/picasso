@@ -164,7 +164,6 @@ def align_group3d(angles, oversampling, t_min, t_max, z_min, z_max, CF_image_avg
     y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
 
 def align_group3d_2(angles, oversampling, t_min, t_max, z_min, z_max, CF_image_avg3, CF_image_avg, image_half, pixelsize, counter, lock, group):
-    print('align_group3d_2')
     with lock:
         counter.value += 1
     index = group_index[group].nonzero()[1]
@@ -188,9 +187,8 @@ def align_group3d_2(angles, oversampling, t_min, t_max, z_min, z_max, CF_image_a
     dz = np.ceil(zpos_max - image_half) / oversampling #Check pixelsize argument again
     dx = np.ceil(xpos_max - image_half) / oversampling #Check pixelsize argument again
     print('---dz---')
-
     print(dz)
-    print(dx)
+
     z[index] = z_original + dz
     #x[index] = x_original + dx
 
@@ -448,7 +446,7 @@ class View(QtGui.QLabel):
             y = sharedctypes.RawArray('f', self.locs.y)
             z = sharedctypes.RawArray('f', self.locs.z)
             n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
-            n_workers = 1
+            #n_workers = 1
             pool3d = multiprocessing.Pool(n_workers, init_pool3, (x, y, z, self.group_index))
             self.window.status_bar.showMessage('Ready for processing!')
             status.close()
@@ -522,16 +520,29 @@ class View(QtGui.QLabel):
         ax = fig.add_subplot(111, projection='3d')
         self.ax = ax
         ax.set_title('3D Average')
+        maxplot = 1000;
+
+        xlocs = locs['x']
+        ylocs = locs['y']
+        zlocs = locs['z']
         colors = locs['z'][:]
-        colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
-        colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
-        ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+        sampling = np.round(len(xlocs)/maxplot)
+        xlocs = xlocs[0::sampling]
+        ylocs = ylocs[0::sampling]
+        zlocs = zlocs[0::sampling]
+        colors = colors[0::sampling]
+
+        colors[colors > np.mean(zlocs)+3*np.std(zlocs)]=np.mean(zlocs)+3*np.std(zlocs)
+        colors[colors < np.mean(zlocs)-3*np.std(zlocs)]=np.mean(zlocs)-3*np.std(zlocs)
+        ax.scatter(xlocs, ylocs, zlocs,c=colors,cmap='jet')
         ax.set_xlabel('X [Px]')
         ax.set_ylabel('Y [Px]')
         ax.set_zlabel('Z [nm]')
-        ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-        ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-        ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+        ax.set_xlim( np.mean(xlocs)-3*np.std(xlocs), np.mean(xlocs)+3*np.std(xlocs))
+        ax.set_ylim( np.mean(ylocs)-3*np.std(ylocs), np.mean(ylocs)+3*np.std(ylocs))
+        ax.set_zlim( np.mean(zlocs)-3*np.std(zlocs), np.mean(zlocs)+3*np.std(zlocs))
+
+        plt.axis('equal')
         plt.show()
 
     def update3dplot(self):
@@ -541,16 +552,30 @@ class View(QtGui.QLabel):
         ax = self.ax
         ax.cla()
         ax.set_title('3D Average')
+        maxplot = 1000;
+
+        xlocs = locs['x']
+        ylocs = locs['y']
+        zlocs = locs['z']
         colors = locs['z'][:]
-        colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
-        colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
-        ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+        sampling = np.round(len(xlocs)/maxplot)
+        xlocs = xlocs[0::sampling]
+        ylocs = ylocs[0::sampling]
+        zlocs = zlocs[0::sampling]
+        colors = colors[0::sampling]
+
+        colors[colors > np.mean(zlocs)+3*np.std(zlocs)]=np.mean(zlocs)+3*np.std(zlocs)
+        colors[colors < np.mean(zlocs)-3*np.std(zlocs)]=np.mean(zlocs)-3*np.std(zlocs)
+
+
+
+        ax.scatter(xlocs, ylocs, zlocs,c=colors,cmap='jet')
         ax.set_xlabel('X [Px]')
         ax.set_ylabel('Y [Px]')
         ax.set_zlabel('Z [nm]')
-        ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-        ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-        ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+        ax.set_xlim( np.mean(xlocs)-3*np.std(xlocs), np.mean(xlocs)+3*np.std(xlocs))
+        ax.set_ylim( np.mean(ylocs)-3*np.std(ylocs), np.mean(ylocs)+3*np.std(ylocs))
+        ax.set_zlim( np.mean(zlocs)-3*np.std(zlocs), np.mean(zlocs)+3*np.std(zlocs))
         fig.canvas.draw()
         plt.axis('equal')
         #plt.show()
