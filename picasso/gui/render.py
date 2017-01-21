@@ -1169,13 +1169,13 @@ class View(QtGui.QLabel):
                         for i, pick in enumerate(self._picks):
 
                             if loccount[i] > maxlocs:
-                                self._picks.remove(pick)
+                                removelist.append(pick)
                             elif loccount[i] < minlocs:
-                                self._picks.remove(pick)
+                                removelist.append(pick)
                             progress.set_value(i)
 
-                #for pick in removelist:
-                #    self._picks.remove(pick)
+                for pick in removelist:
+                    self._picks.remove(pick)
                 progress.close()
                 self.update_scene()
 
