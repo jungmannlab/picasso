@@ -1074,6 +1074,7 @@ class View(QtGui.QLabel):
                     #QtGui.QMessageBox.No | QtGui.QMessageBox.Cancel, QtGui.QMessageBox.No)
 
                     msgBox = QtGui.QMessageBox()
+
                     msgBox.setWindowTitle('Select picks')
                     msgBox.setWindowIcon(self.icon)
                     msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
@@ -1082,7 +1083,10 @@ class View(QtGui.QLabel):
                     msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
                     qr = self.frameGeometry()
                     msgBox.move(qr.topRight())
+
                     reply = msgBox.exec()
+                    #msgBox.activateWindow()
+                    #msgBox.raise_()
 
                     if reply == 0:
                         print('Accepted')
@@ -1099,6 +1103,81 @@ class View(QtGui.QLabel):
                 self.update_scene()
 
 
+    def analyze_picks(self):
+        print('Show picks')
+        channel = self.get_channel('Pick similar')
+        if channel is not None:
+            locs = self.locs[channel]
+            info = self.infos[channel]
+            d = self.window.tools_settings_dialog.pick_diameter.value()
+            r = d / 2
+            std_range = self.window.tools_settings_dialog.pick_similar_range.value()
+            index_blocks = self.get_index_blocks(channel)
+            n_locs = []
+            rmsd = []
+
+            #pixmap = QtGui.QPixmap.fromImage(/icons/filter.ico)
+
+            if self._picks:
+                removelist = []
+                loccount = []
+                progress = lib.ProgressDialog('Counting in picks..', 0, len(self._picks)-1, self)
+                progress.set_value(0)
+                progress.show()
+                for i, pick in enumerate(self._picks):
+
+                    pickindex = 0
+                    x, y = pick
+                    block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+                    pick_locs = lib.locs_at(x, y, block_locs, r)
+                    locs = stack_arrays(pick_locs, asrecarray=True, usemask=False)
+                    print(len(locs))
+                    loccount.append(len(locs))
+                    progress.set_value(i)
+
+                progress.close()
+                fig = plt.figure()
+                fig.canvas.set_window_title('Localizations in Picks')
+                ax = fig.add_subplot(111)
+                ax.set_title('Localizations in Picks ')
+                n, bins, patches = ax.hist(loccount, 20, normed=1, facecolor='green', alpha=0.75)
+                ax.set_xlabel('Number of localizations')
+                ax.set_ylabel('Counts')
+                fig.canvas.draw()
+
+
+                size = fig.canvas.size()
+                width, height = size.width(), size.height()
+
+                im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+
+                self.setPixmap((QtGui.QPixmap(im)))
+                self.setAlignment(QtCore.Qt.AlignCenter)
+
+                minlocs, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
+                    'Enter minimum number of localizations:')
+
+                if ok:
+                    maxlocs, ok2 = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
+                        'Enter maximum number of localizations:')
+                    if ok2:
+                        print(minlocs)
+                        print(maxlocs)
+                        progress = lib.ProgressDialog('Removing picks..', 0, len(self._picks)-1, self)
+                        progress.set_value(0)
+                        progress.show()
+                        for i, pick in enumerate(self._picks):
+
+                            if loccount[i] > maxlocs:
+                                self._picks.remove(pick)
+                            elif loccount[i] < minlocs:
+                                self._picks.remove(pick)
+                            progress.set_value(i)
+
+                #for pick in removelist:
+                #    self._picks.remove(pick)
+                progress.close()
+                self.update_scene()
 
     def rmsd_at_com(self, locs):
         com_x = locs.x.mean()
@@ -1713,6 +1792,8 @@ class Window(QtGui.QMainWindow):
         plotpick3d_action.setShortcut('Ctrl+3')
         plotpick_action = tools_menu.addAction('Plot picks')
         plotpick_action.triggered.connect(self.view.show_pick)
+        analyzepick_action = tools_menu.addAction('Analyze picks')
+        analyzepick_action.triggered.connect(self.view.analyze_picks)
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
         undrift_action.setShortcut('Ctrl+U')
         undrift_action.triggered.connect(self.view.undrift)
