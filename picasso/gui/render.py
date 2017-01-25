@@ -12,6 +12,7 @@ import os.path
 import sys
 import traceback
 from math import ceil
+import copy
 
 import lmfit
 import matplotlib
@@ -579,6 +580,7 @@ class View(QtGui.QLabel):
         self._picks = []
         self.index_blocks = []
         self._drift = []
+        self.currentdrift = []
 
     def add(self, path, render=True):
         try:
@@ -591,6 +593,7 @@ class View(QtGui.QLabel):
         self.locs_paths.append(path)
         self.index_blocks.append(None)
         self._drift.append(None)
+        self.currentdrift.append(None)
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
@@ -1481,6 +1484,7 @@ class View(QtGui.QLabel):
         else:
             self._drift[channel].x += drift.x
             self._drift[channel].y += drift.y
+        self.currentdrift[channel] = copy.copy(drift)
         base, ext = os.path.splitext(self.locs_paths[channel])
         np.savetxt(base + '_drift.txt', self._drift[channel], header='dx\tdy', newline='\r\n')
 
@@ -1506,6 +1510,12 @@ class View(QtGui.QLabel):
         channel = self.get_channel('Undrift from picked')
         if channel is not None:
             self._undrift_from_picked(channel)
+
+    def undrift_from_picked2d(self):
+        channel = self.get_channel('Undrift from picked')
+        if channel is not None:
+            self._undrift_from_picked2d(channel)
+
 
     def _undrift_from_picked_coordinate(self, channel, picked_locs, coordinate):
         n_picks = len(picked_locs)
@@ -1565,6 +1575,41 @@ class View(QtGui.QLabel):
         self.index_blocks[channel] = None
         self.add_drift(channel, drift)
         status.close()
+        self.update_scene()
+
+    def _undrift_from_picked2d(self, channel):
+        picked_locs = self.picked_locs(channel)
+        status = lib.StatusDialog('Calculating drift...', self)
+
+        drift_x = self._undrift_from_picked_coordinate(channel, picked_locs, 'x')
+        drift_y = self._undrift_from_picked_coordinate(channel, picked_locs, 'y')
+
+        # Apply drift
+        self.locs[channel].x -= drift_x[self.locs[channel].frame]
+        self.locs[channel].y -= drift_y[self.locs[channel].frame]
+
+        # A rec array to store the applied drift
+        drift = (drift_x, drift_y)
+        drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
+
+        # Cleanup
+        self.index_blocks[channel] = None
+        self.add_drift(channel, drift)
+        status.close()
+        self.update_scene()
+
+    def undo_drift(self):
+        channel = self.get_channel('Undo drift')
+        if channel is not None:
+            self._undo_drift(channel)
+
+    def _undo_drift(self, channel):
+        drift = self.currentdrift[channel]
+        drift.x = -drift.x
+        drift.y = -drift.y
+        self.add_drift(channel, drift)
+        self.locs[channel].x -= drift.x[self.locs[channel].frame]
+        self.locs[channel].y -= drift.y[self.locs[channel].frame]
         self.update_scene()
 
     def update_cursor(self):
@@ -1800,6 +1845,8 @@ class Window(QtGui.QMainWindow):
         undrift_from_picked_action = postprocess_menu.addAction('Undrift from picked (3D)')
         undrift_from_picked_action.setShortcut('Ctrl+Shift+U')
         undrift_from_picked_action.triggered.connect(self.view.undrift_from_picked)
+        undrift_from_picked2d_action = postprocess_menu.addAction('Undrift from picked (2D)')
+        undrift_from_picked2d_action.triggered.connect(self.view.undrift_from_picked2d)
         link_action = postprocess_menu.addAction('Link localizations (3D)')
         link_action.triggered.connect(self.view.link)
         align_action = postprocess_menu.addAction('Align channels (3D if picked)')
@@ -1811,6 +1858,8 @@ class Window(QtGui.QMainWindow):
         apply_action.triggered.connect(self.open_apply_dialog)
         group_action = postprocess_menu.addAction('Remove group info')
         group_action.triggered.connect(self.remove_group)
+        drift_action = postprocess_menu.addAction('Undo drift (2D)')
+        drift_action.triggered.connect(self.view.undo_drift)
         self.load_user_settings()
 
     def closeEvent(self, event):
