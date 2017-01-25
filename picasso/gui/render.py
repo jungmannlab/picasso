@@ -1860,6 +1860,8 @@ class Window(QtGui.QMainWindow):
         group_action.triggered.connect(self.remove_group)
         drift_action = postprocess_menu.addAction('Undo drift (2D)')
         drift_action.triggered.connect(self.view.undo_drift)
+        #channel_action = postprocess_menu.addAction('Combine channels')
+        #channel_action.triggered.connect(self.combine_channels)
         self.load_user_settings()
 
     def closeEvent(self, event):
@@ -1935,6 +1937,39 @@ class Window(QtGui.QMainWindow):
         self.view.locs = locs
         self.view.update_scene
         print('Groups removed')
+        self.view.zoom_in()
+        self.view.zoom_out()
+
+    def combine_channels(self):
+        print('Combine Channels')
+        print(self.view.locs_paths)
+        for i in range(len(self.view.locs_paths)):
+            channel = self.view.locs_paths[i]
+            print(channel)
+            if i == 0:
+                locs = self.view.locs[i]
+                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                datatype = locs.dtype
+            else:
+                templocs = self.view.locs[i]
+                templocs = stack_arrays(templocs, asrecarray=True, usemask=False)
+                print(locs)
+                print(templocs)
+                locs = np.append(locs, templocs)
+            #locs = locs.view(np.recarray)
+            self.view.locs[i] = locs
+
+
+        #if locs is not None:
+        #    for i in range(len(self.view.locs_paths)):
+        #        channel = self.view.locs_paths[i]
+        #        if i == 0:
+        #            self.locs(self.locs_paths.index(channel))
+        #        else:
+        #            self.locs.remove(self.locs_paths.index(channel))
+
+        self.view.update_scene
+        print('Channels combined')
         self.view.zoom_in()
         self.view.zoom_out()
 
