@@ -16,6 +16,8 @@ import time
 import traceback
 from multiprocessing import sharedctypes
 
+import colorsys
+
 import matplotlib.pyplot as plt
 import numba
 import numpy as np
@@ -326,18 +328,31 @@ class Window(QtGui.QMainWindow):
 
 
         #Define DisplaySettingsDialog
-        viewxy = QtGui.QLabel('XY')
-        viewxz = QtGui.QLabel('XZ')
-        viewyz = QtGui.QLabel('YZ')
-        viewcp = QtGui.QLabel('Convergence Plot')
+        self.viewxy = QtGui.QLabel('XY')
+        self.viewxz = QtGui.QLabel('XZ')
+        self.viewyz = QtGui.QLabel('YZ')
+        self.viewcp = QtGui.QLabel('Convergence Plot')
+
+        minsize = 512
+        self.viewxy.setFixedWidth(minsize)
+        self.viewxy.setFixedHeight(minsize)
+        self.viewxz.setFixedWidth(minsize)
+        self.viewxz.setFixedHeight(minsize)
+        self.viewyz.setFixedWidth(minsize)
+        self.viewyz.setFixedHeight(minsize)
+        self.viewcp.setFixedWidth(minsize)
+        self.viewcp.setFixedHeight(minsize)
+
+
+
 
         # Define layout
         display_groupbox = QtGui.QGroupBox('Display')
         displaygrid = QtGui.QGridLayout(display_groupbox)
-        displaygrid.addWidget(viewxy, 0, 0)
-        displaygrid.addWidget(viewxz, 1, 0)
-        displaygrid.addWidget(viewyz, 0, 1)
-        displaygrid.addWidget(viewcp, 1, 1)
+        displaygrid.addWidget(self.viewxy, 0, 0)
+        displaygrid.addWidget(self.viewxz, 1, 0)
+        displaygrid.addWidget(self.viewyz, 0, 1)
+        displaygrid.addWidget(self.viewcp, 1, 1)
 
         button_groupbox = QtGui.QGroupBox('Buttons')
         buttongrid = QtGui.QGridLayout(button_groupbox)
@@ -444,7 +459,7 @@ class Window(QtGui.QMainWindow):
             print('Opening')
             self.add(path)
 
-    def add(self, path, render=True):
+    def add(self, path, rendermode=True):
         try:
             locs, info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
@@ -467,7 +482,108 @@ class Window(QtGui.QMainWindow):
         else:
             if render:
                 self.update_scene()
+
+        #Try rendering volume:
+        self.oversampling = 10
+        self.t_min = 0
+        self.t_max = 32
+        self.z_min = -100
+        self.z_max = 100
+        self.pixelsize = 160
+
+        N_avg, image_avg3 = render.render_hist3d(self.locs[0], self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize)
+
+        xyproject = np.sum(image_avg3, axis=2)
+
+        pixmap = self.histtoImage(xyproject)
+
+        self.viewxy.setPixmap(pixmap)
+
+        xzproject = np.transpose(np.sum(image_avg3, axis=0))
+        pixmap = self.histtoImage(xzproject)
+        self.viewxz.setPixmap(pixmap)
+
+        yzproject = np.transpose(np.sum(image_avg3, axis=1))
+        pixmap = self.histtoImage(yzproject)
+        self.viewyz.setPixmap(pixmap)
+
+        if len(self.locs) == 1:
+            print('Only 1 Dataset')
+        else:
+            print('More datasets')
+            pixmapmulti = self.hist_multi_channel(self.locs)
+
+            self.viewxy.setPixmap(pixmapmulti)
+
         os.chdir(os.path.dirname(path))
+
+
+    def histtoImage(self, image):
+        cmap = np.uint8(np.round(255 * plt.get_cmap('magma')(np.arange(256))))
+        image /= image.max()
+        image = np.minimum(image, 1.0)
+        image = np.round(255 * image).astype('uint8')
+        Y, X = image.shape
+        self._bgra = np.zeros((Y, X, 4), dtype=np.uint8, order='C')
+        self._bgra[..., 0] = cmap[:, 2][image]
+        self._bgra[..., 1] = cmap[:, 1][image]
+        self._bgra[..., 2] = cmap[:, 0][image]
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+
+        qimage = qimage.scaled(self.viewxy.width(), np.round(self.viewxy.height()*Y/X), QtCore.Qt.KeepAspectRatioByExpanding)
+        pixmap = QtGui.QPixmap.fromImage(qimage)
+
+        return pixmap
+
+    def hist_multi_channel(self, locs):
+        self.oversampling = 10
+        self.t_min = 0
+        self.t_max = 32
+        self.z_min = -100
+        self.z_max = 100
+        self.pixelsize = 160
+
+        if locs is None:
+            locs = self.locs
+        n_channels = len(locs)
+        print('Number of channels')
+        print(n_channels)
+        hues = np.arange(0, 1, 1 / n_channels)
+        colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+
+        renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in locs]
+        n_locs = sum([_[0] for _ in renderings])
+
+        images = np.array([_[1] for _ in renderings])
+
+        image = [np.sum(_, axis=2) for _ in images]
+
+        print('Image size')
+        #xyproject = np.sum(images, axis=2)
+        #pixmap = self.histtoImage(xyproject)
+
+        print(image)
+        image = np.array([_ for _ in image])
+        print(image)
+        #print(images.shape)
+
+        #image = self.scale_contrast(xyproject)
+        Y, X = image.shape[1:]
+        bgra = np.zeros((Y, X, 4), dtype=np.float32)
+        for color, image in zip(colors, image):
+            bgra[:, :, 0] += color[2] * image
+            bgra[:, :, 1] += color[1] * image
+            bgra[:, :, 2] += color[0] * image
+        bgra = np.minimum(bgra, 1)
+        self._bgra = self.to_8bit(bgra)
+
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+
+        qimage = qimage.scaled(self.viewxy.width(), np.round(self.viewxy.height()*Y/X), QtCore.Qt.KeepAspectRatioByExpanding)
+        pixmap = QtGui.QPixmap.fromImage(qimage)
+
+        return pixmap
+
 
     def fit_in_view(self, autoscale=False):
         movie_height, movie_width = self.movie_size()
@@ -494,17 +610,36 @@ class Window(QtGui.QMainWindow):
             #self.update_cursor()
 
     def draw_scene(self, viewport, autoscale=False, use_cache=False, picks_only=False):
-        if not picks_only:
-            self.viewport = self.adjust_viewport_to_view(viewport)
-            qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
-            qimage = qimage.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding)
-            self.qimage_no_picks = self.draw_scalebar(qimage)
-            dppvp = self.display_pixels_per_viewport_pixels()
-            self.window.display_settings_dialog.set_zoom_silently(dppvp)
-        self.qimage = self.draw_picks(self.qimage_no_picks)
+
+        self.viewport = self.adjust_viewport_to_view(viewport)
+        qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
+        print(self.viewxy.width())
+        qimage = qimage.scaled(self.viewxy.width(), self.viewxy.height(), QtCore.Qt.KeepAspectRatioByExpanding)
+        self.qimage_no_picks = self.draw_scalebar(qimage)
+        #dppvp = self.display_pixels_per_viewport_pixels() TOOD: implement this at some point
+        #self.window.display_settings_dialog.set_zoom_silently(dppvp)
+        #self.qimage = self.draw_picks(self.qimage_no_picks)
+
+        self.qimage = qimage
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
-        self.setPixmap(pixmap)
-        self.window.update_info()
+        self.viewxy.setPixmap(pixmap)
+        self.viewxz.setPixmap(pixmap)
+        self.viewyz.setPixmap(pixmap)
+        self.viewcp.setPixmap(pixmap)
+        #self.window.update_info()
+
+    def draw_picks(self, image):
+        image = image.copy()
+        d = self.window.tools_settings_dialog.pick_diameter.value()
+        d *= self.width() / self.viewport_width()
+        # d = int(round(d))
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor('yellow'))
+        for pick in self._picks:
+            cx, cy = self.map_to_view(*pick)
+            painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
+        painter.end()
+        return image
 
     def adjust_viewport_to_view(self, viewport):
         ''' Adds space to a desired viewport so that it matches the window aspect ratio. '''
@@ -544,7 +679,7 @@ class Window(QtGui.QMainWindow):
 
 
     def get_render_kwargs(self, viewport=None):  #Dummy for now: TODO: Implement
-        viewport = [(0, 0), (256, 256)]
+        viewport = [(0, 0), (32, 32)]
         return {'oversampling': 20,
             'viewport': viewport,
             'blur_method': None,
@@ -617,13 +752,54 @@ class Window(QtGui.QMainWindow):
         image = self.scale_contrast(image, autoscale=autoscale)
         image = self.to_8bit(image)
         Y, X = image.shape
-        cmap = self.window.display_settings_dialog.colormap.currentText()
+        #cmap = self.window.display_settings_dialog.colormap.currentText() TODO: selection of colormap?
+        cmap = 'hot'
         cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
         self._bgra = np.zeros((Y, X, 4), dtype=np.uint8, order='C')
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
         return self._bgra
+
+    def to_8bit(self, image):
+        return np.round(255 * image).astype('uint8')
+
+    def draw_scalebar(self, image):
+        #if self.window.display_settings_dialog.scalebar_groupbox.isChecked():
+        if 0:
+            pixelsize = self.window.display_settings_dialog.pixelsize.value()
+            scalebar = self.window.display_settings_dialog.scalebar.value()
+            length_camerapxl = scalebar / pixelsize
+            length_displaypxl = int(round(self.width() * length_camerapxl / self.viewport_width()))
+            height = max(int(round(0.15 * length_displaypxl)), 1)
+            painter = QtGui.QPainter(image)
+            painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
+            painter.setBrush(QtGui.QBrush(QtGui.QColor('white')))
+            x = self.width() - length_displaypxl - 20
+            y = self.height() - height - 20
+            painter.drawRect(x, y, length_displaypxl + 0, height + 0)
+        return image
+
+
+    def scale_contrast(self, image, autoscale=False):
+        if 1:
+            if image.ndim == 2:
+                max_ = image.max()
+            else:
+                max_ = min([_.max() for _ in image])
+            upper = INITIAL_REL_MAXIMUM * max_
+            #self.window.display_settings_dialog.silent_minimum_update(0)
+            #self.window.display_settings_dialog.silent_maximum_update(upper)
+        #upper = self.window.display_settings_dialog.maximum.value() TODO: THINK OF GOOD WAY OF RE-IMPLEMENTING THE CONTAST
+
+        #lower = self.window.display_settings_dialog.minimum.value()
+
+        lower = 0
+        image = (image - lower) / (upper - lower)
+        image[~np.isfinite(image)] = 0
+        image = np.minimum(image, 1.0)
+        image = np.maximum(image, 0.0)
+        return image
 
 def main():
 
