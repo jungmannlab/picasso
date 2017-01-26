@@ -26,6 +26,7 @@ from PyQt4 import QtCore, QtGui
 
 from .. import io, lib, render
 
+from numpy.lib.recfunctions import stack_arrays
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -316,6 +317,7 @@ class Window(QtGui.QMainWindow):
 
         self._pixmap = None
         self.locs = []
+        self.group_index = []
         self.infos = []
         self.locs_paths = []
         self._mode = 'Zoom'
@@ -403,6 +405,8 @@ class Window(QtGui.QMainWindow):
         buttongrid.addWidget(centerofmassbtn,0,0)
         buttongrid.addWidget(rotation_groupbox,1,0)
 
+        centerofmassbtn.clicked.connect(self.centerofmass)
+
         translatexbtn = QtGui.QPushButton("Translate X")
         translateybtn = QtGui.QPushButton("Translate Y")
         translatezbtn = QtGui.QPushButton("Translate Z")
@@ -485,7 +489,7 @@ class Window(QtGui.QMainWindow):
 
         #Try rendering volume:
         self.oversampling = 10
-        self.t_min = 0
+        self.t_min = -32
         self.t_max = 32
         self.z_min = -100
         self.z_max = 100
@@ -511,12 +515,89 @@ class Window(QtGui.QMainWindow):
             print('Only 1 Dataset')
         else:
             print('More datasets')
-            pixmapmulti = self.hist_multi_channel(self.locs)
+            pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
 
-            self.viewxy.setPixmap(pixmapmulti)
+            self.viewxy.setPixmap(pixmap1)
+            self.viewxz.setPixmap(pixmap2)
+            self.viewyz.setPixmap(pixmap3)
 
+        #CREATE GROUP INDEX
+        if hasattr(locs, 'group'):
+            groups = np.unique(locs.group)
+            n_groups = len(groups)
+            n_locs = len(locs)
+
+            group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
+            progress = lib.ProgressDialog('Creating group index', 0, len(groups), self)
+            progress.set_value(0)
+            for i, group in enumerate(groups):
+                index = np.where(locs.group == group)[0]
+                group_index[i, index] = True
+                progress.set_value(i+1)
+
+            self.group_index.append(group_index)
+            self.n_groups = n_groups
         os.chdir(os.path.dirname(path))
 
+    def updateLayout(self):
+        pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
+
+        self.viewxy.setPixmap(pixmap1)
+        self.viewxz.setPixmap(pixmap2)
+        self.viewyz.setPixmap(pixmap3)
+
+    def centerofmass(self):
+        print('Center of mass btn')
+        n_groups = self.n_groups
+        n_channels = len(self.locs)
+        progress = lib.ProgressDialog('Aligning by center of mass', 0, n_groups, self)
+        progress.set_value(0)
+
+        for i in range(n_groups):
+            out_locs_x = []
+            out_locs_y = []
+            out_locs_z = []
+            for j in range(n_channels):
+                sel_locs_x = []
+                sel_locs_y = []
+                sel_locs_z = []
+                index = self.group_index[j][i, :].nonzero()[1]
+            #stack arrays
+                sel_locs_x = self.locs[j].x[index]
+                sel_locs_y = self.locs[j].y[index]
+                sel_locs_z = self.locs[j].z[index]
+                out_locs_x.append(sel_locs_x)
+                out_locs_y.append(sel_locs_y)
+                out_locs_z.append(sel_locs_z)
+                progress.set_value(i+1)
+
+            out_locs_x=stack_arrays(out_locs_x, asrecarray=True, usemask=False)
+            out_locs_y=stack_arrays(out_locs_y, asrecarray=True, usemask=False)
+            out_locs_z=stack_arrays(out_locs_z, asrecarray=True, usemask=False)
+
+            mean_x = np.mean(out_locs_x)
+            mean_y = np.mean(out_locs_y)
+            mean_z = np.mean(out_locs_z)
+
+            for j in range(n_channels):
+                index = self.group_index[j][i, :].nonzero()[1]
+                self.locs[j].x[index] -= mean_x
+                self.locs[j].y[index] -= mean_y
+                self.locs[j].z[index] -= mean_z
+
+        #self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
+
+
+        #for i in range(n_groups):
+        #    index = self.group_index[i, :].nonzero()[1]
+        #    self.locs.x[index] -= np.mean(self.locs.x[index])
+        #    self.locs.y[index] -= np.mean(self.locs.y[index])
+        #    self.locs.z[index] -= np.mean(self.locs.z[index])
+        #    progress.set_value(i+1)
+
+
+        #go through picks, load coordinates from all sets and GOOD
+        self.updateLayout()
 
     def histtoImage(self, image):
         cmap = np.uint8(np.round(255 * plt.get_cmap('magma')(np.arange(256))))
@@ -556,16 +637,19 @@ class Window(QtGui.QMainWindow):
 
         images = np.array([_[1] for _ in renderings])
 
-        image = [np.sum(_, axis=2) for _ in images]
+        pixmap1 = self.pixmap_from_colors(images,colors,2)
+        pixmap2 = self.pixmap_from_colors(images,colors,0)
+        pixmap3 = self.pixmap_from_colors(images,colors,1)
 
-        print('Image size')
-        #xyproject = np.sum(images, axis=2)
-        #pixmap = self.histtoImage(xyproject)
+        return pixmap1, pixmap2, pixmap3
 
-        print(image)
+    def pixmap_from_colors(self,images,colors,axisval):
+        if axisval == 2:
+            image = [np.sum(_, axis=axisval) for _ in images]
+        else:
+            image = [np.transpose(np.sum(_, axis=axisval)) for _ in images]
+
         image = np.array([_ for _ in image])
-        print(image)
-        #print(images.shape)
 
         #image = self.scale_contrast(xyproject)
         Y, X = image.shape[1:]
@@ -583,7 +667,6 @@ class Window(QtGui.QMainWindow):
         pixmap = QtGui.QPixmap.fromImage(qimage)
 
         return pixmap
-
 
     def fit_in_view(self, autoscale=False):
         movie_height, movie_width = self.movie_size()
