@@ -489,10 +489,18 @@ class Window(QtGui.QMainWindow):
 
         #Try rendering volume:
         self.oversampling = 10
-        self.t_min = -32
-        self.t_max = 32
-        self.z_min = -100
-        self.z_max = 100
+        if len(self.locs) == 1:
+            self.t_min = np.min([np.min(locs.x),np.min(locs.y)])
+            self.t_max = np.max([np.max(locs.x),np.max(locs.y)])
+            self.z_min = np.min(locs.z)
+            self.z_max = np.max(locs.z)
+        else:
+            self.t_min = np.min([np.min(locs.x),np.min(locs.y),self.t_min])
+            self.t_max = np.max([np.max(locs.x),np.max(locs.y),self.t_max])
+            self.z_min = np.min([np.min(locs.z),self.z_min])
+            self.z_max = np.min([np.max(locs.z),self.z_max])
+
+
         self.pixelsize = 160
 
         N_avg, image_avg3 = render.render_hist3d(self.locs[0], self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize)
@@ -594,9 +602,19 @@ class Window(QtGui.QMainWindow):
         #    self.locs.y[index] -= np.mean(self.locs.y[index])
         #    self.locs.z[index] -= np.mean(self.locs.z[index])
         #    progress.set_value(i+1)
-
+        #change plot boundaries
+        self.t_min = 0
+        self.t_max = 0
+        self.z_min = 0
+        self.z_max = 0
+        for j in range(n_channels):
+            self.t_min = np.min([np.min(self.locs[j].x),np.min(self.locs[j].y),self.t_min])
+            self.t_max = np.max([np.max(self.locs[j].x),np.max(self.locs[j].y),self.t_max])
+            self.z_min = np.min([np.min(self.locs[j].z),self.z_min])
+            self.z_max = np.min([np.max(self.locs[j].z),self.z_max])
 
         #go through picks, load coordinates from all sets and GOOD
+        self.oversampling = 80
         self.updateLayout()
 
     def histtoImage(self, image):
@@ -617,12 +635,7 @@ class Window(QtGui.QMainWindow):
         return pixmap
 
     def hist_multi_channel(self, locs):
-        self.oversampling = 10
-        self.t_min = 0
-        self.t_max = 32
-        self.z_min = -100
-        self.z_max = 100
-        self.pixelsize = 160
+
 
         if locs is None:
             locs = self.locs
