@@ -28,6 +28,9 @@ from .. import io, lib, render
 
 from numpy.lib.recfunctions import stack_arrays
 
+from cmath import rect, phase
+from math import radians, degrees
+
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 10 / 7
@@ -52,7 +55,7 @@ def compute_xcorr(CF_image_avg, image):
     return xcorr
 
 
-def align_group(angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group):
+def align_group_old(angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group):
     with lock:
         counter.value += 1
     index = group_index[group].nonzero()[1]
@@ -131,7 +134,6 @@ class Worker(QtCore.QThread):
             self.locs.y -= np.mean(self.locs.y)
             self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, True)
 
-
 class ParametersDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -144,10 +146,10 @@ class ParametersDialog(QtGui.QDialog):
         grid.addWidget(QtGui.QLabel('Oversampling:'), 0, 0)
         self.oversampling = QtGui.QDoubleSpinBox()
         self.oversampling.setRange(1, 1e7)
-        self.oversampling.setValue(10)
+        self.oversampling.setValue(40)
         self.oversampling.setDecimals(1)
         self.oversampling.setKeyboardTracking(False)
-        self.oversampling.valueChanged.connect(self.window.view.update_image)
+        self.oversampling.valueChanged.connect(self.window.updateLayout)
         grid.addWidget(self.oversampling, 0, 1)
 
         grid.addWidget(QtGui.QLabel('Iterations:'), 1, 0)
@@ -295,7 +297,7 @@ class Window(QtGui.QMainWindow):
         self.setAcceptDrops(True)
         #self.view = View(self)
         #self.setCentralWidget(self.view)
-        #self.parameters_dialog = ParametersDialog(self)
+        self.parameters_dialog = ParametersDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
@@ -307,9 +309,9 @@ class Window(QtGui.QMainWindow):
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
         process_menu = menu_bar.addMenu('Process')
-        #parameters_action = process_menu.addAction('Parameters')
-        #parameters_action.setShortcut('Ctrl+P')
-        #parameters_action.triggered.connect(self.parameters_dialog.show)
+        parameters_action = process_menu.addAction('Parameters')
+        parameters_action.setShortcut('Ctrl+P')
+        parameters_action.triggered.connect(self.parameters_dialog.show)
         average_action = process_menu.addAction('Average')
         average_action.setShortcut('Ctrl+A')
         #average_action.triggered.connect(self.view.average)
@@ -406,6 +408,7 @@ class Window(QtGui.QMainWindow):
         buttongrid.addWidget(rotation_groupbox,1,0)
 
         centerofmassbtn.clicked.connect(self.centerofmass)
+        rotatebtn.clicked.connect(self.rotate_groups)
 
         translatexbtn = QtGui.QPushButton("Translate X")
         translateybtn = QtGui.QPushButton("Translate Y")
@@ -593,28 +596,20 @@ class Window(QtGui.QMainWindow):
                 self.locs[j].y[index] -= mean_y
                 self.locs[j].z[index] -= mean_z
 
-        #self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
 
-
-        #for i in range(n_groups):
-        #    index = self.group_index[i, :].nonzero()[1]
-        #    self.locs.x[index] -= np.mean(self.locs.x[index])
-        #    self.locs.y[index] -= np.mean(self.locs.y[index])
-        #    self.locs.z[index] -= np.mean(self.locs.z[index])
-        #    progress.set_value(i+1)
-        #change plot boundaries
-        self.t_min = 0
-        self.t_max = 0
-        self.z_min = 0
-        self.z_max = 0
+        #CALCULATE PROPER R VALUES
+        self.r = 0
+        self.r_z = 0
         for j in range(n_channels):
-            self.t_min = np.min([np.min(self.locs[j].x),np.min(self.locs[j].y),self.t_min])
-            self.t_max = np.max([np.max(self.locs[j].x),np.max(self.locs[j].y),self.t_max])
-            self.z_min = np.min([np.min(self.locs[j].z),self.z_min])
-            self.z_max = np.min([np.max(self.locs[j].z),self.z_max])
+            self.r = np.max([2 * np.sqrt(np.mean(self.locs[j].x**2 + self.locs[j].y**2)),self.r])
+            self.r_z = np.max([2 * np.sqrt(np.mean(self.locs[j].z**2)),self.r_z])
+        self.t_min = -self.r
+        self.t_max = self.r
+        self.z_min = -self.r_z
+        self.z_max = self.r_z
 
         #go through picks, load coordinates from all sets and GOOD
-        self.oversampling = 80
+        self.oversampling = 40
         self.updateLayout()
 
     def histtoImage(self, image):
@@ -636,7 +631,8 @@ class Window(QtGui.QMainWindow):
 
     def hist_multi_channel(self, locs):
 
-
+        oversampling = self.parameters_dialog.oversampling.value()
+        self.oversampling = oversampling
         if locs is None:
             locs = self.locs
         n_channels = len(locs)
@@ -645,9 +641,8 @@ class Window(QtGui.QMainWindow):
         hues = np.arange(0, 1, 1 / n_channels)
         colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
 
-        renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in locs]
+        renderings = [render.render_hist3d(_, oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in locs]
         n_locs = sum([_[0] for _ in renderings])
-
         images = np.array([_[1] for _ in renderings])
 
         pixmap1 = self.pixmap_from_colors(images,colors,2)
@@ -662,7 +657,7 @@ class Window(QtGui.QMainWindow):
         else:
             image = [np.transpose(np.sum(_, axis=axisval)) for _ in images]
 
-        image = np.array([_ for _ in image])
+        image = np.array([self.scale_contrast(_) for _ in image])
 
         #image = self.scale_contrast(xyproject)
         Y, X = image.shape[1:]
@@ -680,6 +675,108 @@ class Window(QtGui.QMainWindow):
         pixmap = QtGui.QPixmap.fromImage(qimage)
 
         return pixmap
+
+    def rotate_groups(self):
+        print('Rotate')
+        n_groups = self.group_index[0].shape[0]
+        print(n_groups)
+        a_step = np.arcsin(1 / (self.oversampling * self.r))
+        angles = np.arange(0, 2*np.pi, a_step)
+
+        renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
+        n_locs = sum([_[0] for _ in renderings])
+        images = np.array([_[1] for _ in renderings])
+
+        axisval = 2 #TODO: GET PARAMETER FROM GUI TO SPECIFY AXISVAL
+
+        if axisval == 2:
+            image = [np.sum(_, axis=axisval) for _ in images]
+        else:
+            image = [np.transpose(np.sum(_, axis=axisval)) for _ in images]
+
+        CF_image_avg = [np.conj(np.fft.fft2(_)) for _ in image]
+
+
+        #n_pixel, _ = image_avg.shape
+        #image_half = n_pixel / 2
+
+        # TODO: blur auf average !!!
+
+        for i in range(n_groups):
+            self.status_bar.showMessage('Looping through groups '+str(i)+' of '+str(n_groups))
+            self.align_group(CF_image_avg, angles, i)
+        self.updateLayout()
+        self.status_bar.showMessage('Done!')
+
+    def mean_angle(self, deg):
+        return (phase(sum(rect(1, d) for d in deg)/len(deg)))
+
+
+
+    def align_group(self, CF_image_avg,angles,group):
+        n_channels = len(self.locs)
+        allrot = []
+        alldx = []
+        alldy = []
+
+        n_angles = len(angles)
+
+        all_xcorr = np.zeros((n_angles,n_channels))
+        all_dx = np.zeros((n_angles,n_channels))
+        all_dy = np.zeros((n_angles,n_channels))
+
+        for j in range(n_channels):
+            index = self.group_index[j][group].nonzero()[1]
+            x_rot = self.locs[j].x[index]
+            y_rot = self.locs[j].y[index]
+            z_rot = self.locs[j].z[index]
+            x_original = x_rot.copy()
+            y_original = y_rot.copy()
+            z_original = z_rot.copy()
+            xcorr_max = 0.0
+            for k in range(n_angles):
+                angle = angles[k]
+                # rotate locs
+                x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
+                y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
+                # render group image
+                N, image = render_hist(x_rot, y_rot, self.oversampling, self.t_min, self.t_max)
+                # calculate cross-correlation
+                xcorr = compute_xcorr(CF_image_avg[j], image)
+
+                n_pixelx, n_pixely = image.shape
+                image_halfx = n_pixelx / 2
+                image_halfy = n_pixely / 2
+
+                # find the brightest pixel
+                y_max, x_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
+                # store the transformation if the correlation is larger than before
+
+                all_xcorr[k,j] = xcorr[y_max, x_max]
+                all_dy[k,j] = np.ceil(y_max - image_halfy) / self.oversampling
+                all_dx[k,j] = np.ceil(x_max - image_halfx) / self.oversampling
+
+
+        #value with biggest cc value form table
+        maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
+        print(maximumcc)
+        rotfinal = angles[maximumcc]
+
+        dxfinal = np.mean(all_dx[maximumcc,:])
+        dyfinal = np.mean(all_dy[maximumcc,:])
+
+        for j in range(n_channels):
+            index = self.group_index[j][group].nonzero()[1]
+            x_rot = self.locs[j].x[index]
+            y_rot = self.locs[j].y[index]
+            z_rot = self.locs[j].z[index]
+            x_original = x_rot.copy()
+            y_original = y_rot.copy()
+            z_original = z_rot.copy()
+            # rotate and shift image group locs
+            self.locs[j].x[index] = np.cos(rotfinal) * x_original - np.sin(rotfinal) * y_original - dxfinal
+            self.locs[j].y[index] = np.sin(rotfinal) * x_original + np.cos(rotfinal) * y_original - dyfinal
+
 
     def fit_in_view(self, autoscale=False):
         movie_height, movie_width = self.movie_size()
