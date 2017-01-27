@@ -48,6 +48,21 @@ def render_hist(x, y, oversampling, t_min, t_max):
     render._fill(image, x, y)
     return len(x), image
 
+@numba.jit(nopython=True, nogil=True)
+def render_histxyz(a, b, oversampling, a_min, a_max, b_min, b_max):
+    n_pixel_a = int(np.ceil(oversampling * (a_max - a_min)))
+    n_pixel_b = int(np.ceil(oversampling * (b_max - b_min)))
+    in_view = (a > a_min) & (b > b_min) & (a < a_max) & (b < b_max)
+    a = a[in_view]
+    b = b[in_view]
+    a = oversampling * (a - a_min)
+    b = oversampling * (b - b_min)
+    image = np.zeros((n_pixel_a, n_pixel_b), dtype=np.float32)
+    render._fill(image, a, b)
+    return len(a), image
+
+
+
 
 def compute_xcorr(CF_image_avg, image):
     F_image = np.fft.fft2(image)
@@ -368,35 +383,35 @@ class Window(QtGui.QMainWindow):
         axis_groupbox = QtGui.QGroupBox('Axis')
         axisgrid = QtGui.QGridLayout(axis_groupbox)
 
-        x_axisbtn = QtGui.QRadioButton("X")
-        y_axisbtn = QtGui.QRadioButton("Y")
-        z_axisbtn = QtGui.QRadioButton("Z")
+        self.x_axisbtn = QtGui.QRadioButton("X")
+        self.y_axisbtn = QtGui.QRadioButton("Y")
+        self.z_axisbtn = QtGui.QRadioButton("Z")
 
-        axisgrid.addWidget(x_axisbtn,0,0)
-        axisgrid.addWidget(y_axisbtn,0,1)
-        axisgrid.addWidget(z_axisbtn,0,2)
+        axisgrid.addWidget(self.x_axisbtn,0,0)
+        axisgrid.addWidget(self.y_axisbtn,0,1)
+        axisgrid.addWidget(self.z_axisbtn,0,2)
 
         proj_groupbox = QtGui.QGroupBox('Projection')
         projgrid = QtGui.QGridLayout(proj_groupbox)
 
-        xy_projbtn = QtGui.QRadioButton("XY")
-        yz_projbtn = QtGui.QRadioButton("YZ")
-        zx_projbtn = QtGui.QRadioButton("ZX")
+        self.xy_projbtn = QtGui.QRadioButton("XY")
+        self.yz_projbtn = QtGui.QRadioButton("YZ")
+        self.zx_projbtn = QtGui.QRadioButton("ZX")
 
-        projgrid.addWidget(xy_projbtn,0,0)
-        projgrid.addWidget(yz_projbtn,0,1)
-        projgrid.addWidget(zx_projbtn,0,2)
+        projgrid.addWidget(self.xy_projbtn,0,0)
+        projgrid.addWidget(self.yz_projbtn,0,1)
+        projgrid.addWidget(self.zx_projbtn,0,2)
 
         rotatebtn = QtGui.QPushButton("Rotate")
 
         deg_groupbox = QtGui.QGroupBox('Degrees')
         deggrid = QtGui.QGridLayout(deg_groupbox)
 
-        full_degbtn = QtGui.QRadioButton("Full")
-        part_degbtn = QtGui.QRadioButton("+-30")
+        self.full_degbtn = QtGui.QRadioButton("Full")
+        self.part_degbtn = QtGui.QRadioButton("+-30")
 
-        deggrid.addWidget(full_degbtn,0,0)
-        deggrid.addWidget(part_degbtn,0,1)
+        deggrid.addWidget(self.full_degbtn,0,0)
+        deggrid.addWidget(self.part_degbtn,0,1)
 
         #Rotation Groupbox
         rotationgrid.addWidget(axis_groupbox,0,0)
@@ -410,24 +425,24 @@ class Window(QtGui.QMainWindow):
         centerofmassbtn.clicked.connect(self.centerofmass)
         rotatebtn.clicked.connect(self.rotate_groups)
 
-        translatexbtn = QtGui.QPushButton("Translate X")
-        translateybtn = QtGui.QPushButton("Translate Y")
-        translatezbtn = QtGui.QPushButton("Translate Z")
+        self.translatexbtn = QtGui.QPushButton("Translate X")
+        self.translateybtn = QtGui.QPushButton("Translate Y")
+        self.translatezbtn = QtGui.QPushButton("Translate Z")
 
-        alignxbtn = QtGui.QPushButton("Align X")
-        alignybtn = QtGui.QPushButton("Align Y")
-        alignzbtn = QtGui.QPushButton("Align Z")
+        self.alignxbtn = QtGui.QPushButton("Align X")
+        self.alignybtn = QtGui.QPushButton("Align Y")
+        self.alignzbtn = QtGui.QPushButton("Align Z")
 
         operate_groupbox = QtGui.QGroupBox('Operate')
         operategrid = QtGui.QGridLayout(operate_groupbox)
 
-        operategrid.addWidget(translatexbtn,0,0)
-        operategrid.addWidget(translateybtn,1,0)
-        operategrid.addWidget(translatezbtn,2,0)
+        operategrid.addWidget(self.translatexbtn,0,0)
+        operategrid.addWidget(self.translateybtn,1,0)
+        operategrid.addWidget(self.translatezbtn,2,0)
 
-        operategrid.addWidget(alignxbtn,0,1)
-        operategrid.addWidget(alignybtn,1,1)
-        operategrid.addWidget(alignzbtn,2,1)
+        operategrid.addWidget(self.alignxbtn,0,1)
+        operategrid.addWidget(self.alignybtn,1,1)
+        operategrid.addWidget(self.alignzbtn,2,1)
 
         buttongrid.addWidget(operate_groupbox,2,0)
 
@@ -678,6 +693,19 @@ class Window(QtGui.QMainWindow):
 
     def rotate_groups(self):
         print('Rotate')
+        #Read out values from radiobuttons
+
+        self.x_axisbtn.isChecked()
+        self.y_axisbtn.isChecked()
+        self.z_axisbtn.isChecked()
+
+        self.xy_projbtn.isChecked()
+        self.yz_projbtn.isChecked()
+        self.zx_projbtn.isChecked()
+
+        self.full_degbtn.isChecked()
+        self.part_degbtn.isChecked()
+
         n_groups = self.group_index[0].shape[0]
         print(n_groups)
         a_step = np.arcsin(1 / (self.oversampling * self.r))
@@ -701,10 +729,11 @@ class Window(QtGui.QMainWindow):
         #image_half = n_pixel / 2
 
         # TODO: blur auf average !!!
-
+        rotaxis = 1
+        proaxis = 2
         for i in range(n_groups):
             self.status_bar.showMessage('Looping through groups '+str(i)+' of '+str(n_groups))
-            self.align_group(CF_image_avg, angles, i)
+            self.align_group(CF_image_avg, angles, i, rotaxis, proaxis)
         self.updateLayout()
         self.status_bar.showMessage('Done!')
 
@@ -713,17 +742,26 @@ class Window(QtGui.QMainWindow):
 
 
 
-    def align_group(self, CF_image_avg,angles,group):
+    def align_group(self, CF_image_avg, angles, group, rotaxis, proaxis):
         n_channels = len(self.locs)
         allrot = []
         alldx = []
         alldy = []
+        alldz = []
 
         n_angles = len(angles)
 
         all_xcorr = np.zeros((n_angles,n_channels))
-        all_dx = np.zeros((n_angles,n_channels))
-        all_dy = np.zeros((n_angles,n_channels))
+        all_da = np.zeros((n_angles,n_channels))
+        all_db = np.zeros((n_angles,n_channels))
+
+
+        if rotaxis:
+            aval_min = self.t_min
+            aval_max = self.t_max
+            bval_min = self.t_min
+            bval_max = self.t_max
+
 
         for j in range(n_channels):
             index = self.group_index[j][group].nonzero()[1]
@@ -734,36 +772,43 @@ class Window(QtGui.QMainWindow):
             y_original = y_rot.copy()
             z_original = z_rot.copy()
             xcorr_max = 0.0
+            if rotaxis:
+                a_rot = x_rot
+                b_rot = y_rot
+                a_original = x_original
+                b_original = y_original
+
             for k in range(n_angles):
                 angle = angles[k]
+
                 # rotate locs
-                x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
-                y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
+                a_rot = np.cos(angle) * a_original - np.sin(angle) * b_original
+                b_rot = np.sin(angle) * a_original + np.cos(angle) * b_original
                 # render group image
-                N, image = render_hist(x_rot, y_rot, self.oversampling, self.t_min, self.t_max)
+                N, image = render_histxyz(a_rot, b_rot, self.oversampling, aval_min, aval_max, bval_min, bval_max)
+
                 # calculate cross-correlation
                 xcorr = compute_xcorr(CF_image_avg[j], image)
 
-                n_pixelx, n_pixely = image.shape
-                image_halfx = n_pixelx / 2
-                image_halfy = n_pixely / 2
+                n_pixelb, n_pixela = image.shape
+                image_halfa = n_pixela / 2 #TODO: CHECK THOSE VALUES
+                image_halfb = n_pixelb / 2
 
                 # find the brightest pixel
-                y_max, x_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
+                b_max, a_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
                 # store the transformation if the correlation is larger than before
 
-                all_xcorr[k,j] = xcorr[y_max, x_max]
-                all_dy[k,j] = np.ceil(y_max - image_halfy) / self.oversampling
-                all_dx[k,j] = np.ceil(x_max - image_halfx) / self.oversampling
-
+                all_xcorr[k,j] = xcorr[a_max, b_max]
+                all_db[k,j] = np.ceil(b_max - image_halfb) / self.oversampling
+                all_da[k,j] = np.ceil(a_max - image_halfa) / self.oversampling
 
         #value with biggest cc value form table
         maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
         print(maximumcc)
         rotfinal = angles[maximumcc]
 
-        dxfinal = np.mean(all_dx[maximumcc,:])
-        dyfinal = np.mean(all_dy[maximumcc,:])
+        dxfinal = np.mean(all_da[maximumcc,:])
+        dyfinal = np.mean(all_db[maximumcc,:])
 
         for j in range(n_channels):
             index = self.group_index[j][group].nonzero()[1]
