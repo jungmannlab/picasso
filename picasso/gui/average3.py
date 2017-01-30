@@ -61,14 +61,25 @@ def render_histxyz(a, b, oversampling, a_min, a_max, b_min, b_max):
     render._fill(image, a, b)
     return len(a), image
 
-
-
+def rotate_axis(axis,vx,vy,vz,angle):
+    if axis == 'z':
+        vx_rot = np.cos(angle) * vx - np.sin(angle) * vy
+        vy_rot = np.sin(angle) * vx + np.cos(angle) * vy
+        vz_rot = vz
+    elif axis == 'y':
+        vx_rot = np.cos(angle) * vx - np.sin(angle) * vz
+        vy_rot = vy
+        vz_rot = -np.sin(angle) * vx + np.cos(angle) * vz
+    elif axis == 'x':
+        vx_rot = vx
+        vy_rot = np.cos(angle) * vy - np.sin(angle) * vz
+        vz_rot = np.sin(angle) * vy + np.cos(angle) * vz
+    return vx_rot, vy_rot, vz_rot
 
 def compute_xcorr(CF_image_avg, image):
     F_image = np.fft.fft2(image)
     xcorr = np.fft.fftshift(np.real(np.fft.ifft2((F_image * CF_image_avg))))
     return xcorr
-
 
 def align_group_old(angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group):
     with lock:
@@ -387,6 +398,8 @@ class Window(QtGui.QMainWindow):
         self.y_axisbtn = QtGui.QRadioButton("Y")
         self.z_axisbtn = QtGui.QRadioButton("Z")
 
+        self.z_axisbtn.setChecked(True)
+
         axisgrid.addWidget(self.x_axisbtn,0,0)
         axisgrid.addWidget(self.y_axisbtn,0,1)
         axisgrid.addWidget(self.z_axisbtn,0,2)
@@ -397,6 +410,8 @@ class Window(QtGui.QMainWindow):
         self.xy_projbtn = QtGui.QRadioButton("XY")
         self.yz_projbtn = QtGui.QRadioButton("YZ")
         self.zx_projbtn = QtGui.QRadioButton("ZX")
+
+        self.xy_projbtn.setChecked(True)
 
         projgrid.addWidget(self.xy_projbtn,0,0)
         projgrid.addWidget(self.yz_projbtn,0,1)
@@ -412,6 +427,8 @@ class Window(QtGui.QMainWindow):
 
         deggrid.addWidget(self.full_degbtn,0,0)
         deggrid.addWidget(self.part_degbtn,0,1)
+
+        self.full_degbtn.setChecked(True)
 
         #Rotation Groupbox
         rotationgrid.addWidget(axis_groupbox,0,0)
@@ -623,6 +640,34 @@ class Window(QtGui.QMainWindow):
         self.z_min = -self.r_z
         self.z_max = self.r_z
 
+        #ENSURE SANITY and create new group index
+        self.group_index = []
+
+        for j in range(n_channels):
+
+            self.locs[j] = self.locs[j][self.locs[j].x > self.t_min]
+            self.locs[j] = self.locs[j][self.locs[j].y > self.t_min]
+            self.locs[j] = self.locs[j][self.locs[j].z > self.z_min]
+            self.locs[j] = self.locs[j][self.locs[j].x < self.t_max]
+            self.locs[j] = self.locs[j][self.locs[j].y < self.t_max]
+            self.locs[j] = self.locs[j][self.locs[j].z < self.z_max]
+
+            groups = np.unique(self.locs[j].group)
+            n_groups = len(groups)
+            n_locs = len(self.locs[j])
+
+            group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
+            progress = lib.ProgressDialog('Creating group index', 0, len(groups), self)
+            progress.set_value(0)
+            for i, group in enumerate(groups):
+                index = np.where(self.locs[j].group == group)[0]
+                group_index[i, index] = True
+                progress.set_value(i+1)
+
+        self.group_index.append(group_index)
+        self.n_groups = n_groups
+
+
         #go through picks, load coordinates from all sets and GOOD
         self.oversampling = 40
         self.updateLayout()
@@ -651,8 +696,7 @@ class Window(QtGui.QMainWindow):
         if locs is None:
             locs = self.locs
         n_channels = len(locs)
-        print('Number of channels')
-        print(n_channels)
+
         hues = np.arange(0, 1, 1 / n_channels)
         colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
 
@@ -692,48 +736,64 @@ class Window(QtGui.QMainWindow):
         return pixmap
 
     def rotate_groups(self):
-        print('Rotate')
+
         #Read out values from radiobuttons
 
-        self.x_axisbtn.isChecked()
-        self.y_axisbtn.isChecked()
-        self.z_axisbtn.isChecked()
+        #TODO: maybe re-write this with kwargs
+        rotaxis = []
+        if self.x_axisbtn.isChecked():
+            rotaxis = 'x'
+        elif self.y_axisbtn.isChecked():
+            rotaxis = 'y'
+        elif self.z_axisbtn.isChecked():
+            rotaxis = 'z'
 
-        self.xy_projbtn.isChecked()
-        self.yz_projbtn.isChecked()
-        self.zx_projbtn.isChecked()
-
-        self.full_degbtn.isChecked()
-        self.part_degbtn.isChecked()
 
         n_groups = self.group_index[0].shape[0]
         print(n_groups)
         a_step = np.arcsin(1 / (self.oversampling * self.r))
-        angles = np.arange(0, 2*np.pi, a_step)
+
+        if self.full_degbtn.isChecked():
+            angles = np.arange(0, 2*np.pi, a_step)
+        elif self.part_degbtn.isChecked():
+            angles = np.arange(-15/360*2*np.pi, 15/360*2*np.pi, a_step)
+
 
         renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
         n_locs = sum([_[0] for _ in renderings])
+
         images = np.array([_[1] for _ in renderings])
 
-        axisval = 2 #TODO: GET PARAMETER FROM GUI TO SPECIFY AXISVAL
+        #DELIVER CORRECT PROJECTION FOR IMAGE
+        proplane = []
 
-        if axisval == 2:
-            image = [np.sum(_, axis=axisval) for _ in images]
-        else:
-            image = [np.transpose(np.sum(_, axis=axisval)) for _ in images]
+        if self.xy_projbtn.isChecked():
+            print('xy-plane')
+            proplane = 'xy'
+            image = [np.sum(_, axis=2) for _ in images]
+        elif self.yz_projbtn.isChecked():
+            print('yz-plane')
+            proplane = 'yz'
+            #image = [np.transpose(np.sum(_, axis=1)) for _ in images]
+            image = [np.sum(_, axis=1) for _ in images]
+        elif self.zx_projbtn.isChecked():
+            print('zx-plane')
+            proplane = 'zx'
+            image = [np.transpose(np.sum(_, axis=0)) for _ in images]
 
+        print(len(images))
         CF_image_avg = [np.conj(np.fft.fft2(_)) for _ in image]
-
-
+        print('Size of CFimage')
+        print(image[0].shape)
         #n_pixel, _ = image_avg.shape
         #image_half = n_pixel / 2
 
         # TODO: blur auf average !!!
-        rotaxis = 1
-        proaxis = 2
+
         for i in range(n_groups):
+            print('Looping through groups '+str(i)+' of '+str(n_groups))
             self.status_bar.showMessage('Looping through groups '+str(i)+' of '+str(n_groups))
-            self.align_group(CF_image_avg, angles, i, rotaxis, proaxis)
+            self.align_group(CF_image_avg, angles, i, rotaxis, proplane)
         self.updateLayout()
         self.status_bar.showMessage('Done!')
 
@@ -741,8 +801,45 @@ class Window(QtGui.QMainWindow):
         return (phase(sum(rect(1, d) for d in deg)/len(deg)))
 
 
+    def render_planes(self, xdata, ydata, zdata, proplane, pixelsize):
+        #assign correct renderings for all planes
+        a_render = []
+        b_render = []
+        print('Render planes')
+        print(self.z_min)
+        print(self.z_max)
+        if proplane == 'xy':
+            print('xy')
+            a_render = xdata
+            b_render = ydata
+            aval_min = self.t_min
+            aval_max = self.t_max
+            bval_min = self.t_min
+            bval_max = self.t_max
+        elif proplane == 'yz':
+            print('yz')
+            a_render = ydata
+            b_render = np.divide(zdata,pixelsize)
+            aval_min = self.t_min
+            aval_max = self.t_max
+            bval_min = np.divide(self.z_min,pixelsize)
+            bval_max = np.divide(self.z_max,pixelsize)
+        elif proplane == 'zx':
+            print('zx')
+            a_render = np.divide(zdata,pixelsize)
+            b_render = xdata
+            aval_min = np.divide(self.z_min,pixelsize)
+            aval_max = np.divide(self.z_max,pixelsize)
+            bval_min = self.t_min
+            bval_max = self.t_max
 
-    def align_group(self, CF_image_avg, angles, group, rotaxis, proaxis):
+        print('Rendering image...')
+        N, image = render_histxyz(a_render, b_render, self.oversampling, aval_min, aval_max, bval_min, bval_max)
+        print('Rendering image... complete')
+        return image
+
+
+    def align_group(self, CF_image_avg, angles, group, rotaxis, proplane):
         n_channels = len(self.locs)
         allrot = []
         alldx = []
@@ -754,15 +851,7 @@ class Window(QtGui.QMainWindow):
         all_xcorr = np.zeros((n_angles,n_channels))
         all_da = np.zeros((n_angles,n_channels))
         all_db = np.zeros((n_angles,n_channels))
-
-
-        if rotaxis:
-            aval_min = self.t_min
-            aval_max = self.t_max
-            bval_min = self.t_min
-            bval_max = self.t_max
-
-
+        print('Aligning groups .. 1')
         for j in range(n_channels):
             index = self.group_index[j][group].nonzero()[1]
             x_rot = self.locs[j].x[index]
@@ -772,22 +861,22 @@ class Window(QtGui.QMainWindow):
             y_original = y_rot.copy()
             z_original = z_rot.copy()
             xcorr_max = 0.0
-            if rotaxis:
-                a_rot = x_rot
-                b_rot = y_rot
-                a_original = x_original
-                b_original = y_original
 
             for k in range(n_angles):
                 angle = angles[k]
-
                 # rotate locs
-                a_rot = np.cos(angle) * a_original - np.sin(angle) * b_original
-                b_rot = np.sin(angle) * a_original + np.cos(angle) * b_original
-                # render group image
-                N, image = render_histxyz(a_rot, b_rot, self.oversampling, aval_min, aval_max, bval_min, bval_max)
-
+                #a_rot = np.cos(angle) * a_original - np.sin(angle) * b_original
+                #b_rot = np.sin(angle) * a_original + np.cos(angle) * b_original
+                print('Aligning groups .. 2')
+                x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle)
+                # render group image for plane
+                print('Aligning groups .. 3')
+                image = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #RENDR PLANES WAS BUGGY AT SOME POINT
+                print('Aligning groups .. 4')
                 # calculate cross-correlation
+                print('Compare shapes')
+                print(image.shape)
+                print(CF_image_avg[j].shape)
                 xcorr = compute_xcorr(CF_image_avg[j], image)
 
                 n_pixelb, n_pixela = image.shape
@@ -804,11 +893,10 @@ class Window(QtGui.QMainWindow):
 
         #value with biggest cc value form table
         maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
-        print(maximumcc)
         rotfinal = angles[maximumcc]
 
-        dxfinal = np.mean(all_da[maximumcc,:])
-        dyfinal = np.mean(all_db[maximumcc,:])
+        dafinal = np.mean(all_da[maximumcc,:])
+        dbfinal = np.mean(all_db[maximumcc,:])
 
         for j in range(n_channels):
             index = self.group_index[j][group].nonzero()[1]
@@ -819,8 +907,29 @@ class Window(QtGui.QMainWindow):
             y_original = y_rot.copy()
             z_original = z_rot.copy()
             # rotate and shift image group locs
-            self.locs[j].x[index] = np.cos(rotfinal) * x_original - np.sin(rotfinal) * y_original - dxfinal
-            self.locs[j].y[index] = np.sin(rotfinal) * x_original + np.cos(rotfinal) * y_original - dyfinal
+            if rotaxis == 'z':
+                self.locs[j].x[index] = np.cos(rotfinal) * x_original - np.sin(rotfinal) * y_original
+                self.locs[j].y[index] = np.sin(rotfinal) * x_original + np.cos(rotfinal) * y_original
+            elif rotaxis == 'y':
+                self.locs[j].z[index] = np.cos(rotfinal) * z_original - np.sin(rotfinal) * x_original
+                self.locs[j].x[index] = np.sin(rotfinal) * z_original + np.cos(rotfinal) * x_original
+            elif rotaxis == 'x':
+                self.locs[j].y[index] = np.cos(rotfinal) * y_original - np.sin(rotfinal) * z_original
+                self.locs[j].z[index] = np.sin(rotfinal) * y_original + np.cos(rotfinal) * z_original
+
+            #Shift image group locs
+            if proplane == 'xy':
+                self.locs[j].x[index] -= dafinal
+                self.locs[j].y[index] -= dbfinal
+            elif proplane == 'yz':
+                self.locs[j].y[index] -= dafinal
+                self.locs[j].z[index] -= dbfinal
+            elif proplane == 'zx':
+                self.locs[j].z[index] -= dafinal
+                self.locs[j].x[index] -= dbfinal
+
+
+
 
 
     def fit_in_view(self, autoscale=False):
