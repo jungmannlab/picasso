@@ -67,7 +67,7 @@ def rotate_axis(axis,vx,vy,vz,angle):
         vy_rot = np.sin(angle) * vx + np.cos(angle) * vy
         vz_rot = vz
     elif axis == 'y':
-        vx_rot = np.cos(angle) * vx - np.sin(angle) * vz
+        vx_rot = np.cos(angle) * vx + np.sin(angle) * vz
         vy_rot = vy
         vz_rot = -np.sin(angle) * vx + np.cos(angle) * vz
     elif axis == 'x':
@@ -793,11 +793,8 @@ class Window(QtGui.QMainWindow):
         #assign correct renderings for all planes
         a_render = []
         b_render = []
-        print('Render planes')
-        print(self.z_min)
-        print(self.z_max)
+
         if proplane == 'xy':
-            print('xy')
             a_render = xdata
             b_render = ydata
             aval_min = self.t_min
@@ -805,7 +802,6 @@ class Window(QtGui.QMainWindow):
             bval_min = self.t_min
             bval_max = self.t_max
         elif proplane == 'yz':
-            print('yz')
             a_render = ydata
             b_render = np.divide(zdata,pixelsize)
             aval_min = self.t_min
@@ -813,7 +809,6 @@ class Window(QtGui.QMainWindow):
             bval_min = np.divide(self.z_min,pixelsize)
             bval_max = np.divide(self.z_max,pixelsize)
         elif proplane == 'zx':
-            print('zx')
             a_render = np.divide(zdata,pixelsize)
             b_render = xdata
             aval_min = np.divide(self.z_min,pixelsize)
@@ -828,27 +823,14 @@ class Window(QtGui.QMainWindow):
 
 
 
-    def align_all(self, rotaxis):
+    def align_all(self, alignaxis):
         print('Align all')
         a_step = np.arcsin(1 / (self.oversampling * self.r))
         angles = np.arange(0, 2*np.pi, a_step)
         n_channels = len(self.locs)
         allrot = []
-        alldx = []
-        alldy = []
-        alldz = []
-
         n_angles = len(angles)
-
-        #define a cf image according to the rotaxis
-
-
-
-
-        all_xcorr = np.zeros((n_angles,n_channels))
-        all_da = np.zeros((n_angles,n_channels))
-        all_db = np.zeros((n_angles,n_channels))
-        print('Aligning groups .. 1')
+        all_corr = np.zeros((n_angles,n_channels))
 
         for j in range(n_channels):
             alignimage = []
@@ -859,19 +841,20 @@ class Window(QtGui.QMainWindow):
             x_original = x_rot.copy()
             y_original = y_rot.copy()
             z_original = z_rot.copy()
-            xcorr_max = 0.0
+
             alignimage = []
 
             for k in range(n_angles):
                 angle = angles[k]
-                if rotaxis == 'z':
-                    proplane = 'xy'
-                elif rotaxis == 'y':
+                if alignaxis == 'z':
                     proplane = 'yz'
-                elif rotaxis == 'x':
-                    proplane = 'zx'
-
-
+                    rotaxis = 'x'
+                elif alignaxis == 'y':
+                    proplane = 'xy'
+                    rotaxis = 'z'
+                elif alignaxis == 'x':
+                    proplane = 'xy'
+                    rotaxis = 'z'
 
                 print('Aligning groups .. 2')
                 x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle)
@@ -882,44 +865,28 @@ class Window(QtGui.QMainWindow):
                 print('Aligning groups .. 4')
                 if alignimage == []:
                     alignimage = np.zeros(image.shape)
-                    print(image.shape)
-                    print(alignimage)
-                # calculate cross-correlation
-                    alignimage[np.int(alignimage.shape[0]/2),:]+=1
-                if k == 1:
-                    fig = plt.figure()
-                    ax1 = fig.add_subplot(1,2,1)
-                    ax1.set_aspect('equal')
-                    plt.imshow(alignimage, interpolation='nearest', cmap=plt.cm.ocean)
-                    plt.colorbar()
-                    ax2 = fig.add_subplot(1,2,2)
-                    ax2.set_aspect('equal')
-                    plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
-                    plt.colorbar()
-                    plt.show()
-                xcorr = compute_xcorr(alignimage, image)
+                #CREATE ALIGNIMAGE
+                    if alignaxis == 'z':
+                        alignimage[np.int(alignimage.shape[0]/2),:]+=2
+                        alignimage[np.int(alignimage.shape[0]/2)+1,:]+=1
+                        alignimage[np.int(alignimage.shape[0]/2)-1,:]+=1
+                    elif alignaxis == 'y':
+                        alignimage[:,np.int(alignimage.shape[1]/2)]+=2
+                        alignimage[:,np.int(alignimage.shape[1]/2)-1]+=1
+                        alignimage[:,np.int(alignimage.shape[1]/2)+1]+=1
+                    elif alignaxis == 'x':
+                        alignimage[np.int(alignimage.shape[0]/2),:]+=2
+                        alignimage[np.int(alignimage.shape[0]/2)+1,:]+=1
+                        alignimage[np.int(alignimage.shape[0]/2)-1,:]+=1
 
-                n_pixelb, n_pixela = image.shape
-                image_halfa = n_pixela / 2 #TODO: CHECK THOSE VALUES
-                image_halfb = n_pixelb / 2
 
-                # find the brightest pixel
-                b_max, a_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
-                # store the transformation if the correlation is larger than before
+                all_corr[k,j] = np.sum(np.multiply(alignimage,image))
 
-                all_xcorr[k,j] = xcorr[a_max, b_max]
-                all_db[k,j] = np.ceil(b_max - image_halfb) / self.oversampling
-                all_da[k,j] = np.ceil(a_max - image_halfa) / self.oversampling
 
         #value with biggest cc value form table
-        maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
-
+        maximumcc = np.argmax(np.sum(all_corr,axis = 1))
         rotfinal = angles[maximumcc]
 
-
-
-        dafinal = np.mean(all_da[maximumcc,:])
-        dbfinal = np.mean(all_db[maximumcc,:])
 
         for j in range(n_channels):
             x_rot = self.locs[j].x
@@ -936,19 +903,8 @@ class Window(QtGui.QMainWindow):
             self.locs[j].y = y_rot
             self.locs[j].z = z_rot
 
-
-            #Shift image group locs
-            #if proplane == 'xy':
-            #    self.locs[j].x -= dafinal
-            #    self.locs[j].y -= dbfinal
-            #elif proplane == 'yz':
-            #    self.locs[j].y -= dafinal
-            #    self.locs[j].z -= dbfinal
-            #elif proplane == 'zx':
-            #    self.locs[j].z -= dafinal
-            #    self.locs[j].x -= dbfinal
         self.updateLayout()
-        self.status_bar.showMessage('Done!')
+        self.status_bar.showMessage('Align on Axis '+alignaxis+' complete.!')
 
 
     def align_group(self, CF_image_avg, angles, group, rotaxis, proplane):
@@ -1017,15 +973,11 @@ class Window(QtGui.QMainWindow):
             y_original = y_rot.copy()
             z_original = z_rot.copy()
             # rotate and shift image group locs
-            if rotaxis == 'z':
-                self.locs[j].x[index] = np.cos(rotfinal) * x_original - np.sin(rotfinal) * y_original
-                self.locs[j].y[index] = np.sin(rotfinal) * x_original + np.cos(rotfinal) * y_original
-            elif rotaxis == 'y':
-                self.locs[j].z[index] = np.cos(rotfinal) * z_original - np.sin(rotfinal) * x_original
-                self.locs[j].x[index] = np.sin(rotfinal) * z_original + np.cos(rotfinal) * x_original
-            elif rotaxis == 'x':
-                self.locs[j].y[index] = np.cos(rotfinal) * y_original - np.sin(rotfinal) * z_original
-                self.locs[j].z[index] = np.sin(rotfinal) * y_original + np.cos(rotfinal) * z_original
+            x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, rotfinal)
+
+            self.locs[j].x[index] = x_rot
+            self.locs[j].y[index] = y_rot
+            self.locs[j].z[index] = z_rot
 
             #Shift image group locs
             if proplane == 'xy':
