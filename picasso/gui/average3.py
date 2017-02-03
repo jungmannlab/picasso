@@ -32,7 +32,7 @@ from cmath import rect, phase
 from math import radians, degrees
 
 DEFAULT_OVERSAMPLING = 1.0
-INITIAL_REL_MAXIMUM = 0.5
+INITIAL_REL_MAXIMUM = 2.0
 ZOOM = 10 / 7
 N_GROUP_COLORS = 8
 
@@ -50,21 +50,14 @@ def render_hist(x, y, oversampling, t_min, t_max):
 
 @numba.jit(nopython=True, nogil=True)
 def render_histxyz(a, b, oversampling, a_min, a_max, b_min, b_max):
-    print('render histxyz')
     n_pixel_a = int(np.ceil(oversampling * (a_max - a_min)))
     n_pixel_b = int(np.ceil(oversampling * (b_max - b_min)))
     in_view = (a > a_min) & (b > b_min) & (a < a_max) & (b < b_max)
-    print('0')
     a = a[in_view]
     b = b[in_view]
-    print('1')
     a = oversampling * (a - a_min)
     b = oversampling * (b - b_min)
-    print('2')
-    print([n_pixel_a,n_pixel_b])
     image = np.zeros((n_pixel_a, n_pixel_b), dtype=np.float32)
-    print('3')
-    print('fill by render')
     render._fill(image, a, b)
     return len(a), image
 
@@ -178,7 +171,7 @@ class ParametersDialog(QtGui.QDialog):
 
         grid.addWidget(QtGui.QLabel('Oversampling:'), 0, 0)
         self.oversampling = QtGui.QDoubleSpinBox()
-        self.oversampling.setRange(1, 1e7)
+        self.oversampling.setRange(1, 200)
         self.oversampling.setValue(40)
         self.oversampling.setDecimals(1)
         self.oversampling.setKeyboardTracking(False)
@@ -303,6 +296,28 @@ class View(QtGui.QLabel):
         self.set_image(image_avg)
 
 
+
+
+class DatasetDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Datasets')
+        self.setModal(False)
+
+        self.layout = QtGui.QVBoxLayout()
+        self.checks = []
+
+        self.setLayout(self.layout)
+
+    def add_entry(self,path):
+        c = QtGui.QCheckBox(path)
+        self.layout.addWidget(c)
+        self.checks.append(c)
+        self.checks[-1].setChecked(True)
+
+
 class Window(QtGui.QMainWindow):
 
     def __init__(self):
@@ -317,6 +332,7 @@ class Window(QtGui.QMainWindow):
         #self.view = View(self)
         #self.setCentralWidget(self.view)
         self.parameters_dialog = ParametersDialog(self)
+        self.dataset_dialog = DatasetDialog(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu('File')
         open_action = file_menu.addAction('Open')
@@ -331,11 +347,13 @@ class Window(QtGui.QMainWindow):
         parameters_action = process_menu.addAction('Parameters')
         parameters_action.setShortcut('Ctrl+P')
         parameters_action.triggered.connect(self.parameters_dialog.show)
+        dataset_action = process_menu.addAction('Datasets')
+        dataset_action.triggered.connect(self.dataset_dialog.show)
+
         average_action = process_menu.addAction('Average')
         average_action.setShortcut('Ctrl+A')
         #average_action.triggered.connect(self.view.average)
         self.status_bar = self.statusBar()
-
         self._pixmap = None
         self.locs = []
         self.group_index = []
@@ -415,11 +433,21 @@ class Window(QtGui.QMainWindow):
         deg_groupbox = QtGui.QGroupBox('Degrees')
         deggrid = QtGui.QGridLayout(deg_groupbox)
 
+
         self.full_degbtn = QtGui.QRadioButton("Full")
-        self.part_degbtn = QtGui.QRadioButton("+-30")
+        self.part_degbtn = QtGui.QRadioButton("Part")
+        self.degEdit = QtGui.QTextEdit()
+
+        self.degEdit = QtGui.QSpinBox()
+        self.degEdit.setRange(1, 10)
+        self.degEdit.setValue(5)
+
 
         deggrid.addWidget(self.full_degbtn,0,0)
         deggrid.addWidget(self.part_degbtn,0,1)
+        deggrid.addWidget(self.degEdit,0,2)
+        #deggrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
+
 
         self.full_degbtn.setChecked(True)
 
@@ -464,9 +492,21 @@ class Window(QtGui.QMainWindow):
 
         buttongrid.addWidget(operate_groupbox,2,0)
 
+        self.contrastEdit = QtGui.QDoubleSpinBox()
+        self.contrastEdit.setDecimals(1)
+        self.contrastEdit.setRange(0, 10)
+        self.contrastEdit.setValue(0.5)
+        self.contrastEdit.setSingleStep(0.1)
+
+        self.contrastEdit.valueChanged.connect(self.updateLayout)
+
         self.grid = QtGui.QGridLayout()
         self.grid.addWidget(display_groupbox, 0, 0,2,1)
         self.grid.addWidget(button_groupbox,0,1,1,1)
+        self.grid.addWidget(self.contrastEdit,1,2,1,1)
+        self.grid.addWidget(QtGui.QLabel('Contrast:'),1,1,1,1)
+
+
 
         mainWidget = QtGui.QWidget()
         mainWidget.setLayout(self.grid)
@@ -520,6 +560,10 @@ class Window(QtGui.QMainWindow):
         self.locs_paths.append(path)
         self.index_blocks.append(None)
         self._drift.append(None)
+        self.dataset_dialog.add_entry(path)
+        self.dataset_dialog.checks[-1].stateChanged.connect(self.updateLayout)
+
+
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
@@ -534,7 +578,7 @@ class Window(QtGui.QMainWindow):
                 self.update_scene()
 
         #Try rendering volume:
-        self.oversampling = 10
+        self.oversampling = 1
         if len(self.locs) == 1:
             self.t_min = np.min([np.min(locs.x),np.min(locs.y)])
             self.t_max = np.max([np.max(locs.x),np.max(locs.y)])
@@ -545,7 +589,6 @@ class Window(QtGui.QMainWindow):
             self.t_max = np.max([np.max(locs.x),np.max(locs.y),self.t_max])
             self.z_min = np.min([np.min(locs.z),self.z_min])
             self.z_max = np.min([np.max(locs.z),self.z_max])
-
 
         self.pixelsize = 160
 
@@ -712,7 +755,12 @@ class Window(QtGui.QMainWindow):
         hues = np.arange(0, 1, 1 / n_channels)
         colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
 
-        renderings = [render.render_hist3d(_, oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in locs]
+
+        renderings = []
+        for i in range(n_channels):
+            if self.dataset_dialog.checks[i].isChecked():
+                renderings.append(render.render_hist3d(locs[i], oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize))
+        #renderings = [render.render_hist3d(_, oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in locs]
         n_locs = sum([_[0] for _ in renderings])
         images = np.array([_[1] for _ in renderings])
 
@@ -730,7 +778,6 @@ class Window(QtGui.QMainWindow):
 
         image = np.array([self.scale_contrast(_) for _ in image])
 
-        #image = self.scale_contrast(xyproject)
         Y, X = image.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
         for color, image in zip(colors, image):
@@ -781,13 +828,14 @@ class Window(QtGui.QMainWindow):
 
 
         n_groups = self.group_index[0].shape[0]
-        print(n_groups)
+
         a_step = np.arcsin(1 / (self.oversampling * self.r))
 
         if self.full_degbtn.isChecked():
             angles = np.arange(0, 2*np.pi, a_step)
         elif self.part_degbtn.isChecked():
-            angles = np.arange(-15/360*2*np.pi, 15/360*2*np.pi, a_step)
+            degree = self.degEdit.value()
+            angles = np.arange(-degree/360*2*np.pi, degree/360*2*np.pi, a_step)
 
 
         renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
@@ -860,12 +908,8 @@ class Window(QtGui.QMainWindow):
             aval_min = self.t_min
             aval_max = self.t_max
 
-        print('Rendering image...')
         N, plane = render_histxyz(a_render, b_render, self.oversampling, aval_min, aval_max, bval_min, bval_max)
-        print('Rendering image... complete')
-        print(plane.shape)
-        print('Returning..')
-        print(np.sum(np.sum(plane)))
+
         return plane
 
 
@@ -879,75 +923,75 @@ class Window(QtGui.QMainWindow):
         all_corr = np.zeros((n_angles,n_channels))
 
         for j in range(n_channels):
-            alignimage = []
-            x_rot = self.locs[j].x
-            y_rot = self.locs[j].y
-            z_rot = self.locs[j].z
+            if self.dataset_dialog.checks[j].isChecked():
+                alignimage = []
+                x_rot = self.locs[j].x
+                y_rot = self.locs[j].y
+                z_rot = self.locs[j].z
 
-            x_original = x_rot.copy()
-            y_original = y_rot.copy()
-            z_original = z_rot.copy()
+                x_original = x_rot.copy()
+                y_original = y_rot.copy()
+                z_original = z_rot.copy()
 
-            alignimage = []
+                alignimage = []
 
-            for k in range(n_angles):
-                angle = angles[k]
-                if alignaxis == 'zz':
-                    proplane = 'yz'
-                    rotaxis = 'x'
-                elif alignaxis == 'zy':
-                    proplane = 'yz'
-                    rotaxis = 'x'
-                elif alignaxis == 'y':
-                    proplane = 'xy'
-                    rotaxis = 'z'
-                elif alignaxis == 'x':
-                    proplane = 'xy'
-                    rotaxis = 'z'
-
-                x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle,self.pixelsize)
-                # render group image for plane
-                image = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #RENDR PLANES WAS BUGGY AT SOME POINT
-                print('Render planes complete')
-                if alignimage == []:
-                    alignimage = np.zeros(image.shape)
-                #CREATE ALIGNIMAGE
+                for k in range(n_angles):
+                    angle = angles[k]
                     if alignaxis == 'zz':
-                        alignimage[np.int(alignimage.shape[0]/2),:]+=2
-                        alignimage[np.int(alignimage.shape[0]/2)+1,:]+=1
-                        alignimage[np.int(alignimage.shape[0]/2)-1,:]+=1
+                        proplane = 'yz'
+                        rotaxis = 'x'
                     elif alignaxis == 'zy':
-                        alignimage[:,np.int(alignimage.shape[0]/2)]+=2
-                        alignimage[:,np.int(alignimage.shape[0]/2)+1]+=1
-                        alignimage[:,np.int(alignimage.shape[0]/2)-1]+=1
+                        proplane = 'yz'
+                        rotaxis = 'x'
                     elif alignaxis == 'y':
-                        alignimage[:,np.int(alignimage.shape[1]/2)]+=2
-                        alignimage[:,np.int(alignimage.shape[1]/2)-1]+=1
-                        alignimage[:,np.int(alignimage.shape[1]/2)+1]+=1
+                        proplane = 'xy'
+                        rotaxis = 'z'
                     elif alignaxis == 'x':
-                        alignimage[np.int(alignimage.shape[0]/2),:]+=2
-                        alignimage[np.int(alignimage.shape[0]/2)+1,:]+=1
-                        alignimage[np.int(alignimage.shape[0]/2)-1,:]+=1
+                        proplane = 'xy'
+                        rotaxis = 'z'
+
+                    x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle,self.pixelsize)
+                    # render group image for plane
+                    image = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #RENDR PLANES WAS BUGGY AT SOME POINT
+
+                    if alignimage == []:
+                        alignimage = np.zeros(image.shape)
+                    #CREATE ALIGNIMAGE
+                        if alignaxis == 'zz':
+                            alignimage[np.int(alignimage.shape[0]/2),:]+=2
+                            alignimage[np.int(alignimage.shape[0]/2)+1,:]+=1
+                            alignimage[np.int(alignimage.shape[0]/2)-1,:]+=1
+                        elif alignaxis == 'zy':
+                            alignimage[:,np.int(alignimage.shape[0]/2)]+=2
+                            alignimage[:,np.int(alignimage.shape[0]/2)+1]+=1
+                            alignimage[:,np.int(alignimage.shape[0]/2)-1]+=1
+                        elif alignaxis == 'y':
+                            alignimage[:,np.int(alignimage.shape[1]/2)]+=2
+                            alignimage[:,np.int(alignimage.shape[1]/2)-1]+=1
+                            alignimage[:,np.int(alignimage.shape[1]/2)+1]+=1
+                        elif alignaxis == 'x':
+                            alignimage[np.int(alignimage.shape[0]/2),:]+=2
+                            alignimage[np.int(alignimage.shape[0]/2)+1,:]+=1
+                            alignimage[np.int(alignimage.shape[0]/2)-1,:]+=1
 
 
-                all_corr[k,j] = np.sum(np.multiply(alignimage,image))
-                if 0:
-                    fig = plt.figure()
-                    ax1 = fig.add_subplot(1,2,1)
-                    ax1.set_aspect('equal')
-                    plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
-                    ax2 = fig.add_subplot(1,2,2)
-                    ax2.set_aspect('equal')
-                    plt.imshow(alignimage, interpolation='nearest', cmap=plt.cm.ocean)
-                    plt.colorbar()
-                    plt.show()
+                    all_corr[k,j] = np.sum(np.multiply(alignimage,image))
+                    if 0:
+                        fig = plt.figure()
+                        ax1 = fig.add_subplot(1,2,1)
+                        ax1.set_aspect('equal')
+                        plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
+                        ax2 = fig.add_subplot(1,2,2)
+                        ax2.set_aspect('equal')
+                        plt.imshow(alignimage, interpolation='nearest', cmap=plt.cm.ocean)
+                        plt.colorbar()
+                        plt.show()
 
 
         #value with biggest cc value form table
         maximumcc = np.argmax(np.sum(all_corr,axis = 1))
         rotfinal = angles[maximumcc]
-        print(rotfinal)
-        print(all_corr)
+
 
         for j in range(n_channels):
             x_rot = self.locs[j].x
@@ -981,53 +1025,51 @@ class Window(QtGui.QMainWindow):
         all_db = np.zeros((n_angles,n_channels))
 
         for j in range(n_channels):
-            index = self.group_index[j][group].nonzero()[1]
-            x_rot = self.locs[j].x[index]
-            y_rot = self.locs[j].y[index]
-            z_rot = self.locs[j].z[index]
-            x_original = x_rot.copy()
-            y_original = y_rot.copy()
-            z_original = z_rot.copy()
-            xcorr_max = 0.0
+            if self.dataset_dialog.checks[j].isChecked():
+                index = self.group_index[j][group].nonzero()[1]
+                x_rot = self.locs[j].x[index]
+                y_rot = self.locs[j].y[index]
+                z_rot = self.locs[j].z[index]
+                x_original = x_rot.copy()
+                y_original = y_rot.copy()
+                z_original = z_rot.copy()
+                xcorr_max = 0.0
 
-            for k in range(n_angles):
-                angle = angles[k]
-                # rotate locs
-                #a_rot = np.cos(angle) * a_original - np.sin(angle) * b_original
-                #b_rot = np.sin(angle) * a_original + np.cos(angle) * b_original
+                for k in range(n_angles):
+                    angle = angles[k]
+                    # rotate locs
+                    #a_rot = np.cos(angle) * a_original - np.sin(angle) * b_original
+                    #b_rot = np.sin(angle) * a_original + np.cos(angle) * b_original
 
-                x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle, self.pixelsize)
-                # render group image for plane
+                    x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle, self.pixelsize)
+                    # render group image for plane
 
-                image = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #RENDR PLANES WAS BUGGY AT SOME POINT
-                print('GRoup')
-                print(group)
-                print('Return complete')
-                # calculate cross-correlation
-                if 0:
-                    fig = plt.figure()
-                    ax1 = fig.add_subplot(1,2,1)
-                    ax1.set_aspect('equal')
-                    plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
-                    plt.colorbar()
-                    plt.show()
-                    plt.waitforbuttonpress()
+                    image = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #RENDR PLANES WAS BUGGY AT SOME POINT
 
-                print('Calculating XCORR')
-                print([CF_image_avg[j].shape, image.shape])
-                xcorr = compute_xcorr(CF_image_avg[j], image)
-                print('Xcorr complete')
-                n_pixelb, n_pixela = image.shape
-                image_halfa = n_pixela / 2 #TODO: CHECK THOSE VALUES
-                image_halfb = n_pixelb / 2
+                    # calculate cross-correlation
+                    if 0:
+                        fig = plt.figure()
+                        ax1 = fig.add_subplot(1,2,1)
+                        ax1.set_aspect('equal')
+                        plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
+                        plt.colorbar()
+                        plt.show()
+                        plt.waitforbuttonpress()
 
-                # find the brightest pixel
-                b_max, a_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
-                # store the transformation if the correlation is larger than before
 
-                all_xcorr[k,j] = xcorr[b_max, a_max]
-                all_db[k,j] = np.ceil(b_max - image_halfb) / self.oversampling
-                all_da[k,j] = np.ceil(a_max - image_halfa) / self.oversampling
+                    xcorr = compute_xcorr(CF_image_avg[j], image)
+
+                    n_pixelb, n_pixela = image.shape
+                    image_halfa = n_pixela / 2 #TODO: CHECK THOSE VALUES
+                    image_halfb = n_pixelb / 2
+
+                    # find the brightest pixel
+                    b_max, a_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
+                    # store the transformation if the correlation is larger than before
+
+                    all_xcorr[k,j] = xcorr[b_max, a_max]
+                    all_db[k,j] = np.ceil(b_max - image_halfb) / self.oversampling
+                    all_da[k,j] = np.ceil(a_max - image_halfa) / self.oversampling
 
         #value with biggest cc value form table
         maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
@@ -1270,7 +1312,7 @@ class Window(QtGui.QMainWindow):
                 max_ = image.max()
             else:
                 max_ = min([_.max() for _ in image])
-            upper = INITIAL_REL_MAXIMUM * max_
+            upper = self.contrastEdit.value() * max_
             #self.window.display_settings_dialog.silent_minimum_update(0)
             #self.window.display_settings_dialog.silent_maximum_update(upper)
         #upper = self.window.display_settings_dialog.maximum.value() TODO: THINK OF GOOD WAY OF RE-IMPLEMENTING THE CONTAST
