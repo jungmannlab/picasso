@@ -837,6 +837,22 @@ class View(QtGui.QLabel):
             else:
                 return None
 
+    def get_channel3d(self, title='Choose a channel'):
+        n_channels = len(self.locs_paths)
+        if n_channels == 0:
+            return None
+        elif n_channels == 1:
+            return 0
+        elif len(self.locs_paths) > 1:
+            pathlist = list(self.locs_paths)
+            pathlist.append('Exchangerounds by color')
+
+            index, ok = QtGui.QInputDialog.getItem(self, 'Select channel', 'Channel:', pathlist, editable=False)
+            if ok:
+                return pathlist.index(index)
+            else:
+                return None
+
     def get_render_kwargs(self, viewport=None):
         ''' Returns a dictionary to be used for the keyword arguments of render. '''
         blur_button = self.window.display_settings_dialog.blur_buttongroup.checkedButton()
@@ -976,25 +992,67 @@ class View(QtGui.QLabel):
 
     def plot3d(self):
         print('Plot3d')
-        channel = self.get_channel('Undrift from picked')
+        channel = self.get_channel3d('Undrift from picked')
         if channel is not None:
-            locs = self.picked_locs(channel)
-            locs = stack_arrays(locs, asrecarray=True, usemask=False)
-            fig = plt.figure()
-            fig.canvas.set_window_title('3D - Trace')
-            ax = fig.add_subplot(111, projection='3d')
-            ax.set_title('3d view of pick')
-            colors = locs['z'][:]
-            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
-            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
-            ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
-            ax.set_xlabel('X [Px]')
-            ax.set_ylabel('Y [Px]')
-            ax.set_zlabel('Z [nm]')
-            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
-            plt.show()
+            if channel is (len(self.locs_paths)):
+                print('Multichannel')
+                n_channels = (len(self.locs_paths))
+                hues = np.arange(0, 1, 1 / n_channels)
+                colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+                #self.view.save_picked_locs_multi(path)
+                fig = plt.figure()
+                fig.canvas.set_window_title('3D - Trace')
+                ax = fig.add_subplot(111, projection='3d')
+                ax.set_title('3d view of pick')
+                for i in range(len(self.locs_paths)):
+                    locs = self.picked_locs(i)
+                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                    ax.scatter(locs['x'], locs['y'], locs['z'],c=colors[i])
+
+
+                ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+                ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+                ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+
+                ax.set_xlabel('X [Px]')
+                ax.set_ylabel('Y [Px]')
+                ax.set_zlabel('Z [nm]')
+                plt.gca().patch.set_facecolor('black')
+                ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+                ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+                ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+
+                plt.show()
+            elif channel is (len(self.locs_paths)+1):
+                print('Combined')
+                #for i in range(len(self.view.locs_paths)):
+                #    channel = i
+                #    base, ext = os.path.splitext(self.view.locs_paths[channel])
+                #    out_path = base + '_apicked.hdf5'
+                #    self.view.save_picked_locs(out_path, channel)
+            else:
+                locs = self.picked_locs(channel)
+                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                fig = plt.figure()
+                fig.canvas.set_window_title('3D - Trace')
+                ax = fig.add_subplot(111, projection='3d')
+                ax.set_title('3d view of pick')
+                colors = locs['z'][:]
+                colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+                colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+                ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+                ax.set_xlabel('X [Px]')
+                ax.set_ylabel('Y [Px]')
+                ax.set_zlabel('Z [nm]')
+                ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+                ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+                ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+                plt.gca().patch.set_facecolor('black')
+                ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+                ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+                ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+
+                plt.show()
 
 
     def show_trace(self):
