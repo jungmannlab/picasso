@@ -846,7 +846,6 @@ class View(QtGui.QLabel):
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
             pathlist.append('Exchangerounds by color')
-
             index, ok = QtGui.QInputDialog.getItem(self, 'Select channel', 'Channel:', pathlist, editable=False)
             if ok:
                 return pathlist.index(index)
@@ -1719,15 +1718,17 @@ class View(QtGui.QLabel):
                 length[i] = estimate_kinetic_rate(locs.len)
                 locs = postprocess.compute_dark_times(locs)
                 dark[i] = estimate_kinetic_rate(locs.dark)
-                new_locs.append(locs)
+                if N[i] > 0:
+                    new_locs.append(locs)
                 progress.set_value(i + 1)
-            self.window.info_dialog.n_localizations_mean.setText('{:.2f}'.format(np.mean(N)))
-            self.window.info_dialog.n_localizations_std.setText('{:.2f}'.format(np.std(N)))
-            self.window.info_dialog.rmsd_mean.setText('{:.2}'.format(np.mean(rmsd)))
-            self.window.info_dialog.rmsd_std.setText('{:.2}'.format(np.std(rmsd)))
+
+            self.window.info_dialog.n_localizations_mean.setText('{:.2f}'.format(np.nanmean(N)))
+            self.window.info_dialog.n_localizations_std.setText('{:.2f}'.format(np.nanstd(N)))
+            self.window.info_dialog.rmsd_mean.setText('{:.2}'.format(np.nanmean(rmsd)))
+            self.window.info_dialog.rmsd_std.setText('{:.2}'.format(np.nanstd(rmsd)))
             if has_z:
-                self.window.info_dialog.rmsd_z_mean.setText('{:.2f}'.format(np.mean(rmsd_z)))
-                self.window.info_dialog.rmsd_z_std.setText('{:.2f}'.format(np.std(rmsd_z)))
+                self.window.info_dialog.rmsd_z_mean.setText('{:.2f}'.format(np.nanmean(rmsd_z)))
+                self.window.info_dialog.rmsd_z_std.setText('{:.2f}'.format(np.nanstd(rmsd_z)))
             pooled_locs = stack_arrays(new_locs, usemask=False, asrecarray=True)
             fit_result_len = fit_cum_exp(pooled_locs.len)
             fit_result_dark = fit_cum_exp(pooled_locs.dark)
