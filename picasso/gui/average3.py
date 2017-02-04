@@ -295,7 +295,30 @@ class View(QtGui.QLabel):
         N_avg, image_avg = render.render_hist(self.locs, oversampling, t_min, t_min, t_max, t_max)
         self.set_image(image_avg)
 
+class GroupDialog(QtGui.QDialog):
 
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Groups')
+        self.setModal(False)
+
+        self.checks = []
+
+
+        self.table = QtGui.QTableWidget()
+        tableitem = QtGui.QTableWidgetItem()
+        self.table.setWindowTitle('Group overview')
+        self.setWindowTitle('Group overview')
+        self.resize(800, 400)
+
+        layout.addWidget(self.table)
+
+    def add_entry(self,path):
+        c = QtGui.QCheckBox(path)
+        self.layout.addWidget(c)
+        self.checks.append(c)
+        self.checks[-1].setChecked(True)
 
 
 class DatasetDialog(QtGui.QDialog):
@@ -305,10 +328,8 @@ class DatasetDialog(QtGui.QDialog):
         self.window = window
         self.setWindowTitle('Datasets')
         self.setModal(False)
-
         self.layout = QtGui.QVBoxLayout()
         self.checks = []
-
         self.setLayout(self.layout)
 
     def add_entry(self,path):
