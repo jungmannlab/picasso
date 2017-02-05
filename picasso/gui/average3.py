@@ -451,6 +451,8 @@ class Window(QtGui.QMainWindow):
 
         rotatebtn = QtGui.QPushButton("Rotate")
 
+        self.radio_sym = QtGui.QRadioButton("8x symmetry")
+
         deg_groupbox = QtGui.QGroupBox('Degrees')
         deggrid = QtGui.QGridLayout(deg_groupbox)
 
@@ -477,12 +479,14 @@ class Window(QtGui.QMainWindow):
         rotationgrid.addWidget(proj_groupbox,1,0)
         rotationgrid.addWidget(deg_groupbox,2,0)
         rotationgrid.addWidget(rotatebtn,3,0)
+        rotationgrid.addWidget(self.radio_sym,4,0)
 
         buttongrid.addWidget(centerofmassbtn,0,0)
         buttongrid.addWidget(rotation_groupbox,1,0)
 
         centerofmassbtn.clicked.connect(self.centerofmass)
         rotatebtn.clicked.connect(self.rotate_groups)
+
 
         self.translatexbtn = QtGui.QPushButton("Translate X")
         self.translateybtn = QtGui.QPushButton("Translate Y")
@@ -882,6 +886,26 @@ class Window(QtGui.QMainWindow):
             image = [(np.sum(_, axis=0)) for _ in images]
 
         print(len(images))
+
+        #Change CFiamge for symmetry
+        if self.radio_sym.isChecked():
+            fig = plt.figure()
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.set_aspect('equal')
+            imageold = image[0].copy()
+            plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
+
+            #rotate image
+            print(imageold.shape)
+            print(image[0].shape)
+            for i in range(6):
+                image[0] += scipy.ndimage.interpolation.rotate(imageold,((i+1)*45) , axes=(1, 0),reshape=False)
+
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.set_aspect('equal')
+            plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
+            plt.colorbar()
+            plt.show()
         CF_image_avg = [np.conj(np.fft.fft2(_)) for _ in image]
         print('Size of CFimage')
         print(image[0].shape)
@@ -889,6 +913,10 @@ class Window(QtGui.QMainWindow):
         #image_half = n_pixel / 2
 
         # TODO: blur auf average !!!
+
+
+
+
 
         for i in range(n_groups):
             print('Looping through groups '+str(i)+' of '+str(n_groups))
