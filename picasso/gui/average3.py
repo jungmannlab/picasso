@@ -22,6 +22,8 @@ import matplotlib.pyplot as plt
 import numba
 import numpy as np
 import scipy
+from scipy import signal
+
 from PyQt4 import QtCore, QtGui
 
 from .. import io, lib, render
@@ -52,13 +54,27 @@ def render_hist(x, y, oversampling, t_min, t_max):
 def render_histxyz(a, b, oversampling, a_min, a_max, b_min, b_max):
     n_pixel_a = int(np.ceil(oversampling * (a_max - a_min)))
     n_pixel_b = int(np.ceil(oversampling * (b_max - b_min)))
+
     in_view = (a > a_min) & (b > b_min) & (a < a_max) & (b < b_max)
+
     a = a[in_view]
     b = b[in_view]
     a = oversampling * (a - a_min)
     b = oversampling * (b - b_min)
-    image = np.zeros((n_pixel_a, n_pixel_b), dtype=np.float32)
+
+    print(n_pixel_a)
+    print(n_pixel_b)
+
+    image = np.zeros((n_pixel_b, n_pixel_a), dtype=np.float32)
     render._fill(image, a, b)
+
+    #if n_pixel_a >= n_pixel_b:
+    #    image = np.zeros((n_pixel_a, n_pixel_b), dtype=np.float32)
+    #    render._fill(image, a, b)
+    #else:
+    #    image = np.zeros((n_pixel_a, n_pixel_b), dtype=np.float32)
+    #    render._fill(image, b, a)
+    #    image = image.transpose()
     return len(a), image
 
 def rotate_axis(axis,vx,vy,vz,angle,pixelsize):
@@ -80,6 +96,7 @@ def compute_xcorr(CF_image_avg, image):
     F_image = np.fft.fft2(image)
     xcorr = np.fft.fftshift(np.real(np.fft.ifft2((F_image * CF_image_avg))))
     return xcorr
+
 
 def align_group_old(angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group):
     with lock:
@@ -488,32 +505,43 @@ class Window(QtGui.QMainWindow):
         rotatebtn.clicked.connect(self.rotate_groups)
 
 
-        self.translatexbtn = QtGui.QPushButton("Translate X")
-        self.translateybtn = QtGui.QPushButton("Translate Y")
-        self.translatezbtn = QtGui.QPushButton("Translate Z")
+        self.translatebtn = QtGui.QRadioButton("Translate only")
+
 
         self.alignxbtn = QtGui.QPushButton("Align X")
         self.alignybtn = QtGui.QPushButton("Align Y")
         self.alignzzbtn = QtGui.QPushButton("Align Z_Z")
         self.alignzybtn = QtGui.QPushButton("Align Z_Y")
 
+
+        self.translatexbtn = QtGui.QPushButton("Translate X")
+        self.translateybtn = QtGui.QPushButton("Translate Y")
+        self.translatezbtn = QtGui.QPushButton("Trabslate Z")
+
         operate_groupbox = QtGui.QGroupBox('Operate')
         operategrid = QtGui.QGridLayout(operate_groupbox)
 
-        operategrid.addWidget(self.translatexbtn,0,0)
-        operategrid.addWidget(self.translateybtn,1,0)
-        operategrid.addWidget(self.translatezbtn,2,0)
+        rotationgrid.addWidget(self.translatebtn,5,0)
+
 
         operategrid.addWidget(self.alignxbtn,0,1)
         operategrid.addWidget(self.alignybtn,1,1)
         operategrid.addWidget(self.alignzzbtn,2,1)
         operategrid.addWidget(self.alignzybtn,3,1)
 
+        operategrid.addWidget(self.translatexbtn,0,0)
+        operategrid.addWidget(self.translateybtn,1,0)
+        operategrid.addWidget(self.translatezbtn,2,0)
 
         self.alignxbtn.clicked.connect(self.align_x)
         self.alignybtn.clicked.connect(self.align_y)
         self.alignzzbtn.clicked.connect(self.align_zz)
         self.alignzybtn.clicked.connect(self.align_zy)
+
+        self.translatexbtn.clicked.connect(self.translate_x)
+        self.translateybtn.clicked.connect(self.translate_y)
+        self.translatezbtn.clicked.connect(self.translate_z)
+
 
         buttongrid.addWidget(operate_groupbox,2,0)
 
@@ -668,6 +696,47 @@ class Window(QtGui.QMainWindow):
         self.viewxz.setPixmap(pixmap2)
         self.viewyz.setPixmap(pixmap3)
 
+
+    def centerofmass_all(self):
+        #Align all by center of mass
+        n_groups = self.n_groups
+        n_channels = len(self.locs)
+
+
+        out_locs_x = []
+        out_locs_y = []
+        out_locs_z = []
+        for j in range(n_channels):
+            sel_locs_x = []
+            sel_locs_y = []
+            sel_locs_z = []
+
+        #stack arrays
+            sel_locs_x = self.locs[j].x
+            sel_locs_y = self.locs[j].y
+            sel_locs_z = self.locs[j].z
+            out_locs_x.append(sel_locs_x)
+            out_locs_y.append(sel_locs_y)
+            out_locs_z.append(sel_locs_z)
+
+
+        out_locs_x=stack_arrays(out_locs_x, asrecarray=True, usemask=False)
+        out_locs_y=stack_arrays(out_locs_y, asrecarray=True, usemask=False)
+        out_locs_z=stack_arrays(out_locs_z, asrecarray=True, usemask=False)
+
+        mean_x = np.mean(out_locs_x)
+        mean_y = np.mean(out_locs_y)
+        mean_z = np.mean(out_locs_z)
+
+        for j in range(n_channels):
+            self.locs[j].x -= mean_x
+            self.locs[j].y -= mean_y
+            self.locs[j].z -= mean_z
+
+
+
+
+
     def centerofmass(self):
         print('Center of mass btn')
         n_groups = self.n_groups
@@ -688,6 +757,7 @@ class Window(QtGui.QMainWindow):
                 sel_locs_x = self.locs[j].x[index]
                 sel_locs_y = self.locs[j].y[index]
                 sel_locs_z = self.locs[j].z[index]
+
                 out_locs_x.append(sel_locs_x)
                 out_locs_y.append(sel_locs_y)
                 out_locs_z.append(sel_locs_z)
@@ -701,11 +771,14 @@ class Window(QtGui.QMainWindow):
             mean_y = np.mean(out_locs_y)
             mean_z = np.mean(out_locs_z)
 
+
+
             for j in range(n_channels):
                 index = self.group_index[j][i, :].nonzero()[1]
                 self.locs[j].x[index] -= mean_x
                 self.locs[j].y[index] -= mean_y
                 self.locs[j].z[index] -= mean_z
+
 
 
         #CALCULATE PROPER R VALUES
@@ -837,6 +910,132 @@ class Window(QtGui.QMainWindow):
         print('Align Z')
         self.align_all('zy')
 
+    def translate_x(self):
+        print('Translate X')
+        self.translate('x')
+
+    def translate_y(self):
+        print('Translate Y')
+        self.translate('y')
+
+    def translate_z(self):
+        print('Translate Z')
+        self.translate('z')
+
+    def translate(self, translateaxis):
+        renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
+        n_locs = sum([_[0] for _ in renderings])
+        images = np.array([_[1] for _ in renderings])
+
+        if translateaxis == 'x':
+            image = [np.sum(_, axis=2) for _ in images]
+            signalimg = [np.sum(_,axis=0) for _ in image]
+        elif translateaxis == 'y':
+            image = [np.sum(_, axis=2) for _ in images]
+            signalimg = [np.sum(_,axis=1) for _ in image]
+        elif translateaxis == 'z':
+            image = [np.sum(_, axis=1) for _ in images]
+            signalimg = [np.sum(_,axis=0) for _ in image]
+
+        fig = plt.figure()
+        ax1 = fig.add_subplot(1,1,1)
+
+        for element in signalimg:
+            plt.plot(element)
+        n_groups = self.group_index[0].shape[0]
+        for i in range(n_groups):
+            print('--- Translate --- Groups')
+            print('Looping through groups '+str(i)+' of '+str(n_groups))
+            self.status_bar.showMessage('Looping through groups '+str(i)+' of '+str(n_groups))
+            self.translate_group(signalimg, i, translateaxis)
+
+        plt.show()
+        self.centerofmass_all()
+        self.updateLayout()
+        self.status_bar.showMessage('Done!')
+
+    def translate_group(self, signalimg, group, translateaxis):
+        print('Translating group')
+        n_channels = len(self.locs)
+
+        all_xcorr = np.zeros((1,n_channels))
+        all_da = np.zeros((1,n_channels))
+
+        if translateaxis == 'x':
+            proplane = 'xy'
+        elif translateaxis == 'y':
+            proplane = 'xy'
+        elif translateaxis == 'z':
+            proplane = 'xz'
+
+
+        plotmode = 0
+
+        for j in range(n_channels):
+            if plotmode:
+                fig = plt.figure()
+                ax1 = fig.add_subplot(1,3,1)
+
+                plt.plot(signalimg[j])
+
+                ax2 = fig.add_subplot(1,3,2)
+
+            if self.dataset_dialog.checks[j].isChecked():
+                index = self.group_index[j][group].nonzero()[1]
+                x_rot = self.locs[j].x[index]
+                y_rot = self.locs[j].y[index]
+                z_rot = self.locs[j].z[index]
+
+                xcorr_max = 0.0
+                print('Rendering planes')
+
+                plane = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #
+                print('Rendering planes complete')
+                print(plane.shape)
+                print(plane)
+
+                if translateaxis == 'x':
+                    projection = np.sum(plane, axis=0)
+                elif translateaxis == 'y':
+                    projection = np.sum(plane, axis=1)
+                elif translateaxis == 'z':
+                    projection = np.sum(plane, axis=1)
+
+
+                if plotmode:
+                    plt.plot(projection)
+                #print('Step X')
+                #ax3 = fig.add_subplot(1,3,3)
+                #plt.imshow(plane, interpolation='nearest', cmap=plt.cm.ocean)
+                corrval = np.max(signal.correlate(signalimg[j],projection))
+                #pixel_b = np.argmax(signal.correlate(signalimg[j], projection))
+                #if pixel_b < len(signalimg[j]/2):
+                #    shiftval = np.argmax(signal.correlate(signalimg[j], projection))-len(signalimg[j])+1
+                #else:
+                #    shiftval = 0
+                shiftval = np.argmax(signal.correlate(signalimg[j], projection))-len(signalimg[j])+1
+                print("---Shift---")
+                print(shiftval)
+                all_xcorr[j] = corrval
+                all_da[j] = shiftval/self.oversampling
+
+            if plotmode:
+                plt.show()
+        #value with biggest cc value form table
+        maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
+        dafinal = np.mean(all_da[maximumcc,:])
+        print(dafinal)
+
+        for j in range(n_channels):
+            index = self.group_index[j][group].nonzero()[1]
+            if translateaxis == 'x':
+                self.locs[j].x[index] += dafinal
+            elif translateaxis == 'y':
+                self.locs[j].y[index] += dafinal
+            elif translateaxis == 'z':
+                self.locs[j].z[index] += dafinal*self.pixelsize
+
+        print('Group complete')
 
     def rotate_groups(self):
 
@@ -865,7 +1064,6 @@ class Window(QtGui.QMainWindow):
 
         renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
         n_locs = sum([_[0] for _ in renderings])
-
         images = np.array([_[1] for _ in renderings])
 
         #DELIVER CORRECT PROJECTION FOR IMAGE
@@ -949,13 +1147,13 @@ class Window(QtGui.QMainWindow):
             bval_min = np.divide(self.z_min,pixelsize)
             bval_max = np.divide(self.z_max,pixelsize)
         elif proplane == 'xz':
-
             b_render = np.divide(zdata, pixelsize)
             a_render = xdata
             bval_min = np.divide(self.z_min,pixelsize)
             bval_max = np.divide(self.z_max,pixelsize)
             aval_min = self.t_min
             aval_max = self.t_max
+
 
         N, plane = render_histxyz(a_render, b_render, self.oversampling, aval_min, aval_max, bval_min, bval_max)
 
@@ -1084,6 +1282,11 @@ class Window(QtGui.QMainWindow):
                 z_original = z_rot.copy()
                 xcorr_max = 0.0
 
+                if self.translatebtn.isChecked():
+                    angles = [0]
+                    n_angles = 1
+
+
                 for k in range(n_angles):
                     angle = angles[k]
                     # rotate locs
@@ -1143,20 +1346,17 @@ class Window(QtGui.QMainWindow):
             self.locs[j].z[index] = z_rot
 
             #Shift image group locs
+            if self.translatebtn.isChecked():
+                dbfinal = 0
             if proplane == 'xy':
                 self.locs[j].x[index] -= dafinal
                 self.locs[j].y[index] -= dbfinal
             elif proplane == 'yz':
                 self.locs[j].y[index] -= dafinal
-                self.locs[j].z[index] -= dbfinal
+                self.locs[j].z[index] -= dbfinal*self.pixelsize
             elif proplane == 'xz':
                 self.locs[j].z[index] -= dafinal
-                self.locs[j].x[index] -= dbfinal
-
-
-
-
-
+                self.locs[j].x[index] -= dbfinal*self.pixelsize
 
 
     def fit_in_view(self, autoscale=False):
