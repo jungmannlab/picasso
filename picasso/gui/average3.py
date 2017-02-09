@@ -54,27 +54,14 @@ def render_hist(x, y, oversampling, t_min, t_max):
 def render_histxyz(a, b, oversampling, a_min, a_max, b_min, b_max):
     n_pixel_a = int(np.ceil(oversampling * (a_max - a_min)))
     n_pixel_b = int(np.ceil(oversampling * (b_max - b_min)))
-
     in_view = (a > a_min) & (b > b_min) & (a < a_max) & (b < b_max)
-
     a = a[in_view]
     b = b[in_view]
     a = oversampling * (a - a_min)
     b = oversampling * (b - b_min)
-
-    print(n_pixel_a)
-    print(n_pixel_b)
-
     image = np.zeros((n_pixel_b, n_pixel_a), dtype=np.float32)
     render._fill(image, a, b)
 
-    #if n_pixel_a >= n_pixel_b:
-    #    image = np.zeros((n_pixel_a, n_pixel_b), dtype=np.float32)
-    #    render._fill(image, a, b)
-    #else:
-    #    image = np.zeros((n_pixel_a, n_pixel_b), dtype=np.float32)
-    #    render._fill(image, b, a)
-    #    image = image.transpose()
     return len(a), image
 
 def rotate_axis(axis,vx,vy,vz,angle,pixelsize):
@@ -428,10 +415,14 @@ class Window(QtGui.QMainWindow):
         # Define layout
         display_groupbox = QtGui.QGroupBox('Display')
         displaygrid = QtGui.QGridLayout(display_groupbox)
-        displaygrid.addWidget(self.viewxy, 0, 0)
-        displaygrid.addWidget(self.viewxz, 1, 0)
-        displaygrid.addWidget(self.viewyz, 0, 1)
-        displaygrid.addWidget(self.viewcp, 1, 1)
+        displaygrid.addWidget(QtGui.QLabel('XY'),0,0)
+        displaygrid.addWidget(self.viewxy, 1, 0)
+        displaygrid.addWidget(QtGui.QLabel('XZ'),0,1)
+        displaygrid.addWidget(self.viewxz, 1, 1)
+        displaygrid.addWidget(QtGui.QLabel('YZ'),2,0)
+        displaygrid.addWidget(self.viewyz, 3, 0)
+        displaygrid.addWidget(QtGui.QLabel('CP'),2,1)
+        displaygrid.addWidget(self.viewcp, 3, 1)
 
         button_groupbox = QtGui.QGroupBox('Buttons')
         buttongrid = QtGui.QGridLayout(button_groupbox)
@@ -516,7 +507,9 @@ class Window(QtGui.QMainWindow):
 
         self.translatexbtn = QtGui.QPushButton("Translate X")
         self.translateybtn = QtGui.QPushButton("Translate Y")
-        self.translatezbtn = QtGui.QPushButton("Trabslate Z")
+        self.translatezbtn = QtGui.QPushButton("Translate Z")
+
+        self.rotatexy_convbtn = QtGui.QPushButton('Rotate XY - Convolution')
 
         operate_groupbox = QtGui.QGroupBox('Operate')
         operategrid = QtGui.QGridLayout(operate_groupbox)
@@ -532,6 +525,10 @@ class Window(QtGui.QMainWindow):
         operategrid.addWidget(self.translatexbtn,0,0)
         operategrid.addWidget(self.translateybtn,1,0)
         operategrid.addWidget(self.translatezbtn,2,0)
+
+        operategrid.addWidget(self.rotatexy_convbtn)
+
+        self.rotatexy_convbtn.clicked.connect(self.rotatexy_convolution)
 
         self.alignxbtn.clicked.connect(self.align_x)
         self.alignybtn.clicked.connect(self.align_y)
@@ -662,9 +659,9 @@ class Window(QtGui.QMainWindow):
         self.viewyz.setPixmap(pixmap)
 
         if len(self.locs) == 1:
-            print('Only 1 Dataset')
+            print('Dataset loaded from '+path)
         else:
-            print('More datasets')
+            print('Dataset loaded from '+path+' Total number of datasets '+str(len(self.locs)))
             pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
 
             self.viewxy.setPixmap(pixmap1)
@@ -738,7 +735,7 @@ class Window(QtGui.QMainWindow):
 
 
     def centerofmass(self):
-        print('Center of mass btn')
+        print('Aligning by center of mass')
         n_groups = self.n_groups
         n_channels = len(self.locs)
         progress = lib.ProgressDialog('Aligning by center of mass', 0, n_groups, self)
@@ -955,7 +952,7 @@ class Window(QtGui.QMainWindow):
         self.status_bar.showMessage('Done!')
 
     def translate_group(self, signalimg, group, translateaxis):
-        print('Translating group')
+
         n_channels = len(self.locs)
 
         all_xcorr = np.zeros((1,n_channels))
@@ -987,13 +984,7 @@ class Window(QtGui.QMainWindow):
                 z_rot = self.locs[j].z[index]
 
                 xcorr_max = 0.0
-                print('Rendering planes')
-
                 plane = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #
-                print('Rendering planes complete')
-                print(plane.shape)
-                print(plane)
-
                 if translateaxis == 'x':
                     projection = np.sum(plane, axis=0)
                 elif translateaxis == 'y':
@@ -1014,18 +1005,14 @@ class Window(QtGui.QMainWindow):
                 #else:
                 #    shiftval = 0
                 shiftval = np.argmax(signal.correlate(signalimg[j], projection))-len(signalimg[j])+1
-                print("---Shift---")
-                print(shiftval)
-                all_xcorr[j] = corrval
-                all_da[j] = shiftval/self.oversampling
+                all_xcorr[0,j] = corrval
+                all_da[0,j] = shiftval/self.oversampling
 
             if plotmode:
                 plt.show()
         #value with biggest cc value form table
         maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
         dafinal = np.mean(all_da[maximumcc,:])
-        print(dafinal)
-
         for j in range(n_channels):
             index = self.group_index[j][group].nonzero()[1]
             if translateaxis == 'x':
@@ -1035,7 +1022,170 @@ class Window(QtGui.QMainWindow):
             elif translateaxis == 'z':
                 self.locs[j].z[index] += dafinal*self.pixelsize
 
-        print('Group complete')
+    def rotatexy_convolution_group(self, CF_image_avg, angles, group, rotaxis, proplane):
+        print('Rotate XY by convolution')
+        n_channels = len(self.locs)
+        allrot = []
+        alldx = []
+        alldy = []
+        alldz = []
+
+        n_angles = len(angles)
+
+        all_xcorr = np.zeros((n_angles,n_channels))
+        all_da = np.zeros((n_angles,n_channels))
+        all_db = np.zeros((n_angles,n_channels))
+
+        for j in range(n_channels):
+            if self.dataset_dialog.checks[j].isChecked():
+                index = self.group_index[j][group].nonzero()[1]
+                x_rot = self.locs[j].x[index]
+                y_rot = self.locs[j].y[index]
+                z_rot = self.locs[j].z[index]
+                x_original = x_rot.copy()
+                y_original = y_rot.copy()
+                z_original = z_rot.copy()
+                xcorr_max = 0.0
+
+                if self.translatebtn.isChecked():
+                    angles = [0]
+                    n_angles = 1
+
+
+                for k in range(n_angles):
+                    angle = angles[k]
+                    # rotate locs
+                    #a_rot = np.cos(angle) * a_original - np.sin(angle) * b_original
+                    #b_rot = np.sin(angle) * a_original + np.cos(angle) * b_original
+
+                    x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle, self.pixelsize)
+                    # render group image for plane
+
+                    image = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #RENDR PLANES WAS BUGGY AT SOME POINT
+
+                    # calculate cross-correlation
+                    if 0:
+                        fig = plt.figure()
+                        ax1 = fig.add_subplot(1,2,1)
+                        ax1.set_aspect('equal')
+                        plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
+                        plt.colorbar()
+                        plt.show()
+                        plt.waitforbuttonpress()
+
+
+                    xcorr = np.sum(np.multiply(CF_image_avg[j], image))
+                    print('Shapte of Xcorr')
+                    print(xcorr)
+
+                    all_xcorr[k,j] = xcorr
+
+
+        #value with biggest cc value form table
+        maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
+        rotfinal = angles[maximumcc]
+
+        dafinal = np.mean(all_da[maximumcc,:])
+        dbfinal = np.mean(all_db[maximumcc,:])
+
+        for j in range(n_channels):
+            index = self.group_index[j][group].nonzero()[1]
+            x_rot = self.locs[j].x[index]
+            y_rot = self.locs[j].y[index]
+            z_rot = self.locs[j].z[index]
+            x_original = x_rot.copy()
+            y_original = y_rot.copy()
+            z_original = z_rot.copy()
+            # rotate and shift image group locs
+            x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, rotfinal, self.pixelsize)
+
+            self.locs[j].x[index] = x_rot
+            self.locs[j].y[index] = y_rot
+            self.locs[j].z[index] = z_rot
+
+
+
+
+    def rotatexy_convolution(self):
+        #Read out values from radiobuttons
+
+        #TODO: maybe re-write this with kwargs
+        rotaxis = []
+        if self.x_axisbtn.isChecked():
+            rotaxis = 'x'
+        elif self.y_axisbtn.isChecked():
+            rotaxis = 'y'
+        elif self.z_axisbtn.isChecked():
+            rotaxis = 'z'
+
+
+        n_groups = self.group_index[0].shape[0]
+
+        a_step = np.arcsin(1 / (self.oversampling * self.r))
+
+        if self.full_degbtn.isChecked():
+            angles = np.arange(0, 2*np.pi, a_step)
+        elif self.part_degbtn.isChecked():
+            degree = self.degEdit.value()
+            angles = np.arange(-degree/360*2*np.pi, degree/360*2*np.pi, a_step)
+
+
+        renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
+        n_locs = sum([_[0] for _ in renderings])
+        images = np.array([_[1] for _ in renderings])
+
+        #DELIVER CORRECT PROJECTION FOR IMAGE
+        proplane = []
+
+        if self.xy_projbtn.isChecked():
+
+            proplane = 'xy'
+            image = [np.sum(_, axis=2) for _ in images]
+        elif self.yz_projbtn.isChecked():
+
+            proplane = 'yz'
+
+            image = [np.sum(_, axis=1) for _ in images]
+            image = [_.transpose() for _ in image]
+        elif self.xz_projbtn.isChecked():
+
+            proplane = 'xz'
+            image = [(np.sum(_, axis=0)) for _ in images]
+            image = [_.transpose() for _ in image]
+
+
+
+        #Change CFiamge for symmetry
+        if self.radio_sym.isChecked():
+            fig = plt.figure()
+            ax1 = fig.add_subplot(1,2,1)
+            ax1.set_aspect('equal')
+            imageold = image[0].copy()
+            plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
+
+            #rotate image
+
+            for i in range(6):
+                image[0] += scipy.ndimage.interpolation.rotate(imageold,((i+1)*45) , axes=(1, 0),reshape=False)
+
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.set_aspect('equal')
+            plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
+            plt.colorbar()
+            plt.show()
+        CF_image_avg = image
+
+        #n_pixel, _ = image_avg.shape
+        #image_half = n_pixel / 2
+
+        # TODO: blur auf average !!!
+
+        for i in range(n_groups):
+            print('Looping through groups '+str(i)+' of '+str(n_groups))
+            self.status_bar.showMessage('Looping through groups '+str(i)+' of '+str(n_groups))
+            self.rotatexy_convolution_group(CF_image_avg, angles, i, rotaxis, proplane)
+        self.updateLayout()
+        self.status_bar.showMessage('Done!')
 
     def rotate_groups(self):
 
@@ -1070,20 +1220,22 @@ class Window(QtGui.QMainWindow):
         proplane = []
 
         if self.xy_projbtn.isChecked():
-            print('xy-plane')
+
             proplane = 'xy'
             image = [np.sum(_, axis=2) for _ in images]
         elif self.yz_projbtn.isChecked():
-            print('yz-plane')
+
             proplane = 'yz'
 
             image = [np.sum(_, axis=1) for _ in images]
+            image = [_.transpose() for _ in image]
         elif self.xz_projbtn.isChecked():
-            print('xz-plane')
+
             proplane = 'xz'
             image = [(np.sum(_, axis=0)) for _ in images]
+            image = [_.transpose() for _ in image]
 
-        print(len(images))
+
 
         #Change CFiamge for symmetry
         if self.radio_sym.isChecked():
@@ -1094,8 +1246,7 @@ class Window(QtGui.QMainWindow):
             plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
 
             #rotate image
-            print(imageold.shape)
-            print(image[0].shape)
+
             for i in range(6):
                 image[0] += scipy.ndimage.interpolation.rotate(imageold,((i+1)*45) , axes=(1, 0),reshape=False)
 
@@ -1111,10 +1262,6 @@ class Window(QtGui.QMainWindow):
         #image_half = n_pixel / 2
 
         # TODO: blur auf average !!!
-
-
-
-
 
         for i in range(n_groups):
             print('Looping through groups '+str(i)+' of '+str(n_groups))
@@ -1223,6 +1370,8 @@ class Window(QtGui.QMainWindow):
 
 
                     all_corr[k,j] = np.sum(np.multiply(alignimage,image))
+                    print('All_corr_shape:')
+                    print(all_corr[k,j].shape)
                     if 0:
                         fig = plt.figure()
                         ax1 = fig.add_subplot(1,2,1)
