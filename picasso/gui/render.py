@@ -26,6 +26,9 @@ from mpl_toolkits.mplot3d import Axes3D
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
 
+from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
+
 import colorsys
 
 from .. import imageprocess, io, lib, postprocess, render
@@ -555,6 +558,112 @@ class DisplaySettingsDialog(QtGui.QDialog):
     def update_scene(self, *args, **kwargs):
         self.window.view.update_scene(use_cache=True)
 
+class SlicerDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('3D Slicer ')
+        self.setModal(False)
+        vbox = QtGui.QVBoxLayout(self)
+        slicer_groupbox = QtGui.QGroupBox('Slicer Settings')
+
+        vbox.addWidget(slicer_groupbox)
+        slicer_grid = QtGui.QGridLayout(slicer_groupbox)
+        slicer_grid.addWidget(QtGui.QLabel('Thickness of Slice [nm]:'), 0, 0)
+        self.pick_slice = QtGui.QSpinBox()
+        self.pick_slice.setRange(1, 999999)
+        self.pick_slice.setValue(20)
+        self.pick_slice.setSingleStep(5)
+        self.pick_slice.setKeyboardTracking(False)
+        self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
+        slicer_grid.addWidget(self.pick_slice, 0, 1)
+
+
+        self.sl = QtGui.QSlider(QtCore.Qt.Horizontal)
+        self.sl.setMinimum(0)
+        self.sl.setMaximum(50)
+        self.sl.setValue(25)
+        self.sl.setTickPosition(QtGui.QSlider.TicksBelow)
+        self.sl.setTickInterval(1)
+        self.sl.valueChanged.connect(self.on_slice_position_changed)
+
+        slicer_grid.addWidget(self.sl,1,0,1,2)
+
+        self.figure = plt.figure()
+        self.canvas = FigureCanvas(self.figure)
+        slicer_grid.addWidget(self.canvas)
+        self.slicerRadioButton = QtGui.QRadioButton('Slice Dataset')
+
+        slicer_grid.addWidget(self.slicerRadioButton)
+
+        self.zcoord = []
+
+
+
+    def on_pick_slice_changed(self, slice):
+        ax = self.figure.add_subplot(111)
+        # discards the old graph
+        ax.hold(False)
+        # the histogram of the data
+        #Calculate bins:
+        coord = self.zcoord[0]
+        self.bins = np.arange(np.amin(coord),np.amax(coord),slice)
+        n, bins, self.patches = plt.hist(coord, self.bins, normed=1, facecolor='green', alpha=0.5)
+        self.sl.setMaximum(len(bins))
+        self.sl.setValue(np.round(len(bins)/2))
+
+        plt.xlabel('Z-Coordinate')
+        plt.ylabel('Counts')
+        plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
+        # refresh canvas
+        self.canvas.draw()
+
+
+
+
+    def on_slice_position_changed(self, position):
+        for patch in self.patches:
+            patch.set_facecolor('green')
+
+        self.patches[position].set_facecolor('red')
+        self.canvas.draw()
+        print(position)
+        print(self.bins[position])
+        self.slicermin = self.bins[position]
+        self.slicermax = self.bins[position+1]
+        if self.slicerRadioButton.isChecked():
+            self.window.view.update_scene()
+
+
+
+    def plot(self):
+        ''' plot some random stuff '''
+
+        # create an axis
+        ax = self.figure.add_subplot(111)
+
+        # discards the old graph
+        ax.hold(False)
+
+
+        mu, sigma = 100, 15
+        x = mu + sigma*np.random.randn(10000)
+
+        # the histogram of the data
+        n, bins, patches = plt.hist(x, 50, normed=1, facecolor='green', alpha=0.5)
+        plt.xlabel('Z-Coordinate')
+        plt.ylabel('Counts')
+        plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
+        # refresh canvas
+        self.canvas.draw()
+
+
+
+    def on_pick_diameter_changed(self, diameter):
+        self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
+        self.window.view.update_scene(use_cache=True)
+
 
 class View(QtGui.QLabel):
 
@@ -606,6 +715,8 @@ class View(QtGui.QLabel):
         else:
             if render:
                 self.update_scene()
+        if hasattr(locs, 'z'):
+            self.window.slicer_dialog.zcoord.append(locs.z)
         os.chdir(os.path.dirname(path))
 
     def add_multiple(self, paths):
@@ -1407,6 +1518,12 @@ class View(QtGui.QLabel):
         if hasattr(locs, 'group'):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
+        if self.window.slicer_dialog.slicerRadioButton.isChecked():
+            print('Slicer checked')
+            z_min = self.window.slicer_dialog.slicermin
+            z_max = self.window.slicer_dialog.slicermax
+            in_view = (locs.z > z_min) & (locs.z < z_max)
+            locs = locs[in_view]
         if use_cache:
             n_locs = self.n_locs
             image = self.image
@@ -1805,6 +1922,7 @@ class Window(QtGui.QMainWindow):
         self.setCentralWidget(self.view)
         self.display_settings_dialog = DisplaySettingsDialog(self)
         self.tools_settings_dialog = ToolsSettingsDialog(self)
+        self.slicer_dialog = SlicerDialog(self)
         self.info_dialog = InfoDialog(self)
         self.menu_bar = self.menuBar()
         file_menu = self.menu_bar.addMenu('File')
@@ -1919,6 +2037,8 @@ class Window(QtGui.QMainWindow):
         group_action.triggered.connect(self.remove_group)
         drift_action = postprocess_menu.addAction('Undo drift (2D)')
         drift_action.triggered.connect(self.view.undo_drift)
+        slicer_action = postprocess_menu.addAction('Slice (3D)')
+        slicer_action.triggered.connect(self.slicer_dialog.show)
         #channel_action = postprocess_menu.addAction('Combine channels')
         #channel_action.triggered.connect(self.combine_channels)
         self.load_user_settings()
