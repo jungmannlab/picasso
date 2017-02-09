@@ -593,8 +593,8 @@ class SlicerDialog(QtGui.QDialog):
         self.figure = plt.figure()
         self.canvas = FigureCanvas(self.figure)
         slicer_grid.addWidget(self.canvas)
-        self.slicerRadioButton = QtGui.QRadioButton('Slice Dataset')
-
+        self.slicerRadioButton = QtGui.QCheckBox('Slice Dataset')
+        self.slicerRadioButton.stateChanged.connect(self.on_slice_position_changed)
         slicer_grid.addWidget(self.slicerRadioButton)
 
         self.zcoord = []
@@ -607,18 +607,19 @@ class SlicerDialog(QtGui.QDialog):
         ax.hold(False)
         # the histogram of the data
         #Calculate bins:
-        coord = self.zcoord[0]
-        self.bins = np.arange(np.amin(coord),np.amax(coord),slice)
-        n, bins, self.patches = plt.hist(coord, self.bins, normed=1, facecolor='green', alpha=0.5)
-        self.sl.setMaximum(len(bins))
-        self.sl.setValue(np.round(len(bins)/2))
+        for coord in self.zcoord:
+            self.bins = np.arange(np.amin(coord),np.amax(coord),slice)
+            n, bins, self.patches = plt.hist(coord, self.bins, normed=1, facecolor='green', alpha=0.5)
+
 
         plt.xlabel('Z-Coordinate')
         plt.ylabel('Counts')
         plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
         # refresh canvas
         self.canvas.draw()
-
+        print('Adjust positions')
+        self.sl.setMaximum(len(bins))
+        self.sl.setValue(0)
 
 
 
@@ -628,41 +629,13 @@ class SlicerDialog(QtGui.QDialog):
 
         self.patches[position].set_facecolor('red')
         self.canvas.draw()
-        print(position)
-        print(self.bins[position])
+
         self.slicermin = self.bins[position]
         self.slicermax = self.bins[position+1]
         if self.slicerRadioButton.isChecked():
             self.window.view.update_scene()
 
 
-
-    def plot(self):
-        ''' plot some random stuff '''
-
-        # create an axis
-        ax = self.figure.add_subplot(111)
-
-        # discards the old graph
-        ax.hold(False)
-
-
-        mu, sigma = 100, 15
-        x = mu + sigma*np.random.randn(10000)
-
-        # the histogram of the data
-        n, bins, patches = plt.hist(x, 50, normed=1, facecolor='green', alpha=0.5)
-        plt.xlabel('Z-Coordinate')
-        plt.ylabel('Counts')
-        plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
-        # refresh canvas
-        self.canvas.draw()
-
-
-
-    def on_pick_diameter_changed(self, diameter):
-        self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
-        self.window.view.update_scene(use_cache=True)
 
 
 class View(QtGui.QLabel):
@@ -717,6 +690,7 @@ class View(QtGui.QLabel):
                 self.update_scene()
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
+            self.window.slicer_dialog.pick_slice.setValue(50)
         os.chdir(os.path.dirname(path))
 
     def add_multiple(self, paths):
@@ -1499,6 +1473,12 @@ class View(QtGui.QLabel):
             renderings = [render.render(_, **kwargs) for _ in locs]
             n_locs = sum([_[0] for _ in renderings])
             image = np.array([_[1] for _ in renderings])
+        if self.window.slicer_dialog.slicerRadioButton.isChecked():
+            z_min = self.window.slicer_dialog.slicermin
+            z_max = self.window.slicer_dialog.slicermax
+            for dataset in locs:
+                in_view = (dataset.z > z_min) & (dataset.z < z_max)
+                dataset = dataset[in_view]
         if cache:
             self.n_locs = n_locs
             self.image = image
@@ -1519,7 +1499,6 @@ class View(QtGui.QLabel):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
         if self.window.slicer_dialog.slicerRadioButton.isChecked():
-            print('Slicer checked')
             z_min = self.window.slicer_dialog.slicermin
             z_max = self.window.slicer_dialog.slicermax
             in_view = (locs.z > z_min) & (locs.z < z_max)
