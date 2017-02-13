@@ -573,7 +573,7 @@ class SlicerDialog(QtGui.QDialog):
         slicer_grid.addWidget(QtGui.QLabel('Thickness of Slice [nm]:'), 0, 0)
         self.pick_slice = QtGui.QSpinBox()
         self.pick_slice.setRange(1, 999999)
-        self.pick_slice.setValue(20)
+        self.pick_slice.setValue(50)
         self.pick_slice.setSingleStep(5)
         self.pick_slice.setKeyboardTracking(False)
         self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
@@ -590,50 +590,100 @@ class SlicerDialog(QtGui.QDialog):
 
         slicer_grid.addWidget(self.sl,1,0,1,2)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(figsize=(3,3))
         self.canvas = FigureCanvas(self.figure)
-        slicer_grid.addWidget(self.canvas)
+
         self.slicerRadioButton = QtGui.QCheckBox('Slice Dataset')
         self.slicerRadioButton.stateChanged.connect(self.on_slice_position_changed)
-        slicer_grid.addWidget(self.slicerRadioButton)
-
         self.zcoord = []
 
+        self.exportButton = QtGui.QPushButton('Export Stack')
+
+        self.exportButton.clicked.connect(self.exportStack)
 
 
-    def on_pick_slice_changed(self, slice):
+        slicer_grid.addWidget(self.canvas,2,0,1,2)
+        slicer_grid.addWidget(self.slicerRadioButton,3,0)
+        slicer_grid.addWidget(self.exportButton,4,0)
+
+    def initialize(self):
+        self.calculate_histogram()
+        self.show()
+
+
+    def calculate_histogram(self):
+        slice = self.pick_slice.value()
         ax = self.figure.add_subplot(111)
-        # discards the old graph
         ax.hold(False)
-        # the histogram of the data
-        #Calculate bins:
-        for coord in self.zcoord:
-            self.bins = np.arange(np.amin(coord),np.amax(coord),slice)
-            n, bins, self.patches = plt.hist(coord, self.bins, normed=1, facecolor='green', alpha=0.5)
+        plt.cla()
+        n_channels = len(self.zcoord)
 
+        hues = np.arange(0, 1, 1 / n_channels)
+        self.colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
 
-        plt.xlabel('Z-Coordinate')
+        self.bins = np.arange(np.amin(np.hstack(self.zcoord)),np.amax(np.hstack(self.zcoord)),slice)
+        self.patches = []
+        ax.hold(True)
+        for i in range(len(self.zcoord)):
+            n, bins, patches = plt.hist(self.zcoord[i], self.bins, normed=1, facecolor=self.colors[i], alpha=0.5)
+            self.patches.append(patches)
+
+        plt.xlabel('Z-Coordinate [nm]')
         plt.ylabel('Counts')
         plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
         # refresh canvas
         self.canvas.draw()
-        print('Adjust positions')
-        self.sl.setMaximum(len(bins))
-        self.sl.setValue(0)
+        self.sl.setMaximum(len(self.bins)-2)
+        #self.sl.setValue(np.ceil((len(self.bins)-2)/2))
 
+
+    def on_pick_slice_changed(self):
+        if len(self.bins) < 3: #in case there should be only 1 bin
+            self.calculate_histogram()
+        else:
+            oldPosition_max = self.bins[self.sl.tickPosition()]
+            self.calculate_histogram()
+            self.sl.setValue(sum(self.bins < oldPosition_max))
+            self.on_slice_position_changed(self.sl.value())
 
 
     def on_slice_position_changed(self, position):
-        for patch in self.patches:
-            patch.set_facecolor('green')
+        for i in range(len(self.zcoord)):
+            for patch in self.patches[i]:
+                patch.set_facecolor(self.colors[i])
+            self.patches[i][position].set_facecolor('black')
 
-        self.patches[position].set_facecolor('red')
         self.canvas.draw()
 
         self.slicermin = self.bins[position]
         self.slicermax = self.bins[position+1]
-        if self.slicerRadioButton.isChecked():
-            self.window.view.update_scene()
+        print('Minimum: '+str(self.slicermin)+ ' nm, Maxmimum: '+str(self.slicermax)+ ' nm')
+        self.window.view.update_scene()
+
+    def exportStack(self):
+
+        try:
+            base, ext = os.path.splitext(self.window.view.locs_paths[0])
+        except AttributeError:
+            return
+        out_path = base + '.tif'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save stack files', out_path, filter='*.tif')
+
+        if path:
+            base, ext = os.path.splitext(path)
+
+            progress = lib.ProgressDialog('Exporting Stacks..', 0, self.sl.maximum(), self)
+            progress.set_value(0)
+            progress.show()
+            for i in range(self.sl.maximum()+1):
+                self.sl.setValue(i)
+                print('Slide: '+ str(i))
+                out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH001'+'.tif'
+                self.window.view.qimage.save(out_path)
+                progress.set_value(i)
+            progress.close()
+
+
 
 
 
@@ -690,7 +740,6 @@ class View(QtGui.QLabel):
                 self.update_scene()
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
-            self.window.slicer_dialog.pick_slice.setValue(50)
         os.chdir(os.path.dirname(path))
 
     def add_multiple(self, paths):
@@ -1463,6 +1512,14 @@ class View(QtGui.QLabel):
     def render_multi_channel(self, kwargs, autoscale=False, locs=None, use_cache=False, cache=True):
         if locs is None:
             locs = self.locs
+        locsall = locs.copy()
+        for i in range(len(locs)):
+            if hasattr(locs[i], 'z'):
+                if self.window.slicer_dialog.slicerRadioButton.isChecked():
+                    z_min = self.window.slicer_dialog.slicermin
+                    z_max = self.window.slicer_dialog.slicermax
+                    in_view = (locsall[i].z > z_min) & (locsall[i].z <= z_max)
+                    locsall[i] = locsall[i][in_view]
         n_channels = len(locs)
         hues = np.arange(0, 1, 1 / n_channels)
         colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
@@ -1470,15 +1527,9 @@ class View(QtGui.QLabel):
             n_locs = self.n_locs
             image = self.image
         else:
-            renderings = [render.render(_, **kwargs) for _ in locs]
+            renderings = [render.render(_, **kwargs) for _ in locsall]
             n_locs = sum([_[0] for _ in renderings])
             image = np.array([_[1] for _ in renderings])
-        if self.window.slicer_dialog.slicerRadioButton.isChecked():
-            z_min = self.window.slicer_dialog.slicermin
-            z_max = self.window.slicer_dialog.slicermax
-            for dataset in locs:
-                in_view = (dataset.z > z_min) & (dataset.z < z_max)
-                dataset = dataset[in_view]
         if cache:
             self.n_locs = n_locs
             self.image = image
@@ -1498,11 +1549,12 @@ class View(QtGui.QLabel):
         if hasattr(locs, 'group'):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
-        if self.window.slicer_dialog.slicerRadioButton.isChecked():
-            z_min = self.window.slicer_dialog.slicermin
-            z_max = self.window.slicer_dialog.slicermax
-            in_view = (locs.z > z_min) & (locs.z < z_max)
-            locs = locs[in_view]
+        if hasattr(locs, 'z'):
+            if self.window.slicer_dialog.slicerRadioButton.isChecked():
+                z_min = self.window.slicer_dialog.slicermin
+                z_max = self.window.slicer_dialog.slicermax
+                in_view = (locs.z > z_min) & (locs.z <= z_max)
+                locs = locs[in_view]
         if use_cache:
             n_locs = self.n_locs
             image = self.image
@@ -2017,7 +2069,7 @@ class Window(QtGui.QMainWindow):
         drift_action = postprocess_menu.addAction('Undo drift (2D)')
         drift_action.triggered.connect(self.view.undo_drift)
         slicer_action = postprocess_menu.addAction('Slice (3D)')
-        slicer_action.triggered.connect(self.slicer_dialog.show)
+        slicer_action.triggered.connect(self.slicer_dialog.initialize)
         #channel_action = postprocess_menu.addAction('Combine channels')
         #channel_action.triggered.connect(self.combine_channels)
         self.load_user_settings()
