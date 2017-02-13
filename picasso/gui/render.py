@@ -597,7 +597,7 @@ class SlicerDialog(QtGui.QDialog):
         self.slicerRadioButton.stateChanged.connect(self.on_slice_position_changed)
         self.zcoord = []
 
-        self.exportButton = QtGui.QPushButton('Export Stack')
+        self.exportButton = QtGui.QPushButton('Export Slices')
 
         self.exportButton.clicked.connect(self.exportStack)
 
@@ -667,12 +667,12 @@ class SlicerDialog(QtGui.QDialog):
         except AttributeError:
             return
         out_path = base + '.tif'
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save stack files', out_path, filter='*.tif')
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save z slices', out_path, filter='*.tif')
 
         if path:
             base, ext = os.path.splitext(path)
 
-            progress = lib.ProgressDialog('Exporting Stacks..', 0, self.sl.maximum(), self)
+            progress = lib.ProgressDialog('Exporting slices..', 0, self.sl.maximum(), self)
             progress.set_value(0)
             progress.show()
             for i in range(self.sl.maximum()+1):
@@ -1281,6 +1281,9 @@ class View(QtGui.QLabel):
                     reply = msgBox.exec()
                     #msgBox.activateWindow()
                     #msgBox.raise_()
+
+                    minlocs, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
+                        'Enter minimum number of localizations:')
 
                     if reply == 0:
                         print('Accepted')
