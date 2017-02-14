@@ -179,6 +179,30 @@ class ApplyDialog(QtGui.QDialog):
         vars = self.window.view.locs[index].dtype.names
         self.label.setText(str(vars))
 
+class DatasetDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Datasets')
+        self.setModal(False)
+        self.layout = QtGui.QVBoxLayout()
+        self.checks = []
+        self.setLayout(self.layout)
+
+    def add_entry(self,path):
+        c = QtGui.QCheckBox(path)
+        self.layout.addWidget(c)
+        self.checks.append(c)
+        self.checks[-1].setChecked(True)
+        self.checks[-1].stateChanged.connect(self.update_viewport)
+
+    def update_viewport(self):
+        if self.window.view.viewport:
+            self.window.view.update_scene()
+
+
+
 
 class LinkDialog(QtGui.QDialog):
 
@@ -679,7 +703,8 @@ class SlicerDialog(QtGui.QDialog):
                 self.sl.setValue(i)
                 print('Slide: '+ str(i))
                 out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH001'+'.tif'
-                self.window.view.qimage.save(out_path)
+                gray = self.window.view.qimage.convertToFormat()
+                gray.save(out_path)
                 progress.set_value(i)
             progress.close()
 
@@ -726,6 +751,7 @@ class View(QtGui.QLabel):
         self.index_blocks.append(None)
         self._drift.append(None)
         self.currentdrift.append(None)
+
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
@@ -741,6 +767,9 @@ class View(QtGui.QLabel):
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
         os.chdir(os.path.dirname(path))
+        self.window.dataset_dialog.add_entry(path)
+
+        #self.window.dataset_dialog.checks[-1].stateChanged.connect(self.update_scene)
 
     def add_multiple(self, paths):
         fit_in_view = len(self.locs) == 0
@@ -1686,7 +1715,13 @@ class View(QtGui.QLabel):
             n_locs = self.n_locs
             image = self.image
         else:
-            renderings = [render.render(_, **kwargs) for _ in locsall]
+            renderings = []
+            for i in range(len(locsall)):
+                if self.window.dataset_dialog.checks[i].isChecked():
+                    renderings.append(render.render(locsall[i], **kwargs))
+            if renderings == []: #handle error of no checked -> keep first
+                renderings.append(render.render(locsall[0], **kwargs))
+            #renderings = [render.render(_, **kwargs) for _ in locsall]
             n_locs = sum([_[0] for _ in renderings])
             image = np.array([_[1] for _ in renderings])
         if cache:
@@ -2208,6 +2243,11 @@ class Window(QtGui.QMainWindow):
         plotpick3d_action.triggered.connect(self.view.show_pick_3d)
         analyzepick_action = tools_menu.addAction('Analyze picks')
         analyzepick_action.triggered.connect(self.view.analyze_picks)
+        self.dataset_dialog = DatasetDialog(self)
+        dataset_action = tools_menu.addAction('Datasets')
+        dataset_action.triggered.connect(self.dataset_dialog.show)
+
+
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
         undrift_action.setShortcut('Ctrl+U')
         undrift_action.triggered.connect(self.view.undrift)
