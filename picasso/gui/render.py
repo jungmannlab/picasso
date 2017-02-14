@@ -617,10 +617,12 @@ class SlicerDialog(QtGui.QDialog):
         self.figure = plt.figure(figsize=(3,3))
         self.canvas = FigureCanvas(self.figure)
 
+
         self.slicerRadioButton = QtGui.QCheckBox('Slice Dataset')
         self.slicerRadioButton.stateChanged.connect(self.on_slice_position_changed)
-        self.zcoord = []
 
+        self.zcoord = []
+        self.seperateCheck = QtGui.QCheckBox('Export channels separate')
         self.exportButton = QtGui.QPushButton('Export Slices')
 
         self.exportButton.clicked.connect(self.exportStack)
@@ -628,6 +630,7 @@ class SlicerDialog(QtGui.QDialog):
 
         slicer_grid.addWidget(self.canvas,2,0,1,2)
         slicer_grid.addWidget(self.slicerRadioButton,3,0)
+        slicer_grid.addWidget(self.seperateCheck,4,1)
         slicer_grid.addWidget(self.exportButton,4,0)
 
     def initialize(self):
@@ -696,17 +699,39 @@ class SlicerDialog(QtGui.QDialog):
         if path:
             base, ext = os.path.splitext(path)
 
-            progress = lib.ProgressDialog('Exporting slices..', 0, self.sl.maximum(), self)
-            progress.set_value(0)
-            progress.show()
-            for i in range(self.sl.maximum()+1):
-                self.sl.setValue(i)
-                print('Slide: '+ str(i))
-                out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH001'+'.tif'
-                gray = self.window.view.qimage.convertToFormat()
-                gray.save(out_path)
-                progress.set_value(i)
-            progress.close()
+            if self.seperateCheck:
+                #Uncheck all
+                for checks in self.window.dataset_dialog.checks:
+                    checks.setChecked(False)
+                for j in range(len(self.window.view.locs)):
+                    self.window.dataset_dialog.checks[j].setChecked(True)
+
+                    progress = lib.ProgressDialog('Exporting slices..', 0, self.sl.maximum(), self)
+                    progress.set_value(0)
+                    progress.show()
+                    for i in range(self.sl.maximum()+1):
+                        self.sl.setValue(i)
+                        print('Slide: '+ str(i))
+                        out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH'+'{num:03d}'.format(num=j+1)+'.tif'
+                        gray = self.window.view.qimage.convertToFormat(QtGui.QImage.Format_RGB16)
+                        gray.save(out_path)
+                        progress.set_value(i)
+                    progress.close()
+                    self.window.dataset_dialog.checks[j].setChecked(False)
+                for checks in self.window.dataset_dialog.checks:
+                    checks.setChecked(True)
+
+            else:
+                progress = lib.ProgressDialog('Exporting slices..', 0, self.sl.maximum(), self)
+                progress.set_value(0)
+                progress.show()
+                for i in range(self.sl.maximum()+1):
+                    self.sl.setValue(i)
+                    print('Slide: '+ str(i))
+                    out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH001'+'.tif'
+                    self.window.view.qimage.save(out_path)
+                    progress.set_value(i)
+                progress.close()
 
 
 
