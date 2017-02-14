@@ -1206,10 +1206,10 @@ class View(QtGui.QLabel):
 
     def show_pick(self):
         print('Show pick')
-        channel = self.get_channel3d('Undrift from picked')
+        channel = self.get_channel3d('Select Channel')
         fig = plt.figure()
         fig.canvas.set_window_title("Scatterplot of Pick")
-
+        removelist = []
 
         if channel is not None:
             n_channels = (len(self.locs_paths))
@@ -1222,7 +1222,6 @@ class View(QtGui.QLabel):
                 for k in range(len(self.locs_paths)):
                     all_picked_locs.append(self.picked_locs(k))
                 if self._picks:
-                    removelist = []
                     for i, pick in enumerate(self._picks):
                         pickindex = 0
                         fig.clf()
@@ -1271,7 +1270,6 @@ class View(QtGui.QLabel):
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
-                    removelist = []
                     for i, pick in enumerate(self._picks):
                         pickindex = 0
                         fig.clf()
@@ -1318,18 +1316,19 @@ class View(QtGui.QLabel):
                             print('Discard')
                             removelist.append(pick)
                         plt.close()
-                for pick in removelist:
-                    self._picks.remove(pick)
+        for pick in removelist:
+            self._picks.remove(pick)
 
-                self.n_picks = len(self._picks)
-                self.update_pick_info_short()
-                self.update_scene()
+        self.n_picks = len(self._picks)
+
+        self.update_pick_info_short()
+        self.update_scene()
 
 
     def show_pick_3d(self):
         print('Show pick 3D')
-        channel = self.get_channel3d('Undrift from picked')
-
+        channel = self.get_channel3d('Show Pick 3D')
+        removelist = []
         if channel is not None:
             n_channels = (len(self.locs_paths))
             hues = np.arange(0, 1, 1 / n_channels)
@@ -1342,9 +1341,10 @@ class View(QtGui.QLabel):
                     all_picked_locs.append(self.picked_locs(k))
 
                 if self._picks:
-                    removelist = []
+
                     for i, pick in enumerate(self._picks):
                         pickindex = 0
+                        plt.close()
                         fig = plt.figure()
                         ax = fig.add_subplot(111, projection='3d')
                         ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
@@ -1366,6 +1366,7 @@ class View(QtGui.QLabel):
                         ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
                         ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
                         ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+
                         plt.show()
 
 
@@ -1395,9 +1396,10 @@ class View(QtGui.QLabel):
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
-                    removelist = []
+
                     for i, pick in enumerate(self._picks):
                         pickindex = 0
+                        plt.close()
                         fig = plt.figure()
                         ax = fig.add_subplot(111, projection='3d')
                         ax.set_title("3D Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
@@ -1421,7 +1423,7 @@ class View(QtGui.QLabel):
 
                         plt.show()
 
-                        msgBox = QtGui.QMessageBox(self)
+                        msgBox = QtGui.QMessageBox()
 
                         msgBox.setWindowTitle('Select picks')
                         msgBox.setWindowIcon(self.icon)
@@ -1444,11 +1446,12 @@ class View(QtGui.QLabel):
                             print('Discard')
                             removelist.append(pick)
                         plt.close()
-                for pick in removelist:
-                    self._picks.remove(pick)
-                self.n_picks = len(self._picks)
-                self.update_pick_info_short()
-                self.update_scene()
+
+        for pick in removelist:
+            self._picks.remove(pick)
+        self.n_picks = len(self._picks)
+        self.update_pick_info_short()
+        self.update_scene()
 
     def analyze_picks(self):
         print('Show picks')
