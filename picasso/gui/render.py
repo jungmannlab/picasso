@@ -1222,16 +1222,189 @@ class View(QtGui.QLabel):
 
     def show_pick(self):
         print('Show pick')
+        channel = self.get_channel3d('Undrift from picked')
+
+        if channel is not None:
+            n_channels = (len(self.locs_paths))
+            hues = np.arange(0, 1, 1 / n_channels)
+            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+
+            if channel is (len(self.locs_paths)):
+                print('Combined')
+                all_picked_locs = []
+                for k in range(len(self.locs_paths)):
+                    all_picked_locs.append(self.picked_locs(k))
+                if self._picks:
+                    removelist = []
+                    for i, pick in enumerate(self._picks):
+                        pickindex = 0
+                        fig = plt.figure()
+                        fig.canvas.set_window_title("Scatterplot of Pick")
+                        ax = fig.add_subplot(111)
+                        ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
+                        for l in range(len(self.locs_paths)):
+                            locs = all_picked_locs[l][i]
+                            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                            ax.scatter(locs['x'], locs['y'], c = colors[l])
+                        ax.set_xlabel('X [Px]')
+                        ax.set_ylabel('Y [Px]')
+                        plt.axis('equal')
+                        fig.canvas.draw()
+
+                        size = fig.canvas.size()
+                        width, height = size.width(), size.height()
+
+                        im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+
+                        self.setPixmap((QtGui.QPixmap(im)))
+                        self.setAlignment(QtCore.Qt.AlignCenter)
+
+                        msgBox = QtGui.QMessageBox(self)
+
+                        msgBox.setWindowTitle('Select picks')
+                        msgBox.setWindowIcon(self.icon)
+                        msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
+                        msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
+                        msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
+                        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
+                        qr = self.frameGeometry()
+                        cp = QtGui.QDesktopWidget().availableGeometry().center()
+                        qr.moveCenter(cp)
+                        msgBox.move(qr.topLeft())
+
+                        reply = msgBox.exec()
+
+                        if reply == 0:
+                            print('Accepted')
+                        elif reply == 2:
+                            break
+                        else:
+                            print('Discard')
+                            removelist.append(pick)
+            else:
+                all_picked_locs = self.picked_locs(channel)
+                if self._picks:
+                    removelist = []
+                    for i, pick in enumerate(self._picks):
+                        pickindex = 0
+                        fig = plt.figure()
+                        fig.canvas.set_window_title("Scatterplot of Pick")
+                        ax = fig.add_subplot(111)
+                        ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
+                        locs = all_picked_locs[i]
+                        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                        ax.scatter(locs['x'], locs['y'], c = colors[channel])
+                        ax.set_xlabel('X [Px]')
+                        ax.set_ylabel('Y [Px]')
+                        plt.axis('equal')
+                        fig.canvas.draw()
+
+                        size = fig.canvas.size()
+                        width, height = size.width(), size.height()
+
+                        im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+
+                        self.setPixmap((QtGui.QPixmap(im)))
+                        self.setAlignment(QtCore.Qt.AlignCenter)
+
+                        msgBox = QtGui.QMessageBox(self)
+
+                        msgBox.setWindowTitle('Select picks')
+                        msgBox.setWindowIcon(self.icon)
+                        msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
+                        msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
+                        msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
+                        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
+                        qr = self.frameGeometry()
+                        cp = QtGui.QDesktopWidget().availableGeometry().center()
+                        qr.moveCenter(cp)
+                        msgBox.move(qr.topLeft())
+
+                        reply = msgBox.exec()
+
+                        if reply == 0:
+                            print('Accepted')
+                        elif reply == 2:
+                            break
+                        else:
+                            print('Discard')
+                            removelist.append(pick)
+
+                for pick in removelist:
+                    self._picks.remove(pick)
+                self.n_picks = len(self._picks)
+                self.update_pick_info_short()
+                self.update_scene()
+
+    def show_pick_3d(self):
+        print('show pick 3d')
+        channel = self.get_channel3d('Undrift from picked')
+        if channel is not None:
+            if channel is (len(self.locs_paths)):
+                print('Multichannel')
+                n_channels = (len(self.locs_paths))
+                hues = np.arange(0, 1, 1 / n_channels)
+                colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+                #self.view.save_picked_locs_multi(path)
+                fig = plt.figure()
+                fig.canvas.set_window_title('3D - Trace')
+                ax = fig.add_subplot(111, projection='3d')
+                ax.set_title('3d view of pick')
+                if 0:
+                    for i in range(len(self.locs_paths)):
+                        locs = self.picked_locs(i)
+                        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                        ax.scatter(locs['x'], locs['y'], locs['z'],c=colors[i])
+
+
+                    ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+                    ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+                    ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+
+                    ax.set_xlabel('X [Px]')
+                    ax.set_ylabel('Y [Px]')
+                    ax.set_zlabel('Z [nm]')
+                    plt.gca().patch.set_facecolor('black')
+                    ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+                    ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+                    ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+
+                    plt.show()
+                elif channel is (len(self.locs_paths)+1):
+                    print('Combined')
+                    #for i in range(len(self.view.locs_paths)):
+                    #    channel = i
+                    #    base, ext = os.path.splitext(self.view.locs_paths[channel])
+                    #    out_path = base + '_apicked.hdf5'
+                    #    self.view.save_picked_locs(out_path, channel)
+                else:
+                    locs = self.picked_locs(channel)
+                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                    fig = plt.figure()
+                    fig.canvas.set_window_title('3D - Trace')
+                    ax = fig.add_subplot(111, projection='3d')
+                    ax.set_title('3d view of pick')
+                    colors = locs['z'][:]
+                    colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+                    colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+                    ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+                    ax.set_xlabel('X [Px]')
+                    ax.set_ylabel('Y [Px]')
+                    ax.set_zlabel('Z [nm]')
+                    ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+                    ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+                    ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+                    plt.gca().patch.set_facecolor('black')
+                    ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+                    ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+                    ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+
+                    plt.show()
+
+        print('Show pick_3d')
         channel = self.get_channel('Pick similar')
         if channel is not None:
-            locs = self.locs[channel]
-            info = self.infos[channel]
-            d = self.window.tools_settings_dialog.pick_diameter.value()
-            r = d / 2
-            std_range = self.window.tools_settings_dialog.pick_similar_range.value()
-            index_blocks = self.get_index_blocks(channel)
-            n_locs = []
-            rmsd = []
+
 
             if self._picks:
                 removelist = []
@@ -1287,8 +1460,6 @@ class View(QtGui.QLabel):
                 self.n_picks = len(self._picks)
                 self.update_pick_info_short()
                 self.update_scene()
-
-
 
     def analyze_picks(self):
         print('Show picks')
@@ -2036,11 +2207,13 @@ class Window(QtGui.QMainWindow):
         tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
         postprocess_menu = self.menu_bar.addMenu('Postprocess')
         tools_menu.addSeparator()
-        plotpick3d_action = tools_menu.addAction('Plot pick 3D')
-        plotpick3d_action.triggered.connect(self.view.plot3d)
-        plotpick3d_action.setShortcut('Ctrl+3')
+        plotpick3dsingle_action = tools_menu.addAction('Plot single pick 3D')
+        plotpick3dsingle_action.triggered.connect(self.view.plot3d)
+        plotpick3dsingle_action.setShortcut('Ctrl+3')
         plotpick_action = tools_menu.addAction('Plot picks')
         plotpick_action.triggered.connect(self.view.show_pick)
+        plotpick3d_action = tools_menu.addAction('Plot picks (3D)')
+        plotpick3d_action.triggered.connect(self.view.show_pick_3d)
         analyzepick_action = tools_menu.addAction('Analyze picks')
         analyzepick_action.triggered.connect(self.view.analyze_picks)
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
