@@ -1233,8 +1233,6 @@ class View(QtGui.QLabel):
             n_locs = []
             rmsd = []
 
-            #pixmap = QtGui.QPixmap.fromImage(/icons/filter.ico)
-
             if self._picks:
                 removelist = []
                 for i, pick in enumerate(self._picks):
@@ -1244,15 +1242,14 @@ class View(QtGui.QLabel):
                     pick_locs = lib.locs_at(x, y, block_locs, r)
                     locs = stack_arrays(pick_locs, asrecarray=True, usemask=False)
                     fig = plt.figure()
-                    fig.canvas.set_window_title('Scatterplot of Pick')
+                    fig.canvas.set_window_title("Scatterplot of Pick")
                     ax = fig.add_subplot(111)
-                    ax.set_title('Scatterplot of Pick ')
+                    ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
                     ax.scatter(locs['x'], locs['y'])
                     ax.set_xlabel('X [Px]')
                     ax.set_ylabel('Y [Px]')
                     plt.axis('equal')
                     fig.canvas.draw()
-
 
                     size = fig.canvas.size()
                     width, height = size.width(), size.height()
@@ -1262,12 +1259,7 @@ class View(QtGui.QLabel):
                     self.setPixmap((QtGui.QPixmap(im)))
                     self.setAlignment(QtCore.Qt.AlignCenter)
 
-                    #message = "Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?"
-                    #reply = QtGui.QMessageBox.question(self, 'Message',
-                    #message, QtGui.QMessageBox.Yes |
-                    #QtGui.QMessageBox.No | QtGui.QMessageBox.Cancel, QtGui.QMessageBox.No)
-
-                    msgBox = QtGui.QMessageBox()
+                    msgBox = QtGui.QMessageBox(self)
 
                     msgBox.setWindowTitle('Select picks')
                     msgBox.setWindowIcon(self.icon)
@@ -1276,14 +1268,11 @@ class View(QtGui.QLabel):
                     msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
                     msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
                     qr = self.frameGeometry()
-                    msgBox.move(qr.topRight())
+                    cp = QtGui.QDesktopWidget().availableGeometry().center()
+                    qr.moveCenter(cp)
+                    msgBox.move(qr.topLeft())
 
                     reply = msgBox.exec()
-                    #msgBox.activateWindow()
-                    #msgBox.raise_()
-
-                    minlocs, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
-                        'Enter minimum number of localizations:')
 
                     if reply == 0:
                         print('Accepted')
@@ -1293,11 +1282,12 @@ class View(QtGui.QLabel):
                         print('Discard')
                         removelist.append(pick)
 
-
-                        #break to skip loop
                 for pick in removelist:
                     self._picks.remove(pick)
+                self.n_picks = len(self._picks)
+                self.update_pick_info_short()
                 self.update_scene()
+
 
 
     def analyze_picks(self):
@@ -1373,8 +1363,11 @@ class View(QtGui.QLabel):
 
                 for pick in removelist:
                     self._picks.remove(pick)
+                self.n_picks = len(self._picks)
+                self.update_pick_info_short()
                 progress.close()
                 self.update_scene()
+
 
     def rmsd_at_com(self, locs):
         com_x = locs.x.mean()
