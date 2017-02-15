@@ -2048,6 +2048,36 @@ class View(QtGui.QLabel):
         self.locs[channel].y -= drift.y[self.locs[channel].frame]
         self.update_scene()
 
+    def unfold_groups(self):
+        print('Unfold groups')
+        distx = 1
+        locs = self.locs[0]
+        if hasattr(locs, 'group'):
+            self.locs[0].x += self.locs[0].group*2
+        print(np.mean(self.locs[0].x))
+        groups = np.unique(locs.group)
+
+        if self._picks:
+            for j in range(len(self._picks)):
+                for i in range(len(groups)):
+                    position = self._picks[j][:]
+                    print(position)
+                    print(i)
+                    position[0] += i*2
+                    self._picks.append(position)
+        self.update_scene()
+
+    def refold_groups(self):
+        print('Refold groups')
+        distx = 1
+        locs = self.locs[0]
+        if hasattr(locs, 'group'):
+            self.locs[0].x -= self.locs[0].group*2
+        print(np.mean(self.locs[0].x))
+        groups = np.unique(locs.group)
+
+
+
     def update_cursor(self):
         if self._mode == 'Zoom':
             self.unsetCursor()
@@ -2308,6 +2338,10 @@ class Window(QtGui.QMainWindow):
         drift_action.triggered.connect(self.view.undo_drift)
         slicer_action = postprocess_menu.addAction('Slice (3D)')
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
+        unfold_action = postprocess_menu.addAction('Unfold groups')
+        unfold_action.triggered.connect(self.view.unfold_groups)
+        refold_action = postprocess_menu.addAction('Refold groups')
+        refold_action.triggered.connect(self.view.refold_groups)
         #channel_action = postprocess_menu.addAction('Combine channels')
         #channel_action.triggered.connect(self.combine_channels)
         self.load_user_settings()
