@@ -835,7 +835,7 @@ class Window(QtGui.QMainWindow):
             self.n_groups = n_groups
 
         #go through picks, load coordinates from all sets and GOOD
-        self.oversampling = 40
+        self.oversampling = 5
         self.updateLayout()
 
     def histtoImage(self, image):
@@ -1619,7 +1619,7 @@ class Window(QtGui.QMainWindow):
 
     def get_render_kwargs(self, viewport=None):  #Dummy for now: TODO: Implement
         viewport = [(0, 0), (32, 32)]
-        return {'oversampling': 20,
+        return {'oversampling': 5,
             'viewport': viewport,
             'blur_method': None,
             'min_blur_width': float(0)}
