@@ -177,7 +177,7 @@ class ParametersDialog(QtGui.QDialog):
         grid.addWidget(QtGui.QLabel('Oversampling:'), 0, 0)
         self.oversampling = QtGui.QDoubleSpinBox()
         self.oversampling.setRange(1, 200)
-        self.oversampling.setValue(40)
+        self.oversampling.setValue(5)
         self.oversampling.setDecimals(1)
         self.oversampling.setKeyboardTracking(False)
         self.oversampling.valueChanged.connect(self.window.updateLayout)
@@ -185,8 +185,8 @@ class ParametersDialog(QtGui.QDialog):
 
         grid.addWidget(QtGui.QLabel('Iterations:'), 1, 0)
         self.iterations = QtGui.QSpinBox()
-        self.iterations.setRange(0, 1e7)
-        self.iterations.setValue(10)
+        self.iterations.setRange(1, 1)
+        self.iterations.setValue(1)
         grid.addWidget(self.iterations, 1, 1)
 
 
@@ -606,6 +606,9 @@ class Window(QtGui.QMainWindow):
         except io.NoMetadataFileError:
             return
 
+        if len(self.locs) == 0:
+            self.pixelsize = 0
+
         if not hasattr(locs,'group'):
             msgBox = QtGui.QMessageBox(self)
             msgBox.setWindowTitle('Error')
@@ -614,7 +617,6 @@ class Window(QtGui.QMainWindow):
 
         else:
             locs = lib.ensure_sanity(locs, info)
-            self.pixelsize = 0
             if not hasattr(locs, 'z'):
                 locs = lib.append_to_rec(locs, locs.x.copy(), 'z')
                 self.pixelsize = 1
