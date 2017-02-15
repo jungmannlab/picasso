@@ -1725,30 +1725,42 @@ class View(QtGui.QLabel):
     def render_multi_channel(self, kwargs, autoscale=False, locs=None, use_cache=False, cache=True):
         if locs is None:
             locs = self.locs
-        locsall = locs.copy()
-        for i in range(len(locs)):
-            if hasattr(locs[i], 'z'):
-                if self.window.slicer_dialog.slicerRadioButton.isChecked():
-                    z_min = self.window.slicer_dialog.slicermin
-                    z_max = self.window.slicer_dialog.slicermax
-                    in_view = (locsall[i].z > z_min) & (locsall[i].z <= z_max)
-                    locsall[i] = locsall[i][in_view]
-        n_channels = len(locs)
-        hues = np.arange(0, 1, 1 / n_channels)
-        colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
-        if use_cache:
-            n_locs = self.n_locs
-            image = self.image
+        if len(self.locs_paths) == len(locs): #distinguish plotting of groups vs channels
+            locsall = locs.copy()
+            for i in range(len(locs)):
+                if hasattr(locs[i], 'z'):
+                    if self.window.slicer_dialog.slicerRadioButton.isChecked():
+                        z_min = self.window.slicer_dialog.slicermin
+                        z_max = self.window.slicer_dialog.slicermax
+                        in_view = (locsall[i].z > z_min) & (locsall[i].z <= z_max)
+                        locsall[i] = locsall[i][in_view]
+            n_channels = len(locs)
+            hues = np.arange(0, 1, 1 / n_channels)
+            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            if use_cache:
+                n_locs = self.n_locs
+                image = self.image
+            else:
+                renderings = []
+                for i in range(len(self.locs)):
+                    if self.window.dataset_dialog.checks[i].isChecked():
+                        renderings.append(render.render(locsall[i], **kwargs))
+                if renderings == []: #handle error of no checked -> keep first
+                    renderings.append(render.render(locsall[0], **kwargs))
+                #renderings = [render.render(_, **kwargs) for _ in locsall]
+                n_locs = sum([_[0] for _ in renderings])
+                image = np.array([_[1] for _ in renderings])
         else:
-            renderings = []
-            for i in range(len(locsall)):
-                if self.window.dataset_dialog.checks[i].isChecked():
-                    renderings.append(render.render(locsall[i], **kwargs))
-            if renderings == []: #handle error of no checked -> keep first
-                renderings.append(render.render(locsall[0], **kwargs))
-            #renderings = [render.render(_, **kwargs) for _ in locsall]
-            n_locs = sum([_[0] for _ in renderings])
-            image = np.array([_[1] for _ in renderings])
+            n_channels = len(locs)
+            hues = np.arange(0, 1, 1 / n_channels)
+            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            if use_cache:
+                n_locs = self.n_locs
+                image = self.image
+            else:
+                renderings = [render.render(_, **kwargs) for _ in locs]
+                n_locs = sum([_[0] for _ in renderings])
+                image = np.array([_[1] for _ in renderings])
         if cache:
             self.n_locs = n_locs
             self.image = image
