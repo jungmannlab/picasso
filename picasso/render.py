@@ -49,6 +49,37 @@ def _render_setup(locs, oversampling, y_min, x_min, y_max, x_max):
     image = _np.zeros((n_pixel_y, n_pixel_x), dtype=_np.float32)
     return image, n_pixel_y, n_pixel_x, x, y, in_view
 
+@_numba.jit(nopython=True, nogil=True)
+def _render_setup3d(locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize):
+    n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
+    n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
+    n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min)/pixelsize))
+    x = locs.x
+    y = locs.y
+    z = locs.z
+    in_view = (x > x_min) & (y > y_min) & (z > z_min) & (x < x_max) & (y < y_max) & (z < z_max)
+    x = x[in_view]
+    y = y[in_view]
+    z = z[in_view]
+    x = oversampling * (x - x_min)
+    y = oversampling * (y - y_min)
+    z = oversampling * (z - z_min)/pixelsize
+    image = _np.zeros((n_pixel_y, n_pixel_x, n_pixel_z), dtype=_np.float32)
+    return image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view
+
+@_numba.jit(nopython=True, nogil=True)
+def _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
+    n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
+    n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min)/pixelsize))
+    x = locs.x
+    z = locs.z
+    in_view = (x > x_min) & (z > z_min) & (x < x_max) & (z < z_max)
+    x = x[in_view]
+    z = z[in_view]
+    x = oversampling * (x - x_min)
+    z = oversampling * (z - z_min)/pixelsize
+    image = _np.zeros((n_pixel_x, n_pixel_z), dtype=_np.float32)
+    return image, n_pixel_z, n_pixel_x, x, z, in_view
 
 @_numba.jit(nopython=True, nogil=True)
 def _fill(image, x, y):
@@ -57,6 +88,15 @@ def _fill(image, x, y):
     for i, j in zip(x, y):
         image[j, i] += 1
 
+@_numba.jit(nopython=True, nogil=True)
+def _fill3d(image, x, y, z):
+    x = x.astype(_np.int32)
+    y = y.astype(_np.int32)
+    z = z.astype(_np.int32)
+    for i, j, k in zip(x, y, z):
+        image[j, i, k] += 1
+    return image
+
 
 @_numba.jit(nopython=True, nogil=True)
 def render_hist(locs, oversampling, y_min, x_min, y_max, x_max):
@@ -64,6 +104,17 @@ def render_hist(locs, oversampling, y_min, x_min, y_max, x_max):
     _fill(image, x, y)
     return len(x), image
 
+@_numba.jit(nopython=True, nogil=True)
+def render_histz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
+    image, n_pixel_z, n_pixel_x, x, z, in_view = _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize)
+    _fill(image, z, x)
+    return len(x), image
+
+@_numba.jit(nopython=True, nogil=True)
+def render_hist3d(locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize):
+    image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize)
+    _fill3d(image, x, y, z)
+    return len(x), image
 
 @_numba.jit(nopython=True, nogil=True)
 def render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):

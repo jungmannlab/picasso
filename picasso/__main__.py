@@ -415,9 +415,12 @@ def main():
     average_parser.add_argument('-i', '--iterations', type=int, default=20)
     average_parser.add_argument('files', nargs='?', help='a localization file with grouped localizations')
 
+    average3_parser = subparsers.add_parser('average3', help='three-dimensional particle averaging')
+
     hdf2visp_parser = subparsers.add_parser('hdf2visp')
     hdf2visp_parser.add_argument('files')
     hdf2visp_parser.add_argument('pixelsize', type=float)
+
 
     # Parse
     args = parser.parse_args()
@@ -446,6 +449,9 @@ def main():
             else:
                 from .gui import average
                 average.main()
+        elif args.command == 'average3':
+                from .gui import average3
+                average3.main()
         elif args.command == 'link':
             _link(args.files, args.distance, args.tolerance)
         elif args.command == 'undrift':
