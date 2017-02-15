@@ -29,6 +29,7 @@ from PyQt4 import QtCore, QtGui
 from .. import io, lib, render
 
 from numpy.lib.recfunctions import stack_arrays
+from numpy.lib.recfunctions import append_fields
 
 from cmath import rect, phase
 from math import radians, degrees
@@ -604,87 +605,106 @@ class Window(QtGui.QMainWindow):
             locs, info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
-        locs = lib.ensure_sanity(locs, info)
-        self.locs.append(locs)
-        self.infos.append(info)
-        self.locs_paths.append(path)
-        self.index_blocks.append(None)
-        self._drift.append(None)
-        self.dataset_dialog.add_entry(path)
-        self.dataset_dialog.checks[-1].stateChanged.connect(self.updateLayout)
+
+        if not hasattr(locs,'group'):
+            msgBox = QtGui.QMessageBox(self)
+            msgBox.setWindowTitle('Error')
+            msgBox.setText('Datafile does not contain group information. Please load a file with picked localizations.')
+            msgBox.exec_()
+
+        else:
+            locs = lib.ensure_sanity(locs, info)
+            self.pixelsize = 0
+            if not hasattr(locs, 'z'):
+                locs = lib.append_to_rec(locs, locs.x.copy(), 'z')
+                self.pixelsize = 1
+            else:
+                if self.pixelsize == 0:
+                    pixelsize,ok = QtGui.QInputDialog.getInt(self,"Pixelsize Dialog","Please enter the pixelsize in nm",130)
+                    if ok:
+                        self.pixelsize = pixelsize
+                    else:
+                        self.pixelsize = 130
+
+            self.locs.append(locs)
+            self.infos.append(info)
+            self.locs_paths.append(path)
+            self.index_blocks.append(None)
+            self._drift.append(None)
+            self.dataset_dialog.add_entry(path)
+            self.dataset_dialog.checks[-1].stateChanged.connect(self.updateLayout)
 
 
-        if len(self.locs) == 1:
-            self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
+            if len(self.locs) == 1:
+                self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
+                if hasattr(locs, 'group'):
+                    groups = np.unique(locs.group)
+                    np.random.shuffle(groups)
+                    groups %= N_GROUP_COLORS
+                    self.group_color = groups[locs.group]
+                if render:
+                    self.fit_in_view(autoscale=True)
+            else:
+                if render:
+                    self.update_scene()
+
+            #Try rendering volume:
+            self.oversampling = 1
+            if len(self.locs) == 1:
+                self.t_min = np.min([np.min(locs.x),np.min(locs.y)])
+                self.t_max = np.max([np.max(locs.x),np.max(locs.y)])
+                self.z_min = np.min(locs.z)
+                self.z_max = np.max(locs.z)
+            else:
+                self.t_min = np.min([np.min(locs.x),np.min(locs.y),self.t_min])
+                self.t_max = np.max([np.max(locs.x),np.max(locs.y),self.t_max])
+                self.z_min = np.min([np.min(locs.z),self.z_min])
+                self.z_max = np.min([np.max(locs.z),self.z_max])
+
+
+            N_avg, image_avg3 = render.render_hist3d(self.locs[0], self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize)
+
+            xyproject = np.sum(image_avg3, axis=2)
+
+            pixmap = self.histtoImage(xyproject)
+
+            self.viewxy.setPixmap(pixmap)
+
+            xzproject = np.transpose(np.sum(image_avg3, axis=0))
+            pixmap = self.histtoImage(xzproject)
+            self.viewxz.setPixmap(pixmap)
+
+            yzproject = np.transpose(np.sum(image_avg3, axis=1))
+            pixmap = self.histtoImage(yzproject)
+            self.viewyz.setPixmap(pixmap)
+
+            if len(self.locs) == 1:
+                print('Dataset loaded from '+path)
+            else:
+                print('Dataset loaded from '+path+' Total number of datasets '+str(len(self.locs)))
+                pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
+
+                self.viewxy.setPixmap(pixmap1)
+                self.viewxz.setPixmap(pixmap2)
+                self.viewyz.setPixmap(pixmap3)
+
+            #CREATE GROUP INDEX
             if hasattr(locs, 'group'):
                 groups = np.unique(locs.group)
-                np.random.shuffle(groups)
-                groups %= N_GROUP_COLORS
-                self.group_color = groups[locs.group]
-            if render:
-                self.fit_in_view(autoscale=True)
-        else:
-            if render:
-                self.update_scene()
+                n_groups = len(groups)
+                n_locs = len(locs)
 
-        #Try rendering volume:
-        self.oversampling = 1
-        if len(self.locs) == 1:
-            self.t_min = np.min([np.min(locs.x),np.min(locs.y)])
-            self.t_max = np.max([np.max(locs.x),np.max(locs.y)])
-            self.z_min = np.min(locs.z)
-            self.z_max = np.max(locs.z)
-        else:
-            self.t_min = np.min([np.min(locs.x),np.min(locs.y),self.t_min])
-            self.t_max = np.max([np.max(locs.x),np.max(locs.y),self.t_max])
-            self.z_min = np.min([np.min(locs.z),self.z_min])
-            self.z_max = np.min([np.max(locs.z),self.z_max])
+                group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
+                progress = lib.ProgressDialog('Creating group index', 0, len(groups), self)
+                progress.set_value(0)
+                for i, group in enumerate(groups):
+                    index = np.where(locs.group == group)[0]
+                    group_index[i, index] = True
+                    progress.set_value(i+1)
 
-        self.pixelsize = 160
-
-        N_avg, image_avg3 = render.render_hist3d(self.locs[0], self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize)
-
-        xyproject = np.sum(image_avg3, axis=2)
-
-        pixmap = self.histtoImage(xyproject)
-
-        self.viewxy.setPixmap(pixmap)
-
-        xzproject = np.transpose(np.sum(image_avg3, axis=0))
-        pixmap = self.histtoImage(xzproject)
-        self.viewxz.setPixmap(pixmap)
-
-        yzproject = np.transpose(np.sum(image_avg3, axis=1))
-        pixmap = self.histtoImage(yzproject)
-        self.viewyz.setPixmap(pixmap)
-
-        if len(self.locs) == 1:
-            print('Dataset loaded from '+path)
-        else:
-            print('Dataset loaded from '+path+' Total number of datasets '+str(len(self.locs)))
-            pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
-
-            self.viewxy.setPixmap(pixmap1)
-            self.viewxz.setPixmap(pixmap2)
-            self.viewyz.setPixmap(pixmap3)
-
-        #CREATE GROUP INDEX
-        if hasattr(locs, 'group'):
-            groups = np.unique(locs.group)
-            n_groups = len(groups)
-            n_locs = len(locs)
-
-            group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
-            progress = lib.ProgressDialog('Creating group index', 0, len(groups), self)
-            progress.set_value(0)
-            for i, group in enumerate(groups):
-                index = np.where(locs.group == group)[0]
-                group_index[i, index] = True
-                progress.set_value(i+1)
-
-            self.group_index.append(group_index)
-            self.n_groups = n_groups
-        os.chdir(os.path.dirname(path))
+                self.group_index.append(group_index)
+                self.n_groups = n_groups
+            os.chdir(os.path.dirname(path))
 
     def updateLayout(self):
         pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
@@ -729,10 +749,6 @@ class Window(QtGui.QMainWindow):
             self.locs[j].x -= mean_x
             self.locs[j].y -= mean_y
             self.locs[j].z -= mean_z
-
-
-
-
 
     def centerofmass(self):
         print('Aligning by center of mass')
