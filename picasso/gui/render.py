@@ -874,6 +874,12 @@ class View(QtGui.QLabel):
                     out_locs.append(pick_locs_out)
                 progress.set_value(i+1)
             self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
+            if hasattr(self.locs[channel], 'group'):
+                groups = np.unique(self.locs[channel].group)
+                np.random.shuffle(groups)
+                groups %= N_GROUP_COLORS
+                self.group_color = groups[self.locs[channel].group]
+
             self.update_scene()
 
     def link(self):
@@ -887,6 +893,11 @@ class View(QtGui.QLabel):
                 status = lib.StatusDialog('Linking localizations...', self)
                 self.locs[channel] = postprocess.link(self.locs[channel], self.infos[channel], r_max=r_max, max_dark_time=max_dark)
                 status.close()
+                if hasattr(self.locs[channel], 'group'):
+                    groups = np.unique(self.locs[channel].group)
+                    np.random.shuffle(groups)
+                    groups %= N_GROUP_COLORS
+                    self.group_color = groups[self.locs[channel].group]
                 self.update_scene()
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
@@ -2063,7 +2074,9 @@ class View(QtGui.QLabel):
                     position = self._picks[j][:]
                     print(position)
                     print(i)
-                    position[0] += i*2
+                    positionlist = list(position)
+                    positionlist[0] += i*2
+                    position = tuple(positionlist)
                     self._picks.append(position)
         self.update_scene()
 
@@ -2075,6 +2088,7 @@ class View(QtGui.QLabel):
             self.locs[0].x -= self.locs[0].group*2
         print(np.mean(self.locs[0].x))
         groups = np.unique(locs.group)
+        self.update_scene()
 
 
 
