@@ -2060,35 +2060,44 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def unfold_groups(self):
-        print('Unfold groups')
-        distx = 1
-        locs = self.locs[0]
-        if hasattr(locs, 'group'):
-            self.locs[0].x += self.locs[0].group*2
-        print(np.mean(self.locs[0].x))
-        groups = np.unique(locs.group)
+        if not hasattr(self, 'unfold_status'):
+            self.unfold_status = 'folded'
+        if self.unfold_status == 'folded':
+            print('Unfold groups')
+            locs = self.locs[0]
+            if hasattr(locs, 'group'):
+                self.locs[0].x += self.locs[0].group*2
+            groups = np.unique(locs.group)
 
-        if self._picks:
-            for j in range(len(self._picks)):
-                for i in range(len(groups)):
-                    position = self._picks[j][:]
-                    print(position)
-                    print(i)
-                    positionlist = list(position)
-                    positionlist[0] += i*2
-                    position = tuple(positionlist)
-                    self._picks.append(position)
-        self.update_scene()
+            if self._picks:
+                for j in range(len(self._picks)):
+                    for i in range(len(groups)):
+                        position = self._picks[j][:]
+                        print(position)
+                        print(i)
+                        positionlist = list(position)
+                        positionlist[0] += i*2
+                        position = tuple(positionlist)
+                        self._picks.append(position)
+            #Update width information
+            self.oldwidth = self.infos[0][0]['Width']
+            print(self.oldwidth)
+            self.infos[0][0]['Width'] = np.ceil(np.max(self.locs[0].x)-np.min(self.locs[0].x))
+            print(self.infos[0][0]['Width'])
+            self.fit_in_view()
+            self.unfold_status = 'unfolded'
+        else:
+            self.refold_groups()
 
     def refold_groups(self):
         print('Refold groups')
-        distx = 1
         locs = self.locs[0]
         if hasattr(locs, 'group'):
             self.locs[0].x -= self.locs[0].group*2
-        print(np.mean(self.locs[0].x))
         groups = np.unique(locs.group)
-        self.update_scene()
+        self.fit_in_view()
+        self.infos[0][0]['Width'] = self.oldwidth
+        self.unfold_status == 'folded'
 
 
 
@@ -2352,10 +2361,8 @@ class Window(QtGui.QMainWindow):
         drift_action.triggered.connect(self.view.undo_drift)
         slicer_action = postprocess_menu.addAction('Slice (3D)')
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
-        unfold_action = postprocess_menu.addAction('Unfold groups')
+        unfold_action = postprocess_menu.addAction('Unfold / Refold groups')
         unfold_action.triggered.connect(self.view.unfold_groups)
-        refold_action = postprocess_menu.addAction('Refold groups')
-        refold_action.triggered.connect(self.view.refold_groups)
         #channel_action = postprocess_menu.addAction('Combine channels')
         #channel_action.triggered.connect(self.combine_channels)
         self.load_user_settings()
