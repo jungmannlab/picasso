@@ -1,11 +1,8 @@
 """
     gui/average
     ~~~~~~~~~~~~~~~~~~~~
-
     Graphical user interface for averaging particles
-
     :author: Joerg Schnitzbauer, 2015
-    :author 3d averaging: Maximilian Strauss, 2016
     :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 import functools
@@ -22,11 +19,7 @@ import numpy as np
 import scipy
 from PyQt4 import QtCore, QtGui
 
-from mpl_toolkits.mplot3d import Axes3D
-from numpy.lib.recfunctions import stack_arrays
-
 from .. import io, lib, render
-
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -41,67 +34,11 @@ def render_hist(x, y, oversampling, t_min, t_max):
     render._fill(image, x, y)
     return len(x), image
 
-def render_histz(x, z, oversampling, x_min, x_max, z_min, z_max, pixelsize):
-    n_pixelx = int(np.ceil(oversampling * (x_max - x_min)))
-    n_pixel_z = int(np.ceil(oversampling * (z_max - z_min)/pixelsize))
-    in_view = (x > x_min) & (z > z_min) & (x < x_max) & (z < z_max)
-    x = x[in_view]
-    z = z[in_view]
-    x = oversampling * (x - x_min)
-    z = oversampling * (z - z_min)/pixelsize
-    image = np.zeros((n_pixelx, n_pixel_z), dtype=np.float32)
-    render._fill(image, z, x)
-    return len(x), image
-
-@numba.jit(nopython=True, nogil=True)
-def render_hist3d(x, y, z, oversampling, t_min, t_max, z_min, z_max, pixelsize):
-    n_pixel = int(np.ceil(oversampling * (t_max - t_min)))
-    n_pixel_z = int(np.ceil(oversampling * (z_max - z_min)/pixelsize))
-    in_view = (x > t_min) & (y > t_min) & (z > z_min) & (x < t_max) & (y < t_max) & (z < z_max)
-    x = x[in_view]
-    y = y[in_view]
-    z = z[in_view]
-    x = oversampling * (x - t_min)
-    y = oversampling * (y - t_min)
-    z = oversampling * (z - z_min)/pixelsize
-    image = np.zeros((n_pixel, n_pixel, n_pixel_z), dtype=np.float32)
-    render._fill3d(image, x, y, z)
-    return len(x), image
 
 def compute_xcorr(CF_image_avg, image):
     F_image = np.fft.fft2(image)
     xcorr = np.fft.fftshift(np.real(np.fft.ifft2((F_image * CF_image_avg))))
     return xcorr
-
-def integralImage(A,szT):
-    szA = A.shape
-    B = np.zeros(szA+np.multiply(szT,2)-1)
-    B[szT[0]:szT[0]+szA[0], szT[1]:szT[1]+szA[1], szT[2]:szT[2]+szA[2] ] = A; # add A to the End
-    s = np.cumsum(B,0);
-    c = s[szT[0]:,:,:]-s[0:-szT[0],:,:];
-    s = np.cumsum(c,1);
-    c = s[:,szT[1]:,:]-s[:,0:-szT[1],:];
-    s = np.cumsum(c,2);
-    integralImageA = s[:,:,szT[2]:]-s[:,:,0:-szT[2]];
-    return integralImageA
-
-
-def compute_xcorr3(T,A):
-    intImgA = integralImage(A,T.shape)
-    intImgA2 = integralImage(np.multiply(A,A),T.shape)
-
-    rotT = np.flipud(np.fliplr(T[:,:,::-1]))
-    fftRotT  = np.fft.fftn(rotT,intImgA.shape)
-    fftA = np.fft.fftn(A,intImgA.shape)
-
-    C = np.real(np.fft.ifftn(np.multiply(fftA,fftRotT)))
-
-    shiftco = (np.subtract(np.subtract(A.shape,1),(np.unravel_index(C.argmax(),C.shape))))
-    shiftco = [shiftco[1],shiftco[0],shiftco[2]]
-    maxval = C.argmax()
-    sumval = np.sum(C)
-
-    return shiftco, maxval, sumval
 
 
 def align_group(angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group):
@@ -134,75 +71,10 @@ def align_group(angles, oversampling, t_min, t_max, CF_image_avg, image_half, co
     y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
 
 
-def align_group3d(angles, oversampling, t_min, t_max, z_min, z_max, CF_image_avg3, CF_image_avg, image_half, pixelsize, counter, lock, group):
-    with lock:
-        counter.value += 1
-    index = group_index[group].nonzero()[1]
-    x_rot = x[index]
-    y_rot = y[index]
-    x_original = x_rot.copy()
-    y_original = y_rot.copy()
-    xcorr_max = 0.0
-    for angle in angles:
-        # rotate locs
-        x_rot = np.cos(angle) * x_original - np.sin(angle) * y_original
-        y_rot = np.sin(angle) * x_original + np.cos(angle) * y_original
-        # render group image
-        N, image = render_hist(x_rot, y_rot, oversampling, t_min, t_max)
-        # calculate cross-correlation
-        xcorr = compute_xcorr(CF_image_avg, image)
-        # find the brightest pixel
-        y_max, x_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
-        # store the transformation if the correlation is larger than before
-        if xcorr[y_max, x_max] > xcorr_max:
-            xcorr_max = xcorr[y_max, x_max]
-            rot = angle
-            dy = np.ceil(y_max - image_half) / oversampling
-            dx = np.ceil(x_max - image_half) / oversampling
-    # rotate and shift image group locs
-    x[index] = np.cos(rot) * x_original - np.sin(rot) * y_original - dx
-    y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
-
-def align_group3d_2(angles, oversampling, t_min, t_max, z_min, z_max, CF_image_avg3, CF_image_avg, image_half, pixelsize, counter, lock, group):
-    with lock:
-        counter.value += 1
-    index = group_index[group].nonzero()[1]
-    x_rot = x[index]
-    z_rot = z[index]
-    z_original = z_rot.copy()
-    x_original = x_rot.copy()
-
-    N, image = render_histz(x_rot, z_rot, oversampling, t_min, t_max, z_min, z_max, pixelsize)
-    #fig = plt.figure()
-    #fig.canvas.set_window_title('image xz')
-    #ax1 = fig.add_subplot(121)
-    #ax2 = fig.add_subplot(122)
-    #ax1.imshow(image)
-    #ax2.imshow(CF_image_avg)
-    plt.show()
-    xcorr = compute_xcorr(CF_image_avg, image)
-    # find the brightest pixel
-    xpos_max, zpos_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
-
-    dz = np.ceil(zpos_max - image_half) / oversampling #Check pixelsize argument again
-    dx = np.ceil(xpos_max - image_half) / oversampling #Check pixelsize argument again
-    print('---dz---')
-    print(dz)
-
-    z[index] = z_original + dz
-    #x[index] = x_original + dx
-
 def init_pool(x_, y_, group_index_):
     global x, y, group_index
     x = np.ctypeslib.as_array(x_)
     y = np.ctypeslib.as_array(y_)
-    group_index = group_index_
-
-def init_pool3(x_, y_, z_, group_index_):
-    global x, y, z, group_index
-    x = np.ctypeslib.as_array(x_)
-    y = np.ctypeslib.as_array(y_)
-    z = np.ctypeslib.as_array(z_)
     group_index = group_index_
 
 
@@ -210,115 +82,44 @@ class Worker(QtCore.QThread):
 
     progressMade = QtCore.pyqtSignal(int, int, int, int, np.recarray, bool)
 
-    def __init__(self, locs, r, group_index, oversampling, iterations, pixelsize, r_z):
+    def __init__(self, locs, r, group_index, oversampling, iterations):
         super().__init__()
         self.locs = locs.copy()
         self.r = r
         self.t_min = -r
         self.t_max = r
-        self.z_min = -r_z
-        self.z_max = r_z
         self.group_index = group_index
         self.oversampling = oversampling
         self.iterations = iterations
-        self.pixelsize = pixelsize
-        print('Z vlaues')
-        print(self.z_min)
-        print(self.z_max)
 
     def run(self):
-        has_z = hasattr(self.locs[0], 'z')
-        if has_z:
-            print('Running in 3D')
-            n_groups = self.group_index.shape[0]
-            a_step = np.arcsin(1 / (self.oversampling * self.r))
-            angles = np.arange(0, 2*np.pi, a_step)
-            n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
-            manager = multiprocessing.Manager()
-            counter = manager.Value('d', 0)
-            lock = manager.Lock()
-            groups_per_worker = max(1, int(n_groups / n_workers))
-            for it in range(self.iterations):
-                counter.value = 0
-                # render average image
-                N_avg, image_avg = render.render_hist(self.locs, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max)
-                N_avg, image_avg3 = render.render_hist3d(self.locs, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize)
-                n_pixel, _ = image_avg.shape
-                image_half = n_pixel / 2
-                CF_image_avg = np.conj(np.fft.fft2(image_avg)) #TODO: Check what this does actually for the 3d image
-                CF_image_avg3 = image_avg3
-                # TODO: blur auf average !!!
+        n_groups = self.group_index.shape[0]
+        a_step = np.arcsin(1 / (self.oversampling * self.r))
+        angles = np.arange(0, 2*np.pi, a_step)
+        n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
+        manager = multiprocessing.Manager()
+        counter = manager.Value('d', 0)
+        lock = manager.Lock()
+        groups_per_worker = max(1, int(n_groups / n_workers))
+        for it in range(self.iterations):
+            counter.value = 0
+            # render average image
+            N_avg, image_avg = render.render_hist(self.locs, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max)
+            n_pixel, _ = image_avg.shape
+            image_half = n_pixel / 2
+            CF_image_avg = np.conj(np.fft.fft2(image_avg))
+            # TODO: blur auf average !!!
+            fc = functools.partial(align_group, angles, self.oversampling, self.t_min, self.t_max, CF_image_avg, image_half, counter, lock)
+            result = pool.map_async(fc, range(n_groups), groups_per_worker)
+            while not result.ready():
+                self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, False)
+                time.sleep(0.5)
+            self.locs.x = np.ctypeslib.as_array(x)
+            self.locs.y = np.ctypeslib.as_array(y)
+            self.locs.x -= np.mean(self.locs.x)
+            self.locs.y -= np.mean(self.locs.y)
+            self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, True)
 
-                fc = functools.partial(align_group3d, angles, self.oversampling, self.t_min, self.t_max, self.z_min, self.z_max, CF_image_avg3, CF_image_avg, image_half, self.pixelsize, counter, lock)
-                result = pool3d.map_async(fc, range(n_groups), groups_per_worker)
-                while not result.ready():
-                    self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, False)
-                    time.sleep(0.5)
-                self.locs.x = np.ctypeslib.as_array(x)
-                self.locs.y = np.ctypeslib.as_array(y)
-                self.locs.z = np.ctypeslib.as_array(z)
-                self.locs.x -= np.mean(self.locs.x)
-                self.locs.y -= np.mean(self.locs.y)
-                self.locs.z -= np.mean(self.locs.z)
-                #Second part of alignment
-                print('2nd alignment')
-                counter.value = 0
-                N_avg, image_avg = render.render_histz(self.locs, self.oversampling, self.t_min, self.z_min, self.t_max, self.z_max,self.pixelsize)
-                print('---Size---')
-                print(image_avg.shape)
-                N_avg, image_avg3 = render.render_hist3d(self.locs, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize)
-                n_pixelx, n_pixelz = image_avg.shape
-                image_half = n_pixelz / 2
-
-                CF_image_avg = np.conj(np.fft.fft2(image_avg)) #TODO: Check what this does actually for the 3d image
-                print(CF_image_avg.shape)
-                CF_image_avg3 = image_avg3
-                # TODO: blur auf average !!!
-                #fig = plt.figure()
-                #fig.canvas.set_window_title('image avg')
-                #ax = fig.add_subplot(111)
-                #ax.imshow(image_avg)
-                #plt.show()
-                fc = functools.partial(align_group3d_2, angles, self.oversampling, self.t_min, self.t_max, self.z_min, self.z_max, CF_image_avg3, CF_image_avg, image_half, self.pixelsize, counter, lock)
-                result = pool3d.map_async(fc, range(n_groups), groups_per_worker)
-                while not result.ready():
-                    self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, False)
-                    time.sleep(0.5)
-                self.locs.x = np.ctypeslib.as_array(x)
-                self.locs.y = np.ctypeslib.as_array(y)
-                self.locs.z = np.ctypeslib.as_array(z)
-                self.locs.x -= np.mean(self.locs.x)
-                self.locs.y -= np.mean(self.locs.y)
-                self.locs.z -= np.mean(self.locs.z)
-                self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, True)
-
-        else:
-            n_groups = self.group_index.shape[0]
-            a_step = np.arcsin(1 / (self.oversampling * self.r))
-            angles = np.arange(0, 2*np.pi, a_step)
-            n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
-            manager = multiprocessing.Manager()
-            counter = manager.Value('d', 0)
-            lock = manager.Lock()
-            groups_per_worker = max(1, int(n_groups / n_workers))
-            for it in range(self.iterations):
-                counter.value = 0
-                # render average image
-                N_avg, image_avg = render.render_hist(self.locs, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max)
-                n_pixel, _ = image_avg.shape
-                image_half = n_pixel / 2
-                CF_image_avg = np.conj(np.fft.fft2(image_avg))
-                # TODO: blur auf average !!!
-                fc = functools.partial(align_group, angles, self.oversampling, self.t_min, self.t_max, CF_image_avg, image_half, counter, lock)
-                result = pool.map_async(fc, range(n_groups), groups_per_worker)
-                while not result.ready():
-                    self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, False)
-                    time.sleep(0.5)
-                self.locs.x = np.ctypeslib.as_array(x)
-                self.locs.y = np.ctypeslib.as_array(y)
-                self.locs.x -= np.mean(self.locs.x)
-                self.locs.y -= np.mean(self.locs.y)
-                self.progressMade.emit(it+1, self.iterations, counter.value, n_groups, self.locs, True)
 
 class ParametersDialog(QtGui.QDialog):
 
@@ -361,7 +162,7 @@ class View(QtGui.QLabel):
             self.running = True
             oversampling = self.window.parameters_dialog.oversampling.value()
             iterations = self.window.parameters_dialog.iterations.value()
-            self.thread = Worker(self.locs, self.r, self.group_index, oversampling, iterations, self.pixelsize, self.r_z)
+            self.thread = Worker(self.locs, self.r, self.group_index, oversampling, iterations)
             self.thread.progressMade.connect(self.on_progress)
             self.thread.finished.connect(self.on_finished)
             self.thread.start()
@@ -398,16 +199,6 @@ class View(QtGui.QLabel):
         groups = np.unique(self.locs.group)
         n_groups = len(groups)
         n_locs = len(self.locs)
-        has_z = hasattr(self.locs[0], 'z')
-        self.has_z = has_z
-        if has_z:
-            pixelsize, ok = QtGui.QInputDialog.getInt(self, 'Pixelsize Dialog',
-            'Enter Pixelsize:', 160)
-        else:
-            self.pixelsize = 0 #default value for 2d cases
-        if ok:
-            print(pixelsize)
-            self.pixelsize = pixelsize
         self.group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
         progress = lib.ProgressDialog('Creating group index', 0, len(groups), self)
         progress.set_value(0)
@@ -421,48 +212,21 @@ class View(QtGui.QLabel):
             index = self.group_index[i, :].nonzero()[1]
             self.locs.x[index] -= np.mean(self.locs.x[index])
             self.locs.y[index] -= np.mean(self.locs.y[index])
-            if has_z:
-                self.locs.z[index] -= np.mean(self.locs.z[index])
             progress.set_value(i+1)
-
-
         self.r = 2 * np.sqrt(np.mean(self.locs.x**2 + self.locs.y**2))
-        self.r_z = 0
-        if has_z:
-            self.r_z = 2 * 3  * np.std(self.locs.z) # 2 std deviations radius for now
-            self.plot3d()
-            print('3D mode activated')
-
         self.update_image()
-
-        if has_z:
-            status = lib.StatusDialog('Starting parallel pool...', self.window)
-            global pool3d, x, y, z
-            try:
-                pool3d.close()
-            except NameError:
-                pass
-            x = sharedctypes.RawArray('f', self.locs.x)
-            y = sharedctypes.RawArray('f', self.locs.y)
-            z = sharedctypes.RawArray('f', self.locs.z)
-            n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
-            #n_workers = 1
-            pool3d = multiprocessing.Pool(n_workers, init_pool3, (x, y, z, self.group_index))
-            self.window.status_bar.showMessage('Ready for processing!')
-            status.close()
-        else:
-            status = lib.StatusDialog('Starting parallel pool...', self.window)
-            global pool, x, y
-            try:
-                pool.close()
-            except NameError:
-                pass
-            x = sharedctypes.RawArray('f', self.locs.x)
-            y = sharedctypes.RawArray('f', self.locs.y)
-            n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
-            pool = multiprocessing.Pool(n_workers, init_pool, (x, y, self.group_index))
-            self.window.status_bar.showMessage('Ready for processing!')
-            status.close()
+        status = lib.StatusDialog('Starting parallel pool...', self.window)
+        global pool, x, y
+        try:
+            pool.close()
+        except NameError:
+            pass
+        x = sharedctypes.RawArray('f', self.locs.x)
+        y = sharedctypes.RawArray('f', self.locs.y)
+        n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
+        pool = multiprocessing.Pool(n_workers, init_pool, (x, y, self.group_index))
+        self.window.status_bar.showMessage('Ready for processing!')
+        status.close()
 
     def resizeEvent(self, event):
         if self._pixmap is not None:
@@ -505,81 +269,6 @@ class View(QtGui.QLabel):
         t_max = self.r
         N_avg, image_avg = render.render_hist(self.locs, oversampling, t_min, t_min, t_max, t_max)
         self.set_image(image_avg)
-        has_z = hasattr(self.locs[0], 'z')
-        if has_z:
-            print('Updating.. 3d plot')
-            self.update3dplot()
-
-    def plot3d(self):
-        locs = self.locs
-        locs = stack_arrays(locs, asrecarray=True, usemask=False)
-        fig = plt.figure()
-        self.fig = fig
-        print(fig)
-        fig.canvas.set_window_title('3D - Average')
-        ax = fig.add_subplot(111, projection='3d')
-        self.ax = ax
-        ax.set_title('3D Average')
-        maxplot = 1000;
-
-        xlocs = locs['x']
-        ylocs = locs['y']
-        zlocs = locs['z']
-        colors = locs['z'][:]
-        sampling = np.round(len(xlocs)/maxplot)
-        xlocs = xlocs[0::sampling]
-        ylocs = ylocs[0::sampling]
-        zlocs = zlocs[0::sampling]
-        colors = colors[0::sampling]
-
-        colors[colors > np.mean(zlocs)+3*np.std(zlocs)]=np.mean(zlocs)+3*np.std(zlocs)
-        colors[colors < np.mean(zlocs)-3*np.std(zlocs)]=np.mean(zlocs)-3*np.std(zlocs)
-        ax.scatter(xlocs, ylocs, zlocs,c=colors,cmap='jet')
-        ax.set_xlabel('X [Px]')
-        ax.set_ylabel('Y [Px]')
-        ax.set_zlabel('Z [nm]')
-        ax.set_xlim( np.mean(xlocs)-3*np.std(xlocs), np.mean(xlocs)+3*np.std(xlocs))
-        ax.set_ylim( np.mean(ylocs)-3*np.std(ylocs), np.mean(ylocs)+3*np.std(ylocs))
-        ax.set_zlim( np.mean(zlocs)-3*np.std(zlocs), np.mean(zlocs)+3*np.std(zlocs))
-
-        plt.axis('equal')
-        plt.show()
-
-    def update3dplot(self):
-        locs = self.locs
-        locs = stack_arrays(locs, asrecarray=True, usemask=False)
-        fig = self.fig
-        ax = self.ax
-        ax.cla()
-        ax.set_title('3D Average')
-        maxplot = 1000;
-
-        xlocs = locs['x']
-        ylocs = locs['y']
-        zlocs = locs['z']
-        colors = locs['z'][:]
-        sampling = np.round(len(xlocs)/maxplot)
-        xlocs = xlocs[0::sampling]
-        ylocs = ylocs[0::sampling]
-        zlocs = zlocs[0::sampling]
-        colors = colors[0::sampling]
-
-        colors[colors > np.mean(zlocs)+3*np.std(zlocs)]=np.mean(zlocs)+3*np.std(zlocs)
-        colors[colors < np.mean(zlocs)-3*np.std(zlocs)]=np.mean(zlocs)-3*np.std(zlocs)
-
-
-
-        ax.scatter(xlocs, ylocs, zlocs,c=colors,cmap='jet')
-        ax.set_xlabel('X [Px]')
-        ax.set_ylabel('Y [Px]')
-        ax.set_zlabel('Z [nm]')
-        ax.set_xlim( np.mean(xlocs)-3*np.std(xlocs), np.mean(xlocs)+3*np.std(xlocs))
-        ax.set_ylim( np.mean(ylocs)-3*np.std(ylocs), np.mean(ylocs)+3*np.std(ylocs))
-        ax.set_zlim( np.mean(zlocs)-3*np.std(zlocs), np.mean(zlocs)+3*np.std(zlocs))
-        fig.canvas.draw()
-        plt.axis('equal')
-        #plt.show()
-
 
 
 class Window(QtGui.QMainWindow):
