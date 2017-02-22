@@ -201,67 +201,93 @@ class DatasetDialog(QtGui.QDialog):
 
 class PlotDialog(QtGui.QDialog):
 
-
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle('3D Slicer ')
-        self.setModal(False)
-        vbox = QtGui.QVBoxLayout(self)
-        slicer_groupbox = QtGui.QGroupBox('Slicer Settings')
+        self.setWindowTitle('Structure')
+        layout_grid = QtGui.QGridLayout(self)
 
-        vbox.addWidget(slicer_groupbox)
-        slicer_grid = QtGui.QGridLayout(slicer_groupbox)
-        slicer_grid.addWidget(QtGui.QLabel('Thickness of Slice [nm]:'), 0, 0)
-        self.pick_slice = QtGui.QSpinBox()
-        self.pick_slice.setRange(1, 999999)
-        self.pick_slice.setValue(50)
-        self.pick_slice.setSingleStep(5)
-        self.pick_slice.setKeyboardTracking(False)
-        self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
-        slicer_grid.addWidget(self.pick_slice, 0, 1)
-
-
-        self.sl = QtGui.QSlider(QtCore.Qt.Horizontal)
-        self.sl.setMinimum(0)
-        self.sl.setMaximum(50)
-        self.sl.setValue(25)
-        self.sl.setTickPosition(QtGui.QSlider.TicksBelow)
-        self.sl.setTickInterval(1)
-        self.sl.valueChanged.connect(self.on_slice_position_changed)
-
-        slicer_grid.addWidget(self.sl,1,0,1,2)
-
-        self.figure = plt.figure(figsize=(3,3))
+        #self.figure = plt.figure(figsize=(3,3))
+        self.figure = plt.figure()
         self.canvas = FigureCanvas(self.figure)
+        self.label = QtGui.QLabel()
+
+        #self.acceptButton = QtGui.QPushButton('Accept')
+        #self.discardButton = QtGui.QPushButton('Discard')
+        #self.cancelButton = QtGui.QPushButton('Cancel')
+        layout_grid.addWidget(self.label,0,0,1,3)
+        layout_grid.addWidget(self.canvas,1,0,1,3)
+        #layout_grid.addWidget(self.acceptButton,1,0)
+        #layout_grid.addWidget(self.discardButton,1,1)
+        #layout_grid.addWidget(self.cancelButton,1,2)
+
+        #self.acceptButton.connect(self.getValues)
+        #self.discardButton.connect(self.getValues)
+        #self.cancelButton.connect(self.getValues)
+
+        # OK and Cancel buttons
+        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Yes | QtGui.QDialogButtonBox.No | QtGui.QDialogButtonBox.Cancel,
+                                              QtCore.Qt.Horizontal,
+                                              self)
+        layout_grid.addWidget(self.buttons)
+        #self.buttons.accepted.connect(self.accept)
+        #self.buttons.rejected.connect(self.reject)
+        #self.buttons.rejected.connect(self.setResult(2))
+        #self.buttons.clicked(QtGui.QDialogButtonBox.Cancel).connect(self.setResult(2))
+
+        #self.buttonBox.button(QtGui.QDialogButtonBox.Reset).clicked.connect(foo)
+
+        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
+
+        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
+
+        self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
+
+    def on_accept(self):
+        self.setResult(1)
+        self.result = 1
+        self.close()
+
+    def on_reject(self):
+        self.setResult(0)
+        self.result = 0
+        self.close()
+
+    def on_cancel(self):
+        self.setResult(2)
+        self.result = 2
+        self.close()
 
 
-        self.slicerRadioButton = QtGui.QCheckBox('Slice Dataset')
-        self.slicerRadioButton.stateChanged.connect(self.on_slice_position_changed)
+    @staticmethod
+    def getParams(figdata, current, length):
+        
+        dialog = PlotDialog(None)
+        locs = figdata
+        fig = dialog.figure
+        ax = fig.add_subplot(111, projection='3d')
+        dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
 
-        self.zcoord = []
-        self.seperateCheck = QtGui.QCheckBox('Export channels separate')
-        self.exportButton = QtGui.QPushButton('Export Slices')
+        colors = locs['z'][:]
+        colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+        colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+        ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+        ax.set_xlabel('X [Px]')
+        ax.set_ylabel('Y [Px]')
+        ax.set_zlabel('Z [nm]')
+        ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+        ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+        ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+        plt.gca().patch.set_facecolor('black')
+        ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+        ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+        ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
 
-        self.exportButton.clicked.connect(self.exportStack)
 
 
-        slicer_grid.addWidget(self.canvas,2,0,1,2)
-        slicer_grid.addWidget(self.slicerRadioButton,3,0)
-        slicer_grid.addWidget(self.seperateCheck,4,1)
-        slicer_grid.addWidget(self.exportButton,4,0)
+        result = dialog.exec_()
 
-    def add_entry(self,path):
-        c = QtGui.QCheckBox(path)
-        self.layout.addWidget(c)
-        self.checks.append(c)
-        self.checks[-1].setChecked(True)
-        self.checks[-1].stateChanged.connect(self.update_viewport)
-
-    def update_viewport(self):
-        if self.window.view.viewport:
-            self.window.view.update_scene()
-
+        return dialog.result
 
 
 class LinkDialog(QtGui.QDialog):
@@ -1527,55 +1553,17 @@ class View(QtGui.QLabel):
                 if self._picks:
 
                     for i, pick in enumerate(self._picks):
-                        pickindex = 0
-                        plt.close()
-                        print('Plot window 2')
-                        fig = plt.figure()
-                        ax = fig.add_subplot(111, projection='3d')
-                        ax.set_title("3D Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
+
                         locs = all_picked_locs[i]
                         locs = stack_arrays(locs, asrecarray=True, usemask=False)
-
-                        colors = locs['z'][:]
-                        colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
-                        colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
-                        ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
-                        ax.set_xlabel('X [Px]')
-                        ax.set_ylabel('Y [Px]')
-                        ax.set_zlabel('Z [nm]')
-                        ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-                        ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-                        ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
-                        plt.gca().patch.set_facecolor('black')
-                        ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-                        ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-                        ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
-
-                        plt.show()
-                        #plt.waitforbuttonpress()
-                        msgBox = QtGui.QMessageBox()
-
-                        msgBox.setWindowTitle('Select picks')
-                        msgBox.setWindowIcon(self.icon)
-                        msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
-                        msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
-                        msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
-                        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
-                        qr = self.frameGeometry()
-                        cp = QtGui.QDesktopWidget().availableGeometry().center()
-                        qr.moveCenter(cp)
-                        msgBox.move(qr.topLeft())
-
-                        reply = msgBox.exec()
-
-                        if reply == 0:
+                        reply = PlotDialog.getParams(locs, i, len(self._picks))
+                        if reply == 1:
                             print('Accepted')
                         elif reply == 2:
                             break
                         else:
                             print('Discard')
                             removelist.append(pick)
-                        plt.close()
 
         for pick in removelist:
             self._picks.remove(pick)
