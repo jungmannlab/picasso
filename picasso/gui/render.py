@@ -17,7 +17,6 @@ import copy
 import lmfit
 import matplotlib
 import matplotlib.pyplot as plt
-from matplotlib.widgets import Button
 import numpy as np
 import yaml
 from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
@@ -133,7 +132,6 @@ class PickHistWindow(QtGui.QTabWidget):
         axes.legend(loc='best')
         self.canvas.draw()
 
-
 class ApplyDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -201,6 +199,68 @@ class DatasetDialog(QtGui.QDialog):
         if self.window.view.viewport:
             self.window.view.update_scene()
 
+class PlotDialog(QtGui.QDialog):
+
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('3D Slicer ')
+        self.setModal(False)
+        vbox = QtGui.QVBoxLayout(self)
+        slicer_groupbox = QtGui.QGroupBox('Slicer Settings')
+
+        vbox.addWidget(slicer_groupbox)
+        slicer_grid = QtGui.QGridLayout(slicer_groupbox)
+        slicer_grid.addWidget(QtGui.QLabel('Thickness of Slice [nm]:'), 0, 0)
+        self.pick_slice = QtGui.QSpinBox()
+        self.pick_slice.setRange(1, 999999)
+        self.pick_slice.setValue(50)
+        self.pick_slice.setSingleStep(5)
+        self.pick_slice.setKeyboardTracking(False)
+        self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
+        slicer_grid.addWidget(self.pick_slice, 0, 1)
+
+
+        self.sl = QtGui.QSlider(QtCore.Qt.Horizontal)
+        self.sl.setMinimum(0)
+        self.sl.setMaximum(50)
+        self.sl.setValue(25)
+        self.sl.setTickPosition(QtGui.QSlider.TicksBelow)
+        self.sl.setTickInterval(1)
+        self.sl.valueChanged.connect(self.on_slice_position_changed)
+
+        slicer_grid.addWidget(self.sl,1,0,1,2)
+
+        self.figure = plt.figure(figsize=(3,3))
+        self.canvas = FigureCanvas(self.figure)
+
+
+        self.slicerRadioButton = QtGui.QCheckBox('Slice Dataset')
+        self.slicerRadioButton.stateChanged.connect(self.on_slice_position_changed)
+
+        self.zcoord = []
+        self.seperateCheck = QtGui.QCheckBox('Export channels separate')
+        self.exportButton = QtGui.QPushButton('Export Slices')
+
+        self.exportButton.clicked.connect(self.exportStack)
+
+
+        slicer_grid.addWidget(self.canvas,2,0,1,2)
+        slicer_grid.addWidget(self.slicerRadioButton,3,0)
+        slicer_grid.addWidget(self.seperateCheck,4,1)
+        slicer_grid.addWidget(self.exportButton,4,0)
+
+    def add_entry(self,path):
+        c = QtGui.QCheckBox(path)
+        self.layout.addWidget(c)
+        self.checks.append(c)
+        self.checks[-1].setChecked(True)
+        self.checks[-1].stateChanged.connect(self.update_viewport)
+
+    def update_viewport(self):
+        if self.window.view.viewport:
+            self.window.view.update_scene()
 
 
 
@@ -1390,8 +1450,10 @@ class View(QtGui.QLabel):
         self.update_scene()
 
 
+
+
     def show_pick_3d(self):
-        print('Show pick 3D')
+        print('Show pick 3D - new')
         channel = self.get_channel3d('Show Pick 3D')
         removelist = []
         if channel is not None:
@@ -1410,6 +1472,7 @@ class View(QtGui.QLabel):
                     for i, pick in enumerate(self._picks):
                         pickindex = 0
                         plt.close()
+                        print('Plot window 1')
                         fig = plt.figure()
                         ax = fig.add_subplot(111, projection='3d')
                         ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
@@ -1432,11 +1495,12 @@ class View(QtGui.QLabel):
                         ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
                         ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
 
+
                         plt.show()
+                        plt.waitforbuttonpress()
 
 
                         msgBox = QtGui.QMessageBox()
-
                         msgBox.setWindowTitle('Select picks')
                         msgBox.setWindowIcon(self.icon)
                         msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
@@ -1465,6 +1529,7 @@ class View(QtGui.QLabel):
                     for i, pick in enumerate(self._picks):
                         pickindex = 0
                         plt.close()
+                        print('Plot window 2')
                         fig = plt.figure()
                         ax = fig.add_subplot(111, projection='3d')
                         ax.set_title("3D Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
@@ -1487,7 +1552,7 @@ class View(QtGui.QLabel):
                         ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
 
                         plt.show()
-
+                        #plt.waitforbuttonpress()
                         msgBox = QtGui.QMessageBox()
 
                         msgBox.setWindowTitle('Select picks')
