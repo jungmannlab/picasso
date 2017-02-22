@@ -260,30 +260,50 @@ class PlotDialog(QtGui.QDialog):
 
 
     @staticmethod
-    def getParams(figdata, current, length):
-        
+    def getParams(all_picked_locs, current, length, mode, color_sys):
+
         dialog = PlotDialog(None)
-        locs = figdata
         fig = dialog.figure
         ax = fig.add_subplot(111, projection='3d')
         dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
 
-        colors = locs['z'][:]
-        colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
-        colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
-        ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
-        ax.set_xlabel('X [Px]')
-        ax.set_ylabel('Y [Px]')
-        ax.set_zlabel('Z [nm]')
-        ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-        ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-        ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
-        plt.gca().patch.set_facecolor('black')
-        ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-        ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-        ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+        if mode == 1:
+            locs = all_picked_locs[current]
+            locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
+            colors = locs['z'][:]
+            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+            ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+            ax.set_xlabel('X [Px]')
+            ax.set_ylabel('Y [Px]')
+            ax.set_zlabel('Z [nm]')
+            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            plt.gca().patch.set_facecolor('black')
+            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+        else:
+            colors = color_sys
+            for l in range(len(all_picked_locs)):
+                locs = all_picked_locs[l][current]
+                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                ax.scatter(locs['x'], locs['y'], locs['z'], c=colors[l])
 
+            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+
+            ax.set_xlabel('X [Px]')
+            ax.set_ylabel('Y [Px]')
+            ax.set_zlabel('Z [nm]')
+
+            plt.gca().patch.set_facecolor('black')
+            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
 
         result = dialog.exec_()
 
@@ -1494,69 +1514,22 @@ class View(QtGui.QLabel):
                     all_picked_locs.append(self.picked_locs(k))
 
                 if self._picks:
-
                     for i, pick in enumerate(self._picks):
-                        pickindex = 0
-                        plt.close()
-                        print('Plot window 1')
-                        fig = plt.figure()
-                        ax = fig.add_subplot(111, projection='3d')
-                        ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
-
-                        for l in range(len(self.locs_paths)):
-                            locs = all_picked_locs[l][i]
-                            locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                            ax.scatter(locs['x'], locs['y'], locs['z'], c=colors[l])
-
-                        ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-                        ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-                        ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
-
-                        ax.set_xlabel('X [Px]')
-                        ax.set_ylabel('Y [Px]')
-                        ax.set_zlabel('Z [nm]')
-
-                        plt.gca().patch.set_facecolor('black')
-                        ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-                        ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-                        ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
-
-
-                        plt.show()
-                        plt.waitforbuttonpress()
-
-
-                        msgBox = QtGui.QMessageBox()
-                        msgBox.setWindowTitle('Select picks')
-                        msgBox.setWindowIcon(self.icon)
-                        msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
-                        msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
-                        msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
-                        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
-                        qr = self.frameGeometry()
-                        cp = QtGui.QDesktopWidget().availableGeometry().center()
-                        qr.moveCenter(cp)
-                        msgBox.move(qr.topLeft())
-                        msgBox.setModal(True)
-                        reply = msgBox.exec()
-
-                        if reply == 0:
+                        reply = PlotDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors)
+                        if reply == 1:
                             print('Accepted')
                         elif reply == 2:
                             break
                         else:
                             print('Discard')
                             removelist.append(pick)
-                        plt.close()
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
 
                     for i, pick in enumerate(self._picks):
 
-                        locs = all_picked_locs[i]
-                        locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                        reply = PlotDialog.getParams(locs, i, len(self._picks))
+                        reply = PlotDialog.getParams(all_picked_locs, i, len(self._picks), 1, 1)
                         if reply == 1:
                             print('Accepted')
                         elif reply == 2:
