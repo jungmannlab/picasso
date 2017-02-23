@@ -2097,10 +2097,8 @@ class View(QtGui.QLabel):
 
             if self._picks:
                 for j in range(len(self._picks)):
-                    for i in range(len(groups)):
+                    for i in range(1,len(groups)):
                         position = self._picks[j][:]
-                        print(position)
-                        print(i)
                         positionlist = list(position)
                         positionlist[0] += i*2
                         position = tuple(positionlist)
@@ -2112,8 +2110,11 @@ class View(QtGui.QLabel):
             print(self.infos[0][0]['Width'])
             self.fit_in_view()
             self.unfold_status = 'unfolded'
+            self.n_picks = len(self._picks)
+            self.update_pick_info_short()
         else:
             self.refold_groups()
+            self.clear_picks()
 
     def refold_groups(self):
         print('Refold groups')
