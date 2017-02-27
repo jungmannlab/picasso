@@ -975,7 +975,7 @@ class View(QtGui.QLabel):
             for i, pick_locs in enumerate(picked_locs):
                 pick_locs_out = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark, remove_ambiguous_lengths=False)
                 if not pick_locs_out:
-                    print('skip')
+                    print('no locs in pick - skipped')
                 else:
                     out_locs.append(pick_locs_out)
                 progress.set_value(i+1)
@@ -2090,14 +2090,13 @@ class View(QtGui.QLabel):
             self.unfold_status = 'folded'
         if self.unfold_status == 'folded':
             print('Unfold groups')
-            locs = self.locs[0]
-            if hasattr(locs, 'group'):
+            if hasattr(self.locs[0], 'group'):
                 self.locs[0].x += self.locs[0].group*2
-            groups = np.unique(locs.group)
+            groups = np.unique(self.locs[0].group)
 
             if self._picks:
                 for j in range(len(self._picks)):
-                    for i in range(1,len(groups)):
+                    for i in range(len(groups)):
                         position = self._picks[j][:]
                         positionlist = list(position)
                         positionlist[0] += i*2
@@ -2106,22 +2105,27 @@ class View(QtGui.QLabel):
             #Update width information
             self.oldwidth = self.infos[0][0]['Width']
             print(self.oldwidth)
-            self.infos[0][0]['Width'] = np.ceil(np.max(self.locs[0].x)-np.min(self.locs[0].x))
+            minwidth = np.ceil(np.mean(self.locs[0].x)+np.max(self.locs[0].x)-np.min(self.locs[0].x))
+            print(minwidth)
+            self.infos[0][0]['Width'] = np.max([self.oldwidth, minwidth])
+
+
             print(self.infos[0][0]['Width'])
+
             self.fit_in_view()
             self.unfold_status = 'unfolded'
             self.n_picks = len(self._picks)
             self.update_pick_info_short()
+            print(self.locs)
         else:
             self.refold_groups()
             self.clear_picks()
 
     def refold_groups(self):
         print('Refold groups')
-        locs = self.locs[0]
-        if hasattr(locs, 'group'):
+        if hasattr(self.locs[0], 'group'):
             self.locs[0].x -= self.locs[0].group*2
-        groups = np.unique(locs.group)
+        groups = np.unique(self.locs[0].group)
         self.fit_in_view()
         self.infos[0][0]['Width'] = self.oldwidth
         self.unfold_status == 'folded'
