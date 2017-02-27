@@ -461,6 +461,7 @@ class Window(QtGui.QMainWindow):
         rotatebtn = QtGui.QPushButton("Rotate")
 
         self.radio_sym = QtGui.QRadioButton("8x symmetry")
+        self.radio_nup = QtGui.QRadioButton("NUP-Template")
 
         deg_groupbox = QtGui.QGroupBox('Degrees')
         deggrid = QtGui.QGridLayout(deg_groupbox)
@@ -489,6 +490,7 @@ class Window(QtGui.QMainWindow):
         rotationgrid.addWidget(deg_groupbox,2,0)
         rotationgrid.addWidget(rotatebtn,3,0)
         rotationgrid.addWidget(self.radio_sym,4,0)
+        rotationgrid.addWidget(self.radio_nup,5,0)
 
         buttongrid.addWidget(centerofmassbtn,0,0)
         buttongrid.addWidget(rotation_groupbox,1,0)
@@ -515,7 +517,7 @@ class Window(QtGui.QMainWindow):
         operate_groupbox = QtGui.QGroupBox('Operate')
         operategrid = QtGui.QGridLayout(operate_groupbox)
 
-        rotationgrid.addWidget(self.translatebtn,5,0)
+        rotationgrid.addWidget(self.translatebtn,6,0)
 
 
         operategrid.addWidget(self.alignxbtn,0,1)
@@ -1175,10 +1177,21 @@ class Window(QtGui.QMainWindow):
 
         #Change CFiamge for symmetry
         if self.radio_sym.isChecked():
+            print('Radio sym')
             fig = plt.figure()
             ax1 = fig.add_subplot(1,2,1)
+
             ax1.set_aspect('equal')
-            imageold = image[0].copy()
+            if self.radio_nup.isChecked():
+                print('Radio Nup')
+                imageold = np.zeros(image[0].shape)
+                imageold[np.int(imageold.shape[0]/2),:]+=1
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2)]=0
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2-1)]=0
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2+1)]=0
+                image[0] = np.zeros(image[0].shape)
+            else:
+                imageold = image[0].copy()
             plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
 
             #rotate image
@@ -1257,10 +1270,21 @@ class Window(QtGui.QMainWindow):
 
         #Change CFiamge for symmetry
         if self.radio_sym.isChecked():
+            print('Radio sym')
             fig = plt.figure()
             ax1 = fig.add_subplot(1,2,1)
+
             ax1.set_aspect('equal')
-            imageold = image[0].copy()
+            if self.radio_nup.isChecked():
+                print('Radio Nup')
+                imageold = np.zeros(image[0].shape)
+                imageold[np.int(imageold.shape[0]/2),:]+=1
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2)]=0
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2-1)]=0
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2+1)]=0
+                image[0] = np.zeros(image[0].shape)
+            else:
+                imageold = image[0].copy()
             plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
 
             #rotate image
