@@ -2096,10 +2096,10 @@ class View(QtGui.QLabel):
 
             if self._picks:
                 for j in range(len(self._picks)):
-                    for i in range(len(groups)):
+                    for i in range(len(groups)-1):
                         position = self._picks[j][:]
                         positionlist = list(position)
-                        positionlist[0] += i*2
+                        positionlist[0] += (i+1)*2
                         position = tuple(positionlist)
                         self._picks.append(position)
             #Update width information

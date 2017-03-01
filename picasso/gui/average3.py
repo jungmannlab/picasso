@@ -461,6 +461,7 @@ class Window(QtGui.QMainWindow):
         rotatebtn = QtGui.QPushButton("Rotate")
 
         self.radio_sym = QtGui.QRadioButton("8x symmetry")
+        self.radio_sym3 = QtGui.QRadioButton("3x symmetry")
         self.radio_nup = QtGui.QRadioButton("NUP-Template")
 
         deg_groupbox = QtGui.QGroupBox('Degrees')
@@ -491,6 +492,7 @@ class Window(QtGui.QMainWindow):
         rotationgrid.addWidget(rotatebtn,3,0)
         rotationgrid.addWidget(self.radio_sym,4,0)
         rotationgrid.addWidget(self.radio_nup,5,0)
+        rotationgrid.addWidget(self.radio_sym3,6,0)
 
         buttongrid.addWidget(centerofmassbtn,0,0)
         buttongrid.addWidget(rotation_groupbox,1,0)
@@ -517,7 +519,7 @@ class Window(QtGui.QMainWindow):
         operate_groupbox = QtGui.QGroupBox('Operate')
         operategrid = QtGui.QGridLayout(operate_groupbox)
 
-        rotationgrid.addWidget(self.translatebtn,6,0)
+        rotationgrid.addWidget(self.translatebtn,7,0)
 
 
         operategrid.addWidget(self.alignxbtn,0,1)
@@ -1204,6 +1206,37 @@ class Window(QtGui.QMainWindow):
             plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
             plt.colorbar()
             plt.show()
+
+
+        if self.radio_sym3.isChecked():
+            print('Radio sym3')
+            fig = plt.figure()
+            ax1 = fig.add_subplot(1,2,1)
+
+            ax1.set_aspect('equal')
+            if self.radio_nup.isChecked():
+                print('Radio Nup')
+                imageold = np.zeros(image[0].shape)
+                imageold[np.int(imageold.shape[0]/2),:]+=1
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2)]=0
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2-1)]=0
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2+1)]=0
+                image[0] = np.zeros(image[0].shape)
+            else:
+                imageold = image[0].copy()
+            plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
+
+            #rotate image
+
+            for i in range(3):
+                image[0] += scipy.ndimage.interpolation.rotate(imageold,((i+1)*120) , axes=(1, 0),reshape=False)
+
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.set_aspect('equal')
+            plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
+            plt.colorbar()
+            plt.show()
+
         CF_image_avg = image
 
         #n_pixel, _ = image_avg.shape
@@ -1297,6 +1330,36 @@ class Window(QtGui.QMainWindow):
             plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
             plt.colorbar()
             plt.show()
+
+        if self.radio_sym3.isChecked():
+            print('Radio sym3')
+            fig = plt.figure()
+            ax1 = fig.add_subplot(1,2,1)
+
+            ax1.set_aspect('equal')
+            if self.radio_nup.isChecked():
+                print('Radio Nup')
+                imageold = np.zeros(image[0].shape)
+                imageold[np.int(imageold.shape[0]/2),:]+=1
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2)]=0
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2-1)]=0
+                imageold[np.int(imageold.shape[0]/2),np.int(imageold.shape[1]/2+1)]=0
+                image[0] = np.zeros(image[0].shape)
+            else:
+                imageold = image[0].copy()
+            plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
+
+            #rotate image
+
+            for i in range(3):
+                image[0] += scipy.ndimage.interpolation.rotate(imageold,((i+1)*120) , axes=(1, 0),reshape=False)
+
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.set_aspect('equal')
+            plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
+            plt.colorbar()
+            plt.show()
+            
         CF_image_avg = [np.conj(np.fft.fft2(_)) for _ in image]
         print('Size of CFimage')
         print(image[0].shape)
