@@ -4,8 +4,8 @@
 
     Graphical user interface for rendering localization images
 
-    :author: Joerg Schnitzbauer, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+    :author: Joerg Schnitzbauer & Maximilian Strauss, 2017
+    :copyright: Copyright (c) 2017 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 import os
 import os.path
@@ -24,9 +24,6 @@ from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
-
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
 
 import colorsys
 
@@ -207,9 +204,8 @@ class PlotDialog(QtGui.QDialog):
         self.setWindowTitle('Structure')
         layout_grid = QtGui.QGridLayout(self)
 
-        #self.figure = plt.figure(figsize=(3,3))
         self.figure = plt.figure()
-        self.canvas = FigureCanvas(self.figure)
+        self.canvas = FigureCanvasQTAgg(self.figure)
         self.label = QtGui.QLabel()
 
         #self.acceptButton = QtGui.QPushButton('Accept')
@@ -721,8 +717,7 @@ class SlicerDialog(QtGui.QDialog):
         slicer_grid.addWidget(self.sl,1,0,1,2)
 
         self.figure = plt.figure(figsize=(3,3))
-        self.canvas = FigureCanvas(self.figure)
-
+        self.canvas = FigureCanvasQTAgg(self.figure)
 
         self.slicerRadioButton = QtGui.QCheckBox('Slice Dataset')
         self.slicerRadioButton.stateChanged.connect(self.on_slice_position_changed)
@@ -899,8 +894,7 @@ class View(QtGui.QLabel):
             self.window.slicer_dialog.zcoord.append(locs.z)
         os.chdir(os.path.dirname(path))
         self.window.dataset_dialog.add_entry(path)
-
-        #self.window.dataset_dialog.checks[-1].stateChanged.connect(self.update_scene)
+        plt.close()
 
     def add_multiple(self, paths):
         fit_in_view = len(self.locs) == 0
