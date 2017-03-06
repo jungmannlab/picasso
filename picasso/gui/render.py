@@ -882,9 +882,13 @@ class View(QtGui.QLabel):
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
                 groups = np.unique(locs.group)
+                groupcopy = locs.group.copy()
+                for i in range(len(groups)):
+                    groupcopy[locs.group==groups[i]]=i
                 np.random.shuffle(groups)
                 groups %= N_GROUP_COLORS
-                self.group_color = groups[locs.group]
+                print(groups)
+                self.group_color = groups[groupcopy]
             if render:
                 self.fit_in_view(autoscale=True)
         else:
