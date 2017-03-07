@@ -21,6 +21,7 @@ import numpy as np
 import yaml
 from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
                                                 NavigationToolbar2QT)
+
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
@@ -728,7 +729,6 @@ class SlicerDialog(QtGui.QDialog):
 
         self.exportButton.clicked.connect(self.exportStack)
 
-
         slicer_grid.addWidget(self.canvas,2,0,1,2)
         slicer_grid.addWidget(self.slicerRadioButton,3,0)
         slicer_grid.addWidget(self.seperateCheck,4,1)
@@ -737,7 +737,6 @@ class SlicerDialog(QtGui.QDialog):
     def initialize(self):
         self.calculate_histogram()
         self.show()
-
 
     def calculate_histogram(self):
         slice = self.pick_slice.value()
@@ -898,7 +897,7 @@ class View(QtGui.QLabel):
             self.window.slicer_dialog.zcoord.append(locs.z)
         os.chdir(os.path.dirname(path))
         self.window.dataset_dialog.add_entry(path)
-        plt.close()
+        
 
     def add_multiple(self, paths):
         fit_in_view = len(self.locs) == 0
