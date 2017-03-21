@@ -799,7 +799,7 @@ class SlicerDialog(QtGui.QDialog):
         if path:
             base, ext = os.path.splitext(path)
 
-            if self.seperateCheck:
+            if self.seperateCheck.isChecked():
                 #Uncheck all
                 for checks in self.window.dataset_dialog.checks:
                     checks.setChecked(False)
@@ -820,7 +820,6 @@ class SlicerDialog(QtGui.QDialog):
                     self.window.dataset_dialog.checks[j].setChecked(False)
                 for checks in self.window.dataset_dialog.checks:
                     checks.setChecked(True)
-
             else:
                 progress = lib.ProgressDialog('Exporting slices..', 0, self.sl.maximum(), self)
                 progress.set_value(0)
@@ -897,7 +896,7 @@ class View(QtGui.QLabel):
             self.window.slicer_dialog.zcoord.append(locs.z)
         os.chdir(os.path.dirname(path))
         self.window.dataset_dialog.add_entry(path)
-        
+
 
     def add_multiple(self, paths):
         fit_in_view = len(self.locs) == 0
@@ -1375,7 +1374,7 @@ class View(QtGui.QLabel):
     def show_pick(self):
         print('Show pick')
         channel = self.get_channel3d('Select Channel')
-        fig = plt.figure()
+        fig = plt.figure(figsize=(5,5))
         fig.canvas.set_window_title("Scatterplot of Pick")
         removelist = []
 

@@ -804,8 +804,9 @@ class Window(QtGui.QMainWindow):
         self.r = 0
         self.r_z = 0
         for j in range(n_channels):
-            self.r = np.max([2 * np.sqrt(np.mean(self.locs[j].x**2 + self.locs[j].y**2)),self.r])
-            self.r_z = np.max([2 * np.sqrt(np.mean(self.locs[j].z**2)),self.r_z])
+            self.r = np.max([3 * np.sqrt(np.mean(self.locs[j].x**2 + self.locs[j].y**2)),self.r])
+            self.r_z = np.max([5 * np.sqrt(np.mean(self.locs[j].z**2)),self.r_z])
+        print(self.r_z)
         self.t_min = -self.r
         self.t_max = self.r
         self.z_min = -self.r_z
@@ -1359,7 +1360,7 @@ class Window(QtGui.QMainWindow):
             plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
             plt.colorbar()
             plt.show()
-            
+
         CF_image_avg = [np.conj(np.fft.fft2(_)) for _ in image]
         print('Size of CFimage')
         print(image[0].shape)
