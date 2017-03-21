@@ -561,6 +561,8 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.dynamic_oversampling.setChecked(True)
         self.dynamic_oversampling.toggled.connect(self.set_dynamic_oversampling)
         general_grid.addWidget(self.dynamic_oversampling, 2, 1)
+        self.high_oversampling = QtGui.QCheckBox('high oversampling')
+        general_grid.addWidget(self.high_oversampling, 3, 1)
         # Contrast
         contrast_groupbox = QtGui.QGroupBox('Contrast')
         vbox.addWidget(contrast_groupbox)
@@ -725,14 +727,16 @@ class SlicerDialog(QtGui.QDialog):
 
         self.zcoord = []
         self.seperateCheck = QtGui.QCheckBox('Export channels separate')
+        self.fullCheck = QtGui.QCheckBox('Export full image')
         self.exportButton = QtGui.QPushButton('Export Slices')
 
         self.exportButton.clicked.connect(self.exportStack)
 
         slicer_grid.addWidget(self.canvas,2,0,1,2)
         slicer_grid.addWidget(self.slicerRadioButton,3,0)
-        slicer_grid.addWidget(self.seperateCheck,4,1)
-        slicer_grid.addWidget(self.exportButton,4,0)
+        slicer_grid.addWidget(self.seperateCheck,4,0)
+        slicer_grid.addWidget(self.fullCheck,5,0)
+        slicer_grid.addWidget(self.exportButton,6,0)
 
     def initialize(self):
         self.calculate_histogram()
@@ -813,7 +817,13 @@ class SlicerDialog(QtGui.QDialog):
                         self.sl.setValue(i)
                         print('Slide: '+ str(i))
                         out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH'+'{num:03d}'.format(num=j+1)+'.tif'
-                        gray = self.window.view.qimage.convertToFormat(QtGui.QImage.Format_RGB16)
+                        if self.fullCheck.isChecked():
+                            movie_height, movie_width = self.window.view.movie_size()
+                            viewport = [(0, 0), (movie_height, movie_width)]
+                            qimage = self.window.view.render_scene(cache=False, viewport=viewport)
+                            gray = qimage.convertToFormat(QtGui.QImage.Format_RGB16)
+                        else:
+                            gray = self.window.view.qimage.convertToFormat(QtGui.QImage.Format_RGB16)
                         gray.save(out_path)
                         progress.set_value(i)
                     progress.close()
@@ -828,14 +838,15 @@ class SlicerDialog(QtGui.QDialog):
                     self.sl.setValue(i)
                     print('Slide: '+ str(i))
                     out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH001'+'.tif'
-                    self.window.view.qimage.save(out_path)
+                    if self.fullCheck.isChecked():
+                        movie_height, movie_width = self.window.view.movie_size()
+                        viewport = [(0, 0), (movie_height, movie_width)]
+                        qimage = self.window.view.render_scene(cache=False, viewport=viewport)
+                        qimage.save(out_path)
+                    else:
+                        self.window.view.qimage.save(out_path)
                     progress.set_value(i)
                 progress.close()
-
-
-
-
-
 
 class View(QtGui.QLabel):
 
@@ -1162,12 +1173,15 @@ class View(QtGui.QLabel):
             self.window.display_settings_dialog.set_oversampling_silently(optimal_oversampling)
         else:
             oversampling = float(self.window.display_settings_dialog.oversampling.value())
-            if oversampling > optimal_oversampling:
-                QtGui.QMessageBox.information(self,
-                                              'Oversampling too high',
-                                              'Oversampling will be adjusted to match the display pixel density.')
-                oversampling = optimal_oversampling
-                self.window.display_settings_dialog.set_oversampling_silently(optimal_oversampling)
+            if self.window.display_settings_dialog.high_oversampling.isChecked():
+                print('High oversampling')
+            else:
+                if oversampling > optimal_oversampling:
+                    QtGui.QMessageBox.information(self,
+                                                  'Oversampling too high',
+                                                  'Oversampling will be adjusted to match the display pixel density.')
+                    oversampling = optimal_oversampling
+                    self.window.display_settings_dialog.set_oversampling_silently(optimal_oversampling)
         if viewport is None:
             viewport = self.viewport
         return {'oversampling': oversampling,

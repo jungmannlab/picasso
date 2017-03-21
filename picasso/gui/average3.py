@@ -806,7 +806,6 @@ class Window(QtGui.QMainWindow):
         for j in range(n_channels):
             self.r = np.max([3 * np.sqrt(np.mean(self.locs[j].x**2 + self.locs[j].y**2)),self.r])
             self.r_z = np.max([5 * np.sqrt(np.mean(self.locs[j].z**2)),self.r_z])
-        print(self.r_z)
         self.t_min = -self.r
         self.t_max = self.r
         self.z_min = -self.r_z
