@@ -227,8 +227,19 @@ class DatasetDialog(QtGui.QDialog):
         self.checks[-1].setChecked(True)
         self.checks[-1].stateChanged.connect(self.update_viewport)
         self.colorselection[-1].currentIndexChanged.connect(self.update_viewport)
-        self.colorselection[-1].currentIndexChanged.connect(lambda: self.set_color(len(self.colorselection)-1))
+        index = len(self.colorselection)
+        self.colorselection[-1].currentIndexChanged.connect(lambda: self.set_color(index-1))
         self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
+
+        #update auto colors
+
+        n_channels = len(self.checks)
+        hues = np.arange(0, 1, 1 / n_channels)
+        colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+        for n in range(n_channels):
+            palette = self.colordisp_all[n].palette()
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor.fromRgbF(colors[n][0],colors[n][1],colors[n][2],1))
+            self.colordisp_all[n].setPalette(palette)
 
     def update_viewport(self):
         if self.window.view.viewport:
@@ -238,7 +249,10 @@ class DatasetDialog(QtGui.QDialog):
         palette = self.colordisp_all[n].palette()
         selectedcolor = self.colorselection[n].currentText()
         if selectedcolor == 'auto':
-            palette.setColor(QtGui.QPalette.Window, QtGui.QColor('black'))
+            n_channels = len(self.checks)
+            hues = np.arange(0, 1, 1 / n_channels)
+            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor.fromRgbF(colors[n][0],colors[n][1],colors[n][2],1))
         else:
             palette.setColor(QtGui.QPalette.Window, QtGui.QColor(selectedcolor))
         self.colordisp_all[n].setPalette(palette)
