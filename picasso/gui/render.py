@@ -182,13 +182,41 @@ class DatasetDialog(QtGui.QDialog):
         self.window = window
         self.setWindowTitle('Datasets')
         self.setModal(False)
-        self.layout = QtGui.QVBoxLayout()
+        self.layout = QtGui.QGridLayout()
         self.checks = []
+        self.colorselection = []
         self.setLayout(self.layout)
+        self.layout.addWidget(QtGui.QLabel('Path'),0,0)
+        self.layout.addWidget(QtGui.QLabel('Color'),0,1)
+        self.layout.addWidget(QtGui.QLabel('#'),0,2)
+        self.layout.addWidget(QtGui.QLabel('Intensity'),0,3)
 
     def add_entry(self,path):
         c = QtGui.QCheckBox(path)
-        self.layout.addWidget(c)
+        currentline= len(self.layout)
+        colordrop = QtGui.QComboBox(self)
+        colordrop.addItem("auto")
+        colordrop.addItem("red")
+        colordrop.addItem("green")
+        colordrop.addItem("blue")
+        colordrop.addItem("gray")
+        colordrop.addItem("cyan")
+        colordrop.addItem("magenta")
+        colordrop.addItem("yellow")
+        intensity = QtGui.QSpinBox(self)
+        colordisp = QtGui.QLabel(' ')
+        colordisp.setStyleSheet('color: yellow')
+
+        palette = colordisp.palette()
+        palette.setColor(QtGui.QPalette.Window, QtGui.QColor('black'))
+        colordisp.setAutoFillBackground(True)
+        colordisp.setPalette(palette)
+
+        self.layout.addWidget(c,currentline,0)
+        self.layout.addWidget(colordrop,currentline,1)
+        self.layout.addWidget(colordisp,currentline,2)
+        self.layout.addWidget(intensity,currentline,3)
+
         self.checks.append(c)
         self.checks[-1].setChecked(True)
         self.checks[-1].stateChanged.connect(self.update_viewport)
