@@ -185,6 +185,8 @@ class DatasetDialog(QtGui.QDialog):
         self.layout = QtGui.QGridLayout()
         self.checks = []
         self.colorselection = []
+        self.colordisp_all = []
+        self.intensitysettings = []
         self.setLayout(self.layout)
         self.layout.addWidget(QtGui.QLabel('Path'),0,0)
         self.layout.addWidget(QtGui.QLabel('Color'),0,1)
@@ -204,8 +206,8 @@ class DatasetDialog(QtGui.QDialog):
         colordrop.addItem("magenta")
         colordrop.addItem("yellow")
         intensity = QtGui.QSpinBox(self)
-        colordisp = QtGui.QLabel(' ')
-        colordisp.setStyleSheet('color: yellow')
+        intensity.setValue(1)
+        colordisp = QtGui.QLabel('      ')
 
         palette = colordisp.palette()
         palette.setColor(QtGui.QPalette.Window, QtGui.QColor('black'))
@@ -217,13 +219,30 @@ class DatasetDialog(QtGui.QDialog):
         self.layout.addWidget(colordisp,currentline,2)
         self.layout.addWidget(intensity,currentline,3)
 
+        self.intensitysettings.append(intensity)
+        self.colorselection.append(colordrop)
+        self.colordisp_all.append(colordisp)
+
         self.checks.append(c)
         self.checks[-1].setChecked(True)
         self.checks[-1].stateChanged.connect(self.update_viewport)
+        self.colorselection[-1].currentIndexChanged.connect(self.update_viewport)
+        self.colorselection[-1].currentIndexChanged.connect(lambda: self.set_color(len(self.colorselection)-1))
+        self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
 
     def update_viewport(self):
         if self.window.view.viewport:
             self.window.view.update_scene()
+
+    def set_color(self,n):
+        palette = self.colordisp_all[n].palette()
+        selectedcolor = self.colorselection[n].currentText()
+        if selectedcolor == 'auto':
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor('black'))
+        else:
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor(selectedcolor))
+        self.colordisp_all[n].setPalette(palette)
+
 
 class PlotDialog(QtGui.QDialog):
 
