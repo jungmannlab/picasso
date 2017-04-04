@@ -191,7 +191,7 @@ class DatasetDialog(QtGui.QDialog):
         self.layout.addWidget(QtGui.QLabel('Path'),0,0)
         self.layout.addWidget(QtGui.QLabel('Color'),0,1)
         self.layout.addWidget(QtGui.QLabel('#'),0,2)
-        self.layout.addWidget(QtGui.QLabel('Intensity'),0,3)
+        self.layout.addWidget(QtGui.QLabel('Rel. Intensity'),0,3)
 
     def add_entry(self,path):
         c = QtGui.QCheckBox(path)
@@ -549,12 +549,13 @@ class InfoDialog(QtGui.QDialog):
 
     def show_nena_plot(self):
         d = self.nena_result.userkws['d']
-        plt.Figure()
+        fig1 = plt.figure()
         plt.title('Next frame neighbor distance histogram')
         plt.plot(d, self.nena_result.data, label='Data')
         plt.plot(d, self.nena_result.best_fit, label='Fit')
         plt.legend(loc='best')
-        plt.show()
+        fig1.show()
+
 
 class ToolsSettingsDialog(QtGui.QDialog):
 
@@ -1367,7 +1368,6 @@ class View(QtGui.QLabel):
         print('Plot3d')
         channel = self.get_channel3d('Undrift from picked')
         if channel is not None:
-            plt.close()
             fig = plt.figure()
             fig.canvas.set_window_title('3D - Trace')
             ax = fig.add_subplot(111, projection='3d')
@@ -1409,7 +1409,7 @@ class View(QtGui.QLabel):
             ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
             ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
             fig.canvas.draw()
-            plt.show()
+            fig.show()
 
 
     def show_trace(self):
@@ -1441,8 +1441,8 @@ class View(QtGui.QLabel):
             # Fine-tune figure; make subplots close to each other and hide x ticks for
             # all but bottom plot.
             #f.subplots_adjust(hspace=0)
-            plt.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
-            plt.show()
+            #f.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
+            f.show()
 
     def show_pick(self):
         print('Show pick')

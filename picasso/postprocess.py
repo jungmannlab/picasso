@@ -561,7 +561,7 @@ def undrift(locs, info, segmentation, display=True, segmentation_callback=None, 
     drift = (drift_x_pol(t_inter), drift_y_pol(t_inter))
     drift = _np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
     if display:
-        _plt.figure(figsize=(17, 6))
+        fig1 = _plt.figure(figsize=(17, 6))
         _plt.suptitle('Estimated drift')
         _plt.subplot(1, 2, 1)
         _plt.plot(drift.x, label='x interpolated')
@@ -578,7 +578,7 @@ def undrift(locs, info, segmentation, display=True, segmentation_callback=None, 
         _plt.axis('equal')
         _plt.xlabel('x')
         _plt.ylabel('y')
-        _plt.show()
+        fig1.show()
     locs.x -= drift.x[locs.frame]
     locs.y -= drift.y[locs.frame]
     return drift, locs
