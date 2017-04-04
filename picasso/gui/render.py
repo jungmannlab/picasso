@@ -232,7 +232,6 @@ class DatasetDialog(QtGui.QDialog):
         self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
 
         #update auto colors
-
         n_channels = len(self.checks)
         hues = np.arange(0, 1, 1 / n_channels)
         colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
@@ -957,7 +956,6 @@ class View(QtGui.QLabel):
                     groupcopy[locs.group==groups[i]]=i
                 np.random.shuffle(groups)
                 groups %= N_GROUP_COLORS
-                print(groups)
                 self.group_color = groups[groupcopy]
             if render:
                 self.fit_in_view(autoscale=True)
@@ -1875,6 +1873,28 @@ class View(QtGui.QLabel):
         image = self.scale_contrast(image)
         Y, X = image.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
+        #Run color check
+
+        for i in range(len(self.locs)):
+
+            if self.window.dataset_dialog.colorselection[i].currentText() == 'red':
+                colors[i] = (1,0,0)
+            elif self.window.dataset_dialog.colorselection[i].currentText() == 'green':
+                colors[i] = (0,1,0)
+            elif self.window.dataset_dialog.colorselection[i].currentText() == 'blue':
+                colors[i] = (0,0,1)
+            elif self.window.dataset_dialog.colorselection[i].currentText() == 'gray':
+                colors[i] = (1,1,1)
+            elif self.window.dataset_dialog.colorselection[i].currentText() == 'cyan':
+                colors[i] = (0,1,1)
+            elif self.window.dataset_dialog.colorselection[i].currentText() == 'magenta':
+                colors[i] = (1,0,1)
+            elif self.window.dataset_dialog.colorselection[i].currentText() == 'yellow':
+                colors[i] = (1,1,0)
+
+            iscale = self.window.dataset_dialog.intensitysettings[i].value()
+            image = iscale*image
+
         for color, image in zip(colors, image):
             bgra[:, :, 0] += color[2] * image
             bgra[:, :, 1] += color[1] * image
@@ -2160,7 +2180,6 @@ class View(QtGui.QLabel):
         if not hasattr(self, 'unfold_status'):
             self.unfold_status = 'folded'
         if self.unfold_status == 'folded':
-            print('Unfold groups')
             if hasattr(self.locs[0], 'group'):
                 self.locs[0].x += self.locs[0].group*2
             groups = np.unique(self.locs[0].group)
@@ -2175,25 +2194,17 @@ class View(QtGui.QLabel):
                         self._picks.append(position)
             #Update width information
             self.oldwidth = self.infos[0][0]['Width']
-            print(self.oldwidth)
             minwidth = np.ceil(np.mean(self.locs[0].x)+np.max(self.locs[0].x)-np.min(self.locs[0].x))
-            print(minwidth)
             self.infos[0][0]['Width'] = np.max([self.oldwidth, minwidth])
-
-
-            print(self.infos[0][0]['Width'])
-
             self.fit_in_view()
             self.unfold_status = 'unfolded'
             self.n_picks = len(self._picks)
             self.update_pick_info_short()
-            print(self.locs)
         else:
             self.refold_groups()
             self.clear_picks()
 
     def refold_groups(self):
-        print('Refold groups')
         if hasattr(self.locs[0], 'group'):
             self.locs[0].x -= self.locs[0].group*2
         groups = np.unique(self.locs[0].group)
