@@ -1186,7 +1186,10 @@ class Window(QtGui.QMainWindow):
             handleex = handleex.astype(_np.int)
             handless = handless.astype(_np.int)
 
-            structure = _np.array([handlexx, handleyy, handleex, handless])
+            handle3d = _np.asarray((info[0]['Structure.Handle3d']).split(","))
+            handle3d = handle3d.astype(_np.float)
+            structure = _np.array([handlexx, handleyy, handleex, handless, handle3d])
+
             self.structurecombo.setCurrentIndex(2)
             self.newstruct = structure
             self.plotPositions()
