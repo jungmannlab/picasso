@@ -367,6 +367,100 @@ class PlotDialog(QtGui.QDialog):
         return dialog.result
 
 
+class ClusterDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Structure')
+        layout_grid = QtGui.QGridLayout(self)
+
+        self.figure = plt.figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.label = QtGui.QLabel()
+
+        layout_grid.addWidget(self.label,0,0,1,3)
+        layout_grid.addWidget(self.canvas,1,0,1,3)
+
+        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Yes | QtGui.QDialogButtonBox.No | QtGui.QDialogButtonBox.Cancel,
+                                              QtCore.Qt.Horizontal,
+                                              self)
+        layout_grid.addWidget(self.buttons)
+
+        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
+
+        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
+
+        self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
+
+    def on_accept(self):
+        self.setResult(1)
+        self.result = 1
+        self.close()
+
+    def on_reject(self):
+        self.setResult(0)
+        self.result = 0
+        self.close()
+
+    def on_cancel(self):
+        self.setResult(2)
+        self.result = 2
+        self.close()
+
+
+    @staticmethod
+    def getParams(all_picked_locs, current, length, mode, color_sys):
+
+        dialog = ClusterDialog(None)
+        fig = dialog.figure
+        ax = fig.add_subplot(111, projection='3d')
+        dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
+
+        if mode == 1:
+            locs = all_picked_locs[current]
+            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+
+            colors = locs['z'][:]
+            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+            ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+            ax.set_xlabel('X [Px]')
+            ax.set_ylabel('Y [Px]')
+            ax.set_zlabel('Z [nm]')
+            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            plt.gca().patch.set_facecolor('black')
+            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+        else:
+            colors = color_sys
+            for l in range(len(all_picked_locs)):
+                locs = all_picked_locs[l][current]
+                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                ax.scatter(locs['x'], locs['y'], locs['z'], c=colors[l])
+
+            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+
+            ax.set_xlabel('X [Px]')
+            ax.set_ylabel('Y [Px]')
+            ax.set_zlabel('Z [nm]')
+
+            plt.gca().patch.set_facecolor('black')
+            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+
+        result = dialog.exec_()
+
+        return dialog.result
+
+
+
 class LinkDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -1613,6 +1707,52 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
+    def analyze_cluster(self):
+        print('Analyze cluster')
+        channel = self.get_channel3d('Show Pick 3D')
+        removelist = []
+        if channel is not None:
+            n_channels = (len(self.locs_paths))
+            hues = np.arange(0, 1, 1 / n_channels)
+            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+
+            if channel is (len(self.locs_paths)):
+                print('Combined')
+                all_picked_locs = []
+                for k in range(len(self.locs_paths)):
+                    all_picked_locs.append(self.picked_locs(k))
+
+                if self._picks:
+                    for i, pick in enumerate(self._picks):
+                        reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors)
+                        if reply == 1:
+                            print('Accepted')
+                        elif reply == 2:
+                            break
+                        else:
+                            print('Discard')
+                            removelist.append(pick)
+            else:
+                all_picked_locs = self.picked_locs(channel)
+                if self._picks:
+
+                    for i, pick in enumerate(self._picks):
+
+                        reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 1, 1)
+                        if reply == 1:
+                            print('Accepted')
+                        elif reply == 2:
+                            break
+                        else:
+                            print('Discard')
+                            removelist.append(pick)
+
+        for pick in removelist:
+            self._picks.remove(pick)
+        self.n_picks = len(self._picks)
+        self.update_pick_info_short()
+        self.update_scene()
+
     def analyze_picks(self):
         print('Show picks')
         channel = self.get_channel('Pick similar')
@@ -2449,6 +2589,9 @@ class Window(QtGui.QMainWindow):
         self.dataset_dialog = DatasetDialog(self)
         dataset_action = tools_menu.addAction('Datasets')
         dataset_action.triggered.connect(self.dataset_dialog.show)
+        tools_menu.addSeparator()
+        cluster_action = tools_menu.addAction('Analyze Clusters')
+        cluster_action.triggered.connect(self.view.analyze_cluster)
 
 
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
