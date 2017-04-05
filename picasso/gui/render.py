@@ -1352,6 +1352,28 @@ class View(QtGui.QLabel):
         self.window.tools_settings_dialog.pick_diameter.setValue(regions['Diameter'])
         self.update_scene(picks_only=True)
 
+    def substract_picks(self, path):
+        if self._picks:
+            print(self._picks)
+            oldpicks = self._picks.copy()
+            with open(path, 'r') as f:
+                regions = yaml.load(f)
+                self._picks = regions['Centers']
+                diameter = regions['Diameter']
+                print(self._picks)
+
+                fig1 = plt.figure()
+                plt.title('Old picks and new picks')
+                plt.plot(oldpicks, label='Data')
+                #plt.plot(d, self.nena_result.best_fit, label='Fit')
+                #plt.legend(loc='best')
+                fig1.show()
+
+            self.update_pick_info_short()
+            self.window.tools_settings_dialog.pick_diameter.setValue(regions['Diameter'])
+            self.update_scene(picks_only=True)
+
+
     def map_to_movie(self, position):
         ''' Converts coordinates from display units to camera units. '''
         x_rel = position.x() / self.width()
@@ -2592,6 +2614,8 @@ class Window(QtGui.QMainWindow):
         tools_menu.addSeparator()
         cluster_action = tools_menu.addAction('Analyze Clusters')
         cluster_action.triggered.connect(self.view.analyze_cluster)
+        pickadd_action = tools_menu.addAction('Substract pick regions')
+        pickadd_action.triggered.connect(self.substract_picks)
 
 
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
@@ -2657,6 +2681,11 @@ class Window(QtGui.QMainWindow):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
         if path:
             self.view.load_picks(path)
+
+    def substract_picks(self):
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
+        if path:
+            self.view.substract_picks(path)
 
     def load_user_settings(self):
         settings = io.load_user_settings()
