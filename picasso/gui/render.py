@@ -27,6 +27,10 @@ from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
 
 from sklearn.metrics.pairwise import euclidean_distances
+from sklearn.cluster import KMeans
+
+
+from collections import Counter
 
 import colorsys
 
@@ -416,46 +420,111 @@ class ClusterDialog(QtGui.QDialog):
 
         dialog = ClusterDialog(None)
         fig = dialog.figure
-        ax = fig.add_subplot(111, projection='3d')
+        ax1 = fig.add_subplot(121, projection='3d')
+        ax2 = fig.add_subplot(122, projection='3d')
         dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
 
         if mode == 1:
+            print('Mode 1')
+            pixelsize = 130
             locs = all_picked_locs[current]
             locs = stack_arrays(locs, asrecarray=True, usemask=False)
+            X = np.asarray(locs['x']*pixelsize)
+            Y = np.asarray(locs['y']*pixelsize)
+            Z = np.asarray(locs['z'])
+
+            coord = np.stack((X,Y,Z),axis=1)
+            print(coord)
+            clustersize = 10
+            est = KMeans(n_clusters=clustersize)
+            #est = KMeans(n_clusters=8, random_state=0)
+
+            est.fit(coord)
+            labels = est.labels_
+            print(labels)
+            ax1.scatter(coord[:, 0], coord[:, 1], coord[:, 2], c=labels.astype(np.float))
+
+            ax1.set_xlabel('X')
+            ax1.set_ylabel('Y')
+            ax1.set_zlabel('Z')
+
+            counts = list(Counter(labels).items())
+            cent = est.cluster_centers_
+
+            ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2])
+            print('---Centers---')
+            for element in counts:
+                ax2.text(cent[element[0], 0], cent[element[0], 1],cent[element[0], 2], element[1], fontsize=12)
+                print('X '+str(cent[element[0], 0])+ ' Y '+str(cent[element[0], 1]) + ' Z '+ str(cent[element[0], 2])+' Counts '+str(element[1]))
 
             colors = locs['z'][:]
             colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
             colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
-            ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
-            ax.set_xlabel('X [Px]')
-            ax.set_ylabel('Y [Px]')
-            ax.set_zlabel('Z [nm]')
-            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            #ax1.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+            ax1.set_xlabel('X [Px]')
+            ax1.set_ylabel('Y [Px]')
+            ax1.set_zlabel('Z [nm]')
+            #ax1.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            #ax1.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            #ax1.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+
+            ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+            ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+            ax1.w_zaxis.set_pane_color((0, 0, 0, 1.0))
             plt.gca().patch.set_facecolor('black')
-            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
-        else:
+
+            #Give a nice output, calculate back to pixel coordinates
+
+
+
+        else: #Combined
             colors = color_sys
+
             for l in range(len(all_picked_locs)):
+                X = [locs['x'], locs['y'], locs['z']]
+                clustersize = 10
+                estimators = {'k_means_iris_3': KMeans(n_clusters=clustersize)}
+                name, est = estimators.items()
+
+                est.fit(X)
+                labels = est.labels_
+
+                #ax1.scatter(X[:, 0], X[:, 1], X[:, 2], c=labels.astype(np.float))
+
+                ax1.set_xlabel('X')
+                ax1.set_ylabel('Y')
+                ax.set_zlabel('Z')
+
+                print(labels)
+
+                print('--- Counts:---')
+                counts = list(Counter(labels).items())
+                print(est.cluster_centers_)
+                print(counts)
+                cent = est.cluster_centers_
+
+
+                ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2])
+                for element in counts:
+
+                    ax2.text(cent[element[0], 0], cent[element[0], 1],cent[element[0], 2], element[1], fontsize=12)
+
                 locs = all_picked_locs[l][current]
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                ax.scatter(locs['x'], locs['y'], locs['z'], c=colors[l])
+                ax1.scatter(locs['x'], locs['y'], locs['z'], c=colors[l])
 
-            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax1.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax1.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax1.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
 
-            ax.set_xlabel('X [Px]')
-            ax.set_ylabel('Y [Px]')
-            ax.set_zlabel('Z [nm]')
+            ax1.set_xlabel('X [Px]')
+            ax1.set_ylabel('Y [Px]')
+            ax1.set_zlabel('Z [nm]')
 
             plt.gca().patch.set_facecolor('black')
-            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+            ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+            ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+            ax1.w_zaxis.set_pane_color((0, 0, 0, 1.0))
 
         result = dialog.exec_()
 
@@ -2628,7 +2697,7 @@ class Window(QtGui.QMainWindow):
         dataset_action = tools_menu.addAction('Datasets')
         dataset_action.triggered.connect(self.dataset_dialog.show)
         tools_menu.addSeparator()
-        cluster_action = tools_menu.addAction('Analyze Clusters')
+        cluster_action = tools_menu.addAction('Analyze Clusters (3D)')
         cluster_action.triggered.connect(self.view.analyze_cluster)
         pickadd_action = tools_menu.addAction('Substract pick regions')
         pickadd_action.triggered.connect(self.substract_picks)
