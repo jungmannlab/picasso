@@ -1355,37 +1355,35 @@ class View(QtGui.QLabel):
         self.update_scene(picks_only=True)
 
     def substract_picks(self, path):
-        if self._picks:
-            print(self._picks)
-            oldpicks = self._picks.copy()
-            with open(path, 'r') as f:
-                regions = yaml.load(f)
-                self._picks = regions['Centers']
-                diameter = regions['Diameter']
-                print(self._picks)
-                x_cord = np.array([_[0] for _ in self._picks])
-                y_cord = np.array([_[1] for _ in self._picks])
-                x_cord_old = np.array([_[0] for _ in oldpicks])
-                y_cord_old = np.array([_[1] for _ in oldpicks])
+        oldpicks = self._picks.copy()
+        with open(path, 'r') as f:
+            regions = yaml.load(f)
+            self._picks = regions['Centers']
+            diameter = regions['Diameter']
 
-                distances = np.sum((euclidean_distances(oldpicks, self._picks)<diameter/2)*1,axis=1)>=1
-                print(distances)
-                filtered_list = [i for (i, v) in zip(oldpicks, distances) if not v]
+            x_cord = np.array([_[0] for _ in self._picks])
+            y_cord = np.array([_[1] for _ in self._picks])
+            x_cord_old = np.array([_[0] for _ in oldpicks])
+            y_cord_old = np.array([_[1] for _ in oldpicks])
 
-                x_cord_new = np.array([_[0] for _ in filtered_list])
-                y_cord_new = np.array([_[1] for _ in filtered_list])
-                output = False
+            distances = np.sum((euclidean_distances(oldpicks, self._picks)<diameter/2)*1,axis=1)>=1
+            print(distances)
+            filtered_list = [i for (i, v) in zip(oldpicks, distances) if not v]
 
-                if output:
-                    fig1 = plt.figure()
-                    plt.title('Old picks and new picks')
-                    plt.scatter(x_cord,-y_cord, c='r', label='Newpicks')
-                    plt.scatter(x_cord_old,-y_cord_old, c='b', label='Oldpicks')
-                    plt.scatter(x_cord_new,-y_cord_new, c='g', label='Picks to keep')
-                    #plt.plot(d, self.nena_result.best_fit, label='Fit')
-                    #plt.legend(loc='best')
-                    fig1.show()
-                self._picks = filtered_list
+            x_cord_new = np.array([_[0] for _ in filtered_list])
+            y_cord_new = np.array([_[1] for _ in filtered_list])
+            output = False
+
+            if output:
+                fig1 = plt.figure()
+                plt.title('Old picks and new picks')
+                plt.scatter(x_cord,-y_cord, c='r', label='Newpicks')
+                plt.scatter(x_cord_old,-y_cord_old, c='b', label='Oldpicks')
+                plt.scatter(x_cord_new,-y_cord_new, c='g', label='Picks to keep')
+                #plt.plot(d, self.nena_result.best_fit, label='Fit')
+                #plt.legend(loc='best')
+                fig1.show()
+            self._picks = filtered_list
 
             self.update_pick_info_short()
             self.window.tools_settings_dialog.pick_diameter.setValue(regions['Diameter'])
@@ -2701,9 +2699,10 @@ class Window(QtGui.QMainWindow):
             self.view.load_picks(path)
 
     def substract_picks(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
-        if path:
-            self.view.substract_picks(path)
+        if self.view._picks:
+            path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
+            if path:
+                self.view.substract_picks(path)
 
     def load_user_settings(self):
         settings = io.load_user_settings()
