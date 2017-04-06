@@ -26,6 +26,8 @@ from mpl_toolkits.mplot3d import Axes3D
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
 
+from sklearn.metrics.pairwise import euclidean_distances
+
 import colorsys
 
 from .. import imageprocess, io, lib, postprocess, render
@@ -1361,13 +1363,29 @@ class View(QtGui.QLabel):
                 self._picks = regions['Centers']
                 diameter = regions['Diameter']
                 print(self._picks)
+                x_cord = np.array([_[0] for _ in self._picks])
+                y_cord = np.array([_[1] for _ in self._picks])
+                x_cord_old = np.array([_[0] for _ in oldpicks])
+                y_cord_old = np.array([_[1] for _ in oldpicks])
 
-                fig1 = plt.figure()
-                plt.title('Old picks and new picks')
-                plt.plot(oldpicks, label='Data')
-                #plt.plot(d, self.nena_result.best_fit, label='Fit')
-                #plt.legend(loc='best')
-                fig1.show()
+                distances = np.sum((euclidean_distances(oldpicks, self._picks)<diameter/2)*1,axis=1)>=1
+                print(distances)
+                filtered_list = [i for (i, v) in zip(oldpicks, distances) if not v]
+
+                x_cord_new = np.array([_[0] for _ in filtered_list])
+                y_cord_new = np.array([_[1] for _ in filtered_list])
+                output = False
+
+                if output:
+                    fig1 = plt.figure()
+                    plt.title('Old picks and new picks')
+                    plt.scatter(x_cord,-y_cord, c='r', label='Newpicks')
+                    plt.scatter(x_cord_old,-y_cord_old, c='b', label='Oldpicks')
+                    plt.scatter(x_cord_new,-y_cord_new, c='g', label='Picks to keep')
+                    #plt.plot(d, self.nena_result.best_fit, label='Fit')
+                    #plt.legend(loc='best')
+                    fig1.show()
+                self._picks = filtered_list
 
             self.update_pick_info_short()
             self.window.tools_settings_dialog.pick_diameter.setValue(regions['Diameter'])
