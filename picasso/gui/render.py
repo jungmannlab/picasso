@@ -379,34 +379,53 @@ class ClusterDialog(QtGui.QDialog):
         super().__init__(window)
         self.window = window
         self.setWindowTitle('Structure')
-        layout_grid = QtGui.QGridLayout(self)
+        self.layout_grid = QtGui.QGridLayout(self)
 
         self.figure = plt.figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.label = QtGui.QLabel()
 
-        layout_grid.addWidget(self.label,0,0,1,3)
-        layout_grid.addWidget(self.canvas,1,0,1,3)
+        self.layout_grid.addWidget(self.label,0,0,1,5)
+        self.layout_grid.addWidget(self.canvas,1,0,1,5)
 
         self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Yes | QtGui.QDialogButtonBox.No | QtGui.QDialogButtonBox.Cancel,
                                               QtCore.Qt.Horizontal,
                                               self)
-        layout_grid.addWidget(self.buttons)
-        layout_grid.addWidget(QtGui.QLabel('No clusters:'))
+        self.layout_grid.addWidget(self.buttons,2,0,1,3)
+        self.layout_grid.addWidget(QtGui.QLabel('No clusters:'),2,3,1,1)
 
         self.n_clusters_spin = QtGui.QSpinBox()
 
-        layout_grid.addWidget(self.n_clusters_spin)
+        self.layout_grid.addWidget(self.n_clusters_spin,2,4,1,1)
+
 
         self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
 
         self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
 
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
+
         self.start_clusters = 0
         self.n_clusters_spin.valueChanged.connect(self.on_cluster)
+        self.n_lines = 4
+        self.layout_grid.addWidget(QtGui.QLabel('Select'),3,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('X-Center'),3,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Y-Center'),3,2,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Z-Center'),3,3,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Counts'),3,4,1,1)
+        self.checks = []
 
+    def add_clusters(self, element, x_mean, y_mean, z_mean):
+        c = QtGui.QCheckBox(str(element[0]+1))
 
+        self.layout_grid.addWidget(c,self.n_lines,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(x_mean)),self.n_lines,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(y_mean)),self.n_lines,2,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(z_mean)),self.n_lines,3,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(element[1])),self.n_lines,4,1,1)
+        self.n_lines +=1
+        self.checks.append(c)
+        self.checks[-1].setChecked(True)
 
     def on_accept(self):
         self.setResult(1)
@@ -462,9 +481,9 @@ class ClusterDialog(QtGui.QDialog):
 
         labels = est.labels_
 
-        labeled_locs = lib.append_to_rec(scaled_locs,labels,'cluster')
+        labeled_locs = lib.append_to_rec(scaled_locs,labels+1,'cluster')
         counts = list(Counter(labels).items())
-        labeled_locs = lib.append_to_rec(labeled_locs,labels,'cluster')
+        #labeled_locs = lib.append_to_rec(labeled_locs,labels,'cluster')
 
         ax1.scatter(labeled_locs['x'],labeled_locs['y'],labeled_locs['z'], c=labels.astype(np.float))
 
@@ -478,7 +497,11 @@ class ClusterDialog(QtGui.QDialog):
         ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2])
         print('---Centers---')
         for element in counts:
-            ax2.text(cent[element[0], 0], cent[element[0], 1],cent[element[0], 2], element[1], fontsize=12)
+            x_mean = cent[element[0], 0]
+            y_mean = cent[element[0], 1]
+            z_mean = cent[element[0], 2]
+            dialog.add_clusters(element,x_mean,y_mean,z_mean)
+            ax2.text(x_mean,y_mean,z_mean, element[1], fontsize=12)
 
             print('X '+str(cent[element[0], 0])+ ' Y '+str(cent[element[0], 1]) + ' Z '+ str(cent[element[0], 2])+' Counts '+str(element[1]))
 
@@ -497,7 +520,7 @@ class ClusterDialog(QtGui.QDialog):
 
         result = dialog.exec_()
 
-        return dialog.result, dialog.n_clusters_spin.value()
+        return dialog.result, dialog.n_clusters_spin.value(), labeled_locs
 
 
 
@@ -1787,6 +1810,7 @@ class View(QtGui.QLabel):
         print('Analyze cluster')
         channel = self.get_channel3d('Show Pick 3D')
         removelist = []
+        saved_locs = []
         if channel is not None:
             n_channels = (len(self.locs_paths))
             hues = np.arange(0, 1, 1 / n_channels)
@@ -1818,16 +1842,26 @@ class View(QtGui.QLabel):
                         reply = 3
                         n_clusters = 10
                         while reply == 3:
-                            reply, n_clusters = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
+                            reply, n_clusters, labeled_locs = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
                             print(reply)
                         if reply == 1:
                             print('Accepted')
+                            saved_locs.append(labeled_locs)
                         elif reply == 2:
                             break
                         else:
                             print('Discard')
                             removelist.append(pick)
-
+        if saved_locs != []:
+            base, ext = os.path.splitext(self.locs_paths[channel])
+            out_path = base + '_cluster.hdf5'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save picked localizations', out_path, filter='*.hdf5')
+            if path:
+                saved_locs = stack_arrays(saved_locs, asrecarray=True, usemask=False)
+                if saved_locs is not None:
+                    d = self.window.tools_settings_dialog.pick_diameter.value()
+                    pick_info = {'Generated by:': 'Picasso Render', 'Pick Diameter:': d}
+                    io.save_locs(path, saved_locs, self.infos[channel] + [pick_info])
         for pick in removelist:
             self._picks.remove(pick)
         self.n_picks = len(self._picks)
