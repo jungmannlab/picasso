@@ -465,7 +465,6 @@ class ClusterDialog(QtGui.QDialog):
         pixelsize = 130
         locs = all_picked_locs[current]
         locs = stack_arrays(locs, asrecarray=True, usemask=False)
-        print(locs['x'])
 
         est = KMeans(n_clusters=n_clusters)
 
@@ -480,7 +479,6 @@ class ClusterDialog(QtGui.QDialog):
 
         labels = est.labels_
 
-
         counts = list(Counter(labels).items())
         #labeled_locs = lib.append_to_rec(labeled_locs,labels,'cluster')
 
@@ -494,15 +492,12 @@ class ClusterDialog(QtGui.QDialog):
         cent = est.cluster_centers_
 
         ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2])
-        print('---Centers---')
         for element in counts:
             x_mean = cent[element[0], 0]
             y_mean = cent[element[0], 1]
             z_mean = cent[element[0], 2]
             dialog.add_clusters(element,x_mean,y_mean,z_mean)
             ax2.text(x_mean,y_mean,z_mean, element[1], fontsize=12)
-
-            print('X '+str(cent[element[0], 0])+ ' Y '+str(cent[element[0], 1]) + ' Z '+ str(cent[element[0], 2])+' Counts '+str(element[1]))
 
         ax1.set_xlabel('X [Px]')
         ax1.set_ylabel('Y [Px]')
@@ -528,18 +523,15 @@ class ClusterDialog(QtGui.QDialog):
         labels = np.asarray(labels)
 
         labeled_locs = lib.append_to_rec(scaled_locs,labels,'cluster')
+        labeled_locs_new_group = labeled_locs.copy()
+        power = np.round(n_clusters/10)+1
+        labeled_locs_new_group['group']=labeled_locs_new_group['group']*10**power+labeled_locs_new_group['cluster']
 
         #Combine clustered locs
         clustered_locs = []
-        datatype = labeled_locs.dtype
-        print('---Datatype---')
-        print(datatype)
         for element in np.unique(labels):
-            clustered_locs_temp = labeled_locs[labeled_locs['cluster']==element]
-            clustered_locs_temp = np.rec.array(clustered_locs_temp,
-                                 dtype=datatype)
-
-            clustered_locs.append(clustered_locs_temp)
+            if element != 0:
+                clustered_locs.append(labeled_locs_new_group[labeled_locs['cluster']==element])
 
         return dialog.result, dialog.n_clusters_spin.value(), labeled_locs, clustered_locs
 
@@ -1832,6 +1824,7 @@ class View(QtGui.QLabel):
         channel = self.get_channel3d('Show Pick 3D')
         removelist = []
         saved_locs = []
+        clustered_locs = []
 
         if channel is not None:
             n_channels = (len(self.locs_paths))
@@ -1866,22 +1859,13 @@ class View(QtGui.QLabel):
                         reply = 3
 
                         while reply == 3:
-                            print(n_clusters)
-                            reply, n_clusters_new, labeled_locs, clustered_locs = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
+                            reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
                             n_clusters = n_clusters_new
 
                         if reply == 1:
                             print('Accepted')
                             saved_locs.append(labeled_locs)
-
-
-                            print('Clustered locs')
-                            print(clustered_locs)
-                            print(len(clustered_locs))
-
-
-
-
+                            clustered_locs.extend(clustered_locs_temp)
                         elif reply == 2:
                             break
                         else:
@@ -1901,7 +1885,6 @@ class View(QtGui.QLabel):
             base, ext = os.path.splitext(path)
             out_path = base + '_pickprops.hdf5'
             #TODO: save pick properties
-
             r_max = 2 * max(self.infos[channel][0]['Height'], self.infos[channel][0]['Width'])
             max_dark, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
                 'Enter gap size:',3)
@@ -1909,13 +1892,8 @@ class View(QtGui.QLabel):
             progress = lib.ProgressDialog('Calculating kinetics', 0, len(clustered_locs), self)
             progress.set_value(0)
             dark = np.empty(len(clustered_locs))
-            print('lenght of clustered loccs')
-            print(len(clustered_locs))
-            print(clustered_locs)
-            datatype = clustered_locs[0].dtype
-            print('---Datatype---')
-            print(datatype)
 
+            datatype = clustered_locs[0].dtype
             for i, pick_locs in enumerate(clustered_locs):
                 if not hasattr(pick_locs, 'len'):
                     pick_locs = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
@@ -1925,8 +1903,6 @@ class View(QtGui.QLabel):
                 progress.set_value(i + 1)
             out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
             n_groups = len(clustered_locs)
-            print('---n_groups---')
-            print(n_groups)
             progress = lib.ProgressDialog('Calculating pick properties', 0, n_groups, self)
             pick_props = postprocess.groupprops(out_locs)
             n_units = self.window.info_dialog.calculate_n_units(dark)
@@ -1934,10 +1910,7 @@ class View(QtGui.QLabel):
             influx = self.window.info_dialog.influx_rate.value()
             info = self.infos[channel] + [{'Generated by': 'Picasso: Render',
                                            'Influx rate': influx}]
-            print('About to save ...')
-            print(path)
             io.save_datasets(out_path, info, groups=pick_props)
-            print('Saved')
 
         for pick in removelist:
             self._picks.remove(pick)
