@@ -2162,7 +2162,7 @@ class View(QtGui.QLabel):
                 colors[i] = (1,1,0)
 
             iscale = self.window.dataset_dialog.intensitysettings[i].value()
-            image = iscale*image
+            image[i] = iscale*image[i]
 
         for color, image in zip(colors, image):
             bgra[:, :, 0] += color[2] * image
