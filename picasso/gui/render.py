@@ -452,8 +452,7 @@ class ClusterDialog(QtGui.QDialog):
     def getParams(all_picked_locs, current, length, n_clusters, color_sys):
 
         dialog = ClusterDialog(None)
-        print('Number of clusters')
-        print(n_clusters)
+
         dialog.start_clusters = n_clusters
         dialog.n_clusters_spin.setValue(n_clusters)
 
@@ -481,11 +480,11 @@ class ClusterDialog(QtGui.QDialog):
 
         labels = est.labels_
 
-        labeled_locs = lib.append_to_rec(scaled_locs,labels+1,'cluster')
+
         counts = list(Counter(labels).items())
         #labeled_locs = lib.append_to_rec(labeled_locs,labels,'cluster')
 
-        ax1.scatter(labeled_locs['x'],labeled_locs['y'],labeled_locs['z'], c=labels.astype(np.float))
+        ax1.scatter(locs['x'],locs['y'],locs['z'], c=labels.astype(np.float))
 
         ax1.set_xlabel('X')
         ax1.set_ylabel('Y')
@@ -519,6 +518,16 @@ class ClusterDialog(QtGui.QDialog):
         plt.gca().patch.set_facecolor('black')
 
         result = dialog.exec_()
+
+        checks = [not _.isChecked() for _ in dialog.checks]
+        checks = np.asarray(np.where(checks))+1
+        checks = checks[0]
+
+        labels += 1
+        labels = [0 if x in checks else x for x in labels]
+        labels = np.asarray(labels)
+
+        labeled_locs = lib.append_to_rec(scaled_locs,labels,'cluster')
 
         return dialog.result, dialog.n_clusters_spin.value(), labeled_locs
 
@@ -1836,17 +1845,22 @@ class View(QtGui.QLabel):
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
+                    n_clusters, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
+                        'Enter number of clusters:',10)
 
                     for i, pick in enumerate(self._picks):
                         print('This Clustermode')
                         reply = 3
-                        n_clusters = 10
+
                         while reply == 3:
-                            reply, n_clusters, labeled_locs = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
-                            print(reply)
+                            print(n_clusters)
+                            reply, n_clusters_new, labeled_locs = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
+                            n_clusters = n_clusters_new
+
                         if reply == 1:
                             print('Accepted')
                             saved_locs.append(labeled_locs)
+
                         elif reply == 2:
                             break
                         else:
