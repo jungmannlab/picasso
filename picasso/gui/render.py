@@ -392,12 +392,21 @@ class ClusterDialog(QtGui.QDialog):
                                               QtCore.Qt.Horizontal,
                                               self)
         layout_grid.addWidget(self.buttons)
+        layout_grid.addWidget(QtGui.QLabel('No clusters:'))
+
+        self.n_clusters_spin = QtGui.QSpinBox()
+
+        layout_grid.addWidget(self.n_clusters_spin)
 
         self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
 
         self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
 
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
+        self.start_clusters = 0
+        self.n_clusters_spin.valueChanged.connect(self.on_cluster)
+
+
 
     def on_accept(self):
         self.setResult(1)
@@ -414,121 +423,81 @@ class ClusterDialog(QtGui.QDialog):
         self.result = 2
         self.close()
 
+    def on_cluster(self):
+        if self.n_clusters_spin.value() != self.start_clusters: #only execute once the cluster number is changed
+            self.setResult(3)
+            self.result = 3
+            self.close()
 
     @staticmethod
-    def getParams(all_picked_locs, current, length, mode, color_sys):
+    def getParams(all_picked_locs, current, length, n_clusters, color_sys):
 
         dialog = ClusterDialog(None)
+        print('Number of clusters')
+        print(n_clusters)
+        dialog.start_clusters = n_clusters
+        dialog.n_clusters_spin.setValue(n_clusters)
+
         fig = dialog.figure
         ax1 = fig.add_subplot(121, projection='3d')
         ax2 = fig.add_subplot(122, projection='3d')
         dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
 
-        if mode == 1:
-            print('Mode 1')
-            pixelsize = 130
-            locs = all_picked_locs[current]
-            locs = stack_arrays(locs, asrecarray=True, usemask=False)
-            X = np.asarray(locs['x']*pixelsize)
-            Y = np.asarray(locs['y']*pixelsize)
-            Z = np.asarray(locs['z'])
+        print('Mode 1')
+        pixelsize = 130
+        locs = all_picked_locs[current]
+        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+        print(locs['x'])
 
-            coord = np.stack((X,Y,Z),axis=1)
-            print(coord)
-            clustersize = 10
-            est = KMeans(n_clusters=clustersize)
-            #est = KMeans(n_clusters=8, random_state=0)
+        est = KMeans(n_clusters=n_clusters)
 
-            est.fit(coord)
-            labels = est.labels_
-            print(labels)
-            ax1.scatter(coord[:, 0], coord[:, 1], coord[:, 2], c=labels.astype(np.float))
+        scaled_locs = lib.append_to_rec(locs,locs['x']*pixelsize,'x_scaled')
+        scaled_locs = lib.append_to_rec(scaled_locs,locs['y']*pixelsize,'y_scaled')
 
-            ax1.set_xlabel('X')
-            ax1.set_ylabel('Y')
-            ax1.set_zlabel('Z')
+        X = np.asarray(scaled_locs['x_scaled'])
+        Y = np.asarray(scaled_locs['y_scaled'])
+        Z = np.asarray(scaled_locs['z'])
 
-            counts = list(Counter(labels).items())
-            cent = est.cluster_centers_
+        est.fit(np.stack((X,Y,Z),axis=1))
 
-            ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2])
-            print('---Centers---')
-            for element in counts:
-                ax2.text(cent[element[0], 0], cent[element[0], 1],cent[element[0], 2], element[1], fontsize=12)
-                print('X '+str(cent[element[0], 0])+ ' Y '+str(cent[element[0], 1]) + ' Z '+ str(cent[element[0], 2])+' Counts '+str(element[1]))
+        labels = est.labels_
 
-            colors = locs['z'][:]
-            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
-            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
-            #ax1.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
-            ax1.set_xlabel('X [Px]')
-            ax1.set_ylabel('Y [Px]')
-            ax1.set_zlabel('Z [nm]')
-            #ax1.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            #ax1.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            #ax1.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+        labeled_locs = lib.append_to_rec(scaled_locs,labels,'cluster')
+        counts = list(Counter(labels).items())
+        labeled_locs = lib.append_to_rec(labeled_locs,labels,'cluster')
 
-            ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax1.w_zaxis.set_pane_color((0, 0, 0, 1.0))
-            plt.gca().patch.set_facecolor('black')
+        ax1.scatter(labeled_locs['x'],labeled_locs['y'],labeled_locs['z'], c=labels.astype(np.float))
 
-            #Give a nice output, calculate back to pixel coordinates
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+        ax1.set_zlabel('Z')
 
+        counts = list(Counter(labels).items())
+        cent = est.cluster_centers_
 
+        ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2])
+        print('---Centers---')
+        for element in counts:
+            ax2.text(cent[element[0], 0], cent[element[0], 1],cent[element[0], 2], element[1], fontsize=12)
 
-        else: #Combined
-            colors = color_sys
+            print('X '+str(cent[element[0], 0])+ ' Y '+str(cent[element[0], 1]) + ' Z '+ str(cent[element[0], 2])+' Counts '+str(element[1]))
 
-            for l in range(len(all_picked_locs)):
-                X = [locs['x'], locs['y'], locs['z']]
-                clustersize = 10
-                estimators = {'k_means_iris_3': KMeans(n_clusters=clustersize)}
-                name, est = estimators.items()
+        ax1.set_xlabel('X [Px]')
+        ax1.set_ylabel('Y [Px]')
+        ax1.set_zlabel('Z [nm]')
 
-                est.fit(X)
-                labels = est.labels_
+        ax2.set_xlabel('X [nm]')
+        ax2.set_ylabel('Y [nm]')
+        ax2.set_zlabel('Z [nm]')
 
-                #ax1.scatter(X[:, 0], X[:, 1], X[:, 2], c=labels.astype(np.float))
-
-                ax1.set_xlabel('X')
-                ax1.set_ylabel('Y')
-                ax.set_zlabel('Z')
-
-                print(labels)
-
-                print('--- Counts:---')
-                counts = list(Counter(labels).items())
-                print(est.cluster_centers_)
-                print(counts)
-                cent = est.cluster_centers_
-
-
-                ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2])
-                for element in counts:
-
-                    ax2.text(cent[element[0], 0], cent[element[0], 1],cent[element[0], 2], element[1], fontsize=12)
-
-                locs = all_picked_locs[l][current]
-                locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                ax1.scatter(locs['x'], locs['y'], locs['z'], c=colors[l])
-
-            ax1.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax1.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax1.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
-
-            ax1.set_xlabel('X [Px]')
-            ax1.set_ylabel('Y [Px]')
-            ax1.set_zlabel('Z [nm]')
-
-            plt.gca().patch.set_facecolor('black')
-            ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax1.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+        ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+        ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+        ax1.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+        plt.gca().patch.set_facecolor('black')
 
         result = dialog.exec_()
 
-        return dialog.result
+        return dialog.result, dialog.n_clusters_spin.value()
 
 
 
@@ -1831,6 +1800,7 @@ class View(QtGui.QLabel):
 
                 if self._picks:
                     for i, pick in enumerate(self._picks):
+
                         reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors)
                         if reply == 1:
                             print('Accepted')
@@ -1844,8 +1814,12 @@ class View(QtGui.QLabel):
                 if self._picks:
 
                     for i, pick in enumerate(self._picks):
-
-                        reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 1, 1)
+                        print('This Clustermode')
+                        reply = 3
+                        n_clusters = 10
+                        while reply == 3:
+                            reply, n_clusters = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
+                            print(reply)
                         if reply == 1:
                             print('Accepted')
                         elif reply == 2:
