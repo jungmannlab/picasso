@@ -2682,6 +2682,10 @@ class Window(QtGui.QMainWindow):
         export_complete_action = file_menu.addAction('Export complete image')
         export_complete_action.setShortcut('Ctrl+Shift+E')
         export_complete_action.triggered.connect(self.export_complete)
+        file_menu.addSeparator()
+        export_txt_action = file_menu.addAction('Export as .txt for FRC')
+        export_txt_action.triggered.connect(self.export_txt)
+
         view_menu = self.menu_bar.addMenu('View')
         display_settings_action = view_menu.addAction('Display settings')
         display_settings_action.setShortcut('Ctrl+D')
@@ -2820,6 +2824,17 @@ class Window(QtGui.QMainWindow):
             viewport = [(0, 0), (movie_height, movie_width)]
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage.save(path)
+
+    def export_txt(self):
+        channel = self.view.get_channel('Save localizations as txt (frames,x,y)')
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '.frc.txt'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations as txt (frames,x,y)', out_path, filter='*.frc.txt')
+            if path:
+                locs = self.view.locs[channel]
+                loctxt = locs[['frame', 'x', 'y']].copy()
+                np.savetxt(path, loctxt, fmt=['%.1i', '%.5f', '%.5f'], newline='\r\n', delimiter='   ')
 
     def load_picks(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
