@@ -1339,17 +1339,21 @@ class View(QtGui.QLabel):
 
     def draw_minimap(self, image):
         if self.window.display_settings_dialog.minimap.isChecked():
+            movie_height, movie_width = self.movie_size()
             length_minimap = 100
-            height_minimap = self.height()/self.width()*100
+            height_minimap = movie_height/movie_width*100
             #draw in the upper right corner, overview rectangle
             x = self.width() - length_minimap - 20
             y = 20
-
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QColor('white'))
-            #painter.setBrush(QtGui.QBrush(QtGui.QColor('white')))
-
             painter.drawRect(x, y, length_minimap + 0, height_minimap + 0)
+            painter.setPen(QtGui.QColor('white'))
+            length = self.viewport_width()/movie_width*length_minimap
+            height = self.viewport_height()/movie_height*height_minimap
+            x_vp = self.viewport[0][1]/movie_width*length_minimap
+            y_vp = self.viewport[0][0]/movie_height*length_minimap
+            painter.drawRect(x+x_vp, y+y_vp, length + 0, height + 0)
         return image
 
 
