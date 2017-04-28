@@ -794,6 +794,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         general_grid.addWidget(self.dynamic_oversampling, 2, 1)
         self.high_oversampling = QtGui.QCheckBox('high oversampling')
         general_grid.addWidget(self.high_oversampling, 3, 1)
+        self.minimap = QtGui.QCheckBox('show minimap')
+        general_grid.addWidget(self.minimap,4, 1)
+        self.minimap.stateChanged.connect(self.update_scene)
         # Contrast
         contrast_groupbox = QtGui.QGroupBox('Contrast')
         vbox.addWidget(contrast_groupbox)
@@ -874,6 +877,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.update_scene)
         scalebar_grid.addWidget(self.scalebar, 1, 1)
+        self.scalebar_text = QtGui.QCheckBox('Print scale bar length')
+        self.scalebar_text.stateChanged.connect(self.update_scene)
+        scalebar_grid.addWidget(self.scalebar_text, 2, 0)
         self._silent_oversampling_update = False
 
     def on_oversampling_changed(self, value):
@@ -1322,7 +1328,32 @@ class View(QtGui.QLabel):
             x = self.width() - length_displaypxl - 20
             y = self.height() - height - 20
             painter.drawRect(x, y, length_displaypxl + 0, height + 0)
+            if self.window.display_settings_dialog.scalebar_text.isChecked():
+                font = painter.font()
+                font.setPixelSize(20)
+                painter.setFont(font)
+                painter.setPen(QtGui.QColor('white'))
+                painter.drawText(x, y-2*height, length_displaypxl + 0, 2*height + 0, QtCore.Qt.AlignCenter,str(scalebar)+'nm')
+                print('Text checked')
         return image
+
+    def draw_minimap(self, image):
+        if self.window.display_settings_dialog.minimap.isChecked():
+            length_minimap = 100
+            height_minimap = self.height()/self.width()*100
+            #draw in the upper right corner, overview rectangle
+            x = self.width() - length_minimap - 20
+            y = 20
+
+            painter = QtGui.QPainter(image)
+            painter.setPen(QtGui.QColor('white'))
+            #painter.setBrush(QtGui.QBrush(QtGui.QColor('white')))
+
+            painter.drawRect(x, y, length_minimap + 0, height_minimap + 0)
+        return image
+
+
+
 
     def draw_scene(self, viewport, autoscale=False, use_cache=False, picks_only=False):
         if not picks_only:
@@ -1330,6 +1361,7 @@ class View(QtGui.QLabel):
             qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
             qimage = qimage.scaled(self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding)
             self.qimage_no_picks = self.draw_scalebar(qimage)
+            self.qimage_no_picks = self.draw_minimap(self.qimage_no_picks)
             dppvp = self.display_pixels_per_viewport_pixels()
             self.window.display_settings_dialog.set_zoom_silently(dppvp)
         self.qimage = self.draw_picks(self.qimage_no_picks)
@@ -2765,7 +2797,6 @@ class Window(QtGui.QMainWindow):
         pickadd_action = tools_menu.addAction('Substract pick regions')
         pickadd_action.triggered.connect(self.substract_picks)
 
-
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
         undrift_action.setShortcut('Ctrl+U')
         undrift_action.triggered.connect(self.view.undrift)
@@ -2920,8 +2951,6 @@ class Window(QtGui.QMainWindow):
         print('Channels combined')
         self.view.zoom_in()
         self.view.zoom_out()
-
-
 
     def save_pick_properties(self):
         channel = self.view.get_channel('Save localizations')
