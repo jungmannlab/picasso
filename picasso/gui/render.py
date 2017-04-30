@@ -1107,6 +1107,7 @@ class View(QtGui.QLabel):
         self._size_hint = (768, 768)
         self.n_locs = 0
         self._picks = []
+        self._points = []
         self.index_blocks = []
         self._drift = []
         self.currentdrift = []
@@ -1161,6 +1162,13 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         if update_scene:
             self.update_scene(picks_only=True)
+
+    def add_point(self, position, update_scene=True):
+        self._points.append(position)
+        #self.update_pick_info_short()
+        print(self._points)
+        if update_scene:
+            self.update_scene(points_only=True)
 
     def add_picks(self, positions):
         for position in positions:
@@ -1315,6 +1323,41 @@ class View(QtGui.QLabel):
         painter.end()
         return image
 
+    def draw_points(self, image):
+        image = image.copy()
+        d = 20
+        painter = QtGui.QPainter(image)
+        painter.setPen(QtGui.QColor('yellow'))
+        cx = []
+        cy = []
+        ox = []
+        oy = []
+        print('content of points')
+        print(self._points)
+        oldpoint = []
+        pixelsize = self.window.display_settings_dialog.pixelsize.value()
+        for point in self._points:
+            if oldpoint != []:
+                ox, oy = self.map_to_view(*oldpoint)
+            cx, cy = self.map_to_view(*point)
+            painter.drawPoint(cx,cy)
+            painter.drawLine(cx,cy,cx+d/2,cy)
+            painter.drawLine(cx,cy,cx,cy+d/2)
+            painter.drawLine(cx,cy,cx-d/2,cy)
+            painter.drawLine(cx,cy,cx,cy-d/2)
+            if oldpoint != []:
+                painter.drawLine(cx,cy,ox,oy)
+                font = painter.font()
+                font.setPixelSize(20)
+                painter.setFont(font)
+                distance = float(int(np.sqrt(((oldpoint[0]-point[0])**2+(oldpoint[1]-point[1])**2))*pixelsize*100))/100
+                #painter.drawText(cx+cy/2, y-2*height, length_displaypxl + 0, 2*height + 0, QtCore.Qt.AlignCenter,str(scalebar)+'nm')
+                painter.drawText((cx+ox)/2+d/2,(cy+oy)/2+d/2, str(distance)+ ' nm')
+            oldpoint = point
+        painter.end()
+        return image
+
+
     def draw_scalebar(self, image):
         if self.window.display_settings_dialog.scalebar_groupbox.isChecked():
             pixelsize = self.window.display_settings_dialog.pixelsize.value()
@@ -1334,7 +1377,6 @@ class View(QtGui.QLabel):
                 painter.setFont(font)
                 painter.setPen(QtGui.QColor('white'))
                 painter.drawText(x, y-2*height, length_displaypxl + 0, 2*height + 0, QtCore.Qt.AlignCenter,str(scalebar)+'nm')
-                print('Text checked')
         return image
 
     def draw_minimap(self, image):
@@ -1359,7 +1401,7 @@ class View(QtGui.QLabel):
 
 
 
-    def draw_scene(self, viewport, autoscale=False, use_cache=False, picks_only=False):
+    def draw_scene(self, viewport, autoscale=False, use_cache=False, picks_only=False, points_only=False):
         if not picks_only:
             self.viewport = self.adjust_viewport_to_view(viewport)
             qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
@@ -1369,6 +1411,7 @@ class View(QtGui.QLabel):
             dppvp = self.display_pixels_per_viewport_pixels()
             self.window.display_settings_dialog.set_zoom_silently(dppvp)
         self.qimage = self.draw_picks(self.qimage_no_picks)
+        self.qimage = self.draw_points(self.qimage)
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(pixmap)
         self.window.update_info()
@@ -1582,6 +1625,18 @@ class View(QtGui.QLabel):
                 event.accept()
             else:
                 event.ignore()
+        elif self._mode == 'Measure':
+            if event.button() == QtCore.Qt.LeftButton:
+                x, y = self.map_to_movie(event.pos())
+                self.add_point((x, y))
+                event.accept()
+            elif event.button() == QtCore.Qt.RightButton:
+                x, y = self.map_to_movie(event.pos())
+                self.remove_points((x, y))
+                event.accept()
+            else:
+                event.ignore()
+
 
     def movie_size(self):
         movie_height = self.max_movie_height()
@@ -2157,6 +2212,10 @@ class View(QtGui.QLabel):
         self._picks = []
         self.add_picks(new_picks)
 
+    def remove_points(self, position):
+        self._points = []
+        self.update_scene()
+
     def render_scene(self, autoscale=False, use_cache=False, cache=True, viewport=None):
         kwargs = self.get_render_kwargs(viewport=viewport)
         n_channels = len(self.locs)
@@ -2632,11 +2691,11 @@ class View(QtGui.QLabel):
     def update_pick_info_short(self):
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
 
-    def update_scene(self, viewport=None, autoscale=False, use_cache=False, picks_only=False):
+    def update_scene(self, viewport=None, autoscale=False, use_cache=False, picks_only=False, points_only=False):
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
-            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache, picks_only=picks_only)
+            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache, picks_only=picks_only,points_only=points_only)
             self.update_cursor()
 
     def viewport_center(self, viewport=None):
@@ -2767,6 +2826,9 @@ class Window(QtGui.QMainWindow):
         pick_tool_action = tools_actiongroup.addAction(QtGui.QAction('Pick', tools_menu, checkable=True))
         pick_tool_action.setShortcut('Ctrl+P')
         tools_menu.addAction(pick_tool_action)
+        measure_tool_action = tools_actiongroup.addAction(QtGui.QAction('Measure', tools_menu, checkable=True))
+        measure_tool_action.setShortcut('Ctrl+M')
+        tools_menu.addAction(measure_tool_action)
         tools_actiongroup.triggered.connect(self.view.set_mode)
         tools_menu.addSeparator()
         pick_similar_action = tools_menu.addAction('Pick similar')
