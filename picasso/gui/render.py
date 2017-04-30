@@ -857,29 +857,33 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.blur_methods = {points_button: None, smooth_button: 'smooth',
                              convolve_button: 'convolve', gaussian_button: 'gaussian'}
         # Scale bar
+        # Camera_parameters
+        camera_groupbox = QtGui.QGroupBox('Camera')
+        self.camera_grid = QtGui.QGridLayout(camera_groupbox)
+        self.camera_grid.addWidget(QtGui.QLabel('Pixel Size:'), 0, 0)
+        self.pixelsize = QtGui.QDoubleSpinBox()
+        self.pixelsize.setRange(1, 1000000000)
+        self.pixelsize.setValue(130)
+        self.pixelsize.setKeyboardTracking(False)
+        self.pixelsize.valueChanged.connect(self.update_scene)
+        self.camera_grid.addWidget(self.pixelsize, 0, 1)
+        vbox.addWidget(camera_groupbox)
         self.scalebar_groupbox = QtGui.QGroupBox('Scale Bar')
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
         scalebar_grid = QtGui.QGridLayout(self.scalebar_groupbox)
-        scalebar_grid.addWidget(QtGui.QLabel('Pixel Size:'), 0, 0)
-        self.pixelsize = QtGui.QDoubleSpinBox()
-        self.pixelsize.setRange(1, 1000000000)
-        self.pixelsize.setValue(160)
-        self.pixelsize.setKeyboardTracking(False)
-        self.pixelsize.valueChanged.connect(self.update_scene)
-        scalebar_grid.addWidget(self.pixelsize, 0, 1)
-        scalebar_grid.addWidget(QtGui.QLabel('Scale Bar Length (nm):'), 1, 0)
+        scalebar_grid.addWidget(QtGui.QLabel('Scale Bar Length (nm):'), 0, 0)
         self.scalebar = QtGui.QDoubleSpinBox()
         self.scalebar.setRange(0.0001, 10000000000)
         self.scalebar.setValue(500)
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.update_scene)
-        scalebar_grid.addWidget(self.scalebar, 1, 1)
+        scalebar_grid.addWidget(self.scalebar, 0, 1)
         self.scalebar_text = QtGui.QCheckBox('Print scale bar length')
         self.scalebar_text.stateChanged.connect(self.update_scene)
-        scalebar_grid.addWidget(self.scalebar_text, 2, 0)
+        scalebar_grid.addWidget(self.scalebar_text, 1, 0)
         self._silent_oversampling_update = False
 
     def on_oversampling_changed(self, value):
@@ -1165,8 +1169,6 @@ class View(QtGui.QLabel):
 
     def add_point(self, position, update_scene=True):
         self._points.append(position)
-        #self.update_pick_info_short()
-        print(self._points)
         if update_scene:
             self.update_scene(points_only=True)
 
@@ -1332,8 +1334,6 @@ class View(QtGui.QLabel):
         cy = []
         ox = []
         oy = []
-        print('content of points')
-        print(self._points)
         oldpoint = []
         pixelsize = self.window.display_settings_dialog.pixelsize.value()
         for point in self._points:
@@ -1390,7 +1390,7 @@ class View(QtGui.QLabel):
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QColor('white'))
             painter.drawRect(x, y, length_minimap + 0, height_minimap + 0)
-            painter.setPen(QtGui.QColor('white'))
+            painter.setPen(QtGui.QColor('yellow'))
             length = self.viewport_width()/movie_width*length_minimap
             height = self.viewport_height()/movie_height*height_minimap
             x_vp = self.viewport[0][1]/movie_width*length_minimap
@@ -1520,7 +1520,6 @@ class View(QtGui.QLabel):
             y_cord_old = np.array([_[1] for _ in oldpicks])
 
             distances = np.sum((euclidean_distances(oldpicks, self._picks)<diameter/2)*1,axis=1)>=1
-            print(distances)
             filtered_list = [i for (i, v) in zip(oldpicks, distances) if not v]
 
             x_cord_new = np.array([_[0] for _ in filtered_list])
