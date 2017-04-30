@@ -1352,7 +1352,7 @@ class View(QtGui.QLabel):
                 painter.setFont(font)
                 distance = float(int(np.sqrt(((oldpoint[0]-point[0])**2+(oldpoint[1]-point[1])**2))*pixelsize*100))/100
                 #painter.drawText(cx+cy/2, y-2*height, length_displaypxl + 0, 2*height + 0, QtCore.Qt.AlignCenter,str(scalebar)+'nm')
-                painter.drawText((cx+ox)/2+d/2,(cy+oy)/2+d/2, str(distance)+ ' nm')
+                painter.drawText((cx+ox)/2+d,(cy+oy)/2+d, str(distance)+ ' nm')
             oldpoint = point
         painter.end()
         return image
