@@ -25,6 +25,8 @@ from . import imageprocess as _imageprocess
 from threading import Thread as _Thread
 import time as _time
 from tqdm import tqdm as _tqdm
+from numpy.lib.recfunctions import stack_arrays
+
 
 
 def get_index_blocks(locs, info, size, callback=None):
@@ -377,6 +379,60 @@ def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average', remove
         elif combine_mode == 'refit':
             pass    # TODO
     return linked_locs
+
+
+
+def weighted_variance(locs):
+    n = len(locs)
+    w = locs.photons
+    x = locs.x
+    y = locs.y
+    xWbarx = _np.average(locs.x,weights = w)
+    xWbary = _np.average(locs.y,weights = w)
+    wbarx = _np.mean(locs.lpx)
+    wbary = _np.mean(locs.lpy)
+    variance_x = n/((n-1)*sum(w)**2)*(sum((w*x-wbarx*xWbarx)**2)-2*xWbarx*sum((w-wbarx)*(w*x-wbarx*xWbarx))+xWbarx**2*sum((w-wbarx)**2))
+    variance_y = n/((n-1)*sum(w)**2)*(sum((w*y-wbary*xWbary)**2)-2*xWbary*sum((w-wbary)*(w*y-wbary*xWbary))+xWbary**2*sum((w-wbary)**2))
+    return variance_x, variance_y
+
+
+def cluster(locs):
+    print('Clustering localizations....')
+    clustered_locs = []
+    for group in _np.unique(locs['group']):
+        print(group)
+        temp = locs[locs['group']==group]
+        cluster = _np.unique(temp['cluster'])
+        n_cluster = len(cluster)
+        mean_frame = _np.zeros(n_cluster)
+        std_frame = _np.zeros(n_cluster)
+        com_x = _np.zeros(n_cluster)
+        com_y = _np.zeros(n_cluster)
+        std_x = _np.zeros(n_cluster)
+        std_y = _np.zeros(n_cluster)
+        n = _np.zeros(n_cluster, dtype=_np.int32)
+        for i, clusterval in enumerate(cluster):
+            cluster_locs = temp[temp['cluster']== clusterval]
+            mean_frame[i] = _np.mean(cluster_locs.frame)
+            com_x[i] = _np.average(cluster_locs.x,weights = cluster_locs.photons)
+            com_y[i] = _np.average(cluster_locs.y,weights = cluster_locs.photons)
+            std_frame[i] = _np.std(cluster_locs.frame)
+            variance_x, variance_y = weighted_variance(cluster_locs)
+            std_x[i] = variance_x
+            std_y[i] = variance_y
+            n[i] = len(cluster_locs)
+        clusters = _np.rec.array((cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
+                                 dtype=[('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
+                                 ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('n', 'i4')])
+        clustered_locs.append(clusters)
+
+    clustered_locs = stack_arrays(clustered_locs, asrecarray=True, usemask=False)
+    print(clustered_locs)
+
+    return clustered_locs
+
+
+
 
 
 @_numba.jit(nopython=True)
