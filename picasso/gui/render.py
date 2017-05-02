@@ -617,19 +617,18 @@ class ClusterDialog_2D(QtGui.QDialog):
         dialog.n_clusters_spin.setValue(n_clusters)
 
         fig = dialog.figure
-        ax1 = fig.add_subplot(121, projection='3d')
-        ax2 = fig.add_subplot(122, projection='3d')
-        dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
+        ax1 = fig.add_subplot(121)
+        ax2 = fig.add_subplot(122)
+        dialog.label.setText("2D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
 
         print('Mode 1')
-        pixelsize = 130
         locs = all_picked_locs[current]
         locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
         est = KMeans(n_clusters=n_clusters)
 
-        scaled_locs = lib.append_to_rec(locs,locs['x']*pixelsize,'x_scaled')
-        scaled_locs = lib.append_to_rec(scaled_locs,locs['y']*pixelsize,'y_scaled')
+        scaled_locs = lib.append_to_rec(locs,locs['x'],'x_scaled')
+        scaled_locs = lib.append_to_rec(scaled_locs,locs['y'],'y_scaled')
 
         X = np.asarray(scaled_locs['x_scaled'])
         Y = np.asarray(scaled_locs['y_scaled'])
@@ -662,10 +661,9 @@ class ClusterDialog_2D(QtGui.QDialog):
         ax2.set_xlabel('X [nm]')
         ax2.set_ylabel('Y [nm]')
 
-        ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-        ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-        ax1.w_zaxis.set_pane_color((0, 0, 0, 1.0))
-        plt.gca().patch.set_facecolor('black')
+        #ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+        #ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+        #plt.gca().patch.set_facecolor('black')
 
         result = dialog.exec_()
 
@@ -3017,7 +3015,7 @@ class Window(QtGui.QMainWindow):
         dataset_action = tools_menu.addAction('Datasets')
         dataset_action.triggered.connect(self.dataset_dialog.show)
         tools_menu.addSeparator()
-        cluster_action = tools_menu.addAction('Analyze Clusters (3D)')
+        cluster_action = tools_menu.addAction('Analyze Clusters')
         cluster_action.triggered.connect(self.view.analyze_cluster)
         pickadd_action = tools_menu.addAction('Substract pick regions')
         pickadd_action.triggered.connect(self.substract_picks)
