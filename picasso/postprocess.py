@@ -417,9 +417,9 @@ def cluster(locs):
             com_x[i] = _np.average(cluster_locs.x,weights = cluster_locs.photons)
             com_y[i] = _np.average(cluster_locs.y,weights = cluster_locs.photons)
             std_frame[i] = _np.std(cluster_locs.frame)
-            variance_x, variance_y = weighted_variance(cluster_locs)
-            std_x[i] = variance_x
-            std_y[i] = variance_y
+            #variance_x, variance_y = weighted_variance(cluster_locs)
+            std_x[i] = _np.std(cluster_locs.x)/_np.sqrt(len(cluster_locs))
+            std_y[i] = _np.std(cluster_locs.y)/_np.sqrt(len(cluster_locs))
             n[i] = len(cluster_locs)
         clusters = _np.rec.array((cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
                                  dtype=[('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
