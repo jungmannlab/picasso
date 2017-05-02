@@ -2081,8 +2081,7 @@ class View(QtGui.QLabel):
 
                 if self._picks:
                     for i, pick in enumerate(self._picks):
-                        print(all_picked_locs)
-                        if hasattr(all_picked_locs,'z'):
+                        if hasattr(all_picked_locs[0],'z'):
                             reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors)
                         else:
                             reply = ClusterDialog_2D.getParams(all_picked_locs, i, len(self._picks), 0, colors)
@@ -2100,11 +2099,9 @@ class View(QtGui.QLabel):
                         'Enter number of clusters:',10)
 
                     for i, pick in enumerate(self._picks):
-                        print('This Clustermode')
                         reply = 3
-
                         while reply == 3:
-                            if hasattr(all_picked_locs,'z'):
+                            if hasattr(all_picked_locs[0],'z'):
                                 reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
                             else:
                                 reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog_2D.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
