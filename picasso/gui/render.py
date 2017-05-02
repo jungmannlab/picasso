@@ -535,7 +535,160 @@ class ClusterDialog(QtGui.QDialog):
 
         return dialog.result, dialog.n_clusters_spin.value(), labeled_locs, clustered_locs
 
+class ClusterDialog_2D(QtGui.QDialog):
 
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Structure')
+        self.layout_grid = QtGui.QGridLayout(self)
+
+        self.figure = plt.figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.label = QtGui.QLabel()
+
+        self.layout_grid.addWidget(self.label,0,0,1,5)
+        self.layout_grid.addWidget(self.canvas,1,0,1,5)
+
+        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Yes | QtGui.QDialogButtonBox.No | QtGui.QDialogButtonBox.Cancel,
+                                              QtCore.Qt.Horizontal,
+                                              self)
+        self.layout_grid.addWidget(self.buttons,2,0,1,3)
+        self.layout_grid.addWidget(QtGui.QLabel('No clusters:'),2,3,1,1)
+
+        self.n_clusters_spin = QtGui.QSpinBox()
+
+        self.layout_grid.addWidget(self.n_clusters_spin,2,4,1,1)
+
+
+        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
+
+        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
+
+        self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
+
+        self.start_clusters = 0
+        self.n_clusters_spin.valueChanged.connect(self.on_cluster)
+        self.n_lines = 4
+        self.layout_grid.addWidget(QtGui.QLabel('Select'),3,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('X-Center'),3,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Y-Center'),3,2,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Counts'),3,3,1,1)
+        self.checks = []
+
+    def add_clusters(self, element, x_mean, y_mean):
+        c = QtGui.QCheckBox(str(element[0]+1))
+
+        self.layout_grid.addWidget(c,self.n_lines,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(x_mean)),self.n_lines,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(y_mean)),self.n_lines,2,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(element[1])),self.n_lines,3,1,1)
+        self.n_lines +=1
+        self.checks.append(c)
+        self.checks[-1].setChecked(True)
+
+    def on_accept(self):
+        self.setResult(1)
+        self.result = 1
+        self.close()
+
+    def on_reject(self):
+        self.setResult(0)
+        self.result = 0
+        self.close()
+
+    def on_cancel(self):
+        self.setResult(2)
+        self.result = 2
+        self.close()
+
+    def on_cluster(self):
+        if self.n_clusters_spin.value() != self.start_clusters: #only execute once the cluster number is changed
+            self.setResult(3)
+            self.result = 3
+            self.close()
+
+    @staticmethod
+    def getParams(all_picked_locs, current, length, n_clusters, color_sys):
+
+        dialog = ClusterDialog_2D(None)
+
+        dialog.start_clusters = n_clusters
+        dialog.n_clusters_spin.setValue(n_clusters)
+
+        fig = dialog.figure
+        ax1 = fig.add_subplot(121, projection='3d')
+        ax2 = fig.add_subplot(122, projection='3d')
+        dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
+
+        print('Mode 1')
+        pixelsize = 130
+        locs = all_picked_locs[current]
+        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+
+        est = KMeans(n_clusters=n_clusters)
+
+        scaled_locs = lib.append_to_rec(locs,locs['x']*pixelsize,'x_scaled')
+        scaled_locs = lib.append_to_rec(scaled_locs,locs['y']*pixelsize,'y_scaled')
+
+        X = np.asarray(scaled_locs['x_scaled'])
+        Y = np.asarray(scaled_locs['y_scaled'])
+
+        est.fit(np.stack((X,Y),axis=1))
+
+        labels = est.labels_
+
+        counts = list(Counter(labels).items())
+        #labeled_locs = lib.append_to_rec(labeled_locs,labels,'cluster')
+
+        ax1.scatter(locs['x'],locs['y'], c=labels.astype(np.float))
+
+        ax1.set_xlabel('X')
+        ax1.set_ylabel('Y')
+
+        counts = list(Counter(labels).items())
+        cent = est.cluster_centers_
+
+        ax2.scatter(cent[:, 0], cent[:, 1])
+        for element in counts:
+            x_mean = cent[element[0], 0]
+            y_mean = cent[element[0], 1]
+            dialog.add_clusters(element,x_mean,y_mean)
+            ax2.text(x_mean,y_mean, element[1], fontsize=12)
+
+        ax1.set_xlabel('X [Px]')
+        ax1.set_ylabel('Y [Px]')
+
+        ax2.set_xlabel('X [nm]')
+        ax2.set_ylabel('Y [nm]')
+
+        ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+        ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+        ax1.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+        plt.gca().patch.set_facecolor('black')
+
+        result = dialog.exec_()
+
+        checks = [not _.isChecked() for _ in dialog.checks]
+        checks = np.asarray(np.where(checks))+1
+        checks = checks[0]
+
+        labels += 1
+        labels = [0 if x in checks else x for x in labels]
+        labels = np.asarray(labels)
+
+        labeled_locs = lib.append_to_rec(scaled_locs,labels,'cluster')
+        labeled_locs_new_group = labeled_locs.copy()
+        power = np.round(n_clusters/10)+1
+        labeled_locs_new_group['group']=labeled_locs_new_group['group']*10**power+labeled_locs_new_group['cluster']
+
+        #Combine clustered locs
+        clustered_locs = []
+        for element in np.unique(labels):
+            if element != 0:
+                clustered_locs.append(labeled_locs_new_group[labeled_locs['cluster']==element])
+
+        return dialog.result, dialog.n_clusters_spin.value(), labeled_locs, clustered_locs
 
 class LinkDialog(QtGui.QDialog):
 
@@ -1911,6 +2064,7 @@ class View(QtGui.QLabel):
 
     def analyze_cluster(self):
         print('Analyze cluster')
+
         channel = self.get_channel3d('Show Pick 3D')
         removelist = []
         saved_locs = []
@@ -1929,8 +2083,11 @@ class View(QtGui.QLabel):
 
                 if self._picks:
                     for i, pick in enumerate(self._picks):
-
-                        reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors)
+                        print(all_picked_locs)
+                        if hasattr(all_picked_locs,'z'):
+                            reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors)
+                        else:
+                            reply = ClusterDialog_2D.getParams(all_picked_locs, i, len(self._picks), 0, colors)
                         if reply == 1:
                             print('Accepted')
                         elif reply == 2:
@@ -1949,7 +2106,10 @@ class View(QtGui.QLabel):
                         reply = 3
 
                         while reply == 3:
-                            reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
+                            if hasattr(all_picked_locs,'z'):
+                                reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
+                            else:
+                                reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog_2D.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
                             n_clusters = n_clusters_new
 
                         if reply == 1:
