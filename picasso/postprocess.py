@@ -13,6 +13,7 @@ import numba as _numba
 from sklearn.cluster import DBSCAN as _DBSCAN
 from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
+from scipy.spatial import distance
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import matplotlib.pyplot as _plt
@@ -26,6 +27,8 @@ from threading import Thread as _Thread
 import time as _time
 from tqdm import tqdm as _tqdm
 from numpy.lib.recfunctions import stack_arrays
+
+
 
 
 
@@ -466,6 +469,60 @@ def cluster(locs):
     clustered_locs = stack_arrays(clustered_locs, asrecarray=True, usemask=False)
     print(clustered_locs)
 
+    return clustered_locs
+
+
+
+#some_pt = (1, 2)
+
+#a[distance.cdist([some_pt], a).argmin()]
+
+def clusterdist(locs):
+    print('Calculating distances....')
+    pixelsize = 130 # for now re-write pixelsize
+    clustered_locs = []
+    if hasattr(locs[0], 'z'):
+        print('z-mode')
+        for group in _np.unique(locs['group']):
+            print(group)
+            temp = locs[locs['group']==group]
+            cluster = _np.unique(temp['cluster'])
+            n_cluster = len(cluster)
+            mean_frame = temp['mean_frame']
+            std_frame = temp['std_frame']
+            com_x = temp['x']
+            com_y = temp['y']
+            com_z = temp['z']
+            std_x = temp['lpx']
+            std_y = temp['lpy']
+            std_z = temp['lpy']
+            group_id = temp['group']
+            n = temp['n']
+            min_dist = _np.zeros(n_cluster)
+            min_distz = _np.zeros(n_cluster)
+            for i, clusterval in enumerate(cluster):
+                #find nearest neighbor for cluster
+                group_locs = temp[temp['cluster']!= clusterval]
+                cluster_locs = temp[temp['cluster']== clusterval]
+                ref_point = _np.array([cluster_locs.x, cluster_locs.y, cluster_locs.z/pixelsize])
+                all_points = _np.array([group_locs.x, group_locs.y, group_locs.z/pixelsize])
+                distances = distance.cdist(ref_point.transpose(), all_points.transpose())
+                min_dist[i] = _np.amin(distances*pixelsize)
+
+                #Calculate again with penalizing z
+
+                ref_point_z = _np.array([cluster_locs.x, cluster_locs.y, cluster_locs.z])
+                all_points_z = _np.array([group_locs.x, group_locs.y, group_locs.z])
+                distances_z = distance.cdist(ref_point_z.transpose(), all_points_z.transpose())
+                min_distz[i] = distances[0][_np.argmin(distances_z)]*pixelsize
+
+
+            clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n, min_dist, min_distz),
+                                     dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                                     ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('lpz', 'f4'), ('n', 'i4'), ('min_dist', 'f4'), ('mind_distz', 'f4')])
+            clustered_locs.append(clusters)
+
+    clustered_locs = stack_arrays(clustered_locs, asrecarray=True, usemask=False)
     return clustered_locs
 
 
