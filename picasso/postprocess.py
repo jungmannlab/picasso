@@ -414,6 +414,7 @@ def cluster(locs):
             std_x = _np.zeros(n_cluster)
             std_y = _np.zeros(n_cluster)
             std_z = _np.zeros(n_cluster)
+            group_id = _np.zeros(n_cluster)
             n = _np.zeros(n_cluster, dtype=_np.int32)
             for i, clusterval in enumerate(cluster):
                 cluster_locs = temp[temp['cluster']== clusterval]
@@ -427,8 +428,9 @@ def cluster(locs):
                 std_y[i] = _np.std(cluster_locs.y)/_np.sqrt(len(cluster_locs))
                 std_z[i] = _np.std(cluster_locs.z)/_np.sqrt(len(cluster_locs))
                 n[i] = len(cluster_locs)
-            clusters = _np.rec.array((cluster, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
-                                     dtype=[('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                group_id[i] = group
+            clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
+                                     dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('lpz', 'f4'), ('n', 'i4')])
             clustered_locs.append(clusters)
     else:
@@ -443,6 +445,7 @@ def cluster(locs):
             com_y = _np.zeros(n_cluster)
             std_x = _np.zeros(n_cluster)
             std_y = _np.zeros(n_cluster)
+            group_id = _np.zeros(n_cluster)
             n = _np.zeros(n_cluster, dtype=_np.int32)
             for i, clusterval in enumerate(cluster):
                 cluster_locs = temp[temp['cluster']== clusterval]
@@ -454,8 +457,9 @@ def cluster(locs):
                 std_x[i] = _np.std(cluster_locs.x)/_np.sqrt(len(cluster_locs))
                 std_y[i] = _np.std(cluster_locs.y)/_np.sqrt(len(cluster_locs))
                 n[i] = len(cluster_locs)
-            clusters = _np.rec.array((cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
-                                     dtype=[('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
+                group_id[i] = group
+            clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
+                                     dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('n', 'i4')])
             clustered_locs.append(clusters)
 
