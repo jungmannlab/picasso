@@ -399,32 +399,65 @@ def weighted_variance(locs):
 def cluster(locs):
     print('Clustering localizations....')
     clustered_locs = []
-    for group in _np.unique(locs['group']):
-        print(group)
-        temp = locs[locs['group']==group]
-        cluster = _np.unique(temp['cluster'])
-        n_cluster = len(cluster)
-        mean_frame = _np.zeros(n_cluster)
-        std_frame = _np.zeros(n_cluster)
-        com_x = _np.zeros(n_cluster)
-        com_y = _np.zeros(n_cluster)
-        std_x = _np.zeros(n_cluster)
-        std_y = _np.zeros(n_cluster)
-        n = _np.zeros(n_cluster, dtype=_np.int32)
-        for i, clusterval in enumerate(cluster):
-            cluster_locs = temp[temp['cluster']== clusterval]
-            mean_frame[i] = _np.mean(cluster_locs.frame)
-            com_x[i] = _np.average(cluster_locs.x,weights = cluster_locs.photons)
-            com_y[i] = _np.average(cluster_locs.y,weights = cluster_locs.photons)
-            std_frame[i] = _np.std(cluster_locs.frame)
-            #variance_x, variance_y = weighted_variance(cluster_locs)
-            std_x[i] = _np.std(cluster_locs.x)/_np.sqrt(len(cluster_locs))
-            std_y[i] = _np.std(cluster_locs.y)/_np.sqrt(len(cluster_locs))
-            n[i] = len(cluster_locs)
-        clusters = _np.rec.array((cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
-                                 dtype=[('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
-                                 ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('n', 'i4')])
-        clustered_locs.append(clusters)
+    if hasattr(locs[0], 'z'):
+        print('z-mode')
+        for group in _np.unique(locs['group']):
+            print(group)
+            temp = locs[locs['group']==group]
+            cluster = _np.unique(temp['cluster'])
+            n_cluster = len(cluster)
+            mean_frame = _np.zeros(n_cluster)
+            std_frame = _np.zeros(n_cluster)
+            com_x = _np.zeros(n_cluster)
+            com_y = _np.zeros(n_cluster)
+            com_z = _np.zeros(n_cluster)
+            std_x = _np.zeros(n_cluster)
+            std_y = _np.zeros(n_cluster)
+            std_z = _np.zeros(n_cluster)
+            n = _np.zeros(n_cluster, dtype=_np.int32)
+            for i, clusterval in enumerate(cluster):
+                cluster_locs = temp[temp['cluster']== clusterval]
+                mean_frame[i] = _np.mean(cluster_locs.frame)
+                com_x[i] = _np.average(cluster_locs.x,weights = cluster_locs.photons)
+                com_y[i] = _np.average(cluster_locs.y,weights = cluster_locs.photons)
+                com_z[i] = _np.average(cluster_locs.z,weights = cluster_locs.photons)
+                std_frame[i] = _np.std(cluster_locs.frame)
+                #variance_x, variance_y = weighted_variance(cluster_locs)
+                std_x[i] = _np.std(cluster_locs.x)/_np.sqrt(len(cluster_locs))
+                std_y[i] = _np.std(cluster_locs.y)/_np.sqrt(len(cluster_locs))
+                std_z[i] = _np.std(cluster_locs.z)/_np.sqrt(len(cluster_locs))
+                n[i] = len(cluster_locs)
+            clusters = _np.rec.array((cluster, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
+                                     dtype=[('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                                     ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('lpz', 'f4'), ('n', 'i4')])
+            clustered_locs.append(clusters)
+    else:
+        for group in _np.unique(locs['group']):
+            print(group)
+            temp = locs[locs['group']==group]
+            cluster = _np.unique(temp['cluster'])
+            n_cluster = len(cluster)
+            mean_frame = _np.zeros(n_cluster)
+            std_frame = _np.zeros(n_cluster)
+            com_x = _np.zeros(n_cluster)
+            com_y = _np.zeros(n_cluster)
+            std_x = _np.zeros(n_cluster)
+            std_y = _np.zeros(n_cluster)
+            n = _np.zeros(n_cluster, dtype=_np.int32)
+            for i, clusterval in enumerate(cluster):
+                cluster_locs = temp[temp['cluster']== clusterval]
+                mean_frame[i] = _np.mean(cluster_locs.frame)
+                com_x[i] = _np.average(cluster_locs.x,weights = cluster_locs.photons)
+                com_y[i] = _np.average(cluster_locs.y,weights = cluster_locs.photons)
+                std_frame[i] = _np.std(cluster_locs.frame)
+                #variance_x, variance_y = weighted_variance(cluster_locs)
+                std_x[i] = _np.std(cluster_locs.x)/_np.sqrt(len(cluster_locs))
+                std_y[i] = _np.std(cluster_locs.y)/_np.sqrt(len(cluster_locs))
+                n[i] = len(cluster_locs)
+            clusters = _np.rec.array((cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
+                                     dtype=[('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
+                                     ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('n', 'i4')])
+            clustered_locs.append(clusters)
 
     clustered_locs = stack_arrays(clustered_locs, asrecarray=True, usemask=False)
     print(clustered_locs)
