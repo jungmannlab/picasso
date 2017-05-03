@@ -275,30 +275,14 @@ class PlotDialog(QtGui.QDialog):
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.label = QtGui.QLabel()
 
-        #self.acceptButton = QtGui.QPushButton('Accept')
-        #self.discardButton = QtGui.QPushButton('Discard')
-        #self.cancelButton = QtGui.QPushButton('Cancel')
         layout_grid.addWidget(self.label,0,0,1,3)
         layout_grid.addWidget(self.canvas,1,0,1,3)
-        #layout_grid.addWidget(self.acceptButton,1,0)
-        #layout_grid.addWidget(self.discardButton,1,1)
-        #layout_grid.addWidget(self.cancelButton,1,2)
-
-        #self.acceptButton.connect(self.getValues)
-        #self.discardButton.connect(self.getValues)
-        #self.cancelButton.connect(self.getValues)
 
         # OK and Cancel buttons
         self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Yes | QtGui.QDialogButtonBox.No | QtGui.QDialogButtonBox.Cancel,
                                               QtCore.Qt.Horizontal,
                                               self)
         layout_grid.addWidget(self.buttons)
-        #self.buttons.accepted.connect(self.accept)
-        #self.buttons.rejected.connect(self.reject)
-        #self.buttons.rejected.connect(self.setResult(2))
-        #self.buttons.clicked(QtGui.QDialogButtonBox.Cancel).connect(self.setResult(2))
-
-        #self.buttonBox.button(QtGui.QDialogButtonBox.Reset).clicked.connect(foo)
 
         self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
 
