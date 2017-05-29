@@ -224,5 +224,6 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
 
 
 def localize(movie, info, parameters):
+    print('localizing')
     identifications = identify(movie, parameters)
     return fit(movie, info, identifications, parameters['Box Size'])

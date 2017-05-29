@@ -16,7 +16,7 @@ from PyQt4 import QtCore, QtGui
 import time
 import numpy as np
 import traceback
-from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG
+from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
@@ -410,7 +410,7 @@ class ParametersDialog(QtGui.QDialog):
         fit_grid = QtGui.QGridLayout(fit_groupbox)
         fit_grid.addWidget(QtGui.QLabel('Method:'), 0, 0)
         self.fit_method = QtGui.QComboBox()
-        self.fit_method.addItems(['MLE, integrated Gaussian', 'LQ, Gaussian'])
+        self.fit_method.addItems(['MLE, integrated Gaussian', 'LQ, Gaussian','Average of ROI'])
         fit_grid.addWidget(self.fit_method, 0, 1)
         fit_stack = QtGui.QStackedWidget()
         fit_grid.addWidget(fit_stack, 1, 0, 1, 2)
@@ -691,6 +691,8 @@ class Window(QtGui.QMainWindow):
         open_action.setShortcut('Ctrl+O')
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
+        load_identification_action = file_menu.addAction('Load identifications')
+        load_identification_action.triggered.connect(self.open_identifications)
         save_action = file_menu.addAction('Save localizations')
         save_action.setShortcut('Ctrl+S')
         save_action.triggered.connect(self.save_locs_dialog)
@@ -805,6 +807,68 @@ class Window(QtGui.QMainWindow):
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
             self.status_bar.showMessage('Opened movie in {:.2f} seconds.'.format(dt))
+
+    def open_identifications(self):
+        path = QtGui.QFileDialog.getOpenFileName(self,  'Open identifications', filter='*.yaml')
+        if path:
+            self.load_identifactions(path)
+
+    def load_identifactions(self,path):
+        #result = io.load_movie(path, prompt_info=self.prompt_info)
+        try:
+            with open(path, 'r') as f:
+                regions = yaml.load(f)
+            self._picks = regions['Centers']
+            maxframes = int(self.info[0]['Frames'])
+            print(self._picks)
+
+
+            #frames = info[0]['Frames']
+            #print(info[0]['Frames'])
+            #print(locs['x'])
+            #print('Converting to identifications')
+            #identifications = [[]]
+
+            #size_array = len(locs)
+            #identifications = np.recarray((size_array*frames,4), dtype=[('frames', int), ('x', float), ('y', float), ('net_gradient', float)])
+            #for row, i in enumerate(locs):
+            #    print(locs)
+            #    identifications[(i*frames):(i+1)*frames] = [row['x'],row['y'],locs['net_gradient']]
+
+            #data = [(locs['frame'][j],locs['x'][j],locs['y'][j],locs['net_gradient'][j]) for j, element in enumerate(locs['frame'])]
+            #identifications = np.array(data, dtype=[('frames', int), ('x', float), ('y', float), ('net_gradient', float)])
+            #print(identifications)
+
+
+                #ids_list_of_lists = [_.result() for _ in futures]
+                #ids_list = _chain(*ids_list_of_lists)
+                #ids = _np.hstack(ids_list).view(_np.recarray)
+                #ids.sort(kind='mergesort', order='frame')
+            #data = [(locs['frame'][j],locs['x'][j],locs['y'][j],locs['net_gradient'][j]) for j, element in enumerate(locs['frame'])]
+            data = []
+            for element in self._picks:
+                data.append([(j, element[0], element[1], 100) for j in range(maxframes)])
+            data = [item for sublist in data for item in sublist]
+            identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float)])
+            self.identifications = identifications.view(np.recarray)
+            print(self.identifications)
+
+            self.locs = None
+
+
+            print(self.parameters)
+            self.last_identification_info={'Box Size': self.parameters_dialog.box_spinbox.value(),
+                    'Min. Net Gradient': self.parameters_dialog.mng_slider.value()}
+            #self.last_identification_info['Box Size'] = self.parameters['Box Size']
+            self.ready_for_fit = True
+            self.draw_frame()
+            self.status_bar.showMessage('Created a total of {} identifications.'.format(len(self.identifications)))
+
+        except io.NoMetadataFileError:
+            return
+
+
+
 
     def prompt_info(self):
         info, save, ok = PromptInfoDialog.getMovieSpecs(self)
@@ -961,7 +1025,7 @@ class Window(QtGui.QMainWindow):
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage('Preparing fit...')
             method = self.parameters_dialog.fit_method.currentText()
-            method = {'MLE, integrated Gaussian': 'mle', 'LQ, Gaussian': 'lq'}[method]
+            method = {'MLE, integrated Gaussian': 'mle', 'LQ, Gaussian': 'lq', 'Average of ROI': 'avg'}[method]
             eps = self.parameters_dialog.convergence_criterion.value()
             max_it = self.parameters_dialog.max_it.value()
             fit_z = self.parameters_dialog.fit_z_checkbox.isChecked()
@@ -1113,6 +1177,17 @@ class FitWorker(QtCore.QThread):
                 self.progressMade.emit(current[0], N)
                 time.sleep(0.2)
             locs = gaussmle.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, iterations, self.box)
+        elif self.method == 'avg':
+            print('Average intensity')
+            #just get out the average intensity
+            fs = avgroi.fit_spots_parallel(spots, async=True)
+            n_tasks = len(fs)
+            while lib.n_futures_done(fs) < n_tasks:
+                self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
+                time.sleep(0.2)
+            theta = gausslq.fits_from_futures(fs)
+            em = self.camera_info['gain'] > 1
+            locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
         else:
             print('This should never happen...')
         self.progressMade.emit(N+1, N)
