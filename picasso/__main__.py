@@ -117,8 +117,8 @@ def _undrift(files, segmentation, display, fromfile):
             continue
         info.append(undrift_info)
         if fromfile is not None:
-            locs.x -= drift[:, 0][locs.frame]
-            locs.y -= drift[:, 1][locs.frame]
+            locs.x -= drift[:, 1][locs.frame]
+            locs.y -= drift[:, 0][locs.frame]
             if display:
                 import matplotlib.pyplot as plt
                 plt.style.use('ggplot')

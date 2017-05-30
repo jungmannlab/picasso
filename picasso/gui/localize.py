@@ -691,8 +691,8 @@ class Window(QtGui.QMainWindow):
         open_action.setShortcut('Ctrl+O')
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
-        load_identification_action = file_menu.addAction('Load identifications')
-        load_identification_action.triggered.connect(self.open_identifications)
+        load_picks_action = file_menu.addAction('Load picks')
+        load_picks_action.triggered.connect(self.open_picks)
         save_action = file_menu.addAction('Save localizations')
         save_action.setShortcut('Ctrl+S')
         save_action.triggered.connect(self.save_locs_dialog)
@@ -808,12 +808,12 @@ class Window(QtGui.QMainWindow):
             self.parameters_dialog.set_camera_parameters(self.info[0])
             self.status_bar.showMessage('Opened movie in {:.2f} seconds.'.format(dt))
 
-    def open_identifications(self):
-        path = QtGui.QFileDialog.getOpenFileName(self,  'Open identifications', filter='*.yaml')
+    def open_picks(self):
+        path = QtGui.QFileDialog.getOpenFileName(self,  'Open picks', filter='*.yaml')
         if path:
-            self.load_identifactions(path)
+            self.load_picks(path)
 
-    def load_identifactions(self,path):
+    def load_picks(self,path):
         try:
             with open(path, 'r') as f:
                 regions = yaml.load(f)
