@@ -13,6 +13,7 @@ import sys
 import traceback
 from math import ceil
 import copy
+import time
 
 import lmfit
 import matplotlib
@@ -1893,6 +1894,7 @@ class View(QtGui.QLabel):
                 for k in range(len(self.locs_paths)):
                     all_picked_locs.append(self.picked_locs(k))
                 if self._picks:
+                    t0 = time.time()
                     for i, pick in enumerate(self._picks):
                         pickindex = 0
                         fig.clf()
@@ -1919,7 +1921,11 @@ class View(QtGui.QLabel):
 
                         msgBox.setWindowTitle('Select picks')
                         msgBox.setWindowIcon(self.icon)
-                        msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
+                        dt = time.time() - t0
+                        n_removed = len(removelist)
+                        n_kept = i-n_removed
+                        n_total = len(self._picks)
+                        msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'.format(i+1,n_total,n_removed,n_kept,n_kept/(i+1)*100,dt/60,i/dt*60))
                         msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
                         msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
                         msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
@@ -1941,6 +1947,7 @@ class View(QtGui.QLabel):
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
+                    t0 = time.time()
                     for i, pick in enumerate(self._picks):
                         pickindex = 0
                         fig.clf()
@@ -1968,7 +1975,11 @@ class View(QtGui.QLabel):
 
                         msgBox.setWindowTitle('Select picks')
                         msgBox.setWindowIcon(self.icon)
-                        msgBox.setText("Keep pick No: " +str(i+1) + "  of: " +str(len(self._picks))+" ?")
+                        dt = time.time() - t0
+                        n_removed = len(removelist)
+                        n_kept = i-n_removed
+                        n_total = len(self._picks)
+                        msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'.format(i+1,n_total,n_removed,n_kept,n_kept/(i+1)*100,dt/60,i/dt*60))
                         msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
                         msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
                         msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
