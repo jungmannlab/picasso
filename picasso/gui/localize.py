@@ -814,52 +814,24 @@ class Window(QtGui.QMainWindow):
             self.load_identifactions(path)
 
     def load_identifactions(self,path):
-        #result = io.load_movie(path, prompt_info=self.prompt_info)
         try:
             with open(path, 'r') as f:
                 regions = yaml.load(f)
             self._picks = regions['Centers']
             maxframes = int(self.info[0]['Frames'])
-            print(self._picks)
-
-
-            #frames = info[0]['Frames']
-            #print(info[0]['Frames'])
-            #print(locs['x'])
-            #print('Converting to identifications')
-            #identifications = [[]]
-
-            #size_array = len(locs)
-            #identifications = np.recarray((size_array*frames,4), dtype=[('frames', int), ('x', float), ('y', float), ('net_gradient', float)])
-            #for row, i in enumerate(locs):
-            #    print(locs)
-            #    identifications[(i*frames):(i+1)*frames] = [row['x'],row['y'],locs['net_gradient']]
-
-            #data = [(locs['frame'][j],locs['x'][j],locs['y'][j],locs['net_gradient'][j]) for j, element in enumerate(locs['frame'])]
-            #identifications = np.array(data, dtype=[('frames', int), ('x', float), ('y', float), ('net_gradient', float)])
-            #print(identifications)
-
-
-                #ids_list_of_lists = [_.result() for _ in futures]
-                #ids_list = _chain(*ids_list_of_lists)
-                #ids = _np.hstack(ids_list).view(_np.recarray)
-                #ids.sort(kind='mergesort', order='frame')
-            #data = [(locs['frame'][j],locs['x'][j],locs['y'][j],locs['net_gradient'][j]) for j, element in enumerate(locs['frame'])]
+            #at some point include drift
             data = []
             for element in self._picks:
                 data.append([(j, element[0], element[1], 100) for j in range(maxframes)])
             data = [item for sublist in data for item in sublist]
             identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float)])
             self.identifications = identifications.view(np.recarray)
-            print(self.identifications)
-
             self.locs = None
 
+            self.loaded_picks = True
 
-            print(self.parameters)
             self.last_identification_info={'Box Size': self.parameters_dialog.box_spinbox.value(),
                     'Min. Net Gradient': self.parameters_dialog.mng_slider.value()}
-            #self.last_identification_info['Box Size'] = self.parameters['Box Size']
             self.ready_for_fit = True
             self.draw_frame()
             self.status_bar.showMessage('Created a total of {} identifications.'.format(len(self.identifications)))
