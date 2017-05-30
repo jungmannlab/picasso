@@ -473,3 +473,13 @@ def load_locs(path, qt_parent=None):
     locs = _np.rec.array(locs, dtype=locs.dtype)    # Convert to rec array with fields as attributes
     info = load_info(path, qt_parent=qt_parent)
     return locs, info
+
+def load_filter(path, qt_parent=None):
+    with _h5py.File(path, 'r') as locs_file:
+        try:
+            locs = locs_file['locs'][...]
+        except KeyError:
+            locs = locs_file['groups'][...]
+    locs = _np.rec.array(locs, dtype=locs.dtype)    # Convert to rec array with fields as attributes
+    info = load_info(path, qt_parent=qt_parent)
+    return locs, info

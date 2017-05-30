@@ -254,7 +254,7 @@ class Window(QtGui.QMainWindow):
 
     def open(self, path):
         try:
-            locs, self.info = io.load_locs(path, qt_parent=self)
+            locs, self.info = io.load_filter(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
         if self.locs is not None:
