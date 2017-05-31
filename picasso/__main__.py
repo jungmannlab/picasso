@@ -117,6 +117,7 @@ def _undrift(files, segmentation, display, fromfile):
             continue
         info.append(undrift_info)
         if fromfile is not None:
+            #this works for mingjies drift files but not for the own ones
             locs.x -= drift[:, 1][locs.frame]
             locs.y -= drift[:, 0][locs.frame]
             if display:

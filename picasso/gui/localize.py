@@ -820,9 +820,24 @@ class Window(QtGui.QMainWindow):
             self._picks = regions['Centers']
             maxframes = int(self.info[0]['Frames'])
             #at some point include drift
+            driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', filter='*.txt')
+            if driftpath:
+                drift = np.genfromtxt(driftpath)
             data = []
+
             for element in self._picks:
-                data.append([(j, element[0], element[1], 100) for j in range(maxframes)])
+                #drifted:
+                if driftpath:
+                    xloc = np.ones((maxframes,), dtype=np.float)*element[0]
+                    yloc = np.ones((maxframes,), dtype=np.float)*element[1]
+                    xloc += drift[:, 1]
+                    yloc += drift[:, 0]
+                    frames = np.arange(maxframes)
+                    gradient = np.arange(maxframes)
+                    temp = np.array([frames,xloc,yloc,gradient])
+                    data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
+                else:
+                        data.append([(j, element[0], element[1], 100) for j in range(maxframes)])
             data = [item for sublist in data for item in sublist]
             identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float)])
             self.identifications = identifications.view(np.recarray)
