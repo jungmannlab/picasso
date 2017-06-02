@@ -2929,6 +2929,8 @@ class Window(QtGui.QMainWindow):
         file_menu.addSeparator()
         export_txt_action = file_menu.addAction('Export as .txt for FRC')
         export_txt_action.triggered.connect(self.export_txt)
+        #export_txt_nis_action = file_menu.addAction('Export as .txt for NIS')
+        #export_txt_nis_action.triggered.connect(self.export_txt_nis)
 
         view_menu = self.menu_bar.addMenu('View')
         display_settings_action = view_menu.addAction('Display settings')
@@ -3081,6 +3083,22 @@ class Window(QtGui.QMainWindow):
                 locs = self.view.locs[channel]
                 loctxt = locs[['frame', 'x', 'y']].copy()
                 np.savetxt(path, loctxt, fmt=['%.1i', '%.5f', '%.5f'], newline='\r\n', delimiter='   ')
+
+    def export_txt_nis(self):
+        channel = self.view.get_channel('Save localizations as txt for NIS (x,y,z,channel,width,bg,length,area,frame)')
+        pixelsize = self.display_settings_dialog.pixelsize.value()
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '.nis.txt'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations as txt for NIS (x,y,z,channel,width,bg,length,area,frame)', out_path, filter='*.nis.txt')
+            if path:
+                locs = self.view.locs[channel]
+                loctxt = locs[['x','y','sx','bg','photons','frame']].copy()
+                loctxt = [(row[0]*pixelsize, row[1]*pixelsize, 1, row[2]*pixelsize, row[3], 1, row[4], row[5])  for row in loctxt]
+                with open(path, 'wb') as f:
+                    f.write(b'X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n')
+                    np.savetxt(f, loctxt, fmt=['%.2f','%.2f','%.i','%.2f','%.i','%.i','%.i','%.i'], newline='\r\n', delimiter='\t')
+                    print('Saving complete.')
 
     def load_picks(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
