@@ -364,6 +364,7 @@ class ClusterDialog(QtGui.QDialog):
         super().__init__(window)
         self.window = window
         self.setWindowTitle('Structure')
+        self.showMaximized()
         self.layout_grid = QtGui.QGridLayout(self)
 
         self.figure = plt.figure()
@@ -371,17 +372,17 @@ class ClusterDialog(QtGui.QDialog):
         self.label = QtGui.QLabel()
 
         self.layout_grid.addWidget(self.label,0,0,1,5)
-        self.layout_grid.addWidget(self.canvas,1,0,1,5)
+        self.layout_grid.addWidget(self.canvas,1,0,8,5)
 
         self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Yes | QtGui.QDialogButtonBox.No | QtGui.QDialogButtonBox.Cancel,
                                               QtCore.Qt.Horizontal,
                                               self)
-        self.layout_grid.addWidget(self.buttons,2,0,1,3)
-        self.layout_grid.addWidget(QtGui.QLabel('No clusters:'),2,3,1,1)
+        self.layout_grid.addWidget(self.buttons,10,0,1,3)
+        self.layout_grid.addWidget(QtGui.QLabel('No clusters:'),10,3,1,1)
 
         self.n_clusters_spin = QtGui.QSpinBox()
 
-        self.layout_grid.addWidget(self.n_clusters_spin,2,4,1,1)
+        self.layout_grid.addWidget(self.n_clusters_spin,10,4,1,1)
 
 
         self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
@@ -392,12 +393,12 @@ class ClusterDialog(QtGui.QDialog):
 
         self.start_clusters = 0
         self.n_clusters_spin.valueChanged.connect(self.on_cluster)
-        self.n_lines = 4
-        self.layout_grid.addWidget(QtGui.QLabel('Select'),3,0,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('X-Center'),3,1,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('Y-Center'),3,2,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('Z-Center'),3,3,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('Counts'),3,4,1,1)
+        self.n_lines = 12
+        self.layout_grid.addWidget(QtGui.QLabel('Select'),11,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('X-Center'),11,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Y-Center'),11,2,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Z-Center'),11,3,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Counts'),11,4,1,1)
         self.checks = []
 
     def add_clusters(self, element, x_mean, y_mean, z_mean):
@@ -444,6 +445,7 @@ class ClusterDialog(QtGui.QDialog):
         fig = dialog.figure
         ax1 = fig.add_subplot(121, projection='3d')
         ax2 = fig.add_subplot(122, projection='3d')
+        plt.axis('equal')
         dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
 
         print('Mode 1')
