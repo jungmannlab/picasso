@@ -357,6 +357,162 @@ class PlotDialog(QtGui.QDialog):
 
         return dialog.result
 
+class PlotDialogIso(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Structure')
+        layout_grid = QtGui.QGridLayout(self)
+
+        self.figure = plt.figure()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.label = QtGui.QLabel()
+
+        layout_grid.addWidget(self.label,0,0,1,3)
+        layout_grid.addWidget(self.canvas,1,0,1,3)
+
+        # OK and Cancel buttons
+        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Yes | QtGui.QDialogButtonBox.No | QtGui.QDialogButtonBox.Cancel,
+                                              QtCore.Qt.Horizontal,
+                                              self)
+        layout_grid.addWidget(self.buttons)
+
+        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
+
+        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
+
+        self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
+
+    def on_accept(self):
+        self.setResult(1)
+        self.result = 1
+        self.close()
+
+    def on_reject(self):
+        self.setResult(0)
+        self.result = 0
+        self.close()
+
+    def on_cancel(self):
+        self.setResult(2)
+        self.result = 2
+        self.close()
+
+
+    @staticmethod
+    def getParams(all_picked_locs, current, length, mode, color_sys):
+
+        dialog = PlotDialog(None)
+        fig = dialog.figure
+        ax = fig.add_subplot(221, projection='3d')
+        dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
+        ax2 = fig.add_subplot(222)
+        ax3 = fig.add_subplot(223)
+        ax4 = fig.add_subplot(224)
+
+        if mode == 1:
+            locs = all_picked_locs[current]
+            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+
+            colors = locs['z'][:]
+            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
+            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+
+            ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+            ax.set_xlabel('X [Px]')
+            ax.set_ylabel('Y [Px]')
+            ax.set_zlabel('Z [nm]')
+            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax.set_title('3D')
+            #plt.gca().patch.set_facecolor('black')
+            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+
+            #AXES 2
+            ax2.scatter(locs['x'], locs['y'],c=colors,cmap='jet')
+            ax2.set_xlabel('X [Px]')
+            ax2.set_ylabel('Y [Px]')
+            ax2.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax2.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax2.set_title('XY')
+            ax2.set_axis_bgcolor('black')
+
+            #AXES 3
+            ax3.scatter(locs['x'], locs['z'],c=colors,cmap='jet')
+            ax3.set_xlabel('X [Px]')
+            ax3.set_ylabel('Z [Px]')
+            ax3.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax3.set_ylim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax3.set_title('XZ')
+            ax3.set_axis_bgcolor('black')
+
+            #AXES 4
+            ax4.scatter(locs['y'], locs['z'],c=colors,cmap='jet')
+            ax4.set_xlabel('Y [Px]')
+            ax4.set_ylabel('Z [Px]')
+            ax4.set_xlim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax4.set_ylim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax4.set_title('YZ')
+            ax4.set_axis_bgcolor('black')
+
+        else:
+            colors = color_sys
+            for l in range(len(all_picked_locs)):
+                locs = all_picked_locs[l][current]
+                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                ax.scatter(locs['x'], locs['y'], locs['z'], c=colors[l])
+                ax2.scatter(locs['x'], locs['y'],c=colors[l])
+                ax3.scatter(locs['x'], locs['z'],c=colors[l])
+                ax4.scatter(locs['y'], locs['z'],c=colors[l])
+
+            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+
+            ax.set_xlabel('X [Px]')
+            ax.set_ylabel('Y [Px]')
+            ax.set_zlabel('Z [nm]')
+
+            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+
+            #AXES 2
+            ax2.set_xlabel('X [Px]')
+            ax2.set_ylabel('Y [Px]')
+            ax2.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax2.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax2.set_title('XY')
+            ax2.set_axis_bgcolor('black')
+
+            #AXES 3
+            ax3.set_xlabel('X [Px]')
+            ax3.set_ylabel('Z [Px]')
+            ax3.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax3.set_ylim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax3.set_title('XZ')
+            ax3.set_axis_bgcolor('black')
+
+            #AXES 4
+            ax4.set_xlabel('Y [Px]')
+            ax4.set_ylabel('Z [Px]')
+            ax4.set_xlim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax4.set_ylim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax4.set_title('YZ')
+            ax4.set_axis_bgcolor('black')
+
+
+
+
+
+        result = dialog.exec_()
+
+        return dialog.result
+
 
 class ClusterDialog(QtGui.QDialog):
 
@@ -2009,8 +2165,6 @@ class View(QtGui.QLabel):
         self.update_scene()
 
 
-
-
     def show_pick_3d(self):
         print('Show pick 3D - new')
         channel = self.get_channel3d('Show Pick 3D')
@@ -2043,6 +2197,53 @@ class View(QtGui.QLabel):
                     for i, pick in enumerate(self._picks):
 
                         reply = PlotDialog.getParams(all_picked_locs, i, len(self._picks), 1, 1)
+                        if reply == 1:
+                            print('Accepted')
+                        elif reply == 2:
+                            break
+                        else:
+                            print('Discard')
+                            removelist.append(pick)
+
+        for pick in removelist:
+            self._picks.remove(pick)
+        self.n_picks = len(self._picks)
+        self.update_pick_info_short()
+        self.update_scene()
+
+
+    def show_pick_3d_iso(self):
+        #essentially the same as show_pick_3d
+        channel = self.get_channel3d('Show Pick 3D')
+        removelist = []
+        if channel is not None:
+            n_channels = (len(self.locs_paths))
+            hues = np.arange(0, 1, 1 / n_channels)
+            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+
+            if channel is (len(self.locs_paths)):
+                print('Combined')
+                all_picked_locs = []
+                for k in range(len(self.locs_paths)):
+                    all_picked_locs.append(self.picked_locs(k))
+
+                if self._picks:
+                    for i, pick in enumerate(self._picks):
+                        reply = PlotDialogIso.getParams(all_picked_locs, i, len(self._picks), 0, colors)
+                        if reply == 1:
+                            print('Accepted')
+                        elif reply == 2:
+                            break
+                        else:
+                            print('Discard')
+                            removelist.append(pick)
+            else:
+                all_picked_locs = self.picked_locs(channel)
+                if self._picks:
+
+                    for i, pick in enumerate(self._picks):
+
+                        reply = PlotDialogIso.getParams(all_picked_locs, i, len(self._picks), 1, 1)
                         if reply == 1:
                             print('Accepted')
                         elif reply == 2:
@@ -3005,6 +3206,8 @@ class Window(QtGui.QMainWindow):
         plotpick_action.triggered.connect(self.view.show_pick)
         plotpick3d_action = tools_menu.addAction('Plot picks (3D)')
         plotpick3d_action.triggered.connect(self.view.show_pick_3d)
+        plotpick3d_iso_action = tools_menu.addAction('Plot picks (3D) - Isometric')
+        plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
         analyzepick_action = tools_menu.addAction('Analyze picks')
         analyzepick_action.triggered.connect(self.view.analyze_picks)
         self.dataset_dialog = DatasetDialog(self)
