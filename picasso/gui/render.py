@@ -1667,7 +1667,7 @@ class View(QtGui.QLabel):
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
             painter.setBrush(QtGui.QBrush(QtGui.QColor('white')))
-            x = self.width() - length_displaypxl - 20
+            x = self.width() - length_displaypxl - 35
             y = self.height() - height - 20
             painter.drawRect(x, y, length_displaypxl + 0, height + 0)
             if self.window.display_settings_dialog.scalebar_text.isChecked():
@@ -1675,7 +1675,10 @@ class View(QtGui.QLabel):
                 font.setPixelSize(20)
                 painter.setFont(font)
                 painter.setPen(QtGui.QColor('white'))
-                painter.drawText(x, y-2*height, length_displaypxl + 0, 2*height + 0, QtCore.Qt.AlignCenter,str(scalebar)+'nm')
+                text_spacer = 40
+                text_width = length_displaypxl +2*text_spacer
+                text_height = text_spacer
+                painter.drawText(x-text_spacer, y-25, text_width, text_height, QtCore.Qt.AlignHCenter,str(scalebar)+' nm')
         return image
 
     def draw_minimap(self, image):
@@ -3211,7 +3214,7 @@ class Window(QtGui.QMainWindow):
         plotpick_action.triggered.connect(self.view.show_pick)
         plotpick3d_action = tools_menu.addAction('Plot picks (3D)')
         plotpick3d_action.triggered.connect(self.view.show_pick_3d)
-        plotpick3d_iso_action = tools_menu.addAction('Plot picks (3D) - Isometric')
+        plotpick3d_iso_action = tools_menu.addAction('Plot picks (3D) - 4 Panels')
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
         analyzepick_action = tools_menu.addAction('Analyze picks')
         analyzepick_action.triggered.connect(self.view.analyze_picks)
