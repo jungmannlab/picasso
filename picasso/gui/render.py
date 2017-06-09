@@ -1132,13 +1132,17 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.blur_buttongroup.addButton(convolve_button)
         gaussian_button = QtGui.QRadioButton('Individual Localization Precision')
         self.blur_buttongroup.addButton(gaussian_button)
+        gaussian_iso_button = QtGui.QRadioButton('Individual Localization Precision, iso')
+        self.blur_buttongroup.addButton(gaussian_iso_button)
+
         blur_grid.addWidget(points_button, 0, 0, 1, 2)
         blur_grid.addWidget(smooth_button, 1, 0, 1, 2)
         blur_grid.addWidget(convolve_button, 2, 0, 1, 2)
         blur_grid.addWidget(gaussian_button, 3, 0, 1, 2)
+        blur_grid.addWidget(gaussian_iso_button, 4, 0, 1, 2)
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene)
-        blur_grid.addWidget(QtGui.QLabel('Min. Blur (cam. pixel):'), 4, 0, 1, 1)
+        blur_grid.addWidget(QtGui.QLabel('Min. Blur (cam. pixel):'), 5, 0, 1, 1)
         self.min_blur_width = QtGui.QDoubleSpinBox()
         self.min_blur_width.setRange(0, 999999)
         self.min_blur_width.setSingleStep(0.01)
@@ -1146,10 +1150,11 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.min_blur_width.setDecimals(3)
         self.min_blur_width.setKeyboardTracking(False)
         self.min_blur_width.valueChanged.connect(self.render_scene)
-        blur_grid.addWidget(self.min_blur_width, 4, 1, 1, 1)
+        blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
+
         vbox.addWidget(blur_groupbox)
         self.blur_methods = {points_button: None, smooth_button: 'smooth',
-                             convolve_button: 'convolve', gaussian_button: 'gaussian'}
+                             convolve_button: 'convolve', gaussian_button: 'gaussian',gaussian_iso_button:'gaussian_iso'}
         # Scale bar
         # Camera_parameters
         camera_groupbox = QtGui.QGroupBox('Camera')

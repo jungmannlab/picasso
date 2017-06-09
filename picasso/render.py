@@ -27,6 +27,8 @@ def render(locs, info=None, oversampling=1, viewport=None, blur_method=None, min
         return render_hist(locs, oversampling, y_min, x_min, y_max, x_max)
     elif blur_method == 'gaussian':
         return render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width)
+    elif blur_method == 'gaussian_iso':
+        return render_gaussian_iso(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width)
     elif blur_method == 'smooth':
         return render_smooth(locs, oversampling, y_min, x_min, y_max, x_max)
     elif blur_method == 'convolve':
@@ -123,6 +125,33 @@ def render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_wid
     blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
     sy = blur_height[in_view]
     sx = blur_width[in_view]
+    for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
+        max_y = _DRAW_MAX_SIGMA * sy_
+        i_min = _np.int32(y_ - max_y)
+        if i_min < 0:
+            i_min = 0
+        i_max = _np.int32(y_ + max_y + 1)
+        if i_max > n_pixel_y:
+            i_max = n_pixel_y
+        max_x = _DRAW_MAX_SIGMA * sx_
+        j_min = _np.int32(x_ - max_x)
+        if j_min < 0:
+            j_min = 0
+        j_max = _np.int32(x_ + max_x) + 1
+        if j_max > n_pixel_x:
+            j_max = n_pixel_x
+        for i in range(i_min, i_max):
+            for j in range(j_min, j_max):
+                image[i, j] += _np.exp(-((j - x_ + 0.5)**2/(2 * sx_**2) + (i - y_ + 0.5)**2/(2 * sy_**2))) / (2 * _np.pi * sx_ * sy_)
+    return len(x), image
+
+@_numba.jit(nopython=True, nogil=True)
+def render_gaussian_iso(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+    blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
+    blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
+    sy = (blur_height[in_view] + blur_width[in_view])/2
+    sx = sy
     for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
         max_y = _DRAW_MAX_SIGMA * sy_
         i_min = _np.int32(y_ - max_y)
