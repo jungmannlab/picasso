@@ -401,7 +401,7 @@ class PlotDialogIso(QtGui.QDialog):
 
 
     @staticmethod
-    def getParams(all_picked_locs, current, length, mode, color_sys):
+    def getParams(all_picked_locs, current, length, mode, color_sys, pixelsize):
 
         dialog = PlotDialog(None)
         fig = dialog.figure
@@ -591,7 +591,7 @@ class ClusterDialog(QtGui.QDialog):
             self.close()
 
     @staticmethod
-    def getParams(all_picked_locs, current, length, n_clusters, color_sys):
+    def getParams(all_picked_locs, current, length, n_clusters, color_sys, pixelsize):
 
         dialog = ClusterDialog(None)
 
@@ -605,7 +605,6 @@ class ClusterDialog(QtGui.QDialog):
         dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
 
         print('Mode 1')
-        pixelsize = 130
         locs = all_picked_locs[current]
         locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
@@ -2176,6 +2175,7 @@ class View(QtGui.QLabel):
     def show_pick_3d(self):
         print('Show pick 3D - new')
         channel = self.get_channel3d('Show Pick 3D')
+        pixelsize = self.window.display_settings_dialog.pixelsize.value()
         removelist = []
         if channel is not None:
             n_channels = (len(self.locs_paths))
@@ -2224,6 +2224,7 @@ class View(QtGui.QLabel):
         #essentially the same as show_pick_3d
         channel = self.get_channel3d('Show Pick 3D')
         removelist = []
+        pixelsize = self.window.display_settings_dialog.pixelsize.value()
         if channel is not None:
             n_channels = (len(self.locs_paths))
             hues = np.arange(0, 1, 1 / n_channels)
@@ -2237,7 +2238,7 @@ class View(QtGui.QLabel):
 
                 if self._picks:
                     for i, pick in enumerate(self._picks):
-                        reply = PlotDialogIso.getParams(all_picked_locs, i, len(self._picks), 0, colors)
+                        reply = PlotDialogIso.getParams(all_picked_locs, i, len(self._picks), 0, colors, pixelsize)
                         if reply == 1:
                             print('Accepted')
                         elif reply == 2:
@@ -2251,7 +2252,7 @@ class View(QtGui.QLabel):
 
                     for i, pick in enumerate(self._picks):
 
-                        reply = PlotDialogIso.getParams(all_picked_locs, i, len(self._picks), 1, 1)
+                        reply = PlotDialogIso.getParams(all_picked_locs, i, len(self._picks), 1, 1, pixelsize)
                         if reply == 1:
                             print('Accepted')
                         elif reply == 2:
@@ -2273,6 +2274,7 @@ class View(QtGui.QLabel):
         removelist = []
         saved_locs = []
         clustered_locs = []
+        pixelsize = self.window.display_settings_dialog.pixelsize.value()
 
         if channel is not None:
             n_channels = (len(self.locs_paths))
@@ -2288,7 +2290,7 @@ class View(QtGui.QLabel):
                 if self._picks:
                     for i, pick in enumerate(self._picks):
                         if hasattr(all_picked_locs[0],'z'):
-                            reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors)
+                            reply = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors, pixelsize)
                         else:
                             reply = ClusterDialog_2D.getParams(all_picked_locs, i, len(self._picks), 0, colors)
                         if reply == 1:
@@ -2308,7 +2310,7 @@ class View(QtGui.QLabel):
                         reply = 3
                         while reply == 3:
                             if hasattr(all_picked_locs[0],'z'):
-                                reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
+                                reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1, pixelsize)
                             else:
                                 reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog_2D.getParams(all_picked_locs, i, len(self._picks), n_clusters, 1)
                             n_clusters = n_clusters_new
