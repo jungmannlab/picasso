@@ -550,21 +550,21 @@ class ClusterDialog(QtGui.QDialog):
         self.start_clusters = 0
         self.n_clusters_spin.valueChanged.connect(self.on_cluster)
         self.n_lines = 12
-        self.layout_grid.addWidget(QtGui.QLabel('Select'),11,0,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('X-Center'),11,1,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('Y-Center'),11,2,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('Z-Center'),11,3,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('Counts'),11,4,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Select'),11,4,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('X-Center'),11,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Y-Center'),11,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Z-Center'),11,2,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Counts'),11,3,1,1)
         self.checks = []
 
     def add_clusters(self, element, x_mean, y_mean, z_mean):
         c = QtGui.QCheckBox(str(element[0]+1))
 
-        self.layout_grid.addWidget(c,self.n_lines,0,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(x_mean)),self.n_lines,1,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(y_mean)),self.n_lines,2,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(z_mean)),self.n_lines,3,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(element[1])),self.n_lines,4,1,1)
+        self.layout_grid.addWidget(c,self.n_lines,4,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(x_mean)),self.n_lines,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(y_mean)),self.n_lines,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(z_mean)),self.n_lines,2,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(element[1])),self.n_lines,3,1,1)
         self.n_lines +=1
         self.checks.append(c)
         self.checks[-1].setChecked(True)
@@ -712,19 +712,19 @@ class ClusterDialog_2D(QtGui.QDialog):
         self.start_clusters = 0
         self.n_clusters_spin.valueChanged.connect(self.on_cluster)
         self.n_lines = 4
-        self.layout_grid.addWidget(QtGui.QLabel('Select'),3,0,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('X-Center'),3,1,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('Y-Center'),3,2,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel('Counts'),3,3,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Select'),3,3,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('X-Center'),3,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Y-Center'),3,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel('Counts'),3,2,1,1)
         self.checks = []
 
     def add_clusters(self, element, x_mean, y_mean):
         c = QtGui.QCheckBox(str(element[0]+1))
 
-        self.layout_grid.addWidget(c,self.n_lines,0,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(x_mean)),self.n_lines,1,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(y_mean)),self.n_lines,2,1,1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(element[1])),self.n_lines,3,1,1)
+        self.layout_grid.addWidget(c,self.n_lines,3,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(x_mean)),self.n_lines,0,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(y_mean)),self.n_lines,1,1,1)
+        self.layout_grid.addWidget(QtGui.QLabel(str(element[1])),self.n_lines,2,1,1)
         self.n_lines +=1
         self.checks.append(c)
         self.checks[-1].setChecked(True)
