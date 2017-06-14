@@ -437,6 +437,9 @@ class ParametersDialog(QtGui.QDialog):
         fit_stack.addWidget(lq_widget)
         # lq_grid = QtGui.QGridLayout(lq_widget)
 
+        avg_widget = QtGui.QWidget()
+        fit_stack.addWidget(avg_widget)
+
         # 3D
         z_groupbox = QtGui.QGroupBox('3D via Astigmatism')
         vbox.addWidget(z_groupbox)
@@ -826,6 +829,7 @@ class Window(QtGui.QMainWindow):
             if driftpath:
                 drift = np.genfromtxt(driftpath)
             data = []
+            n_id = 0
             for element in self._picks:
                 #drifted:
                 xloc = np.ones((maxframes,), dtype=np.float)*element[0]
@@ -837,11 +841,13 @@ class Window(QtGui.QMainWindow):
                     pass
                 frames = np.arange(maxframes)
                 gradient = np.ones(maxframes)+100
-                temp = np.array([frames,xloc,yloc,gradient])
+                n_id_all = np.ones(maxframes)+n_id
+                temp = np.array([frames,xloc,yloc,gradient,n_id_all])
                 data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
+                n_id+=1
 
             data = [item for sublist in data for item in sublist]
-            identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float)])
+            identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float), ('n_id', int)])
             self.identifications = identifications.view(np.recarray)
             self.locs = None
 
@@ -875,7 +881,7 @@ class Window(QtGui.QMainWindow):
             #if driftpath:
             #    drift = np.genfromtxt(driftpath)
             data = []
-
+            n_id = 0
             for element in locs:
                 currentframe = element['frame']
                 if currentframe>n_frames and currentframe<(max_frames-n_frames):
@@ -883,11 +889,13 @@ class Window(QtGui.QMainWindow):
                     yloc = np.ones((2*n_frames+1,), dtype=np.float)*element['y']
                     frames = np.arange(currentframe-n_frames,currentframe+n_frames+1)
                     gradient = np.ones(2*n_frames+1)+100
-                    temp = np.array([frames,xloc,yloc,gradient])
+                    n_id_all = np.ones(2*n_frames+1)+n_id
+                    temp = np.array([frames,xloc,yloc,gradient,n_id_all])
                     data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
+                n_id+=1    
 
             data = [item for sublist in data for item in sublist]
-            identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float)])
+            identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float), ('n_id', int)])
             self.identifications = identifications.view(np.recarray)
             self.locs = None
 
@@ -1224,7 +1232,7 @@ class FitWorker(QtCore.QThread):
                 time.sleep(0.2)
             theta = gausslq.fits_from_futures(fs)
             em = self.camera_info['gain'] > 1
-            locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
+            locs = avgroi.locs_from_fits(self.identifications, theta, self.box, em)
         else:
             print('This should never happen...')
         self.progressMade.emit(N+1, N)
