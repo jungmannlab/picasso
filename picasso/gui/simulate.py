@@ -432,7 +432,7 @@ class Window(QtGui.QMainWindow):
         structureIncorporation = QtGui.QLabel('Incorporation')
 
         self.structurenoEdit = QtGui.QSpinBox()
-        self.structurenoEdit.setRange(1, 1000)
+        self.structurenoEdit.setRange(1, 1000000)
         self.structureframeEdit = QtGui.QSpinBox()
         self.structureframeEdit.setRange(4, 16)
         self.structurexxEdit = QtGui.QLineEdit(STRUCTUREXX_DEFAULT)
