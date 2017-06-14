@@ -693,6 +693,8 @@ class Window(QtGui.QMainWindow):
         file_menu.addAction(open_action)
         load_picks_action = file_menu.addAction('Load picks')
         load_picks_action.triggered.connect(self.open_picks)
+        load_locs_action = file_menu.addAction('Load locs as boxes')
+        load_locs_action.triggered.connect(self.open_locs)
         save_action = file_menu.addAction('Save localizations')
         save_action.setShortcut('Ctrl+S')
         save_action.triggered.connect(self.save_locs_dialog)
@@ -819,25 +821,25 @@ class Window(QtGui.QMainWindow):
                 regions = yaml.load(f)
             self._picks = regions['Centers']
             maxframes = int(self.info[0]['Frames'])
-            #at some point include drift
+            #ask for drift correction
             driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', filter='*.txt')
             if driftpath:
                 drift = np.genfromtxt(driftpath)
             data = []
-
             for element in self._picks:
                 #drifted:
+                xloc = np.ones((maxframes,), dtype=np.float)*element[0]
+                yloc = np.ones((maxframes,), dtype=np.float)*element[1]
                 if driftpath:
-                    xloc = np.ones((maxframes,), dtype=np.float)*element[0]
-                    yloc = np.ones((maxframes,), dtype=np.float)*element[1]
                     xloc += drift[:, 1]
                     yloc += drift[:, 0]
-                    frames = np.arange(maxframes)
-                    gradient = np.arange(maxframes)
-                    temp = np.array([frames,xloc,yloc,gradient])
-                    data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
                 else:
-                        data.append([(j, element[0], element[1], 100) for j in range(maxframes)])
+                    pass
+                frames = np.arange(maxframes)
+                gradient = np.ones(maxframes)+100
+                temp = np.array([frames,xloc,yloc,gradient])
+                data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
+
             data = [item for sublist in data for item in sublist]
             identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float)])
             self.identifications = identifications.view(np.recarray)
@@ -853,6 +855,54 @@ class Window(QtGui.QMainWindow):
 
         except io.NoMetadataFileError:
             return
+
+    def open_locs(self):
+        path = QtGui.QFileDialog.getOpenFileName(self,  'Open locs', filter='*.hdf5')
+        if path:
+            self.load_locs(path)
+
+    def load_locs(self,path):
+        try:
+            locs, info = io.load_locs(path)
+
+            print(locs)
+            print(info)
+            max_frames = int(self.info[0]['Frames'])
+            n_frames, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
+                'Enter number of frames around localization event:',100)
+
+            #driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', filter='*.txt')
+            #if driftpath:
+            #    drift = np.genfromtxt(driftpath)
+            data = []
+
+            for element in locs:
+                currentframe = element['frame']
+                if currentframe>n_frames and currentframe<(max_frames-n_frames):
+                    xloc = np.ones((2*n_frames+1,), dtype=np.float)*element['x']
+                    yloc = np.ones((2*n_frames+1,), dtype=np.float)*element['y']
+                    frames = np.arange(currentframe-n_frames,currentframe+n_frames+1)
+                    gradient = np.ones(2*n_frames+1)+100
+                    temp = np.array([frames,xloc,yloc,gradient])
+                    data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
+
+            data = [item for sublist in data for item in sublist]
+            identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float)])
+            self.identifications = identifications.view(np.recarray)
+            self.locs = None
+
+            self.loaded_picks = True
+
+            self.last_identification_info={'Box Size': self.parameters_dialog.box_spinbox.value(),
+                    'Min. Net Gradient': self.parameters_dialog.mng_slider.value()}
+            self.ready_for_fit = True
+            self.draw_frame()
+            self.status_bar.showMessage('Created a total of {} identifications.'.format(len(self.identifications)))
+
+        except io.NoMetadataFileError:
+            return
+
+
 
 
 
