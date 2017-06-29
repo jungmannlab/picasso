@@ -20,10 +20,9 @@ def _sum(spot, size):
 
 def fit_spot(spot):
     size = spot.shape[0]
-    average = _sum(spot,size)
-
+    avg_roi = _sum(spot, size)
     # result is [x, y, photons, bg, sx, sy]
-    result = [0, 0, average, average, 1, 1]
+    result = [0, 0, avg_roi, avg_roi, 1, 1]
     return result
 
 

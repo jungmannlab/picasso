@@ -694,9 +694,9 @@ class Window(QtGui.QMainWindow):
         open_action.setShortcut('Ctrl+O')
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
-        load_picks_action = file_menu.addAction('Load picks')
+        load_picks_action = file_menu.addAction('Load picks as identifications')
         load_picks_action.triggered.connect(self.open_picks)
-        load_locs_action = file_menu.addAction('Load locs as boxes')
+        load_locs_action = file_menu.addAction('Load locs as identifications')
         load_locs_action.triggered.connect(self.open_locs)
         save_action = file_menu.addAction('Save localizations')
         save_action.setShortcut('Ctrl+S')
@@ -848,7 +848,9 @@ class Window(QtGui.QMainWindow):
 
             data = [item for sublist in data for item in sublist]
             identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float), ('n_id', int)])
+
             self.identifications = identifications.view(np.recarray)
+            self.identifications.sort(kind='mergesort', order='frame')
             self.locs = None
 
             self.loaded_picks = True
@@ -892,11 +894,12 @@ class Window(QtGui.QMainWindow):
                     n_id_all = np.ones(2*n_frames+1)+n_id
                     temp = np.array([frames,xloc,yloc,gradient,n_id_all])
                     data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
-                n_id+=1    
+                n_id+=1
 
             data = [item for sublist in data for item in sublist]
             identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float), ('n_id', int)])
             self.identifications = identifications.view(np.recarray)
+            self.identifications.sort(kind='mergesort', order='frame')
             self.locs = None
 
             self.loaded_picks = True
@@ -909,9 +912,6 @@ class Window(QtGui.QMainWindow):
 
         except io.NoMetadataFileError:
             return
-
-
-
 
 
 
@@ -1230,7 +1230,7 @@ class FitWorker(QtCore.QThread):
             while lib.n_futures_done(fs) < n_tasks:
                 self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
                 time.sleep(0.2)
-            theta = gausslq.fits_from_futures(fs)
+            theta = avgroi.fits_from_futures(fs)
             em = self.camera_info['gain'] > 1
             locs = avgroi.locs_from_fits(self.identifications, theta, self.box, em)
         else:
