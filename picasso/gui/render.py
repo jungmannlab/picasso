@@ -1446,6 +1446,8 @@ class View(QtGui.QLabel):
             self.window.slicer_dialog.zcoord.append(locs.z)
         os.chdir(os.path.dirname(path))
         self.window.dataset_dialog.add_entry(path)
+        self.window.setWindowTitle('Picasso: Render. File: {}'.format(os.path.basename(path)))
+     
 
 
     def add_multiple(self, paths):
