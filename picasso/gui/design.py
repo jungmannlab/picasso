@@ -109,6 +109,8 @@ HEX_SIDE_HALF = 20
 HEX_SCALE = 1
 HEX_PEN = QtGui.QPen(QtGui.QBrush(QtGui.QColor('black')),  2)
 
+LINE_PEN = QtGui.QPen(QtGui.QBrush(QtGui.QColor(205, 205, 205, 255)),  2)
+
 # origami definition
 rows = 12
 rowIndex = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']
@@ -576,10 +578,37 @@ class Scene(QtGui.QGraphicsScene):
             self.alllblseq[i].setPos(*(1.5*HEX_SIDE_HALF * (labelspacer+COLOR_SITES[7-paletteindex-i][1]+xofflbl), -labelspacer-sqrt(3)*HEX_SIDE_HALF * (COLOR_SITES[7-paletteindex-i][0]+yoff)))
             self.addItem(self.alllblseq[i])
 
+
+
         # MAKE A LABEL FOR THE CURRENTCOLOR
         self.cclabel = QtGui.QGraphicsTextItem('Selected color')
         self.cclabel.setPos(*(1.5*HEX_SIDE_HALF * (labelspacer+COLOR_SITES[8-paletteindex][1]+xofflbl), -labelspacer-sqrt(3)*HEX_SIDE_HALF * (COLOR_SITES[8-paletteindex][0]+yoff)))
         self.addItem(self.cclabel)
+
+        # MAKE A LABEL FOR THE HEXAGONS POINTING DOWNWARDS Ideally: Gray V
+        #isolated ones:
+        down_arrow = dict()
+        index1 = [3,3,3,3,10,10,10,10]
+        index2 = [2,6,10,14,2,6,10,14]
+        line1 = dict()
+        line2 = dict()
+
+        for i in range(len(index1)):
+            hex_center_x,  hex_center_y = indextoHex(index1[i], index2[i])
+
+            startpoint = QtCore.QPointF(hex_center_x-0.5*HEX_SIDE_HALF,  hex_center_y-0.5*HEX_SIDE_HALF+2)
+            midpoint = QtCore.QPointF(hex_center_x,  hex_center_y+0.5*HEX_SIDE_HALF)
+            endpoint = QtCore.QPointF(hex_center_x+0.5*HEX_SIDE_HALF,  hex_center_y-0.5*HEX_SIDE_HALF+2)
+
+            line1[i] = QtGui.QGraphicsLineItem(QtCore.QLineF(startpoint, midpoint))
+            line2[i] = QtGui.QGraphicsLineItem(QtCore.QLineF(midpoint, endpoint))
+
+            line1[i].setPen(LINE_PEN)
+            line2[i].setPen(LINE_PEN)
+
+            self.addItem(line1[i])
+            self.addItem(line2[i])
+
         self.evaluateCanvas()
 
     def mousePressEvent(self,  event):
