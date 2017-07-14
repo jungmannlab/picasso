@@ -231,7 +231,10 @@ class PipettingDialog(QtGui.QDialog):
         self.buttons.rejected.connect(self.reject)
 
     def loadFolder(self):
-        path = QFileDialog.getExistingDirectory(self,  "Select Directory")
+        if hasattr(self, 'pwd'):
+            path = QFileDialog.getExistingDirectory(self,  "Select Directory", self.pwd)
+        else:
+            path = QFileDialog.getExistingDirectory(self,  "Select Directory")
         if path:
             self.folderEdit.setText(path)
             csvFiles = glob.glob(os.path.join(path,  "*.csv"))
@@ -250,13 +253,16 @@ class PipettingDialog(QtGui.QDialog):
             self.plateCounter.setText('A total of '+str(len(set(platelist))-1) + '  plates detected.')
             self.uniqueCounter.setText('A total of '+str(len(set(sequencelist))-2) + '  unique sequences detected.')
 
+
     def getfulllist(self):
         fulllist = self.fulllist
         return fulllist
 
     @staticmethod
-    def getSchemes(parent=None):
+    def getSchemes(parent=None, pwd=None):
         dialog = PipettingDialog(parent)
+        if pwd:
+            dialog.pwd = pwd
         result = dialog.exec_()
         fulllist = dialog.getfulllist()
 
@@ -393,9 +399,13 @@ class FoldingDialog(QtGui.QDialog):
             tablecontent.append(rowdata)
 
         table[0] = tablecontent
-        path = QtGui.QFileDialog.getSaveFileName(self,  'Export folding table to.',  filter='*.csv')
+        if hasattr(self, 'pwd'):
+            path = QtGui.QFileDialog.getSaveFileName(self,  'Export folding table to.', self.pwd,  filter='*.csv')
+        else:
+            path = QtGui.QFileDialog.getSaveFileName(self,  'Export folding table to.',  filter='*.csv')
         if path:
             design.savePlate(path, table)
+
 
     def clcExcess(self):
         rowCount = self.table.rowCount()
@@ -801,18 +811,26 @@ class Window(QtGui.QMainWindow):
         self.statusBar().showMessage('Ready. Sequences loaded from '+BaseSequencesFile+'.')
 
     def openDialog(self):
-        path = QtGui.QFileDialog.getOpenFileName(self,  'Open design',  filter='*.yaml')
+        if hasattr(self, 'pwd'):
+            path = QtGui.QFileDialog.getOpenFileName(self,  'Open design', self.pwd,  filter='*.yaml')
+        else:
+            path = QtGui.QFileDialog.getOpenFileName(self,  'Open design',  filter='*.yaml')
         if path:
             self.mainscene.loadCanvas(path)
             self.statusBar().showMessage('File loaded from: '+path)
+            self.pwd = os.path.dirname(path)
         else:
             self.statusBar().showMessage('Filename not specified. File not loaded.')
 
     def saveDialog(self):
-        path = QtGui.QFileDialog.getSaveFileName(self,  'Save design to..',  filter='*.yaml')
+        if hasattr(self, 'pwd'):
+            path = QtGui.QFileDialog.getSaveFileName(self,  'Save design to..', self.pwd,  filter='*.yaml')
+        else:
+            path = QtGui.QFileDialog.getSaveFileName(self,  'Save design to..',  filter='*.yaml')
         if path:
             self.mainscene.saveCanvas(path)
             self.statusBar().showMessage('File saved as: '+path)
+            self.pwd = os.path.dirname(path)
         else:
             self.statusBar().showMessage('Filename not specified. Design not saved.')
 
@@ -821,11 +839,15 @@ class Window(QtGui.QMainWindow):
         self.statusBar().showMessage('Clearead.')
 
     def takeScreenshot(self):
-        path = QtGui.QFileDialog.getSaveFileName(self,  'Save Screenshot to..',  filter='*.png')
+        if hasattr(self, 'pwd'):
+            path = QtGui.QFileDialog.getSaveFileName(self,  'Save Screenshot to..', self.pwd, filter='*.png')
+        else:
+            path = QtGui.QFileDialog.getSaveFileName(self,  'Save Screenshot to..',  filter='*.png')
         if path:
             p = QPixmap.grabWidget(self.view)
             p.save(path,  'png')
             self.statusBar().showMessage('Screenshot saved to: '+path)
+            self.pwd = os.path.dirname(path)
         else:
             self.statusBar().showMessage('Filename not specified. Screenshot not saved.')
 
@@ -873,10 +895,14 @@ class Window(QtGui.QMainWindow):
                 else:
                     allplates = self.mainscene.preparePlate(selection)
                     self.statusBar().showMessage('A total of '+str(len(allplates)*2)+' Plates generated.')
-                    path = QtGui.QFileDialog.getSaveFileName(self,  'Save csv files to.',  filter='*.csv')
+                    if hasattr(self, 'pwd'):
+                        path = QtGui.QFileDialog.getSaveFileName(self,  'Save csv files to.', self.pwd, filter='*.csv')
+                    else:
+                        path = QtGui.QFileDialog.getSaveFileName(self,  'Save csv files to.',  filter='*.csv')
                     if path:
                         design.savePlate(path, allplates)
                         self.statusBar().showMessage('Plates saved to : '+path)
+                        self.pwd = os.path.dirname(path)
                     else:
                         self.statusBar().showMessage('Filename not specified. Plates not saved.')
 
@@ -889,7 +915,11 @@ class Window(QtGui.QMainWindow):
         else:
             structureData = self.mainscene.readCanvas()[0]
             fullpipettlist = [['PLATE NAME', 'PLATE POSITION', 'OLIGO NAME', 'SEQUENCE', 'COLOR']]
-            fulllist,  ok = PipettingDialog.getSchemes()
+            if hasattr(self, 'pwd'):
+                pwd = self.pwd
+            else:
+                pwd = []
+            fulllist,  ok = PipettingDialog.getSchemes(pwd=pwd)
             if fulllist == []:
                 self.statusBar().showMessage('No *.csv found. Scheme not created.')
             else:
@@ -938,8 +968,11 @@ class Window(QtGui.QMainWindow):
                             selectioncolors.append(pipettlist[y][4])
 
                     allfig[x] = plotPlate(selection, selectioncolors, platename)
+                if hasattr(self, 'pwd'):
+                    path = QtGui.QFileDialog.getSaveFileName(self,  'Save pipetting schemes to.', self.pwd,  filter='*.pdf')
+                else:
+                    path = QtGui.QFileDialog.getSaveFileName(self,  'Save pipetting schemes to.',  filter='*.pdf')
 
-                path = QtGui.QFileDialog.getSaveFileName(self,  'Save pipetting schemes to.',  filter='*.pdf')
                 if path:
                     with PdfPages(path) as pdf:
                         for x in range(0, len(platenames)):
@@ -950,6 +983,7 @@ class Window(QtGui.QMainWindow):
                             csv_path = base + '.csv'
                             design.savePlate(csv_path, exportlist)
                     self.statusBar().showMessage('Pippetting scheme saved to: '+path)
+                    self.pwd = os.path.dirname(path)
 
     def foldingScheme(self):
 
@@ -957,6 +991,9 @@ class Window(QtGui.QMainWindow):
         # Fill with Data
         colorcounts = self.mainscene.colorcounts
         noseq = _np.count_nonzero(colorcounts)
+
+        if hasattr(self, 'pwd'):
+            fdialog.pwd = self.pwd
 
         fdialog.table.setRowCount(noseq+5)
 
