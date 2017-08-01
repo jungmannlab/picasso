@@ -114,6 +114,24 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     _plt.tight_layout(pad=2)
     _plt.show()
 
+    #Export
+    if False:
+
+        _np.savetxt('mean_sx.txt',mean_sx, delimiter='/t')
+        _np.savetxt('mean_sy.txt',mean_sy, delimiter='/t')
+        _np.savetxt('locs_sx.txt',locs.sx, delimiter='/t')
+        _np.savetxt('locs_sy.txt',locs.sy, delimiter='/t')
+        _np.savetxt('cx.txt',cx, delimiter='/t')
+        _np.savetxt('cy.txt',cy, delimiter='/t')
+        _np.savetxt('z_range.txt',z_range, delimiter='/t')
+        _np.savetxt('locs_z.txt',locs.z, delimiter='/t')
+        _np.savetxt('z_range_locs_frame.txt',z_range[locs.frame], delimiter='/t')
+        _np.savetxt('rmsd_frame.txt',rmsd_frame, delimiter='/t')
+
+    #np.savetxt('test.out', x, delimiter=',')   # X is an array
+    #np.savetxt('test.out', (x,y,z))   # x,y,z equal sized 1D arrays
+    #np.savetxt('test.out', x, fmt='%1.4e')   # use exponential notation
+
     return calibration
 
 
