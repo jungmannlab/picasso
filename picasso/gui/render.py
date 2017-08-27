@@ -2976,11 +2976,20 @@ class View(QtGui.QLabel):
             self.locs[0].x += np.mod(self.locs[0].group,n_square)*2
             self.locs[0].y += np.floor(self.locs[0].group/n_square)*2
 
+            self.locs[0].x -= np.mean(self.locs[0].x)
+            self.locs[0].y -= np.mean(self.locs[0].y)
+
+            self.locs[0].x += np.absolute(np.min(self.locs[0].x))
+            self.locs[0].y += np.absolute(np.min(self.locs[0].y))
+
+            #self.locs[0].x = -self.locs[0].x
+            #self.locs[0].y = -self.locs[0].y
+
+
         groups = np.unique(self.locs[0].group)
         #Update width information
-        self.oldwidth = self.infos[0][0]['Width']
-        minwidth = np.ceil(np.mean(self.locs[0].x)+np.max(self.locs[0].x)-np.min(self.locs[0].x))
-        self.infos[0][0]['Width'] = np.max([self.oldwidth, minwidth])
+        self.infos[0][0]['Width'] = int(np.ceil(np.max(self.locs[0].y)))
+        self.infos[0][0]['Height'] = int(np.ceil(np.max(self.locs[0].x)))
         self.fit_in_view()
 
 
