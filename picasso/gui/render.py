@@ -2969,6 +2969,21 @@ class View(QtGui.QLabel):
             self.refold_groups()
             self.clear_picks()
 
+    def unfold_groups_square(self):
+        n_square, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
+        'Set number of elements per row and column:',100)
+        if hasattr(self.locs[0], 'group'):
+            self.locs[0].x += np.mod(self.locs[0].group,n_square)*2
+            self.locs[0].y += np.floor(self.locs[0].group/n_square)*2
+
+        groups = np.unique(self.locs[0].group)
+        #Update width information
+        self.oldwidth = self.infos[0][0]['Width']
+        minwidth = np.ceil(np.mean(self.locs[0].x)+np.max(self.locs[0].x)-np.min(self.locs[0].x))
+        self.infos[0][0]['Width'] = np.max([self.oldwidth, minwidth])
+        self.fit_in_view()
+
+
     def refold_groups(self):
         if hasattr(self.locs[0], 'group'):
             self.locs[0].x -= self.locs[0].group*2
@@ -3256,6 +3271,9 @@ class Window(QtGui.QMainWindow):
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
         unfold_action = postprocess_menu.addAction('Unfold / Refold groups')
         unfold_action.triggered.connect(self.view.unfold_groups)
+        unfold_action_square = postprocess_menu.addAction('Unfold groups (square)')
+        unfold_action_square.triggered.connect(self.view.unfold_groups_square)
+
         #channel_action = postprocess_menu.addAction('Combine channels')
         #channel_action.triggered.connect(self.combine_channels)
         self.load_user_settings()
