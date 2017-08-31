@@ -1016,6 +1016,8 @@ class InfoDialog(QtGui.QDialog):
         plt.title('Next frame neighbor distance histogram')
         plt.plot(d, self.nena_result.data, label='Data')
         plt.plot(d, self.nena_result.best_fit, label='Fit')
+        plt.xlabel('Distance (Px)')
+        plt.ylabel('Counts')
         plt.legend(loc='best')
         fig1.show()
 
