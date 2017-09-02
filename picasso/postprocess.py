@@ -249,39 +249,73 @@ def pair_correlation(locs, info, bin_size, r_max):
     area = _np.pi * bin_size * (2 * bins_lower + bin_size)
     return bins_lower, dh / area
 
-
 def dbscan(locs, radius, min_density):
     print('Identifying clusters...')
-    locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
-    X = _np.vstack((locs.x, locs.y)).T
-    db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
-    group = _np.int32(db.labels_)       # int32 for Origin compatiblity
-    locs = _lib.append_to_rec(locs, group, 'group')
-    locs = locs[locs.group != -1]
-    print('Generating cluster information...')
-    groups = _np.unique(locs.group)
-    n_groups = len(groups)
-    mean_frame = _np.zeros(n_groups)
-    std_frame = _np.zeros(n_groups)
-    com_x = _np.zeros(n_groups)
-    com_y = _np.zeros(n_groups)
-    std_x = _np.zeros(n_groups)
-    std_y = _np.zeros(n_groups)
-    n = _np.zeros(n_groups, dtype=_np.int32)
-    for i, group in enumerate(groups):
-        group_locs = locs[locs.group == i]
-        mean_frame[i] = _np.mean(group_locs.frame)
-        com_x[i] = _np.mean(group_locs.x)
-        com_y[i] = _np.mean(group_locs.y)
-        std_frame[i] = _np.std(group_locs.frame)
-        std_x[i] = _np.std(group_locs.x)
-        std_y[i] = _np.std(group_locs.y)
-        n[i] = len(group_locs)
-    clusters = _np.rec.array((groups, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
-                             dtype=[('groups', groups.dtype), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
-                             ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'), ('n', 'i4')])
+    if hasattr(locs, 'z'):
+        print('z-coordinates detected')
+        pixelsize = int(input("Enter the pixelsize in nm/px:"))
+        locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y) & _np.isfinite(locs.z)]
+        X = _np.vstack((locs.x, locs.y, locs.z/pixelsize)).T
+        db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
+        group = _np.int32(db.labels_)       # int32 for Origin compatiblity
+        locs = _lib.append_to_rec(locs, group, 'group')
+        locs = locs[locs.group != -1]
+        print('Generating cluster information...')
+        groups = _np.unique(locs.group)
+        n_groups = len(groups)
+        mean_frame = _np.zeros(n_groups)
+        std_frame = _np.zeros(n_groups)
+        com_x = _np.zeros(n_groups)
+        com_y = _np.zeros(n_groups)
+        com_z = _np.zeros(n_groups)
+        std_x = _np.zeros(n_groups)
+        std_y = _np.zeros(n_groups)
+        std_z = _np.zeros(n_groups)
+        n = _np.zeros(n_groups, dtype=_np.int32)
+        for i, group in enumerate(groups):
+            group_locs = locs[locs.group == i]
+            mean_frame[i] = _np.mean(group_locs.frame)
+            com_x[i] = _np.mean(group_locs.x)
+            com_y[i] = _np.mean(group_locs.y)
+            com_z[i] = _np.mean(group_locs.z)
+            std_frame[i] = _np.std(group_locs.frame)
+            std_x[i] = _np.std(group_locs.x)
+            std_y[i] = _np.std(group_locs.y)
+            std_z[i] = _np.std(group_locs.z)
+            n[i] = len(group_locs)
+        clusters = _np.rec.array((groups, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
+                                 dtype=[('groups', groups.dtype), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),('com_z', 'f4'),
+                                 ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'),('std_z', 'f4'),('n', 'i4')])
+    else:
+        locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
+        X = _np.vstack((locs.x, locs.y)).T
+        db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
+        group = _np.int32(db.labels_)       # int32 for Origin compatiblity
+        locs = _lib.append_to_rec(locs, group, 'group')
+        locs = locs[locs.group != -1]
+        print('Generating cluster information...')
+        groups = _np.unique(locs.group)
+        n_groups = len(groups)
+        mean_frame = _np.zeros(n_groups)
+        std_frame = _np.zeros(n_groups)
+        com_x = _np.zeros(n_groups)
+        com_y = _np.zeros(n_groups)
+        std_x = _np.zeros(n_groups)
+        std_y = _np.zeros(n_groups)
+        n = _np.zeros(n_groups, dtype=_np.int32)
+        for i, group in enumerate(groups):
+            group_locs = locs[locs.group == i]
+            mean_frame[i] = _np.mean(group_locs.frame)
+            com_x[i] = _np.mean(group_locs.x)
+            com_y[i] = _np.mean(group_locs.y)
+            std_frame[i] = _np.std(group_locs.frame)
+            std_x[i] = _np.std(group_locs.x)
+            std_y[i] = _np.std(group_locs.y)
+            n[i] = len(group_locs)
+        clusters = _np.rec.array((groups, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
+                                 dtype=[('groups', groups.dtype), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
+                                 ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'), ('n', 'i4')])
     return clusters, locs
-
 
 @_numba.jit(nopython=True, nogil=True)
 def _local_density(locs, radius, x_index, y_index, block_starts, block_ends, start, chunk):
