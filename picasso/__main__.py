@@ -179,6 +179,29 @@ def _dbscan(files, radius, min_density):
             with File(base + '_clusters.hdf5', 'w') as clusters_file:
                 clusters_file.create_dataset('clusters', data=clusters)
 
+def _nneighbor(files):
+    import glob
+    import h5py as _h5py
+    import numpy as np
+    from scipy.spatial import distance
+    paths = glob.glob(files)
+    if paths:
+        from . import io, postprocess
+        from h5py import File
+        for path in paths:
+            print('Loading {} ...'.format(path))
+            with _h5py.File(path, 'r') as locs_file:
+                locs = locs_file['clusters'][...]
+            clusters = np.rec.array(locs, dtype=locs.dtype)
+            points = np.array(clusters[['com_x','com_y']].tolist())
+            alldist = distance.cdist(points,points)
+            alldist[alldist==0]=float('inf')
+            minvals = np.amin(alldist,axis=0)
+            base, ext = os.path.splitext(path)
+            out_path = base + '_minval.txt'
+            #np.savetxt(base + '_minval.txt', minvals, header='dx\tdy', newline='\r\n')
+            np.savetxt(out_path, minvals, newline='\r\n')
+            print('Saved filest o: {}'.format(out_path))
 
 def _dark(files):
     import glob
@@ -433,6 +456,10 @@ def main():
     localize_parser = subparsers.add_parser('localize', help='identify and fit single molecule spots')
     localize_parser.add_argument('files', nargs='?', help='one or multiple movie files specified by a unix style path pattern')
 
+    # nneighbors
+    nneighbor_parser = subparsers.add_parser('nneighbor', help='calculate nearest neighbor of a clustered dataset')
+    nneighbor_parser.add_argument('files', nargs='?', help='one or multiple hdf5 clustered files specified by a unix style path pattern')
+
     # render
     render_parser = subparsers.add_parser('render', help='render localization based images')
     render_parser.add_argument('files', nargs='?', help='one or multiple localization files specified by a unix style path pattern')
@@ -505,6 +532,8 @@ def main():
             _density(args.files, args.radius)
         elif args.command == 'dbscan':
             _dbscan(args.files, args.radius, args.density)
+        elif args.command == 'nneighbor':
+            _nneighbor(args.files)
         elif args.command == 'dark':
             _dark(args.files)
         elif args.command == 'align':
