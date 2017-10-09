@@ -545,7 +545,7 @@ def clusterdist(locs):
             com_z = temp['z']
             std_x = temp['lpx']
             std_y = temp['lpy']
-            std_z = temp['lpy']
+            std_z = temp['lpz']
             group_id = temp['group']
             n = temp['n']
             min_dist = _np.zeros(n_cluster)

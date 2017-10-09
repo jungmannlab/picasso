@@ -1049,6 +1049,11 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.pick_similar_range.setSingleStep(0.1)
         self.pick_similar_range.setDecimals(1)
         pick_grid.addWidget(self.pick_similar_range, 1, 1)
+        self.pick_annotation = QtGui.QCheckBox('Annotate picks')
+        self.pick_annotation.stateChanged.connect(self.on_pick_diameter_changed)
+        pick_grid.addWidget(self.pick_annotation, 2, 0)
+
+
 
     def on_pick_diameter_changed(self, diameter):
         self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
@@ -1621,9 +1626,11 @@ class View(QtGui.QLabel):
         # d = int(round(d))
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor('yellow'))
-        for pick in self._picks:
+        for i, pick in enumerate(self._picks):
             cx, cy = self.map_to_view(*pick)
             painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
+            if self.window.tools_settings_dialog.pick_annotation.isChecked():
+                painter.drawText(cx+d/2,cy+d/2, str(i))
         painter.end()
         return image
 
@@ -3337,14 +3344,14 @@ class Window(QtGui.QMainWindow):
                 locs = self.view.locs[channel]
                 if hasattr(locs, 'z'):
                     loctxt = locs[['x','y','z','sx','bg','photons','frame']].copy()
-                    loctxt = [(row[0]*pixelsize, row[1]*pixelsize, row[2], 1, row[3]*pixelsize, row[4], 1, row[5], row[6])  for row in loctxt]
+                    loctxt = [(row[0]*pixelsize, row[1]*pixelsize, row[2], 1, row[3]*pixelsize, row[4], 1, row[5], row[6]+1)  for row in loctxt]
                     with open(path, 'wb') as f:
                         f.write(b'X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n')
                         np.savetxt(f, loctxt, fmt=['%.2f','%.2f','%.2f','%.i','%.2f','%.i','%.i','%.i','%.i'], newline='\r\n', delimiter='\t')
                         print('Saving complete.')
                 else:
                     loctxt = locs[['x','y','sx','bg','photons','frame']].copy()
-                    loctxt = [(row[0]*pixelsize, row[1]*pixelsize, 1, row[2]*pixelsize, row[3], 1, row[4], row[5])  for row in loctxt]
+                    loctxt = [(row[0]*pixelsize, row[1]*pixelsize, 1, row[2]*pixelsize, row[3], 1, row[4], row[5]+1)  for row in loctxt]
                     with open(path, 'wb') as f:
                         f.write(b'X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n')
                         np.savetxt(f, loctxt, fmt=['%.2f','%.2f','%.i','%.2f','%.i','%.i','%.i','%.i'], newline='\r\n', delimiter='\t')
