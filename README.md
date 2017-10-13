@@ -1,5 +1,5 @@
 # Picasso
-A collection of tools for painting super-resolution images
+A collection of tools for painting super-resolution images. The Picasso software is complemented by our Nature Protcols publication (https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html).
 
 ## Installation
 Download and run the installer file from [http://www.jungmannlab.org/](http://www.jungmannlab.org).
@@ -28,7 +28,7 @@ This should be doable by right-clicking on the script and choosing "Run with Pow
 
 ## Contributions & Copyright
 Contributors: Joerg Schnitzbauer, Maximilian Strauss  
-Copyright (c) 2015-2016 Jungmann Lab, Max Planck Institute of Biochemistry
+Copyright (c) 2015-2017 Jungmann Lab, Max Planck Institute of Biochemistry
 
 ## Credits
 - Design icon based on "Hexagon by Creative Stalls from the Noun Project"
