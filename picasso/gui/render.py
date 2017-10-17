@@ -23,6 +23,7 @@ import yaml
 from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
                                                 NavigationToolbar2QT)
 
+from scipy.ndimage.filters import gaussian_filter
 from mpl_toolkits.mplot3d import Axes3D
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
@@ -1022,6 +1023,156 @@ class InfoDialog(QtGui.QDialog):
         fig1.show()
 
 
+class MaskSettingsDialog(QtGui.QDialog):
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle('Generate Mask')
+        self.setModal(False)
+
+        vbox = QtGui.QVBoxLayout(self)
+        mask_groupbox = QtGui.QGroupBox('Mask Settings')
+        vbox.addWidget(mask_groupbox)
+        mask_grid = QtGui.QGridLayout(mask_groupbox)
+
+
+        mask_grid.addWidget(QtGui.QLabel('Oversampling'), 0, 0)
+        self.mask_oversampling = QtGui.QSpinBox()
+        self.mask_oversampling.setRange(0, 999999)
+        self.mask_oversampling.setValue(2)
+        self.mask_oversampling.setSingleStep(1)
+        self.mask_oversampling.setKeyboardTracking(False)
+
+        self.mask_oversampling.valueChanged.connect(self.calculate_mask)
+
+        mask_grid.addWidget(self.mask_oversampling, 0, 1)
+
+        mask_grid.addWidget(QtGui.QLabel('Blur'), 1, 0)
+        self.mask_blur = QtGui.QDoubleSpinBox()
+        self.mask_blur.setRange(0, 999999)
+        self.mask_blur.setValue(1)
+        self.mask_blur.setSingleStep(0.1)
+        self.mask_blur.setDecimals(3)
+        mask_grid.addWidget(self.mask_blur, 1, 1)
+
+        self.mask_blur.valueChanged.connect(self.calculate_mask)
+
+        mask_grid.addWidget(QtGui.QLabel('Threshold'), 2, 0)
+        self.mask_tresh = QtGui.QDoubleSpinBox()
+        self.mask_tresh.setRange(0, 1)
+        self.mask_tresh.setValue(0.5)
+        self.mask_tresh.setSingleStep(0.01)
+        self.mask_tresh.setDecimals(3)
+
+        self.mask_tresh.valueChanged.connect(self.calculate_mask)
+        mask_grid.addWidget(self.mask_tresh, 2, 1)
+
+
+        self.figure = plt.figure(figsize=(12,3))
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        mask_grid.addWidget(self.canvas,3,0,1,2)
+
+        self.maskButton = QtGui.QPushButton('Mask')
+        mask_grid.addWidget(self.maskButton, 4, 0)
+
+        self.saveButton = QtGui.QPushButton('Save')
+        mask_grid.addWidget(self.saveButton, 4, 1)
+
+        self.locs = []
+   
+
+    def calculate_mask(self):
+
+        locs = self.locs[0]
+        stepsize = 1/self.mask_oversampling.value()
+        min_param = self.mask_tresh.value()
+        blur = self.mask_blur.value()
+
+        x_min,x_max = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
+        y_min,y_max = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
+        xedges = np.arange(x_min,x_max,stepsize)
+        yedges = np.arange(y_min,y_max,stepsize)
+
+        H, xedges, yedges = np.histogram2d(locs['x'], locs['y'], bins=(xedges, yedges))
+        H = H.T  # Let each row list bins with common y range.
+        H_blur = gaussian_filter(H,sigma=blur)
+        H_blur = H_blur/np.max(H_blur)
+        mask = np.zeros_like(H_blur)
+        mask[H_blur>min_param]=1
+
+        #steps_x = len(xedges)
+        #steps_y = len(yedges)
+
+        #x_ind = np.round((locs['x']-x_min)/(x_max-x_min)*steps_x)-1
+        #y_ind = np.round((locs['y']-y_min)/(y_max-y_min)*steps_y)-1
+        #x_ind = x_ind.astype(int)
+        #y_ind = y_ind.astype(int)
+
+        #index = mask[y_ind,x_ind].astype(bool)
+        #index_locs = locs[index]
+
+        #H_new, xedges, yedges = np.histogram2d(index_locs['x'], index_locs['y'], bins=(xedges, yedges))
+        #H_new = H_new.T  # Let each row list bins with common y range.
+
+        #fig = plt.figure(figsize=(10, 10))
+        ax1 = self.figure.add_subplot(141, title='Original')
+        ax1.imshow(H, interpolation='nearest', origin='low',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
+        ax1.grid(False)
+        ax2 = self.figure.add_subplot(142, title='Blurred')
+        ax2.imshow(H_blur, interpolation='nearest', origin='low',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
+        ax2.grid(False)
+        ax3 = self.figure.add_subplot(143, title='Mask')
+        ax3.imshow(mask, interpolation='nearest', origin='low',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
+        ax3.grid(False)
+        ax4 = self.figure.add_subplot(144, title='Isolated coords')
+        ax4.cla()
+        #ax4.imshow(H_new, interpolation='nearest', origin='low',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
+        ax4.grid(False)
+        plt.show(False)
+
+        #ax = self.figure.add_subplot(111)
+        #ax.hold(False)
+        #plt.cla()
+        # refresh canvas
+        self.canvas.draw()
+        #self.sl.setMaximum(len(self.bins)-2)
+
+
+
+    def on_pick_diameter_changed(self, diameter):
+        self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
+        self.window.view.update_scene(use_cache=True)
+
+
+    def calculate_histogram(self):
+        slice = self.pick_slice.value()
+        ax = self.figure.add_subplot(111)
+        ax.hold(False)
+        plt.cla()
+        n_channels = len(self.zcoord)
+
+        hues = np.arange(0, 1, 1 / n_channels)
+        self.colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+
+        self.bins = np.arange(np.amin(np.hstack(self.zcoord)),np.amax(np.hstack(self.zcoord)),slice)
+        self.patches = []
+        ax.hold(True)
+        for i in range(len(self.zcoord)):
+            n, bins, patches = plt.hist(self.zcoord[i], self.bins, normed=1, facecolor=self.colors[i], alpha=0.5)
+            self.patches.append(patches)
+
+        plt.xlabel('Z-Coordinate [nm]')
+        plt.ylabel('Counts')
+        plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
+        # refresh canvas
+        self.canvas.draw()
+        self.sl.setMaximum(len(self.bins)-2)
+        #self.sl.setValue(np.ceil((len(self.bins)-2)/2))
+
+
+
+
 class ToolsSettingsDialog(QtGui.QDialog):
 
     def __init__(self, window):
@@ -1451,6 +1602,7 @@ class View(QtGui.QLabel):
                 self.update_scene()
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
+        self.window.mask_settings_dialog.locs.append(locs)
         os.chdir(os.path.dirname(path))
         self.window.dataset_dialog.add_entry(path)
         self.window.setWindowTitle('Picasso: Render. File: {}'.format(os.path.basename(path)))
@@ -2484,6 +2636,30 @@ class View(QtGui.QLabel):
             self.index_locs(channel)
         return self.index_blocks[channel]
 
+    def mask_image(self):
+        print('Maksing image')
+        channel = self.get_channel('Mask image')
+        if channel is not None:
+            print('Maksed')
+            movie_height, movie_width = self.movie_size()
+            viewport = [(0, 0), (movie_height, movie_width)]
+            qimage = self.render_scene(cache=False, viewport=viewport)
+            hist_data = self.render_scene_hist(cache=False, viewport=viewport)
+            hist_data = np.average(np.array(hist_data),axis=2)
+            hist_data = hist_data/np.max(hist_data)
+            hist_data = hist_data[hist_data>0.5,:]
+            print(hist_data.shape)
+            print(hist_data)
+            print('Hist_data')
+ 
+
+            fig = plt.figure()
+            ax1 = fig.add_subplot(1,1,1)
+            plt.imshow(hist_data)
+            #plt.imshow(hist_data, interpolation='nearest', cmap=plt.cm.ocean)
+            plt.show()
+            #plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
+
     def pick_similar(self):
         channel = self.get_channel('Pick similar')
         if channel is not None:
@@ -2600,6 +2776,16 @@ class View(QtGui.QLabel):
         Y, X = self._bgra.shape[:2]
         qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
         return qimage
+
+    def render_scene_hist(self, autoscale=False, use_cache=False, cache=True, viewport=None):
+        kwargs = self.get_render_kwargs(viewport=viewport)
+        n_channels = len(self.locs)
+        if n_channels == 1:
+            self.render_single_channel(kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache)
+        else:
+            self.render_multi_channel(kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache)
+        self._bgra[:, :, 3].fill(255)
+        return self._bgra.data
 
     def render_multi_channel(self, kwargs, autoscale=False, locs=None, use_cache=False, cache=True):
         if locs is None:
@@ -3149,6 +3335,7 @@ class Window(QtGui.QMainWindow):
         self.setCentralWidget(self.view)
         self.display_settings_dialog = DisplaySettingsDialog(self)
         self.tools_settings_dialog = ToolsSettingsDialog(self)
+        self.mask_settings_dialog = MaskSettingsDialog(self)
         self.slicer_dialog = SlicerDialog(self)
         self.info_dialog = InfoDialog(self)
         self.menu_bar = self.menuBar()
@@ -3259,9 +3446,13 @@ class Window(QtGui.QMainWindow):
         self.dataset_dialog = DatasetDialog(self)
         dataset_action = tools_menu.addAction('Datasets')
         dataset_action.triggered.connect(self.dataset_dialog.show)
+        mask_action = tools_menu.addAction('Mask image')
+        mask_action.triggered.connect(self.mask_settings_dialog.show)
         tools_menu.addSeparator()
         cluster_action = tools_menu.addAction('Analyze Clusters')
         cluster_action.triggered.connect(self.view.analyze_cluster)
+
+
         pickadd_action = tools_menu.addAction('Substract pick regions')
         pickadd_action.triggered.connect(self.substract_picks)
 
@@ -3292,6 +3483,8 @@ class Window(QtGui.QMainWindow):
         unfold_action.triggered.connect(self.view.unfold_groups)
         unfold_action_square = postprocess_menu.addAction('Unfold groups (square)')
         unfold_action_square.triggered.connect(self.view.unfold_groups_square)
+
+
 
         #channel_action = postprocess_menu.addAction('Combine channels')
         #channel_action.triggered.connect(self.combine_channels)
