@@ -1649,8 +1649,6 @@ class View(QtGui.QLabel):
         os.chdir(os.path.dirname(path))
         self.window.dataset_dialog.add_entry(path)
         self.window.setWindowTitle('Picasso: Render. File: {}'.format(os.path.basename(path)))
-     
-
 
     def add_multiple(self, paths):
         fit_in_view = len(self.locs) == 0
@@ -2246,6 +2244,93 @@ class View(QtGui.QLabel):
             #f.subplots_adjust(hspace=0)
             #f.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
             f.show()
+
+    def show_traces(self):
+        print('Show traces')
+        fig = plt.figure(figsize=(5,5))
+        fig.canvas.set_window_title("Trace")
+        removelist = []
+
+        channel = self.get_channel('Undrift from picked')
+        if channel is not None:
+            if self._picks:
+                t0 = time.time()
+                all_picked_locs = self.picked_locs(channel)
+                for i, pick in enumerate(self._picks):
+                    locs = all_picked_locs[i]
+                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
+
+                    fig.clf()
+                    ax1 = fig.add_subplot(311)
+                    ax2 = fig.add_subplot(312,sharex=ax1)
+                    ax3 = fig.add_subplot(313,sharex=ax1)
+
+                    xvec = np.arange(max(locs['frame'])+1)
+                    yvec = xvec[:]*0
+                    yvec[locs['frame']]=1
+                    ax1.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
+                    ax1.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
+                    ax1.scatter(locs['frame'],locs['x'])
+                    ax1.set_ylabel('X-pos [Px]')
+                    ax1.set_title('X-pos vs frame')
+
+                    ax1.set_xlim(0,(max(locs['frame'])+1))
+                    plt.setp(ax1.get_xticklabels(), visible=False)
+                    
+                    ax2.scatter(locs['frame'],locs['y'])
+                    ax2.set_title('Y-pos vs frame')
+                    ax2.set_ylabel('Y-pos [Px]')
+                    plt.setp(ax2.get_xticklabels(), visible=False)
+                    
+
+                    ax3.plot(xvec,yvec)
+                    ax3.set_title('Localizations')
+                    ax3.set_xlabel('Frames')
+                    ax3.set_ylabel('ON')
+                    
+                    fig.canvas.draw()
+                    size = fig.canvas.size()
+                    width, height = size.width(), size.height()
+                    im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+
+
+                    self.setPixmap((QtGui.QPixmap(im)))
+                    self.setAlignment(QtCore.Qt.AlignCenter)
+
+                    msgBox = QtGui.QMessageBox(self)
+
+                    msgBox.setWindowTitle('Select picks')
+                    msgBox.setWindowIcon(self.icon)
+                    dt = time.time() - t0
+                    n_removed = len(removelist)
+                    n_kept = i-n_removed
+                    n_total = len(self._picks)
+                    msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'.format(i+1,n_total,n_removed,n_kept,n_kept/(i+1)*100,dt/60,i/dt*60))
+                    msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
+                    msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
+                    msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
+                    qr = self.frameGeometry()
+                    cp = QtGui.QDesktopWidget().availableGeometry().center()
+                    qr.moveCenter(cp)
+                    msgBox.move(qr.topLeft())
+
+                    reply = msgBox.exec()
+
+                    if reply == 0:
+                        print('Accepted')
+                    elif reply == 2:
+                        break
+                    else:
+                        print('Discard')
+                        removelist.append(pick)
+                    plt.close()
+        for pick in removelist:
+            self._picks.remove(pick)
+
+        self.n_picks = len(self._picks)
+
+        self.update_pick_info_short()
+        self.update_scene()
 
     def show_pick(self):
         print('Show pick')
@@ -3467,6 +3552,8 @@ class Window(QtGui.QMainWindow):
         show_trace_action = tools_menu.addAction('Show trace')
         show_trace_action.setShortcut('Ctrl+R')
         show_trace_action.triggered.connect(self.view.show_trace)
+        show_traces_action = tools_menu.addAction('Show traces')
+        show_traces_action.triggered.connect(self.view.show_traces)
         clear_picks_action = tools_menu.addAction('Clear picks')
         clear_picks_action.triggered.connect(self.view.clear_picks)
         tools_menu.addSeparator()
