@@ -1040,7 +1040,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         mask_grid.addWidget(QtGui.QLabel('Oversampling'), 0, 0)
         self.mask_oversampling = QtGui.QSpinBox()
         self.mask_oversampling.setRange(0, 999999)
-        self.mask_oversampling.setValue(2)
+        self.mask_oversampling.setValue(1)
         self.mask_oversampling.setSingleStep(1)
         self.mask_oversampling.setKeyboardTracking(False)
 
@@ -1051,7 +1051,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         mask_grid.addWidget(QtGui.QLabel('Blur'), 1, 0)
         self.mask_blur = QtGui.QDoubleSpinBox()
         self.mask_blur.setRange(0, 999999)
-        self.mask_blur.setValue(1)
+        self.mask_blur.setValue(2)
         self.mask_blur.setSingleStep(0.1)
         self.mask_blur.setDecimals(3)
         mask_grid.addWidget(self.mask_blur, 1, 1)
@@ -1075,11 +1075,16 @@ class MaskSettingsDialog(QtGui.QDialog):
 
         self.maskButton = QtGui.QPushButton('Mask')
         mask_grid.addWidget(self.maskButton, 4, 0)
+        self.maskButton.clicked.connect(self.mask_locs)
 
         self.saveButton = QtGui.QPushButton('Save')
+        self.saveButton.setEnabled(False) 
+        self.saveButton.clicked.connect(self.save_locs)
         mask_grid.addWidget(self.saveButton, 4, 1)
 
         self.locs = []
+        self.paths = []
+        self.infos = []
 
         self.oversampling = 2
         self.blur = 1
@@ -1088,6 +1093,8 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.cached_oversampling = 0
         self.cached_blur = 0
         self.cached_thresh = 0
+
+        self.mask_exists = 0
 
    
     def init_dialog(self):
@@ -1160,7 +1167,6 @@ class MaskSettingsDialog(QtGui.QDialog):
             self.mask_image()
             self.cached_thresh = 1
 
-
         ax1 = self.figure.add_subplot(141, title='Original')
         ax1.imshow(self.H, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax1.grid(False)
@@ -1173,100 +1179,41 @@ class MaskSettingsDialog(QtGui.QDialog):
         ax4 = self.figure.add_subplot(144, title='Masked image')
         ax4.imshow(np.zeros_like(self.H), interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax4.grid(False)
-        #plt.show()
         self.canvas.draw()
 
 
+    def mask_locs(self):
 
+        locs = self.locs[0]
+        steps_x = len(self.xedges)
+        steps_y = len(self.yedges)
 
-    def calculate_mask(self):
+        x_ind = np.floor((locs['x']-self.x_min)/(self.x_max-self.x_min)*steps_x)-1
+        y_ind = np.floor((locs['y']-self.y_min)/(self.y_max-self.y_min)*steps_y)-1
+        x_ind = x_ind.astype(int)
+        y_ind = y_ind.astype(int)
 
+        index = self.mask[y_ind,x_ind].astype(bool)
+        self.index_locs = locs[index]
 
-        H, xedges, yedges = np.histogram2d(locs['x'], locs['y'], bins=(xedges, yedges))
-        H = H.T  # Let each row list bins with common y range.
-        H_blur = gaussian_filter(H,sigma=blur)
-        H_blur = H_blur/np.max(H_blur)
-        mask = np.zeros_like(H_blur)
-        mask[H_blur>min_param]=1
+        H_new, xedges, yedges = np.histogram2d(self.index_locs['x'], self.index_locs['y'], bins=(self.xedges, self.yedges))
+        self.H_new = H_new.T  # Let each row list bins with common y range.
 
-        #TODO: Make dynamic
-        #TODO: DO Not calculate histogram all the time
-
-
-
-
-
-        #steps_x = len(xedges)
-        #steps_y = len(yedges)
-
-        #x_ind = np.round((locs['x']-x_min)/(x_max-x_min)*steps_x)-1
-        #y_ind = np.round((locs['y']-y_min)/(y_max-y_min)*steps_y)-1
-        #x_ind = x_ind.astype(int)
-        #y_ind = y_ind.astype(int)
-
-        #index = mask[y_ind,x_ind].astype(bool)
-        #index_locs = locs[index]
-
-        #H_new, xedges, yedges = np.histogram2d(index_locs['x'], index_locs['y'], bins=(xedges, yedges))
-        #H_new = H_new.T  # Let each row list bins with common y range.
-
-        #fig = plt.figure(figsize=(10, 10))
-        ax1 = self.figure.add_subplot(141, title='Original')
-        ax1.imshow(H, interpolation='nearest', origin='low',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
-        ax1.grid(False)
-        ax2 = self.figure.add_subplot(142, title='Blurred')
-        ax2.imshow(H_blur, interpolation='nearest', origin='low',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
-        ax2.grid(False)
-        ax3 = self.figure.add_subplot(143, title='Mask')
-        ax3.imshow(mask, interpolation='nearest', origin='low',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
-        ax3.grid(False)
-        ax4 = self.figure.add_subplot(144, title='Isolated coords')
-        ax4.cla()
-        #ax4.imshow(H_new, interpolation='nearest', origin='low',extent=[xedges[0], xedges[-1], yedges[0], yedges[-1]])
+        ax4 = self.figure.add_subplot(144, title='Masked image')
+        ax4.imshow(self.H_new, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax4.grid(False)
-        plt.show(False)
-
-        #ax = self.figure.add_subplot(111)
-        #ax.hold(False)
-        #plt.cla()
-        # refresh canvas
+        self.mask_exists = 1
+        self.saveButton.setEnabled(True) 
         self.canvas.draw()
-        #self.sl.setMaximum(len(self.bins)-2)
 
-
-
-    def on_pick_diameter_changed(self, diameter):
-        self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
-        self.window.view.update_scene(use_cache=True)
-
-
-    def calculate_histogram(self):
-        slice = self.pick_slice.value()
-        ax = self.figure.add_subplot(111)
-        ax.hold(False)
-        plt.cla()
-        n_channels = len(self.zcoord)
-
-        hues = np.arange(0, 1, 1 / n_channels)
-        self.colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
-
-        self.bins = np.arange(np.amin(np.hstack(self.zcoord)),np.amax(np.hstack(self.zcoord)),slice)
-        self.patches = []
-        ax.hold(True)
-        for i in range(len(self.zcoord)):
-            n, bins, patches = plt.hist(self.zcoord[i], self.bins, normed=1, facecolor=self.colors[i], alpha=0.5)
-            self.patches.append(patches)
-
-        plt.xlabel('Z-Coordinate [nm]')
-        plt.ylabel('Counts')
-        plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
-        # refresh canvas
-        self.canvas.draw()
-        self.sl.setMaximum(len(self.bins)-2)
-        #self.sl.setValue(np.ceil((len(self.bins)-2)/2))
-
-
-
+    def save_locs(self):
+        channel = 0
+        base, ext = os.path.splitext(self.paths[channel])
+        out_path = base + '_render.hdf5'
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', out_path, filter='*.hdf5')
+        if path:
+            info = self.infos[channel] + [{'Generated by': 'Picasso Render'}]
+            io.save_locs(path, self.index_locs, info)
 
 class ToolsSettingsDialog(QtGui.QDialog):
 
@@ -1697,6 +1644,8 @@ class View(QtGui.QLabel):
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
         self.window.mask_settings_dialog.locs.append(locs)
+        self.window.mask_settings_dialog.paths.append(path)
+        self.window.mask_settings_dialog.infos.append(info)
         os.chdir(os.path.dirname(path))
         self.window.dataset_dialog.add_entry(path)
         self.window.setWindowTitle('Picasso: Render. File: {}'.format(os.path.basename(path)))
