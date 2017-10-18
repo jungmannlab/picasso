@@ -1044,7 +1044,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.mask_oversampling.setSingleStep(1)
         self.mask_oversampling.setKeyboardTracking(False)
 
-        self.mask_oversampling.valueChanged.connect(self.calculate_mask)
+        self.mask_oversampling.valueChanged.connect(self.update_plots)
 
         mask_grid.addWidget(self.mask_oversampling, 0, 1)
 
@@ -1056,7 +1056,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.mask_blur.setDecimals(3)
         mask_grid.addWidget(self.mask_blur, 1, 1)
 
-        self.mask_blur.valueChanged.connect(self.calculate_mask)
+        self.mask_blur.valueChanged.connect(self.update_plots)
 
         mask_grid.addWidget(QtGui.QLabel('Threshold'), 2, 0)
         self.mask_tresh = QtGui.QDoubleSpinBox()
@@ -1065,7 +1065,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.mask_tresh.setSingleStep(0.01)
         self.mask_tresh.setDecimals(3)
 
-        self.mask_tresh.valueChanged.connect(self.calculate_mask)
+        self.mask_tresh.valueChanged.connect(self.update_plots)
         mask_grid.addWidget(self.mask_tresh, 2, 1)
 
 
@@ -1080,19 +1080,107 @@ class MaskSettingsDialog(QtGui.QDialog):
         mask_grid.addWidget(self.saveButton, 4, 1)
 
         self.locs = []
+
+        self.oversampling = 2
+        self.blur = 1
+        self.thresh = 0.5
+
+        self.cached_oversampling = 0
+        self.cached_blur = 0
+        self.cached_thresh = 0
+
    
+    def init_dialog(self):
+        self.show()
+        locs = self.locs[0]
+        self.x_min,self.x_max = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
+        self.y_min,self.y_max = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
+        self.update_plots()
+
+
+    def generate_image(self):
+        locs = self.locs[0]
+        self.stepsize = 1/self.oversampling
+        self.xedges = np.arange(self.x_min,self.x_max,self.stepsize)
+        self.yedges = np.arange(self.y_min,self.y_max,self.stepsize)
+        H, xedges, yedges = np.histogram2d(locs['x'], locs['y'], bins=(self.xedges, self.yedges))
+        H = H.T  # Let each row list bins with common y range.
+        self.H = H
+
+    def blur_image(self):
+        H_blur = gaussian_filter(self.H,sigma=self.blur)
+        H_blur = H_blur/np.max(H_blur)
+        self.H_blur = H_blur
+
+    def mask_image(self):
+        mask = np.zeros_like(self.H_blur)
+        mask[self.H_blur>self.tresh]=1
+        self.mask = mask
+
+    def update_plots(self):
+        if self.mask_oversampling.value() == self.oversampling and self.cached_oversampling == 1:
+            self.cached_oversampling = 1
+        else: 
+            self.oversampling = self.mask_oversampling.value()
+            self.cached_oversampling = 0
+
+        if self.mask_blur.value() == self.blur and self.cached_blur == 1:
+            self.cached_blur = 1
+        else: 
+            self.blur = self.mask_blur.value()
+            self.cached_oversampling = 0
+
+        if self.mask_tresh.value() == self.thresh and self.cached_thresh == 1:
+            self.cached_thresh = 1
+        else: 
+            self.tresh = self.mask_tresh.value()
+            self.cached_thresh = 0
+
+        if self.cached_oversampling:
+            pass
+        else:
+            self.generate_image()
+            self.blur_image()
+            self.mask_image()
+            self.cached_oversampling = 1
+            self.cached_blur = 1
+            self.cached_thresh = 1
+
+        if self.cached_blur:
+            pass
+        else:
+            self.blur_image()
+            self.mask_image()
+            self.cached_blur = 1
+            self.cached_thresh = 1
+
+        if self.cached_thresh:
+            pass
+        else:
+            self.mask_image()
+            self.cached_thresh = 1
+
+
+        ax1 = self.figure.add_subplot(141, title='Original')
+        ax1.imshow(self.H, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
+        ax1.grid(False)
+        ax2 = self.figure.add_subplot(142, title='Blurred')
+        ax2.imshow(self.H_blur, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
+        ax2.grid(False)
+        ax3 = self.figure.add_subplot(143, title='Mask')
+        ax3.imshow(self.mask, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
+        ax3.grid(False)
+        ax4 = self.figure.add_subplot(144, title='Masked image')
+        ax4.imshow(np.zeros_like(self.H), interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
+        ax4.grid(False)
+        #plt.show()
+        self.canvas.draw()
+
+
+
 
     def calculate_mask(self):
 
-        locs = self.locs[0]
-        stepsize = 1/self.mask_oversampling.value()
-        min_param = self.mask_tresh.value()
-        blur = self.mask_blur.value()
-
-        x_min,x_max = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
-        y_min,y_max = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
-        xedges = np.arange(x_min,x_max,stepsize)
-        yedges = np.arange(y_min,y_max,stepsize)
 
         H, xedges, yedges = np.histogram2d(locs['x'], locs['y'], bins=(xedges, yedges))
         H = H.T  # Let each row list bins with common y range.
@@ -1103,6 +1191,8 @@ class MaskSettingsDialog(QtGui.QDialog):
 
         #TODO: Make dynamic
         #TODO: DO Not calculate histogram all the time
+
+
 
 
 
@@ -3451,7 +3541,7 @@ class Window(QtGui.QMainWindow):
         dataset_action = tools_menu.addAction('Datasets')
         dataset_action.triggered.connect(self.dataset_dialog.show)
         mask_action = tools_menu.addAction('Mask image')
-        mask_action.triggered.connect(self.mask_settings_dialog.show)
+        mask_action.triggered.connect(self.mask_settings_dialog.init_dialog)
         tools_menu.addSeparator()
         cluster_action = tools_menu.addAction('Analyze Clusters')
         cluster_action.triggered.connect(self.view.analyze_cluster)
