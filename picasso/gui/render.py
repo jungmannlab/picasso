@@ -1101,6 +1101,11 @@ class MaskSettingsDialog(QtGui.QDialog):
         mask = np.zeros_like(H_blur)
         mask[H_blur>min_param]=1
 
+        #TODO: Make dynamic
+        #TODO: DO Not calculate histogram all the time
+
+
+
         #steps_x = len(xedges)
         #steps_y = len(yedges)
 
@@ -1207,7 +1212,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
 
 
     def on_pick_diameter_changed(self, diameter):
-        self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
+        self.window.vieaw.index_blocks = [None for _ in self.window.view.index_blocks]
         self.window.view.update_scene(use_cache=True)
 
 
@@ -1401,10 +1406,8 @@ class SlicerDialog(QtGui.QDialog):
         self.pick_slice.setRange(1, 999999)
         self.pick_slice.setValue(50)
         self.pick_slice.setSingleStep(5)
-        self.pick_slice.setKeyboardTracking(False)
         self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
         slicer_grid.addWidget(self.pick_slice, 0, 1)
-
 
         self.sl = QtGui.QSlider(QtCore.Qt.Horizontal)
         self.sl.setMinimum(0)
@@ -1426,6 +1429,7 @@ class SlicerDialog(QtGui.QDialog):
         self.seperateCheck = QtGui.QCheckBox('Export channels separate')
         self.fullCheck = QtGui.QCheckBox('Export full image')
         self.exportButton = QtGui.QPushButton('Export Slices')
+        self.exportButton.setAutoDefault(False)
 
         self.exportButton.clicked.connect(self.exportStack)
 
