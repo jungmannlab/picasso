@@ -273,6 +273,7 @@ def dbscan(locs, radius, min_density):
         std_x = _np.zeros(n_groups)
         std_y = _np.zeros(n_groups)
         std_z = _np.zeros(n_groups)
+        convex_hull = _np.zeros(n_groups)
         volume = _np.zeros(n_groups)
         n = _np.zeros(n_groups, dtype=_np.int32)
         for i, group in enumerate(groups):
@@ -287,13 +288,14 @@ def dbscan(locs, radius, min_density):
             std_z[i] = _np.std(group_locs.z)
             n[i] = len(group_locs)
             X_group = _np.stack([group_locs.x,group_locs.y,group_locs.z/pixelsize], axis=0).T
+            volume[i] = _np.power((std_x[i]+std_y[i]+(std_z[i]/pixelsize))/3*2,3)*_np.pi*4/3
             try:
                 hull = ConvexHull(X_group)
-                volume[i] = hull.volume
+                convex_hull[i] = hull.volume
             except:
-                volume[i] = 0
-        clusters = _np.rec.array((groups, volume, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
-                                 dtype=[('groups', groups.dtype),('volume', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),('com_z', 'f4'),
+                convex_hull[i] = 0
+        clusters = _np.rec.array((groups, convex_hull, volume, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
+                                 dtype=[('groups', groups.dtype),('convex_hull', 'f4'),('volume', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),('com_z', 'f4'),
                                  ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'),('std_z', 'f4'),('n', 'i4')])
     else:
         locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
@@ -311,7 +313,8 @@ def dbscan(locs, radius, min_density):
         com_y = _np.zeros(n_groups)
         std_x = _np.zeros(n_groups)
         std_y = _np.zeros(n_groups)
-        volume = _np.zeros(n_groups)
+        convex_hull = _np.zeros(n_groups)
+        area = _np.zeros(n_groups)
         n = _np.zeros(n_groups, dtype=_np.int32)
         for i, group in enumerate(groups):
             group_locs = locs[locs.group == i]
@@ -323,13 +326,14 @@ def dbscan(locs, radius, min_density):
             std_y[i] = _np.std(group_locs.y)
             n[i] = len(group_locs)
             X_group = _np.stack([group_locs.x,group_locs.y], axis=0).T
+            area[i] = _np.power((std_x[i]+std_y[i]),2)*_np.pi
             try:
                 hull = ConvexHull(X_group)
-                volume[i] = hull.volume
+                convex_hull[i] = hull.volume
             except:
-                volume[i] = 0
-        clusters = _np.rec.array((groups, volume, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
-                                 dtype=[('groups', groups.dtype),('volume', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
+                convex_hull[i] = 0
+        clusters = _np.rec.array((groups, convex_hull, area, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
+                                 dtype=[('groups', groups.dtype),('convex_hull', 'f4'),('area', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
                                  ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'), ('n', 'i4')])
     return clusters, locs
 
