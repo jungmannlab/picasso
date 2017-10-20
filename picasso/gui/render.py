@@ -2313,6 +2313,7 @@ class View(QtGui.QLabel):
                     reply = msgBox.exec()
 
                     if reply == 0:
+                        pass
                     elif reply == 2:
                         break
                     else:
