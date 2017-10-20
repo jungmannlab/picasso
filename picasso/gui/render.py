@@ -1249,7 +1249,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
 
 
     def on_pick_diameter_changed(self, diameter):
-        self.window.vieaw.index_blocks = [None for _ in self.window.view.index_blocks]
+        self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
         self.window.view.update_scene(use_cache=True)
 
 
@@ -2293,7 +2293,6 @@ class View(QtGui.QLabel):
                     width, height = size.width(), size.height()
                     im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
 
-
                     self.setPixmap((QtGui.QPixmap(im)))
                     self.setAlignment(QtCore.Qt.AlignCenter)
 
@@ -2317,11 +2316,9 @@ class View(QtGui.QLabel):
                     reply = msgBox.exec()
 
                     if reply == 0:
-                        print('Accepted')
                     elif reply == 2:
                         break
                     else:
-                        print('Discard')
                         removelist.append(pick)
                     plt.close()
         for pick in removelist:
