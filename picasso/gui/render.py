@@ -22,15 +22,14 @@ import numpy as np
 import yaml
 from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
                                                 NavigationToolbar2QT)
+from mpl_toolkits.mplot3d import Axes3D
 
 from scipy.ndimage.filters import gaussian_filter
-from mpl_toolkits.mplot3d import Axes3D
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
 
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
-
 
 from collections import Counter
 
@@ -184,7 +183,6 @@ class ApplyDialog(QtGui.QDialog):
         self.label.setText(str(vars))
 
 class DatasetDialog(QtGui.QDialog):
-
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -196,14 +194,14 @@ class DatasetDialog(QtGui.QDialog):
         self.colordisp_all = []
         self.intensitysettings = []
         self.setLayout(self.layout)
-        self.layout.addWidget(QtGui.QLabel('Path'),0,0)
-        self.layout.addWidget(QtGui.QLabel('Color'),0,1)
-        self.layout.addWidget(QtGui.QLabel('#'),0,2)
-        self.layout.addWidget(QtGui.QLabel('Rel. Intensity'),0,3)
+        self.layout.addWidget(QtGui.QLabel('Path'), 0, 0)
+        self.layout.addWidget(QtGui.QLabel('Color'), 0, 1)
+        self.layout.addWidget(QtGui.QLabel('#'), 0, 2)
+        self.layout.addWidget(QtGui.QLabel('Rel. Intensity'), 0, 3)
 
     def add_entry(self,path):
         c = QtGui.QCheckBox(path)
-        currentline= len(self.layout)
+        currentline = len(self.layout)
         colordrop = QtGui.QComboBox(self)
         colordrop.addItem("auto")
         colordrop.addItem("red")
@@ -222,10 +220,10 @@ class DatasetDialog(QtGui.QDialog):
         colordisp.setAutoFillBackground(True)
         colordisp.setPalette(palette)
 
-        self.layout.addWidget(c,currentline,0)
-        self.layout.addWidget(colordrop,currentline,1)
-        self.layout.addWidget(colordisp,currentline,2)
-        self.layout.addWidget(intensity,currentline,3)
+        self.layout.addWidget(c, currentline, 0)
+        self.layout.addWidget(colordrop, currentline, 1)
+        self.layout.addWidget(colordisp, currentline, 2)
+        self.layout.addWidget(intensity, currentline, 3)
 
         self.intensitysettings.append(intensity)
         self.colorselection.append(colordrop)
@@ -245,28 +243,27 @@ class DatasetDialog(QtGui.QDialog):
         colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
         for n in range(n_channels):
             palette = self.colordisp_all[n].palette()
-            palette.setColor(QtGui.QPalette.Window, QtGui.QColor.fromRgbF(colors[n][0],colors[n][1],colors[n][2],1))
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor.fromRgbF(colors[n][0], colors[n][1], colors[n][2], 1))
             self.colordisp_all[n].setPalette(palette)
 
     def update_viewport(self):
         if self.window.view.viewport:
             self.window.view.update_scene()
 
-    def set_color(self,n):
+    def set_color(self, n):
         palette = self.colordisp_all[n].palette()
         selectedcolor = self.colorselection[n].currentText()
         if selectedcolor == 'auto':
             n_channels = len(self.checks)
             hues = np.arange(0, 1, 1 / n_channels)
             colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
-            palette.setColor(QtGui.QPalette.Window, QtGui.QColor.fromRgbF(colors[n][0],colors[n][1],colors[n][2],1))
+            palette.setColor(QtGui.QPalette.Window, QtGui.QColor.fromRgbF(colors[n][0], colors[n][1], colors[n][2], 1))
         else:
             palette.setColor(QtGui.QPalette.Window, QtGui.QColor(selectedcolor))
         self.colordisp_all[n].setPalette(palette)
 
 
 class PlotDialog(QtGui.QDialog):
-
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -285,11 +282,8 @@ class PlotDialog(QtGui.QDialog):
                                               QtCore.Qt.Horizontal,
                                               self)
         layout_grid.addWidget(self.buttons)
-
         self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
-
         self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
-
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
 
     def on_accept(self):
@@ -307,29 +301,28 @@ class PlotDialog(QtGui.QDialog):
         self.result = 2
         self.close()
 
-
     @staticmethod
     def getParams(all_picked_locs, current, length, mode, color_sys):
 
         dialog = PlotDialog(None)
         fig = dialog.figure
         ax = fig.add_subplot(111, projection='3d')
-        dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
+        dialog.label.setText('3D Scatterplot of pick {} of {}.'.format(current+1, length))
 
         if mode == 1:
             locs = all_picked_locs[current]
             locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
             colors = locs['z'][:]
-            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
-            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
-            ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])] = np.mean(locs['z'])+3*np.std(locs['z'])
+            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])] = np.mean(locs['z'])-3*np.std(locs['z'])
+            ax.scatter(locs['x'], locs['y'], locs['z'], c=colors, cmap='jet')
             ax.set_xlabel('X [Px]')
             ax.set_ylabel('Y [Px]')
             ax.set_zlabel('Z [nm]')
-            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
             plt.gca().patch.set_facecolor('black')
             ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
             ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
@@ -341,9 +334,9 @@ class PlotDialog(QtGui.QDialog):
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
                 ax.scatter(locs['x'], locs['y'], locs['z'], c=colors[l])
 
-            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
 
             ax.set_xlabel('X [Px]')
             ax.set_ylabel('Y [Px]')
@@ -355,11 +348,9 @@ class PlotDialog(QtGui.QDialog):
             ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
 
         result = dialog.exec_()
-
         return dialog.result
 
 class PlotDialogIso(QtGui.QDialog):
-
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -370,19 +361,16 @@ class PlotDialogIso(QtGui.QDialog):
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.label = QtGui.QLabel()
 
-        layout_grid.addWidget(self.label,0,0,1,3)
-        layout_grid.addWidget(self.canvas,1,0,1,3)
+        layout_grid.addWidget(self.label, 0, 0, 1, 3)
+        layout_grid.addWidget(self.canvas, 1, 0, 1, 3)
 
         # OK and Cancel buttons
         self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Yes | QtGui.QDialogButtonBox.No | QtGui.QDialogButtonBox.Cancel,
                                               QtCore.Qt.Horizontal,
                                               self)
         layout_grid.addWidget(self.buttons)
-
         self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
-
         self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
-
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
 
     def on_accept(self):
@@ -400,14 +388,13 @@ class PlotDialogIso(QtGui.QDialog):
         self.result = 2
         self.close()
 
-
     @staticmethod
     def getParams(all_picked_locs, current, length, mode, color_sys, pixelsize):
 
         dialog = PlotDialog(None)
         fig = dialog.figure
         ax = fig.add_subplot(221, projection='3d')
-        dialog.label.setText("3D Scatterplot of Pick " +str(current+1) + "  of: " +str(length)+".")
+        dialog.label.setText('3D Scatterplot of pick {} of {}.'.format(current+1, length))
         ax2 = fig.add_subplot(222)
         ax3 = fig.add_subplot(223)
         ax4 = fig.add_subplot(224)
@@ -417,16 +404,16 @@ class PlotDialogIso(QtGui.QDialog):
             locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
             colors = locs['z'][:]
-            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])]=np.mean(locs['z'])+3*np.std(locs['z'])
-            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
+            colors[colors > np.mean(locs['z'])+3*np.std(locs['z'])] = np.mean(locs['z'])+3*np.std(locs['z'])
+            colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])] = np.mean(locs['z'])-3*np.std(locs['z'])
 
-            ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
+            ax.scatter(locs['x'], locs['y'], locs['z'], c=colors, cmap='jet')
             ax.set_xlabel('X [Px]')
             ax.set_ylabel('Y [Px]')
             ax.set_zlabel('Z [nm]')
-            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
             ax.set_title('3D')
             #plt.gca().patch.set_facecolor('black')
             ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
@@ -434,20 +421,20 @@ class PlotDialogIso(QtGui.QDialog):
             ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
 
             #AXES 2
-            ax2.scatter(locs['x'], locs['y'],c=colors,cmap='jet')
+            ax2.scatter(locs['x'], locs['y'], c=colors, cmap='jet')
             ax2.set_xlabel('X [Px]')
             ax2.set_ylabel('Y [Px]')
-            ax2.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax2.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax2.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax2.set_ylim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
             ax2.set_title('XY')
             ax2.set_axis_bgcolor('black')
 
             #AXES 3
-            ax3.scatter(locs['x'], locs['z'],c=colors,cmap='jet')
+            ax3.scatter(locs['x'], locs['z'], c=colors, cmap='jet')
             ax3.set_xlabel('X [Px]')
             ax3.set_ylabel('Z [Px]')
-            ax3.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax3.set_ylim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax3.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax3.set_ylim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
             ax3.set_title('XZ')
             ax3.set_axis_bgcolor('black')
 
@@ -455,8 +442,8 @@ class PlotDialogIso(QtGui.QDialog):
             ax4.scatter(locs['y'], locs['z'],c=colors,cmap='jet')
             ax4.set_xlabel('Y [Px]')
             ax4.set_ylabel('Z [Px]')
-            ax4.set_xlim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax4.set_ylim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax4.set_xlim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax4.set_ylim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
             ax4.set_title('YZ')
             ax4.set_axis_bgcolor('black')
 
@@ -470,9 +457,9 @@ class PlotDialogIso(QtGui.QDialog):
                 ax3.scatter(locs['x'], locs['z'],c=colors[l])
                 ax4.scatter(locs['y'], locs['z'],c=colors[l])
 
-            ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax.set_ylim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax.set_zlim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
 
             ax.set_xlabel('X [Px]')
             ax.set_ylabel('Y [Px]')
@@ -485,24 +472,24 @@ class PlotDialogIso(QtGui.QDialog):
             #AXES 2
             ax2.set_xlabel('X [Px]')
             ax2.set_ylabel('Y [Px]')
-            ax2.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax2.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax2.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax2.set_ylim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
             ax2.set_title('XY')
             ax2.set_axis_bgcolor('black')
 
             #AXES 3
             ax3.set_xlabel('X [Px]')
             ax3.set_ylabel('Z [Px]')
-            ax3.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-            ax3.set_ylim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax3.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+            ax3.set_ylim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
             ax3.set_title('XZ')
             ax3.set_axis_bgcolor('black')
 
             #AXES 4
             ax4.set_xlabel('Y [Px]')
             ax4.set_ylabel('Z [Px]')
-            ax4.set_xlim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-            ax4.set_ylim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+            ax4.set_xlim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+            ax4.set_ylim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
             ax4.set_title('YZ')
             ax4.set_axis_bgcolor('black')
 
@@ -1078,7 +1065,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.maskButton.clicked.connect(self.mask_locs)
 
         self.saveButton = QtGui.QPushButton('Save')
-        self.saveButton.setEnabled(False) 
+        self.saveButton.setEnabled(False)
         self.saveButton.clicked.connect(self.save_locs)
         mask_grid.addWidget(self.saveButton, 4, 1)
 
@@ -1096,14 +1083,13 @@ class MaskSettingsDialog(QtGui.QDialog):
 
         self.mask_exists = 0
 
-   
+
     def init_dialog(self):
         self.show()
         locs = self.locs[0]
         self.x_min,self.x_max = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
         self.y_min,self.y_max = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
         self.update_plots()
-
 
     def generate_image(self):
         locs = self.locs[0]
@@ -1127,19 +1113,19 @@ class MaskSettingsDialog(QtGui.QDialog):
     def update_plots(self):
         if self.mask_oversampling.value() == self.oversampling and self.cached_oversampling == 1:
             self.cached_oversampling = 1
-        else: 
+        else:
             self.oversampling = self.mask_oversampling.value()
             self.cached_oversampling = 0
 
         if self.mask_blur.value() == self.blur and self.cached_blur == 1:
             self.cached_blur = 1
-        else: 
+        else:
             self.blur = self.mask_blur.value()
             self.cached_oversampling = 0
 
         if self.mask_tresh.value() == self.thresh and self.cached_thresh == 1:
             self.cached_thresh = 1
-        else: 
+        else:
             self.tresh = self.mask_tresh.value()
             self.cached_thresh = 0
 
@@ -1203,7 +1189,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         ax4.imshow(self.H_new, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax4.grid(False)
         self.mask_exists = 1
-        self.saveButton.setEnabled(True) 
+        self.saveButton.setEnabled(True)
         self.canvas.draw()
 
     def save_locs(self):
@@ -1839,7 +1825,7 @@ class View(QtGui.QLabel):
             if oldpoint != []:
                 ox, oy = self.map_to_view(*oldpoint)
             cx, cy = self.map_to_view(*point)
-            painter.drawPoint(cx,cy)
+            painter.drawPoint(cx, cy)
             painter.drawLine(cx,cy,cx+d/2,cy)
             painter.drawLine(cx,cy,cx,cy+d/2)
             painter.drawLine(cx,cy,cx-d/2,cy)
@@ -1850,7 +1836,6 @@ class View(QtGui.QLabel):
                 font.setPixelSize(20)
                 painter.setFont(font)
                 distance = float(int(np.sqrt(((oldpoint[0]-point[0])**2+(oldpoint[1]-point[1])**2))*pixelsize*100))/100
-                #painter.drawText(cx+cy/2, y-2*height, length_displaypxl + 0, 2*height + 0, QtCore.Qt.AlignCenter,str(scalebar)+'nm')
                 painter.drawText((cx+ox)/2+d,(cy+oy)/2+d, str(distance)+ ' nm')
             oldpoint = point
         painter.end()
@@ -1899,9 +1884,6 @@ class View(QtGui.QLabel):
             y_vp = self.viewport[0][0]/movie_height*length_minimap
             painter.drawRect(x+x_vp, y+y_vp, length + 0, height + 0)
         return image
-
-
-
 
     def draw_scene(self, viewport, autoscale=False, use_cache=False, picks_only=False, points_only=False):
         if not picks_only:
@@ -2034,15 +2016,12 @@ class View(QtGui.QLabel):
                 plt.scatter(x_cord,-y_cord, c='r', label='Newpicks')
                 plt.scatter(x_cord_old,-y_cord_old, c='b', label='Oldpicks')
                 plt.scatter(x_cord_new,-y_cord_new, c='g', label='Picks to keep')
-                #plt.plot(d, self.nena_result.best_fit, label='Fit')
-                #plt.legend(loc='best')
                 fig1.show()
             self._picks = filtered_list
 
             self.update_pick_info_short()
             self.window.tools_settings_dialog.pick_diameter.setValue(regions['Diameter'])
             self.update_scene(picks_only=True)
-
 
     def map_to_movie(self, position):
         ''' Converts coordinates from display units to camera units. '''
@@ -2138,7 +2117,6 @@ class View(QtGui.QLabel):
             else:
                 event.ignore()
 
-
     def movie_size(self):
         movie_height = self.max_movie_height()
         movie_width = self.max_movie_width()
@@ -2182,9 +2160,9 @@ class View(QtGui.QLabel):
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
                     ax.scatter(locs['x'], locs['y'], locs['z'],c=colors[i])
 
-                ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-                ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-                ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+                ax.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+                ax.set_ylim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+                ax.set_zlim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
 
             else:
                 locs = self.picked_locs(channel)
@@ -2195,9 +2173,9 @@ class View(QtGui.QLabel):
                 colors[colors < np.mean(locs['z'])-3*np.std(locs['z'])]=np.mean(locs['z'])-3*np.std(locs['z'])
                 ax.scatter(locs['x'], locs['y'], locs['z'],c=colors,cmap='jet')
 
-                ax.set_xlim( np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
-                ax.set_ylim( np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
-                ax.set_zlim( np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
+                ax.set_xlim(np.mean(locs['x'])-3*np.std(locs['x']), np.mean(locs['x'])+3*np.std(locs['x']))
+                ax.set_ylim(np.mean(locs['y'])-3*np.std(locs['y']), np.mean(locs['y'])+3*np.std(locs['y']))
+                ax.set_zlim(np.mean(locs['z'])-3*np.std(locs['z']), np.mean(locs['z'])+3*np.std(locs['z']))
 
             plt.gca().patch.set_facecolor('black')
             ax.set_xlabel('X [Px]')
@@ -2208,7 +2186,6 @@ class View(QtGui.QLabel):
             ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
             fig.canvas.draw()
             fig.show()
-
 
     def show_trace(self):
         print('Show trace')
@@ -2236,10 +2213,6 @@ class View(QtGui.QLabel):
             ax1.set_ylabel('X-pos [Px]')
             ax2.set_ylabel('Y-pos [Px]')
             ax3.set_ylabel('ON')
-            # Fine-tune figure; make subplots close to each other and hide x ticks for
-            # all but bottom plot.
-            #f.subplots_adjust(hspace=0)
-            #f.setp([a.get_xticklabels() for a in f.axes[:-1]], visible=False)
             f.show()
 
     def show_traces(self):
@@ -2273,18 +2246,17 @@ class View(QtGui.QLabel):
 
                     ax1.set_xlim(0,(max(locs['frame'])+1))
                     plt.setp(ax1.get_xticklabels(), visible=False)
-                    
+
                     ax2.scatter(locs['frame'],locs['y'])
                     ax2.set_title('Y-pos vs frame')
                     ax2.set_ylabel('Y-pos [Px]')
                     plt.setp(ax2.get_xticklabels(), visible=False)
-                    
 
                     ax3.plot(xvec,yvec)
                     ax3.set_title('Localizations')
                     ax3.set_xlabel('Frames')
                     ax3.set_ylabel('ON')
-                    
+
                     fig.canvas.draw()
                     size = fig.canvas.size()
                     width, height = size.width(), size.height()
@@ -2412,18 +2384,15 @@ class View(QtGui.QLabel):
                         ax.set_ylabel('Y [Px]')
                         plt.axis('equal')
 
-
                         fig.canvas.draw()
                         size = fig.canvas.size()
                         width, height = size.width(), size.height()
                         im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
 
-
                         self.setPixmap((QtGui.QPixmap(im)))
                         self.setAlignment(QtCore.Qt.AlignCenter)
 
                         msgBox = QtGui.QMessageBox(self)
-
                         msgBox.setWindowTitle('Select picks')
                         msgBox.setWindowIcon(self.icon)
                         dt = time.time() - t0
@@ -2504,7 +2473,6 @@ class View(QtGui.QLabel):
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
-
 
     def show_pick_3d_iso(self):
         #essentially the same as show_pick_3d
@@ -2670,8 +2638,6 @@ class View(QtGui.QLabel):
             n_locs = []
             rmsd = []
 
-            #pixmap = QtGui.QPixmap.fromImage(/icons/filter.ico)
-
             if self._picks:
                 removelist = []
                 loccount = []
@@ -2698,7 +2664,6 @@ class View(QtGui.QLabel):
                 ax.set_xlabel('Number of localizations')
                 ax.set_ylabel('Counts')
                 fig.canvas.draw()
-
 
                 size = fig.canvas.size()
                 width, height = size.width(), size.height()
@@ -2735,7 +2700,6 @@ class View(QtGui.QLabel):
                 progress.close()
                 self.update_scene()
 
-
     def rmsd_at_com(self, locs):
         com_x = locs.x.mean()
         com_y = locs.y.mean()
@@ -2758,30 +2722,6 @@ class View(QtGui.QLabel):
         if self.index_blocks[channel] is None:
             self.index_locs(channel)
         return self.index_blocks[channel]
-
-    def mask_image(self):
-        print('Maksing image')
-        channel = self.get_channel('Mask image')
-        if channel is not None:
-            print('Maksed')
-            movie_height, movie_width = self.movie_size()
-            viewport = [(0, 0), (movie_height, movie_width)]
-            qimage = self.render_scene(cache=False, viewport=viewport)
-            hist_data = self.render_scene_hist(cache=False, viewport=viewport)
-            hist_data = np.average(np.array(hist_data),axis=2)
-            hist_data = hist_data/np.max(hist_data)
-            hist_data = hist_data[hist_data>0.5,:]
-            print(hist_data.shape)
-            print(hist_data)
-            print('Hist_data')
- 
-
-            fig = plt.figure()
-            ax1 = fig.add_subplot(1,1,1)
-            plt.imshow(hist_data)
-            #plt.imshow(hist_data, interpolation='nearest', cmap=plt.cm.ocean)
-            plt.show()
-            #plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
 
     def pick_similar(self):
         channel = self.get_channel('Pick similar')
@@ -2958,7 +2898,6 @@ class View(QtGui.QLabel):
         #Run color check
 
         for i in range(len(self.locs)):
-
             if self.window.dataset_dialog.colorselection[i].currentText() == 'red':
                 colors[i] = (1,0,0)
             elif self.window.dataset_dialog.colorselection[i].currentText() == 'green':
@@ -3027,7 +2966,6 @@ class View(QtGui.QLabel):
             io.save_locs(path, locs, self.infos[channel] + [pick_info])
 
     def save_picked_locs_multi(self, path):
-
         for i in range(len(self.locs_paths)):
             channel = self.locs_paths[i]
             if i == 0:
@@ -3043,8 +2981,6 @@ class View(QtGui.QLabel):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             pick_info = {'Generated by:': 'Picasso Render', 'Pick Diameter:': d}
             io.save_locs(path, locs, self.infos[0] + [pick_info])
-
-
 
     def save_pick_properties(self, path, channel):
         picked_locs = self.picked_locs(channel)
@@ -3311,7 +3247,6 @@ class View(QtGui.QLabel):
         self.infos[0][0]['Width'] = int(np.ceil(np.max(self.locs[0].x)))
         self.fit_in_view()
 
-
     def refold_groups(self):
         if hasattr(self.locs[0], 'group'):
             self.locs[0].x -= self.locs[0].group*2
@@ -3319,8 +3254,6 @@ class View(QtGui.QLabel):
         self.fit_in_view()
         self.infos[0][0]['Width'] = self.oldwidth
         self.unfold_status == 'folded'
-
-
 
     def update_cursor(self):
         if self._mode == 'Zoom':
@@ -3441,7 +3374,6 @@ class View(QtGui.QLabel):
 
     def zoom_out(self):
         self.zoom(ZOOM)
-
 
 class Window(QtGui.QMainWindow):
 
@@ -3577,7 +3509,6 @@ class Window(QtGui.QMainWindow):
         cluster_action = tools_menu.addAction('Analyze Clusters')
         cluster_action.triggered.connect(self.view.analyze_cluster)
 
-
         pickadd_action = tools_menu.addAction('Substract pick regions')
         pickadd_action.triggered.connect(self.substract_picks)
 
@@ -3608,11 +3539,6 @@ class Window(QtGui.QMainWindow):
         unfold_action.triggered.connect(self.view.unfold_groups)
         unfold_action_square = postprocess_menu.addAction('Unfold groups (square)')
         unfold_action_square.triggered.connect(self.view.unfold_groups_square)
-
-
-
-        #channel_action = postprocess_menu.addAction('Combine channels')
-        #channel_action.triggered.connect(self.combine_channels)
         self.load_user_settings()
 
     def closeEvent(self, event):
@@ -3749,17 +3675,7 @@ class Window(QtGui.QMainWindow):
                 print(locs)
                 print(templocs)
                 locs = np.append(locs, templocs)
-            #locs = locs.view(np.recarray)
             self.view.locs[i] = locs
-
-
-        #if locs is not None:
-        #    for i in range(len(self.view.locs_paths)):
-        #        channel = self.view.locs_paths[i]
-        #        if i == 0:
-        #            self.locs(self.locs_paths.index(channel))
-        #        else:
-        #            self.locs.remove(self.locs_paths.index(channel))
 
         self.view.update_scene
         print('Channels combined')
@@ -3810,8 +3726,6 @@ class Window(QtGui.QMainWindow):
                 if path:
                     self.view.save_picked_locs(path, channel)
 
-
-
     def save_picks(self):
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + '_picks.yaml'
@@ -3828,7 +3742,6 @@ class Window(QtGui.QMainWindow):
         except AttributeError:
             pass
 
-
 def main():
     app = QtGui.QApplication(sys.argv)
     window = Window()
@@ -3844,7 +3757,6 @@ def main():
     sys.excepthook = excepthook
 
     sys.exit(app.exec_())
-
 
 if __name__ == '__main__':
     main()
