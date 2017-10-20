@@ -581,7 +581,7 @@ class Window(QtGui.QMainWindow):
     def open(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open localizations', filter='*.hdf5')
         if path:
-            self.openhdf(path)
+            self.add(path)
 
 
     def save(self, path):

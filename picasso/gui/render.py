@@ -1246,12 +1246,9 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.pick_annotation.stateChanged.connect(self.on_pick_diameter_changed)
         pick_grid.addWidget(self.pick_annotation, 2, 0)
 
-
-
     def on_pick_diameter_changed(self, diameter):
         self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
         self.window.view.update_scene(use_cache=True)
-
 
 class DisplaySettingsDialog(QtGui.QDialog):
 
