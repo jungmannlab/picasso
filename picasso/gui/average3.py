@@ -214,10 +214,10 @@ class Window(QtGui.QMainWindow):
         self._drift = []
 
         # Define DisplaySettingsDialog
-        self.viewxy = QtGui.QLabel('[x]')
-        self.viewxz = QtGui.QLabel('[x]')
-        self.viewyz = QtGui.QLabel('[x]')
-        self.viewcp = QtGui.QLabel('[x]')
+        self.viewxy = QtGui.QLabel('')
+        self.viewxz = QtGui.QLabel('')
+        self.viewyz = QtGui.QLabel('')
+        self.viewcp = QtGui.QLabel('')
 
         minsize = 512
         self.viewxy.setFixedWidth(minsize)
@@ -945,7 +945,7 @@ class Window(QtGui.QMainWindow):
             plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
 
             #rotate image
-            for i in range(symmetry):
+            for i in range(symmetry-1):
                 image[0] += scipy.ndimage.interpolation.rotate(imageold,((i+1)*360/symmetry) , axes=(1, 0),reshape=False)
 
             ax2 = fig.add_subplot(1,2,2)
@@ -1022,7 +1022,7 @@ class Window(QtGui.QMainWindow):
             plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
 
             #rotate image
-            for i in range(symmetry):
+            for i in range(symmetry-1):
                 image[0] += scipy.ndimage.interpolation.rotate(imageold,((i+1)*360/symmetry) , axes=(1, 0),reshape=False)
 
             ax2 = fig.add_subplot(1,2,2)
