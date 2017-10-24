@@ -3422,6 +3422,10 @@ class Window(QtGui.QMainWindow):
         export_txt_action.triggered.connect(self.export_txt)
         export_txt_nis_action = file_menu.addAction('Export as .txt for NIS')
         export_txt_nis_action.triggered.connect(self.export_txt_nis)
+        export_txt_imaris_action = file_menu.addAction('Export as .txt for IMARIS')
+        export_txt_imaris_action.triggered.connect(self.export_txt_imaris)
+
+
 
         view_menu = self.menu_bar.addMenu('View')
         display_settings_action = view_menu.addAction('Display settings')
@@ -3606,6 +3610,23 @@ class Window(QtGui.QMainWindow):
                         np.savetxt(f, loctxt, fmt=['%.2f','%.2f','%.i','%.2f','%.i','%.i','%.i','%.i'], newline='\r\n', delimiter='\t')
                         print('Saving complete.')
 
+    def export_txt_imaris(self):
+        channel = self.view.get_channel('Save localizations as txt for IMARIS (x,y,z,frame,channel)')
+        pixelsize = self.display_settings_dialog.pixelsize.value()
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '.imaris.txt'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations as txt for IMARIS (x,y,z,frame,channel)', out_path, filter='*.imaris.txt')
+            if path:
+                locs = self.view.locs[channel]
+                channel = 0
+                tempdata_xyz = locs[['x','y','z','frame']].copy()
+                tempdata_xyz['x']=tempdata_xyz['x']*pixelsize
+                tempdata_xyz['y']=tempdata_xyz['y']*pixelsize
+                tempdata = np.array(tempdata_xyz.tolist())
+                tempdata = np.array(tempdata_xyz.tolist())
+                tempdata_channel = np.hstack((tempdata,np.zeros((tempdata.shape[0],1))+channel))
+                np.savetxt(path, tempdata_channel, fmt=['%.1f','%.1f','%.1f','%.1f','%i'], newline='\r\n', delimiter='\t')
 
     def load_picks(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
