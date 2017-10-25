@@ -3424,6 +3424,8 @@ class Window(QtGui.QMainWindow):
         export_txt_nis_action.triggered.connect(self.export_txt_nis)
         export_txt_imaris_action = file_menu.addAction('Export as .txt for IMARIS')
         export_txt_imaris_action.triggered.connect(self.export_txt_imaris)
+        export_txt_chimera_action = file_menu.addAction('Export as .xyz for Chimera')
+        export_txt_chimera_action.triggered.connect(self.export_xyz_chimera)
 
 
 
@@ -3609,6 +3611,25 @@ class Window(QtGui.QMainWindow):
                         f.write(b'X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n')
                         np.savetxt(f, loctxt, fmt=['%.2f','%.2f','%.i','%.2f','%.i','%.i','%.i','%.i'], newline='\r\n', delimiter='\t')
                         print('Saving complete.')
+
+    def export_xyz_chimera(self):
+        channel = self.view.get_channel('Save localizations as xyz for chimera (molecule,x,y,z)')
+        pixelsize = self.display_settings_dialog.pixelsize.value()
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '.chi.xyz'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations as xyz for chimera (molecule,x,y,z)', out_path)
+            if path:
+                locs = self.view.locs[channel]
+                if hasattr(locs, 'z'):
+                    loctxt = locs[['x','y','z']].copy()
+                    loctxt = [(1, row[0]*pixelsize,row[1]*pixelsize,row[2])  for row in loctxt]
+                    with open(path, 'wb') as f:
+                        f.write(b'Molecule export\r\n')
+                        np.savetxt(f, loctxt, fmt=['%i','%.5f','%.5f','%.5f'], newline='\r\n', delimiter='\t')
+                        print('Saving complete.')
+                else:
+                        print('Data has no z.')
 
     def export_txt_imaris(self):
         channel = self.view.get_channel('Save localizations as txt for IMARIS (x,y,z,frame,channel)')
