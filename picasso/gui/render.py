@@ -1685,61 +1685,68 @@ class View(QtGui.QLabel):
         return [(y_min, x_min), (y_max, x_max)]
 
     def align(self):
-        completed = False
-        max_iterations = 10
-        iteration = 0
-        convergence = 0.001 # Thhat is 0.001 pixels ~0.13nm
-        shift_x = []
-        shift_y = []
-        shift_z = []
-        display = True
-
-        if iteration == max_iterations:
-            completed = True
-
-        while not completed:
-            completed = True
-            if len(self._picks) > 0:
-                shift = self.shift_from_picked()
-            else:
-                shift = self.shift_from_rcc()
+        if len(self._picks) > 0:
+            shift = self.shift_from_picked()
             sp = lib.ProgressDialog('Shifting channels', 0, len(self.locs), self)
             sp.set_value(0)
-            temp_shift_x = []
-            temp_shift_y = []
-            temp_shift_z = []
             for i, locs_ in enumerate(self.locs):
-                if np.absolute(shift[0][i]) + np.absolute(shift[1][i]) > convergence:
-                    completed = False
-                    print('Continuing iteratioon')
                 locs_.y -= shift[0][i]
                 locs_.x -= shift[1][i]
-
-                temp_shift_x.append(shift[1][i])
-                temp_shift_y.append(shift[0][i])
-
                 if len(shift) == 3:
                     locs_.z -= shift[2][i]
-                    temp_shift_z.append(shift[2][i])
                 sp.set_value(i+1)
-            shift_x.append(np.mean(temp_shift_x))
-            shift_y.append(np.mean(temp_shift_y))
-            if len(shift) == 3:
-                shift_z.append(np.mean(temp_shift_z))
-            iteration+=1 
             self.update_scene()
+        else:
+            completed = False
+            max_iterations = 10
+            iteration = 0
+            convergence = 0.001 # Thhat is 0.001 pixels ~0.13nm
+            shift_x = []
+            shift_y = []
+            shift_z = []
+            display = True
 
-        #Plot shift etc
-        if display:
-            fig1 = plt.figure(figsize=(8, 8))
-            plt.suptitle('Shift')
-            plt.subplot(1, 1, 1)
-            plt.plot(shift_x, 'o-', label='x shift')
-            plt.plot(shift_y, 'o-', label='y shift')
-            plt.xlabel('Iteration')
-            plt.ylabel('Mean Shift per Iteration (Px)')
-            plt.legend(loc='best')
-            fig1.show()
+            if iteration == max_iterations:
+                completed = True
+
+            while not completed:
+                completed = True
+                shift = self.shift_from_rcc()
+                sp = lib.ProgressDialog('Shifting channels', 0, len(self.locs), self)
+                sp.set_value(0)
+                temp_shift_x = []
+                temp_shift_y = []
+                temp_shift_z = []
+                for i, locs_ in enumerate(self.locs):
+                    if np.absolute(shift[0][i]) + np.absolute(shift[1][i]) > convergence:
+                        completed = False
+                    locs_.y -= shift[0][i]
+                    locs_.x -= shift[1][i]
+
+                    temp_shift_x.append(shift[1][i])
+                    temp_shift_y.append(shift[0][i])
+
+                    if len(shift) == 3:
+                        locs_.z -= shift[2][i]
+                        temp_shift_z.append(shift[2][i])
+                    sp.set_value(i+1)
+                shift_x.append(np.mean(temp_shift_x))
+                shift_y.append(np.mean(temp_shift_y))
+                if len(shift) == 3:
+                    shift_z.append(np.mean(temp_shift_z))
+                iteration+=1 
+                self.update_scene()
+            #Plot shift etc
+            if display:
+                fig1 = plt.figure(figsize=(8, 8))
+                plt.suptitle('Shift')
+                plt.subplot(1, 1, 1)
+                plt.plot(shift_x, 'o-', label='x shift')
+                plt.plot(shift_y, 'o-', label='y shift')
+                plt.xlabel('Iteration')
+                plt.ylabel('Mean Shift per Iteration (Px)')
+                plt.legend(loc='best')
+                fig1.show()
 
 
     def combine(self):
@@ -1823,7 +1830,6 @@ class View(QtGui.QLabel):
         for i, (locs_, info_) in enumerate(zip(self.locs, self.infos)):
             _, image = render.render(locs_, info_, blur_method='smooth')
             images.append(image)
-            print(image.shape)
             rp.set_value(i + 1)
         n_pairs = int(n_channels * (n_channels - 1) / 2)
         rc = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
