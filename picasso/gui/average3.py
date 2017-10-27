@@ -281,6 +281,9 @@ class Window(QtGui.QMainWindow):
         self.symEdit.setRange(2, 20)
         self.symEdit.setValue(8)
 
+        self.radio_sym_custom = QtGui.QRadioButton("custom symmetry")
+        self.symcustomEdit = QtGui.QLineEdit("90,180,270")
+
         deg_groupbox = QtGui.QGroupBox('Degrees')
         deggrid = QtGui.QGridLayout(deg_groupbox)
 
@@ -305,6 +308,8 @@ class Window(QtGui.QMainWindow):
         rotationgrid.addWidget(rotatebtn, 3, 0, 1, 2)
         rotationgrid.addWidget(self.symEdit, 4, 0)
         rotationgrid.addWidget(self.radio_sym, 4, 1)
+        rotationgrid.addWidget(self.radio_sym_custom, 5, 0)
+        rotationgrid.addWidget(self.symcustomEdit, 5, 1)
 
         buttongrid.addWidget(centerofmassbtn, 0, 0)
         buttongrid.addWidget(rotation_groupbox, 1, 0)
@@ -959,6 +964,33 @@ class Window(QtGui.QMainWindow):
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
             plt.close(fig)
 
+
+        if self.radio_sym_custom.isChecked():
+            print('Using custom symmetry.')
+            symmetry_txt = np.asarray((self.symcustomEdit.text()).split(','))
+            print(symmetry_txt)
+            fig = plt.figure(figsize =(5,5))
+            ax1 = fig.add_subplot(1,2,1)
+            symmetry = self.symEdit.value()
+            ax1.set_aspect('equal')
+            imageold = image[0].copy()
+            plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
+
+            #rotate image
+            for degree in symmetry_txt:
+                image[0] += scipy.ndimage.interpolation.rotate(imageold, float(degree) , axes=(1, 0),reshape=False)
+
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.set_aspect('equal')
+            plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
+            fig.canvas.draw()
+            size = fig.canvas.size()
+            width, height = size.width(), size.height()
+            im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+            self.viewcp.setPixmap((QtGui.QPixmap(im)))
+            self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+            plt.close(fig)
+
         CF_image_avg = image
 
         # TODO: blur auf average !!!
@@ -1035,6 +1067,33 @@ class Window(QtGui.QMainWindow):
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
             plt.close(fig)
+
+        #TODO: Sort these functions out, combine with radio_sym / also for convolving.
+        if self.radio_sym_custom.isChecked():
+            print('Using custom symmetry.')
+            symmetry_txt = np.asarray((self.symcustomEdit.text()).split(','))
+            fig = plt.figure(figsize =(5,5))
+            ax1 = fig.add_subplot(1,2,1)
+            symmetry = self.symEdit.value()
+            ax1.set_aspect('equal')
+            imageold = image[0].copy()
+            plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
+
+            #rotate image
+            for degree in symmetry_txt:
+                image[0] += scipy.ndimage.interpolation.rotate(imageold, float(degree) , axes=(1, 0),reshape=False)
+
+            ax2 = fig.add_subplot(1,2,2)
+            ax2.set_aspect('equal')
+            plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
+            fig.canvas.draw()
+            size = fig.canvas.size()
+            width, height = size.width(), size.height()
+            im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+            self.viewcp.setPixmap((QtGui.QPixmap(im)))
+            self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+            plt.close(fig)
+
 
         CF_image_avg = image
 
