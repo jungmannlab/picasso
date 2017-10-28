@@ -474,6 +474,12 @@ def load_locs(path, qt_parent=None):
     info = load_info(path, qt_parent=qt_parent)
     return locs, info
 
+def load_clusters(path, qt_parent=None):
+    with _h5py.File(path, 'r') as cluster_file:
+        clusters = cluster_file['clusters'][...]
+    clusters = _np.rec.array(clusters, dtype=clusters.dtype)    # Convert to rec array with fields as attributes
+    return clusters
+
 def load_filter(path, qt_parent=None):
     with _h5py.File(path, 'r') as locs_file:
         try:
