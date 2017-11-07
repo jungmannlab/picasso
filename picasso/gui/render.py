@@ -2933,11 +2933,9 @@ class View(QtGui.QLabel):
             else:
                 renderings = []
                 for i in range(len(self.locs)):
-                    if self.window.dataset_dialog.checks[i].isChecked():
-                        renderings.append(render.render(locsall[i], **kwargs))
-                if renderings == []: #handle error of no checked -> keep first
-                    renderings.append(render.render(locsall[0], **kwargs))
-                #renderings = [render.render(_, **kwargs) for _ in locsall]
+                    #We render all images first, and later decide to keep them or not
+                    renderings.append(render.render(locsall[i], **kwargs))
+                renderings = [render.render(_, **kwargs) for _ in locsall]
                 n_locs = sum([_[0] for _ in renderings])
                 image = np.array([_[1] for _ in renderings])
         else:
@@ -2954,10 +2952,12 @@ class View(QtGui.QLabel):
         if cache:
             self.n_locs = n_locs
             self.image = image
+
         image = self.scale_contrast(image)
         Y, X = image.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
-        #Run color check
+        
+        #Color images
 
         for i in range(len(self.locs)):
             if self.window.dataset_dialog.colorselection[i].currentText() == 'red':
@@ -2982,6 +2982,8 @@ class View(QtGui.QLabel):
 
             iscale = self.window.dataset_dialog.intensitysettings[i].value()
             image[i] = iscale*image[i]
+            if not self.window.dataset_dialog.checks[i].isChecked():
+                image[i] = 0*image[i]
 
         for color, image in zip(colors, image):
             bgra[:, :, 0] += color[2] * image
