@@ -194,10 +194,13 @@ class DatasetDialog(QtGui.QDialog):
         self.colordisp_all = []
         self.intensitysettings = []
         self.setLayout(self.layout)
-        self.layout.addWidget(QtGui.QLabel('Path'), 0, 0)
-        self.layout.addWidget(QtGui.QLabel('Color'), 0, 1)
-        self.layout.addWidget(QtGui.QLabel('#'), 0, 2)
-        self.layout.addWidget(QtGui.QLabel('Rel. Intensity'), 0, 3)
+        self.wbackground = QtGui.QCheckBox('White background')
+        self.layout.addWidget(self.wbackground,0,3)
+        self.layout.addWidget(QtGui.QLabel('Path'), 1, 0)
+        self.layout.addWidget(QtGui.QLabel('Color'), 1, 1)
+        self.layout.addWidget(QtGui.QLabel('#'), 1, 2)
+        self.layout.addWidget(QtGui.QLabel('Rel. Intensity'), 1, 3)
+        self.wbackground.stateChanged.connect(self.update_viewport)
 
     def add_entry(self,path):
         c = QtGui.QCheckBox(path)
@@ -2977,8 +2980,12 @@ class View(QtGui.QLabel):
             elif self.window.dataset_dialog.colorselection[i].currentText() != 'auto':
                 colorstring = self.window.dataset_dialog.colorselection[i].currentText().lstrip('#')
                 rgbval= tuple(int(colorstring[i:i+2], 16)/255 for i in (0, 2 ,4))
-
                 colors[i] = rgbval
+
+            if self.window.dataset_dialog.wbackground.isChecked():
+                tempcolor = colors[i]
+                inverted = tuple([1-_ for _ in tempcolor])
+                colors[i] = inverted
 
             iscale = self.window.dataset_dialog.intensitysettings[i].value()
             image[i] = iscale*image[i]
@@ -2989,7 +2996,10 @@ class View(QtGui.QLabel):
             bgra[:, :, 0] += color[2] * image
             bgra[:, :, 1] += color[1] * image
             bgra[:, :, 2] += color[0] * image
+
         bgra = np.minimum(bgra, 1)
+        if self.window.dataset_dialog.wbackground.isChecked():
+            bgra = -(bgra-1)
         self._bgra = self.to_8bit(bgra)
         return self._bgra
 
