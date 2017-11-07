@@ -203,6 +203,8 @@ class DatasetDialog(QtGui.QDialog):
         c = QtGui.QCheckBox(path)
         currentline = len(self.layout)
         colordrop = QtGui.QComboBox(self)
+        colordrop.setEditable(True)
+        colordrop.lineEdit().setMaxLength(7)
         colordrop.addItem("auto")
         colordrop.addItem("red")
         colordrop.addItem("green")
@@ -211,6 +213,9 @@ class DatasetDialog(QtGui.QDialog):
         colordrop.addItem("cyan")
         colordrop.addItem("magenta")
         colordrop.addItem("yellow")
+        #self.myDropDown = QComboBox()
+        #self.myDropDown.setEditable(True)
+        #self.myDropDown.lineEdit().setMaxLength(45)
         intensity = QtGui.QSpinBox(self)
         intensity.setValue(1)
         colordisp = QtGui.QLabel('      ')
@@ -2969,6 +2974,11 @@ class View(QtGui.QLabel):
                 colors[i] = (1,0,1)
             elif self.window.dataset_dialog.colorselection[i].currentText() == 'yellow':
                 colors[i] = (1,1,0)
+            elif self.window.dataset_dialog.colorselection[i].currentText() != 'auto':
+                colorstring = self.window.dataset_dialog.colorselection[i].currentText().lstrip('#')
+                rgbval= tuple(int(colorstring[i:i+2], 16)/255 for i in (0, 2 ,4))
+
+                colors[i] = rgbval
 
             iscale = self.window.dataset_dialog.intensitysettings[i].value()
             image[i] = iscale*image[i]
