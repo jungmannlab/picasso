@@ -18,6 +18,12 @@ import numpy as np
 import traceback
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
 
+try:
+    from pygpufit import gpufit as gf
+    gpufit_installed = True
+except ImportError:
+    gpufit_installed = False
+
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
 DEFAULT_PARAMETERS = {'Box Size': 7, 'Min. Net Gradient': 5000}
@@ -409,11 +415,7 @@ class ParametersDialog(QtGui.QDialog):
         vbox.addWidget(fit_groupbox)
         fit_grid = QtGui.QGridLayout(fit_groupbox)
 
-        self.gpufit_checkbox = QtGui.QCheckBox('Use GPUfit')
-        self.gpufit_checkbox.setTristate(False)
-        self.gpufit_checkbox.setDisabled(True)
-        self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
-        fit_grid.addWidget(self.gpufit_checkbox, 0, 0)
+
 
         fit_grid.addWidget(QtGui.QLabel('Method:'), 1, 0)
         self.fit_method = QtGui.QComboBox()
@@ -442,6 +444,17 @@ class ParametersDialog(QtGui.QDialog):
 
         # LQ
         lq_widget = QtGui.QWidget()
+        lq_grid = QtGui.QGridLayout(lq_widget)
+
+        self.gpufit_checkbox = QtGui.QCheckBox('Use GPUfit')
+        self.gpufit_checkbox.setTristate(False)
+        self.gpufit_checkbox.setDisabled(True)
+        self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
+
+        if not gpufit_installed:
+            self.gpufit_checkbox.hide()
+        lq_grid.addWidget(self.gpufit_checkbox)
+
         fit_stack.addWidget(lq_widget)
         # lq_grid = QtGui.QGridLayout(lq_widget)
 

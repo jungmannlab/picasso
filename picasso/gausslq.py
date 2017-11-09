@@ -6,7 +6,11 @@ import multiprocessing as _multiprocessing
 from concurrent import futures as _futures
 from . import postprocess as _postprocess
 
-from pygpufit import gpufit as gf
+try:
+    from pygpufit import gpufit as gf
+    print('Pygufit detected. GPU fitting enabled.')
+except ImportError:
+    print('No Pygufit detected. GPU fitting disabled.')
 
 
 @_numba.jit(nopython=True, nogil=True)
