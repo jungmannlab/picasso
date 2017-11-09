@@ -408,13 +408,21 @@ class ParametersDialog(QtGui.QDialog):
         fit_groupbox = QtGui.QGroupBox('Fit Settings')
         vbox.addWidget(fit_groupbox)
         fit_grid = QtGui.QGridLayout(fit_groupbox)
-        fit_grid.addWidget(QtGui.QLabel('Method:'), 0, 0)
+
+        self.gpufit_checkbox = QtGui.QCheckBox('Use GPUfit')
+        self.gpufit_checkbox.setTristate(False)
+        self.gpufit_checkbox.setDisabled(True)
+        self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
+        fit_grid.addWidget(self.gpufit_checkbox, 0, 0)
+
+        fit_grid.addWidget(QtGui.QLabel('Method:'), 1, 0)
         self.fit_method = QtGui.QComboBox()
         self.fit_method.addItems(['MLE, integrated Gaussian', 'LQ, Gaussian','Average of ROI'])
-        fit_grid.addWidget(self.fit_method, 0, 1)
+        fit_grid.addWidget(self.fit_method, 1, 1)
         fit_stack = QtGui.QStackedWidget()
-        fit_grid.addWidget(fit_stack, 1, 0, 1, 2)
+        fit_grid.addWidget(fit_stack, 2, 0, 1, 2)
         self.fit_method.currentIndexChanged.connect(fit_stack.setCurrentIndex)
+        self.fit_method.currentIndexChanged.connect(self.on_fit_method_changed)
 
         # MLE
         mle_widget = QtGui.QWidget()
@@ -470,6 +478,13 @@ class ParametersDialog(QtGui.QDialog):
                 camera_config = CONFIG['Cameras'][camera]
                 if 'Sensitivity' in camera_config and 'Sensitivity Categories' in camera_config:
                     self.update_sensitivity()
+
+    def on_fit_method_changed(self, state):
+        if self.fit_method.currentText() == 'LQ, Gaussian':
+            self.gpufit_checkbox.setDisabled(False)
+        else:
+            self.gpufit_checkbox.setChecked(False)
+            self.gpufit_checkbox.setDisabled(True)
 
     def load_z_calib(self):
         if hasattr(self.window, 'movie_path'):
@@ -534,6 +549,9 @@ class ParametersDialog(QtGui.QDialog):
         self.mng_slider.setMaximum(value)
 
     def on_preview_changed(self, state):
+        self.window.draw_frame()
+
+    def on_gpufit_changed(self, state):
         self.window.draw_frame()
 
     def set_camera_parameters(self, info):
@@ -1074,7 +1092,9 @@ class Window(QtGui.QMainWindow):
             eps = self.parameters_dialog.convergence_criterion.value()
             max_it = self.parameters_dialog.max_it.value()
             fit_z = self.parameters_dialog.fit_z_checkbox.isChecked()
-            self.fit_worker = FitWorker(self.movie, self.camera_info, self.identifications, self.parameters['Box Size'], method, eps, max_it, fit_z, calibrate_z)
+            use_gpufit = self.parameters_dialog.gpufit_checkbox.isChecked()
+            self.fit_worker = FitWorker(self.movie, self.camera_info, self.identifications, self.parameters['Box Size'],
+                                        method, eps, max_it, fit_z, calibrate_z, use_gpufit)
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
@@ -1087,8 +1107,11 @@ class Window(QtGui.QMainWindow):
         self.fit_z_worker.start()
 
     def on_fit_progress(self, current, total):
-        message = 'Fitting spot {:,} / {:,} ...'.format(current, total)
-        self.status_bar.showMessage(message)
+        if self.parameters_dialog.gpufit_checkbox.isChecked():
+            self.status_bar.showMessage('Fitting spots by GPUfit...')
+        else:
+            message = 'Fitting spot {:,} / {:,} ...'.format(current, total)
+            self.status_bar.showMessage(message)
 
     def on_fit_finished(self, locs, elapsed_time, fit_z, calibrate_z):
         self.status_bar.showMessage('Fitted {:,} spots in {:.2f} seconds.'.format(len(locs), elapsed_time))
@@ -1191,7 +1214,7 @@ class FitWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float, bool, bool)
 
-    def __init__(self, movie, camera_info, identifications, box, method, eps, max_it, fit_z, calibrate_z):
+    def __init__(self, movie, camera_info, identifications, box, method, eps, max_it, fit_z, calibrate_z, use_gpufit):
         super().__init__()
         self.movie = movie
         self.camera_info = camera_info
@@ -1202,20 +1225,27 @@ class FitWorker(QtCore.QThread):
         self.max_it = max_it
         self.fit_z = fit_z
         self.calibrate_z = calibrate_z
+        self.use_gpufit = use_gpufit
 
     def run(self):
         N = len(self.identifications)
         t0 = time.time()
         spots = localize.get_spots(self.movie, self.identifications, self.box, self.camera_info)
         if self.method == 'lq':
-            fs = gausslq.fit_spots_parallel(spots, async=True)
-            n_tasks = len(fs)
-            while lib.n_futures_done(fs) < n_tasks:
-                self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
-                time.sleep(0.2)
-            theta = gausslq.fits_from_futures(fs)
-            em = self.camera_info['gain'] > 1
-            locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
+            if self.use_gpufit:
+                self.progressMade.emit(1, 1)
+                theta = gausslq.fit_spots_gpufit(spots)
+                em = self.camera_info['gain'] > 1
+                locs = gausslq.locs_from_fits_gpufit(self.identifications, theta, self.box, em)
+            else:
+                fs = gausslq.fit_spots_parallel(spots, async=True)
+                n_tasks = len(fs)
+                while lib.n_futures_done(fs) < n_tasks:
+                    self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
+                    time.sleep(0.2)
+                theta = gausslq.fits_from_futures(fs)
+                em = self.camera_info['gain'] > 1
+                locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
         elif self.method == 'mle':
             current, thetas, CRLBs, likelihoods, iterations = gaussmle.gaussmle_async(spots, self.eps, self.max_it, method='sigmaxy')
             while current[0] < N:

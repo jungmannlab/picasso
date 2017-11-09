@@ -6,6 +6,8 @@ import multiprocessing as _multiprocessing
 from concurrent import futures as _futures
 from . import postprocess as _postprocess
 
+from pygpufit import gpufit as gf
+
 
 @_numba.jit(nopython=True, nogil=True)
 def _gaussian(mu, sigma, grid):
@@ -58,6 +60,26 @@ def _initial_parameters(spot, size, size_half):
     theta[5], theta[4] = _initial_sigmas(spot-theta[3], theta[1], theta[0], sum, size)
     theta[0:2] -= size_half
     return theta
+
+
+def initial_parameters_gpufit(spots, size):
+
+    center = (size / 2.0) - 0.5
+    initial_width = _np.amax([size / 5.0, 1.0])
+
+    spot_max = _np.amax(spots, axis=(1, 2))
+    spot_min = _np.amin(spots, axis=(1, 2))
+
+    initial_parameters = _np.empty((len(spots), 6), dtype=_np.float32)
+
+    initial_parameters[:, 0] = spot_max - spot_min
+    initial_parameters[:, 1] = center
+    initial_parameters[:, 2] = center
+    initial_parameters[:, 3] = initial_width
+    initial_parameters[:, 4] = initial_width
+    initial_parameters[:, 5] = spot_min
+
+    return initial_parameters
 
 
 @_numba.jit(nopython=True, nogil=True)
@@ -133,6 +155,20 @@ def fit_spots_parallel(spots, async=False):
     return fits_from_futures(fs)
 
 
+def fit_spots_gpufit(spots):
+    size = spots.shape[1]
+    initial_parameters = initial_parameters_gpufit(spots, size)
+    spots.shape = (len(spots), (size * size))
+    model_id = gf.ModelID.GAUSS_2D_ELLIPTIC
+
+    parameters, states, chi_squares, number_iterations, execution_time \
+        = gf.fit(spots, None, model_id, initial_parameters, tolerance=1e-2, max_number_iterations=20)
+
+    parameters[:, 0] *= 2.0 * _np.pi * parameters[:, 3] * parameters[:, 4]
+
+    return parameters
+
+
 def fits_from_futures(futures):
     theta = [_.result() for _ in futures]
     return _np.vstack(theta)
@@ -168,4 +204,25 @@ def locs_from_fits(identifications, theta, box, em):
                                     ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
                                     ('ellipticity', 'f4'), ('net_gradient', 'f4')])
         locs.sort(kind='mergesort', order='frame')
+    return locs
+
+
+def locs_from_fits_gpufit(identifications, theta, box, em):
+    box_offset = int(box/2)
+    x = theta[:, 1] + identifications.x     - box_offset
+    y = theta[:, 2] + identifications.y     - box_offset
+    lpx = _postprocess.localization_precision(theta[:, 0], theta[:, 3], theta[:, 5], em=em)
+    lpy = _postprocess.localization_precision(theta[:, 0], theta[:, 4], theta[:, 5], em=em)
+    a = _np.maximum(theta[:, 3], theta[:, 4])
+    b = _np.minimum(theta[:, 3], theta[:, 4])
+    ellipticity = (a - b) / a
+    locs = _np.rec.array((identifications.frame, x, y,
+                          theta[:, 0], theta[:, 3], theta[:, 4],
+                          theta[:, 5], lpx, lpy, ellipticity,
+                          identifications.net_gradient),
+                         dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
+                                ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
+                                ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
+                                ('ellipticity', 'f4'), ('net_gradient', 'f4')])
+    locs.sort(kind='mergesort', order='frame')
     return locs
