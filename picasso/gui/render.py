@@ -33,6 +33,8 @@ from sklearn.cluster import KMeans
 
 from collections import Counter
 
+from tqdm import tqdm
+
 import colorsys
 
 from .. import imageprocess, io, lib, postprocess, render
@@ -1615,6 +1617,10 @@ class View(QtGui.QLabel):
         self._drift = []
         self.currentdrift = []
 
+    def is_consecutive(l):
+        setl = set(l)
+        return len(l) == len(setl) and setl == set(range(min(l), max(l)+1))
+
     def add(self, path, render=True):
         try:
             locs, info = io.load_locs(path, qt_parent=self)
@@ -1627,14 +1633,28 @@ class View(QtGui.QLabel):
         self.index_blocks.append(None)
         self._drift.append(None)
         self.currentdrift.append(None)
-
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
                 groups = np.unique(locs.group)
-                groupcopy = locs.group.copy()
-                for i in range(len(groups)):
-                    groupcopy[locs.group==groups[i]]=i
+                #check if groups are consecutive
+                if set(groups) == set(range(min(groups),max(groups)+1)):
+                    print('Not consecutive')
+                    groupcopy = locs.group.copy()
+                    if len(groups) > 5000:
+                        choice = QtGui.QMessageBox.question(self, 'Group question',
+                                            'Groups are not consecutive and more than 5000 groups detected. Re-Index groups? This may take a while.',
+                                            QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
+                        if choice == QtGui.QMessageBox.Yes:
+                            pb = lib.ProgressDialog('Re-Indexing groups', 0, len(groups), self)
+                            pb.set_value(0)
+                            for i in tqdm(range(len(groups))):
+                                groupcopy[locs.group==groups[i]]=i
+                                pb.set_value(i)
+                            pb.close()
+                    else:
+                        for i in tqdm(range(len(groups))):
+                            groupcopy[locs.group==groups[i]]=i
                 np.random.shuffle(groups)
                 groups %= N_GROUP_COLORS
                 self.group_color = groups[groupcopy]
