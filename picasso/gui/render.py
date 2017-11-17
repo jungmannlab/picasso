@@ -1637,10 +1637,10 @@ class View(QtGui.QLabel):
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
             if hasattr(locs, 'group'):
                 groups = np.unique(locs.group)
+                groupcopy = locs.group.copy()
                 #check if groups are consecutive
                 if set(groups) == set(range(min(groups),max(groups)+1)):
                     print('Not consecutive')
-                    groupcopy = locs.group.copy()
                     if len(groups) > 5000:
                         choice = QtGui.QMessageBox.question(self, 'Group question',
                                             'Groups are not consecutive and more than 5000 groups detected. Re-Index groups? This may take a while.',
