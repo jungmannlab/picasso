@@ -330,6 +330,8 @@ class Window(QtGui.QMainWindow):
 
         self.rotatexy_convbtn = QtGui.QPushButton('Rotate XY - Convolution')
 
+        self.scorebtn = QtGui.QPushButton('Calculate Score')
+
         operate_groupbox = QtGui.QGroupBox('Operate')
         operategrid = QtGui.QGridLayout(operate_groupbox)
 
@@ -342,7 +344,8 @@ class Window(QtGui.QMainWindow):
         operategrid.addWidget(self.translatexbtn, 0, 0)
         operategrid.addWidget(self.translateybtn, 1, 0)
         operategrid.addWidget(self.translatezbtn, 2, 0)
-        operategrid.addWidget(self.rotatexy_convbtn)
+        operategrid.addWidget(self.rotatexy_convbtn,4,0)
+        operategrid.addWidget(self.scorebtn,4,1)
 
         self.rotatexy_convbtn.clicked.connect(self.rotatexy_convolution)
 
@@ -354,6 +357,8 @@ class Window(QtGui.QMainWindow):
         self.translatexbtn.clicked.connect(self.translate_x)
         self.translateybtn.clicked.connect(self.translate_y)
         self.translatezbtn.clicked.connect(self.translate_z)
+
+        self.scorebtn.clicked.connect(self.calculate_score)
 
         buttongrid.addWidget(operate_groupbox, 2, 0)
 
@@ -1108,6 +1113,120 @@ class Window(QtGui.QMainWindow):
             self.align_group(CF_image_avg, angles, i, rotaxis, proplane)
         self.updateLayout()
         self.status_bar.showMessage('Done!')
+
+    def calculate_score(self):
+            #Dummy button -> Functionality of rotatebtn for now
+            #TODO: maybe re-write this with kwargs
+            rotaxis = []
+            if self.x_axisbtn.isChecked():
+                rotaxis = 'x'
+            elif self.y_axisbtn.isChecked():
+                rotaxis = 'y'
+            elif self.z_axisbtn.isChecked():
+                rotaxis = 'z'
+
+            n_groups = self.group_index[0].shape[0]
+            a_step = np.arcsin(1 / (self.oversampling * self.r))
+
+            if self.full_degbtn.isChecked():
+                angles = np.arange(0, 2*np.pi, a_step)
+            elif self.part_degbtn.isChecked():
+                degree = self.degEdit.value()
+                angles = np.arange(-degree/360*2*np.pi, degree/360*2*np.pi, a_step)
+
+
+            renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
+            n_locs = sum([_[0] for _ in renderings])
+            images = np.array([_[1] for _ in renderings])
+
+            #DELIVER CORRECT PROJECTION FOR IMAGE
+            proplane = []
+            if self.xy_projbtn.isChecked():
+
+                proplane = 'xy'
+                image = [np.sum(_, axis=2) for _ in images]
+            elif self.yz_projbtn.isChecked():
+
+                proplane = 'yz'
+
+                image = [np.sum(_, axis=1) for _ in images]
+                image = [_.transpose() for _ in image]
+            elif self.xz_projbtn.isChecked():
+
+                proplane = 'xz'
+                image = [(np.sum(_, axis=0)) for _ in images]
+                image = [_.transpose() for _ in image]
+
+            if self.radio_sym.isChecked():
+                print('Radio sym')
+                fig = plt.figure(figsize = (5,5))
+                ax1 = fig.add_subplot(1,2,1)
+                symmetry = self.symEdit.value()
+                ax1.set_aspect('equal')
+                imageold = image[0].copy()
+                plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
+
+                #rotate image
+                for i in range(symmetry-1):
+                    image[0] += scipy.ndimage.interpolation.rotate(imageold,((i+1)*360/symmetry) , axes=(1, 0),reshape=False)
+
+                ax2 = fig.add_subplot(1,2,2)
+                ax2.set_aspect('equal')
+                plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
+                fig.canvas.draw()
+                size = fig.canvas.size()
+                width, height = size.width(), size.height()
+                im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+                self.viewcp.setPixmap((QtGui.QPixmap(im)))
+                self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+                plt.close(fig)
+
+            #TODO: Sort these functions out, combine with radio_sym / also for convolving.
+            if self.radio_sym_custom.isChecked():
+                print('Using custom symmetry.')
+                symmetry_txt = np.asarray((self.symcustomEdit.text()).split(','))
+                fig = plt.figure(figsize =(5,5))
+                ax1 = fig.add_subplot(1,2,1)
+                symmetry = self.symEdit.value()
+                ax1.set_aspect('equal')
+                imageold = image[0].copy()
+                plt.imshow(imageold, interpolation='nearest', cmap=plt.cm.ocean)
+
+                #rotate image
+                for degree in symmetry_txt:
+                    image[0] += scipy.ndimage.interpolation.rotate(imageold, float(degree) , axes=(1, 0),reshape=False)
+
+                ax2 = fig.add_subplot(1,2,2)
+                ax2.set_aspect('equal')
+                plt.imshow(image[0], interpolation='nearest', cmap=plt.cm.ocean)
+                fig.canvas.draw()
+                size = fig.canvas.size()
+                width, height = size.width(), size.height()
+                im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+                self.viewcp.setPixmap((QtGui.QPixmap(im)))
+                self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+                plt.close(fig)
+
+
+            CF_image_avg = image
+
+            CF_image_avg = [np.conj(np.fft.fft2(_)) for _ in image]
+            #n_pixel, _ = image_avg.shape
+            #image_half = n_pixel / 2
+
+            # TODO: blur auf average !!!
+            print('Rotating..')
+            for i in tqdm(range(n_groups)):
+                self.status_bar.showMessage('Group {} / {}.'.format(i,n_groups))
+                self.align_group(CF_image_avg, angles, i, rotaxis, proplane)
+            self.updateLayout()
+            self.status_bar.showMessage('Done!')
+
+
+
+
+
+
 
     def mean_angle(self, deg):
         return (phase(sum(rect(1, d) for d in deg)/len(deg)))
