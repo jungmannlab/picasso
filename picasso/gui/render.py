@@ -1640,7 +1640,7 @@ class View(QtGui.QLabel):
                 groupcopy = locs.group.copy()
                 #check if groups are consecutive
                 if set(groups) == set(range(min(groups),max(groups)+1)):
-                    print('Not consecutive')
+                    groupcopy = locs.group.copy()
                     if len(groups) > 5000:
                         choice = QtGui.QMessageBox.question(self, 'Group question',
                                             'Groups are not consecutive and more than 5000 groups detected. Re-Index groups? This may take a while.',
@@ -1655,6 +1655,10 @@ class View(QtGui.QLabel):
                     else:
                         for i in tqdm(range(len(groups))):
                             groupcopy[locs.group==groups[i]]=i
+                else:
+                    groupcopy = locs.group.copy()
+                    for i in range(len(groups)):
+                        groupcopy[locs.group==groups[i]]=i
                 np.random.shuffle(groups)
                 groups %= N_GROUP_COLORS
                 self.group_color = groups[groupcopy]
