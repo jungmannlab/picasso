@@ -91,7 +91,7 @@ class ParametersDialog(QtGui.QDialog):
         grid.addWidget(QtGui.QLabel('Oversampling:'), 0, 0)
         self.oversampling = QtGui.QDoubleSpinBox()
         self.oversampling.setRange(1, 200)
-        self.oversampling.setValue(5)
+        self.oversampling.setValue(2)
         self.oversampling.setDecimals(1)
         self.oversampling.setKeyboardTracking(False)
         self.oversampling.valueChanged.connect(self.window.updateLayout)
@@ -644,7 +644,7 @@ class Window(QtGui.QMainWindow):
             self.n_groups = n_groups
 
         #go through picks, load coordinates from all sets and GOOD
-        self.oversampling = 5
+        self.oversampling = 2
         self.updateLayout()
         print('Complete.')
 
@@ -1156,7 +1156,8 @@ class Window(QtGui.QMainWindow):
 
             renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
             n_locs = sum([_[0] for _ in renderings])
-            images = np.array([_[1] for _ in renderings])
+            #Make an average and not a sum image here..
+            images = np.array([_[1]/n_groups for _ in renderings])
 
             #DELIVER CORRECT PROJECTION FOR IMAGE
             image = self.projectPlanes(images, proplane)
@@ -1174,15 +1175,15 @@ class Window(QtGui.QMainWindow):
                         z_rot = self.locs[j].z[index]
 
                         groupimage = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize)
-                        print(np.sum(groupimage*image[j]))
-                        channel_score.append(np.sum(groupimage*image[j]))
+                        score = np.sum(np.sqrt(groupimage*image[j]))/np.sum(np.sqrt(groupimage*groupimage))
+                        channel_score.append(score)
                     self.scores.append(channel_score)
 
                 self.status_bar.showMessage('Group {} / {}.'.format(i,n_groups))
             self.status_bar.showMessage('Done. Average score: {}'.format(np.mean(self.scores)))
 
             plt.hist(np.array(self.scores), 40)
-            plt.title('Histogram of Scores')
+            plt.title('Histogram of Scores, Mean: {:.2f}'.format(np.mean(self.scores)))
             plt.xlabel('Score')
             plt.ylabel('Counts')
             plt.show()
