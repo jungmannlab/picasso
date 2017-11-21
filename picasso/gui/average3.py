@@ -28,6 +28,8 @@ from numpy.lib.recfunctions import stack_arrays
 from cmath import rect, phase
 from tqdm import tqdm
 
+import scipy.ndimage.filters
+
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 2.0
 ZOOM = 10 / 7
@@ -1042,6 +1044,11 @@ class Window(QtGui.QMainWindow):
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
             plt.close(fig)
 
+        if self.modelchk.isChecked():
+            self.generate_template()
+            image[0] = self.template_img
+
+        
         CF_image_avg = image
 
         # TODO: blur auf average !!!
@@ -1145,8 +1152,9 @@ class Window(QtGui.QMainWindow):
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
             plt.close(fig)
 
-
-        CF_image_avg = image
+        if self.modelchk.isChecked():
+            self.generate_template()
+            image[0] = self.template_img
 
         CF_image_avg = [np.conj(np.fft.fft2(_)) for _ in image]
         #n_pixel, _ = image_avg.shape
@@ -1192,7 +1200,7 @@ class Window(QtGui.QMainWindow):
 
         return image
 
-    def model_preview(self):
+    def generate_template(self):
         model_x_str = np.asarray((self.model_x.text()).split(","))
         model_y_str = np.asarray((self.model_y.text()).split(","))
         model_z_str = np.asarray((self.model_z.text()).split(","))
@@ -1220,11 +1228,34 @@ class Window(QtGui.QMainWindow):
                 pass 
 
 
-        print('Model X: {}'.format(model_x))
-        print('Model Y: {}'.format(model_y))
-        print('Model Z: {}'.format(model_z))
+        pixelsize = self.pixelsizeEdit.value()
+        blur = self.modelblurEdit.value()
+       
+        # Center of mass
+        model_x = np.array(model_x)/pixelsize
+        model_y = np.array(model_y)/pixelsize
+        model_z = np.array(model_z)
 
-   
+        model_x = model_x - np.mean(model_x)
+        model_y = model_y - np.mean(model_y)
+        model_z = model_z - np.mean(model_z)
+
+        rotaxis, proplane = self.getUIstate()
+
+        template_img = self.render_planes(model_x, model_y, model_z, proplane, pixelsize)
+
+        self.template_img = scipy.ndimage.filters.gaussian_filter(template_img,blur)
+
+
+    def model_preview(self):
+
+        self.generate_template()
+        #Generate a  template image 
+
+        fig = plt.figure()
+        plt.title('Preview of Template')
+        plt.imshow(self.template_img, interpolation='nearest', cmap =plt.cm.hot)
+        plt.show()
 
     def calculate_score(self):
             #Dummy button -> Functionality of rotatebtn for now
