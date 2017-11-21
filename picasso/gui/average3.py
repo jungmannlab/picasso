@@ -317,7 +317,7 @@ class Window(QtGui.QMainWindow):
         centerofmassbtn.clicked.connect(self.centerofmass)
         rotatebtn.clicked.connect(self.rotate_groups)
 
-        self.translatebtn = QtGui.QRadioButton("Translate only")
+        self.translatebtn = QtGui.QCheckBox("Translate only")
 
         self.alignxbtn = QtGui.QPushButton("Align X")
         self.alignybtn = QtGui.QPushButton("Align Y")
@@ -346,6 +346,7 @@ class Window(QtGui.QMainWindow):
         operategrid.addWidget(self.translatezbtn, 2, 0)
         operategrid.addWidget(self.rotatexy_convbtn,4,0)
         operategrid.addWidget(self.scorebtn,4,1)
+      
 
         self.rotatexy_convbtn.clicked.connect(self.rotatexy_convolution)
 
@@ -379,6 +380,51 @@ class Window(QtGui.QMainWindow):
 
         contrastgrid.addWidget(self.contrastEdit)
         buttongrid.addWidget(contrast_groupbox)
+
+        MODEL_X_DEFAULT = '0,20,40,60,0,20,40,60,0,20,40,60'
+        MODEL_Y_DEFAULT = '0,20,40,0,20,40,0,20,40,0,20,40'
+        MODEL_Z_DEFAULT = '0,0,0,0,0,0,0,0,0,0,0,0'
+
+
+        self.modelchk = QtGui.QCheckBox("Use Model")
+        self.model_x = QtGui.QLineEdit(MODEL_X_DEFAULT)
+        self.model_y = QtGui.QLineEdit(MODEL_Y_DEFAULT)
+        self.model_z = QtGui.QLineEdit(MODEL_Z_DEFAULT)
+
+        self.model_preview_btn = QtGui.QPushButton('Preview')
+
+        self.model_preview_btn.clicked.connect(self.model_preview)
+
+        self.modelblurEdit = QtGui.QDoubleSpinBox()
+        self.modelblurEdit.setDecimals(1)
+        self.modelblurEdit.setRange(0, 10)
+        self.modelblurEdit.setValue(0.5)
+        self.modelblurEdit.setSingleStep(0.1)
+
+        self.pixelsizeEdit = QtGui.QSpinBox()
+        self.pixelsizeEdit.setRange(1,999)
+        self.pixelsizeEdit.setValue(130)
+
+        model_groupbox = QtGui.QGroupBox('Model')
+        modelgrid = QtGui.QGridLayout(model_groupbox)
+
+        modelgrid.addWidget(self.modelchk,0,0)
+        modelgrid.addWidget(QtGui.QLabel('X-Coordinates'),1,0)
+        modelgrid.addWidget(self.model_x,1,1)
+        modelgrid.addWidget(QtGui.QLabel('Y-Coordinates'),2,0)
+        modelgrid.addWidget(self.model_y,2,1)
+        modelgrid.addWidget(QtGui.QLabel('Z-Coordinates'),3,0)
+        modelgrid.addWidget(self.model_z,3,1)
+        modelgrid.addWidget(QtGui.QLabel('Blur:'),4, 0)
+        modelgrid.addWidget(self.modelblurEdit, 4, 1)
+        modelgrid.addWidget(QtGui.QLabel('Pixelsize:'),5,0)
+        modelgrid.addWidget(self.pixelsizeEdit, 5, 1)
+        modelgrid.addWidget(self.model_preview_btn, 6 ,0)
+        modelgrid.addWidget(self.modelchk, 6, 1)
+
+
+        buttongrid.addWidget(model_groupbox)
+
 
         mainWidget = QtGui.QWidget()
         mainWidget.setLayout(self.grid)
@@ -1146,6 +1192,39 @@ class Window(QtGui.QMainWindow):
 
         return image
 
+    def model_preview(self):
+        model_x_str = np.asarray((self.model_x.text()).split(","))
+        model_y_str = np.asarray((self.model_y.text()).split(","))
+        model_z_str = np.asarray((self.model_z.text()).split(","))
+
+        model_x = []
+        model_y = []
+        model_z = []
+
+        for element in model_x_str:
+            try:
+                model_x.append(float(element))
+            except ValueError:
+                pass 
+
+        for element in model_y_str:
+            try:
+                model_y.append(float(element))
+            except ValueError:
+                pass 
+
+        for element in model_z_str:
+            try:
+                model_z.append(float(element))
+            except ValueError:
+                pass 
+
+
+        print('Model X: {}'.format(model_x))
+        print('Model Y: {}'.format(model_y))
+        print('Model Z: {}'.format(model_z))
+
+   
 
     def calculate_score(self):
             #Dummy button -> Functionality of rotatebtn for now
@@ -1158,6 +1237,8 @@ class Window(QtGui.QMainWindow):
             n_locs = sum([_[0] for _ in renderings])
             #Make an average and not a sum image here..
             images = np.array([_[1]/n_groups for _ in renderings])
+
+
 
             #DELIVER CORRECT PROJECTION FOR IMAGE
             image = self.projectPlanes(images, proplane)
