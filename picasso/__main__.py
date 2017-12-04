@@ -102,7 +102,7 @@ def _clusterfilter(files, clusterfile, parameter, minval, maxval):
     from itertools import chain
     from .io import load_locs, save_locs
     from .postprocess import align
-    from os.path import splitext
+    from os.path import splitextf
     from tqdm import tqdm
     import numpy as np
 
@@ -339,16 +339,17 @@ def _pair_correlation(files, bin_size, r_max):
     if paths:
         from .io import load_locs
         from .postprocess import pair_correlation
-        from matplotlib.pyplot import plot, style, show, xlabel, ylabel
+        from matplotlib.pyplot import plot, style, show, xlabel, ylabel, title
         style.use('ggplot')
         for path in paths:
             print('Loading {}...'.format(path))
             locs, info = load_locs(path)
             print('Calculating pair-correlation...')
             bins_lower, pc = pair_correlation(locs, info, bin_size, r_max)
-            plot(bins_lower, pc)
+            plot(bins_lower-bin_size/2, pc)
             xlabel('r (pixel)')
             ylabel('pair-correlation (pixel^-2)')
+            title('Pair-correlation. Bin size: {}, R max: {}'.format(bin_size,r_max))
             show()
 
 

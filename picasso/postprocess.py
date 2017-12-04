@@ -156,7 +156,7 @@ def _distance_histogram(locs, bin_size, r_max, x_index, y_index, block_starts, b
 
 
 def distance_histogram(locs, info, bin_size, r_max):
-    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(locs, info, r_max)
+    locs, size, x_index, y_index, block_starts, block_ends, K, L = get_index_blocks(locs, info, r_max)
     N = len(locs)
     n_threads = _multiprocessing.cpu_count()
     chunk = int(N / n_threads)
@@ -247,8 +247,14 @@ def _fill_dnfl(N, frame, x, y, group, i, d_max, dnfl, bin_size):
 
 def pair_correlation(locs, info, bin_size, r_max):
     dh = distance_histogram(locs, info, bin_size, r_max)
-    bins_lower = _np.arange(0, r_max, bin_size)
+    #Start with r-> otherwise area will be 0 
+    bins_lower = _np.arange(bin_size, r_max+bin_size, bin_size)
+
+    if  bins_lower.shape[0] >  dh.shape[0]:
+        bins_lower = bins_lower[:-1]
+
     area = _np.pi * bin_size * (2 * bins_lower + bin_size)
+    
     return bins_lower, dh / area
 
 def dbscan(locs, radius, min_density):
