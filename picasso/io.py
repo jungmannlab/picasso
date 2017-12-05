@@ -484,8 +484,15 @@ def load_filter(path, qt_parent=None):
     with _h5py.File(path, 'r') as locs_file:
         try:
             locs = locs_file['locs'][...]
+            info = load_info(path, qt_parent=qt_parent)
         except KeyError:
-            locs = locs_file['groups'][...]
+            try:
+                locs = locs_file['groups'][...]
+                info = load_info(path, qt_parent=qt_parent)
+            except KeyError:
+                locs = locs_file['clusters'][...]
+                info = []
+
+
     locs = _np.rec.array(locs, dtype=locs.dtype)    # Convert to rec array with fields as attributes
-    info = load_info(path, qt_parent=qt_parent)
     return locs, info
