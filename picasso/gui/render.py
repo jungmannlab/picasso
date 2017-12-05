@@ -876,12 +876,23 @@ class InfoDialog(QtGui.QDialog):
         display_groupbox = QtGui.QGroupBox('Display')
         vbox.addWidget(display_groupbox)
         display_grid = QtGui.QGridLayout(display_groupbox)
-        display_grid.addWidget(QtGui.QLabel('Width:'), 0, 0)
+        display_grid.addWidget(QtGui.QLabel('Image width:'), 0, 0)
         self.width_label = QtGui.QLabel()
         display_grid.addWidget(self.width_label, 0, 1)
-        display_grid.addWidget(QtGui.QLabel('Height:'), 1, 0)
+        display_grid.addWidget(QtGui.QLabel('Image height:'), 1, 0)
         self.height_label = QtGui.QLabel()
         display_grid.addWidget(self.height_label, 1, 1)
+
+        display_grid.addWidget(QtGui.QLabel('View X / Y:'), 2, 0)
+        self.xy_label = QtGui.QLabel()
+        display_grid.addWidget(self.xy_label, 2, 1)
+
+        display_grid.addWidget(QtGui.QLabel('View width / height:'), 3, 0)
+        self.wh_label = QtGui.QLabel()
+        display_grid.addWidget(self.wh_label, 3, 1)
+
+
+
         # Movie
         movie_groupbox = QtGui.QGroupBox('Movie')
         vbox.addWidget(movie_groupbox)
@@ -902,6 +913,7 @@ class InfoDialog(QtGui.QDialog):
         fov_grid.addWidget(QtGui.QLabel('# Localizations:'), 0, 0)
         self.locs_label = QtGui.QLabel()
         fov_grid.addWidget(self.locs_label, 0, 1)
+
         # Picks
         picks_groupbox = QtGui.QGroupBox('Picks')
         vbox.addWidget(picks_groupbox)
@@ -3893,6 +3905,12 @@ class Window(QtGui.QMainWindow):
         self.info_dialog.width_label.setText('{} pixel'.format((self.view.width())))
         self.info_dialog.height_label.setText('{} pixel'.format((self.view.height())))
         self.info_dialog.locs_label.setText('{:,}'.format(self.view.n_locs))
+        try:
+            self.info_dialog.xy_label.setText('{:.2f} / {:.2f} '.format(self.view.viewport[0][1],self.view.viewport[0][0]))
+            self.info_dialog.wh_label.setText('{:.2f} / {:.2f} pixel'.format(self.view.viewport_width(),self.view.viewport_height()))
+        except AttributeError:
+            pass
+
         try:
             self.info_dialog.fit_precision.setText('{:.3} pixel'.format(self.view.median_lp))
         except AttributeError:
