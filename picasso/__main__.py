@@ -102,7 +102,7 @@ def _clusterfilter(files, clusterfile, parameter, minval, maxval):
     from itertools import chain
     from .io import load_locs, save_locs
     from .postprocess import align
-    from os.path import splitextf
+    from os.path import splitext
     from tqdm import tqdm
     import numpy as np
 
