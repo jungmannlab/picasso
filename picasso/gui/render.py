@@ -3552,6 +3552,9 @@ class Window(QtGui.QMainWindow):
         export_txt_imaris_action.triggered.connect(self.export_txt_imaris)
         export_txt_chimera_action = file_menu.addAction('Export as .xyz for Chimera')
         export_txt_chimera_action.triggered.connect(self.export_xyz_chimera)
+        export_3d_visp_action = file_menu.addAction('Export as .3d for ViSP')
+        export_3d_visp_action.triggered.connect(self.export_3d_visp)
+
 
 
 
@@ -3756,6 +3759,28 @@ class Window(QtGui.QMainWindow):
                         print('Saving complete.')
                 else:
                         print('Data has no z.')
+
+    def export_3d_visp(self):
+        channel = self.view.get_channel('Save localizations as xyz for chimera (molecule,x,y,z)')
+        pixelsize = self.display_settings_dialog.pixelsize.value()
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '.visp.3d'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations as xyz for chimera (molecule,x,y,z)', out_path)
+            if path:
+                locs = self.view.locs[channel]
+                if hasattr(locs, 'z'):
+                    locs = locs[['x', 'y', 'z', 'photons', 'frame']].copy()
+                    locs.x *= pixelsize
+                    locs.y *= pixelsize
+                    with open(path, 'wb') as f:
+                        np.savetxt(f, locs,fmt=['%.1f', '%.1f', '%.1f', '%.1f', '%d'], newline='\r\n')
+                        print('Saving complete.')
+                else:
+                        print('Data has no z.')
+
+
+
 
     def export_txt_imaris(self):
         channel = self.view.get_channel('Save localizations as txt for IMARIS (x,y,z,frame,channel)')
