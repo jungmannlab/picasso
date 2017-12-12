@@ -93,7 +93,7 @@ class ParametersDialog(QtGui.QDialog):
         grid.addWidget(QtGui.QLabel('Oversampling:'), 0, 0)
         self.oversampling = QtGui.QDoubleSpinBox()
         self.oversampling.setRange(1, 200)
-        self.oversampling.setValue(2)
+        self.oversampling.setValue(4)
         self.oversampling.setDecimals(1)
         self.oversampling.setKeyboardTracking(False)
         self.oversampling.valueChanged.connect(self.window.updateLayout)
@@ -339,6 +339,11 @@ class Window(QtGui.QMainWindow):
 
         rotationgrid.addWidget(self.translatebtn, 7, 0)
 
+        self.z_range = QtGui.QLineEdit('-1000,1000')
+
+        rotationgrid.addWidget(QtGui.QLabel('z-Range (nm)'), 8, 0)
+        rotationgrid.addWidget(self.z_range, 8, 1)
+
         operategrid.addWidget(self.alignxbtn, 0, 1)
         operategrid.addWidget(self.alignybtn, 1, 1)
         operategrid.addWidget(self.alignzzbtn, 2, 1)
@@ -502,6 +507,12 @@ class Window(QtGui.QMainWindow):
             self.dataset_dialog.add_entry(path)
             self.dataset_dialog.checks[-1].stateChanged.connect(self.updateLayout)
 
+            cx = self.infos[-1][0]['Width'] / 2
+            cy = self.infos[-1][0]['Height'] / 2
+   
+            self.locs[-1].x -= cx
+            self.locs[-1].y -= cy
+
             if len(self.locs) == 1:
                 self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
                 if hasattr(locs, 'group'):
@@ -530,30 +541,10 @@ class Window(QtGui.QMainWindow):
                 self.z_min = np.min([np.min(locs.z),self.z_min])
                 self.z_max = np.min([np.max(locs.z),self.z_max])
 
-            N_avg, image_avg3 = render.render_hist3d(self.locs[0], self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize)
-
-            xyproject = np.sum(image_avg3, axis=2)
-            pixmap = self.histtoImage(xyproject)
-
-            self.viewxy.setPixmap(pixmap)
-
-            xzproject = np.transpose(np.sum(image_avg3, axis=0))
-            pixmap = self.histtoImage(xzproject)
-            self.viewxz.setPixmap(pixmap)
-
-            yzproject = np.transpose(np.sum(image_avg3, axis=1))
-            pixmap = self.histtoImage(yzproject)
-            self.viewyz.setPixmap(pixmap)
-
             if len(self.locs) == 1:
                 print('Dataset loaded from {}.'.format(path))
             else:
                 print('Dataset loaded from {}, Total number of datasets {}.'.format(path, len(self.locs)))
-                pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
-
-                self.viewxy.setPixmap(pixmap1)
-                self.viewxz.setPixmap(pixmap2)
-                self.viewyz.setPixmap(pixmap3)
 
             #CREATE GROUP INDEX
             if hasattr(locs, 'group'):
@@ -571,7 +562,15 @@ class Window(QtGui.QMainWindow):
 
                 self.group_index.append(group_index)
                 self.n_groups = n_groups
+            
+
             os.chdir(os.path.dirname(path))
+
+            self.calculate_radii()
+            self.oversampling = 4
+            self.updateLayout()
+
+
 
     def updateLayout(self):
         pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
@@ -611,6 +610,19 @@ class Window(QtGui.QMainWindow):
             self.locs[j].x -= mean_x
             self.locs[j].y -= mean_y
             self.locs[j].z -= mean_z
+
+    def calculate_radii(self):
+        #CALCULATE PROPER R VALUES
+        n_channels = len(self.locs)
+        self.r = 0
+        self.r_z = 0
+        for j in range(n_channels):
+            self.r = np.max([3 * np.sqrt(np.mean(self.locs[j].x**2 + self.locs[j].y**2)),self.r])
+            self.r_z = np.max([5 * np.sqrt(np.mean(self.locs[j].z**2)),self.r_z])
+        self.t_min = -self.r
+        self.t_max = self.r
+        self.z_min = -self.r_z
+        self.z_max = self.r_z
 
     def centerofmass(self):
         print('Aligning by center of mass.. ', end='', flush=True)
@@ -652,48 +664,10 @@ class Window(QtGui.QMainWindow):
                 self.locs[j].y[index] -= mean_y
                 self.locs[j].z[index] -= mean_z
 
-        #CALCULATE PROPER R VALUES
-        self.r = 0
-        self.r_z = 0
-        for j in range(n_channels):
-            self.r = np.max([3 * np.sqrt(np.mean(self.locs[j].x**2 + self.locs[j].y**2)),self.r])
-            self.r_z = np.max([5 * np.sqrt(np.mean(self.locs[j].z**2)),self.r_z])
-        self.t_min = -self.r
-        self.t_max = self.r
-        self.z_min = -self.r_z
-        self.z_max = self.r_z
-
-        #ENSURE SANITY
-        if 0:
-            self.group_index = []
-
-            for j in range(n_channels):
-
-                self.locs[j] = self.locs[j][self.locs[j].x > self.t_min]
-                self.locs[j] = self.locs[j][self.locs[j].y > self.t_min]
-                self.locs[j] = self.locs[j][self.locs[j].z > self.z_min]
-                self.locs[j] = self.locs[j][self.locs[j].x < self.t_max]
-                self.locs[j] = self.locs[j][self.locs[j].y < self.t_max]
-                self.locs[j] = self.locs[j][self.locs[j].z < self.z_max]
-
-                groups = np.unique(self.locs[j].group)
-                n_groups = len(groups)
-                n_locs = len(self.locs[j])
-
-                group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
-                progress = lib.ProgressDialog('Creating group index', 0, len(groups), self)
-                progress.set_value(0)
-                for i, group in enumerate(groups):
-                    index = np.where(self.locs[j].group == group)[0]
-                    group_index[i, index] = True
-                    progress.set_value(i+1)
-
-            self.group_index.append(group_index)
-            self.n_groups = n_groups
-
-        #go through picks, load coordinates from all sets and GOOD
-        self.oversampling = 2
+        self.calculate_radii()
+        self.oversampling = 4
         self.updateLayout()
+
         print('Complete.')
 
     def histtoImage(self, image):
@@ -1548,11 +1522,7 @@ class Window(QtGui.QMainWindow):
         self.viewport = self.adjust_viewport_to_view(viewport)
         qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
         self.qimage = qimage.scaled(self.viewxy.width(), self.viewxy.height(), QtCore.Qt.KeepAspectRatioByExpanding)
-        pixmap = QtGui.QPixmap.fromImage(self.qimage)
-        self.viewxy.setPixmap(pixmap)
-        self.viewxz.setPixmap(pixmap)
-        self.viewyz.setPixmap(pixmap)
-        self.viewcp.setPixmap(pixmap)
+
 
     def adjust_viewport_to_view(self, viewport):
         ''' Adds space to a desired viewport so that it matches the window aspect ratio. '''
