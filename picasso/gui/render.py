@@ -1742,6 +1742,7 @@ class View(QtGui.QLabel):
     def align(self):
         if len(self._picks) > 0:
             shift = self.shift_from_picked()
+            print('Shift {}'.format(shift))
             sp = lib.ProgressDialog('Shifting channels', 0, len(self.locs), self)
             sp.set_value(0)
             for i, locs_ in enumerate(self.locs):

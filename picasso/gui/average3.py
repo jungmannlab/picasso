@@ -280,7 +280,7 @@ class Window(QtGui.QMainWindow):
 
         self.radio_sym = QtGui.QRadioButton("x symmetry")
         self.symEdit = QtGui.QSpinBox()
-        self.symEdit.setRange(2, 20)
+        self.symEdit.setRange(2, 50)
         self.symEdit.setValue(8)
 
         self.radio_sym_custom = QtGui.QRadioButton("custom symmetry")
@@ -344,6 +344,8 @@ class Window(QtGui.QMainWindow):
         rotationgrid.addWidget(QtGui.QLabel('z-Range (nm)'), 8, 0)
         rotationgrid.addWidget(self.z_range, 8, 1)
 
+        self.z_range.textChanged.connect(self.adjust_z)
+
         operategrid.addWidget(self.alignxbtn, 0, 1)
         operategrid.addWidget(self.alignybtn, 1, 1)
         operategrid.addWidget(self.alignzzbtn, 2, 1)
@@ -354,7 +356,6 @@ class Window(QtGui.QMainWindow):
         operategrid.addWidget(self.rotatexy_convbtn,4,0)
         operategrid.addWidget(self.scorebtn,4,1)
       
-
         self.rotatexy_convbtn.clicked.connect(self.rotatexy_convolution)
 
         self.alignxbtn.clicked.connect(self.align_x)
@@ -624,6 +625,9 @@ class Window(QtGui.QMainWindow):
         self.z_min = -self.r_z
         self.z_max = self.r_z
 
+        self.z_min_load =  self.z_min.copy()
+        self.z_max_load =  self.z_max.copy()
+
     def centerofmass(self):
         print('Aligning by center of mass.. ', end='', flush=True)
         n_groups = self.n_groups
@@ -859,6 +863,30 @@ class Window(QtGui.QMainWindow):
             elif translateaxis == 'z':
                 self.locs[j].z[index] += dafinal*self.pixelsize
 
+
+    def adjust_z(self):
+        z_range_str = np.asarray((self.z_range.text()).split(","))
+        z_range = []
+ 
+        for element in z_range_str:
+            try:
+                z_range.append(float(element))
+            except ValueError:
+                pass 
+
+        z_min = z_range[0]
+        z_max = z_range[1]
+
+        
+        self.z_min = np.max([z_min, self.z_min_load])
+        self.z_max = np.min([z_max, self.z_max_load])
+
+
+        print('Z min {}, Z max {}'.format(self.z_min, self.z_max))
+
+        self.updateLayout()
+
+
     def rotatexy_convolution_group(self, CF_image_avg, angles, group, rotaxis, proplane):
         n_channels = len(self.locs)
         allrot = []
@@ -948,6 +976,7 @@ class Window(QtGui.QMainWindow):
             angles = np.arange(-degree/360*2*np.pi, degree/360*2*np.pi, a_step)
 
         renderings = [render.render_hist3d(_, self.oversampling, self.t_min, self.t_min, self.t_max, self.t_max, self.z_min, self.z_max, self.pixelsize) for _ in self.locs]
+
         n_locs = sum([_[0] for _ in renderings])
         images = np.array([_[1] for _ in renderings])
 

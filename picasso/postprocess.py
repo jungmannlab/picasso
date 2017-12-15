@@ -458,10 +458,10 @@ def weighted_variance(locs):
     variance_y = n/((n-1)*sum(w)**2)*(sum((w*y-wbary*xWbary)**2)-2*xWbary*sum((w-wbary)*(w*y-wbary*xWbary))+xWbary**2*sum((w-wbary)**2))
     return variance_x, variance_y
 
-
-def cluster(locs):
-    print('Clustering localizations....')
-    clustered_locs = []
+#Combine localizations: calculate the properties of the group
+def combine(locs):
+    print('Combining localizations....')
+    combined_locs = []
     if hasattr(locs[0], 'z'):
         print('z-mode')
         for group in _np.unique(locs['group']):
@@ -495,7 +495,7 @@ def cluster(locs):
             clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
                                      dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('lpz', 'f4'), ('n', 'i4')])
-            clustered_locs.append(clusters)
+            combined_locs.append(clusters)
     else:
         for group in _np.unique(locs['group']):
             print(group)
@@ -524,12 +524,12 @@ def cluster(locs):
             clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
                                      dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('n', 'i4')])
-            clustered_locs.append(clusters)
+            combined_locs.append(clusters)
 
-    clustered_locs = stack_arrays(clustered_locs, asrecarray=True, usemask=False)
-    print(clustered_locs)
+    combined_locs = stack_arrays(combined_locs, asrecarray=True, usemask=False)
+    print(combined_locs)
 
-    return clustered_locs
+    return combined_locs
 
 
 
@@ -540,7 +540,7 @@ def cluster(locs):
 def clusterdist(locs):
     print('Calculating distances....')
     pixelsize = 130 # for now re-write pixelsize
-    clustered_locs = []
+    combined_locs = []
     if hasattr(locs[0], 'z'):
         print('z-mode')
         for group in _np.unique(locs['group']):
@@ -580,10 +580,10 @@ def clusterdist(locs):
             clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n, min_dist, min_distz),
                                      dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('lpz', 'f4'), ('n', 'i4'), ('min_dist', 'f4'), ('mind_distz', 'f4')])
-            clustered_locs.append(clusters)
+            combined_locs.append(clusters)
 
-    clustered_locs = stack_arrays(clustered_locs, asrecarray=True, usemask=False)
-    return clustered_locs
+    combined_locs = stack_arrays(combined_locs, asrecarray=True, usemask=False)
+    return combined_locs
 
 
 
