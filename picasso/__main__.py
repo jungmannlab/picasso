@@ -469,7 +469,7 @@ def main():
     link_parser.add_argument('-t', '--tolerance', type=int, default=1,
                              help='maximum dark time between localizations to still consider them the same binding event (default=1)')
 
-    cluster_parser = subparsers.add_parser('cluster', help='link cluster data')
+    cluster_parser = subparsers.add_parser('combine', help='combine localization in grouped data')
     cluster_parser.add_argument('files', help='one or multiple hdf5 localization files specified by a unix style path pattern')
 
     clusterdist_parser = subparsers.add_parser('clusterdist', help='calculate distances in cluster')
