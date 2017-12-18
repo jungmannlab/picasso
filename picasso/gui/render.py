@@ -1829,8 +1829,11 @@ class View(QtGui.QLabel):
                     out_locs.append(pick_locs_out)
                 progress.set_value(i+1)
             self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
+
             if hasattr(self.locs[channel], 'group'):
                 groups = np.unique(self.locs[channel].group)
+                #In case a group is missing
+                groups = np.arange(np.max(groups)+1)
                 np.random.shuffle(groups)
                 groups %= N_GROUP_COLORS
                 self.group_color = groups[self.locs[channel].group]
@@ -1850,6 +1853,7 @@ class View(QtGui.QLabel):
                 status.close()
                 if hasattr(self.locs[channel], 'group'):
                     groups = np.unique(self.locs[channel].group)
+                    groups = np.arange(np.max(groups)+1)
                     np.random.shuffle(groups)
                     groups %= N_GROUP_COLORS
                     self.group_color = groups[self.locs[channel].group]
