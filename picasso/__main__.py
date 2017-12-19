@@ -84,10 +84,11 @@ def _link(files, d_max, tolerance):
 
                 for group in _tqdm(_np.unique(clusters['groups'])):
                     temp = linked_locs[linked_locs['group']==group]
-                    n_after_link.append(len(temp))
-                    linked_len.append(_np.mean(temp['len']))
-                    linked_n.append(_np.mean(temp['n']))
-                    linked_photonrate.append(_np.mean(temp['photon_rate']))
+                    if len(temp) > 0:
+                        n_after_link.append(len(temp))
+                        linked_len.append(_np.mean(temp['len']))
+                        linked_n.append(_np.mean(temp['n']))
+                        linked_photonrate.append(_np.mean(temp['photon_rate']))
 
                 clusters = _lib.append_to_rec(clusters, _np.array(n_after_link, dtype=_np.int32), 'n_after_link')
                 clusters = _lib.append_to_rec(clusters, _np.array(linked_len, dtype=_np.int32), 'linked_len')
