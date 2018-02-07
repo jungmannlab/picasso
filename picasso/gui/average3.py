@@ -1652,17 +1652,20 @@ class Window(QtGui.QMainWindow):
         return np.round(255 * image).astype('uint8')
 
     def scale_contrast(self, image, autoscale=False):
-        if 1:
-            if image.ndim == 2:
-                max_ = image.max()
-            else:
-                max_ = min([_.max() for _ in image])
-            upper = self.contrastEdit.value() * max_
+        
+        if image.ndim == 2:
+            max_ = image.max()
+        else:
+            max_ = min([_.max() for _ in image])
+        upper = self.contrastEdit.value() * max_
+
         lower = 0
-        image = (image - lower) / (upper - lower)
-        image[~np.isfinite(image)] = 0
-        image = np.minimum(image, 1.0)
-        image = np.maximum(image, 0.0)
+        
+        if upper > 0:
+            image = (image - lower) / (upper - lower)
+            image[~np.isfinite(image)] = 0
+            image = np.minimum(image, 1.0)
+            image = np.maximum(image, 0.0)
         return image
 
 def main():
