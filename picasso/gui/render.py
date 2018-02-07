@@ -1688,6 +1688,9 @@ class View(QtGui.QLabel):
         self.window.dataset_dialog.add_entry(path)
         self.window.setWindowTitle('Picasso: Render. File: {}'.format(os.path.basename(path)))
 
+
+
+
     def add_multiple(self, paths):
         fit_in_view = len(self.locs) == 0
         paths = sorted(paths)
@@ -2331,6 +2334,87 @@ class View(QtGui.QLabel):
             ax2.set_ylabel('Y-pos [Px]')
             ax3.set_ylabel('ON')
             f.show()
+
+    def show_fret(self):
+        print('Show fret')
+        channel = self.get_channel3d('Select Channel')
+        fig = plt.figure(figsize=(5,5))
+        fig.canvas.set_window_title("Scatterplot of Pick")
+        removelist = []
+
+        if channel is not None:
+            n_channels = (len(self.locs_paths))
+            hues = np.arange(0, 1, 1 / n_channels)
+            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+
+            print('Dual color')
+
+            all_picked_locs = []
+            for k in range(len(self.locs_paths)):
+                all_picked_locs.append(self.picked_locs(k))
+            if self._picks:
+                t0 = time.time()
+                for i, pick in enumerate(self._picks):
+                    pickindex = 0
+                    fig.clf()
+                    ax = fig.add_subplot(111)
+                    ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
+                    for l in range(len(self.locs_paths)):
+                        locs = all_picked_locs[l][i]
+                        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                        ax.scatter(locs['x'], locs['y'], c = colors[l])
+
+                    ax.set_xlabel('X [Px]')
+                    ax.set_ylabel('Y [Px]')
+                    plt.axis('equal')
+
+                    fig.canvas.draw()
+                    size = fig.canvas.size()
+                    width, height = size.width(), size.height()
+                    im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+
+                    self.setPixmap((QtGui.QPixmap(im)))
+                    self.setAlignment(QtCore.Qt.AlignCenter)
+
+                    msgBox = QtGui.QMessageBox(self)
+
+                    msgBox.setWindowTitle('Select picks')
+                    msgBox.setWindowIcon(self.icon)
+                    dt = time.time() - t0
+                    n_removed = len(removelist)
+                    n_kept = i-n_removed
+                    n_total = len(self._picks)
+                    msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'.format(i+1,n_total,n_removed,n_kept,n_kept/(i+1)*100,dt/60,i/dt*60))
+                    msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
+                    msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
+                    msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
+                    qr = self.frameGeometry()
+                    cp = QtGui.QDesktopWidget().availableGeometry().center()
+                    qr.moveCenter(cp)
+                    msgBox.move(qr.topLeft())
+
+                    reply = msgBox.exec()
+
+                    if reply == 0:
+                        print('Accepted')
+                    elif reply == 2:
+                        break
+                    else:
+                        print('Discard')
+                        removelist.append(pick)
+                    plt.close()
+
+        for pick in removelist:
+            self._picks.remove(pick)
+
+        self.n_picks = len(self._picks)
+
+        self.update_pick_info_short()
+        self.update_scene()
+
+    def calculate_fret(self):
+        print('Calculate FRET')
+
 
     def show_traces(self):
         print('Show traces')
@@ -3651,6 +3735,14 @@ class Window(QtGui.QMainWindow):
 
         pickadd_action = tools_menu.addAction('Substract pick regions')
         pickadd_action.triggered.connect(self.substract_picks)
+
+        tools_menu.addSeparator()
+        self.fret_traces_action = tools_menu.addAction('Show FRET traces')
+        self.fret_traces_action.triggered.connect(self.view.show_fret)
+
+        self.calculate_fret_action = tools_menu.addAction('Calculate FRET in picks')
+        self.calculate_fret_action.triggered.connect(self.view.calculate_fret)
+
 
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
         undrift_action.setShortcut('Ctrl+U')
