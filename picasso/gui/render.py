@@ -2335,74 +2335,93 @@ class View(QtGui.QLabel):
             ax3.set_ylabel('ON')
             f.show()
 
+
+    def pick_message_box(self, params):
+        msgBox = QtGui.QMessageBox(self)
+        msgBox.setWindowTitle('Select picks')
+        msgBox.setWindowIcon(self.icon)
+
+        if params['i'] == 0:
+            keep_ratio = 0
+        else:
+            keep_ratio = params['n_kept']/(params['i'])
+
+        dt = time.time() - params['t0']
+
+        msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'
+            .format(params['i']+1, params['n_total'], params['n_removed'] , params['n_kept'], keep_ratio*100 , dt/60, params['i']/dt*60))
+        msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
+        msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
+        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
+
+        qr = self.frameGeometry()
+        cp = QtGui.QDesktopWidget().availableGeometry().center()
+        qr.moveCenter(cp)
+        msgBox.move(qr.topLeft())
+
+        return msgBox
+
+
     def show_fret(self):
         print('Show fret')
-        channel = self.get_channel3d('Select Channel')
+
+        channel_acceptor = self.get_channel(title = 'Select acceptor channel')
+        channel_donor = self.get_channel(title = 'Select donor channel')        
+
         fig = plt.figure(figsize=(5,5))
         fig.canvas.set_window_title("Scatterplot of Pick")
         removelist = []
 
-        if channel is not None:
-            n_channels = (len(self.locs_paths))
-            hues = np.arange(0, 1, 1 / n_channels)
-            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+        n_channels = (len(self.locs_paths))
+        hues = np.arange(0, 1, 1 / n_channels)
+        colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
 
-            print('Dual color')
+        all_picked_locs = []
+        for k in range(len(self.locs_paths)):
+            all_picked_locs.append(self.picked_locs(k))
+        if self._picks:
+            params = {}
+            params['t0'] = time.time()
+            for i, pick in enumerate(self._picks):
+                pickindex = 0
+                fig.clf()
+                ax = fig.add_subplot(111)
+                ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
+                for l in range(len(self.locs_paths)):
+                    locs = all_picked_locs[l][i]
+                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                    ax.scatter(locs['x'], locs['y'], c = colors[l])
 
-            all_picked_locs = []
-            for k in range(len(self.locs_paths)):
-                all_picked_locs.append(self.picked_locs(k))
-            if self._picks:
-                t0 = time.time()
-                for i, pick in enumerate(self._picks):
-                    pickindex = 0
-                    fig.clf()
-                    ax = fig.add_subplot(111)
-                    ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
-                    for l in range(len(self.locs_paths)):
-                        locs = all_picked_locs[l][i]
-                        locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                        ax.scatter(locs['x'], locs['y'], c = colors[l])
+                ax.set_xlabel('X [Px]')
+                ax.set_ylabel('Y [Px]')
+                plt.axis('equal')
 
-                    ax.set_xlabel('X [Px]')
-                    ax.set_ylabel('Y [Px]')
-                    plt.axis('equal')
+                fig.canvas.draw()
+                size = fig.canvas.size()
+                width, height = size.width(), size.height()
+                im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
 
-                    fig.canvas.draw()
-                    size = fig.canvas.size()
-                    width, height = size.width(), size.height()
-                    im = QtGui.QImage(fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32)
+                self.setPixmap((QtGui.QPixmap(im)))
+                self.setAlignment(QtCore.Qt.AlignCenter)
 
-                    self.setPixmap((QtGui.QPixmap(im)))
-                    self.setAlignment(QtCore.Qt.AlignCenter)
+                params['n_removed'] = len(removelist)
+                params['n_kept'] = i-params['n_removed']
+                params['n_total'] = len(self._picks)
+                params['i'] = i
 
-                    msgBox = QtGui.QMessageBox(self)
+                msgBox = self.pick_message_box(params)
 
-                    msgBox.setWindowTitle('Select picks')
-                    msgBox.setWindowIcon(self.icon)
-                    dt = time.time() - t0
-                    n_removed = len(removelist)
-                    n_kept = i-n_removed
-                    n_total = len(self._picks)
-                    msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'.format(i+1,n_total,n_removed,n_kept,n_kept/(i+1)*100,dt/60,i/dt*60))
-                    msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
-                    msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
-                    msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
-                    qr = self.frameGeometry()
-                    cp = QtGui.QDesktopWidget().availableGeometry().center()
-                    qr.moveCenter(cp)
-                    msgBox.move(qr.topLeft())
+                reply = msgBox.exec()
 
-                    reply = msgBox.exec()
+                if reply == 0:
+                    print('Accepted')
+                elif reply == 2:
+                    break
+                else:
+                    print('Discard')
+                    removelist.append(pick)
 
-                    if reply == 0:
-                        print('Accepted')
-                    elif reply == 2:
-                        break
-                    else:
-                        print('Discard')
-                        removelist.append(pick)
-                    plt.close()
+                plt.close()
 
         for pick in removelist:
             self._picks.remove(pick)
