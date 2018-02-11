@@ -2350,9 +2350,11 @@ class View(QtGui.QLabel):
 
         msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'
             .format(params['i']+1, params['n_total'], params['n_removed'] , params['n_kept'], keep_ratio*100 , dt/60, params['i']/dt*60))
+        
         msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
         msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
-        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
+        msgBox.addButton(QtGui.QPushButton('Back'), QtGui.QMessageBox.ResetRole)
+        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole) 
 
         qr = self.frameGeometry()
         cp = QtGui.QDesktopWidget().availableGeometry().center()
@@ -2382,8 +2384,10 @@ class View(QtGui.QLabel):
         if self._picks:
             params = {}
             params['t0'] = time.time()
-            for i, pick in enumerate(self._picks):
-                pickindex = 0
+            i = 0
+            while i < len(self._picks):
+                pick = self._picks[i]
+
                 fig.clf()
                 ax = fig.add_subplot(111)
                 ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
@@ -2415,12 +2419,21 @@ class View(QtGui.QLabel):
 
                 if reply == 0:
                     print('Accepted')
-                elif reply == 2:
+                    if pick in removelist: removelist.remove(pick)
+                elif reply == 3:
+                    print('Cancel')
                     break
+                elif reply == 2:
+                    print('Back')
+                    if i >= 2:
+                        i-= 2
+                    else:
+                        i = -1
                 else:
                     print('Discard')
                     removelist.append(pick)
 
+                i+=1
                 plt.close()
 
         for pick in removelist:
