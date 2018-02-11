@@ -2500,9 +2500,12 @@ class View(QtGui.QLabel):
         channel = self.get_channel('Undrift from picked')
         if channel is not None:
             if self._picks:
-                t0 = time.time()
+                params = {}
+                params['t0'] = time.time()
                 all_picked_locs = self.picked_locs(channel)
-                for i, pick in enumerate(self._picks):
+                i = 0
+                while i < len(self._picks):
+                    pick = self._picks[i]
                     locs = all_picked_locs[i]
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
@@ -2541,32 +2544,34 @@ class View(QtGui.QLabel):
                     self.setPixmap((QtGui.QPixmap(im)))
                     self.setAlignment(QtCore.Qt.AlignCenter)
 
-                    msgBox = QtGui.QMessageBox(self)
+                    params['n_removed'] = len(removelist)
+                    params['n_kept'] = i-params['n_removed']
+                    params['n_total'] = len(self._picks)
+                    params['i'] = i
 
-                    msgBox.setWindowTitle('Select picks')
-                    msgBox.setWindowIcon(self.icon)
-                    dt = time.time() - t0
-                    n_removed = len(removelist)
-                    n_kept = i-n_removed
-                    n_total = len(self._picks)
-                    msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'.format(i+1,n_total,n_removed,n_kept,n_kept/(i+1)*100,dt/60,i/dt*60))
-                    msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
-                    msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
-                    msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
-                    qr = self.frameGeometry()
-                    cp = QtGui.QDesktopWidget().availableGeometry().center()
-                    qr.moveCenter(cp)
-                    msgBox.move(qr.topLeft())
+                    msgBox = self.pick_message_box(params)
 
                     reply = msgBox.exec()
 
                     if reply == 0:
-                        pass
-                    elif reply == 2:
+                        print('Accepted')
+                        if pick in removelist: removelist.remove(pick)
+                    elif reply == 3:
+                        print('Cancel')
                         break
+                    elif reply == 2:
+                        print('Back')
+                        if i >= 2:
+                            i-= 2
+                        else:
+                            i = -1
                     else:
+                        print('Discard')
                         removelist.append(pick)
+
+                    i+=1
                     plt.close()
+                    
         for pick in removelist:
             self._picks.remove(pick)
 
