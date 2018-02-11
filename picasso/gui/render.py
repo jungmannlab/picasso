@@ -2704,7 +2704,7 @@ class View(QtGui.QLabel):
 
                         i+=1
                         plt.close()
-                        
+
         for pick in removelist:
             self._picks.remove(pick)
 
@@ -4005,8 +4005,36 @@ class Window(QtGui.QMainWindow):
     def open_apply_dialog(self):
         cmd, channel, ok = ApplyDialog.getCmd(self)
         if ok:
-            vars = self.view.locs[channel].dtype.names
-            exec(cmd, {k: self.view.locs[channel][k] for k in vars})
+            input = cmd.split()
+            if input[0] == 'flip' and len(input) == 3:
+                #Distinguis flipping in xy and z
+                if 'z' in input:
+                    print('xyz')
+                    var_1 = input[1]
+                    var_2 = input[2]
+                    if var_1 == 'z':
+                        var_2 = 'z'
+                        var_1 = input[2]
+                    pixelsize = self.display_settings_dialog.pixelsize.value()
+                    templocs = self.view.locs[channel][var_1].copy()
+                    movie_height, movie_width = self.view.movie_size()
+                    if var_1 == 'x':
+                        dist = movie_width
+                    else:
+                        dist = movie_height
+
+                    self.view.locs[channel][var_1] = self.view.locs[channel][var_2]/pixelsize+dist/2 #exchange w. info
+                    self.view.locs[channel][var_2] = templocs*pixelsize
+                else:
+                    var_1 = input[1]
+                    var_2 = input[2]
+                    templocs = self.view.locs[channel][var_1].copy()
+                    self.view.locs[channel][var_1] = self.view.locs[channel][var_2]
+                    self.view.locs[channel][var_2] = templocs
+                    
+            else:
+                vars = self.view.locs[channel].dtype.names
+                exec(cmd, {k: self.view.locs[channel][k] for k in vars})
             lib.ensure_sanity(self.view.locs[channel], self.view.infos[channel])
             self.view.index_blocks[channel] = None
             self.view.update_scene()
