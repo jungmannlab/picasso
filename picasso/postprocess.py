@@ -34,6 +34,7 @@ from numpy.lib.recfunctions import stack_arrays
 
 
 
+
 def get_index_blocks(locs, info, size, callback=None):
     locs = _lib.ensure_sanity(locs, info)
     # Sort locs by indices
@@ -853,3 +854,38 @@ def groupprops(locs, callback=None):
         if callback is not None:
             callback(i+1)
     return groups
+
+#FRET functions
+
+def calculate_fret(acc_locs,don_locs):
+    fret_dict = {}
+    if len(acc_locs) == 0:
+        max_frames = _np.max(don_locs['frame'])
+    elif len(don_locs)  == 0:
+        max_frames = _np.max(acc_locs['frame'])
+    else:
+        max_frames = _np.max([_np.max(acc_locs['frame']),_np.max(don_locs['frame'])])
+    xvec = _np.arange(max_frames+1)
+    yvec = xvec[:]*0
+    
+    acc_trace = yvec.copy()
+    don_trace = yvec.copy()
+    
+    acc_trace[acc_locs['frame']]=acc_locs['photons']-acc_locs['bg']
+    don_trace[don_locs['frame']]=don_locs['photons']-don_locs['bg']
+    fret_trace = acc_trace/(acc_trace+don_trace)
+    
+    selector = _np.logical_and(fret_trace>0,fret_trace<1)
+
+    fret_events = fret_trace[selector]
+
+    fret_timepoints = _np.arange(len(fret_trace))[selector]
+    
+    fret_dict['fret_events'] = _np.array(fret_events)
+    fret_dict['fret_timepoints'] = fret_timepoints
+    fret_dict['acc_trace'] = acc_trace
+    fret_dict['don_trace'] = don_trace
+    fret_dict['frames'] = xvec
+    fret_dict['maxframes'] = max_frames
+
+    return fret_dict

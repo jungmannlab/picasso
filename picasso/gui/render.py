@@ -2040,7 +2040,7 @@ class View(QtGui.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
-            index, ok = QtGui.QInputDialog.getItem(self, 'Select channel', 'Channel:', pathlist, editable=False)
+            index, ok = QtGui.QInputDialog.getItem(self, title, 'Channel:', pathlist, editable=False)
             if ok:
                 return pathlist.index(index)
             else:
@@ -2364,6 +2364,8 @@ class View(QtGui.QLabel):
         return msgBox
 
 
+
+
     def show_fret(self):
         print('Show fret')
 
@@ -2378,9 +2380,9 @@ class View(QtGui.QLabel):
         hues = np.arange(0, 1, 1 / n_channels)
         colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
 
-        all_picked_locs = []
-        for k in range(len(self.locs_paths)):
-            all_picked_locs.append(self.picked_locs(k))
+        acc_picks = self.picked_locs(channel_acceptor)
+        don_picks = self.picked_locs(channel_donor)
+
         if self._picks:
             params = {}
             params['t0'] = time.time()
@@ -2388,17 +2390,23 @@ class View(QtGui.QLabel):
             while i < len(self._picks):
                 pick = self._picks[i]
 
-                fig.clf()
-                ax = fig.add_subplot(111)
-                ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
-                for l in range(len(self.locs_paths)):
-                    locs = all_picked_locs[l][i]
-                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                    ax.scatter(locs['x'], locs['y'], c = colors[l])
+                fret_dict = postprocess.calculate_fret(acc_picks[i],don_picks[i])
 
-                ax.set_xlabel('X [Px]')
-                ax.set_ylabel('Y [Px]')
-                plt.axis('equal')
+                fig, (ax1, ax2, ax3) = plt.subplots(3, sharex=True)
+                fig.canvas.set_window_title('FRET-trace')
+                ax1.plot(fret_dict['frames'],fret_dict['acc_trace'])
+                ax1.set_title('Acceptor intensity vs frame')
+                ax2.plot(fret_dict['frames'],fret_dict['don_trace'])
+                ax2.set_title('Donor intensity vs frame')
+                ax3.scatter(fret_dict['fret_timepoints'],fret_dict['fret_events'])
+                ax3.set_title(r'$\frac{I_A}{I_D+I_A}$')
+
+                ax1.set_xlim(0,(fret_dict['maxframes']+1))
+                ax3.set_xlabel('Frame')
+
+                ax1.set_ylabel('Photons')
+                ax2.set_ylabel('Photons')
+                ax3.set_ylabel('Ratio')
 
                 fig.canvas.draw()
                 size = fig.canvas.size()
@@ -2444,8 +2452,43 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
-    def calculate_fret(self):
+    def calculate_fret_dialog(self):
         print('Calculate FRET')
+        fret_events = []
+
+        channel_acceptor = self.get_channel(title = 'Select acceptor channel')
+        channel_donor = self.get_channel(title = 'Select donor channel')
+
+        acc_picks = self.picked_locs(channel_acceptor)
+        don_picks = self.picked_locs(channel_donor)
+
+        K = len(self._picks)
+        progress = lib.ProgressDialog('Calculating fret in Picks...', 0, K, self)
+        progress.show()
+
+        for i in range(K):
+            
+            fret_dict = postprocess.calculate_fret(acc_picks[i],don_picks[i])
+            fret_events.append(fret_dict['fret_events'])
+            progress.set_value(i+1)
+
+        progress.close()    
+
+        fig1 = plt.figure()
+        plt.hist(np.hstack(fret_events), bins = np.arange(0,1,0.02))
+        plt.title(r'Distribution of $\frac{I_A}{I_D+I_A}$')
+        plt.xlabel('Ratio')
+        plt.ylabel('Counts')
+        fig1.show()
+
+        base, ext = os.path.splitext(self.locs_paths[channel_acceptor])
+        out_path = base + '.fret.txt'
+
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save FRET values as txt', out_path, filter='*.fret.txt')
+            
+        if path:
+            np.savetxt(path, np.hstack(fret_events), fmt='%1.5f' , newline='\r\n', delimiter='   ')
+
 
 
     def show_traces(self):
@@ -3773,7 +3816,7 @@ class Window(QtGui.QMainWindow):
         self.fret_traces_action.triggered.connect(self.view.show_fret)
 
         self.calculate_fret_action = tools_menu.addAction('Calculate FRET in picks')
-        self.calculate_fret_action.triggered.connect(self.view.calculate_fret)
+        self.calculate_fret_action.triggered.connect(self.view.calculate_fret_dialog)
 
 
         undrift_action = postprocess_menu.addAction('Undrift by RCC')
