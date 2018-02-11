@@ -2490,7 +2490,6 @@ class View(QtGui.QLabel):
             np.savetxt(path, np.hstack(fret_events), fmt='%1.5f' , newline='\r\n', delimiter='   ')
 
 
-
     def show_traces(self):
         print('Show traces')
         fig = plt.figure(figsize=(5,5))
@@ -2571,7 +2570,7 @@ class View(QtGui.QLabel):
 
                     i+=1
                     plt.close()
-                    
+
         for pick in removelist:
             self._picks.remove(pick)
 
@@ -2598,9 +2597,11 @@ class View(QtGui.QLabel):
                 for k in range(len(self.locs_paths)):
                     all_picked_locs.append(self.picked_locs(k))
                 if self._picks:
-                    t0 = time.time()
-                    for i, pick in enumerate(self._picks):
-                        pickindex = 0
+                    params = {}
+                    params['t0'] = time.time()
+                    i = 0
+                    while i < len(self._picks):
+                        pick = self._picks[i]
                         fig.clf()
                         ax = fig.add_subplot(111)
                         ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
@@ -2621,39 +2622,42 @@ class View(QtGui.QLabel):
                         self.setPixmap((QtGui.QPixmap(im)))
                         self.setAlignment(QtCore.Qt.AlignCenter)
 
-                        msgBox = QtGui.QMessageBox(self)
+                        params['n_removed'] = len(removelist)
+                        params['n_kept'] = i-params['n_removed']
+                        params['n_total'] = len(self._picks)
+                        params['i'] = i
 
-                        msgBox.setWindowTitle('Select picks')
-                        msgBox.setWindowIcon(self.icon)
-                        dt = time.time() - t0
-                        n_removed = len(removelist)
-                        n_kept = i-n_removed
-                        n_total = len(self._picks)
-                        msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'.format(i+1,n_total,n_removed,n_kept,n_kept/(i+1)*100,dt/60,i/dt*60))
-                        msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
-                        msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
-                        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
-                        qr = self.frameGeometry()
-                        cp = QtGui.QDesktopWidget().availableGeometry().center()
-                        qr.moveCenter(cp)
-                        msgBox.move(qr.topLeft())
+                        msgBox = self.pick_message_box(params)
 
                         reply = msgBox.exec()
 
                         if reply == 0:
                             print('Accepted')
-                        elif reply == 2:
+                            if pick in removelist: removelist.remove(pick)
+                        elif reply == 3:
+                            print('Cancel')
                             break
+                        elif reply == 2:
+                            print('Back')
+                            if i >= 2:
+                                i-= 2
+                            else:
+                                i = -1
                         else:
                             print('Discard')
                             removelist.append(pick)
+
+                        i+=1
                         plt.close()
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
-                    t0 = time.time()
-                    for i, pick in enumerate(self._picks):
-                        pickindex = 0
+                    params = {}
+                    params['t0'] = time.time()
+                    i = 0
+                    while i < len(self._picks):
+                        pick = self._picks[i]
+                        t0 = time.time()
                         fig.clf()
                         ax = fig.add_subplot(111)
                         ax.set_title("Scatterplot of Pick " +str(i+1) + "  of: " +str(len(self._picks))+".")
@@ -2673,32 +2677,34 @@ class View(QtGui.QLabel):
                         self.setPixmap((QtGui.QPixmap(im)))
                         self.setAlignment(QtCore.Qt.AlignCenter)
 
-                        msgBox = QtGui.QMessageBox(self)
-                        msgBox.setWindowTitle('Select picks')
-                        msgBox.setWindowIcon(self.icon)
-                        dt = time.time() - t0
-                        n_removed = len(removelist)
-                        n_kept = i-n_removed
-                        n_total = len(self._picks)
-                        msgBox.setText('Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}'.format(i+1,n_total,n_removed,n_kept,n_kept/(i+1)*100,dt/60,i/dt*60))
-                        msgBox.addButton(QtGui.QPushButton('Accept'), QtGui.QMessageBox.YesRole)
-                        msgBox.addButton(QtGui.QPushButton('Reject'), QtGui.QMessageBox.NoRole)
-                        msgBox.addButton(QtGui.QPushButton('Cancel'), QtGui.QMessageBox.RejectRole)
-                        qr = self.frameGeometry()
-                        cp = QtGui.QDesktopWidget().availableGeometry().center()
-                        qr.moveCenter(cp)
-                        msgBox.move(qr.topLeft())
+                        params['n_removed'] = len(removelist)
+                        params['n_kept'] = i-params['n_removed']
+                        params['n_total'] = len(self._picks)
+                        params['i'] = i
+
+                        msgBox = self.pick_message_box(params)
 
                         reply = msgBox.exec()
 
                         if reply == 0:
                             print('Accepted')
-                        elif reply == 2:
+                            if pick in removelist: removelist.remove(pick)
+                        elif reply == 3:
+                            print('Cancel')
                             break
+                        elif reply == 2:
+                            print('Back')
+                            if i >= 2:
+                                i-= 2
+                            else:
+                                i = -1
                         else:
                             print('Discard')
                             removelist.append(pick)
+
+                        i+=1
                         plt.close()
+                        
         for pick in removelist:
             self._picks.remove(pick)
 
@@ -2926,8 +2932,6 @@ class View(QtGui.QLabel):
                 progress.set_value(0)
                 progress.show()
                 for i, pick in enumerate(self._picks):
-
-                    pickindex = 0
                     x, y = pick
                     block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
                     pick_locs = lib.locs_at(x, y, block_locs, r)
