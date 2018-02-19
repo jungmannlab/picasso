@@ -93,7 +93,7 @@ class ParametersDialog(QtGui.QDialog):
         grid.addWidget(QtGui.QLabel('Oversampling:'), 0, 0)
         self.oversampling = QtGui.QDoubleSpinBox()
         self.oversampling.setRange(1, 200)
-        self.oversampling.setValue(4)
+        self.oversampling.setValue(DEFAULT_OVERSAMPLING)
         self.oversampling.setDecimals(1)
         self.oversampling.setKeyboardTracking(False)
         self.oversampling.valueChanged.connect(self.window.updateLayout)
@@ -574,10 +574,11 @@ class Window(QtGui.QMainWindow):
 
 
     def updateLayout(self):
-        pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
-        self.viewxy.setPixmap(pixmap1)
-        self.viewxz.setPixmap(pixmap2)
-        self.viewyz.setPixmap(pixmap3)
+        if len(self.locs) > 0:
+            pixmap1, pixmap2, pixmap3 = self.hist_multi_channel(self.locs)
+            self.viewxy.setPixmap(pixmap1)
+            self.viewxz.setPixmap(pixmap2)
+            self.viewyz.setPixmap(pixmap3)
 
     def centerofmass_all(self):
         #Align all by center of mass
