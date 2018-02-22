@@ -616,6 +616,7 @@ class Window(QtGui.QMainWindow):
         mean_y = np.mean(out_locs_y)
         mean_z = np.mean(out_locs_z)
 
+
         for j in range(n_channels):
             self.locs[j].x -= mean_x
             self.locs[j].y -= mean_y
@@ -678,7 +679,6 @@ class Window(QtGui.QMainWindow):
                 self.locs[j].z[index] -= mean_z
 
         self.calculate_radii()
-        self.oversampling = 4
         self.updateLayout()
 
         print('Complete.')
