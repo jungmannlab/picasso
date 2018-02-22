@@ -3559,16 +3559,17 @@ class View(QtGui.QLabel):
         elif self._mode == 'Pick':
             diameter = self.window.tools_settings_dialog.pick_diameter.value()
             diameter = self.width() * diameter / self.viewport_width()
-            pixmap_size = ceil(diameter)
-            pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
-            pixmap.fill(QtCore.Qt.transparent)
-            painter = QtGui.QPainter(pixmap)
-            painter.setPen(QtGui.QColor('white'))
-            offset = (pixmap_size - diameter) / 2
-            painter.drawEllipse(offset, offset, diameter, diameter)
-            painter.end()
-            cursor = QtGui.QCursor(pixmap)
-            self.setCursor(cursor)
+            if diameter < 100: #remote desktop session crashes if pick is larger than view
+                pixmap_size = ceil(diameter)
+                pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
+                pixmap.fill(QtCore.Qt.transparent)
+                painter = QtGui.QPainter(pixmap)
+                painter.setPen(QtGui.QColor('white'))
+                offset = (pixmap_size - diameter) / 2
+                painter.drawEllipse(offset, offset, diameter, diameter)
+                painter.end()
+                cursor = QtGui.QCursor(pixmap)
+                self.setCursor(cursor)
 
     def update_pick_info_long(self, info):
         ''' Gets called when "Show info below" '''
