@@ -1459,6 +1459,7 @@ class SlicerDialog(QtGui.QDialog):
         self.pick_slice.setRange(1, 999999)
         self.pick_slice.setValue(50)
         self.pick_slice.setSingleStep(5)
+        self.pick_slice.setKeyboardTracking(False)
         self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
         slicer_grid.addWidget(self.pick_slice, 0, 1)
 
@@ -1516,10 +1517,8 @@ class SlicerDialog(QtGui.QDialog):
         plt.xlabel('Z-Coordinate [nm]')
         plt.ylabel('Counts')
         plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
-        # refresh canvas
         self.canvas.draw()
         self.sl.setMaximum(len(self.bins)-2)
-        #self.sl.setValue(np.ceil((len(self.bins)-2)/2))
 
 
     def on_pick_slice_changed(self):

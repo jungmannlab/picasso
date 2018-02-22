@@ -134,6 +134,11 @@ class Window(QtGui.QMainWindow):
         self.pixelsizeEdit.setRange(1, 1000)  # 1 to 1000 nm frame size
         self.totaltimeEdit = QtGui.QLabel()
 
+        #Deactivate keyboard tracking
+
+        self.camerasizeEdit.setKeyboardTracking(False)
+        self.pixelsizeEdit.setKeyboardTracking(False)
+
         self.camerasizeEdit.setValue(IMAGESIZE_DEFAULT)
         self.integrationtimeEdit.setValue(ITIME_DEFAULT)
         self.framesEdit.setValue(FRAMES_DEFAULT)
@@ -142,6 +147,8 @@ class Window(QtGui.QMainWindow):
         self.integrationtimeEdit.valueChanged.connect(self.changeTime)
         self.framesEdit.valueChanged.connect(self.changeTime)
         self.camerasizeEdit.valueChanged.connect(self.generatePositions)
+
+        self.pixelsizeEdit.valueChanged.connect(self.changeStructDefinition)
 
         cgrid.addWidget(camerasize, 1, 0)
         cgrid.addWidget(self.camerasizeEdit, 1, 1)
@@ -440,6 +447,7 @@ class Window(QtGui.QMainWindow):
         self.structureexEdit = QtGui.QLineEdit(STRUCTUREEX_DEFAULT)
         self.structure3DEdit = QtGui.QLineEdit(STRUCTURE3D_DEFAULT)
         self.structureIncorporationEdit = QtGui.QDoubleSpinBox()
+        self.structureIncorporationEdit.setKeyboardTracking(False)
         self.structureIncorporationEdit.setRange(1, 100)
         self.structureIncorporationEdit.setDecimals(0)
         self.structureIncorporationEdit.setValue(INCORPORATION_DEFAULT)
@@ -450,24 +458,29 @@ class Window(QtGui.QMainWindow):
         self.structurecombo.addItem("Custom")
 
         self.structure1Edit = QtGui.QSpinBox()
+        self.structure1Edit.setKeyboardTracking(False)
         self.structure1Edit.setRange(1, 1000)
         self.structure1Edit.setValue(STRUCTURE1_DEFAULT)
         self.structure2Edit = QtGui.QSpinBox()
+        self.structure2Edit.setKeyboardTracking(False)
         self.structure2Edit.setRange(1, 1000)
         self.structure2Edit.setValue(STRUCTURE2_DEFAULT)
         self.structure3Edit = QtGui.QLineEdit(STRUCTURE3_DEFAULT)
 
         self.structure1Edit.valueChanged.connect(self.changeStructDefinition)
         self.structure2Edit.valueChanged.connect(self.changeStructDefinition)
-        self.structure3Edit.textEdited.connect(self.changeStructDefinition)
+        self.structure3Edit.returnPressed.connect(self.changeStructDefinition)
 
         self.structurenoEdit.setValue(STRUCTURENO_DEFAULT)
         self.structureframeEdit.setValue(STRUCTUREFRAME_DEFAULT)
 
-        self.structurexxEdit.textChanged.connect(self.generatePositions)
-        self.structureyyEdit.textChanged.connect(self.generatePositions)
-        self.structureexEdit.textChanged.connect(self.generatePositions)
-        self.structure3DEdit.textChanged.connect(self.generatePositions)
+        self.structurenoEdit.setKeyboardTracking(False)
+        self.structureframeEdit.setKeyboardTracking(False)
+
+        self.structurexxEdit.returnPressed.connect(self.generatePositions)
+        self.structureyyEdit.returnPressed.connect(self.generatePositions)
+        self.structureexEdit.returnPressed.connect(self.generatePositions)
+        self.structure3DEdit.returnPressed.connect(self.generatePositions)
 
         self.structurenoEdit.valueChanged.connect(self.generatePositions)
         self.structureframeEdit.valueChanged.connect(self.generatePositions)
