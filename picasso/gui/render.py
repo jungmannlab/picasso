@@ -43,6 +43,7 @@ DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 10 / 7
 N_GROUP_COLORS = 8
+N_Z_COLORS = 32
 
 
 matplotlib.rcParams.update({'axes.titlesize': 'large'})
@@ -1477,8 +1478,8 @@ class SlicerDialog(QtGui.QDialog):
         self.canvas = FigureCanvasQTAgg(self.figure)
 
         self.slicerRadioButton = QtGui.QCheckBox('Slice Dataset')
-        self.slicerRadioButton.stateChanged.connect(self.on_slice_position_changed)
-
+        self.slicerRadioButton.stateChanged.connect(self.toggle_slicer)
+        
         self.zcoord = []
         self.seperateCheck = QtGui.QCheckBox('Export channels separate')
         self.fullCheck = QtGui.QCheckBox('Export full image')
@@ -1519,17 +1520,20 @@ class SlicerDialog(QtGui.QDialog):
         plt.title(r'$\mathrm{Histogram\ of\ Z:}$')
         self.canvas.draw()
         self.sl.setMaximum(len(self.bins)-2)
+        self.sl.setValue(len(self.bins)/2)
 
 
     def on_pick_slice_changed(self):
         if len(self.bins) < 3: #in case there should be only 1 bin
             self.calculate_histogram()
         else:
-            oldPosition_max = self.bins[self.sl.tickPosition()]
+
             self.calculate_histogram()
-            self.sl.setValue(sum(self.bins < oldPosition_max))
+            self.sl.setValue(len(self.bins)/2)
             self.on_slice_position_changed(self.sl.value())
 
+    def toggle_slicer(self):
+        self.window.view.update_scene()
 
     def on_slice_position_changed(self, position):
         for i in range(len(self.zcoord)):
@@ -1538,7 +1542,6 @@ class SlicerDialog(QtGui.QDialog):
             self.patches[i][position].set_facecolor('black')
 
         self.canvas.draw()
-
         self.slicermin = self.bins[position]
         self.slicermax = self.bins[position+1]
         print('Minimum: '+str(self.slicermin)+ ' nm, Maxmimum: '+str(self.slicermax)+ ' nm')
@@ -1678,8 +1681,31 @@ class View(QtGui.QLabel):
         else:
             if render:
                 self.update_scene()
+        self.z_render=False
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
+            #Add z information:
+            choice = QtGui.QMessageBox.question(self, '3D Render Question',
+                                            '3D Dataset detected. Render height?',
+                                            QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
+
+            if choice == QtGui.QMessageBox.Yes:
+                self.z_render=True
+                mean_z = np.mean(locs.z)
+                std_z = np.std(locs.z)
+                min_z = mean_z-3*std_z
+                max_z = mean_z+3*std_z
+                z_step = (max_z-min_z)/N_Z_COLORS
+                self.z_color = np.floor((locs.z - min_z)/z_step)
+                z_locs = []
+                pb = lib.ProgressDialog('Indexing colors', 0, N_Z_COLORS, self)
+                pb.set_value(0)
+                for i in tqdm(range(N_Z_COLORS)):
+                    z_locs.append(locs[self.z_color == i])
+                    pb.set_value(i)
+                pb.close()
+                self.z_locs = z_locs
+
         self.window.mask_settings_dialog.locs.append(locs)
         self.window.mask_settings_dialog.paths.append(path)
         self.window.mask_settings_dialog.infos.append(info)
@@ -3137,7 +3163,7 @@ class View(QtGui.QLabel):
     def render_multi_channel(self, kwargs, autoscale=False, locs=None, use_cache=False, cache=True):
         if locs is None:
             locs = self.locs
-        if len(self.locs_paths) == len(locs): #distinguish plotting of groups vs channels
+        if len(self.locs_paths) == len(locs): #distinguish plotting of groups vs channels TODO: this might cause problems if group no == channel no
             locsall = locs.copy()
             for i in range(len(locs)):
                 if hasattr(locs[i], 'z'):
@@ -3227,12 +3253,16 @@ class View(QtGui.QLabel):
         if hasattr(locs, 'group'):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
+
         if hasattr(locs, 'z'):
             if self.window.slicer_dialog.slicerRadioButton.isChecked():
                 z_min = self.window.slicer_dialog.slicermin
                 z_max = self.window.slicer_dialog.slicermax
                 in_view = (locs.z > z_min) & (locs.z <= z_max)
                 locs = locs[in_view]
+            if self.z_render:
+                locs = self.z_locs
+                return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
         if use_cache:
             n_locs = self.n_locs
             image = self.image
