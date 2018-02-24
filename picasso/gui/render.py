@@ -3586,11 +3586,6 @@ class View(QtGui.QLabel):
             cursor = QtGui.QCursor(pixmap)
             self.setCursor(cursor)
 
-
-
-
-
-
     def update_pick_info_long(self, info):
         ''' Gets called when "Show info below" '''
         channel = self.get_channel('Calculate pick info')
@@ -4068,16 +4063,9 @@ class Window(QtGui.QMainWindow):
         self.update_info()
 
     def remove_group(self):
-        print('Removing groups')
-        name = 'group'
-        names = list(self.view.locs[0].dtype.names)
-        if name in names:
-            names.remove(name)
-        locs = []
-        locs.append(self.view.locs[0][names])
-        self.view.locs = locs
+        channel = self.view.get_channel('Remove group')
+        self.view.locs[channel] = lib.remove_from_rec(self.view.locs[channel], 'group')
         self.view.update_scene
-        print('Groups removed')
         self.view.zoom_in()
         self.view.zoom_out()
 
