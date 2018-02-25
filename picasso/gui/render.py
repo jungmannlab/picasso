@@ -1685,28 +1685,6 @@ class View(QtGui.QLabel):
         self.z_render=False
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
-            #Add z information:
-            choice = QtGui.QMessageBox.question(self, '3D Render Question',
-                                            '3D Dataset detected. Render height?',
-                                            QtGui.QMessageBox.Yes | QtGui.QMessageBox.No)
-
-            if choice == QtGui.QMessageBox.Yes:
-                self.z_render=True
-                mean_z = np.mean(locs.z)
-                std_z = np.std(locs.z)
-                min_z = mean_z-3*std_z
-                max_z = mean_z+3*std_z
-                z_step = (max_z-min_z)/N_Z_COLORS
-                self.z_color = np.floor((locs.z - min_z)/z_step)
-                z_locs = []
-                pb = lib.ProgressDialog('Indexing colors', 0, N_Z_COLORS, self)
-                pb.set_value(0)
-                for i in tqdm(range(N_Z_COLORS)):
-                    z_locs.append(locs[self.z_color == i])
-                    pb.set_value(i)
-                pb.close()
-                self.z_locs = z_locs
-
         self.window.mask_settings_dialog.locs.append(locs) #TODO: at some point replace this, this is not very memory efficient
         self.window.mask_settings_dialog.paths.append(path)
         self.window.mask_settings_dialog.infos.append(info)
@@ -3366,6 +3344,30 @@ class View(QtGui.QLabel):
         image = np.maximum(image, 0.0)
         return image
 
+    def render_3d(self):
+        if hasattr(self.locs[0], 'z'):
+            if self.z_render == True:
+                self.z_render = False
+            else:
+                self.z_render=True
+                mean_z = np.mean(self.locs[0].z)
+                std_z = np.std(self.locs[0].z)
+                min_z = mean_z-3*std_z
+                max_z = mean_z+3*std_z
+                z_step = (max_z-min_z)/N_Z_COLORS
+                self.z_color = np.floor((self.locs[0].z - min_z)/z_step)
+                z_locs = []
+                if not hasattr(self, 'z_locs'):
+                    pb = lib.ProgressDialog('Indexing colors', 0, N_Z_COLORS, self)
+                    pb.set_value(0)
+                    for i in tqdm(range(N_Z_COLORS)):
+                        z_locs.append(self.locs[0][self.z_color == i])
+                        pb.set_value(i)
+                    pb.close()
+                    self.z_locs = z_locs
+            self.update_scene()
+
+
     def set_mode(self, action):
         self._mode = action.text()
         self.update_cursor()
@@ -3810,6 +3812,9 @@ class Window(QtGui.QMainWindow):
         info_action.setShortcut('Ctrl+I')
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
+        render_3d = view_menu.addAction('Render 3D')
+        render_3d.triggered.connect(self.view.render_3d)
+        view_menu.addAction(render_3d)
         tools_menu = self.menu_bar.addMenu('Tools')
         tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
         zoom_tool_action = tools_actiongroup.addAction(QtGui.QAction('Zoom', tools_menu, checkable=True))
