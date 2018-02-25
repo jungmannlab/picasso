@@ -1681,6 +1681,7 @@ class View(QtGui.QLabel):
         else:
             if render:
                 self.update_scene()
+
         self.z_render=False
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
@@ -1706,15 +1707,12 @@ class View(QtGui.QLabel):
                 pb.close()
                 self.z_locs = z_locs
 
-        self.window.mask_settings_dialog.locs.append(locs)
+        self.window.mask_settings_dialog.locs.append(locs) #TODO: at some point replace this, this is not very memory efficient
         self.window.mask_settings_dialog.paths.append(path)
         self.window.mask_settings_dialog.infos.append(info)
         os.chdir(os.path.dirname(path))
         self.window.dataset_dialog.add_entry(path)
         self.window.setWindowTitle('Picasso: Render. File: {}'.format(os.path.basename(path)))
-
-
-
 
     def add_multiple(self, paths):
         fit_in_view = len(self.locs) == 0

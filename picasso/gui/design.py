@@ -868,15 +868,27 @@ class Window(QtGui.QMainWindow):
         self.statusBar().showMessage('Clearead.')
 
     def takeScreenshot(self):
+        filetypes = "*.png;;*.pdf"
         if hasattr(self, 'pwd'):
-            path = QtGui.QFileDialog.getSaveFileName(self,  'Save Screenshot to..', self.pwd, filter='*.png')
+            path, filter = QtGui.QFileDialog.getSaveFileNameAndFilter(self,
+              'Save Screenshot to..', self.pwd, filter=filetypes)
         else:
-            path = QtGui.QFileDialog.getSaveFileName(self,  'Save Screenshot to..',  filter='*.png')
+            path, filter = QtGui.QFileDialog.getSaveFileNameAndFilter(self,
+              'Save Screenshot to..', filter=filetypes)
         if path:
-            p = QPixmap.grabWidget(self.view)
-            p.save(path,  'png')
-            self.statusBar().showMessage('Screenshot saved to: '+path)
-            self.pwd = os.path.dirname(path)
+            if filter == '*.png':
+                p = QPixmap.grabWidget(self.view)
+                p.save(path,  filter[2:])
+            else:
+                pdf_printer = QPrinter()
+                pdf_printer.setOutputFormat(QPrinter.PdfFormat)
+                pdf_printer.setOutputFileName(path)
+                pdf_painter = QPainter()
+                pdf_painter.begin(pdf_printer)
+                self.view.render(pdf_painter)
+                pdf_painter.end()
+
+            self.statusBar().showMessage('Screenshot saved to {}'.format(path))
         else:
             self.statusBar().showMessage('Filename not specified. Screenshot not saved.')
 
