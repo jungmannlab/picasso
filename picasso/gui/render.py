@@ -1682,7 +1682,8 @@ class View(QtGui.QLabel):
             if render:
                 self.update_scene()
 
-        self.z_render=False
+        self.z_render = False
+        self.t_render = False
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
         self.window.mask_settings_dialog.locs.append(locs) #TODO: at some point replace this, this is not very memory efficient
@@ -3230,6 +3231,10 @@ class View(QtGui.QLabel):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
 
+        if self.t_render:
+                locs = self.t_locs
+                return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
+
         if hasattr(locs, 'z'):
             if self.window.slicer_dialog.slicerRadioButton.isChecked():
                 z_min = self.window.slicer_dialog.slicermin
@@ -3366,6 +3371,27 @@ class View(QtGui.QLabel):
                     pb.close()
                     self.z_locs = z_locs
             self.update_scene()
+
+    def render_time(self):
+        if self.t_render == True:
+            self.t_render = False
+        else:
+            self.t_render=True
+
+            min_frames = np.min(self.locs[0].frame)
+            max_frames = np.max(self.locs[0].frame)
+            t_step = (max_frames-min_frames)/N_Z_COLORS
+            self.t_color = np.floor((self.locs[0].frame - min_frames)/t_step)
+            t_locs = []
+            if not hasattr(self, 't_locs'):
+                pb = lib.ProgressDialog('Indexing time', 0, N_Z_COLORS, self)
+                pb.set_value(0)
+                for i in tqdm(range(N_Z_COLORS)):
+                    t_locs.append(self.locs[0][self.t_color == i])
+                    pb.set_value(i)
+                pb.close()
+                self.t_locs = t_locs
+        self.update_scene()
 
 
     def set_mode(self, action):
@@ -3815,6 +3841,9 @@ class Window(QtGui.QMainWindow):
         render_3d = view_menu.addAction('Render 3D')
         render_3d.triggered.connect(self.view.render_3d)
         view_menu.addAction(render_3d)
+        render_time = view_menu.addAction('Render time')
+        render_time.triggered.connect(self.view.render_time)
+        view_menu.addAction(render_time)
         tools_menu = self.menu_bar.addMenu('Tools')
         tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
         zoom_tool_action = tools_actiongroup.addAction(QtGui.QAction('Zoom', tools_menu, checkable=True))
