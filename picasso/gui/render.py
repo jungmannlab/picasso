@@ -1569,7 +1569,7 @@ class SlicerDialog(QtGui.QDialog):
                     progress = lib.ProgressDialog('Exporting slices..', 0, self.sl.maximum(), self)
                     progress.set_value(0)
                     progress.show()
-                    for i in range(self.sl.maximum()+1):
+                    for i in tqdm(range(self.sl.maximum()+1)):
                         self.sl.setValue(i)
                         print('Slide: '+ str(i))
                         out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH'+'{num:03d}'.format(num=j+1)+'.tif'
@@ -1590,7 +1590,8 @@ class SlicerDialog(QtGui.QDialog):
                 progress = lib.ProgressDialog('Exporting slices..', 0, self.sl.maximum(), self)
                 progress.set_value(0)
                 progress.show()
-                for i in range(self.sl.maximum()+1):
+
+                for i in tqdm(range(self.sl.maximum()+1)):
                     self.sl.setValue(i)
                     print('Slide: '+ str(i))
                     out_path = base + '_Z'+'{num:03d}'.format(num=i)+'_CH001'+'.tif'
@@ -3946,7 +3947,7 @@ class Window(QtGui.QMainWindow):
         except AttributeError:
             return
         out_path = base + '.png'
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save image', out_path, filter='*.png')
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save image', out_path, filter="*.png;;*.tif")
         if path:
             self.view.qimage.save(path)
         self.view.setMinimumSize(1, 1)
@@ -3957,7 +3958,7 @@ class Window(QtGui.QMainWindow):
         except AttributeError:
             return
         out_path = base + '.png'
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save image', out_path, filter='*.png')
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save image', out_path, filter="*.png;;*.tif")
         if path:
             movie_height, movie_width = self.view.movie_size()
             viewport = [(0, 0), (movie_height, movie_width)]

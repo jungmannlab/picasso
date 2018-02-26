@@ -112,6 +112,8 @@ def load_user_settings():
         return _lib.AutoDict()
     settings = _yaml.load(settings_file)
     settings_file.close()
+    if not settings:
+        return _lib.AutoDict()
     return _lib.AutoDict(settings)
 
 
