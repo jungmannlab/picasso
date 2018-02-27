@@ -3627,21 +3627,6 @@ class View(QtGui.QLabel):
                 painter.end()
                 cursor = QtGui.QCursor(pixmap)
                 self.setCursor(cursor)
-        elif self._mode == 'Measure':
-            pixmap_size = self.viewport_width()
-
-            pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
-            pixmap.fill(QtCore.Qt.transparent)
-            painter = QtGui.QPainter(pixmap)
-            painter.setPen(QtGui.QColor('white'))
-
-            cx = self.viewport_width()/2
-            cy = self.viewport_width()/2
-
-            painter.drawPoint(cx, cy)
-            painter.end()
-            cursor = QtGui.QCursor(pixmap)
-            self.setCursor(cursor)
 
     def update_pick_info_long(self, info):
         ''' Gets called when "Show info below" '''
