@@ -1456,9 +1456,6 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
-
-
-
         
     def on_oversampling_changed(self, value):
         contrast_factor = (self._oversampling / value)**2
@@ -3463,7 +3460,6 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def show_legend(self):
-        print('This will be the legend')
         parameter = self.window.display_settings_dialog.parameter.currentText()
         n_colors = self.window.display_settings_dialog.color_step.value()
         min_val = self.window.display_settings_dialog.minimum_render.value()
@@ -3490,7 +3486,7 @@ class View(QtGui.QLabel):
         plt.xticks(x, labels)
 
         plt.title(parameter )
-        plt.show()
+        fig1.show()
 
 
     def activate_render_property(self):
