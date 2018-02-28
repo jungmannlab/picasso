@@ -1401,6 +1401,56 @@ class DisplaySettingsDialog(QtGui.QDialog):
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
         self._silent_oversampling_update = False
 
+        #Render
+        self.render_groupbox = QtGui.QGroupBox('Render properties')
+
+        vbox.addWidget(self.render_groupbox)
+        render_grid = QtGui.QGridLayout(self.render_groupbox)
+        render_grid.addWidget(QtGui.QLabel('Parameter:'), 0, 0)
+        self.parameter = QtGui.QComboBox()
+        render_grid.addWidget(self.parameter, 0, 1)
+        self.parameter.activated.connect(self.window.view.set_property)
+
+        minimum_label_render = QtGui.QLabel('Min.:')
+        render_grid.addWidget(minimum_label_render, 1, 0)
+        self.minimum_render = QtGui.QDoubleSpinBox()
+        self.minimum_render.setRange(-999999, 999999)
+        self.minimum_render.setSingleStep(5)
+        self.minimum_render.setValue(0)
+        self.minimum_render.setDecimals(2)
+        self.minimum_render.setKeyboardTracking(False)
+        self.minimum_render.setEnabled(False)
+        self.minimum_render.valueChanged.connect(self.window.view.activate_render_property)
+        render_grid.addWidget(self.minimum_render, 1, 1)
+        maximum_label_render = QtGui.QLabel('Max.:')
+        render_grid.addWidget(maximum_label_render, 2, 0)
+        self.maximum_render = QtGui.QDoubleSpinBox()
+        self.maximum_render.setRange(-999999, 999999)
+        self.maximum_render.setSingleStep(5)
+        self.maximum_render.setValue(100)
+        self.maximum_render.setDecimals(2)
+        self.maximum_render.setKeyboardTracking(False)
+        self.maximum_render.setEnabled(False)
+        self.maximum_render.valueChanged.connect(self.window.view.activate_render_property)
+        render_grid.addWidget(self.maximum_render, 2, 1)
+        color_step_label = QtGui.QLabel('Colors:')
+        render_grid.addWidget(color_step_label, 3, 0)
+        self.color_step = QtGui.QSpinBox()
+        self.color_step.setRange(1, 256)
+        self.color_step.setSingleStep(16)
+        self.color_step.setValue(32)
+        self.color_step.setKeyboardTracking(False)
+        self.color_step.setEnabled(False)
+        self.color_step.valueChanged.connect(self.window.view.activate_render_property)
+        render_grid.addWidget(self.color_step, 3, 1)
+
+        self.render_check = QtGui.QCheckBox('Render')
+        self.render_check.stateChanged.connect(self.window.view.activate_render_property)
+        self.render_check.setEnabled(False)
+        render_grid.addWidget(self.render_check, 4, 1)
+
+
+        
     def on_oversampling_changed(self, value):
         contrast_factor = (self._oversampling / value)**2
         self._oversampling = value
@@ -1631,6 +1681,8 @@ class View(QtGui.QLabel):
         self.index_blocks = []
         self._drift = []
         self.currentdrift = []
+        self.x_render = {}
+        self.x_render_state = False
 
     def is_consecutive(l):
         setl = set(l)
@@ -1683,8 +1735,8 @@ class View(QtGui.QLabel):
             if render:
                 self.update_scene()
 
-        self.z_render = False
-        self.t_render = False
+        self.window.display_settings_dialog.parameter.addItems(locs.dtype.names)
+
         if hasattr(locs, 'z'):
             self.window.slicer_dialog.zcoord.append(locs.z)
         self.window.mask_settings_dialog.locs.append(locs) #TODO: at some point replace this, this is not very memory efficient
@@ -3172,7 +3224,16 @@ class View(QtGui.QLabel):
                 n_locs = self.n_locs
                 image = self.image
             else:
-                renderings = [render.render(_, **kwargs) for _ in locs]
+
+                pb = lib.ProgressDialog('Rendering.. ', 0, n_channels, self)
+                pb.set_value(0)
+                renderings = []
+                for i in tqdm(range(n_channels)):
+                    renderings.append(render.render(locs[i], **kwargs))
+                    pb.set_value(i+1)
+                pb.close()
+
+                #renderings = [render.render(_, **kwargs) for _ in locs]
                 n_locs = sum([_[0] for _ in renderings])
                 image = np.array([_[1] for _ in renderings])
         if cache:
@@ -3232,9 +3293,9 @@ class View(QtGui.QLabel):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
 
-        if self.t_render:
-                locs = self.t_locs
-                return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
+        if self.x_render_state:
+            locs = self.x_locs
+            return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
 
         if hasattr(locs, 'z'):
             if self.window.slicer_dialog.slicerRadioButton.isChecked():
@@ -3242,9 +3303,7 @@ class View(QtGui.QLabel):
                 z_max = self.window.slicer_dialog.slicermax
                 in_view = (locs.z > z_min) & (locs.z <= z_max)
                 locs = locs[in_view]
-            if self.z_render:
-                locs = self.z_locs
-                return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
+     
         if use_cache:
             n_locs = self.n_locs
             image = self.image
@@ -3393,6 +3452,61 @@ class View(QtGui.QLabel):
                 pb.close()
                 self.t_locs = t_locs
         self.update_scene()
+
+    def activate_render_property(self):
+
+        if self.window.display_settings_dialog.render_check.isChecked():
+            self.x_render_state = True
+
+            parameter = self.window.display_settings_dialog.parameter.currentText()
+            colors = self.window.display_settings_dialog.color_step.value()
+            min_val = self.window.display_settings_dialog.minimum_render.value()
+            max_val = self.window.display_settings_dialog.maximum_render.value()
+            x_step = (max_val-min_val)/colors
+
+            self.x_color = np.floor((self.locs[0][parameter] - min_val)/x_step)
+
+            x_locs = []
+            #TODOL CHECK DICT AND CHECK IF IN PLAce
+            pb = lib.ProgressDialog('Indexing '+parameter, 0, colors, self)
+            pb.set_value(0)
+            for i in tqdm(range(colors)):
+                x_locs.append(self.locs[0][self.x_color == i])
+                pb.set_value(i+1)
+            pb.close()
+            self.x_locs = x_locs
+
+            self.update_scene()
+
+        else:
+            self.x_render_state = False
+
+    def set_property(self):
+
+        self.window.display_settings_dialog.render_check.setEnabled(False)
+        parameter = self.window.display_settings_dialog.parameter.currentText()
+
+        min_val = np.floor(np.min(self.locs[0][parameter]))
+        max_val = np.ceil(np.max(self.locs[0][parameter]))
+
+        self.window.display_settings_dialog.maximum_render.blockSignals(True)
+        self.window.display_settings_dialog.minimum_render.blockSignals(True)
+
+        self.window.display_settings_dialog.maximum_render.setRange(min_val, max_val)
+        self.window.display_settings_dialog.maximum_render.setValue(max_val)
+        self.window.display_settings_dialog.minimum_render.setValue(min_val)
+
+        self.window.display_settings_dialog.maximum_render.blockSignals(False)
+        self.window.display_settings_dialog.minimum_render.blockSignals(False)
+
+        self.window.display_settings_dialog.minimum_render.setEnabled(True)
+        self.window.display_settings_dialog.maximum_render.setEnabled(True)
+        self.window.display_settings_dialog.color_step.setEnabled(True)
+
+        self.property_changed = True #Set flag to avoid double 
+        self.window.display_settings_dialog.render_check.setEnabled(True)
+
+        self.activate_render_property()
 
 
     def set_mode(self, action):
