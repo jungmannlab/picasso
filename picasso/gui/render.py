@@ -18,6 +18,7 @@ import time
 import lmfit
 import matplotlib
 import matplotlib.pyplot as plt
+import matplotlib.patches as patches
 import numpy as np
 import yaml
 from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
@@ -1411,6 +1412,7 @@ class DisplaySettingsDialog(QtGui.QDialog):
         render_grid.addWidget(self.parameter, 0, 1)
         self.parameter.activated.connect(self.window.view.set_property)
 
+
         minimum_label_render = QtGui.QLabel('Min.:')
         render_grid.addWidget(minimum_label_render, 1, 0)
         self.minimum_render = QtGui.QDoubleSpinBox()
@@ -1447,7 +1449,14 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.render_check = QtGui.QCheckBox('Render')
         self.render_check.stateChanged.connect(self.window.view.activate_render_property)
         self.render_check.setEnabled(False)
-        render_grid.addWidget(self.render_check, 4, 1)
+        render_grid.addWidget(self.render_check, 4, 0)
+
+        self.show_legend = QtGui.QPushButton('Show legend')
+        render_grid.addWidget(self.show_legend, 4, 1)
+        self.show_legend.setEnabled(False)
+        self.show_legend.setAutoDefault(False)
+        self.show_legend.clicked.connect(self.window.view.show_legend)
+
 
 
         
@@ -3453,7 +3462,39 @@ class View(QtGui.QLabel):
                 self.t_locs = t_locs
         self.update_scene()
 
+    def show_legend(self):
+        print('This will be the legend')
+        parameter = self.window.display_settings_dialog.parameter.currentText()
+        n_colors = self.window.display_settings_dialog.color_step.value()
+        min_val = self.window.display_settings_dialog.minimum_render.value()
+        max_val = self.window.display_settings_dialog.maximum_render.value()
+
+        hues = np.arange(0, 1, 1 / n_colors)
+        colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+
+        fig1 = plt.figure(figsize=(5,1))
+
+        ax1 = fig1.add_subplot(111, aspect='equal')
+
+        color_spacing = 10/len(colors)
+        xpos = 0
+        for i in range(len(colors)):
+            ax1.add_patch(patches.Rectangle((xpos, 0),color_spacing,1,color=colors[i]))
+            xpos+=color_spacing
+            
+        x = np.arange(0,11,2.5)
+        ax1.set_xlim([0,10])
+        ax1.get_yaxis().set_visible(False)
+
+        labels = np.linspace(min_val,max_val,5)
+        plt.xticks(x, labels)
+
+        plt.title(parameter )
+        plt.show()
+
+
     def activate_render_property(self):
+        self.deactivate_property_menu()
 
         if self.window.display_settings_dialog.render_check.isChecked():
             self.x_render_state = True
@@ -3478,33 +3519,58 @@ class View(QtGui.QLabel):
 
             self.update_scene()
 
+            self.window.display_settings_dialog.show_legend.setEnabled(True)
+
         else:
             self.x_render_state = False
+
+        self.activate_property_menu()
+
+
+    def activate_property_menu(self):
+        self.window.display_settings_dialog.minimum_render.setEnabled(True)
+        self.window.display_settings_dialog.maximum_render.setEnabled(True)
+        self.window.display_settings_dialog.color_step.setEnabled(True)
+
+    def deactivate_property_menu(self):
+        self.window.display_settings_dialog.minimum_render.setEnabled(False)
+        self.window.display_settings_dialog.maximum_render.setEnabled(False)
+        self.window.display_settings_dialog.color_step.setEnabled(False)
 
     def set_property(self):
 
         self.window.display_settings_dialog.render_check.setEnabled(False)
         parameter = self.window.display_settings_dialog.parameter.currentText()
 
-        min_val = np.floor(np.min(self.locs[0][parameter]))
-        max_val = np.ceil(np.max(self.locs[0][parameter]))
+        min_val = np.min(self.locs[0][parameter])
+        max_val = np.max(self.locs[0][parameter])
+
+        if min_val >= 0:
+            lower = 0
+        else:
+            lower = min_val*100
+
+        if max_val >= 0:
+            upper = max_val*100
+        else:
+            upper = -min_val*100
+
+
 
         self.window.display_settings_dialog.maximum_render.blockSignals(True)
         self.window.display_settings_dialog.minimum_render.blockSignals(True)
 
-        self.window.display_settings_dialog.maximum_render.setRange(min_val, max_val)
+        self.window.display_settings_dialog.maximum_render.setRange(lower, upper)
         self.window.display_settings_dialog.maximum_render.setValue(max_val)
         self.window.display_settings_dialog.minimum_render.setValue(min_val)
 
         self.window.display_settings_dialog.maximum_render.blockSignals(False)
         self.window.display_settings_dialog.minimum_render.blockSignals(False)
 
-        self.window.display_settings_dialog.minimum_render.setEnabled(True)
-        self.window.display_settings_dialog.maximum_render.setEnabled(True)
-        self.window.display_settings_dialog.color_step.setEnabled(True)
+        self.activate_property_menu()
 
-        self.property_changed = True #Set flag to avoid double 
         self.window.display_settings_dialog.render_check.setEnabled(True)
+        self.window.display_settings_dialog.render_check.setCheckState(False)
 
         self.activate_render_property()
 
@@ -3938,12 +4004,6 @@ class Window(QtGui.QMainWindow):
         info_action.setShortcut('Ctrl+I')
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
-        render_3d = view_menu.addAction('Render 3D')
-        render_3d.triggered.connect(self.view.render_3d)
-        view_menu.addAction(render_3d)
-        render_time = view_menu.addAction('Render time')
-        render_time.triggered.connect(self.view.render_time)
-        view_menu.addAction(render_time)
         tools_menu = self.menu_bar.addMenu('Tools')
         tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
         zoom_tool_action = tools_actiongroup.addAction(QtGui.QAction('Zoom', tools_menu, checkable=True))
