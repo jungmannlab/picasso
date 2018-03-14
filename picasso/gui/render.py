@@ -3494,11 +3494,14 @@ class View(QtGui.QLabel):
 
         if self.window.display_settings_dialog.render_check.isChecked():
             self.x_render_state = True
-
             parameter = self.window.display_settings_dialog.parameter.currentText()
             colors = self.window.display_settings_dialog.color_step.value()
             min_val = self.window.display_settings_dialog.minimum_render.value()
             max_val = self.window.display_settings_dialog.maximum_render.value()
+
+            min_val_data = np.min(self.locs[0][parameter])
+            max_val_data = np.max(self.locs[0][parameter])
+
             x_step = (max_val-min_val)/colors
 
             self.x_color = np.floor((self.locs[0][parameter] - min_val)/x_step)
@@ -3550,8 +3553,6 @@ class View(QtGui.QLabel):
             upper = max_val*100
         else:
             upper = -min_val*100
-
-
 
         self.window.display_settings_dialog.maximum_render.blockSignals(True)
         self.window.display_settings_dialog.minimum_render.blockSignals(True)
@@ -4264,7 +4265,29 @@ class Window(QtGui.QMainWindow):
                     templocs = self.view.locs[channel][var_1].copy()
                     self.view.locs[channel][var_1] = self.view.locs[channel][var_2]
                     self.view.locs[channel][var_2] = templocs
-                    
+
+            elif input[0] == 'spiral' and len(input) == 3:
+                #spiral uses radius and turns
+                radius = float(input[1])
+                turns = int(input[2])
+                maxframe = self.view.infos[channel][0]['Frames']
+                #Todo: at some point save the spiral in the respective channel
+
+                self.view.x_spiral = self.view.locs[channel]['x'].copy()
+                self.view.y_spiral = self.view.locs[channel]['y'].copy()
+
+                scale_time = maxframe/(turns*2*np.pi)
+                scale_x = turns*2*np.pi
+
+                x = self.view.locs[channel]['frame']/scale_time
+
+                self.view.locs[channel]['x'] = (x*np.cos(x))/scale_x*radius+self.view.locs[channel]['x']
+                self.view.locs[channel]['y'] = (x*np.sin(x))/scale_x*radius+self.view.locs[channel]['y']
+
+            elif input[0] == 'uspiral':
+                self.view.locs[channel]['x'] = self.view.x_spiral
+                self.view.locs[channel]['y'] = self.view.y_spiral
+                self.display_settings_dialog.render_check.setChecked(False)
             else:
                 vars = self.view.locs[channel].dtype.names
                 exec(cmd, {k: self.view.locs[channel][k] for k in vars})
