@@ -1554,6 +1554,8 @@ class SlicerDialog(QtGui.QDialog):
         slicer_grid.addWidget(self.fullCheck,5,0)
         slicer_grid.addWidget(self.exportButton,6,0)
 
+
+
     def initialize(self):
         self.calculate_histogram()
         self.show()
@@ -1565,7 +1567,7 @@ class SlicerDialog(QtGui.QDialog):
         plt.cla()
         n_channels = len(self.zcoord)
 
-        colors = get_colors(n_channels)
+        self.colors = get_colors(n_channels)
 
         self.bins = np.arange(np.amin(np.hstack(self.zcoord)),np.amax(np.hstack(self.zcoord)),slice)
         self.patches = []
@@ -1581,12 +1583,14 @@ class SlicerDialog(QtGui.QDialog):
         self.sl.setMaximum(len(self.bins)-2)
         self.sl.setValue(len(self.bins)/2)
 
+        self.slicer_cache = {}
+
 
     def on_pick_slice_changed(self):
+        self.slicer_cache = {}
         if len(self.bins) < 3: #in case there should be only 1 bin
             self.calculate_histogram()
         else:
-
             self.calculate_histogram()
             self.sl.setValue(len(self.bins)/2)
             self.on_slice_position_changed(self.sl.value())
@@ -1600,11 +1604,12 @@ class SlicerDialog(QtGui.QDialog):
                 patch.set_facecolor(self.colors[i])
             self.patches[i][position].set_facecolor('black')
 
+        self.slicerposition = position
         self.canvas.draw()
         self.slicermin = self.bins[position]
         self.slicermax = self.bins[position+1]
         print('Minimum: '+str(self.slicermin)+ ' nm, Maxmimum: '+str(self.slicermax)+ ' nm')
-        self.window.view.update_scene()
+        self.window.view.update_scene_slicer()
 
     def exportStack(self):
 
@@ -2080,9 +2085,21 @@ class View(QtGui.QLabel):
             self.window.display_settings_dialog.set_zoom_silently(dppvp)
         self.qimage = self.draw_picks(self.qimage_no_picks)
         self.qimage = self.draw_points(self.qimage)
-        pixmap = QtGui.QPixmap.fromImage(self.qimage)
-        self.setPixmap(pixmap)
+        self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
+        self.setPixmap(self.pixmap)
         self.window.update_info()
+
+    def draw_scene_slicer(self, viewport, autoscale=False, use_cache=False, picks_only=False, points_only=False):
+        slicerposition = self.window.slicer_dialog.slicerposition
+        pixmap = self.window.slicer_dialog.slicer_cache.get(slicerposition)
+
+        if pixmap is None:
+            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache, picks_only=picks_only,points_only=points_only)
+            self.window.slicer_dialog.slicer_cache[slicerposition] = self.pixmap
+        else:
+            self.setPixmap(pixmap)
+
+
 
     def dropEvent(self, event):
         urls = event.mimeData().urls()
@@ -3892,11 +3909,20 @@ class View(QtGui.QLabel):
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
 
     def update_scene(self, viewport=None, autoscale=False, use_cache=False, picks_only=False, points_only=False):
+        #Clear slicer cache 
+        self.window.slicer_dialog.slicer_cache = {}
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
             self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache, picks_only=picks_only,points_only=points_only)
             self.update_cursor()
+
+    def update_scene_slicer(self, viewport=None, autoscale=False, use_cache=False, picks_only=False, points_only=False):
+        n_channels = len(self.locs)
+        if n_channels:
+            viewport = viewport or self.viewport
+            self.draw_scene_slicer(viewport, autoscale=autoscale, use_cache=use_cache, picks_only=picks_only,points_only=points_only)
+            self.update_cursor()     
 
     def viewport_center(self, viewport=None):
         if viewport is None:
