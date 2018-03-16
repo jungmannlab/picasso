@@ -50,6 +50,12 @@ N_Z_COLORS = 32
 matplotlib.rcParams.update({'axes.titlesize': 'large'})
 
 
+def get_colors(n_channels):
+    hues = np.arange(0, 1, 1 / n_channels)
+    colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+    return colors
+
+
 def fit_cum_exp(data):
     data.sort()
     n = len(data)
@@ -251,8 +257,7 @@ class DatasetDialog(QtGui.QDialog):
 
         #update auto colors
         n_channels = len(self.checks)
-        hues = np.arange(0, 1, 1 / n_channels)
-        colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+        colors = get_colors(n_channels)
         for n in range(n_channels):
             palette = self.colordisp_all[n].palette()
             palette.setColor(QtGui.QPalette.Window, QtGui.QColor.fromRgbF(colors[n][0], colors[n][1], colors[n][2], 1))
@@ -267,8 +272,7 @@ class DatasetDialog(QtGui.QDialog):
         selectedcolor = self.colorselection[n].currentText()
         if selectedcolor == 'auto':
             n_channels = len(self.checks)
-            hues = np.arange(0, 1, 1 / n_channels)
-            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            colors = get_colors(n_channels)
             palette.setColor(QtGui.QPalette.Window, QtGui.QColor.fromRgbF(colors[n][0], colors[n][1], colors[n][2], 1))
         else:
             palette.setColor(QtGui.QPalette.Window, QtGui.QColor(selectedcolor))
@@ -1561,8 +1565,7 @@ class SlicerDialog(QtGui.QDialog):
         plt.cla()
         n_channels = len(self.zcoord)
 
-        hues = np.arange(0, 1, 1 / n_channels)
-        self.colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+        colors = get_colors(n_channels)
 
         self.bins = np.arange(np.amin(np.hstack(self.zcoord)),np.amax(np.hstack(self.zcoord)),slice)
         self.patches = []
@@ -2333,8 +2336,7 @@ class View(QtGui.QLabel):
             if channel is (len(self.locs_paths)):
                 print('Multichannel')
                 n_channels = (len(self.locs_paths))
-                hues = np.arange(0, 1, 1 / n_channels)
-                colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+                colors = get_colors(n_channels)
 
                 for i in range(len(self.locs_paths)):
                     locs = self.picked_locs(i)
@@ -2438,8 +2440,7 @@ class View(QtGui.QLabel):
         removelist = []
 
         n_channels = (len(self.locs_paths))
-        hues = np.arange(0, 1, 1 / n_channels)
-        colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+        colors = get_colors(n_channels)
 
         acc_picks = self.picked_locs(channel_acceptor)
         don_picks = self.picked_locs(channel_donor)
@@ -2649,8 +2650,7 @@ class View(QtGui.QLabel):
 
         if channel is not None:
             n_channels = (len(self.locs_paths))
-            hues = np.arange(0, 1, 1 / n_channels)
-            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            colors = get_colors(n_channels)
 
             if channel is (len(self.locs_paths)):
                 print('Combined')
@@ -2782,8 +2782,7 @@ class View(QtGui.QLabel):
         removelist = []
         if channel is not None:
             n_channels = (len(self.locs_paths))
-            hues = np.arange(0, 1, 1 / n_channels)
-            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            colors = get_colors(n_channels)
 
             if channel is (len(self.locs_paths)):
                 print('Combined')
@@ -2829,8 +2828,7 @@ class View(QtGui.QLabel):
         pixelsize = self.window.display_settings_dialog.pixelsize.value()
         if channel is not None:
             n_channels = (len(self.locs_paths))
-            hues = np.arange(0, 1, 1 / n_channels)
-            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            colors = get_colors(n_channels)
 
             if channel is (len(self.locs_paths)):
                 print('Combined')
@@ -2880,8 +2878,7 @@ class View(QtGui.QLabel):
 
         if channel is not None:
             n_channels = (len(self.locs_paths))
-            hues = np.arange(0, 1, 1 / n_channels)
-            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            colors = get_colors(n_channels)
 
             if channel is (len(self.locs_paths)):
                 print('Combined')
@@ -3180,7 +3177,7 @@ class View(QtGui.QLabel):
         if n_channels == 1:
             self.render_single_channel(kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache)
         else:
-            self.render_multi_channel(kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache)
+            self.render_multi_channel(kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache,  plot_channels = True)
         self._bgra[:, :, 3].fill(255)
         Y, X = self._bgra.shape[:2]
         qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
@@ -3196,10 +3193,11 @@ class View(QtGui.QLabel):
         self._bgra[:, :, 3].fill(255)
         return self._bgra.data
 
-    def render_multi_channel(self, kwargs, autoscale=False, locs=None, use_cache=False, cache=True):
+    def render_multi_channel(self, kwargs, autoscale=False, locs=None, use_cache=False, cache=True, plot_channels = False):
         if locs is None:
             locs = self.locs
-        if len(self.locs_paths) == len(locs): #TODO change this (meant to distinguish plotting groups vs channels)
+        #Plot each channel
+        if plot_channels:
             locsall = locs.copy()
             for i in range(len(locs)):
                 if hasattr(locs[i], 'z'):
@@ -3209,8 +3207,7 @@ class View(QtGui.QLabel):
                         in_view = (locsall[i].z > z_min) & (locsall[i].z <= z_max)
                         locsall[i] = locsall[i][in_view]
             n_channels = len(locs)
-            hues = np.arange(0, 1, 1 / n_channels)
-            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            colors = get_colors(n_channels)
             if use_cache:
                 n_locs = self.n_locs
                 image = self.image
@@ -3224,8 +3221,7 @@ class View(QtGui.QLabel):
                 image = np.array([_[1] for _ in renderings])
         else:
             n_channels = len(locs)
-            hues = np.arange(0, 1, 1 / n_channels)
-            colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+            colors = get_colors(n_channels)
             if use_cache:
                 n_locs = self.n_locs
                 image = self.image
@@ -3296,12 +3292,13 @@ class View(QtGui.QLabel):
 
     def render_single_channel(self, kwargs, autoscale=False, use_cache=False, cache=True):
         locs = self.locs[0]
-        if hasattr(locs, 'group'):
-            locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
-            return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
 
         if self.x_render_state:
             locs = self.x_locs
+            return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
+
+        if hasattr(locs, 'group'):
+            locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache)
 
         if hasattr(locs, 'z'):
@@ -3466,8 +3463,7 @@ class View(QtGui.QLabel):
         min_val = self.window.display_settings_dialog.minimum_render.value()
         max_val = self.window.display_settings_dialog.maximum_render.value()
 
-        hues = np.arange(0, 1, 1 / n_colors)
-        colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+        colors = get_colors(n_channels)
 
         fig1 = plt.figure(figsize=(5,1))
 
@@ -3520,7 +3516,7 @@ class View(QtGui.QLabel):
             if x_locs == []:
                 pb = lib.ProgressDialog('Indexing '+parameter, 0, colors, self)
                 pb.set_value(0)
-                for i in tqdm(range(colors)):
+                for i in tqdm(range(colors+1)):
                     x_locs.append(self.locs[0][self.x_color == i])
                     pb.set_value(i+1)
                 pb.close()
