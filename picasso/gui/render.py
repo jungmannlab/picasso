@@ -3405,8 +3405,14 @@ class View(QtGui.QLabel):
             upper = INITIAL_REL_MAXIMUM * max_
             self.window.display_settings_dialog.silent_minimum_update(0)
             self.window.display_settings_dialog.silent_maximum_update(upper)
+
         upper = self.window.display_settings_dialog.maximum.value()
         lower = self.window.display_settings_dialog.minimum.value()
+
+        if upper == lower:
+            upper = lower + 1/(10**6)
+            self.window.display_settings_dialog.silent_maximum_update(upper)
+
         image = (image - lower) / (upper - lower)
         image[~np.isfinite(image)] = 0
         image = np.minimum(image, 1.0)
