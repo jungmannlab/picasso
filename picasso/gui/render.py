@@ -1687,7 +1687,7 @@ class View(QtGui.QLabel):
         self.index_blocks = []
         self._drift = []
         self.currentdrift = []
-        self.x_render = {}
+        self.x_render_cache = []
         self.x_render_state = False
 
     def is_consecutive(l):
@@ -3199,7 +3199,7 @@ class View(QtGui.QLabel):
     def render_multi_channel(self, kwargs, autoscale=False, locs=None, use_cache=False, cache=True):
         if locs is None:
             locs = self.locs
-        if len(self.locs_paths) == len(locs): #distinguish plotting of groups vs channels TODO: this might cause problems if group no == channel no
+        if len(self.locs_paths) == len(locs): #TODO change this (meant to distinguish plotting groups vs channels)
             locsall = locs.copy()
             for i in range(len(locs)):
                 if hasattr(locs[i], 'z'):
@@ -3242,6 +3242,7 @@ class View(QtGui.QLabel):
                 #renderings = [render.render(_, **kwargs) for _ in locs]
                 n_locs = sum([_[0] for _ in renderings])
                 image = np.array([_[1] for _ in renderings])
+
         if cache:
             self.n_locs = n_locs
             self.image = image
@@ -3250,8 +3251,8 @@ class View(QtGui.QLabel):
         Y, X = image.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
         
+    
         #Color images
-
         for i in range(len(self.locs)):
             if self.window.dataset_dialog.colorselection[i].currentText() == 'red':
                 colors[i] = (1,0,0)
@@ -3499,21 +3500,45 @@ class View(QtGui.QLabel):
             min_val = self.window.display_settings_dialog.minimum_render.value()
             max_val = self.window.display_settings_dialog.maximum_render.value()
 
-            min_val_data = np.min(self.locs[0][parameter])
-            max_val_data = np.max(self.locs[0][parameter])
-
             x_step = (max_val-min_val)/colors
 
             self.x_color = np.floor((self.locs[0][parameter] - min_val)/x_step)
 
+            #values above and below will be fixed:
+            self.x_color[self.x_color < 0] = 0
+            self.x_color[self.x_color > colors] = colors
+
             x_locs = []
-            #TODOL CHECK DICT AND CHECK IF IN PLAce
-            pb = lib.ProgressDialog('Indexing '+parameter, 0, colors, self)
-            pb.set_value(0)
-            for i in tqdm(range(colors)):
-                x_locs.append(self.locs[0][self.x_color == i])
-                pb.set_value(i+1)
-            pb.close()
+
+            for cached_entry in self.x_render_cache:
+                if cached_entry['parameter'] == parameter:
+                    if cached_entry['colors'] == colors:
+                        if (cached_entry['min_val'] == min_val) & (cached_entry['max_val'] == max_val): 
+                            x_locs = cached_entry['locs']
+                        break
+
+            if x_locs == []:
+                pb = lib.ProgressDialog('Indexing '+parameter, 0, colors, self)
+                pb.set_value(0)
+                for i in tqdm(range(colors)):
+                    x_locs.append(self.locs[0][self.x_color == i])
+                    pb.set_value(i+1)
+                pb.close()
+
+                entry = {}
+                entry['parameter'] = parameter
+                entry['colors'] = colors
+                entry['locs'] = x_locs
+                entry['min_val'] = min_val
+                entry['max_val'] = max_val
+
+                #Do not store to many datasets in cache
+                if len(self.x_render_cache) < 10:
+                    self.x_render_cache.append(entry)
+                else:
+                    self.x_render_cache.insert(0,entry)
+                    del self.x_render_cache[-1]
+
             self.x_locs = x_locs
 
             self.update_scene()
