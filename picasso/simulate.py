@@ -21,7 +21,6 @@ from . import io as _io
 magfac = 0.79
 
 
-
 def calculate_zpsf(z, cx, cy):
     z = z/magfac
     z2 = z * z
@@ -47,15 +46,14 @@ def noisy(image, mu, sigma):  # Add gaussian noise to an image.
     noisy[noisy < 0] = 0
     return noisy
 
-
 def noisy_p(image, mu):  # Add poissonian noise to an image or movie
     poiss = _np.random.poisson(mu, image.shape).astype(float)
     noisy = image + poiss
     return noisy
 
 def check_type(movie):
-    movie = _np.round(movie).astype('<u2')
-    movie[movie > (2**16)-1] = (2**16)-1
+    movie[movie >= (2**16)-1] = (2**16)-1
+    movie = movie.astype('<u2') #little-endian 16-bit unsigned in
     return movie
 
 # Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
@@ -182,37 +180,13 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate):
 
     return photonposframe
 
+
 def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate, cx,cy):
     edges = range(0, imagesize+1)
 
-    bindingsitesx = structures[0, :]
-    bindingsitesy = structures[1, :]
-    bindingsitesz = structures[4, :]
-    nosites = len(bindingsitesx)
+    photonposframe = distphotonsxy(runner, photondist, structures, psf, mode3Dstate)
 
-
-    tempphotons = _np.array(photondist[:, runner]).astype(int)
-    n_photons = _np.sum(tempphotons)
-    n_photons_step = _np.cumsum(tempphotons)
-    n_photons_step = _np.insert(n_photons_step, 0, 0)
-
-    #Allocate memory
-    photonposframe = _np.zeros((n_photons,2))
-    for i in range(0, nosites):
-        photoncount = int(photondist[i, runner])
-
-        if mode3Dstate:
-            wx, wy = calculate_zpsf(bindingsitesz[i], cx, cy)
-            cov = [[wx*wx, 0], [0, wy*wy]]
-        else:
-            cov = [[psf*psf, 0], [0, psf*psf]]
-
-        if photoncount > 0:
-            mu = [bindingsitesx[i], bindingsitesy[i]]
-            photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
-            photonposframe[n_photons_step[i]:n_photons_step[i+1],:] = photonpos
-
-    if n_photons == 0:    
+    if len(photonposframe) == 0:    
         simframe = _np.zeros((imagesize, imagesize))
     else:
         x = photonposframe[:, 0]
@@ -245,7 +219,6 @@ def defineStructure(structurexxpx, structureyypx, structureex, structure3d, pixe
 
 
 def generatePositions(number, imagesize, frame, arrangement):  # GENERATE A SET OF POSITIONS WHERE STRUCTURES WILL BE PLACED
-
     if arrangement == 0:
         spacing = _np.ceil((number**0.5))
         linpos = _np.linspace(frame, imagesize-frame, spacing)
