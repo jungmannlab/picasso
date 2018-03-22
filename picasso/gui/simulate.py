@@ -1096,6 +1096,7 @@ class Window(QtGui.QMainWindow):
                     if self.currentround == conrounds:
                         self.statusBar().showMessage('Adding noise to movie ...')
                         movie = simulate.noisy_p(movie,background)
+                        movie = simulate.check_type(movie)
                         self.statusBar().showMessage('Saving movie ...')
 
                         simulate.saveMovie(fileName, movie, info)
@@ -1121,6 +1122,7 @@ class Window(QtGui.QMainWindow):
                         self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
                         app.processEvents()
                     movie = simulate.noisy_p(movie,background)
+                    movie = simulate.check_type(movie)
                     self.statusBar().showMessage('Converting to image ... complete.')
                     self.statusBar().showMessage('Saving movie ...')
 
@@ -1646,7 +1648,7 @@ class CalibrationDialog(QtGui.QDialog):
         tableitem = QtGui.QTableWidgetItem()
         self.table.setWindowTitle('Noise Model Calibration')
         self.setWindowTitle('Noise Model Calibration')
-        self.resize(800, 400)
+        #self.resize(800, 400)
 
         layout.addWidget(self.table)
 

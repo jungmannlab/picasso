@@ -51,11 +51,12 @@ def noisy(image, mu, sigma):  # Add gaussian noise to an image.
 def noisy_p(image, mu):  # Add poissonian noise to an image or movie
     poiss = _np.random.poisson(mu, image.shape).astype(float)
     noisy = image + poiss
-    noisy[noisy > 2**16-1] = 2**16-1
-    noisy = _np.round(noisy).astype('<u2')
     return noisy
 
-
+def check_type(movie):
+    movie = _np.round(movie).astype('<u2')
+    movie[movie > (2**16)-1] = (2**16)-1
+    return movie
 
 # Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
 def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget):
@@ -70,11 +71,8 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
     eventsum = _np.cumsum(events)
     maxloc = _np.argmax(eventsum > (frames*time))  # Find the first event that exceeds the total integration time
     simulatedmeandark = _np.mean(events[:maxloc:2])
-    print('Dark')
-    print(events[:maxloc:2])
+
     simulatedmeanbright = _np.mean(events[1:maxloc:2])
-    print('Bright')
-    print(events[1:maxloc:2])
 
     # CHECK Trace
     if _np.mod(maxloc, 2):  # uneven -> ends with an OFF-event
@@ -161,14 +159,15 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate):
     bindingsitesz = structures[4, :]
     nosites = len(bindingsitesx)  # number of binding sites in image
 
-    # FRAMEWISE SIMULATION OF PSF
-    # ALL PHOTONS FOR 1 STRUCTURE IN ALL FRAMES
-    flag = 0
-    photonposframe = _np.zeros((2, 0))
+    tempphotons = _np.array(photondist[:, runner]).astype(int)
+    n_photons = _np.sum(tempphotons)
+    n_photons_step = _np.cumsum(tempphotons)
+    n_photons_step = _np.insert(n_photons_step, 0, 0)
 
+    #Allocate memory
+    photonposframe = _np.zeros((n_photons,2))
     for i in range(0, nosites):
-        tempphotons = photondist[i, :]
-        photoncount = int(tempphotons[runner])
+        photoncount = int(photondist[i, runner])
 
         if mode3Dstate:
             wx, wy = calculate_zpsf(bindingsitesz[i], cx, cy)
@@ -177,59 +176,30 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate):
             cov = [[psf*psf, 0], [0, psf*psf]]
 
         if photoncount > 0:
-            flag = flag+1
             mu = [bindingsitesx[i], bindingsitesy[i]]
             photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
-            if flag == 1:
-                photonposframe = photonpos
-            else:
-                photonposframe = _np.concatenate((photonposframe, photonpos), axis=0)
+            photonposframe[n_photons_step[i]:n_photons_step[i+1],:] = photonpos
 
     return photonposframe
 
-def photonsToFrame(photonposframe,imagesize,background):
-        pixels = imagesize
-        edges = range(0, pixels+1)
-            # HANDLE CASE FOR NO PHOTONS DETECTED AT ALL IN FRAME
-        if photonposframe.size == 0:
-            simframe = _np.zeros((pixels, pixels))
-        else:
-            xx = photonposframe[:, 0]
-            yy = photonposframe[:, 1]
-
-            simframe, xedges, yedges = _np.histogram2d(yy, xx, bins=(edges, edges))
-            simframe = _np.flipud(simframe)  # to be consistent with render
-
-        #simframenoise = noisy(simframe,background,noise)
-        simframenoise = noisy_p(simframe, background)
-        simframenoise[simframenoise > 2**16-1] = 2**16-1
-        simframeout = _np.round(simframenoise).astype('<u2')
-
-        return simframeout
-
-
-
 def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate, cx,cy):
-
-    pixels = imagesize
-    edges = range(0, pixels+1)
+    edges = range(0, imagesize+1)
 
     bindingsitesx = structures[0, :]
     bindingsitesy = structures[1, :]
     bindingsitesz = structures[4, :]
-    nosites = len(bindingsitesx)  # number of binding sites in image
+    nosites = len(bindingsitesx)
 
-    # FRAMEWISE SIMULATION OF PSF
-    # ALL PHOTONS FOR 1 STRUCTURE IN ALL FRAMES
 
-    # ALLCOATE MEMORY
+    tempphotons = _np.array(photondist[:, runner]).astype(int)
+    n_photons = _np.sum(tempphotons)
+    n_photons_step = _np.cumsum(tempphotons)
+    n_photons_step = _np.insert(n_photons_step, 0, 0)
 
-    flag = 0
-    photonposframe = _np.zeros((2, 0))
-
+    #Allocate memory
+    photonposframe = _np.zeros((n_photons,2))
     for i in range(0, nosites):
-        tempphotons = photondist[i, :]
-        photoncount = int(tempphotons[runner])
+        photoncount = int(photondist[i, runner])
 
         if mode3Dstate:
             wx, wy = calculate_zpsf(bindingsitesz[i], cx, cy)
@@ -238,21 +208,16 @@ def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonr
             cov = [[psf*psf, 0], [0, psf*psf]]
 
         if photoncount > 0:
-            flag = flag+1
             mu = [bindingsitesx[i], bindingsitesy[i]]
             photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
-            if flag == 1:
-                photonposframe = photonpos
-            else:
-                photonposframe = _np.concatenate((photonposframe, photonpos), axis=0)
+            photonposframe[n_photons_step[i]:n_photons_step[i+1],:] = photonpos
 
-        # HANDLE CASE FOR NO PHOTONS DETECTED AT ALL IN FRAME
-    if photonposframe.size == 0:
-        simframe = _np.zeros((pixels, pixels))
+    if n_photons == 0:    
+        simframe = _np.zeros((imagesize, imagesize))
     else:
-        xx = photonposframe[:, 0]
-        yy = photonposframe[:, 1]
-        simframe, xedges, yedges = _np.histogram2d(yy, xx, bins=(edges, edges))
+        x = photonposframe[:, 0]
+        y = photonposframe[:, 1]
+        simframe, xedges, yedges = _np.histogram2d(y, x, bins=(edges, edges))
         simframe = _np.flipud(simframe)  # to be consistent with render
 
     return simframe
