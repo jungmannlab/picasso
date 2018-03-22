@@ -236,7 +236,7 @@ def generatePositions(number, imagesize, frame, arrangement):  # GENERATE A SET 
 
 
 def rotateStructure(structure):  # ROTATE A STRUCTURE RANDOMLY
-    angle_rad = _np.random.rand(1)*2*3.141592
+    angle_rad = _np.random.rand(1)*2*_np.pi
     newstructure = _np.array([(structure[0, :])*_np.cos(angle_rad)-(structure[1, :])*_np.sin(angle_rad),
                               (structure[0, :])*_np.sin(angle_rad)+(structure[1, :])*_np.cos(angle_rad),
                               structure[2, :], structure[3, :]])
