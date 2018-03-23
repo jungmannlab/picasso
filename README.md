@@ -26,7 +26,6 @@ Sample instructions to create an environment with conda are as follows:
 5. Continue with Installation 
 
 #### Installation
-
 1. Open the console, `cd` to the directory where you want to install and run
 `git clone https://github.com/jungmannlab/picasso`
 Alternatively, [download](https://github.com/jungmannlab/picasso/archive/master.zip) the zip file and unzip it.
@@ -40,6 +39,9 @@ This should be doable by right-clicking on the script and choosing "Run with Pow
 The individual modules of picasso can be started as follows:
 1. Open the console, activate the enviroment: `source activate picasso`
 2. Start the picasso modules via `python -m picasso ..`, e.g. `python -m picasso render` for the render module
+
+#### Using GPU for Fitting
+To enable GPU fitting, follow instructions on [Gpufit](https://github.com/gpufit/Gpufit) to install the Gpufit python library in your conda environment. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
 ## Contributions & Copyright
 Contributors: Joerg Schnitzbauer, Maximilian Strauss  
