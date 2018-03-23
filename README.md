@@ -2,10 +2,10 @@
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our Nature Protocols publication (https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html).
 
 ## Installation
-Download and run the one-click installer file for Windows from [http://www.jungmannlab.org/](http://www.jungmannlab.org). Note that this is the Picasso version presented in the Nature Protocols publication. Feel free to reach out via picasso@jungmannlab.org to get the latest installer of the current commit. For the use of Picasso with Linux and Mac Os X, please follow the advanced installation instructions.
+Download and run the one-click installer file for Windows from [http://www.jungmannlab.org/](http://www.jungmannlab.org). Note that this is the Picasso version presented in the Nature Protocols publication. Feel free to reach out via picasso@jungmannlab.org to get the latest installer of the current commit. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X) please follow the advanced installation instructions.
 
 ### Advanced installation for Python programmers
-As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso's internal routines in custom Python programs. At the same time, it is still possible to use Picasso as an end-user by creating the respective Windows shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
+As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso's internal routines in custom Python programs. For windows, one is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
 
 #### Requirements
 
@@ -32,8 +32,8 @@ Sample instructions to create an environment with conda are as follows:
 Alternatively, [download](https://github.com/jungmannlab/picasso/archive/master.zip) the zip file and unzip it.
 2. Change to the downloaded directory and run `python setup.py install`.
 
-Optional for Windows users:
-3. Run the PowerShell script "createShortcuts.ps1" in the gui directory.
+#### Optional for windows users
+Run the PowerShell script "createShortcuts.ps1" in the gui directory.
 This should be doable by right-clicking on the script and choosing "Run with PowerShell". Alternatively, run the command `powershell ./createShortcuts.ps1` in the command line. Use the generated shortcuts in the top level directory to start GUI components. Users can drag these shortcuts to their Desktop, Start Menu or Task Bar.
 
 #### Using Picasso as a module
