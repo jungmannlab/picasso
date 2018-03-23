@@ -31,6 +31,7 @@ Sample instructions to create an environment with conda are as follows:
 `git clone https://github.com/jungmannlab/picasso`
 Alternatively, [download](https://github.com/jungmannlab/picasso/archive/master.zip) the zip file and unzip it.
 2. Change to the downloaded directory and run `python setup.py install`.
+
 Optional for Windows users:
 3. Run the PowerShell script "createShortcuts.ps1" in the gui directory.
 This should be doable by right-clicking on the script and choosing "Run with PowerShell". Alternatively, run the command `powershell ./createShortcuts.ps1` in the command line. Use the generated shortcuts in the top level directory to start GUI components. Users can drag these shortcuts to their Desktop, Start Menu or Task Bar.
