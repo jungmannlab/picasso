@@ -23,7 +23,8 @@ Sample instructions to create an environment with conda are as follows:
 2. Activate the environment: `source activate picasso`
 3. Install the necessary packages with conda: `conda install h5py matplotlib numba numpy scipy pyqt=4 pyyaml scikit-learn colorama tqdm`
 4. Additionally install packages with pip: `pip install lmfit`
-5. Continue with Installation 
+5. Continue with Installation
+Note that sometimes outdated packages can cause problems. If you experience errors, please check whether your packages have the right version (e.g. see issue #4).
 
 #### Installation
 1. Open the console, `cd` to the directory where you want to install and run
