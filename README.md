@@ -20,7 +20,7 @@ When using Anaconda or Miniconda, most can be installed via `conda install <pack
 ##### Creating an environment with conda
 Sample instructions to create an environment with conda are as follows:
 1. Open the console and create a new conda environment: `conda create --name picasso python=3.5`
-2. Activate the environment: `source activate picasso`
+2. Activate the environment: `source activate picasso` for Linux / Mac Os X or `activate picasso` for Windows.
 3. Install the necessary packages with conda: `conda install h5py matplotlib numba numpy scipy pyqt=4 pyyaml scikit-learn colorama tqdm`
 4. Additionally install packages with pip: `pip install lmfit`
 5. Continue with Installation
@@ -38,7 +38,7 @@ This should be doable by right-clicking on the script and choosing "Run with Pow
 
 #### Using Picasso as a module
 The individual modules of picasso can be started as follows:
-1. Open the console, activate the enviroment: `source activate picasso`
+1. Open the console, activate the enviroment: `source activate picasso` for Linux / Mac Os X or `activate picasso` for Windows.
 2. Start the picasso modules via `python -m picasso ..`, e.g. `python -m picasso render` for the render module
 
 #### Using GPU for Fitting
