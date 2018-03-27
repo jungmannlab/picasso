@@ -692,8 +692,6 @@ def main():
             else:
                 from .gui import localize
                 localize.main()
-        elif args.command == 'reconstruct':
-            _reconstruct(args)
         elif args.command == 'filter':
             from .gui import filter
             filter.main()
