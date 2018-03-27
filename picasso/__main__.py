@@ -402,7 +402,7 @@ def _localize(args):
     files = args.files
     from glob import glob
     from .io import load_movie, save_locs
-    from .localize import identify_async, identifications_from_futures, fit_async, locs_from_fits
+    from .localize import get_spots, identify_async, identifications_from_futures, fit_async, locs_from_fits
     from os.path import splitext, isdir
     from time import sleep
     from . import gausslq, gaussmle, avgroi, lib
@@ -471,13 +471,11 @@ def _localize(args):
                                                                     convergence,
                                                                     max_iterations)
         """
-        n_spots = len(ids)
-        
-        use_gpufit = False #Todo: Change later
-
         if args.fit_method == 'lq':
-            print('{} not implemented yet...'.format(args.fit_method))
-         
+            spots = get_spots(movie, ids, box, camera_info)
+            theta = gausslq.fit_spots_parallel(spots, async=False)
+            locs = gausslq.locs_from_fits(ids, theta, box, args.gain)
+            #Todo implement gpufit at some point
         elif args.fit_method == 'mle':
             current, thetas, CRLBs, likelihoods, iterations = fit_async(movie,
                                                                     camera_info,
@@ -492,8 +490,11 @@ def _localize(args):
             print('Fitting spot {:,} of {:,}'.format(n_spots, n_spots))
             locs = locs_from_fits(ids, thetas, CRLBs, likelihoods, iterations, box)
 
+
         elif args.fit_method == 'avg':
-            print('{} not implemented yet...'.format(args.fit_method))
+            spots = get_spots(movie, ids, box, camera_info)
+            theta = avgroi.fit_spots_parallel(spots, async=False)
+            locs = avgroi.locs_from_fits(ids, theta, box, args.gain)
 
         else:
             print('This should never happen...')
