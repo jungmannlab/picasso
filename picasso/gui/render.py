@@ -3486,7 +3486,7 @@ class View(QtGui.QLabel):
         min_val = self.window.display_settings_dialog.minimum_render.value()
         max_val = self.window.display_settings_dialog.maximum_render.value()
 
-        colors = get_colors(n_channels)
+        colors = get_colors(n_colors)
 
         fig1 = plt.figure(figsize=(5,1))
 
