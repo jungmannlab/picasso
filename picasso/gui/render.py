@@ -4147,6 +4147,8 @@ class Window(QtGui.QMainWindow):
     def closeEvent(self, event):
         settings = io.load_user_settings()
         settings['Render']['Colormap'] = self.display_settings_dialog.colormap.currentText()
+        if self.view.locs_paths != []:
+            settings['Render']['PWD'] = os.path.dirname(self.view.locs_paths[0])
         io.save_user_settings(settings)
         QtGui.qApp.closeAllWindows()
 
@@ -4288,6 +4290,12 @@ class Window(QtGui.QMainWindow):
             if self.display_settings_dialog.colormap.itemText(index) == colormap:
                 self.display_settings_dialog.colormap.setCurrentIndex(index)
                 break
+        self.pwd = []
+        try:
+            pwd = settings['Render']['PWD']
+            self.pwd = pwd
+        except:
+            pass
 
     def open_apply_dialog(self):
         cmd, channel, ok = ApplyDialog.getCmd(self)
@@ -4349,7 +4357,10 @@ class Window(QtGui.QMainWindow):
             self.view.update_scene()
 
     def open_file_dialog(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Add localizations', filter='*.hdf5')
+        if self.pwd == []:
+            path = QtGui.QFileDialog.getOpenFileName(self, 'Add localizations', filter='*.hdf5')
+        else:
+            path = QtGui.QFileDialog.getOpenFileName(self, 'Add localizations', directory = self.pwd, filter='*.hdf5')
         if path:
             self.view.add(path)
 
