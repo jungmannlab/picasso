@@ -16,6 +16,7 @@ import threading as _threading
 from itertools import chain as _chain
 import matplotlib.pyplot as _plt
 from . import gaussmle as _gaussmle
+from . import io as _io
 
 
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
@@ -128,7 +129,19 @@ def identifications_from_futures(futures):
 
 
 def identify_async(movie, minimum_ng, box, roi=None):
-    n_workers = max(1, int(0.75 * _multiprocessing.cpu_count()))
+    "Use the user settings to define the number of workers that are being used"
+    settings = _io.load_user_settings()
+    try:
+        cpu_utilization = settings['Localize']['cpu_utilization']
+        if cpu_utilization >= 1:
+            cpu_utilization = 1
+    except:
+        cpu_utilization = 0.75
+        settings['Localize']['cpu_utilization'] = cpu_utilization
+        _io.save_user_settings(settings)
+
+    n_workers = max(1, int(cpu_utilization * _multiprocessing.cpu_count()))
+
     current = [0]
     executor = _ThreadPoolExecutor(n_workers)
     lock = _threading.Lock()
