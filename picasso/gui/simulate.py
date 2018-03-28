@@ -101,6 +101,7 @@ class Window(QtGui.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle('Picasso: Simulate')
+        self.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, 'icons', 'simulate.ico')
         icon = QtGui.QIcon(icon_path)
@@ -310,7 +311,10 @@ class Window(QtGui.QMainWindow):
         igrid.addWidget(QtGui.QLabel('Photons'), 7 - igridindex, 2)
         igrid.addWidget(photonslope, 8 - igridindex, 0)
         igrid.addWidget(self.photonslopeEdit, 8 - igridindex, 1)
-        igrid.addWidget(QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>'), 8 - igridindex, 2)
+
+        photonslopeUnit = QtGui.QLabel('Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>')
+        photonslopeUnit.setWordWrap(True)
+        igrid.addWidget(photonslopeUnit, 8 - igridindex, 2)
 
         igrid.addWidget(self.photonslopemodeEdit, 9 - igridindex, 1)
         igrid.addWidget(QtGui.QLabel('Constant detection rate'), 9 - igridindex, 0)
@@ -599,7 +603,7 @@ class Window(QtGui.QMainWindow):
         self.figure1 = plt.figure()
         self.figure2 = plt.figure()
         self.canvas1 = FigureCanvas(self.figure1)
-        csize = 280
+        csize = 180
         self.canvas1.setMinimumSize(csize, csize)
 
         self.canvas2 = FigureCanvas(self.figure2)
