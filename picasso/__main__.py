@@ -406,12 +406,57 @@ def _localize(args):
     from os.path import splitext, isdir
     from time import sleep
     from . import gausslq, gaussmle, avgroi, lib
+    import os.path as _ospath
+    import re as _re
+    import os as _os
+
+
+    print('    ____  _____________   __________ ____ ')
+    print('   / __ \\/  _/ ____/   | / ___/ ___// __ \\')
+    print('  / /_/ // // /   / /| | \\__ \\\\__ \\/ / / /')
+    print(' / _____/ // /___/ ___ |___/ ___/ / /_/ / ')
+    print('/_/   /___/\\____/_/  |_/____/____/\\____/  ')
+    print('                                          ')
+    print('------------------------------------------')
+    print('Localize - Parameters:')
+
+   
+    print('{:<8} {:<15} {:<10}'.format('No','Label','Value'))
+
+    for index, element in enumerate(vars(args)):
+        print('{:<8} {:<15} {:<10}'.format(index+1, element, getattr(args, element)))
+    print('------------------------------------------')    
+    def check_consecutive_tif(filepath):
+        """
+        Function to only return the first file of a consecutive ome.tif series to not reconstruct all of them
+        as load_movie automatically detects consecutive files.
+        e.g. have a folder with file.ome.tif, file_1.ome.tif, file_2.ome.tif, will return only file.ome.tif
+        """
+        files = glob(filepath+'/*.tif')
+        newlist = [_ospath.abspath(file) for file in files]
+        for file in files:
+            path = _ospath.abspath(file)
+            directory = _ospath.dirname(path)
+            base, ext = _ospath.splitext(_ospath.splitext(path)[0])    # split two extensions as in .ome.tif
+            base = _re.escape(base)
+            pattern = _re.compile(base + '_(\d*).ome.tif')    # This matches the basename + an appendix of the file number
+            entries = [_.path for _ in _os.scandir(directory) if _.is_file()]
+            matches = [_re.match(pattern, _) for _ in entries]
+            matches = [_ for _ in matches if _ is not None]
+            paths_indices = [(int(_.group(1)), _.group(0)) for _ in matches]
+            datafiles = [_.group(0) for _ in matches]
+            if datafiles != []:
+                for element in datafiles:
+                    newlist.remove(element)
+        return newlist
 
     if isdir(files):
         print('Analyzing folder')
-        paths = glob(files+'/*.tif')+glob(files+'*.raw')
+
+        tif_files = check_consecutive_tif(files)
+
+        paths = tif_files+glob(files+'*.raw')
         print('A total of {} files detected'.format(len(paths)))
-        #TODO: Remove ome.tifs that belong to another file
     else:
         paths = glob(files)
     if paths:
@@ -453,7 +498,10 @@ def _localize(args):
         max_iterations = int(input('Max. iterations: '))
         '''
     for path in paths:
+        print('------------------------------------------')
+        print('------------------------------------------')
         print('Processing {}'.format(path))
+        print('------------------------------------------')
         movie, info = load_movie(path)
         current, futures = identify_async(movie, min_net_gradient, box)
         n_frames = len(movie)
@@ -521,11 +569,13 @@ def _localize(args):
         print('File saved to {}'.format(out_path))
         if args.drift > 0:
             print('Undrifting file:')
+            print('------------------------------------------')
             try:
                 _undrift(out_path, args.drift, False, None)
             except:
                 print('Drift correction failed for {}'.format(out_path))
 
+        print('                                          ')
 
 def _render(args):
     from .lib import locs_glob_map

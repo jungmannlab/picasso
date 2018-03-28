@@ -779,7 +779,9 @@ def localization_precision(photons, s, bg, em):
     v = sa2 * (16/9 + (8 * _np.pi * sa2 * bg) / photons) / photons
     if em:
         v *= 2
-    return _np.sqrt(v)
+
+    with _np.errstate(invalid='ignore'):
+        return _np.sqrt(v)
 
 
 def undrift(locs, info, segmentation, display=True, segmentation_callback=None, rcc_callback=None):
