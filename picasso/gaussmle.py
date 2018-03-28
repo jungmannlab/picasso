@@ -477,12 +477,11 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
     y = theta[:, 0] + identifications.y - box_offset
     x = theta[:, 1] + identifications.x - box_offset
 
-    with np.errstate(invalid='ignore'):
-        lpy = _np.sqrt(CRLBs[:, 0])
-        lpx = _np.sqrt(CRLBs[:, 1])
-        a = _np.maximum(theta[:, 4], theta[:, 5])
-        b = _np.minimum(theta[:, 4], theta[:, 5])
-        ellipticity = (a - b) / a
+    lpy = _np.sqrt(CRLBs[:, 0])
+    lpx = _np.sqrt(CRLBs[:, 1])
+    a = _np.maximum(theta[:, 4], theta[:, 5])
+    b = _np.minimum(theta[:, 4], theta[:, 5])
+    ellipticity = (a - b) / a
     if hasattr(identifications, 'n_id'):
         locs = _np.rec.array((identifications.frame, x, y,
                               theta[:, 2], theta[:, 4], theta[:, 5],
