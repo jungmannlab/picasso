@@ -205,7 +205,7 @@ def _clusterfilter(files, clusterfile, parameter, minval, maxval):
                 print('Error: Field {} not found.'.format(parameter))
 
 
-def _undrift(files, segmentation, display, fromfile):
+def _undrift(files, segmentation, display=True, fromfile = None):
     import glob
     from . import io, postprocess
     from numpy import genfromtxt, savetxt
@@ -245,7 +245,7 @@ def _undrift(files, segmentation, display, fromfile):
                 plt.show()
         else:
             print('Undrifting file {}'.format(path))
-            drift, locs = postprocess.undrift(locs, info, segmentation, display=True)
+            drift, locs = postprocess.undrift(locs, info, segmentation, display=display)
         base, ext = os.path.splitext(path)
         io.save_locs(base + '_undrift.hdf5', locs, info)
         savetxt(base + '_drift.txt', drift, header='dx\tdy', newline='\r\n')
@@ -571,7 +571,7 @@ def _localize(args):
             print('Undrifting file:')
             print('------------------------------------------')
             try:
-                _undrift(out_path, args.drift, False, None)
+                _undrift(out_path, args.drift, display=False, fromfile=None)
             except:
                 print('Drift correction failed for {}'.format(out_path))
 
