@@ -500,8 +500,8 @@ class ParametersDialog(QtGui.QDialog):
             self.gpufit_checkbox.setDisabled(True)
 
     def load_z_calib(self):
-        if hasattr(self.window, 'movie_path'):
-            dir = os.path.dirname(self.window.movie_path)
+        if self.movie_path != []:
+            dir = os.path.dirname(self.movie_path)
         else:
             dir = None
         path = QtGui.QFileDialog.getOpenFileName(self, 'Load 3d calibration', directory=dir, filter='*.yaml')
@@ -716,6 +716,28 @@ class Window(QtGui.QMainWindow):
 
         self.locs = None
 
+        self.movie_path = []
+
+        #Load user settings
+        self.load_user_settings()
+
+    def load_user_settings(self):
+        settings = io.load_user_settings()
+        self.pwd = []
+        try:
+            pwd = settings['Localize']['PWD']
+            self.pwd = pwd
+        except:
+            pass
+
+    def closeEvent(self, event):
+        settings = io.load_user_settings()
+        if self.movie_path != []:
+            settings['Localize']['PWD'] = os.path.dirname(self.movie_path)
+        io.save_user_settings(settings)
+        QtGui.qApp.closeAllWindows()
+
+
     def init_menu_bar(self):
         menu_bar = self.menuBar()
 
@@ -825,9 +847,15 @@ class Window(QtGui.QMainWindow):
         self.localize(calibrate_z=True)
 
     def open_file_dialog(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', filter='*.raw; *.tif')
+        if self.pwd == []:
+            dir = None
+        else:
+            dir = self.pwd
+        
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', directory = dir, filter='*.raw; *.tif')
         if path:
             self.open(path)
+
 
     def open(self, path):
         t0 = time.time()
@@ -845,7 +873,11 @@ class Window(QtGui.QMainWindow):
             self.status_bar.showMessage('Opened movie in {:.2f} seconds.'.format(dt))
 
     def open_picks(self):
-        path = QtGui.QFileDialog.getOpenFileName(self,  'Open picks', filter='*.yaml')
+        if self.movie_path != []:
+            dir = os.path.dirname(self.movie_path)
+        else:
+            dir = None
+        path = QtGui.QFileDialog.getOpenFileName(self,  'Open picks', directory = dir, filter='*.yaml')
         if path:
             self.load_picks(path)
 
@@ -856,7 +888,8 @@ class Window(QtGui.QMainWindow):
             self._picks = regions['Centers']
             maxframes = int(self.info[0]['Frames'])
             #ask for drift correction
-            driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', filter='*.txt')
+
+            driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', dir = os.path.dirname(path), filter='*.txt')
             if driftpath:
                 drift = np.genfromtxt(driftpath)
             data = []
@@ -896,7 +929,11 @@ class Window(QtGui.QMainWindow):
             return
 
     def open_locs(self):
-        path = QtGui.QFileDialog.getOpenFileName(self,  'Open locs', filter='*.hdf5')
+        if self.movie_path != []:
+            dir = os.path.dirname(self.movie_path)
+        else:
+            dir = None
+        path = QtGui.QFileDialog.getOpenFileName(self,  'Open locs', directory = dir, filter='*.hdf5')
         if path:
             self.load_locs(path)
 
@@ -1035,7 +1072,10 @@ class Window(QtGui.QMainWindow):
             self.scene.addRect(x - box_half, y - box_half, box, box, color)
 
     def open_parameters(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', filter='*.yaml')
+        if self.pwd == []:
+            path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', filter='*.yaml')
+        else:
+            path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', directory = self.pwd, filter='*.yaml')
         if path:
             self.load_parameters(path)
 
@@ -1171,11 +1211,14 @@ class Window(QtGui.QMainWindow):
         io.save_datasets(path, self.info, spots=spots)
 
     def save_spots_dialog(self):
-        base, ext = os.path.splitext(self.movie_path)
-        path = base + '_spots.hdf5'
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save spots', path, filter='*.hdf5')
-        if path:
-            self.save_spots(path)
+        if self.movie_path == []:
+            print('No spots to save.')
+        else:
+            base, ext = os.path.splitext(self.movie_path)
+            path = base + '_spots.hdf5'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save spots', path, filter='*.hdf5')
+            if path:
+                self.save_spots(path)
 
     def save_locs(self, path):
         localize_info = self.last_identification_info.copy()
@@ -1184,11 +1227,14 @@ class Window(QtGui.QMainWindow):
         io.save_locs(path, self.locs, info)
 
     def save_locs_dialog(self):
-        base, ext = os.path.splitext(self.movie_path)
-        locs_path = base + '_locs.hdf5'
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', locs_path, filter='*.hdf5')
-        if path:
-            self.save_locs(path)
+        if self.movie_path == []:
+            print('No localizations to save.')
+        else:
+            base, ext = os.path.splitext(self.movie_path)
+            locs_path = base + '_locs.hdf5'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', locs_path, filter='*.hdf5')
+            if path:
+                self.save_locs(path)
 
     def localize(self, calibrate_z=False):
         self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
