@@ -723,12 +723,15 @@ class Window(QtGui.QMainWindow):
 
     def load_user_settings(self):
         settings = io.load_user_settings()
-        self.pwd = []
         try:
             pwd = settings['Localize']['PWD']
-            self.pwd = pwd
         except:
             pass
+        if len(pwd) == 0:
+            pwd = []
+
+        self.pwd = pwd
+
 
     def closeEvent(self, event):
         settings = io.load_user_settings()

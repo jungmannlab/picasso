@@ -136,7 +136,7 @@ def identify_async(movie, minimum_ng, box, roi=None):
         if cpu_utilization >= 1:
             cpu_utilization = 1
     except:
-        cpu_utilization = 0.75
+        cpu_utilization = 0.8
         settings['Localize']['cpu_utilization'] = cpu_utilization
         _io.save_user_settings(settings)
 
