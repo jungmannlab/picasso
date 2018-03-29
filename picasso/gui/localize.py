@@ -858,7 +858,9 @@ class Window(QtGui.QMainWindow):
         
         path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', directory = dir, filter='*.raw; *.tif')
         if path:
+            self.pwd = path
             self.open(path)
+
 
 
     def open(self, path):

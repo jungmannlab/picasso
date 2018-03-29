@@ -4297,7 +4297,6 @@ class Window(QtGui.QMainWindow):
             pass
         if len(pwd) == 0:
             pwd = []
-        print(pwd) 
         self.pwd = pwd
 
 
@@ -4366,7 +4365,12 @@ class Window(QtGui.QMainWindow):
         else:
             path = QtGui.QFileDialog.getOpenFileName(self, 'Add localizations', directory = self.pwd, filter='*.hdf5')
         if path:
-            self.view.add(path)
+            self.pwd = path
+            if len(self.view.locs) == 0:
+                self.view.add(path)
+            else:
+                self.view.add(path, render = False)
+                self.view.update_scene()
 
     def resizeEvent(self, event):
         self.update_info()
