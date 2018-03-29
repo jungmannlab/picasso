@@ -4290,12 +4290,16 @@ class Window(QtGui.QMainWindow):
             if self.display_settings_dialog.colormap.itemText(index) == colormap:
                 self.display_settings_dialog.colormap.setCurrentIndex(index)
                 break
-        self.pwd = []
+        pwd = []
         try:
             pwd = settings['Render']['PWD']
-            self.pwd = pwd
         except:
             pass
+        if len(pwd) == 0:
+            pwd = []
+        print(pwd) 
+        self.pwd = pwd
+
 
     def open_apply_dialog(self):
         cmd, channel, ok = ApplyDialog.getCmd(self)

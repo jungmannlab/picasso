@@ -723,6 +723,7 @@ class Window(QtGui.QMainWindow):
 
     def load_user_settings(self):
         settings = io.load_user_settings()
+        pwd = []
         try:
             pwd = settings['Localize']['PWD']
         except:
