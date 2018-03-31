@@ -1174,7 +1174,7 @@ class Window(QtGui.QMainWindow):
         self.draw_frame()
         base, ext = os.path.splitext(self.movie_path)
         if calibrate_z:
-            step, ok = QtGui.QInputDialog.getDouble(self, '3D Calibration', 'Calibration step size:', value=5, decimals=2)
+            step, ok = QtGui.QInputDialog.getDouble(self, '3D Calibration', 'Calibration step size (nm):', value=5, decimals=2)
             if ok:
                 base, ext = os.path.splitext(self.movie_path)
                 out_path = base + '_3d_calib.yaml'
