@@ -500,11 +500,7 @@ class ParametersDialog(QtGui.QDialog):
             self.gpufit_checkbox.setDisabled(True)
 
     def load_z_calib(self):
-        if self.movie_path != []:
-            dir = os.path.dirname(self.movie_path)
-        else:
-            dir = None
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Load 3d calibration', directory=dir, filter='*.yaml')
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Load 3d calibration', directory=None, filter='*.yaml')
         if path:
             with open(path, 'r') as f:
                 self.z_calibration = yaml.load(f)
