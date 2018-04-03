@@ -4246,11 +4246,11 @@ class Window(QtGui.QMainWindow):
                 #TODO include len for linked locs: (detections)
                 if hasattr(locs, 'z'):
                     loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy','z']].copy()
-                    loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5], row[6])  for index, row in enumerate(loctxt)]
-                    #For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon]
+                    loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5], row[6], (row[7]+row[8])/2*pixelsize)  for index, row in enumerate(loctxt)]
+                    #For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm]
                     with open(path, 'wb') as f:
-                        f.write(b'id,frame,x [nm],y [nm],z [nm],sigma1 [nm],sigma2 [nm],intensity [photon],offset [photon] \r\n')
-                        np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i'], newline='\r\n', delimiter=',')
+                        f.write(b'id,frame,x [nm],y [nm],z [nm],sigma1 [nm],sigma2 [nm],intensity [photon],offset [photon],uncertainty_xy [nm] \r\n')
+                        np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i','%.2f'], newline='\r\n', delimiter=',')
                         print('File saved to {}'.format(path))
                 else:
                     loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy']].copy()
