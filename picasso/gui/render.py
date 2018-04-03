@@ -3981,6 +3981,8 @@ class Window(QtGui.QMainWindow):
         export_txt_chimera_action.triggered.connect(self.export_xyz_chimera)
         export_3d_visp_action = file_menu.addAction('Export as .3d for ViSP')
         export_3d_visp_action.triggered.connect(self.export_3d_visp)
+        export_ts_action = file_menu.addAction('Export as .csv for ThunderSTORM')
+        export_ts_action.triggered.connect(self.export_ts)
 
         view_menu = self.menu_bar.addMenu('View')
         display_settings_action = view_menu.addAction('Display settings')
@@ -4231,6 +4233,33 @@ class Window(QtGui.QMainWindow):
                 tempdata = np.array(tempdata_xyz.tolist())
                 tempdata_channel = np.hstack((tempdata,np.zeros((tempdata.shape[0],1))+channel))
                 np.savetxt(path, tempdata_channel, fmt=['%.1f','%.1f','%.1f','%.1f','%i'], newline='\r\n', delimiter='\t')
+
+    def export_ts(self):
+        channel = self.view.get_channel('Save localizations as csv for ThunderSTORM')
+        pixelsize = self.display_settings_dialog.pixelsize.value()
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '.csv'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save csv to', out_path, filter='*.csv')
+            if path:
+                locs = self.view.locs[channel]
+                #TODO include len for linked locs: (detections)
+                if hasattr(locs, 'z'):
+                    loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy','z']].copy()
+                    loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5], row[6])  for index, row in enumerate(loctxt)]
+                    #For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon]
+                    with open(path, 'wb') as f:
+                        f.write(b'id,frame,x [nm],y [nm],z [nm],sigma1 [nm],sigma2 [nm],intensity [photon],offset [photon] \r\n')
+                        np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i'], newline='\r\n', delimiter=',')
+                        print('File saved to {}'.format(path))
+                else:
+                    loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy']].copy()
+                    loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, (row[3]+row[4])/2*pixelsize, row[5], row[6], (row[7]+row[8])/2*pixelsize)  for index, row in enumerate(loctxt)]
+                    #For 2D: id, frame, x[nm], y[nm], sigma [nm], intensity[Photons], offset[photon], uncertainty_xy [nm]
+                    with open(path, 'wb') as f:
+                        f.write(b'id,frame,x [nm],y [nm],sigma [nm],intensity [photon],offset [photon],uncertainty_xy [nm] \r\n')
+                        np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.i','%.i','%.2f'], newline='\r\n', delimiter=',')
+                        print('File saved to {}'.format(path))
 
     def load_picks(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
