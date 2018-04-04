@@ -1681,6 +1681,13 @@ class View(QtGui.QLabel):
         except io.NoMetadataFileError:
             return
         locs = lib.ensure_sanity(locs, info)
+
+        #update pixelsize
+        for element in info:
+            if 'Picasso Localize' in element.values():
+                if 'Pixelsize' in element:
+                    self.window.display_settings_dialog.pixelsize.setValue(element['Pixelsize'])
+
         self.locs.append(locs)
         self.infos.append(info)
         self.locs_paths.append(path)
