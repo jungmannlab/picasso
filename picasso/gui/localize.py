@@ -720,12 +720,20 @@ class Window(QtGui.QMainWindow):
     def load_user_settings(self):
         settings = io.load_user_settings()
         pwd = []
+        box_size = []
+        gradient = []
         try:
             pwd = settings['Localize']['PWD']
+            box_size = settings['Localize']['box_size']
+            gradient = settings['Localize']['gradient']
         except:
             pass
         if len(pwd) == 0:
             pwd = []
+        if type(box_size) is int:
+            self.parameters_dialog.box_spinbox.setValue(box_size)
+        if type(gradient) is int:
+            self.parameters_dialog.mng_slider.setValue(gradient)
 
         self.pwd = pwd
 
@@ -734,9 +742,10 @@ class Window(QtGui.QMainWindow):
         settings = io.load_user_settings()
         if self.movie_path != []:
             settings['Localize']['PWD'] = os.path.dirname(self.movie_path)
+            settings['Localize']['box_size'] = self.parameters_dialog.box_spinbox.value()
+            settings['Localize']['gradient'] = self.parameters_dialog.mng_slider.value()
         io.save_user_settings(settings)
         QtGui.qApp.closeAllWindows()
-
 
     def init_menu_bar(self):
         menu_bar = self.menuBar()
