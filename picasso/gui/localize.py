@@ -528,6 +528,8 @@ class ParametersDialog(QtGui.QDialog):
         cam_config = CONFIG['Cameras'][camera]
         if 'Baseline' in cam_config:
             self.baseline.setValue(cam_config['Baseline'])
+        if 'DefaultGain' in cam_config:
+            self.gain.setValue(cam_config['DefaultGain'])
         if 'Pixelsize' in cam_config:
             self.pixelsize.setValue(cam_config['Pixelsize'])
         self.update_sensitivity()
