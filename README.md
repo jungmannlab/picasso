@@ -2,11 +2,7 @@
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our Nature Protocols publication (https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html).
 
 ## Installation
-The following one-click installer files for Windows are currently available:
-* Latest nightly build (Commit #970 in the dev branch): [970](http://bit.ly/2Eq8ZCZ)
-* Latest nightly build with gpu support for CUDA devices (Commit #970 in the dev branch): [970-GPU](http://bit.ly/2IzHQzS)
-* Stable Nature Protocols version: [NP](http://bit.ly/2IAwtYD)
-For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X) please follow the advanced installation instructions.
+Download and run the one-click installer file for Windows from [http://www.jungmannlab.org/](http://www.jungmannlab.org). Note that this is the Picasso version presented in the Nature Protocols publication. Feel free to reach out via picasso@jungmannlab.org to get the latest installer of the current commit. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X) please follow the advanced installation instructions.
 
 ### Advanced installation for Python programmers
 As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso's internal routines in custom Python programs. For windows, one is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
