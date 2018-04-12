@@ -4249,42 +4249,42 @@ class Window(QtGui.QMainWindow):
             out_path = base + '.csv'
             path = QtGui.QFileDialog.getSaveFileName(self, 'Save csv to', out_path, filter='*.csv')
             if path:
+                stddummy = 0
                 locs = self.view.locs[channel]
-                #TODO include len for linked locs: (detections)
                 if hasattr(locs, 'len'): #Linked locs -> add detections
                     if hasattr(locs, 'z'):
                         loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy','z','len']].copy()
-                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5], row[6], (row[7]+row[8])/2*pixelsize,row[10])  for index, row in enumerate(loctxt)]
+                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5],  row[6], stddummy, (row[7]+row[8])/2*pixelsize,row[10])  for index, row in enumerate(loctxt)]
                         #For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm], len
                         with open(path, 'wb') as f:
-                            f.write(b'id,frame,x [nm],y [nm],z [nm],sigma1 [nm],sigma2 [nm],intensity [photon],offset [photon],uncertainty_xy [nm],detections\r\n')
-                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i','%.2f','%.i'], newline='\r\n', delimiter=',')
+                            f.write(b'\"id\",\"frame\"\",\"\"x [nm]\"\",\"\"y [nm]\"\",\"\"z [nm]\"\",\"\"sigma1 [nm]\"\",\"\"sigma2 [nm]\",\"intensity [photon]\",\"offset [photon]\",\"bkgstd [photon]\",\"uncertainty_xy [nm]\",\"detections\"\r\n')
+                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i','%.i','%.2f','%.i'], newline='\r\n', delimiter=',')
                             print('File saved to {}'.format(path))
                     else:
                         loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy','len']].copy()
-                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, (row[3]+row[4])/2*pixelsize, row[5], row[6], (row[7]+row[8])/2*pixelsize,row[9])  for index, row in enumerate(loctxt)]
+                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, (row[3]+row[4])/2*pixelsize, row[5],  row[6], stddummy, (row[7]+row[8])/2*pixelsize, row[9])  for index, row in enumerate(loctxt)]
                         #For 2D: id, frame, x[nm], y[nm], sigma [nm], intensity[Photons], offset[photon], uncertainty_xy [nm], len
                         with open(path, 'wb') as f:
-                            f.write(b'id,frame,x [nm],y [nm],sigma [nm],intensity [photon],offset [photon],uncertainty_xy [nm],detections\r\n')
-                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.i','%.i','%.2f','%.i'], newline='\r\n', delimiter=',')
+                            f.write(b'\'id\",\"frame\",\"x [nm]\",\"y [nm]\",\"sigma [nm]\",\"intensity [photon]\",\"offset [photon]\",\"bkgstd [photon]\",\"uncertainty_xy [nm]\",\"detections\"\r\n')
+                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.i','%.i','%.i','%.2f','%.i'], newline='\r\n', delimiter=',')
                             print('File saved to {}'.format(path))
 
                 else:
                     if hasattr(locs, 'z'):
                         loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy','z']].copy()
-                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5], row[6], (row[7]+row[8])/2*pixelsize)  for index, row in enumerate(loctxt)]
+                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5], row[6], stddummy, (row[7]+row[8])/2*pixelsize)  for index, row in enumerate(loctxt)]
                         #For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm]
                         with open(path, 'wb') as f:
-                            f.write(b'id,frame,x [nm],y [nm],z [nm],sigma1 [nm],sigma2 [nm],intensity [photon],offset [photon],uncertainty_xy [nm]\r\n')
-                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i','%.2f'], newline='\r\n', delimiter=',')
+                            f.write(b'\"id\",\"frame\",\"x [nm]\",\"y [nm]\",\"z [nm]\",\"sigma1 [nm]\",\"sigma2 [nm]\",\"intensity [photon]\",\"offset [photon]\",\"bkgstd [photon]\",\"uncertainty_xy [nm]\"\r\n')
+                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i','%.i','%.2f'], newline='\r\n', delimiter=',')
                             print('File saved to {}'.format(path))
                     else:
                         loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy']].copy()
-                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, (row[3]+row[4])/2*pixelsize, row[5], row[6], (row[7]+row[8])/2*pixelsize)  for index, row in enumerate(loctxt)]
+                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, (row[3]+row[4])/2*pixelsize, row[5], row[6], stddummy,  (row[7]+row[8])/2*pixelsize)  for index, row in enumerate(loctxt)]
                         #For 2D: id, frame, x[nm], y[nm], sigma [nm], intensity[Photons], offset[photon], uncertainty_xy [nm]
                         with open(path, 'wb') as f:
-                            f.write(b'id,frame,x [nm],y [nm],sigma [nm],intensity [photon],offset [photon],uncertainty_xy [nm]\r\n')
-                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.i','%.i','%.2f'], newline='\r\n', delimiter=',')
+                            f.write(b'\"id\",\"frame\",\"x [nm]\",\"y [nm]\",\"sigma [nm]\",\"intensity [photon]\",\"offset [photon]\",\"bkgstd [photon]\",\"uncertainty_xy [nm]\"\r\n')
+                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.i','%.i','%.i','%.2f'], newline='\r\n', delimiter=',')
                             print('File saved to {}'.format(path))
 
     def load_picks(self):
