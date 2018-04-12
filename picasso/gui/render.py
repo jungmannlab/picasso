@@ -29,7 +29,7 @@ from PyQt4 import QtCore, QtGui
 
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
-
+from mpl_toolkits.mplot3d import axes3d
 from collections import Counter
 
 from tqdm import tqdm
