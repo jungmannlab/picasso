@@ -62,6 +62,8 @@ def _csv2hdf(path, pixelsize):
 
             try: 
                 frames = data['frame'].astype(int)
+                #make sure frames start at zero:
+                frames = frames -_np.min(frames)
                 x = data['x_nm']/pixelsize
                 y = data['y_nm']/pixelsize
                 photons = data['intensity_photon'].astype(int)
