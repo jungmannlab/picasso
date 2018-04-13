@@ -3630,19 +3630,30 @@ class View(QtGui.QLabel):
         ''' Undrifts with rcc. '''
         channel = self.get_channel('Undrift')
         if channel is not None:
-            segmentation, ok = QtGui.QInputDialog.getInt(self, 'Undrift by RCC', 'Segmentation:', 1000)
+            info = self.infos[channel]
+            n_frames = info[0]['Frames']
+            if n_frames < 1000:
+                default_segmentation = int(n_frames/4)
+            else:
+                default_segmentation = 1000
+            segmentation, ok = QtGui.QInputDialog.getInt(self, 'Undrift by RCC', 'Segmentation:', default_segmentation)
+            
             if ok:
                 locs = self.locs[channel]
                 info = self.infos[channel]
                 n_segments = render.n_segments(info, segmentation)
                 seg_progress = lib.ProgressDialog('Generating segments', 0, n_segments, self)
                 n_pairs = int(n_segments * (n_segments - 1) / 2)
-                rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
-                drift, _ = postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
-                self.locs[channel] = lib.ensure_sanity(locs, info)
-                self.index_blocks[channel] = None
-                self.add_drift(channel, drift)
-                self.update_scene()
+                try:
+                    rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
+                    drift, _ = postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
+                    self.locs[channel] = lib.ensure_sanity(locs, info)
+                    self.index_blocks[channel] = None
+                    self.add_drift(channel, drift)
+                    self.update_scene()
+                except:
+                    QtGui.QMessageBox.information(self,'RCC Error','RCC failed. Consider changing segmentation and make sure there are enough locs per frame.')
+
 
     def undrift_from_picked(self):
         channel = self.get_channel('Undrift from picked')
