@@ -1261,7 +1261,10 @@ class Window(QtGui.QMainWindow):
                 self.save_locs(path)
 
     def localize(self, calibrate_z=False):
-        self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
+        if self.identifications != [] and calibrate_z == True:
+            self.fit(calibrate_z=calibrate_z)
+        else:
+            self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
 
 
 class IdentificationWorker(QtCore.QThread):
