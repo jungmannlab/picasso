@@ -912,8 +912,7 @@ class Window(QtGui.QMainWindow):
             self._picks = regions['Centers']
             maxframes = int(self.info[0]['Frames'])
             #ask for drift correction
-
-            driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', dir = os.path.dirname(path), filter='*.txt')
+            driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', directory = os.path.dirname(path), filter='*.txt')
             if driftpath:
                 drift = np.genfromtxt(driftpath)
             data = []
