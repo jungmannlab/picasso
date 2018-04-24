@@ -1106,8 +1106,8 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.y_min = 0
         self.x_max = info['Width']
         self.y_max = info['Height']
-        #self.x_min,self.x_max = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
-        #self.y_min,self.y_max = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
+        self.x_min_d,self.x_max_d = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
+        self.y_min_d,self.y_max_d = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
         self.update_plots()
 
     def generate_image(self):
@@ -1137,7 +1137,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         if path:
             self.mask = np.load(path)
             self.saveMaskButton.setEnabled(True)
-            self.update_plots()
+            self.update_plots(newMask = False)
 
     def mask_image(self):
         mask = np.zeros_like(self.H_blur)
@@ -1145,61 +1145,72 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.mask = mask
         self.saveMaskButton.setEnabled(True)
 
-    def update_plots(self):
-        if self.mask_oversampling.value() == self.oversampling and self.cached_oversampling == 1:
-            self.cached_oversampling = 1
-        else:
-            self.oversampling = self.mask_oversampling.value()
-            self.cached_oversampling = 0
+    def update_plots(self, newMask = True):
+        if newMask:
+            if self.mask_oversampling.value() == self.oversampling and self.cached_oversampling == 1:
+                self.cached_oversampling = 1
+            else:
+                self.oversampling = self.mask_oversampling.value()
+                self.cached_oversampling = 0
 
-        if self.mask_blur.value() == self.blur and self.cached_blur == 1:
-            self.cached_blur = 1
-        else:
-            self.blur = self.mask_blur.value()
-            self.cached_oversampling = 0
+            if self.mask_blur.value() == self.blur and self.cached_blur == 1:
+                self.cached_blur = 1
+            else:
+                self.blur = self.mask_blur.value()
+                self.cached_oversampling = 0
 
-        if self.mask_tresh.value() == self.thresh and self.cached_thresh == 1:
-            self.cached_thresh = 1
-        else:
-            self.tresh = self.mask_tresh.value()
-            self.cached_thresh = 0
+            if self.mask_tresh.value() == self.thresh and self.cached_thresh == 1:
+                self.cached_thresh = 1
+            else:
+                self.tresh = self.mask_tresh.value()
+                self.cached_thresh = 0
 
-        if self.cached_oversampling:
+            if self.cached_oversampling:
+                pass
+            else:
+                self.generate_image()
+                self.blur_image()
+                self.mask_image()
+                self.cached_oversampling = 1
+                self.cached_blur = 1
+                self.cached_thresh = 1
+
+            if self.cached_blur:
+                pass
+            else:
+                self.blur_image()
+                self.mask_image()
+                self.cached_blur = 1
+                self.cached_thresh = 1
+
+            if self.cached_thresh:
+                pass
+            else:
+                self.mask_image()
+                self.cached_thresh = 1
+        else:
             pass
-        else:
-            self.generate_image()
-            self.blur_image()
-            self.mask_image()
-            self.cached_oversampling = 1
-            self.cached_blur = 1
-            self.cached_thresh = 1
-
-        if self.cached_blur:
-            pass
-        else:
-            self.blur_image()
-            self.mask_image()
-            self.cached_blur = 1
-            self.cached_thresh = 1
-
-        if self.cached_thresh:
-            pass
-        else:
-            self.mask_image()
-            self.cached_thresh = 1
 
         ax1 = self.figure.add_subplot(141, title='Original')
         ax1.imshow(self.H, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax1.grid(False)
+        ax1.set_xlim(self.x_min_d, self.x_max_d)
+        ax1.set_ylim(self.y_min_d, self.y_max_d)
         ax2 = self.figure.add_subplot(142, title='Blurred')
         ax2.imshow(self.H_blur, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax2.grid(False)
+        ax2.set_xlim(self.x_min_d, self.x_max_d)
+        ax2.set_ylim(self.y_min_d, self.y_max_d)
         ax3 = self.figure.add_subplot(143, title='Mask')
         ax3.imshow(self.mask, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax3.grid(False)
+        ax3.set_xlim(self.x_min_d, self.x_max_d)
+        ax3.set_ylim(self.y_min_d, self.y_max_d)
         ax4 = self.figure.add_subplot(144, title='Masked image')
         ax4.imshow(np.zeros_like(self.H), interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax4.grid(False)
+        ax4.set_xlim(self.x_min_d, self.x_max_d)
+        ax4.set_ylim(self.y_min_d, self.y_max_d)
         self.canvas.draw()
 
 
