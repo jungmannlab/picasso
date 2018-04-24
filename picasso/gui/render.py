@@ -1067,13 +1067,22 @@ class MaskSettingsDialog(QtGui.QDialog):
         mask_grid.addWidget(self.canvas,3,0,1,2)
 
         self.maskButton = QtGui.QPushButton('Mask')
-        mask_grid.addWidget(self.maskButton, 4, 0)
+        mask_grid.addWidget(self.maskButton, 5, 0)
         self.maskButton.clicked.connect(self.mask_locs)
 
         self.saveButton = QtGui.QPushButton('Save')
         self.saveButton.setEnabled(False)
         self.saveButton.clicked.connect(self.save_locs)
-        mask_grid.addWidget(self.saveButton, 4, 1)
+        mask_grid.addWidget(self.saveButton, 5, 1)
+
+        self.loadMaskButton = QtGui.QPushButton('Load Mask')
+        self.loadMaskButton.clicked.connect(self.load_mask)
+        mask_grid.addWidget(self.loadMaskButton, 4, 0)
+
+        self.saveMaskButton = QtGui.QPushButton('Save Mask')
+        self.saveMaskButton.setEnabled(False)
+        self.saveMaskButton.clicked.connect(self.save_mask)
+        mask_grid.addWidget(self.saveMaskButton, 4, 1)
 
         self.locs = []
         self.paths = []
@@ -1092,8 +1101,13 @@ class MaskSettingsDialog(QtGui.QDialog):
     def init_dialog(self):
         self.show()
         locs = self.locs[0]
-        self.x_min,self.x_max = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
-        self.y_min,self.y_max = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
+        info = self.infos[0][0]
+        self.x_min = 0
+        self.y_min = 0
+        self.x_max = info['Width']
+        self.y_max = info['Height']
+        #self.x_min,self.x_max = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
+        #self.y_min,self.y_max = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
         self.update_plots()
 
     def generate_image(self):
@@ -1110,10 +1124,26 @@ class MaskSettingsDialog(QtGui.QDialog):
         H_blur = H_blur/np.max(H_blur)
         self.H_blur = H_blur
 
+    def save_mask(self):
+        #Open dialog to save mask
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save mask to', filter='*.npy')
+        if path:
+            np.save(path, self.mask)
+
+
+    def load_mask(self):
+        #Save dialog to load mask
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Load mask', filter='*.npy')
+        if path:
+            self.mask = np.load(path)
+            self.saveMaskButton.setEnabled(True)
+            self.update_plots()
+
     def mask_image(self):
         mask = np.zeros_like(self.H_blur)
         mask[self.H_blur>self.tresh]=1
         self.mask = mask
+        self.saveMaskButton.setEnabled(True)
 
     def update_plots(self):
         if self.mask_oversampling.value() == self.oversampling and self.cached_oversampling == 1:
