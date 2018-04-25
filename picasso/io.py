@@ -106,12 +106,16 @@ def load_info(path, qt_parent=None):
 
 def load_user_settings():
     settings_filename = _user_settings_filename()
+    settings = None
     try:
         settings_file = open(settings_filename, 'r')
     except FileNotFoundError:
         return _lib.AutoDict()
-    settings = _yaml.load(settings_file)
-    settings_file.close()
+    try:
+        settings = _yaml.load(settings_file)
+        settings_file.close()
+    except:
+        print('Error reading user settings, Reset.')
     if not settings:
         return _lib.AutoDict()
     return _lib.AutoDict(settings)
