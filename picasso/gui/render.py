@@ -1136,7 +1136,13 @@ class MaskSettingsDialog(QtGui.QDialog):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Load mask', filter='*.npy')
         if path:
             self.mask = np.load(path)
+            #adjust oversampling for mask
+            oversampling = int((self.mask.shape[0]+1)/self.y_max)
+            self.oversampling = oversampling
+            self.mask_oversampling.setValue(oversampling)
             self.saveMaskButton.setEnabled(True)
+            self.generate_image()
+            self.blur_image()
             self.update_plots(newMask = False)
 
     def mask_image(self):
