@@ -4,7 +4,7 @@
 
     Graphical user interface for rendering localization images
 
-    :author: Joerg Schnitzbauer & Maximilian Strauss, 2017
+    :author: Joerg Schnitzbauer & Maximilian Strauss, 2017-2018
     :copyright: Copyright (c) 2017 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 import os
@@ -23,15 +23,13 @@ import numpy as np
 import yaml
 from matplotlib.backends.backend_qt4agg import (FigureCanvasQTAgg,
                                                 NavigationToolbar2QT)
-from mpl_toolkits.mplot3d import Axes3D
-
 from scipy.ndimage.filters import gaussian_filter
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
 
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
-
+from mpl_toolkits.mplot3d import axes3d
 from collections import Counter
 
 from tqdm import tqdm
@@ -45,7 +43,6 @@ INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 10 / 7
 N_GROUP_COLORS = 8
 N_Z_COLORS = 32
-
 
 matplotlib.rcParams.update({'axes.titlesize': 'large'})
 
@@ -81,8 +78,7 @@ def kinetic_rate_from_fit(data):
         rate = np.nanmean(data)
     return rate
 
-
-estimate_kinetic_rate = kinetic_rate_from_fit  # np.mean
+estimate_kinetic_rate = kinetic_rate_from_fit
 
 
 class FloatEdit(QtGui.QLineEdit):
@@ -179,7 +175,6 @@ class ApplyDialog(QtGui.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
-    # static method to create the dialog and return (date, time, accepted)
     @staticmethod
     def getCmd(parent=None):
         dialog = ApplyDialog(parent)
@@ -193,6 +188,11 @@ class ApplyDialog(QtGui.QDialog):
         self.label.setText(str(vars))
 
 class DatasetDialog(QtGui.QDialog):
+    """
+    A class to handle the Dataset Dialog:
+    Tick and Untick, set colors and set relative intensity in display
+
+    """
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -218,17 +218,11 @@ class DatasetDialog(QtGui.QDialog):
         colordrop = QtGui.QComboBox(self)
         colordrop.setEditable(True)
         colordrop.lineEdit().setMaxLength(7)
-        colordrop.addItem("auto")
-        colordrop.addItem("red")
-        colordrop.addItem("green")
-        colordrop.addItem("blue")
-        colordrop.addItem("gray")
-        colordrop.addItem("cyan")
-        colordrop.addItem("magenta")
-        colordrop.addItem("yellow")
-        #self.myDropDown = QComboBox()
-        #self.myDropDown.setEditable(True)
-        #self.myDropDown.lineEdit().setMaxLength(45)
+
+        #Add default colors
+        for default_color in ['auto','red','green','blue','gray','cyan','magenta','yellow']:
+            colordrop.addItem(default_color)
+
         intensity = QtGui.QSpinBox(self)
         intensity.setValue(1)
         colordisp = QtGui.QLabel('      ')
@@ -509,10 +503,6 @@ class PlotDialogIso(QtGui.QDialog):
             ax4.set_title('YZ')
             ax4.set_axis_bgcolor('black')
 
-
-
-
-
         result = dialog.exec_()
 
         return dialog.result
@@ -544,11 +534,8 @@ class ClusterDialog(QtGui.QDialog):
 
         self.layout_grid.addWidget(self.n_clusters_spin,10,4,1,1)
 
-
         self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
-
         self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
-
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
 
         self.start_clusters = 0
@@ -708,9 +695,7 @@ class ClusterDialog_2D(QtGui.QDialog):
 
 
         self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
-
         self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
-
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(self.on_cancel)
 
         self.start_clusters = 0
@@ -807,10 +792,6 @@ class ClusterDialog_2D(QtGui.QDialog):
         ax2.set_xlabel('X [nm]')
         ax2.set_ylabel('Y [nm]')
 
-        #ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-        #ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-        #plt.gca().patch.set_facecolor('black')
-
         result = dialog.exec_()
 
         checks = [not _.isChecked() for _ in dialog.checks]
@@ -896,8 +877,6 @@ class InfoDialog(QtGui.QDialog):
         display_grid.addWidget(QtGui.QLabel('View width / height:'), 3, 0)
         self.wh_label = QtGui.QLabel()
         display_grid.addWidget(self.wh_label, 3, 1)
-
-
 
         # Movie
         movie_groupbox = QtGui.QGroupBox('Movie')
@@ -1051,7 +1030,6 @@ class MaskSettingsDialog(QtGui.QDialog):
         vbox.addWidget(mask_groupbox)
         mask_grid = QtGui.QGridLayout(mask_groupbox)
 
-
         mask_grid.addWidget(QtGui.QLabel('Oversampling'), 0, 0)
         self.mask_oversampling = QtGui.QSpinBox()
         self.mask_oversampling.setRange(0, 999999)
@@ -1089,13 +1067,22 @@ class MaskSettingsDialog(QtGui.QDialog):
         mask_grid.addWidget(self.canvas,3,0,1,2)
 
         self.maskButton = QtGui.QPushButton('Mask')
-        mask_grid.addWidget(self.maskButton, 4, 0)
+        mask_grid.addWidget(self.maskButton, 5, 0)
         self.maskButton.clicked.connect(self.mask_locs)
 
         self.saveButton = QtGui.QPushButton('Save')
         self.saveButton.setEnabled(False)
         self.saveButton.clicked.connect(self.save_locs)
-        mask_grid.addWidget(self.saveButton, 4, 1)
+        mask_grid.addWidget(self.saveButton, 5, 1)
+
+        self.loadMaskButton = QtGui.QPushButton('Load Mask')
+        self.loadMaskButton.clicked.connect(self.load_mask)
+        mask_grid.addWidget(self.loadMaskButton, 4, 0)
+
+        self.saveMaskButton = QtGui.QPushButton('Save Mask')
+        self.saveMaskButton.setEnabled(False)
+        self.saveMaskButton.clicked.connect(self.save_mask)
+        mask_grid.addWidget(self.saveMaskButton, 4, 1)
 
         self.locs = []
         self.paths = []
@@ -1111,12 +1098,16 @@ class MaskSettingsDialog(QtGui.QDialog):
 
         self.mask_exists = 0
 
-
     def init_dialog(self):
         self.show()
         locs = self.locs[0]
-        self.x_min,self.x_max = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
-        self.y_min,self.y_max = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
+        info = self.infos[0][0]
+        self.x_min = 0
+        self.y_min = 0
+        self.x_max = info['Width']
+        self.y_max = info['Height']
+        self.x_min_d,self.x_max_d = [np.floor(np.min(locs['x'])),np.ceil(np.max(locs['x']))]
+        self.y_min_d,self.y_max_d = [np.floor(np.min(locs['y'])),np.ceil(np.max(locs['y']))]
         self.update_plots()
 
     def generate_image(self):
@@ -1133,66 +1124,99 @@ class MaskSettingsDialog(QtGui.QDialog):
         H_blur = H_blur/np.max(H_blur)
         self.H_blur = H_blur
 
+    def save_mask(self):
+        #Open dialog to save mask
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save mask to', filter='*.npy')
+        if path:
+            np.save(path, self.mask)
+
+
+    def load_mask(self):
+        #Save dialog to load mask
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Load mask', filter='*.npy')
+        if path:
+            self.mask = np.load(path)
+            #adjust oversampling for mask
+            oversampling = int((self.mask.shape[0]+1)/self.y_max)
+            self.oversampling = oversampling
+            self.mask_oversampling.setValue(oversampling)
+            self.saveMaskButton.setEnabled(True)
+            self.generate_image()
+            self.blur_image()
+            self.update_plots(newMask = False)
+
     def mask_image(self):
         mask = np.zeros_like(self.H_blur)
         mask[self.H_blur>self.tresh]=1
         self.mask = mask
+        self.saveMaskButton.setEnabled(True)
 
-    def update_plots(self):
-        if self.mask_oversampling.value() == self.oversampling and self.cached_oversampling == 1:
-            self.cached_oversampling = 1
+    def update_plots(self, newMask = True):
+        if newMask:
+            if self.mask_oversampling.value() == self.oversampling and self.cached_oversampling == 1:
+                self.cached_oversampling = 1
+            else:
+                self.oversampling = self.mask_oversampling.value()
+                self.cached_oversampling = 0
+
+            if self.mask_blur.value() == self.blur and self.cached_blur == 1:
+                self.cached_blur = 1
+            else:
+                self.blur = self.mask_blur.value()
+                self.cached_oversampling = 0
+
+            if self.mask_tresh.value() == self.thresh and self.cached_thresh == 1:
+                self.cached_thresh = 1
+            else:
+                self.tresh = self.mask_tresh.value()
+                self.cached_thresh = 0
+
+            if self.cached_oversampling:
+                pass
+            else:
+                self.generate_image()
+                self.blur_image()
+                self.mask_image()
+                self.cached_oversampling = 1
+                self.cached_blur = 1
+                self.cached_thresh = 1
+
+            if self.cached_blur:
+                pass
+            else:
+                self.blur_image()
+                self.mask_image()
+                self.cached_blur = 1
+                self.cached_thresh = 1
+
+            if self.cached_thresh:
+                pass
+            else:
+                self.mask_image()
+                self.cached_thresh = 1
         else:
-            self.oversampling = self.mask_oversampling.value()
-            self.cached_oversampling = 0
-
-        if self.mask_blur.value() == self.blur and self.cached_blur == 1:
-            self.cached_blur = 1
-        else:
-            self.blur = self.mask_blur.value()
-            self.cached_oversampling = 0
-
-        if self.mask_tresh.value() == self.thresh and self.cached_thresh == 1:
-            self.cached_thresh = 1
-        else:
-            self.tresh = self.mask_tresh.value()
-            self.cached_thresh = 0
-
-        if self.cached_oversampling:
             pass
-        else:
-            self.generate_image()
-            self.blur_image()
-            self.mask_image()
-            self.cached_oversampling = 1
-            self.cached_blur = 1
-            self.cached_thresh = 1
-
-        if self.cached_blur:
-            pass
-        else:
-            self.blur_image()
-            self.mask_image()
-            self.cached_blur = 1
-            self.cached_thresh = 1
-
-        if self.cached_thresh:
-            pass
-        else:
-            self.mask_image()
-            self.cached_thresh = 1
 
         ax1 = self.figure.add_subplot(141, title='Original')
         ax1.imshow(self.H, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax1.grid(False)
+        ax1.set_xlim(self.x_min_d, self.x_max_d)
+        ax1.set_ylim(self.y_min_d, self.y_max_d)
         ax2 = self.figure.add_subplot(142, title='Blurred')
         ax2.imshow(self.H_blur, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax2.grid(False)
+        ax2.set_xlim(self.x_min_d, self.x_max_d)
+        ax2.set_ylim(self.y_min_d, self.y_max_d)
         ax3 = self.figure.add_subplot(143, title='Mask')
         ax3.imshow(self.mask, interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax3.grid(False)
+        ax3.set_xlim(self.x_min_d, self.x_max_d)
+        ax3.set_ylim(self.y_min_d, self.y_max_d)
         ax4 = self.figure.add_subplot(144, title='Masked image')
         ax4.imshow(np.zeros_like(self.H), interpolation='nearest', origin='low',extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]])
         ax4.grid(False)
+        ax4.set_xlim(self.x_min_d, self.x_max_d)
+        ax4.set_ylim(self.y_min_d, self.y_max_d)
         self.canvas.draw()
 
 
@@ -1554,8 +1578,6 @@ class SlicerDialog(QtGui.QDialog):
         slicer_grid.addWidget(self.fullCheck,5,0)
         slicer_grid.addWidget(self.exportButton,6,0)
 
-
-
     def initialize(self):
         self.calculate_histogram()
         self.show()
@@ -1585,7 +1607,6 @@ class SlicerDialog(QtGui.QDialog):
 
         self.slicer_cache = {}
 
-
     def on_pick_slice_changed(self):
         self.slicer_cache = {}
         if len(self.bins) < 3: #in case there should be only 1 bin
@@ -1612,7 +1633,6 @@ class SlicerDialog(QtGui.QDialog):
         self.window.view.update_scene_slicer()
 
     def exportStack(self):
-
         try:
             base, ext = os.path.splitext(self.window.view.locs_paths[0])
         except AttributeError:
@@ -1708,6 +1728,13 @@ class View(QtGui.QLabel):
         except io.NoMetadataFileError:
             return
         locs = lib.ensure_sanity(locs, info)
+
+        #update pixelsize
+        for element in info:
+            if 'Picasso Localize' in element.values():
+                if 'Pixelsize' in element:
+                    self.window.display_settings_dialog.pixelsize.setValue(element['Pixelsize'])
+
         self.locs.append(locs)
         self.infos.append(info)
         self.locs_paths.append(path)
@@ -2168,7 +2195,7 @@ class View(QtGui.QLabel):
         else:
             oversampling = float(self.window.display_settings_dialog.oversampling.value())
             if self.window.display_settings_dialog.high_oversampling.isChecked():
-                print('High oversampling')
+                pass
             else:
                 if oversampling > optimal_oversampling:
                     QtGui.QMessageBox.information(self,
@@ -2342,7 +2369,6 @@ class View(QtGui.QLabel):
 
 
     def plot3d(self):
-        print('Plot3d')
         channel = self.get_channel3d('Undrift from picked')
         if channel is not None:
             fig = plt.figure()
@@ -2351,7 +2377,6 @@ class View(QtGui.QLabel):
             ax.set_title('3d view of pick')
 
             if channel is (len(self.locs_paths)):
-                print('Multichannel')
                 n_channels = (len(self.locs_paths))
                 colors = get_colors(n_channels)
 
@@ -2388,7 +2413,6 @@ class View(QtGui.QLabel):
             fig.show()
 
     def show_trace(self):
-        print('Show trace')
         channel = self.get_channel('Undrift from picked')
         if channel is not None:
             locs = self.picked_locs(channel)
@@ -2447,8 +2471,6 @@ class View(QtGui.QLabel):
 
 
     def show_fret(self):
-        print('Show fret')
-
         channel_acceptor = self.get_channel(title = 'Select acceptor channel')
         channel_donor = self.get_channel(title = 'Select donor channel')        
 
@@ -2505,19 +2527,19 @@ class View(QtGui.QLabel):
                 reply = msgBox.exec()
 
                 if reply == 0:
-                    print('Accepted')
+                    #Accepted
                     if pick in removelist: removelist.remove(pick)
                 elif reply == 3:
-                    print('Cancel')
+                    # Cancel
                     break
                 elif reply == 2:
-                    print('Back')
+                    # Back
                     if i >= 2:
                         i-= 2
                     else:
                         i = -1
                 else:
-                    print('Discard')
+                    # Discard
                     removelist.append(pick)
 
                 i+=1
@@ -2532,7 +2554,7 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def calculate_fret_dialog(self):
-        print('Calculate FRET')
+        print('Calculating FRET')
         fret_events = []
 
         channel_acceptor = self.get_channel(title = 'Select acceptor channel')
@@ -2570,7 +2592,7 @@ class View(QtGui.QLabel):
 
 
     def show_traces(self):
-        print('Show traces')
+        print('Showing  traces')
         fig = plt.figure(figsize=(5,5))
         fig.canvas.set_window_title("Trace")
         removelist = []
@@ -2632,19 +2654,19 @@ class View(QtGui.QLabel):
                     reply = msgBox.exec()
 
                     if reply == 0:
-                        print('Accepted')
+                        #accepted
                         if pick in removelist: removelist.remove(pick)
                     elif reply == 3:
-                        print('Cancel')
+                        #cancel
                         break
                     elif reply == 2:
-                        print('Back')
+                        #back
                         if i >= 2:
                             i-= 2
                         else:
                             i = -1
                     else:
-                        print('Discard')
+                        #discard
                         removelist.append(pick)
 
                     i+=1
@@ -2659,7 +2681,7 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def show_pick(self):
-        print('Show pick')
+        print('Showing picks...')
         channel = self.get_channel3d('Select Channel')
         fig = plt.figure(figsize=(5,5))
         fig.canvas.set_window_title("Scatterplot of Pick")
@@ -2670,7 +2692,6 @@ class View(QtGui.QLabel):
             colors = get_colors(n_channels)
 
             if channel is (len(self.locs_paths)):
-                print('Combined')
                 all_picked_locs = []
                 for k in range(len(self.locs_paths)):
                     all_picked_locs.append(self.picked_locs(k))
@@ -2710,19 +2731,19 @@ class View(QtGui.QLabel):
                         reply = msgBox.exec()
 
                         if reply == 0:
-                            print('Accepted')
+                            #acepted
                             if pick in removelist: removelist.remove(pick)
                         elif reply == 3:
-                            print('Cancel')
+                            #cancel
                             break
                         elif reply == 2:
-                            print('Back')
+                            #back
                             if i >= 2:
                                 i-= 2
                             else:
                                 i = -1
                         else:
-                            print('Discard')
+                            #discard
                             removelist.append(pick)
 
                         i+=1
@@ -2765,19 +2786,19 @@ class View(QtGui.QLabel):
                         reply = msgBox.exec()
 
                         if reply == 0:
-                            print('Accepted')
+                            #accepted
                             if pick in removelist: removelist.remove(pick)
                         elif reply == 3:
-                            print('Cancel')
+                            #cancel
                             break
                         elif reply == 2:
-                            print('Back')
+                            #back
                             if i >= 2:
                                 i-= 2
                             else:
                                 i = -1
                         else:
-                            print('Discard')
+                            #discard
                             removelist.append(pick)
 
                         i+=1
@@ -2793,7 +2814,7 @@ class View(QtGui.QLabel):
 
 
     def show_pick_3d(self):
-        print('Show pick 3D - new')
+        print('Show pick 3D')
         channel = self.get_channel3d('Show Pick 3D')
         pixelsize = self.window.display_settings_dialog.pixelsize.value()
         removelist = []
@@ -2802,7 +2823,7 @@ class View(QtGui.QLabel):
             colors = get_colors(n_channels)
 
             if channel is (len(self.locs_paths)):
-                print('Combined')
+                #Combined
                 all_picked_locs = []
                 for k in range(len(self.locs_paths)):
                     all_picked_locs.append(self.picked_locs(k))
@@ -2811,11 +2832,11 @@ class View(QtGui.QLabel):
                     for i, pick in enumerate(self._picks):
                         reply = PlotDialog.getParams(all_picked_locs, i, len(self._picks), 0, colors)
                         if reply == 1:
-                            print('Accepted')
+                            pass # accepted
                         elif reply == 2:
                             break
                         else:
-                            print('Discard')
+                            #discard
                             removelist.append(pick)
             else:
                 all_picked_locs = self.picked_locs(channel)
@@ -2825,11 +2846,11 @@ class View(QtGui.QLabel):
 
                         reply = PlotDialog.getParams(all_picked_locs, i, len(self._picks), 1, 1)
                         if reply == 1:
-                            print('Accepted')
+                            pass #accepted
                         elif reply == 2:
                             break
                         else:
-                            print('Discard')
+                            #discard
                             removelist.append(pick)
 
         for pick in removelist:
@@ -2848,7 +2869,7 @@ class View(QtGui.QLabel):
             colors = get_colors(n_channels)
 
             if channel is (len(self.locs_paths)):
-                print('Combined')
+                #combined
                 all_picked_locs = []
                 for k in range(len(self.locs_paths)):
                     all_picked_locs.append(self.picked_locs(k))
@@ -2857,11 +2878,12 @@ class View(QtGui.QLabel):
                     for i, pick in enumerate(self._picks):
                         reply = PlotDialogIso.getParams(all_picked_locs, i, len(self._picks), 0, colors, pixelsize)
                         if reply == 1:
-                            print('Accepted')
+                            pass #accepted
+
                         elif reply == 2:
                             break
                         else:
-                            print('Discard')
+                            discard
                             removelist.append(pick)
             else:
                 all_picked_locs = self.picked_locs(channel)
@@ -2871,11 +2893,12 @@ class View(QtGui.QLabel):
 
                         reply = PlotDialogIso.getParams(all_picked_locs, i, len(self._picks), 1, 1, pixelsize)
                         if reply == 1:
-                            print('Accepted')
+                            pass
+                            #accepted
                         elif reply == 2:
                             break
                         else:
-                            print('Discard')
+                            #discard
                             removelist.append(pick)
 
         for pick in removelist:
@@ -2885,8 +2908,10 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def analyze_cluster(self):
-        print('Analyze cluster')
-
+        """
+        Tool to detect clusters with k-means clustering for later evaluation 
+        """
+        print('Analyzing clusters...')
         channel = self.get_channel3d('Show Pick 3D')
         removelist = []
         saved_locs = []
@@ -2898,7 +2923,7 @@ class View(QtGui.QLabel):
             colors = get_colors(n_channels)
 
             if channel is (len(self.locs_paths)):
-                print('Combined')
+                #Combined
                 all_picked_locs = []
                 for k in range(len(self.locs_paths)):
                     all_picked_locs.append(self.picked_locs(k))
@@ -2910,17 +2935,17 @@ class View(QtGui.QLabel):
                         else:
                             reply = ClusterDialog_2D.getParams(all_picked_locs, i, len(self._picks), 0, colors)
                         if reply == 1:
-                            print('Accepted')
+                            pass #accepted
                         elif reply == 2:
                             break
                         else:
-                            print('Discard')
+                            #discard
                             removelist.append(pick)
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
                     n_clusters, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
-                        'Enter number of clusters:',10)
+                        'Enter inital number of clusters:',10)
 
                     for i, pick in enumerate(self._picks):
                         reply = 3
@@ -3011,7 +3036,6 @@ class View(QtGui.QLabel):
                     block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
                     pick_locs = lib.locs_at(x, y, block_locs, r)
                     locs = stack_arrays(pick_locs, asrecarray=True, usemask=False)
-                    print(len(locs))
                     loccount.append(len(locs))
                     progress.set_value(i)
 
@@ -3035,13 +3059,10 @@ class View(QtGui.QLabel):
 
                 minlocs, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
                     'Enter minimum number of localizations:')
-
                 if ok:
                     maxlocs, ok2 = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
                         'Enter maximum number of localizations:')
                     if ok2:
-                        print(minlocs)
-                        print(maxlocs)
                         progress = lib.ProgressDialog('Removing picks..', 0, len(self._picks)-1, self)
                         progress.set_value(0)
                         progress.show()
@@ -3656,7 +3677,14 @@ class View(QtGui.QLabel):
         ''' Undrifts with rcc. '''
         channel = self.get_channel('Undrift')
         if channel is not None:
-            segmentation, ok = QtGui.QInputDialog.getInt(self, 'Undrift by RCC', 'Segmentation:', 1000)
+            info = self.infos[channel]
+            n_frames = info[0]['Frames']
+            if n_frames < 1000:
+                default_segmentation = int(n_frames/4)
+            else:
+                default_segmentation = 1000
+            segmentation, ok = QtGui.QInputDialog.getInt(self, 'Undrift by RCC', 'Segmentation:', default_segmentation)
+            
             if ok:
                 locs = self.locs[channel]
                 info = self.infos[channel]
@@ -3664,11 +3692,16 @@ class View(QtGui.QLabel):
                 seg_progress = lib.ProgressDialog('Generating segments', 0, n_segments, self)
                 n_pairs = int(n_segments * (n_segments - 1) / 2)
                 rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
-                drift, _ = postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
-                self.locs[channel] = lib.ensure_sanity(locs, info)
-                self.index_blocks[channel] = None
-                self.add_drift(channel, drift)
-                self.update_scene()
+                try:
+                    drift, _ = postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
+                    self.locs[channel] = lib.ensure_sanity(locs, info)
+                    self.index_blocks[channel] = None
+                    self.add_drift(channel, drift)
+                    self.update_scene()
+                except:
+                    QtGui.QMessageBox.information(self,'RCC Error','RCC failed. Consider changing segmentation and make sure there are enough locs per frame.')
+                    rcc_progress.set_value(n_pairs)
+                    self.update_scene()
 
     def undrift_from_picked(self):
         channel = self.get_channel('Undrift from picked')
@@ -4014,9 +4047,8 @@ class Window(QtGui.QMainWindow):
         export_txt_chimera_action.triggered.connect(self.export_xyz_chimera)
         export_3d_visp_action = file_menu.addAction('Export as .3d for ViSP')
         export_3d_visp_action.triggered.connect(self.export_3d_visp)
-
-
-
+        export_ts_action = file_menu.addAction('Export as .csv for ThunderSTORM')
+        export_ts_action.triggered.connect(self.export_ts)
 
         view_menu = self.menu_bar.addMenu('View')
         display_settings_action = view_menu.addAction('Display settings')
@@ -4202,14 +4234,14 @@ class Window(QtGui.QMainWindow):
                     with open(path, 'wb') as f:
                         f.write(b'X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n')
                         np.savetxt(f, loctxt, fmt=['%.2f','%.2f','%.2f','%.i','%.2f','%.i','%.i','%.i','%.i'], newline='\r\n', delimiter='\t')
-                        print('Saving complete.')
+                        print('File saved to {}'.format(path))
                 else:
                     loctxt = locs[['x','y','sx','bg','photons','frame']].copy()
                     loctxt = [(row[0]*pixelsize, row[1]*pixelsize, 1, row[2]*pixelsize, row[3], 1, row[4], row[5]+1)  for row in loctxt]
                     with open(path, 'wb') as f:
                         f.write(b'X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n')
                         np.savetxt(f, loctxt, fmt=['%.2f','%.2f','%.i','%.2f','%.i','%.i','%.i','%.i'], newline='\r\n', delimiter='\t')
-                        print('Saving complete.')
+                        print('File saved to {}'.format(path))
 
     def export_xyz_chimera(self):
         channel = self.view.get_channel('Save localizations as xyz for chimera (molecule,x,y,z)')
@@ -4226,9 +4258,10 @@ class Window(QtGui.QMainWindow):
                     with open(path, 'wb') as f:
                         f.write(b'Molecule export\r\n')
                         np.savetxt(f, loctxt, fmt=['%i','%.5f','%.5f','%.5f'], newline='\r\n', delimiter='\t')
-                        print('Saving complete.')
+                        print('File saved to {}'.format(path))
                 else:
-                        print('Data has no z.')
+                    QtGui.QMessageBox.information(self,'Dataset error','Data has no z. Export skipped.')
+
 
     def export_3d_visp(self):
         channel = self.view.get_channel('Save localizations as xyz for chimera (molecule,x,y,z)')
@@ -4247,10 +4280,7 @@ class Window(QtGui.QMainWindow):
                         np.savetxt(f, locs,fmt=['%.1f', '%.1f', '%.1f', '%.1f', '%d'], newline='\r\n')
                         print('Saving complete.')
                 else:
-                        print('Data has no z.')
-
-
-
+                    QtGui.QMessageBox.information(self,'Dataset error','Data has no z. Export skipped.')
 
     def export_txt_imaris(self):
         channel = self.view.get_channel('Save localizations as txt for IMARIS (x,y,z,frame,channel)')
@@ -4269,6 +4299,52 @@ class Window(QtGui.QMainWindow):
                 tempdata = np.array(tempdata_xyz.tolist())
                 tempdata_channel = np.hstack((tempdata,np.zeros((tempdata.shape[0],1))+channel))
                 np.savetxt(path, tempdata_channel, fmt=['%.1f','%.1f','%.1f','%.1f','%i'], newline='\r\n', delimiter='\t')
+
+    def export_ts(self):
+        channel = self.view.get_channel('Save localizations as csv for ThunderSTORM')
+        pixelsize = self.display_settings_dialog.pixelsize.value()
+        if channel is not None:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + '.csv'
+            path = QtGui.QFileDialog.getSaveFileName(self, 'Save csv to', out_path, filter='*.csv')
+            if path:
+                stddummy = 0
+                locs = self.view.locs[channel]
+                if hasattr(locs, 'len'): #Linked locs -> add detections
+                    if hasattr(locs, 'z'):
+                        loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy','z','len']].copy()
+                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5],  row[6], stddummy, (row[7]+row[8])/2*pixelsize,row[10])  for index, row in enumerate(loctxt)]
+                        #For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm], len
+                        with open(path, 'wb') as f:
+                            f.write(b'\"id\",\"frame\"\",\"\"x [nm]\"\",\"\"y [nm]\"\",\"\"z [nm]\"\",\"\"sigma1 [nm]\"\",\"\"sigma2 [nm]\",\"intensity [photon]\",\"offset [photon]\",\"bkgstd [photon]\",\"uncertainty_xy [nm]\",\"detections\"\r\n')
+                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i','%.i','%.2f','%.i'], newline='\r\n', delimiter=',')
+                            print('File saved to {}'.format(path))
+                    else:
+                        loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy','len']].copy()
+                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, (row[3]+row[4])/2*pixelsize, row[5],  row[6], stddummy, (row[7]+row[8])/2*pixelsize, row[9])  for index, row in enumerate(loctxt)]
+                        #For 2D: id, frame, x[nm], y[nm], sigma [nm], intensity[Photons], offset[photon], uncertainty_xy [nm], len
+                        with open(path, 'wb') as f:
+                            f.write(b'\'id\",\"frame\",\"x [nm]\",\"y [nm]\",\"sigma [nm]\",\"intensity [photon]\",\"offset [photon]\",\"bkgstd [photon]\",\"uncertainty_xy [nm]\",\"detections\"\r\n')
+                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.i','%.i','%.i','%.2f','%.i'], newline='\r\n', delimiter=',')
+                            print('File saved to {}'.format(path))
+
+                else:
+                    if hasattr(locs, 'z'):
+                        loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy','z']].copy()
+                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, row[9], row[3]*pixelsize, row[4]*pixelsize, row[5], row[6], stddummy, (row[7]+row[8])/2*pixelsize)  for index, row in enumerate(loctxt)]
+                        #For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm]
+                        with open(path, 'wb') as f:
+                            f.write(b'\"id\",\"frame\",\"x [nm]\",\"y [nm]\",\"z [nm]\",\"sigma1 [nm]\",\"sigma2 [nm]\",\"intensity [photon]\",\"offset [photon]\",\"bkgstd [photon]\",\"uncertainty_xy [nm]\"\r\n')
+                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.2f','%.2f','%.i','%.i','%.i','%.2f'], newline='\r\n', delimiter=',')
+                            print('File saved to {}'.format(path))
+                    else:
+                        loctxt = locs[['frame','x','y','sx','sy','photons','bg','lpx','lpy']].copy()
+                        loctxt = [(index, row[0], row[1]*pixelsize, row[2]*pixelsize, (row[3]+row[4])/2*pixelsize, row[5], row[6], stddummy,  (row[7]+row[8])/2*pixelsize)  for index, row in enumerate(loctxt)]
+                        #For 2D: id, frame, x[nm], y[nm], sigma [nm], intensity[Photons], offset[photon], uncertainty_xy [nm]
+                        with open(path, 'wb') as f:
+                            f.write(b'\"id\",\"frame\",\"x [nm]\",\"y [nm]\",\"sigma [nm]\",\"intensity [photon]\",\"offset [photon]\",\"bkgstd [photon]\",\"uncertainty_xy [nm]\"\r\n')
+                            np.savetxt(f, loctxt, fmt=['%.i','%.i','%.2f','%.2f','%.2f','%.i','%.i','%.i','%.2f'], newline='\r\n', delimiter=',')
+                            print('File saved to {}'.format(path))
 
     def load_picks(self):
         path = QtGui.QFileDialog.getOpenFileName(self, 'Load pick regions', filter='*.yaml')
@@ -4298,7 +4374,6 @@ class Window(QtGui.QMainWindow):
         if len(pwd) == 0:
             pwd = []
         self.pwd = pwd
-
 
     def open_apply_dialog(self):
         cmd, channel, ok = ApplyDialog.getCmd(self)
@@ -4465,7 +4540,6 @@ class Window(QtGui.QMainWindow):
             self.info_dialog.wh_label.setText('{:.2f} / {:.2f} pixel'.format(self.view.viewport_width(),self.view.viewport_height()))
         except AttributeError:
             pass
-
         try:
             self.info_dialog.fit_precision.setText('{:.3} pixel'.format(self.view.median_lp))
         except AttributeError:
