@@ -3691,8 +3691,8 @@ class View(QtGui.QLabel):
                 n_segments = render.n_segments(info, segmentation)
                 seg_progress = lib.ProgressDialog('Generating segments', 0, n_segments, self)
                 n_pairs = int(n_segments * (n_segments - 1) / 2)
+                rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
                 try:
-                    rcc_progress = lib.ProgressDialog('Correlating image pairs', 0, n_pairs, self)
                     drift, _ = postprocess.undrift(locs, info, segmentation, True, seg_progress.set_value, rcc_progress.set_value)
                     self.locs[channel] = lib.ensure_sanity(locs, info)
                     self.index_blocks[channel] = None
@@ -3700,7 +3700,8 @@ class View(QtGui.QLabel):
                     self.update_scene()
                 except:
                     QtGui.QMessageBox.information(self,'RCC Error','RCC failed. Consider changing segmentation and make sure there are enough locs per frame.')
-
+                    rcc_progress.set_value(n_pairs)
+                    self.update_scene()
 
     def undrift_from_picked(self):
         channel = self.get_channel('Undrift from picked')
