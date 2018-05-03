@@ -114,9 +114,10 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     _plt.tight_layout(pad=2)
     _plt.show()
 
+    export = False
     #Export
-    if False:
-
+    if export:
+        print('Exporting...')
         _np.savetxt('mean_sx.txt',mean_sx, delimiter='/t')
         _np.savetxt('mean_sy.txt',mean_sy, delimiter='/t')
         _np.savetxt('locs_sx.txt',locs.sx, delimiter='/t')
