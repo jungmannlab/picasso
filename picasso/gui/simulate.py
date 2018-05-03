@@ -655,14 +655,7 @@ class Window(QtGui.QMainWindow):
                 z_calibration = yaml.load(f)
                 self.cx = _np.array(z_calibration['X Coefficients'])
                 self.cy = _np.array(z_calibration['Y Coefficients'])
-                print(self.cx)
-                print(self.cy)
                 self.statusBar().showMessage('Caliration loaded from: ' + path)
-
-            #self.z_calib_label.setAlignment(QtCore.Qt.AlignRight)
-            #self.z_calib_label.setText(os.path.basename(path))
-            #self.fit_z_checkbox.setEnabled(True)
-            #self.fit_z_checkbox.setChecked(True)
 
     def changeTime(self):
         laserpower = self.laserpowerEdit.value()
@@ -1677,7 +1670,6 @@ class CalibrationDialog(QtGui.QDialog):
 
         table = dict()
         tablecontent = []
-        print(self.table.rowCount())
         tablecontent.append(['FileName', 'Imager concentration[nM]', 'Integration time [ms]', 'Laserpower', 'Mean [Photons]', 'Std [Photons]'])
         for row in range(self.table.rowCount()):
             rowdata = []
@@ -1690,8 +1682,6 @@ class CalibrationDialog(QtGui.QDialog):
             tablecontent.append(rowdata)
 
         table[0] = tablecontent
-        print(tablecontent)
-        print(table)
         path = QtGui.QFileDialog.getSaveFileName(self,  'Export calibration table to.',  filter='*.csv')
         if path:
             self.savePlate(path, table)
@@ -1721,9 +1711,6 @@ class CalibrationDialog(QtGui.QDialog):
         else:
             sensitvity = 1.47
 
-        print(baseline)
-        print(sensitvity)
-
         counter = 0
         for element in self.tifFiles:
             counter = counter + 1
@@ -1742,8 +1729,6 @@ class CalibrationDialog(QtGui.QDialog):
             self.table.setItem(counter-1, 2, QtGui.QTableWidgetItem(str((self.ValueFind(element, 'ms_')))))
             self.table.setItem(counter-1, 3, QtGui.QTableWidgetItem(str((self.ValueFind(element, 'mW_')))))
 
-            print(_np.mean(movie))
-            print(_np.std(movie))
         self.pbar.setValue(100)
 
     def ValueFind(self, filename, unit):
@@ -1805,8 +1790,6 @@ class CalibrationDialog(QtGui.QDialog):
                 tablelong[i] = 'None'
         return tablelong, tableshort
 
-        # print(tablelong)
-        # print(tableshort)
 
     # get current date and time from the dialog
     def evalTable(self):

@@ -150,7 +150,7 @@ def distphotons(structures, itime, frames, taud, taub, photonrate, photonratestd
     return photonsinframe, spotkinetics
 
 
-def distphotonsxy(runner, photondist, structures, psf, mode3Dstate):
+def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
 
     bindingsitesx = structures[0, :]
     bindingsitesy = structures[1, :]
@@ -184,7 +184,7 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate):
 def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate, cx,cy):
     edges = range(0, imagesize+1)
 
-    photonposframe = distphotonsxy(runner, photondist, structures, psf, mode3Dstate)
+    photonposframe = distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy)
 
     if len(photonposframe) == 0:    
         simframe = _np.zeros((imagesize, imagesize))
