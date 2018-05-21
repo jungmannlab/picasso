@@ -572,6 +572,7 @@ class Window(QtGui.QMainWindow):
         btngridR = QtGui.QGridLayout()
 
         self.concatExchangeEdit = QtGui.QCheckBox()
+        self.exportkinetics = QtGui.QCheckBox()
 
         btngridR.addWidget(loadButton,0,0,1,2)
         btngridR.addWidget(QtGui.QLabel('Exchange rounds to be simulated:'),1,0)
@@ -580,10 +581,10 @@ class Window(QtGui.QMainWindow):
         btngridR.addWidget(self.conroundsEdit,2,1)
         btngridR.addWidget(QtGui.QLabel('Concatenate Exchange'))
         btngridR.addWidget(self.concatExchangeEdit,3,1)
-        btngridR.addWidget(simulateButton,4,0,1,2)
-        btngridR.addWidget(quitButton,5,0,1,2)
-
-
+        btngridR.addWidget(QtGui.QLabel('Export kinetic data'))
+        btngridR.addWidget(self.exportkinetics,4,1)
+        btngridR.addWidget(simulateButton,5,0,1,2)
+        btngridR.addWidget(quitButton,6,0,1,2)
 
         simulateButton.clicked.connect(self.simulate)
         loadButton.clicked.connect(self.loadSettings)
@@ -1000,12 +1001,13 @@ class Window(QtGui.QMainWindow):
                 meandark = int(taud)
                 meanbright = int(taub)
 
-                for i in range(0, nosites):
-                    photondisttemp, spotkineticstemp = simulate.distphotons(partstruct, itime, frames, taud, taub, photonrate, photonratestd, photonbudget)
+                timetrace = {}
 
+                for i in range(0, nosites):
+                    photondisttemp, timetracetemp, spotkineticstemp = simulate.distphotons(partstruct, itime, frames, taud, taub, photonrate, photonratestd, photonbudget)
                     photondist[i, :] = photondisttemp
                     spotkinetics[i, :] = spotkineticstemp
-
+                    timetrace[i]=self.vectorToString(timetracetemp)
                     outputmsg = 'Distributing photons ... ' + str(_np.round(i/nosites*1000)/10) + ' %'
                     self.statusBar().showMessage(outputmsg)
                     self.mainpbar.setValue(_np.round(i / nosites * 1000) / 10)
@@ -1102,6 +1104,14 @@ class Window(QtGui.QMainWindow):
                         info_path = _ospath.splitext(fileName)[0] + '_'+ str(self.currentround) + '.yaml'
                         _io.save_info(info_path, [info])
 
+                        if self.exportkinetics.isChecked():
+                            #Export the kinetic data if this is checked
+                            kinfo_path = _ospath.splitext(fileName)[0] + '_'+ str(self.currentround) + '_kinetics.yaml'
+                            _io.save_info(kinfo_path, [timetrace])
+
+
+                        self.statusBar().showMessage('Movie saved to: ' + fileName)
+
 
                 else:
                     app = QtCore.QCoreApplication.instance()
@@ -1120,6 +1130,10 @@ class Window(QtGui.QMainWindow):
                     self.statusBar().showMessage('Saving movie ...')
 
                     simulate.saveMovie(fileName, movie, info)
+                    if self.exportkinetics.isChecked():
+                        #Export the kinetic data if this is checked
+                        kinfo_path = _ospath.splitext(fileName)[0] + '_kinetics.yaml'
+                        _io.save_info(kinfo_path, [timetrace])
                     self.statusBar().showMessage('Movie saved to: ' + fileName)
                     dt = time.time() - t0
                     self.statusBar().showMessage('All computations finished. Last file saved to: ' + fileName + '. Time elapsed: {:.2f} Seconds.'.format(dt))

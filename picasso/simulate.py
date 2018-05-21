@@ -147,7 +147,7 @@ def distphotons(structures, itime, frames, taud, taub, photonrate, photonratestd
 
     photonsinframe, timetrace, spotkinetics = paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget)
 
-    return photonsinframe, spotkinetics
+    return photonsinframe, timetrace, spotkinetics
 
 
 def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
