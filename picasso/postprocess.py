@@ -858,7 +858,10 @@ def groupprops(locs, callback=None):
 
 #FRET functions
 
-def calculate_fret(acc_locs,don_locs):
+def calculate_fret(acc_locs, don_locs):
+    """
+    Calculate the FRET efficiceny in picked regions, this is for one trace
+    """
     fret_dict = {}
     if len(acc_locs) == 0:
         max_frames = _np.max(don_locs['frame'])
@@ -866,24 +869,41 @@ def calculate_fret(acc_locs,don_locs):
         max_frames = _np.max(acc_locs['frame'])
     else:
         max_frames = _np.max([_np.max(acc_locs['frame']),_np.max(don_locs['frame'])])
+
+    #Initialize a vector filled with zeros for the duration of the movie
     xvec = _np.arange(max_frames+1)
     yvec = xvec[:]*0
 
     acc_trace = yvec.copy()
     don_trace = yvec.copy()
     
+    #Fill vector with the photon numbers of events that happend
     acc_trace[acc_locs['frame']]=acc_locs['photons']-acc_locs['bg']
     don_trace[don_locs['frame']]=don_locs['photons']-don_locs['bg']
+
+    #Calculate the FRET efficiency
     fret_trace = acc_trace/(acc_trace+don_trace)
     
+    #Only select FRET values between 0 and 1
     selector = _np.logical_and(fret_trace>0,fret_trace<1)
 
+    #select the final fret events based on the 0 to 1 range 
     fret_events = fret_trace[selector]
 
     fret_timepoints = _np.arange(len(fret_trace))[selector]
-    loc_selector = [True if _ in fret_timepoints else False for _ in don_locs['frame'] ]
-    fret_locs = don_locs[loc_selector]
-    fret_locs = _lib.append_to_rec(fret_locs, _np.array(fret_events,dtype='f4'), 'fret')
+
+    # Calculate FRET localizations:  Select the localizations when FRET happens
+    #loc_selector = [True if _ in fret_timepoints else False for _ in don_locs['frame'] ]
+    #fret_locs = don_locs[loc_selector==True]
+
+    sel_locs = []
+    for element in fret_timepoints:
+        sel_locs.append(don_locs[don_locs['frame']==element])
+
+    fret_locs = stack_arrays(sel_locs, asrecarray=True, usemask=False)
+
+    fret_locs = _lib.append_to_rec(fret_locs, _np.array(fret_events), 'fret')
+
     fret_dict['fret_events'] = _np.array(fret_events)
     fret_dict['fret_timepoints'] = fret_timepoints
     fret_dict['acc_trace'] = acc_trace
