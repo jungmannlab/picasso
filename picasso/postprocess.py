@@ -868,7 +868,7 @@ def calculate_fret(acc_locs,don_locs):
         max_frames = _np.max([_np.max(acc_locs['frame']),_np.max(don_locs['frame'])])
     xvec = _np.arange(max_frames+1)
     yvec = xvec[:]*0
-    
+
     acc_trace = yvec.copy()
     don_trace = yvec.copy()
     
@@ -881,7 +881,9 @@ def calculate_fret(acc_locs,don_locs):
     fret_events = fret_trace[selector]
 
     fret_timepoints = _np.arange(len(fret_trace))[selector]
-    
+    loc_selector = [True if _ in fret_timepoints else False for _ in don_locs['frame'] ]
+    fret_locs = don_locs[loc_selector]
+    fret_locs = _lib.append_to_rec(fret_locs, _np.array(fret_events,dtype='f4'), 'fret')
     fret_dict['fret_events'] = _np.array(fret_events)
     fret_dict['fret_timepoints'] = fret_timepoints
     fret_dict['acc_trace'] = acc_trace
@@ -889,4 +891,4 @@ def calculate_fret(acc_locs,don_locs):
     fret_dict['frames'] = xvec
     fret_dict['maxframes'] = max_frames
 
-    return fret_dict
+    return fret_dict, fret_locs
