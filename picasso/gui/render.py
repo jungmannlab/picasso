@@ -3438,7 +3438,6 @@ class View(QtGui.QLabel):
         for i, pick_locs in enumerate(picked_locs):
             no_locs[i] = len(pick_locs)
             if not hasattr(pick_locs, 'len'):
-                print('linking in pick_properties')
                 pick_locs = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
             pick_locs = postprocess.compute_dark_times(pick_locs)
             length[i] = estimate_kinetic_rate(pick_locs.len)
@@ -3872,16 +3871,37 @@ class View(QtGui.QLabel):
         n_square, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
         'Set number of elements per row and column:',100)
         if hasattr(self.locs[0], 'group'):
+            
             self.locs[0].x += np.mod(self.locs[0].group,n_square)*2
             self.locs[0].y += np.floor(self.locs[0].group/n_square)*2
 
-            self.locs[0].x -= np.mean(self.locs[0].x)
+            mean_x = np.mean(self.locs[0].x)
+            mean_y = np.mean(self.locs[0].y)
+
+            self.locs[0].x -= mean_x
             self.locs[0].y -= np.mean(self.locs[0].y)
 
-            self.locs[0].x += np.absolute(np.min(self.locs[0].x))
-            self.locs[0].y += np.absolute(np.min(self.locs[0].y))
+            offset_x = np.absolute(np.min(self.locs[0].x))
+            offset_y = np.absolute(np.min(self.locs[0].y))
 
-        groups = np.unique(self.locs[0].group)
+            self.locs[0].x += offset_x
+            self.locs[0].y += offset_y
+
+            if self._picks:
+                #Also unfold picks
+                groups = np.unique(self.locs[0].group)
+
+                shift_x =  np.mod(groups,n_square)*2 -mean_x + offset_x
+                shift_y = np.floor(groups/n_square)*2 -mean_y + offset_y
+
+                for j in range(len(self._picks)): 
+                    for k in range(len(groups)):
+                        x_pick, y_pick = self._picks[j]
+                        for m in range(len(shift_x)):
+                            self._picks.append((x_pick+shift_x[m],x_pick+shift_y[m]))
+                self.n_picks = len(self._picks)
+                self.update_pick_info_short()
+
         #Update width information
         self.infos[0][0]['Height'] = int(np.ceil(np.max(self.locs[0].y)))
         self.infos[0][0]['Width'] = int(np.ceil(np.max(self.locs[0].x)))
