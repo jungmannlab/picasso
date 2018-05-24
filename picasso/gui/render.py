@@ -3437,12 +3437,13 @@ class View(QtGui.QLabel):
         no_locs = np.empty(len(picked_locs))
         for i, pick_locs in enumerate(picked_locs):
             no_locs[i] = len(pick_locs)
-            if not hasattr(pick_locs, 'len'):
-                pick_locs = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
-            pick_locs = postprocess.compute_dark_times(pick_locs)
-            length[i] = estimate_kinetic_rate(pick_locs.len)
-            dark[i] = estimate_kinetic_rate(pick_locs.dark)
-            out_locs.append(pick_locs)
+            if no_locs[i] > 0:
+                if not hasattr(pick_locs, 'len'):
+                    pick_locs = postprocess.link(pick_locs, self.infos[channel], r_max=r_max, max_dark_time=max_dark)
+                pick_locs = postprocess.compute_dark_times(pick_locs)
+                length[i] = estimate_kinetic_rate(pick_locs.len)
+                dark[i] = estimate_kinetic_rate(pick_locs.dark)
+                out_locs.append(pick_locs)
             progress.set_value(i + 1)
         out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
         n_groups = len(picked_locs)
@@ -3891,14 +3892,14 @@ class View(QtGui.QLabel):
                 #Also unfold picks
                 groups = np.unique(self.locs[0].group)
 
-                shift_x =  np.mod(groups,n_square)*2 -mean_x + offset_x
-                shift_y = np.floor(groups/n_square)*2 -mean_y + offset_y
+                shift_x =  np.mod(groups,n_square)*2 - mean_x + offset_x
+                shift_y = np.floor(groups/n_square)*2 - mean_y + offset_y
 
                 for j in range(len(self._picks)): 
                     for k in range(len(groups)):
                         x_pick, y_pick = self._picks[j]
-                        for m in range(len(shift_x)):
-                            self._picks.append((x_pick+shift_x[m],x_pick+shift_y[m]))
+                        self._picks.append((x_pick+shift_x[k], y_pick+shift_y[k]))
+
                 self.n_picks = len(self._picks)
                 self.update_pick_info_short()
 
