@@ -2413,6 +2413,9 @@ class View(QtGui.QLabel):
             fig.show()
 
     def show_trace(self):
+        self.current_trace_x = 0
+        self.current_trace_y = 0
+
         channel = self.get_channel('Undrift from picked')
         if channel is not None:
             locs = self.picked_locs(channel)
@@ -2421,6 +2424,9 @@ class View(QtGui.QLabel):
             xvec = np.arange(max(locs['frame'])+1)
             yvec = xvec[:]*0
             yvec[locs['frame']]=1
+            self.current_trace_x = xvec
+            self.current_trace_y = yvec
+            self.channel = channel
             # Three subplots sharing both x/y axes
             f, (ax1, ax2, ax3) = plt.subplots(3, sharex=True)
             f.canvas.set_window_title('Trace')
@@ -2429,6 +2435,7 @@ class View(QtGui.QLabel):
             ax2.scatter(locs['frame'],locs['y'])
             ax2.set_title('Y-pos vs frame')
             ax3.plot(xvec,yvec)
+            ax3.fill_between(xvec, 0, yvec, facecolor='red')
             ax3.set_title('Localizations')
 
             ax1.set_xlim(0,(max(locs['frame'])+1))
@@ -2437,8 +2444,23 @@ class View(QtGui.QLabel):
             ax1.set_ylabel('X-pos [Px]')
             ax2.set_ylabel('Y-pos [Px]')
             ax3.set_ylabel('ON')
+            ax3.set_ylim([-0.1,1.1])
+        
+            toolbar = f.canvas.toolbar
+            self.exportTraceButton = QtGui.QPushButton('Export')
+            toolbar.addWidget(self.exportTraceButton)
+            self.exportTraceButton.clicked.connect(self.exportTrace) 
             f.show()
 
+    def exportTrace(self):
+        trace = np.array([self.current_trace_x,self.current_trace_y])
+        base, ext = os.path.splitext(self.locs_paths[self.channel])
+        out_path = base + '.trace.txt'
+
+        path = QtGui.QFileDialog.getSaveFileName(self, 'Save trace as txt', out_path, filter='*.trace.txt')
+            
+        if path:
+            np.savetxt(path, trace, fmt='%i', delimiter=',') 
 
     def pick_message_box(self, params):
         msgBox = QtGui.QMessageBox(self)
@@ -3198,6 +3220,7 @@ class View(QtGui.QLabel):
                 if add_group:
                     group = i * np.ones(len(group_locs), dtype=np.int32)
                     group_locs = lib.append_to_rec(group_locs, group, 'group')
+                group_locs.sort(kind='mergesort', order='frame')
                 picked_locs.append(group_locs)
                 progress.set_value(i + 1)
             return picked_locs
