@@ -27,7 +27,8 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     keep_x = (locs.sx - mean_sx[locs.frame])**2 < var_sx[locs.frame]
     keep_y = (locs.sy - mean_sy[locs.frame])**2 < var_sy[locs.frame]
     keep = keep_x & keep_y
-    #locs = locs[keep]
+    locs = locs[keep]
+    z_range = z_range[keep]
 
     # Fits calibration curve to the mean of each frame
     mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
