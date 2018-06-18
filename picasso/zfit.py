@@ -32,8 +32,8 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     # Fits calibration curve to the mean of each frame
     mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
     mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
-    cx = _np.polyfit(z_range, mean_sx, 6, full=False)
-    cy = _np.polyfit(z_range, mean_sy, 6, full=False)
+    cx = _np.polyfit(z_range, mean_sx, 4, full=False)
+    cy = _np.polyfit(z_range, mean_sy, 4, full=False)
 
     # Fits calibration curve to each localization
     # true_z = locs.frame * d - range / 2
