@@ -27,16 +27,13 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     keep_x = (locs.sx - mean_sx[locs.frame])**2 < var_sx[locs.frame]
     keep_y = (locs.sy - mean_sy[locs.frame])**2 < var_sy[locs.frame]
     keep = keep_x & keep_y
-    locs = locs[keep]
-    z_range = z_range[keep]
+    #locs = locs[keep]
 
     # Fits calibration curve to the mean of each frame
     mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
     mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
     cx = _np.polyfit(z_range, mean_sx, 6, full=False)
     cy = _np.polyfit(z_range, mean_sy, 6, full=False)
-    polyx = _np.poly1d(cx)
-    polyy = _np.poly1d(cy)
 
     # Fits calibration curve to each localization
     # true_z = locs.frame * d - range / 2
@@ -61,8 +58,8 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     # _plt.plot(true_z, _np.polyval(cy, true_z), '0.3', lw=1.5, label='y fit')
     _plt.plot(z_range, mean_sx, '.-', label='x')
     _plt.plot(z_range, mean_sy, '.-', label='y')
-    _plt.plot(z_range, polyx(z_range), '0.3', lw=1.5, label='x fit')
-    _plt.plot(z_range, polyy(z_range), '0.3', lw=1.5, label='y fit')
+    _plt.plot(z_range, _np.polyval(cx, z_range), '0.3', lw=1.5, label='x fit')
+    _plt.plot(z_range, _np.polyval(cy, z_range), '0.3', lw=1.5, label='y fit')
     _plt.xlabel('Stage position')
     _plt.ylabel('Mean spot width/height')
     _plt.xlim(z_range.min(), z_range.max())
@@ -70,7 +67,7 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
 
     ax = _plt.subplot(232)
     _plt.scatter(locs.sx, locs.sy, c='k', lw=0, alpha=0.1)
-    _plt.plot(polyx(z_range), polyy(z_range), lw=1.5, label='calibration from fit of mean width/height')
+    _plt.plot(_np.polyval(cx, z_range), _np.polyval(cy, z_range), lw=1.5, label='calibration from fit of mean width/height')
     _plt.plot()
     ax.set_aspect('equal')
     _plt.xlabel('Spot width')
@@ -80,8 +77,8 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     _plt.subplot(233)
     _plt.plot(locs.z, locs.sx, '.', label='x', alpha=0.2)
     _plt.plot(locs.z, locs.sy, '.', label='y', alpha=0.2)
-    _plt.plot(z_range, polyx(z_range), '0.3', lw=1.5, label='calibration')
-    _plt.plot(z_range, polyy(z_range), '0.3', lw=1.5)
+    _plt.plot(z_range, _np.polyval(cx, z_range), '0.3', lw=1.5, label='calibration')
+    _plt.plot(z_range, _np.polyval(cy, z_range), '0.3', lw=1.5)
     _plt.xlim(z_range.min(), z_range.max())
     _plt.xlabel('Estimated z')
     _plt.ylabel('Spot width/height')
