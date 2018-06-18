@@ -1740,7 +1740,27 @@ class View(QtGui.QLabel):
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
-        self._drift.append(None)
+
+        #Try to load a driftfile:
+        if 'Last driftfile' in info[-1]:
+            path = info[-1]['Last driftfile']
+            try:
+                with open(path, 'r') as f:
+                    drifttxt = np.loadtxt(f)
+                drift_x = drifttxt[:,0]
+                drift_y = drifttxt[:,1]
+
+                if drifttxt.shape[1] == 3:
+                    drift_z = drifttxt[:,2]
+                    drift = (drift_x, drift_y,drift_z)
+                    drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f'),('z', 'f')])
+                else:
+                    drift = (drift_x, drift_y)
+                    drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
+            except:
+                drift = None
+
+        self._drift.append(drift)
         self._driftfiles.append(None)
         self.currentdrift.append(None)
         if len(self.locs) == 1:
@@ -3701,26 +3721,44 @@ class View(QtGui.QLabel):
         channel = self.get_channel('Show drift')
         if channel is not None:
             info = self.infos[channel]
-            t_inter = np.arange(info[0]['Frames'])
             drift = self._drift[channel]
-            fig1 = plt.figure(figsize=(17, 6))
-            plt.suptitle('Corrected drift')
-            plt.subplot(1, 2, 1)
-            plt.plot(drift.x, label='x')
-            plt.plot(drift.y, label='y')
-            #t = (bounds[1:] + bounds[:-1]) / 2
-            #plt.plot(t, shift_x, 'o', color=list(_plt.rcParams['axes.prop_cycle'])[0]['color'], label='x')
-            #plt.plot(t, shift_y, 'o', color=list(_plt.rcParams['axes.prop_cycle'])[1]['color'], label='y')
-            plt.legend(loc='best')
-            plt.xlabel('Frame')
-            plt.ylabel('Drift (pixel)')
-            plt.subplot(1, 2, 2)
-            plt.plot(drift.x, drift.y, color=list(plt.rcParams['axes.prop_cycle'])[2]['color'])
-            #plt.plot(shift_x, shift_y, 'o', color=list(_plt.rcParams['axes.prop_cycle'])[2]['color'])
-            plt.axis('equal')
-            plt.xlabel('x')
-            plt.ylabel('y')
-            fig1.show()
+
+            if hasattr(self._drift[channel], 'z'):
+                fig1 = plt.figure(figsize=(25.5, 6))
+                plt.suptitle('Corrected drift')
+                plt.subplot(1, 3, 1)
+                plt.plot(drift.x, label='x')
+                plt.plot(drift.y, label='y')
+                plt.legend(loc='best')
+                plt.xlabel('Frame')
+                plt.ylabel('Drift (pixel)')
+                plt.subplot(1, 3, 2)
+                plt.plot(drift.x, drift.y, color=list(plt.rcParams['axes.prop_cycle'])[2]['color'])
+                plt.axis('equal')
+                plt.xlabel('x')
+                plt.ylabel('y')
+                plt.subplot(1, 3, 3)
+                plt.plot(drift.z, label='z')
+                plt.legend(loc='best')
+                plt.xlabel('Frame')
+                plt.ylabel('Drift (nm)')
+                fig1.show()
+
+            else:
+                fig1 = plt.figure(figsize=(17, 6))
+                plt.suptitle('Corrected drift')
+                plt.subplot(1, 2, 1)
+                plt.plot(drift.x, label='x')
+                plt.plot(drift.y, label='y')
+                plt.legend(loc='best')
+                plt.xlabel('Frame')
+                plt.ylabel('Drift (pixel)')
+                plt.subplot(1, 2, 2)
+                plt.plot(drift.x, drift.y, color=list(plt.rcParams['axes.prop_cycle'])[2]['color'])
+                plt.axis('equal')
+                plt.xlabel('x')
+                plt.ylabel('y')
+                fig1.show()
 
     def undrift(self):
         ''' Undrifts with rcc. '''
