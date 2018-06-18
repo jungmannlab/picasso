@@ -13,6 +13,14 @@ from . import lib as _lib
 _plt.style.use('ggplot')
 
 
+def nan_index(y):
+    return _np.isnan(y), lambda z: z.nonzero()[0]
+
+def interpolate_nan(data):
+    nans, x= nan_index(data)
+    data[nans]= _np.interp(x(nans), x(~nans), data[~nans])
+    return data
+
 def calibrate_z(locs, info, d, magnification_factor, path=None):
     n_frames = info[0]['Frames']
     range = (n_frames - 1) * d
@@ -32,6 +40,11 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     # Fits calibration curve to the mean of each frame
     mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
     mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
+
+    #Fix nan 
+    mean_sx = interpolate_nan(mean_sx)
+    mean_sy = interpolate_nan(mean_sy)
+
     cx = _np.polyfit(z_range, mean_sx, 6, full=False)
     cy = _np.polyfit(z_range, mean_sy, 6, full=False)
 
