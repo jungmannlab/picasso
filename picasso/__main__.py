@@ -9,12 +9,12 @@
     :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
 """
 import os.path
-
+from picasso.gui import average
 
 def _average(args):
     from glob import glob
     from .io import load_locs, NoMetadataFileError
-    from .postprocess import average
+    #from .postprocess import average
     kwargs = {'iterations': args.iterations,
               'oversampling': args.oversampling}
     paths = glob(args.file)
@@ -816,7 +816,7 @@ def main():
             if args.files:
                 _localize(args)
             else:
-                from .gui import localize
+                from picasso.gui import localize
                 localize.main()
         elif args.command == 'filter':
             from .gui import filter
