@@ -1,11 +1,11 @@
 numpy
 h5py
 matplotlib
-numba numpy
+numba
 scipy
-pyqt=4
 pyyaml
 scikit-learn
 colorama
 tqdm
 lmfit
+pyqt==4
