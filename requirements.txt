@@ -1,0 +1,10 @@
+numpy
+h5py
+matplotlib
+numba
+scipy
+pyyaml
+scikit-learn
+colorama
+tqdm
+lmfit
