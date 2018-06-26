@@ -352,7 +352,7 @@ def _hdbscan(files, min_samples, min_cluster_size):
                            'Minimum samples': min_samples,
                            'Minimum cluster size': min_cluster_size}
             info.append(hdbscan_info)
-            io.save_locs(base + '_dbscan.hdf5', locs, info)
+            io.save_locs(base + '_hdbscan.hdf5', locs, info)
             with File(base + '_clusters.hdf5', 'w') as clusters_file:
                 clusters_file.create_dataset('clusters', data=clusters)
 
