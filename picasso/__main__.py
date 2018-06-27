@@ -626,7 +626,7 @@ def _localize(args):
                 spots = get_spots(movie, ids, box, camera_info)
                 theta = gausslq.fit_spots_gpufit(spots)
                 em = camera_info['gain'] > 1
-                locs = gausslq.locs_from_fits_gpufit(self.identifications, theta, box, em)
+                locs = gausslq.locs_from_fits_gpufit(ids, theta, box, em)
             elif args.fit_method == 'mle':
                 current, thetas, CRLBs, likelihoods, iterations = fit_async(movie,
                                                                         camera_info,
