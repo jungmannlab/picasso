@@ -514,9 +514,16 @@ def _localize(args):
    
     print('{:<8} {:<15} {:<10}'.format('No','Label','Value'))
 
+    if args.fit_method == 'lq-gpu':
+        if gausslq.gpufit_installed:
+            print('GPUfit installed')
+        else:
+            raise Exception('GPUfit not installed. Aborting.')
+
     for index, element in enumerate(vars(args)):
         print('{:<8} {:<15} {:<10}'.format(index+1, element, getattr(args, element)))
-    print('------------------------------------------')    
+    print('------------------------------------------')
+
     def check_consecutive_tif(filepath):
         """
         Function to only return the first file of a consecutive ome.tif series to not reconstruct all of them
@@ -550,6 +557,7 @@ def _localize(args):
         print('A total of {} files detected'.format(len(paths)))
     else:
         paths = glob(files)
+
     if paths:
         def prompt_info():
             info = {}
@@ -588,85 +596,91 @@ def _localize(args):
         convergence = float(input('Convergence criterion: '))
         max_iterations = int(input('Max. iterations: '))
         '''
-    for path in paths:
-        print('------------------------------------------')
-        print('------------------------------------------')
-        print('Processing {}'.format(path))
-        print('------------------------------------------')
-        movie, info = load_movie(path)
-        current, futures = identify_async(movie, min_net_gradient, box)
-        n_frames = len(movie)
-        while current[0] < n_frames:
-            print('Identifying in frame {:,} of {:,}'.format(current[0]+1, n_frames), end='\r')
-            sleep(0.2)
-        print('Identifying in frame {:,} of {:,}'.format(n_frames, n_frames))
-        ids = identifications_from_futures(futures)
+        for path in paths:
+            print('------------------------------------------')
+            print('------------------------------------------')
+            print('Processing {}'.format(path))
+            print('------------------------------------------')
+            movie, info = load_movie(path)
+            current, futures = identify_async(movie, min_net_gradient, box)
+            n_frames = len(movie)
+            while current[0] < n_frames:
+                print('Identifying in frame {:,} of {:,}'.format(current[0]+1, n_frames), end='\r')
+                sleep(0.2)
+            print('Identifying in frame {:,} of {:,}'.format(n_frames, n_frames))
+            ids = identifications_from_futures(futures)
 
-        """
-        current, thetas, CRLBs, likelihoods, iterations = fit_async(movie,
-                                                                    camera_info,
-                                                                    ids,
-                                                                    box,
-                                                                    convergence,
-                                                                    max_iterations)
-        """
-        if args.fit_method == 'lq':
-            spots = get_spots(movie, ids, box, camera_info)
-            theta = gausslq.fit_spots_parallel(spots, async=False)
-            locs = gausslq.locs_from_fits(ids, theta, box, args.gain)
-            #Todo implement gpufit at some point
-        elif args.fit_method == 'mle':
+            """
             current, thetas, CRLBs, likelihoods, iterations = fit_async(movie,
-                                                                    camera_info,
-                                                                    ids,
-                                                                    box,
-                                                                    convergence,
-                                                                    max_iterations)
-            n_spots = len(ids)
+                                                                        camera_info,
+                                                                        ids,
+                                                                        box,
+                                                                        convergence,
+                                                                        max_iterations)
+            """
+            if args.fit_method == 'lq':
+                spots = get_spots(movie, ids, box, camera_info)
+                theta = gausslq.fit_spots_parallel(spots, async=False)
+                locs = gausslq.locs_from_fits(ids, theta, box, args.gain)
+            elif args.fit_method == 'lq-gpu':
+                spots = get_spots(movie, ids, box, camera_info)
+                theta = gausslq.fit_spots_gpufit(spots)
+                em = camera_info['gain'] > 1
+                locs = gausslq.locs_from_fits_gpufit(self.identifications, theta, box, em)
+            elif args.fit_method == 'mle':
+                current, thetas, CRLBs, likelihoods, iterations = fit_async(movie,
+                                                                        camera_info,
+                                                                        ids,
+                                                                        box,
+                                                                        convergence,
+                                                                        max_iterations)
+                n_spots = len(ids)
+                while current[0] < n_spots:
+                    print('Fitting spot {:,} of {:,}'.format(current[0]+1, n_spots), end='\r')
+                    sleep(0.2)
+                print('Fitting spot {:,} of {:,}'.format(n_spots, n_spots))
+                locs = locs_from_fits(ids, thetas, CRLBs, likelihoods, iterations, box)
+
+
+            elif args.fit_method == 'avg':
+                spots = get_spots(movie, ids, box, camera_info)
+                theta = avgroi.fit_spots_parallel(spots, async=False)
+                locs = avgroi.locs_from_fits(ids, theta, box, args.gain)
+
+            else:
+                print('This should never happen...')
+
+            """
             while current[0] < n_spots:
                 print('Fitting spot {:,} of {:,}'.format(current[0]+1, n_spots), end='\r')
                 sleep(0.2)
             print('Fitting spot {:,} of {:,}'.format(n_spots, n_spots))
+
             locs = locs_from_fits(ids, thetas, CRLBs, likelihoods, iterations, box)
+            """
 
+            localize_info = {'Generated by': 'Picasso Localize',
+                             'ROI': None,
+                             'Box Size': box,
+                             'Min. Net Gradient': min_net_gradient,
+                             'Convergence Criterion': convergence,
+                             'Max. Iterations': max_iterations}
+            info.append(localize_info)
+            base, ext = splitext(path)
+            out_path = base + '_locs.hdf5'
+            save_locs(out_path, locs, info)
+            print('File saved to {}'.format(out_path))
+            if args.drift > 0:
+                print('Undrifting file:')
+                print('------------------------------------------')
+                try:
+                    _undrift(out_path, args.drift, display=False, fromfile=None)
+                except:
+                    print('Drift correction failed for {}'.format(out_path))
 
-        elif args.fit_method == 'avg':
-            spots = get_spots(movie, ids, box, camera_info)
-            theta = avgroi.fit_spots_parallel(spots, async=False)
-            locs = avgroi.locs_from_fits(ids, theta, box, args.gain)
-
-        else:
-            print('This should never happen...')
-
-        """
-        while current[0] < n_spots:
-            print('Fitting spot {:,} of {:,}'.format(current[0]+1, n_spots), end='\r')
-            sleep(0.2)
-        print('Fitting spot {:,} of {:,}'.format(n_spots, n_spots))
-
-        locs = locs_from_fits(ids, thetas, CRLBs, likelihoods, iterations, box)
-        """
-
-        localize_info = {'Generated by': 'Picasso Localize',
-                         'ROI': None,
-                         'Box Size': box,
-                         'Min. Net Gradient': min_net_gradient,
-                         'Convergence Criterion': convergence,
-                         'Max. Iterations': max_iterations}
-        info.append(localize_info)
-        base, ext = splitext(path)
-        out_path = base + '_locs.hdf5'
-        save_locs(out_path, locs, info)
-        print('File saved to {}'.format(out_path))
-        if args.drift > 0:
-            print('Undrifting file:')
-            print('------------------------------------------')
-            try:
-                _undrift(out_path, args.drift, display=False, fromfile=None)
-            except:
-                print('Drift correction failed for {}'.format(out_path))
-
-        print('                                          ')
+            print('                                          ')
+    else:
+        print('Error. No files found.')
 
 def _render(args):
     from .lib import locs_glob_map
@@ -786,7 +800,7 @@ def main():
     localize_parser = subparsers.add_parser('localize', help='identify and fit single molecule spots')
     localize_parser.add_argument('files', nargs='?', help='one movie file or a folder containing movie files specified by a unix style path pattern')
     localize_parser.add_argument('-b', '--box-side-length', type=int, default=7, help='box side length')
-    localize_parser.add_argument('-a', '--fit-method', choices=['mle', 'lq', 'avg'], default='mle')
+    localize_parser.add_argument('-a', '--fit-method', choices=['mle', 'lq','lq-gpu', 'avg'], default='mle')
     localize_parser.add_argument('-g', '--gradient', type=int, default=5000, help='minimum net gradient')
     localize_parser.add_argument('-d', '--drift', type=int, default=1000, help='segmentation size for subsequent RCC, 0 to deactivate')
     localize_parser.add_argument('-bl', '--baseline', type=int, default=0, help='camera baseline')
