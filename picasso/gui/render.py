@@ -113,7 +113,7 @@ class PickHistWindow(QtGui.QTabWidget):
         icon_path = os.path.join(this_directory, 'icons', 'render.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
-        self.resize(1000, 400)
+        self.resize(1000, 500)
         self.figure = plt.Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
         vbox = QtGui.QVBoxLayout()
@@ -125,22 +125,37 @@ class PickHistWindow(QtGui.QTabWidget):
         self.figure.clear()
         # Length
         axes = self.figure.add_subplot(121)
-        axes.set_title('Length (cumulative)')
+        #axes.set_title('Length (cumulative) \n' r'$\mu={},\ \sigma={}$'.format(1,2))
+        a = fit_result_len.best_values['a']
+        t = fit_result_len.best_values['t']
+        c = fit_result_len.best_values['c']
+        axes.set_title('Length (cumulative) \n' r'$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$'.format(a,t,c))
+
         data = pooled_locs.len
         data.sort()
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label='data')
         axes.semilogx(data, fit_result_len.best_fit, label='fit')
         axes.legend(loc='best')
+        axes.set_xlabel('Duration (frames)')
+        axes.set_ylabel('Frequency')
+
         # Dark
         axes = self.figure.add_subplot(122)
-        axes.set_title('Dark time (cumulative)')
+
+        a = fit_result_dark.best_values['a']
+        t = fit_result_dark.best_values['t']
+        c = fit_result_dark.best_values['c']
+
+        axes.set_title('Dark time (cumulative) \n' r'$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$'.format(a,t,c))
         data = pooled_locs.dark
         data.sort()
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label='data')
         axes.semilogx(data, fit_result_dark.best_fit, label='fit')
         axes.legend(loc='best')
+        axes.set_xlabel('Duration (frames)')
+        axes.set_ylabel('Frequency')
         self.canvas.draw()
 
 class ApplyDialog(QtGui.QDialog):
