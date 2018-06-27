@@ -1741,6 +1741,7 @@ class View(QtGui.QLabel):
         self.locs_paths.append(path)
         self.index_blocks.append(None)
 
+        drift = None
         #Try to load a driftfile:
         if 'Last driftfile' in info[-1]:
             path = info[-1]['Last driftfile']
@@ -1758,8 +1759,9 @@ class View(QtGui.QLabel):
                     drift = (drift_x, drift_y)
                     drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
             except:
-                drift = None
-
+                #drift already initialized before
+                pass
+       
         self._drift.append(drift)
         self._driftfiles.append(None)
         self.currentdrift.append(None)
