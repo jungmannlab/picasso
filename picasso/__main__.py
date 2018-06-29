@@ -353,7 +353,7 @@ def _hdbscan(files, min_samples, min_cluster_size):
                            'Minimum cluster size': min_cluster_size}
             info.append(hdbscan_info)
             io.save_locs(base + '_hdbscan.hdf5', locs, info)
-            with File(base + '_clusters.hdf5', 'w') as clusters_file:
+            with File(base + '_hdbclusters.hdf5', 'w') as clusters_file:
                 clusters_file.create_dataset('clusters', data=clusters)
 
 
@@ -373,7 +373,7 @@ def _dbscan(files, radius, min_density):
                            'Minimum local density': min_density}
             info.append(dbscan_info)
             io.save_locs(base + '_dbscan.hdf5', locs, info)
-            with File(base + '_clusters.hdf5', 'w') as clusters_file:
+            with File(base + '_dbclusters.hdf5', 'w') as clusters_file:
                 clusters_file.create_dataset('clusters', data=clusters)
 
 def _nneighbor(files):
