@@ -202,9 +202,10 @@ def saveMovie(filename, movie, info):
 
 
 # Function to store the coordinates of a structure in a container. The coordinates wil be adjustet so that the center of mass is the origin
-def defineStructure(structurexxpx, structureyypx, structureex, structure3d, pixelsize):
-    structurexxpx = structurexxpx-_np.mean(structurexxpx)
-    structureyypx = structureyypx-_np.mean(structureyypx)
+def defineStructure(structurexxpx, structureyypx, structureex, structure3d, pixelsize, mean = True):
+    if mean:
+        structurexxpx = structurexxpx-_np.mean(structurexxpx)
+        structureyypx = structureyypx-_np.mean(structureyypx)
     # from px to nm
     structurexx = []
     for x in structurexxpx:

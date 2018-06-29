@@ -12,7 +12,6 @@
 import csv
 import glob as _glob
 import os
-import random
 import sys
 import time
 
@@ -47,7 +46,6 @@ plt.style.use('ggplot')
 CURRENTROUND = 0
 
 ADVANCEDMODE = 0  # 1 is with calibration of noise model
-MODE3D = 1
 # CAMERA
 IMAGESIZE_DEFAULT = 32
 ITIME_DEFAULT = 300
@@ -91,6 +89,7 @@ STRUCTURE3D_DEFAULT = '0,0,0,0,0,0,0,0,0,0,0,0'
 STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
 INCORPORATION_DEFAULT = 85
+#Default 3D calibration
 CX_DEFAULT = [3.1638306844743706e-17, -2.2103661248660896e-14, -9.775815406044296e-12, 8.2178622893072e-09, 4.91181990105529e-06, -0.0028759382006135654, 1.1756537760039398]
 CY_DEFAULT = [1.710907877866197e-17, -2.4986657766862576e-15, -8.405284979510355e-12, 1.1548322314075128e-11, 5.4270591055277476e-06, 0.0018155881468011011, 1.011468185618154]
 
@@ -110,7 +109,7 @@ class Window(QtGui.QMainWindow):
 
     def initUI(self):
         self.currentround = CURRENTROUND
-        self.customHandles = False
+        self.structureMode = True
 
         self.grid = QtGui.QGridLayout()
         self.grid.setSpacing(5)
@@ -328,9 +327,8 @@ class Window(QtGui.QMainWindow):
         if not ADVANCEDMODE:
             backgroundframesimple = QtGui.QLabel('Background (Frame)')
             self.backgroundframesimpleEdit = QtGui.QLabel()
-            igrid.addWidget(backgroundframesimple, 11-igridindex, 0)
-            igrid.addWidget(self.backgroundframesimpleEdit, 11-igridindex, 1)
-
+            igrid.addWidget(backgroundframesimple, 12-igridindex, 0)
+            igrid.addWidget(self.backgroundframesimpleEdit, 12-igridindex, 1)
 
         #Make a spinbox for adjusting the background level
         backgroundlevel = QtGui.QLabel('Background level')
@@ -338,8 +336,8 @@ class Window(QtGui.QMainWindow):
         self.backgroundlevelEdit = QtGui.QSpinBox()
         self.backgroundlevelEdit.setRange(1, 100)
 
-        igrid.addWidget(backgroundlevel, 12-igridindex, 0)
-        igrid.addWidget(self.backgroundlevelEdit, 12-igridindex, 1)
+        igrid.addWidget(backgroundlevel, 11-igridindex, 0)
+        igrid.addWidget(self.backgroundlevelEdit, 11-igridindex, 1)
         self.backgroundlevelEdit.valueChanged.connect(self.changeNoise)
 
          # NOISE MODEL
@@ -394,11 +392,8 @@ class Window(QtGui.QMainWindow):
         self.BgStdoffsetEdit.setRange(-100000, 100000)
         self.BgStdoffsetEdit.setDecimals(6)
 
-        self.lasercEdit.valueChanged.connect(self.changeNoise)
-        self.imagercEdit.valueChanged.connect(self.changeNoise)
-        self.EquationAEdit.valueChanged.connect(self.changeNoise)
-        self.EquationBEdit.valueChanged.connect(self.changeNoise)
-        self.EquationCEdit.valueChanged.connect(self.changeNoise)
+        for button in [self.lasercEdit,self.imagercEdit,self.EquationAEdit,self.EquationBEdit,self.EquationCEdit]:
+            button.valueChanged.connect(self.changeNoise)
 
         backgroundframe = QtGui.QLabel('Background (Frame)')
         noiseLabel = QtGui.QLabel('Noise (Frame)')
@@ -406,24 +401,13 @@ class Window(QtGui.QMainWindow):
         self.backgroundframeEdit = QtGui.QLabel()
         self.noiseEdit = QtGui.QLabel()
 
-        ngrid.addWidget(laserc, 0, 0)
-        ngrid.addWidget(self.lasercEdit, 0, 1)
-        ngrid.addWidget(imagerc, 1, 0)
-        ngrid.addWidget(self.imagercEdit, 1, 1)
-        ngrid.addWidget(EquationA, 2, 0)
-        ngrid.addWidget(self.EquationAEdit, 2, 1)
-        ngrid.addWidget(EquationB, 3, 0)
-        ngrid.addWidget(self.EquationBEdit, 3, 1)
-        ngrid.addWidget(EquationC, 4, 0)
-        ngrid.addWidget(self.EquationCEdit, 4, 1)
-        ngrid.addWidget(Bgoffset, 5, 0)
-        ngrid.addWidget(self.BgoffsetEdit, 5, 1)
-        ngrid.addWidget(BgStdoffset, 6, 0)
-        ngrid.addWidget(self.BgStdoffsetEdit, 6, 1)
-        ngrid.addWidget(backgroundframe, 7, 0)
-        ngrid.addWidget(self.backgroundframeEdit, 7, 1)
-        ngrid.addWidget(noiseLabel, 8, 0)
-        ngrid.addWidget(self.noiseEdit, 8, 1)
+        tags = [laserc,imagerc,EquationA,EquationB,EquationC,Bgoffset,BgStdoffset,backgroundframe,noiseLabel]
+        buttons = [self.lasercEdit,self.imagercEdit,self.EquationAEdit,self.EquationBEdit,self.EquationCEdit,self.BgoffsetEdit,self.BgStdoffsetEdit,self.backgroundframeEdit,self.noiseEdit]
+
+        for i, tag in enumerate(tags):
+            ngrid.addWidget(tag, i ,0)
+            ngrid.addWidget(buttons[i], i ,1)
+ 
 
         calibrateNoiseButton = QtGui.QPushButton("Calibrate Noise Model")
         calibrateNoiseButton.clicked.connect(self.calibrateNoise)
@@ -432,6 +416,39 @@ class Window(QtGui.QMainWindow):
 
         ngrid.addWidget(calibrateNoiseButton, 10, 0, 1, 3)
         ngrid.addWidget(importButton, 11, 0, 1, 3)
+
+
+        # HANDLE DEFINTIIONS
+        structureIncorporation = QtGui.QLabel('Incorporation')
+        self.structureIncorporationEdit = QtGui.QDoubleSpinBox()
+        self.structureIncorporationEdit.setKeyboardTracking(False)
+        self.structureIncorporationEdit.setRange(1, 100)
+        self.structureIncorporationEdit.setDecimals(0)
+        self.structureIncorporationEdit.setValue(INCORPORATION_DEFAULT)
+
+        handles_groupbox = QtGui.QGroupBox('Handles')
+        hgrid = QtGui.QGridLayout(handles_groupbox)
+
+        hgrid.addWidget(structureIncorporation, 0, 0)
+        hgrid.addWidget(self.structureIncorporationEdit, 0, 1)
+        hgrid.addWidget(QtGui.QLabel('%'), 0, 2)
+
+        importHandlesButton = QtGui.QPushButton("Import handles")
+        importHandlesButton.clicked.connect(self.importHandles)
+        hgrid.addWidget(importHandlesButton, 1, 0, 1, 3)
+
+
+        # 3D Settings
+        self.mode3DEdit = QtGui.QCheckBox()
+        threed_groupbox = QtGui.QGroupBox('3D')
+        tgrid = QtGui.QGridLayout(threed_groupbox)
+        tgrid.addWidget(self.mode3DEdit, 0, 0)
+        tgrid.addWidget(QtGui.QLabel('3D'), 0, 1)
+
+        load3dCalibrationButton = QtGui.QPushButton("Load 3D Calibration")
+        load3dCalibrationButton.clicked.connect(self.load3dCalibration)
+        tgrid.addWidget(load3dCalibrationButton, 0, 2)
+
 
         # STRUCTURE DEFINITIONS
         structure_groupbox = QtGui.QGroupBox('Structure')
@@ -452,8 +469,6 @@ class Window(QtGui.QMainWindow):
 
         structurecomboLabel = QtGui.QLabel('Type')
 
-        structureIncorporation = QtGui.QLabel('Incorporation')
-
         self.structurenoEdit = QtGui.QSpinBox()
         self.structurenoEdit.setRange(1, 1000)
         self.structureframeEdit = QtGui.QSpinBox()
@@ -462,17 +477,11 @@ class Window(QtGui.QMainWindow):
         self.structureyyEdit = QtGui.QLineEdit(STRUCTUREYY_DEFAULT)
         self.structureexEdit = QtGui.QLineEdit(STRUCTUREEX_DEFAULT)
         self.structure3DEdit = QtGui.QLineEdit(STRUCTURE3D_DEFAULT)
-        self.structureIncorporationEdit = QtGui.QDoubleSpinBox()
-        self.structureIncorporationEdit.setKeyboardTracking(False)
-        self.structureIncorporationEdit.setRange(1, 100)
-        self.structureIncorporationEdit.setDecimals(0)
-        self.structureIncorporationEdit.setValue(INCORPORATION_DEFAULT)
 
         self.structurecombo = QtGui.QComboBox()
-        self.structurecombo.addItem("Grid")
-        self.structurecombo.addItem("Circle")
-        self.structurecombo.addItem("Custom")
-        self.structurecombo.addItem("Handles")
+        for entry in ['Grid','Circle','Custom']:
+            self.structurecombo.addItem(entry)
+
 
         self.structure1Edit = QtGui.QSpinBox()
         self.structure1Edit.setKeyboardTracking(False)
@@ -505,7 +514,6 @@ class Window(QtGui.QMainWindow):
         self.structurerandomOrientationEdit = QtGui.QCheckBox()
         self.structurerandomEdit = QtGui.QCheckBox()
 
-        self.mode3DEdit = QtGui.QCheckBox()
 
         structurerandom = QtGui.QLabel('Random arrangement')
         structurerandomOrientation = QtGui.QLabel('Random orientation')
@@ -539,35 +547,26 @@ class Window(QtGui.QMainWindow):
         sgrid.addWidget(self.structureyyEdit, 8, 1)
         sgrid.addWidget(QtGui.QLabel('nm'), 8, 2)
         sindex = 0
-        if MODE3D:
-            sgrid.addWidget(structure3d, 9, 0)
-            sgrid.addWidget(self.structure3DEdit, 9, 1)
-            sindex = 1
+
+        sgrid.addWidget(structure3d, 9, 0)
+        sgrid.addWidget(self.structure3DEdit, 9, 1)
+        sindex = 1
 
         sgrid.addWidget(structureex, 9+sindex, 0)
         sgrid.addWidget(self.structureexEdit, 9+sindex, 1)
-        sgrid.addWidget(structureIncorporation, 10+sindex, 0)
-        sgrid.addWidget(self.structureIncorporationEdit, 10+sindex, 1)
-        sgrid.addWidget(QtGui.QLabel('%'), 10+sindex, 2)
+            
+        sindex+=-1
         sgrid.addWidget(structurerandom, 11+sindex, 1)
         sgrid.addWidget(self.structurerandomEdit, 11+sindex, 0)
         sgrid.addWidget(structurerandomOrientation, 12+sindex, 1)
         sgrid.addWidget(self.structurerandomOrientationEdit, 12+sindex, 0)
 
-        sgrid.addWidget(self.mode3DEdit, 13+sindex, 0)
-        sgrid.addWidget(QtGui.QLabel('3D'), 13+sindex, 1)
-
-        load3dCalibrationButton = QtGui.QPushButton("Load 3D Calibration")
-        load3dCalibrationButton.clicked.connect(self.load3dCalibration)
-        sgrid.addWidget(load3dCalibrationButton, 14+sindex, 0, 1, 3)
+        sindex+=-2
 
         importDesignButton = QtGui.QPushButton("Import structure from design")
         importDesignButton.clicked.connect(self.importDesign)
         sgrid.addWidget(importDesignButton, 15+sindex, 0, 1, 3)
 
-        importHandlesButton = QtGui.QPushButton("Import handles")
-        importHandlesButton.clicked.connect(self.importHandles)
-        sgrid.addWidget(importHandlesButton, 16+sindex, 0, 1, 3)
 
         generateButton = QtGui.QPushButton("Generate positions")
         generateButton.clicked.connect(self.generatePositions)
@@ -641,16 +640,25 @@ class Window(QtGui.QMainWindow):
             self.grid.addWidget(imager_groupbox, 2, 1)
             self.grid.addWidget(noise_groupbox, 2, 2)
             self.grid.addLayout(btngridR, 3, 2)
-            self.grid.addWidget(self.mainpbar, 4, 0, 1, 4)
+            self.grid.addWidget(self.mainpbar, 5, 0, 1, 4)
+            self.grid.addWidget(threed_groupbox, 4, 0)
+            self.grid.addWidget(handles_groupbox, 4, 1)
         else:
+            #Left side
             self.grid.addWidget(pos_groupbox, 1, 0)
             self.grid.addWidget(str_groupbox, 1, 1)
-            self.grid.addWidget(structure_groupbox, 2, 0, 2, 1)
-            self.grid.addWidget(camera_groupbox, 3, 1)
-            self.grid.addWidget(paint_groupbox, 4, 0)
+            self.grid.addWidget(structure_groupbox, 2, 0)
+            self.grid.addWidget(paint_groupbox, 3, 0)
+            self.grid.addWidget(handles_groupbox, 4, 0)
+            self.grid.addWidget(threed_groupbox, 5, 0)
+
+            #Right side
             self.grid.addWidget(imager_groupbox, 2, 1)
-            self.grid.addLayout(btngridR, 4, 1)
-            self.grid.addWidget(self.mainpbar, 5, 0, 1, 4)
+            self.grid.addWidget(camera_groupbox, 3, 1)
+            self.grid.addLayout(btngridR, 4, 1, 2, 1)
+            self.grid.addWidget(self.mainpbar, 8, 0, 1, 4)
+            
+
         mainWidget = QtGui.QWidget()
         mainWidget.setLayout(self.grid)
         self.setCentralWidget(mainWidget)
@@ -747,7 +755,7 @@ class Window(QtGui.QMainWindow):
             equationB = self.EquationBEdit.value()
             equationC = self.EquationCEdit.value()
             bgstdoffset = self.BgStdoffsetEdit.value()
-            bgmodelstd = equationA * laserpower * itime + equationB * bgmodel + equationC + bgstdoffset
+            bgmodelstd = equationA * laserpower * itime + equationB * bgmodel + equationC + bgstdoffset * bglevel
             self.backgroundframeEdit.setText(str(int(bgmodel)))
             self.noiseEdit.setText(str(int(bgmodelstd)))
         else:
@@ -939,8 +947,8 @@ class Window(QtGui.QMainWindow):
             structurex = self.structurexxEdit.text()
             structurey = self.structureyyEdit.text()
             structureextxt = self.structureexEdit.text()
-            if MODE3D:
-                structure3dtxt = self.structure3DEdit.text()
+   
+            structure3dtxt = self.structure3DEdit.text()
 
             # PAINT
             kon = self.konEdit.value()
@@ -1082,7 +1090,8 @@ class Window(QtGui.QMainWindow):
                         'Imager.Photonbudget': photonbudget,
                         'Imager.Laserpower': laserpower,
                         'Imager.Photonslope': photonslope,
-                        'Imager.PhotonslopeStd': photonslopeStd,
+                        'Imager.PhotonslopeStd': photonslopeStd, 
+                        'Imager.BackgroundLevel':self.backgroundlevelEdit.value(),
                         'Camera.Image Size': imagesize,
                         'Camera.Integration Time': itime,
                         'Camera.Frames': frames,
@@ -1192,6 +1201,11 @@ class Window(QtGui.QMainWindow):
                 self.photonslopemodeEdit.setCheckState(info[0]['Imager.Constant Photonrate Std'])
             except:
                 pass
+
+            try:
+                self.backgroundlevelEdit.setValue(info[0]['Imager.BackgroundLevel'])
+            except:
+                pass
             self.structureIncorporationEdit.setValue(info[0]['Structure.Incorporation'])
 
             self.structurerandomEdit.setCheckState(info[0]['Structure.Arrangement'])
@@ -1261,8 +1275,12 @@ class Window(QtGui.QMainWindow):
             self.structure3DEdit.setText(structure3d)
             self.structurecombo.setCurrentIndex(2)
 
-    def readLine(self, linetxt,type='float'):
-        line = _np.asarray((linetxt.text()).split(","))
+    def readLine(self, linetxt,type='float',textmode = True):
+        if textmode:
+            line = _np.asarray((linetxt.text()).split(","))
+        else:
+            line = _np.asarray((linetxt.split(",")))
+
         values = []
         for element in line:
             try:
@@ -1277,22 +1295,79 @@ class Window(QtGui.QMainWindow):
 
     def importHandles(self):
         #Import structure <> 
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Open yaml', filter='*.yaml')
+        self.handles = {}
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Open yaml', filter='*.yaml *.hdf5')
         if path:
-            info = _io.load_info(path)
+            splitpath = _ospath.splitext(path)
+            if splitpath[-1] == '.yaml':
 
-            self.structurexxEdit.setText(info[0]['Structure.StructureX'])
-            self.structureyyEdit.setText(info[0]['Structure.StructureY'])
-            self.structureexEdit.setText(info[0]['Structure.StructureEx'])
+                info = _io.load_info(path)
+                
+
+                x = self.readLine(info[0]['Structure.StructureX'],textmode=False)
+                y = self.readLine(info[0]['Structure.StructureY'],textmode=False)
+                try:
+                    ex = self.readLine(info[0]['Structure.StructureEx'],type='int',textmode=False)
+                except:
+                    ex =_np.ones_like(x)
+
+                try:
+                    z = self.readLine(info[0]['Structure.Structure3D'])
+                except:
+                    z =_np.zeros_like(x)
+
+                minlen = min(len(x), len(y), len(ex), len(z))
+
+                x = x[0:minlen]
+                y = y[0:minlen]
+                ex = ex[0:minlen]
+                z = z[0:minlen]
+
+            else:
+
+                clusters = _io.load_clusters(path)
 
 
-            structure3d = ''
-            for i in range(0, len(self.structurexxEdit.text())):
-                structure3d = structure3d + '0,'
+                pixelsize = self.pixelsizeEdit.value()
+                imagesize = self.camerasizeEdit.value()
 
-            self.structure3DEdit.setText(structure3d)
-            self.structurecombo.setCurrentIndex(4)
+                x = clusters['com_x']
+                y = clusters['com_y']
+
+                #Align in the center of window:
+                x = x-_np.mean(x)+imagesize/2
+                y = -(y-_np.mean(y))+imagesize/2
+
+                x = x*pixelsize
+                y = y*pixelsize
+
+                try:
+                    z = clusters['com_z']
+                except:
+                    z = _np.zeros_like(x)
+
+                ex =_np.ones_like(x)
+                minlen = len(x)
+
+            self.handles['x'] = x
+            self.handles['y'] = y
+            self.handles['z'] = z
+            self.handles['ex'] = ex
+
+            #TODO: Check axis orientation
+            exchangecolors = list(set(self.handles['ex']))
+            exchangecolorsList = ','.join(map(str, exchangecolors))
+            # UPDATE THE EXCHANGE COLORS IN BUTTON TO BE simulated
+            self.exchangeroundsEdit.setText(str(exchangecolorsList))
+
+
+
+
             self.structurenoEdit.setValue(1)
+            self.structureMode = False
+            self.generatePositions()
+
+            self.statusBar().showMessage('A total of {} points loaded.'.format(minlen))
 
     def readStructure(self):
         structurexx = self.readLine(self.structurexxEdit)
@@ -1342,9 +1417,16 @@ class Window(QtGui.QMainWindow):
 
     def generatePositions(self):
         self.plotStructure()
-        structurexx, structureyy, structureex, structure3d = self.readStructure()
         pixelsize = self.pixelsizeEdit.value()
-        structure = simulate.defineStructure(structurexx, structureyy, structureex, structure3d, pixelsize)
+        if self.structureMode:
+            structurexx, structureyy, structureex, structure3d = self.readStructure()
+            structure = simulate.defineStructure(structurexx, structureyy, structureex, structure3d, pixelsize)
+        else:
+            structurexx = self.handles['x']
+            structureyy = self.handles['y']
+            structureex = self.handles['ex']
+            structure3d = self.handles['z']
+            structure = simulate.defineStructure(structurexx, structureyy, structureex, structure3d, pixelsize, mean=False)
 
         number = self.structurenoEdit.value()
         imageSize = self.camerasizeEdit.value()
@@ -1355,7 +1437,17 @@ class Window(QtGui.QMainWindow):
         orientation = int(self.structurerandomOrientationEdit.checkState())
         incorporation = self.structureIncorporationEdit.value() / 100
         exchange = 0
-        self.newstruct = simulate.prepareStructures(structure, gridpos, orientation, number, incorporation, exchange)
+
+        if self.structureMode:
+            self.newstruct = simulate.prepareStructures(structure, gridpos, orientation, number, incorporation, exchange)
+        else:
+            self.newstruct = simulate.prepareStructures(structure, _np.array([[0,0]]), orientation, number, incorporation, exchange)
+
+            in_x = _np.logical_and(self.newstruct[0, :]<(imageSize-frame),self.newstruct[0, :]>frame)
+            in_y = _np.logical_and(self.newstruct[1, :]<(imageSize-frame),self.newstruct[1, :]>frame)
+            in_frame = _np.logical_and(in_x,in_y)
+            self.newstruct = self.newstruct[:,in_frame]
+
 
         # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
