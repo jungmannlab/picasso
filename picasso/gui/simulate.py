@@ -110,6 +110,7 @@ class Window(QtGui.QMainWindow):
 
     def initUI(self):
         self.currentround = CURRENTROUND
+        self.customHandles = False
 
         self.grid = QtGui.QGridLayout()
         self.grid.setSpacing(5)
@@ -330,6 +331,17 @@ class Window(QtGui.QMainWindow):
             igrid.addWidget(backgroundframesimple, 11-igridindex, 0)
             igrid.addWidget(self.backgroundframesimpleEdit, 11-igridindex, 1)
 
+
+        #Make a spinbox for adjusting the background level
+        backgroundlevel = QtGui.QLabel('Background level')
+
+        self.backgroundlevelEdit = QtGui.QSpinBox()
+        self.backgroundlevelEdit.setRange(1, 100)
+
+        igrid.addWidget(backgroundlevel, 12-igridindex, 0)
+        igrid.addWidget(self.backgroundlevelEdit, 12-igridindex, 1)
+        self.backgroundlevelEdit.valueChanged.connect(self.changeNoise)
+
          # NOISE MODEL
         noise_groupbox = QtGui.QGroupBox('Noise Model')
         ngrid = QtGui.QGridLayout(noise_groupbox)
@@ -460,6 +472,7 @@ class Window(QtGui.QMainWindow):
         self.structurecombo.addItem("Grid")
         self.structurecombo.addItem("Circle")
         self.structurecombo.addItem("Custom")
+        self.structurecombo.addItem("Handles")
 
         self.structure1Edit = QtGui.QSpinBox()
         self.structure1Edit.setKeyboardTracking(False)
@@ -552,9 +565,13 @@ class Window(QtGui.QMainWindow):
         importDesignButton.clicked.connect(self.importDesign)
         sgrid.addWidget(importDesignButton, 15+sindex, 0, 1, 3)
 
+        importHandlesButton = QtGui.QPushButton("Import handles")
+        importHandlesButton.clicked.connect(self.importHandles)
+        sgrid.addWidget(importHandlesButton, 16+sindex, 0, 1, 3)
+
         generateButton = QtGui.QPushButton("Generate positions")
         generateButton.clicked.connect(self.generatePositions)
-        sgrid.addWidget(generateButton, 16+sindex, 0, 1, 3)
+        sgrid.addWidget(generateButton, 17+sindex, 0, 1, 3)
         cgrid.addItem(QtGui.QSpacerItem(1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding))
 
         simulateButton = QtGui.QPushButton("Simulate data")
@@ -719,6 +736,7 @@ class Window(QtGui.QMainWindow):
         itime = self.integrationtimeEdit.value()
         imagerconcentration = self.imagerconcentrationEdit.value()
         laserpower = self.laserpowerEdit.value() * POWERDENSITY_CONVERSION
+        bglevel = self.backgroundlevelEdit.value()
         if ADVANCEDMODE:
             # NEW NOISE MODEL
             laserc = self.lasercEdit.value()
@@ -733,12 +751,12 @@ class Window(QtGui.QMainWindow):
             self.backgroundframeEdit.setText(str(int(bgmodel)))
             self.noiseEdit.setText(str(int(bgmodelstd)))
         else:
-            bgmodel = (LASERC_DEFAULT + IMAGERC_DEFAULT * imagerconcentration) * laserpower * itime
+            bgmodel = (LASERC_DEFAULT + IMAGERC_DEFAULT * imagerconcentration) * laserpower * itime * bglevel
             self.backgroundframesimpleEdit.setText(str(int(bgmodel)))
 
     def changeStructureType(self):
         typeindex = self.structurecombo.currentIndex()
-        # TYPEINDEX: 0 = GRID, 1 = CIRCLE, 2 = CUSTOM
+        # TYPEINDEX: 0 = GRID, 1 = CIRCLE, 2 = CUSTOM, 3 = Handles
 
         if typeindex == 0:
             self.structure1.show()
@@ -776,6 +794,16 @@ class Window(QtGui.QMainWindow):
             self.structure2Edit.hide()
             self.structure3Edit.hide()
             self.structure3Label.hide()
+        elif typeindex == 3: 
+            self.structure1.hide()
+            self.structure2.hide()
+            self.structure3.hide()
+            self.structure1Edit.hide()
+            self.structure2Edit.hide()
+            self.structure3Edit.hide()
+            self.structure3Label.hide()
+            self.structure3Label.hide()
+
 
         self.changeStructDefinition()
 
@@ -860,8 +888,10 @@ class Window(QtGui.QMainWindow):
             self.generatePositions()
 
         elif typeindex == 2:  # Custom
-
             self.generatePositions()
+
+        elif typeindex == 3: # Handles
+            print('Handles will be displayed..')
 
     def keyPressEvent(self, e):
 
@@ -1231,39 +1261,44 @@ class Window(QtGui.QMainWindow):
             self.structure3DEdit.setText(structure3d)
             self.structurecombo.setCurrentIndex(2)
 
+    def readLine(self, linetxt,type='float'):
+        line = _np.asarray((linetxt.text()).split(","))
+        values = []
+        for element in line:
+            try:
+                if type == 'int':
+                    values.append(int(element))
+                elif type == 'float':
+                    values.append(float(element))
+
+            except ValueError:
+                pass
+        return values
+
+    def importHandles(self):
+        #Import structure <> 
+        path = QtGui.QFileDialog.getOpenFileName(self, 'Open yaml', filter='*.yaml')
+        if path:
+            info = _io.load_info(path)
+
+            self.structurexxEdit.setText(info[0]['Structure.StructureX'])
+            self.structureyyEdit.setText(info[0]['Structure.StructureY'])
+            self.structureexEdit.setText(info[0]['Structure.StructureEx'])
+
+
+            structure3d = ''
+            for i in range(0, len(self.structurexxEdit.text())):
+                structure3d = structure3d + '0,'
+
+            self.structure3DEdit.setText(structure3d)
+            self.structurecombo.setCurrentIndex(4)
+            self.structurenoEdit.setValue(1)
 
     def readStructure(self):
-        structurexxtxt = _np.asarray((self.structurexxEdit.text()).split(","))
-        structureyytxt = _np.asarray((self.structureyyEdit.text()).split(","))
-        structureextxt = _np.asarray((self.structureexEdit.text()).split(","))
-        structure3dtxt = _np.asarray((self.structure3DEdit.text()).split(","))
-
-        structurexx = []
-        structureyy = []
-        structureex = []
-        structure3d = []
-
-        for element in structurexxtxt:
-            try:
-                structurexx.append(float(element))
-            except ValueError:
-                pass
-        for element in structureyytxt:
-            try:
-                structureyy.append(float(element))
-            except ValueError:
-                pass
-        for element in structureextxt:
-            try:
-                structureex.append(int(element))
-            except ValueError:
-                pass
-
-        for element in structure3dtxt:
-            try:
-                structure3d.append(float(element))
-            except ValueError:
-                pass
+        structurexx = self.readLine(self.structurexxEdit)
+        structureyy = self.readLine(self.structureyyEdit)
+        structureex = self.readLine(self.structureexEdit,'int')
+        structure3d = self.readLine(self.structure3DEdit)
 
         minlen = min(len(structureex), len(structurexx), len(structureyy), len(structure3d))
 
