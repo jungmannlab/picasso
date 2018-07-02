@@ -113,7 +113,7 @@ class PickHistWindow(QtGui.QTabWidget):
         icon_path = os.path.join(this_directory, 'icons', 'render.ico')
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
-        self.resize(1000, 400)
+        self.resize(1000, 500)
         self.figure = plt.Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
         vbox = QtGui.QVBoxLayout()
@@ -125,22 +125,37 @@ class PickHistWindow(QtGui.QTabWidget):
         self.figure.clear()
         # Length
         axes = self.figure.add_subplot(121)
-        axes.set_title('Length (cumulative)')
+        #axes.set_title('Length (cumulative) \n' r'$\mu={},\ \sigma={}$'.format(1,2))
+        a = fit_result_len.best_values['a']
+        t = fit_result_len.best_values['t']
+        c = fit_result_len.best_values['c']
+        axes.set_title('Length (cumulative) \n' r'$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$'.format(a,t,c))
+
         data = pooled_locs.len
         data.sort()
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label='data')
         axes.semilogx(data, fit_result_len.best_fit, label='fit')
         axes.legend(loc='best')
+        axes.set_xlabel('Duration (frames)')
+        axes.set_ylabel('Frequency')
+
         # Dark
         axes = self.figure.add_subplot(122)
-        axes.set_title('Dark time (cumulative)')
+
+        a = fit_result_dark.best_values['a']
+        t = fit_result_dark.best_values['t']
+        c = fit_result_dark.best_values['c']
+
+        axes.set_title('Dark time (cumulative) \n' r'$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$'.format(a,t,c))
         data = pooled_locs.dark
         data.sort()
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label='data')
         axes.semilogx(data, fit_result_dark.best_fit, label='fit')
         axes.legend(loc='best')
+        axes.set_xlabel('Duration (frames)')
+        axes.set_ylabel('Frequency')
         self.canvas.draw()
 
 class ApplyDialog(QtGui.QDialog):
@@ -1714,6 +1729,7 @@ class View(QtGui.QLabel):
         self._points = []
         self.index_blocks = []
         self._drift = []
+        self._driftfiles = []
         self.currentdrift = []
         self.x_render_cache = []
         self.x_render_state = False
@@ -1739,7 +1755,30 @@ class View(QtGui.QLabel):
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
-        self._drift.append(None)
+
+        drift = None
+        #Try to load a driftfile:
+        if 'Last driftfile' in info[-1]:
+            path = info[-1]['Last driftfile']
+            try:
+                with open(path, 'r') as f:
+                    drifttxt = np.loadtxt(f)
+                drift_x = drifttxt[:,0]
+                drift_y = drifttxt[:,1]
+
+                if drifttxt.shape[1] == 3:
+                    drift_z = drifttxt[:,2]
+                    drift = (drift_x, drift_y,drift_z)
+                    drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f'),('z', 'f')])
+                else:
+                    drift = (drift_x, drift_y)
+                    drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
+            except:
+                #drift already initialized before
+                pass
+       
+        self._drift.append(drift)
+        self._driftfiles.append(None)
         self.currentdrift.append(None)
         if len(self.locs) == 1:
             self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
@@ -3694,15 +3733,49 @@ class View(QtGui.QLabel):
     def to_down(self):
         self.pan_relative(-0.8, 0)
 
-    def add_drift(self, channel, drift):
-        if self._drift[channel] is None:
-            self._drift[channel] = drift
-        else:
-            self._drift[channel].x += drift.x
-            self._drift[channel].y += drift.y
-        self.currentdrift[channel] = copy.copy(drift)
-        base, ext = os.path.splitext(self.locs_paths[channel])
-        np.savetxt(base + '_drift.txt', self._drift[channel], header='dx\tdy', newline='\r\n')
+    def show_drift(self):
+        #Todo: Implement a check if there is drift already loaded and load
+        channel = self.get_channel('Show drift')
+        if channel is not None:
+            info = self.infos[channel]
+            drift = self._drift[channel]
+
+            if hasattr(self._drift[channel], 'z'):
+                fig1 = plt.figure(figsize=(25.5, 6))
+                plt.suptitle('Corrected drift')
+                plt.subplot(1, 3, 1)
+                plt.plot(drift.x, label='x')
+                plt.plot(drift.y, label='y')
+                plt.legend(loc='best')
+                plt.xlabel('Frame')
+                plt.ylabel('Drift (pixel)')
+                plt.subplot(1, 3, 2)
+                plt.plot(drift.x, drift.y, color=list(plt.rcParams['axes.prop_cycle'])[2]['color'])
+                plt.axis('equal')
+                plt.xlabel('x')
+                plt.ylabel('y')
+                plt.subplot(1, 3, 3)
+                plt.plot(drift.z, label='z')
+                plt.legend(loc='best')
+                plt.xlabel('Frame')
+                plt.ylabel('Drift (nm)')
+                fig1.show()
+
+            else:
+                fig1 = plt.figure(figsize=(17, 6))
+                plt.suptitle('Corrected drift')
+                plt.subplot(1, 2, 1)
+                plt.plot(drift.x, label='x')
+                plt.plot(drift.y, label='y')
+                plt.legend(loc='best')
+                plt.xlabel('Frame')
+                plt.ylabel('Drift (pixel)')
+                plt.subplot(1, 2, 2)
+                plt.plot(drift.x, drift.y, color=list(plt.rcParams['axes.prop_cycle'])[2]['color'])
+                plt.axis('equal')
+                plt.xlabel('x')
+                plt.ylabel('y')
+                fig1.show()
 
     def undrift(self):
         ''' Undrifts with rcc. '''
@@ -3832,13 +3905,48 @@ class View(QtGui.QLabel):
             self._undo_drift(channel)
 
     def _undo_drift(self, channel):
+        #Todo undo drift for z
         drift = self.currentdrift[channel]
         drift.x = -drift.x
         drift.y = -drift.y
-        self.add_drift(channel, drift)
+
         self.locs[channel].x -= drift.x[self.locs[channel].frame]
         self.locs[channel].y -= drift.y[self.locs[channel].frame]
+
+        if hasattr(drift, 'z'):
+            drift.z = -drift.z
+            self.locs[channel].z -= drift.z[self.locs[channel].frame]
+
+        self.add_drift(channel, drift)
         self.update_scene()
+
+
+    def add_drift(self, channel, drift):
+        import time
+        timestr = time.strftime("%Y%m%d_%H%M%S")[2:]
+        base, ext = os.path.splitext(self.locs_paths[channel])
+        driftfile = base + '_' + timestr + '_drift.txt'
+        self._driftfiles[channel] = driftfile
+
+        if self._drift[channel] is None:
+            self._drift[channel] = drift
+        else:
+            self._drift[channel].x += drift.x
+            self._drift[channel].y += drift.y
+
+            if hasattr(drift, 'z'):
+                if hasattr(self._drift[channel], 'z'):
+                    self._drift[channel].z += drift.z
+                else:
+                    self._drift[channel]  = lib.append_to_rec(self._drift[channel], drift.z, 'z')
+
+        self.currentdrift[channel] = copy.copy(drift)
+
+        if hasattr(drift, 'z'):
+            np.savetxt(driftfile, self._drift[channel], header='dx\tdy\tdz', newline='\r\n')
+        else:
+            np.savetxt(driftfile, self._drift[channel], header='dx\tdy', newline='\r\n')
+
 
     def unfold_groups(self):
         if not hasattr(self, 'unfold_status'):
@@ -4137,6 +4245,8 @@ class Window(QtGui.QMainWindow):
         info_action = view_menu.addAction('Show info')
         info_action.setShortcut('Ctrl+I')
         info_action.triggered.connect(self.info_dialog.show)
+        drift_action = view_menu.addAction('Show drift')
+        drift_action.triggered.connect(self.view.show_drift)
         view_menu.addAction(info_action)
         tools_menu = self.menu_bar.addMenu('Tools')
         tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
@@ -4548,7 +4658,7 @@ class Window(QtGui.QMainWindow):
             out_path = base + '_render.hdf5'
             path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', out_path, filter='*.hdf5')
             if path:
-                info = self.view.infos[channel] + [{'Generated by': 'Picasso Render'}]
+                info = self.view.infos[channel] + [{'Generated by': 'Picasso Render', 'Last driftfile': self.view._driftfiles[channel]}]
                 io.save_locs(path, self.view.locs[channel], info)
 
     def save_picked_locs(self):
