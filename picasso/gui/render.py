@@ -1888,7 +1888,10 @@ class View(QtGui.QLabel):
                 locs_.x -= shift[1][i]
                 if len(shift) == 3:
                     locs_.z -= shift[2][i]
+                #Cleanup
+                self.index_blocks[i] = None
                 sp.set_value(i+1)
+
             self.update_scene()
         else:
             max_iterations = 4
@@ -3244,6 +3247,7 @@ class View(QtGui.QLabel):
             self.add_picks(similar)
 
     def picked_locs(self, channel, add_group=True):
+        print('Calling picked locs')
         ''' Returns picked localizations in the specified channel '''
         if len(self._picks):
             d = self.window.tools_settings_dialog.pick_diameter.value()
