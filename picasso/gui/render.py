@@ -2212,6 +2212,21 @@ class View(QtGui.QLabel):
             else:
                 return None
 
+    def save_channel_pickprops(self, title='Choose a channel'):
+        n_channels = len(self.locs_paths)
+        if n_channels == 0:
+            return None
+        elif n_channels == 1:
+            return 0
+        elif len(self.locs_paths) > 1:
+            pathlist = list(self.locs_paths)
+            pathlist.append('Save all at once')
+            index, ok = QtGui.QInputDialog.getItem(self, 'Save pick properties', 'Channel:', pathlist, editable=False)
+            if ok:
+                return pathlist.index(index)
+            else:
+                return None
+
     def get_channel3d(self, title='Choose a channel'):
         n_channels = len(self.locs_paths)
         if n_channels == 0:
@@ -3247,7 +3262,6 @@ class View(QtGui.QLabel):
             self.add_picks(similar)
 
     def picked_locs(self, channel, add_group=True):
-        print('Calling picked locs')
         ''' Returns picked localizations in the specified channel '''
         if len(self._picks):
             d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -4647,13 +4661,21 @@ class Window(QtGui.QMainWindow):
         self.view.zoom_out()
 
     def save_pick_properties(self):
-        channel = self.view.get_channel('Save localizations')
+        channel = self.view.save_channel_pickprops('Save localizations')
         if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + '_pickprops.hdf5'
-            path = QtGui.QFileDialog.getSaveFileName(self, 'Save pick properties', out_path, filter='*.hdf5')
-            if path:
-                self.view.save_pick_properties(path, channel)
+            if channel is (len(self.view.locs_paths)):
+                print('Save all at once.')
+                for i in tqdm(range(len(self.view.locs_paths))):
+                    channel = i
+                    base, ext = os.path.splitext(self.view.locs_paths[channel])
+                    out_path = base + '_apickprops.hdf5'
+                    self.view.save_pick_properties(out_path, channel)
+            else:
+                base, ext = os.path.splitext(self.view.locs_paths[channel])
+                out_path = base + '_pickprops.hdf5'
+                path = QtGui.QFileDialog.getSaveFileName(self, 'Save pick properties', out_path, filter='*.hdf5')
+                if path:
+                    self.view.save_pick_properties(path, channel)
 
     def save_locs(self):
         channel = self.view.get_channel('Save localizations')
