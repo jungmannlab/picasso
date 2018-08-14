@@ -46,16 +46,15 @@ def _hdf2visp(path, pixel_size):
             savetxt(outname, locs, fmt=['%.1f', '%.1f', '%.1f', '%.1f', '%d'], newline='\r\n')
 
 def _csv2hdf(path, pixelsize):
-
-
     from glob import glob
+    from tqdm import tqdm as _tqdm
     paths = glob(path)
     if paths:
         from .io import save_locs
         import os.path
         import numpy as _np
         from numpy import savetxt
-        for path in paths:
+        for path in _tqdm(paths):
             print('Converting {}'.format(path))
 
             data = _np.genfromtxt(path, dtype=float, delimiter=',', names=True)
@@ -113,7 +112,29 @@ def _csv2hdf(path, pixelsize):
             except:
                 print('Error. Datatype not understood.')
 
-
+def _hdf2csv(path):
+    from glob import glob
+    import pandas as pd
+    from tqdm import tqdm as _tqdm
+    from os.path import isdir
+    if isdir(path):
+        paths = glob(path+'/*.hdf5')
+    else:
+        paths = glob(path)
+    if paths:
+        from .io import load_filter
+        import os.path
+        import numpy as _np
+        from numpy import savetxt
+        for path in _tqdm(paths):
+            base, ext = os.path.splitext(path)                       
+            if ext == '.hdf5':
+                print('Converting {}'.format(path))
+                out_path = base + '.csv'
+                locs = pd.read_hdf(path)
+                print('A total of {} rows loaded'.format(len(locs)))
+                locs.to_csv(out_path, sep=',', encoding='utf-8')
+    print('Complete.')
 
 
 
@@ -845,6 +866,10 @@ def main():
     csv2hdf_parser.add_argument('files')
     csv2hdf_parser.add_argument('pixelsize', type=float)
 
+    hdf2csv_parser = subparsers.add_parser('hdf2csv')
+    hdf2csv_parser.add_argument('files')
+
+
 
     # Parse
     args = parser.parse_args()
@@ -914,6 +939,8 @@ def main():
             _hdf2visp(args.files, args.pixelsize)
         elif args.command == 'csv2hdf':
             _csv2hdf(args.files, args.pixelsize)
+        elif args.command == 'hdf2csv':
+            _hdf2csv(args.files)
     else:
         parser.print_help()
 
