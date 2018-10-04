@@ -322,6 +322,8 @@ class Window(QtGui.QMainWindow):
 
         self.translatebtn = QtGui.QCheckBox("Translate only")
 
+        self.flipbtn = QtGui.QCheckBox("Consider flipped structures")
+
         self.alignxbtn = QtGui.QPushButton("Align X")
         self.alignybtn = QtGui.QPushButton("Align Y")
         self.alignzzbtn = QtGui.QPushButton("Align Z_Z")
@@ -340,12 +342,26 @@ class Window(QtGui.QMainWindow):
 
         rotationgrid.addWidget(self.translatebtn, 7, 0)
 
+        rotationgrid.addWidget(self.flipbtn, 8, 0)
+
+        self.x_range = QtGui.QLineEdit('-3,3')
+        rotationgrid.addWidget(QtGui.QLabel('x-Range (Px)'), 9, 0)
+        rotationgrid.addWidget(self.x_range, 9, 1)
+
+        self.y_range = QtGui.QLineEdit('-3,3')
+        rotationgrid.addWidget(QtGui.QLabel('y-Range (Px)'), 10, 0)
+        rotationgrid.addWidget(self.y_range, 10, 1)
+
         self.z_range = QtGui.QLineEdit('-1000,1000')
 
-        rotationgrid.addWidget(QtGui.QLabel('z-Range (nm)'), 8, 0)
-        rotationgrid.addWidget(self.z_range, 8, 1)
+        rotationgrid.addWidget(QtGui.QLabel('z-Range (nm)'), 11, 0)
+        rotationgrid.addWidget(self.z_range, 11, 1)
 
         self.z_range.textChanged.connect(self.adjust_z)
+
+        self.x_range.textChanged.connect(self.adjust_xy)
+
+        self.y_range.textChanged.connect(self.adjust_xy)
 
         operategrid.addWidget(self.alignxbtn, 0, 1)
         operategrid.addWidget(self.alignybtn, 1, 1)
@@ -892,6 +908,49 @@ class Window(QtGui.QMainWindow):
 
 
         print('Z min {}, Z max {}'.format(self.z_min, self.z_max))
+
+        self.updateLayout()
+
+
+    def adjust_xy(self):
+        x_range_str = np.asarray((self.x_range.text()).split(","))
+        x_range = []
+ 
+        for element in x_range_str:
+            try:
+                x_range.append(float(element))
+            except ValueError:
+                pass 
+
+        x_min = x_range[0]
+        x_max = x_range[1]
+
+        
+        self.x_min = np.max([x_min, self.t_min])
+        self.x_max = np.min([x_max, self.t_max])
+
+
+        print('X min {}, X max {}'.format(self.x_min, self.x_max))
+
+
+        y_range_str = np.asarray((self.y_range.text()).split(","))
+        y_range = []
+ 
+        for element in y_range_str:
+            try:
+                y_range.append(float(element))
+            except ValueError:
+                pass 
+
+        y_min = y_range[0]
+        y_max = y_range[1]
+
+        
+        self.y_min = np.max([y_min, self.t_min])
+        self.y_max = np.min([y_max, self.t_max])
+
+
+        print('Y min {}, Y max {}'.format(self.y_min, self.y_max))
 
         self.updateLayout()
 
@@ -1452,60 +1511,91 @@ class Window(QtGui.QMainWindow):
         all_da = np.zeros((n_angles,n_channels))
         all_db = np.zeros((n_angles,n_channels))
 
-        for j in range(n_channels):
-            if self.dataset_dialog.checks[j].isChecked():
-                index = self.group_index[j][group].nonzero()[1]
-                x_rot = self.locs[j].x[index]
-                y_rot = self.locs[j].y[index]
-                z_rot = self.locs[j].z[index]
-                x_original = x_rot.copy()
-                y_original = y_rot.copy()
-                z_original = z_rot.copy()
-                xcorr_max = 0.0
+        flips = 1
+        if self.flipbtn.isChecked():
+            print('Considering flipped structures...')
+            flips = 2
 
-                if self.translatebtn.isChecked():
-                    angles = [0]
-                    n_angles = 1
+        for f in range(flips):
+            for j in range(n_channels):
+                if self.dataset_dialog.checks[j].isChecked():
+                    index = self.group_index[j][group].nonzero()[1]
+                    x_rot = self.locs[j].x[index]
+                    y_rot = self.locs[j].y[index]
+                    z_rot = self.locs[j].z[index]
+                    x_original = x_rot.copy()
+                    y_original = y_rot.copy()
+                    z_original = z_rot.copy()
+                    xcorr_max = 0.0
 
-                for k in range(n_angles):
-                    angle = angles[k]
+                    if f == 1: #Flipped round
+                        if proplane == 'xy':
+                            x_original = -x_original
+                        elif proplane == 'yz':
+                            y_original = -y_original
+                        elif proplane == 'xz':
+                            z_original = -z_original
 
-                    x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle, self.pixelsize)
-                    # render group image for plane
-                    image = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #RENDR PLANES WAS BUGGY AT SOME POINT
+                    if self.translatebtn.isChecked():
+                        angles = [0]
+                        n_angles = 1
 
-                    # calculate cross-correlation
-                    if 0:
-                        fig = plt.figure()
-                        ax1 = fig.add_subplot(1,2,1)
-                        ax1.set_aspect('equal')
-                        plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
-                        plt.colorbar()
-                        plt.show()
-                        plt.waitforbuttonpress()
+                    for k in range(n_angles):
+                        angle = angles[k]
 
-                    xcorr = compute_xcorr(CF_image_avg[j], image)
+                        x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, angle, self.pixelsize)
+                        # render group image for plane
+                        image = self.render_planes(x_rot, y_rot, z_rot, proplane, self.pixelsize) #RENDR PLANES WAS BUGGY AT SOME POINT
 
-                    n_pixelb, n_pixela = image.shape
-                    image_halfa = n_pixela / 2 #TODO: CHECK THOSE VALUES
-                    image_halfb = n_pixelb / 2
+                        # calculate cross-correlation
+                        if 0:
+                            fig = plt.figure()
+                            ax1 = fig.add_subplot(1,2,1)
+                            ax1.set_aspect('equal')
+                            plt.imshow(image, interpolation='nearest', cmap=plt.cm.ocean)
+                            plt.colorbar()
+                            plt.show()
+                            plt.waitforbuttonpress()
 
-                    # find the brightest pixel
-                    b_max, a_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
-                    # store the transformation if the correlation is larger than before
-                    all_xcorr[k,j] = xcorr[b_max, a_max]
-                    all_db[k,j] = np.ceil(b_max - image_halfb) / self.oversampling
-                    all_da[k,j] = np.ceil(a_max - image_halfa) / self.oversampling
+                        xcorr = compute_xcorr(CF_image_avg[j], image)
 
-        #value with biggest cc value form table
-        maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
-        rotfinal = angles[maximumcc]
+                        n_pixelb, n_pixela = image.shape
+                        image_halfa = n_pixela / 2 #TODO: CHECK THOSE VALUES
+                        image_halfb = n_pixelb / 2
 
-        dafinal = np.mean(all_da[maximumcc,:])
-        dbfinal = np.mean(all_db[maximumcc,:])
+                        # find the brightest pixel
+                        b_max, a_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
+                        # store the transformation if the correlation is larger than before
+                        all_xcorr[k,j] = xcorr[b_max, a_max]
+                        all_db[k,j] = np.ceil(b_max - image_halfb) / self.oversampling
+                        all_da[k,j] = np.ceil(a_max - image_halfa) / self.oversampling
+            
+            flipstate = False
+            if f == 0:
+                #value with biggest cc value form table
+                maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
+                maximumcc_val = np.max(np.sum(all_xcorr,axis = 1))
+                rotfinal = angles[maximumcc]
+
+                dafinal = np.mean(all_da[maximumcc,:])
+                dbfinal = np.mean(all_db[maximumcc,:])
+
+            else:
+                maximumcc_val_f = np.max(np.sum(all_xcorr,axis = 1))
+
+                if maximumcc_val < maximumcc_val_f:
+                    flipstate = True
+                    maximumcc = np.argmax(np.sum(all_xcorr,axis = 1))
+                    rotfinal = angles[maximumcc]
+
+                    dafinal = np.mean(all_da[maximumcc,:])
+                    dbfinal = np.mean(all_db[maximumcc,:])
+
+
 
         for j in range(n_channels):
             index = self.group_index[j][group].nonzero()[1]
+
             x_rot = self.locs[j].x[index]
             y_rot = self.locs[j].y[index]
             z_rot = self.locs[j].z[index]
@@ -1515,9 +1605,25 @@ class Window(QtGui.QMainWindow):
             # rotate and shift image group locs
             x_rot, y_rot, z_rot = rotate_axis(rotaxis, x_original, y_original, z_original, rotfinal, self.pixelsize)
 
-            self.locs[j].x[index] = x_rot
-            self.locs[j].y[index] = y_rot
-            self.locs[j].z[index] = z_rot
+
+            if flipstate:
+                if proplane == 'xy':
+                    self.locs[j].x[index] = -x_rot
+                    self.locs[j].y[index] = y_rot
+                    self.locs[j].z[index] = z_rot
+                elif proplane == 'yz':
+                    self.locs[j].x[index] = x_rot
+                    self.locs[j].y[index] = -y_rot
+                    self.locs[j].z[index] = z_rot
+                elif proplane == 'xz':
+                    self.locs[j].x[index] = x_rot
+                    self.locs[j].y[index] = y_rot
+                    self.locs[j].z[index] = -z_rot
+
+            else:
+                self.locs[j].x[index] = x_rot
+                self.locs[j].y[index] = y_rot
+                self.locs[j].z[index] = z_rot
 
             #Shift image group locs
             if self.translatebtn.isChecked():

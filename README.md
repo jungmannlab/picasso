@@ -21,16 +21,17 @@ When using Anaconda or Miniconda, most can be installed via `conda install <pack
 Sample instructions to create an environment with conda are as follows:
 1. Open the console and create a new conda environment: `conda create --name picasso python=3.5`
 2. Activate the environment: `source activate picasso` for Linux / Mac Os X or `activate picasso` for Windows.
-3. Install the necessary packages with conda: `conda install h5py matplotlib numba numpy scipy pyqt=4 pyyaml scikit-learn colorama tqdm`
-4. Additionally install packages with pip: `pip install lmfit`
-5. Continue with Installation
-6. Note that sometimes outdated packages can cause problems. If you experience errors, please check whether your packages have the right version (e.g. see issue #4).
+3. Continue with Installation
 
 #### Installation
 1. Open the console, `cd` to the directory where you want to install and run
 `git clone https://github.com/jungmannlab/picasso`
 Alternatively, [download](https://github.com/jungmannlab/picasso/archive/master.zip) the zip file and unzip it.
-2. Change to the downloaded directory and run `python setup.py install`.
+2. Change to the downloaded directory `cd picasso`
+3. Run installation `python setup.py install`.
+4. Install requirements  with pip: `pip install -r requirements.txt`
+5. Additionally install QT library with conda: `conda install pyqt=4 -y`
+6. Note that sometimes outdated packages can cause problems. If you experience errors, please check whether your packages have the right version (e.g. see issue #4).
 
 #### Optional for windows users
 Run the PowerShell script "createShortcuts.ps1" in the gui directory.

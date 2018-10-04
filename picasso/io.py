@@ -199,6 +199,8 @@ class TiffMap:
             self.file.seek(offset + 2 + n_entries * 12)
             offset = self.read('L')
         self.n_frames = len(self.image_offsets)
+        
+        self.last_ifd_offset = offset + 2 + n_entries * 12 
 
         self.lock = _threading.Lock()
 
@@ -268,6 +270,20 @@ class TiffMap:
                 mm_info = _json.loads(readout.decode())
                 info['Micro-Manager Metadata'] = mm_info
                 info['Camera'] = mm_info['Camera']
+                
+        self.file.seek(self.last_ifd_offset)
+        content = self.file.read()  
+        search="\{\"Summary\":\"(.*)\"\}"
+        fullstring=str(content)
+        s = _re.search(search,fullstring)
+        
+        if s:
+            comments = s.group(1).split('\\\\n')
+        else:
+            comments = ''
+
+        info['Micro-Manager Acquisiton Comments'] = comments
+
         return info
 
     def get_frame(self, index, array=None):
@@ -304,6 +320,7 @@ class TiffMap:
             if do_byteswap:
                 image = image.byteswap()
             image.tofile(file_handle)
+
 
 
 class TiffMultiMap:
