@@ -10,7 +10,6 @@
 
 import numpy as _np
 import numba as _numba
-from hdbscan import HDBSCAN as _HDBSCAN
 
 from sklearn.cluster import DBSCAN as _DBSCAN
 from scipy import interpolate as _interpolate
