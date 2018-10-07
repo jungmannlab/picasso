@@ -1392,6 +1392,7 @@ class Window(QtGui.QMainWindow):
         #self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
+        ax1.hold(True)
         ax1.axis('equal')
 
         for i in range(0, noexchangecolors):
@@ -1451,6 +1452,7 @@ class Window(QtGui.QMainWindow):
         # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
         ax1.cla()
+        ax1.hold(True)
         ax1.axis('equal')
         ax1.plot(self.newstruct[0, :], self.newstruct[1, :], '+')
         # PLOT FRAME
@@ -1479,6 +1481,7 @@ class Window(QtGui.QMainWindow):
         #self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
+        ax1.hold(True)
         ax1.axis('equal')
 
         structurexx = struct1[0, :]
@@ -1521,6 +1524,7 @@ class Window(QtGui.QMainWindow):
         # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
         ax1.cla()
+        ax1.hold(True)
         ax1.axis('equal')
         ax1.plot(self.newstruct[0, :], self.newstruct[1, :], '+')
         # PLOT FRAME
@@ -1549,6 +1553,7 @@ class Window(QtGui.QMainWindow):
         # self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
+        ax1.hold(True)
 
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
@@ -1689,6 +1694,7 @@ class Window(QtGui.QMainWindow):
                     photonsmu, photonsstd = norm.fit(photons)
                     ax1 = figure3.add_subplot(131)
                     ax1.cla()
+                    ax1.hold(True)
                     ax1.hist(photons, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
                     x = _np.linspace(xmin, xmax, 100)
@@ -1702,6 +1708,7 @@ class Window(QtGui.QMainWindow):
                     sigmamu, sigmastd = norm.fit(sigma)
                     ax2 = figure3.add_subplot(132)
                     ax2.cla()
+                    ax2.hold(True)
                     ax2.hist(sigma, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
                     x = _np.linspace(xmin, xmax, 100)
@@ -1714,6 +1721,7 @@ class Window(QtGui.QMainWindow):
                     bgmu, bgstd = norm.fit(bg)
                     ax3 = figure3.add_subplot(133)
                     ax3.cla()
+                    ax3.hold(True)
                     # Plot the histogram.
                     ax3.hist(bg, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
