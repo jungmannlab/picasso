@@ -1,8 +1,8 @@
 ﻿# Picasso
-A collection of tools for painting super-resolution images. The Picasso software is complemented by our Nature Protocols publication (https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html).
+A collection of tools for painting super-resolution images. The Picasso software is complemented by our [Nature Protocols publication](https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html).
 
 ## Installation
-Download and run the one-click installer file for Windows from [http://www.jungmannlab.org/](http://www.jungmannlab.org). Note that this is the Picasso version presented in the Nature Protocols publication. Feel free to reach out via picasso@jungmannlab.org to get the latest installer of the current commit. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X) please follow the advanced installation instructions.
+Check out the [Picasso release page](https://github.com/jungmannlab/picasso/releases/) to download and run the latest compiled one-click installer for Windows. Here you will also find the Nature Protocols legacy version. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X) please follow the advanced installation instructions.
 
 ### Advanced installation for Python programmers
 As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso's internal routines in custom Python programs. For windows, one is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
@@ -12,16 +12,18 @@ As an alternative to the stand-alone program for end-users, Picasso can be insta
 ##### Python 3.* (currently tested with 3.5)  
 We highly recommend the [Anaconda or Miniconda](https://www.continuum.io/downloads) Python distribution which comes with a powerful package manager.
 
-##### Python packages
-The following packages are required:  
-`h5py matplotlib numba numpy scipy pyqt=4 pyyaml scikit-learn colorama lmfit tqdm`  
-When using Anaconda or Miniconda, most can be installed via `conda install <package>`. However, some packages need to be obtained from third-party conda channels. Visit [anaconda.org](anaconda.org) to search for them. Use `pip`  as a last resort to install packages from [PyPi](https://pypi.python.org/pypi). See instructions below as reference:
-
-##### Creating an environment with conda
-Sample instructions to create an environment with conda are as follows:
+##### Setting up environment with conda 
+Sample instructions to create an environment and installation of packages with conda are as follows:
 1. Open the console and create a new conda environment: `conda create --name picasso python=3.5`
 2. Activate the environment: `source activate picasso` for Linux / Mac Os X or `activate picasso` for Windows.
-3. Continue with Installation
+4. Install the necessary packages with conda: `conda install h5py matplotlib numba numpy scipy pyqt=4 pyyaml scikit-learn colorama tqdm`
+5. Additionally install the lmfit package with pip: `pip install lmfit`
+6. (Optional) If you plan to compile your own installer additionally install Pyinstaller: `pip install pyinstaller`
+7. Continue with the installation of Picasso
+
+Note that sometimes outdated packages can cause problems. If you experience errors, please check whether your packages have the right version (e.g. see issue #4).
+Also note that there is also a requirements.txt which you can use to install all packages with pip (`pip install -r requirements.txt`). However currently you will also need PyQt4 (i.e. with `conda install pyqt=4 -y`). In the past, not relying on conda caused troubles with creating the one-click installer. I therefore recommend installing all packages with conda.
+
 
 #### Installation
 1. Open the console, `cd` to the directory where you want to install and run
@@ -29,9 +31,6 @@ Sample instructions to create an environment with conda are as follows:
 Alternatively, [download](https://github.com/jungmannlab/picasso/archive/master.zip) the zip file and unzip it.
 2. Change to the downloaded directory `cd picasso`
 3. Run installation `python setup.py install`.
-4. Install requirements  with pip: `pip install -r requirements.txt`
-5. Additionally install QT library with conda: `conda install pyqt=4 -y`
-6. Note that sometimes outdated packages can cause problems. If you experience errors, please check whether your packages have the right version (e.g. see issue #4).
 
 #### Optional for windows users
 Run the PowerShell script "createShortcuts.ps1" in the gui directory.
