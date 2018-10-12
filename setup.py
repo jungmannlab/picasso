@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name='picasso',
-    version='0.2.0',
+    version='0.2.1',
     author='Joerg Schnitzbauer, Maximilian T. Strauss',
     author_email='joschnitzbauer (at) gmail.com, straussmaximilian (at) gmail.com',
     url='https://gitlab.com/jungmannlab/picasso',

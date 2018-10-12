@@ -1759,23 +1759,24 @@ class View(QtGui.QLabel):
         drift = None
         #Try to load a driftfile:
         if 'Last driftfile' in info[-1]:
-            path = info[-1]['Last driftfile']
-            try:
-                with open(path, 'r') as f:
-                    drifttxt = np.loadtxt(f)
-                drift_x = drifttxt[:,0]
-                drift_y = drifttxt[:,1]
+            driftpath = info[-1]['Last driftfile']
+            if driftpath is not None:
+                try:
+                    with open(driftpath, 'r') as f:
+                        drifttxt = np.loadtxt(f)
+                    drift_x = drifttxt[:,0]
+                    drift_y = drifttxt[:,1]
 
-                if drifttxt.shape[1] == 3:
-                    drift_z = drifttxt[:,2]
-                    drift = (drift_x, drift_y,drift_z)
-                    drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f'),('z', 'f')])
-                else:
-                    drift = (drift_x, drift_y)
-                    drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
-            except:
-                #drift already initialized before
-                pass
+                    if drifttxt.shape[1] == 3:
+                        drift_z = drifttxt[:,2]
+                        drift = (drift_x, drift_y,drift_z)
+                        drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f'),('z', 'f')])
+                    else:
+                        drift = (drift_x, drift_y)
+                        drift = np.rec.array(drift, dtype=[('x', 'f'), ('y', 'f')])
+                except:
+                    #drift already initialized before
+                    pass
        
         self._drift.append(drift)
         self._driftfiles.append(None)
