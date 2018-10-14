@@ -4,20 +4,12 @@
 
     Simulate single molcule fluorescence data
 
-    :author: Maximilian Thomas Strauss, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+    :author: Maximilian Thomas Strauss, 2016-2018
+    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 import numpy as _np
-
 from . import io as _io
 
-#from . import CONFIG as _CONFIG
-
-# if _CONFIG:
-#    cx = _CONFIG['3D Calibration']['X Coefficients']
-#    cy = _CONFIG['3D Calibration']['Y Coefficients']
-#    magfac = _CONFIG['3D Calibration']['Magnification Factor']
-# else:
 magfac = 0.79
 
 
@@ -30,7 +22,6 @@ def calculate_zpsf(z, cx, cy):
     z6 = z * z5
     wx = cx[0]*z6 + cx[1]*z5 + cx[2]*z4 + cx[3]*z3 + cx[4]*z2 + cx[5]*z + cx[6]
     wy = cy[0]*z6 + cy[1]*z5 + cy[2]*z4 + cy[3]*z3 + cy[4]*z2 + cy[5]*z + cy[6]
-
     return (wx, wy)
 
 
@@ -38,7 +29,10 @@ def saveInfo(filename, info):
     _io.save_info(filename, [info], default_flow_style=True)
 
 
-def noisy(image, mu, sigma):  # Add gaussian noise to an image.
+def noisy(image, mu, sigma):
+    """
+    Add gaussian noise to an image.
+    """
     row, col = image.shape  # Variance for _np.random is 1
     gauss = sigma*_np.random.normal(0, 1, (row, col)) + mu
     gauss = gauss.reshape(row, col)
@@ -46,18 +40,28 @@ def noisy(image, mu, sigma):  # Add gaussian noise to an image.
     noisy[noisy < 0] = 0
     return noisy
 
-def noisy_p(image, mu):  # Add poissonian noise to an image or movie
+
+def noisy_p(image, mu):
+    """
+    # Add poissonian noise to an image or movie
+    """
     poiss = _np.random.poisson(mu, image.shape).astype(float)
     noisy = image + poiss
     return noisy
 
+
 def check_type(movie):
     movie[movie >= (2**16)-1] = (2**16)-1
-    movie = movie.astype('<u2') #little-endian 16-bit unsigned in
+    movie = movie.astype('<u2')  # little-endian 16-bit unsigned int
     return movie
 
-# Paint-Generator: Generates on and off-traces for given parameters. Calculates the number of Photons in each frame for a binding site
+
 def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget):
+    """
+    Paint-Generator:
+    Generates on and off-traces for given parameters.
+    Calculates the number of Photons in each frame for a binding site.
+    """
     meanlocs = 4*int(_np.ceil(frames*time/(meandark+meanbright)))  # This is an estimate for the total number of binding events
     if meanlocs < 10:
         meanlocs = meanlocs*10
@@ -72,17 +76,16 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
 
     simulatedmeanbright = _np.mean(events[1:maxloc:2])
 
-    # CHECK Trace
+    # check trace
     if _np.mod(maxloc, 2):  # uneven -> ends with an OFF-event
         onevents = int(_np.floor(maxloc/2))
     else:  # even -> ends with bright event
         onevents = int(maxloc/2)
     bright_events = _np.floor(maxloc/2)  # number of bright_events
 
-    # AN ON-EVENT MIGHT BE LONGER THAN THE MOVIE, SO ALLOCATE MORE MEMORY, AS AN ESTIMATE: MEANBRIGHT/time*10
-    photonsinframe = _np.zeros(int(frames+_np.ceil(meanbright/time*20)))
+    photonsinframe = _np.zeros(int(frames+_np.ceil(meanbright/time*20)))  # an on-event might be longer than the movie, so allocate more memory. Estimate meanbright/time*10
 
-    # CALCULATE PHOTON NUMBERS
+    # calculate photon numbers
     for i in range(1, maxloc, 2):
         if photonratestd == 0:
             photons = _np.round(photonrate*time)
@@ -98,17 +101,16 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
         if photons*onFrames > photonbudget:
             onFrames = int(_np.ceil(photonbudget/(photons*onFrames)*onFrames))  # Reduce the number of on-frames once the photonbudget is reached
 
-        for j in range(0, (onFrames)):  # LOOP THROUGH ALL ONFRAMES
-
-            if onFrames == 1:  # CASE 1: ALL PHOTONS ARE EMITTED IN ONE FRAME
+        for j in range(0, (onFrames)):
+            if onFrames == 1:  # CASE 1: all photons are emitted in one frame
                 photonsinframe[1+tempFrame] = int(_np.random.poisson(((tempFrame+1)*time-eventsum[i-1])/time*photons))
-            elif onFrames == 2:  # CASE 2: ALL PHOTONS ARE EMITTED IN TWO FRAMES
+            elif onFrames == 2:  # CASE 2: all photons are emitted in two frames
                 emittedphotons = (((tempFrame+1)*time-eventsum[i-1])/time*photons)
-                if j == 1:  # PHOTONS IN FIRST ONFRAME
+                if j == 1:  # photons in first onframe
                     photonsinframe[1+tempFrame] = int(_np.random.poisson(((tempFrame+1)*time-eventsum[i-1])/time*photons))
-                else:  # PHOTONS IN SECOND ONFRAME
+                else:  # photons in second onframe
                     photonsinframe[2+tempFrame] = int(_np.random.poisson((eventsum[i]-(tempFrame+1)*time)/time*photons))
-            else:  # CASE 3: ALL PHOTONS ARE EMITTED IN THREE OR MORE FRAMES
+            else:  # CASE 3: all photons are mitted in three or more frames
                 if j == 1:
                     photonsinframe[1+tempFrame] = int(_np.random.poisson(((tempFrame+1)*time-eventsum[i-1])/time*photons))  # Indexing starts with 0
                 elif j == onFrames:
@@ -120,7 +122,7 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
         if totalphotons > photonbudget:
             photonsinframe[onFrames+tempFrame] = int(photonsinframe[onFrames+tempFrame]-(totalphotons-photonbudget))
 
-    photonsinframe = photonsinframe[0:frames]  # Catch exception if a trace should be longer than the movie
+    photonsinframe = photonsinframe[0:frames]
     timetrace = events[0:maxloc]
 
     if onevents > 0:
@@ -132,16 +134,17 @@ def paintgen(meandark, meanbright, frames, time, photonrate, photonratestd, phot
 
 
 def distphotons(structures, itime, frames, taud, taub, photonrate, photonratestd, photonbudget):
-
+    """
+    Distrbute Photons
+    """
     time = itime
     meandark = int(taud)
     meanbright = int(taub)
 
     bindingsitesx = structures[0, :]
     bindingsitesy = structures[1, :]
-    nosites = len(bindingsitesx)  # number of binding sites in image
+    nosites = len(bindingsitesx) 
 
-    # PHOTONDIST: DISTRIBUTE PHOTONS FOR ALL BINDING SITES
     photonposall = _np.zeros((2, 0))
     photonposall = [1, 1]
 
@@ -162,11 +165,10 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
     n_photons_step = _np.cumsum(tempphotons)
     n_photons_step = _np.insert(n_photons_step, 0, 0)
 
-    #Allocate memory
-    photonposframe = _np.zeros((n_photons,2))
+    # Allocate memory
+    photonposframe = _np.zeros((n_photons, 2))
     for i in range(0, nosites):
         photoncount = int(photondist[i, runner])
-
         if mode3Dstate:
             wx, wy = calculate_zpsf(bindingsitesz[i], cx, cy)
             cov = [[wx*wx, 0], [0, wy*wy]]
@@ -176,17 +178,17 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
         if photoncount > 0:
             mu = [bindingsitesx[i], bindingsitesy[i]]
             photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
-            photonposframe[n_photons_step[i]:n_photons_step[i+1],:] = photonpos
+            photonposframe[n_photons_step[i]:n_photons_step[i+1], :] = photonpos
 
     return photonposframe
 
 
-def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate, cx,cy):
+def convertMovie(runner, photondist, structures, imagesize, frames, psf, photonrate, background, noise, mode3Dstate, cx, cy):
     edges = range(0, imagesize+1)
 
     photonposframe = distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy)
 
-    if len(photonposframe) == 0:    
+    if len(photonposframe) == 0:
         simframe = _np.zeros((imagesize, imagesize))
     else:
         x = photonposframe[:, 0]
@@ -202,7 +204,7 @@ def saveMovie(filename, movie, info):
 
 
 # Function to store the coordinates of a structure in a container. The coordinates wil be adjustet so that the center of mass is the origin
-def defineStructure(structurexxpx, structureyypx, structureex, structure3d, pixelsize, mean = True):
+def defineStructure(structurexxpx, structureyypx, structureex, structure3d, pixelsize, mean=True):
     if mean:
         structurexxpx = structurexxpx-_np.mean(structurexxpx)
         structureyypx = structureyypx-_np.mean(structureyypx)
@@ -219,7 +221,10 @@ def defineStructure(structurexxpx, structureyypx, structureex, structure3d, pixe
     return structure
 
 
-def generatePositions(number, imagesize, frame, arrangement):  # GENERATE A SET OF POSITIONS WHERE STRUCTURES WILL BE PLACED
+def generatePositions(number, imagesize, frame, arrangement):
+    """
+    Generate a set of positions where structures will be placed
+    """
     if arrangement == 0:
         spacing = _np.ceil((number**0.5))
         linpos = _np.linspace(frame, imagesize-frame, spacing)
@@ -236,7 +241,10 @@ def generatePositions(number, imagesize, frame, arrangement):  # GENERATE A SET 
     return gridpos
 
 
-def rotateStructure(structure):  # ROTATE A STRUCTURE RANDOMLY
+def rotateStructure(structure):
+    """
+    Rotate a structure randomly
+    """
     angle_rad = _np.random.rand(1)*2*_np.pi
     newstructure = _np.array([(structure[0, :])*_np.cos(angle_rad)-(structure[1, :])*_np.sin(angle_rad),
                               (structure[0, :])*_np.sin(angle_rad)+(structure[1, :])*_np.cos(angle_rad),
@@ -244,12 +252,18 @@ def rotateStructure(structure):  # ROTATE A STRUCTURE RANDOMLY
     return newstructure
 
 
-def incorporateStructure(structure, incorporation):  # CONSIDER STAPLE INCORPORATION
+def incorporateStructure(structure, incorporation):
+    """
+    Returns a subset of the strucutre to reflect incorporation of stpales
+    """
     newstructure = structure[:, (_np.random.rand(structure.shape[1]) < incorporation)]
     return newstructure
 
 
-def randomExchange(pos):  # RANDOMLY SHUFFLE EXCHANGE PARAMETERS ('RANDOM LABELING')
+def randomExchange(pos):
+    """
+    Randomly shuffle exchange parameters for rnadom labeling
+    """
     arraytoShuffle = pos[2, :]
     _np.random.shuffle(arraytoShuffle)
     newpos = _np.array([pos[0, :], pos[1, :], arraytoShuffle, pos[3, :]])
@@ -260,7 +274,7 @@ def prepareStructures(structure, gridpos, orientation, number, incorporation, ex
     newpos = []
     oldstructure = _np.array([structure[0, :], structure[1, :], structure[2, :], structure[3, :]])
 
-    for i in range(0, len(gridpos)):  # LOOP THROUGH ALL POSITIONS
+    for i in range(0, len(gridpos)):
         if orientation == 0:
             structure = oldstructure
         else:
@@ -281,5 +295,4 @@ def prepareStructures(structure, gridpos, orientation, number, incorporation, ex
 
     if exchange == 1:
         newpos = randomExchange(newpos)
-
     return newpos
