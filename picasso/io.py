@@ -114,7 +114,8 @@ def load_user_settings():
     try:
         settings = _yaml.load(settings_file)
         settings_file.close()
-    except:
+    except Exception as e:
+        print(e)
         print('Error reading user settings, Reset.')
     if not settings:
         return _lib.AutoDict()
@@ -199,9 +200,7 @@ class TiffMap:
             self.file.seek(offset + 2 + n_entries * 12)
             offset = self.read('L')
         self.n_frames = len(self.image_offsets)
-        
-        self.last_ifd_offset = offset + 2 + n_entries * 12 
-
+        self.last_ifd_offset = offset + 2 + n_entries * 12
         self.lock = _threading.Lock()
 
     def __enter__(self):
@@ -270,12 +269,12 @@ class TiffMap:
                 mm_info = _json.loads(readout.decode())
                 info['Micro-Manager Metadata'] = mm_info
                 info['Camera'] = mm_info['Camera']
-                
+
         self.file.seek(self.last_ifd_offset)
-        content = self.file.read()  
-        search="\{\"Summary\":\"(.*)\"\}"
+        content = self.file.read()
+        search=r"\{\"Summary\":\"(.*)\"\}"
         fullstring=str(content)
-        s = _re.search(search,fullstring)
+        s = _re.search(search, fullstring)
         
         if s:
             comments = s.group(1).split('\\\\n')
@@ -322,7 +321,6 @@ class TiffMap:
             image.tofile(file_handle)
 
 
-
 class TiffMultiMap:
 
     def __init__(self, path, memmap_frames=False, verbose=False):
@@ -330,7 +328,7 @@ class TiffMultiMap:
         self.dir = _ospath.dirname(self.path)
         base, ext = _ospath.splitext(_ospath.splitext(self.path)[0])    # split two extensions as in .ome.tif
         base = _re.escape(base)
-        pattern = _re.compile(base + '_(\d*).ome.tif')    # This matches the basename + an appendix of the file number
+        pattern = _re.compile(base + r'_(\d*).ome.tif')    # This matches the basename + an appendix of the file number
         entries = [_.path for _ in _os.scandir(self.dir) if _.is_file()]
         matches = [_re.match(pattern, _) for _ in entries]
         matches = [_ for _ in matches if _ is not None]
@@ -497,11 +495,13 @@ def load_locs(path, qt_parent=None):
     info = load_info(path, qt_parent=qt_parent)
     return locs, info
 
+
 def load_clusters(path, qt_parent=None):
     with _h5py.File(path, 'r') as cluster_file:
         clusters = cluster_file['clusters'][...]
     clusters = _np.rec.array(clusters, dtype=clusters.dtype)    # Convert to rec array with fields as attributes
     return clusters
+
 
 def load_filter(path, qt_parent=None):
     with _h5py.File(path, 'r') as locs_file:
@@ -515,7 +515,6 @@ def load_filter(path, qt_parent=None):
             except KeyError:
                 locs = locs_file['clusters'][...]
                 info = []
-
 
     locs = _np.rec.array(locs, dtype=locs.dtype)    # Convert to rec array with fields as attributes
     return locs, info

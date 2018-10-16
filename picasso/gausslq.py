@@ -192,11 +192,11 @@ def locs_from_fits(identifications, theta, box, em):
         locs = _np.rec.array((identifications.frame, x, y,
                               theta[:, 2], theta[:, 4], theta[:, 5],
                               theta[:, 3], lpx, lpy, ellipticity,
-                              identifications.net_gradient,identifications.n_id),
+                              identifications.net_gradient, identifications.n_id),
                              dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
                                     ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
                                     ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
-                                    ('ellipticity', 'f4'), ('net_gradient', 'f4'),('n_id', 'u4')])
+                                    ('ellipticity', 'f4'), ('net_gradient', 'f4'), ('n_id', 'u4')])
         locs.sort(kind='mergesort', order='n_id')
     else:
         locs = _np.rec.array((identifications.frame, x, y,
@@ -213,8 +213,8 @@ def locs_from_fits(identifications, theta, box, em):
 
 def locs_from_fits_gpufit(identifications, theta, box, em):
     box_offset = int(box/2)
-    x = theta[:, 1] + identifications.x     - box_offset
-    y = theta[:, 2] + identifications.y     - box_offset
+    x = theta[:, 1] + identifications.x - box_offset
+    y = theta[:, 2] + identifications.y - box_offset
     lpx = _postprocess.localization_precision(theta[:, 0], theta[:, 3], theta[:, 5], em=em)
     lpy = _postprocess.localization_precision(theta[:, 0], theta[:, 4], theta[:, 5], em=em)
     a = _np.maximum(theta[:, 3], theta[:, 4])

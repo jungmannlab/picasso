@@ -486,11 +486,11 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
         locs = _np.rec.array((identifications.frame, x, y,
                               theta[:, 2], theta[:, 4], theta[:, 5],
                               theta[:, 3], lpx, lpy, ellipticity,
-                              identifications.net_gradient,identifications.n_id),
+                              identifications.net_gradient, identifications.n_id),
                              dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
                                     ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
                                     ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
-                                    ('ellipticity', 'f4'), ('net_gradient', 'f4'),('n_id', 'u4')])
+                                    ('ellipticity', 'f4'), ('net_gradient', 'f4'), ('n_id', 'u4')])
         locs.sort(kind='mergesort', order='n_id')
     else:
         locs = _np.rec.array((identifications.frame, x, y,
