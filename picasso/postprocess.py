@@ -32,10 +32,6 @@ from tqdm import tqdm as _tqdm
 from numpy.lib.recfunctions import stack_arrays
 
 
-
-
-
-
 def get_index_blocks(locs, info, size, callback=None):
     locs = _lib.ensure_sanity(locs, info)
     # Sort locs by indices
@@ -249,15 +245,14 @@ def _fill_dnfl(N, frame, x, y, group, i, d_max, dnfl, bin_size):
 
 def pair_correlation(locs, info, bin_size, r_max):
     dh = distance_histogram(locs, info, bin_size, r_max)
-    #Start with r-> otherwise area will be 0 
+    # Start with r-> otherwise area will be 0
     bins_lower = _np.arange(bin_size, r_max+bin_size, bin_size)
 
-    if  bins_lower.shape[0] >  dh.shape[0]:
+    if bins_lower.shape[0] > dh.shape[0]:
         bins_lower = bins_lower[:-1]
-
     area = _np.pi * bin_size * (2 * bins_lower + bin_size)
-    
     return bins_lower, dh / area
+
 
 def dbscan(locs, radius, min_density):
     print('Identifying clusters...')
@@ -295,16 +290,17 @@ def dbscan(locs, radius, min_density):
             std_y[i] = _np.std(group_locs.y)
             std_z[i] = _np.std(group_locs.z)
             n[i] = len(group_locs)
-            X_group = _np.stack([group_locs.x,group_locs.y,group_locs.z/pixelsize], axis=0).T
-            volume[i] = _np.power((std_x[i]+std_y[i]+(std_z[i]/pixelsize))/3*2,3)*_np.pi*4/3
+            X_group = _np.stack([group_locs.x, group_locs.y, group_locs.z/pixelsize], axis=0).T
+            volume[i] = _np.power((std_x[i]+std_y[i]+(std_z[i]/pixelsize))/3*2, 3)*_np.pi*4/3
             try:
                 hull = ConvexHull(X_group)
                 convex_hull[i] = hull.volume
-            except:
+            except Exception as e:
+                print(e)
                 convex_hull[i] = 0
         clusters = _np.rec.array((groups, convex_hull, volume, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
-                                 dtype=[('groups', groups.dtype),('convex_hull', 'f4'),('volume', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),('com_z', 'f4'),
-                                 ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'),('std_z', 'f4'),('n', 'i4')])
+                                 dtype=[('groups', groups.dtype), ('convex_hull', 'f4'), ('volume', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'), ('com_z', 'f4'),
+                                 ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'), ('std_z', 'f4'), ('n', 'i4')])
     else:
         locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
         X = _np.vstack((locs.x, locs.y)).T
@@ -333,15 +329,16 @@ def dbscan(locs, radius, min_density):
             std_x[i] = _np.std(group_locs.x)
             std_y[i] = _np.std(group_locs.y)
             n[i] = len(group_locs)
-            X_group = _np.stack([group_locs.x,group_locs.y], axis=0).T
-            area[i] = _np.power((std_x[i]+std_y[i]),2)*_np.pi
+            X_group = _np.stack([group_locs.x, group_locs.y], axis=0).T
+            area[i] = _np.power((std_x[i]+std_y[i]), 2)*_np.pi
             try:
                 hull = ConvexHull(X_group)
                 convex_hull[i] = hull.volume
-            except:
+            except Exception as e:
+                print(e)
                 convex_hull[i] = 0
         clusters = _np.rec.array((groups, convex_hull, area, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
-                                 dtype=[('groups', groups.dtype),('convex_hull', 'f4'),('area', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
+                                 dtype=[('groups', groups.dtype), ('convex_hull', 'f4'), ('area', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
                                  ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'), ('n', 'i4')])
     return clusters, locs
 
@@ -382,16 +379,17 @@ def hdbscan(locs, min_samples, min_cluster_size):
             std_y[i] = _np.std(group_locs.y)
             std_z[i] = _np.std(group_locs.z)
             n[i] = len(group_locs)
-            X_group = _np.stack([group_locs.x,group_locs.y,group_locs.z/pixelsize], axis=0).T
-            volume[i] = _np.power((std_x[i]+std_y[i]+(std_z[i]/pixelsize))/3*2,3)*_np.pi*4/3
+            X_group = _np.stack([group_locs.x, group_locs.y, group_locs.z/pixelsize], axis=0).T
+            volume[i] = _np.power((std_x[i]+std_y[i]+(std_z[i]/pixelsize))/3*2, 3)*_np.pi*4/3
             try:
                 hull = ConvexHull(X_group)
                 convex_hull[i] = hull.volume
-            except:
+            except Exception as e:
+                print(e)
                 convex_hull[i] = 0
         clusters = _np.rec.array((groups, convex_hull, volume, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
-                                 dtype=[('groups', groups.dtype),('convex_hull', 'f4'),('volume', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),('com_z', 'f4'),
-                                 ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'),('std_z', 'f4'),('n', 'i4')])
+                                 dtype=[('groups', groups.dtype), ('convex_hull', 'f4'), ('volume', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'), ('com_z', 'f4'),
+                                 ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'), ('std_z', 'f4'), ('n', 'i4')])
     else:
         locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
         X = _np.vstack((locs.x, locs.y)).T
@@ -420,18 +418,18 @@ def hdbscan(locs, min_samples, min_cluster_size):
             std_x[i] = _np.std(group_locs.x)
             std_y[i] = _np.std(group_locs.y)
             n[i] = len(group_locs)
-            X_group = _np.stack([group_locs.x,group_locs.y], axis=0).T
-            area[i] = _np.power((std_x[i]+std_y[i]),2)*_np.pi
+            X_group = _np.stack([group_locs.x, group_locs.y], axis=0).T
+            area[i] = _np.power((std_x[i]+std_y[i]), 2)*_np.pi
             try:
                 hull = ConvexHull(X_group)
                 convex_hull[i] = hull.volume
-            except:
+            except Exception as e:
+                print(e)
                 convex_hull[i] = 0
         clusters = _np.rec.array((groups, convex_hull, area, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
-                                 dtype=[('groups', groups.dtype),('convex_hull', 'f4'),('area', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
+                                 dtype=[('groups', groups.dtype), ('convex_hull', 'f4'), ('area', 'f4'), ('mean_frame', 'f4'), ('com_x', 'f4'), ('com_y', 'f4'),
                                  ('std_frame', 'f4'), ('std_x', 'f4'), ('std_y', 'f4'), ('n', 'i4')])
     return clusters, locs
-
 
 
 @_numba.jit(nopython=True, nogil=True)
@@ -535,28 +533,28 @@ def link(locs, info, r_max=0.05, max_dark_time=1, combine_mode='average', remove
     return linked_locs
 
 
-
 def weighted_variance(locs):
     n = len(locs)
     w = locs.photons
     x = locs.x
     y = locs.y
-    xWbarx = _np.average(locs.x,weights = w)
-    xWbary = _np.average(locs.y,weights = w)
+    xWbarx = _np.average(locs.x, weights=w)
+    xWbary = _np.average(locs.y, weights=w)
     wbarx = _np.mean(locs.lpx)
     wbary = _np.mean(locs.lpy)
     variance_x = n/((n-1)*sum(w)**2)*(sum((w*x-wbarx*xWbarx)**2)-2*xWbarx*sum((w-wbarx)*(w*x-wbarx*xWbarx))+xWbarx**2*sum((w-wbarx)**2))
     variance_y = n/((n-1)*sum(w)**2)*(sum((w*y-wbary*xWbary)**2)-2*xWbary*sum((w-wbary)*(w*y-wbary*xWbary))+xWbary**2*sum((w-wbary)**2))
     return variance_x, variance_y
 
-#Combine localizations: calculate the properties of the group
+
+# Combine localizations: calculate the properties of the group
 def cluster_combine(locs):
     print('Combining localizations...')
     combined_locs = []
     if hasattr(locs[0], 'z'):
         print('z-mode')
         for group in _tqdm(_np.unique(locs['group'])):
-            temp = locs[locs['group']==group]
+            temp = locs[locs['group'] == group]
             cluster = _np.unique(temp['cluster'])
             n_cluster = len(cluster)
             mean_frame = _np.zeros(n_cluster)
@@ -570,25 +568,24 @@ def cluster_combine(locs):
             group_id = _np.zeros(n_cluster)
             n = _np.zeros(n_cluster, dtype=_np.int32)
             for i, clusterval in enumerate(cluster):
-                cluster_locs = temp[temp['cluster']== clusterval]
+                cluster_locs = temp[temp['cluster'] == clusterval]
                 mean_frame[i] = _np.mean(cluster_locs.frame)
-                com_x[i] = _np.average(cluster_locs.x,weights = cluster_locs.photons)
-                com_y[i] = _np.average(cluster_locs.y,weights = cluster_locs.photons)
-                com_z[i] = _np.average(cluster_locs.z,weights = cluster_locs.photons)
+                com_x[i] = _np.average(cluster_locs.x, weights=cluster_locs.photons)
+                com_y[i] = _np.average(cluster_locs.y, weights=cluster_locs.photons)
+                com_z[i] = _np.average(cluster_locs.z, weights=cluster_locs.photons)
                 std_frame[i] = _np.std(cluster_locs.frame)
-                #variance_x, variance_y = weighted_variance(cluster_locs)
                 std_x[i] = _np.std(cluster_locs.x)/_np.sqrt(len(cluster_locs))
                 std_y[i] = _np.std(cluster_locs.y)/_np.sqrt(len(cluster_locs))
                 std_z[i] = _np.std(cluster_locs.z)/_np.sqrt(len(cluster_locs))
                 n[i] = len(cluster_locs)
                 group_id[i] = group
             clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n),
-                                     dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                                     dtype=[('group', group.dtype), ('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('lpz', 'f4'), ('n', 'i4')])
             combined_locs.append(clusters)
     else:
         for group in _tqdm(_np.unique(locs['group'])):
-            temp = locs[locs['group']==group]
+            temp = locs[locs['group'] == group]
             cluster = _np.unique(temp['cluster'])
             n_cluster = len(cluster)
             mean_frame = _np.zeros(n_cluster)
@@ -600,18 +597,17 @@ def cluster_combine(locs):
             group_id = _np.zeros(n_cluster)
             n = _np.zeros(n_cluster, dtype=_np.int32)
             for i, clusterval in enumerate(cluster):
-                cluster_locs = temp[temp['cluster']== clusterval]
+                cluster_locs = temp[temp['cluster'] == clusterval]
                 mean_frame[i] = _np.mean(cluster_locs.frame)
-                com_x[i] = _np.average(cluster_locs.x,weights = cluster_locs.photons)
-                com_y[i] = _np.average(cluster_locs.y,weights = cluster_locs.photons)
+                com_x[i] = _np.average(cluster_locs.x, weights=cluster_locs.photons)
+                com_y[i] = _np.average(cluster_locs.y, weights=cluster_locs.photons)
                 std_frame[i] = _np.std(cluster_locs.frame)
-                #variance_x, variance_y = weighted_variance(cluster_locs)
-                std_x[i] = _np.std(cluster_locs.x)/_np.sqrt(len(cluster_locs))
-                std_y[i] = _np.std(cluster_locs.y)/_np.sqrt(len(cluster_locs))
+                std_x[i] = _np.std(cluster_locs.x) / _np.sqrt(len(cluster_locs))
+                std_y[i] = _np.std(cluster_locs.y) / _np.sqrt(len(cluster_locs))
                 n[i] = len(cluster_locs)
                 group_id[i] = group
             clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n),
-                                     dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
+                                     dtype=[('group', group.dtype), ('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('n', 'i4')])
             combined_locs.append(clusters)
 
@@ -629,7 +625,7 @@ def cluster_combine_dist(locs):
 
         combined_locs = []
         for group in _tqdm(_np.unique(locs['group'])):
-            temp = locs[locs['group']==group]
+            temp = locs[locs['group'] == group]
             cluster = _np.unique(temp['cluster'])
             n_cluster = len(cluster)
             mean_frame = temp['mean_frame']
@@ -645,30 +641,29 @@ def cluster_combine_dist(locs):
             min_dist = _np.zeros(n_cluster)
             min_distz = _np.zeros(n_cluster)
             for i, clusterval in enumerate(cluster):
-                #find nearest neighbor in xyz
-                group_locs = temp[temp['cluster']!= clusterval]
-                cluster_locs = temp[temp['cluster']== clusterval]
+                # find nearest neighbor in xyz
+                group_locs = temp[temp['cluster'] != clusterval]
+                cluster_locs = temp[temp['cluster'] == clusterval]
                 ref_point = _np.array([cluster_locs.x, cluster_locs.y, cluster_locs.z/pixelsize])
                 all_points = _np.array([group_locs.x, group_locs.y, group_locs.z/pixelsize])
                 distances = distance.cdist(ref_point.transpose(), all_points.transpose())
                 min_dist[i] = _np.amin(distances)
-                #find nearest neighbor in xy 
-
+                # find nearest neighbor in xy
                 ref_point_xy = _np.array([cluster_locs.x, cluster_locs.y])
                 all_points_xy = _np.array([group_locs.x, group_locs.y])
                 distances_xy = distance.cdist(ref_point_xy.transpose(), all_points_xy.transpose())
                 min_dist_xy[i] = _np.amin(distances_xy)
 
             clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, com_z, std_frame, std_x, std_y, std_z, n, min_dist, min_dist_xy),
-                                     dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+                                     dtype=[('group', group.dtype), ('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('lpz', 'f4'), ('n', 'i4'), ('min_dist', 'f4'), ('mind_dist_xy', 'f4')])
             combined_locs.append(clusters)
 
-    else: #2D Case
+    else:  # 2D case
         print('XY')
         combined_locs = []
         for group in _tqdm(_np.unique(locs['group'])):
-            temp = locs[locs['group']==group]
+            temp = locs[locs['group'] == group]
             cluster = _np.unique(temp['cluster'])
             n_cluster = len(cluster)
             mean_frame = temp['mean_frame']
@@ -682,24 +677,21 @@ def cluster_combine_dist(locs):
             min_dist = _np.zeros(n_cluster)
 
             for i, clusterval in enumerate(cluster):
-                #find nearest neighbor in xyz
-                group_locs = temp[temp['cluster']!= clusterval]
-                cluster_locs = temp[temp['cluster']== clusterval]
+                # find nearest neighbor in xyz
+                group_locs = temp[temp['cluster'] != clusterval]
+                cluster_locs = temp[temp['cluster'] == clusterval]
                 ref_point_xy = _np.array([cluster_locs.x, cluster_locs.y])
                 all_points_xy = _np.array([group_locs.x, group_locs.y])
                 distances_xy = distance.cdist(ref_point_xy.transpose(), all_points_xy.transpose())
                 min_dist[i] = _np.amin(distances_xy)
 
             clusters = _np.rec.array((group_id, cluster, mean_frame, com_x, com_y, std_frame, std_x, std_y, n, min_dist),
-                                     dtype=[('group', group.dtype),('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
+                                     dtype=[('group', group.dtype), ('cluster', cluster.dtype), ('mean_frame', 'f4'), ('x', 'f4'), ('y', 'f4'),
                                      ('std_frame', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'), ('n', 'i4'), ('min_dist', 'f4')])
             combined_locs.append(clusters)
 
     combined_locs = stack_arrays(combined_locs, asrecarray=True, usemask=False)
     return combined_locs
-
-
-
 
 
 @_numba.jit(nopython=True)
@@ -946,7 +938,6 @@ def groupprops(locs, callback=None):
             callback(i+1)
     return groups
 
-#FRET functions
 
 def calculate_fret(acc_locs, don_locs):
     """
@@ -955,40 +946,33 @@ def calculate_fret(acc_locs, don_locs):
     fret_dict = {}
     if len(acc_locs) == 0:
         max_frames = _np.max(don_locs['frame'])
-    elif len(don_locs)  == 0:
+    elif len(don_locs) == 0:
         max_frames = _np.max(acc_locs['frame'])
     else:
-        max_frames = _np.max([_np.max(acc_locs['frame']),_np.max(don_locs['frame'])])
+        max_frames = _np.max([_np.max(acc_locs['frame']), _np.max(don_locs['frame'])])
 
-    #Initialize a vector filled with zeros for the duration of the movie
+    # Initialize a vector filled with zeros for the duration of the movie
     xvec = _np.arange(max_frames+1)
     yvec = xvec[:]*0
-
     acc_trace = yvec.copy()
     don_trace = yvec.copy()
-    
-    #Fill vector with the photon numbers of events that happend
-    acc_trace[acc_locs['frame']]=acc_locs['photons']-acc_locs['bg']
-    don_trace[don_locs['frame']]=don_locs['photons']-don_locs['bg']
+    # Fill vector with the photon numbers of events that happend
+    acc_trace[acc_locs['frame']] = acc_locs['photons'] - acc_locs['bg']
+    don_trace[don_locs['frame']] = don_locs['photons'] - don_locs['bg']
 
-    #Calculate the FRET efficiency
-    fret_trace = acc_trace/(acc_trace+don_trace)
-    
-    #Only select FRET values between 0 and 1
-    selector = _np.logical_and(fret_trace>0,fret_trace<1)
+    # Calculate the FRET efficiency
+    fret_trace = acc_trace/(acc_trace + don_trace)
+    # Only select FRET values between 0 and 1
+    selector = _np.logical_and(fret_trace > 0, fret_trace < 1)
 
-    #select the final fret events based on the 0 to 1 range 
+    # Select the final fret events based on the 0 to 1 range
     fret_events = fret_trace[selector]
-
     fret_timepoints = _np.arange(len(fret_trace))[selector]
 
     # Calculate FRET localizations:  Select the localizations when FRET happens
-    #loc_selector = [True if _ in fret_timepoints else False for _ in don_locs['frame'] ]
-    #fret_locs = don_locs[loc_selector==True]
-
     sel_locs = []
     for element in fret_timepoints:
-        sel_locs.append(don_locs[don_locs['frame']==element])
+        sel_locs.append(don_locs[don_locs['frame'] == element])
 
     fret_locs = stack_arrays(sel_locs, asrecarray=True, usemask=False)
 

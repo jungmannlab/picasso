@@ -61,9 +61,9 @@ def net_gradient(frame, y, x, box, uy, ux):
     ng = _np.zeros(len(x), dtype=_np.float32)
     for i, (yi, xi) in enumerate(zip(y, x)):
         for k_index, k in enumerate(range(yi - box_half, yi + box_half + 1)):
-            for l_index, l in enumerate(range(xi - box_half, xi + box_half + 1)):
-                if not (k == yi and l == xi):
-                    gy, gx = gradient_at(frame, k, l, i)
+            for l_index, m in enumerate(range(xi - box_half, xi + box_half + 1)):
+                if not (k == yi and m == xi):
+                    gy, gx = gradient_at(frame, k, m, i)
                     ng[i] += (gy*uy[k_index, l_index] + gx*ux[k_index, l_index])
     return ng
 
@@ -135,7 +135,9 @@ def identify_async(movie, minimum_ng, box, roi=None):
         cpu_utilization = settings['Localize']['cpu_utilization']
         if cpu_utilization >= 1:
             cpu_utilization = 1
-    except:
+    except Exception as e:
+        print(e)
+        print('An Error occured. Setting cpu_utilization to 0.8')  # TODO at some point re-write this
         cpu_utilization = 0.8
         settings['Localize']['cpu_utilization'] = cpu_utilization
         _io.save_user_settings(settings)
