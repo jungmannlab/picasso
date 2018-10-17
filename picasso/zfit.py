@@ -16,10 +16,12 @@ _plt.style.use('ggplot')
 def nan_index(y):
     return _np.isnan(y), lambda z: z.nonzero()[0]
 
+
 def interpolate_nan(data):
-    nans, x= nan_index(data)
-    data[nans]= _np.interp(x(nans), x(~nans), data[~nans])
+    nans, x = nan_index(data)
+    data[nans] = _np.interp(x(nans), x(~nans), data[~nans])
     return data
+
 
 def calibrate_z(locs, info, d, magnification_factor, path=None):
     n_frames = info[0]['Frames']
@@ -41,7 +43,7 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
     mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
 
-    #Fix nan 
+    # Fix nan
     mean_sx = interpolate_nan(mean_sx)
     mean_sy = interpolate_nan(mean_sy)
 
@@ -128,23 +130,23 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     _plt.show()
 
     export = False
-    #Export
+    # Export
     if export:
         print('Exporting...')
-        _np.savetxt('mean_sx.txt',mean_sx, delimiter='/t')
-        _np.savetxt('mean_sy.txt',mean_sy, delimiter='/t')
-        _np.savetxt('locs_sx.txt',locs.sx, delimiter='/t')
-        _np.savetxt('locs_sy.txt',locs.sy, delimiter='/t')
-        _np.savetxt('cx.txt',cx, delimiter='/t')
-        _np.savetxt('cy.txt',cy, delimiter='/t')
-        _np.savetxt('z_range.txt',z_range, delimiter='/t')
-        _np.savetxt('locs_z.txt',locs.z, delimiter='/t')
-        _np.savetxt('z_range_locs_frame.txt',z_range[locs.frame], delimiter='/t')
-        _np.savetxt('rmsd_frame.txt',rmsd_frame, delimiter='/t')
+        _np.savetxt('mean_sx.txt', mean_sx, delimiter='/t')
+        _np.savetxt('mean_sy.txt', mean_sy, delimiter='/t')
+        _np.savetxt('locs_sx.txt', locs.sx, delimiter='/t')
+        _np.savetxt('locs_sy.txt', locs.sy, delimiter='/t')
+        _np.savetxt('cx.txt', cx, delimiter='/t')
+        _np.savetxt('cy.txt', cy, delimiter='/t')
+        _np.savetxt('z_range.txt', z_range, delimiter='/t')
+        _np.savetxt('locs_z.txt', locs.z, delimiter='/t')
+        _np.savetxt('z_range_locs_frame.txt', z_range[locs.frame], delimiter='/t')
+        _np.savetxt('rmsd_frame.txt', rmsd_frame, delimiter='/t')
 
-    #np.savetxt('test.out', x, delimiter=',')   # X is an array
-    #np.savetxt('test.out', (x,y,z))   # x,y,z equal sized 1D arrays
-    #np.savetxt('test.out', x, fmt='%1.4e')   # use exponential notation
+    # np.savetxt('test.out', x, delimiter=',')   # X is an array
+    # np.savetxt('test.out', (x,y,z))   # x,y,z equal sized 1D arrays
+    # anp.savetxt('test.out', x, fmt='%1.4e')   # use exponential notation
 
     return calibration
 
