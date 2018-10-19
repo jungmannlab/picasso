@@ -269,19 +269,23 @@ class TiffMap:
                 mm_info = _json.loads(readout.decode())
                 info['Micro-Manager Metadata'] = mm_info
                 info['Camera'] = mm_info['Camera']
+        try:
+            self.file.seek(self.last_ifd_offset)
+            content = self.file.read()
+            search=r"\{\"Summary\":\"(.*)\"\}"
+            fullstring=str(content)
+            s = _re.search(search, fullstring)
+            
+            if s:
+                comments = s.group(1).split('\\\\n')
+            else:
+                comments = ''
 
-        self.file.seek(self.last_ifd_offset)
-        content = self.file.read()
-        search=r"\{\"Summary\":\"(.*)\"\}"
-        fullstring=str(content)
-        s = _re.search(search, fullstring)
-        
-        if s:
-            comments = s.group(1).split('\\\\n')
-        else:
-            comments = ''
-
-        info['Micro-Manager Acquisiton Comments'] = comments
+            info['Micro-Manager Acquisiton Comments'] = comments
+            
+        except Exception as e:
+            print(e)
+            print('Error reading Micro-Manager metadata.')
 
         return info
 
