@@ -5,7 +5,7 @@
     Render single molecule localizations to a super-resolution image
 
     :author: Joerg Schnitzbauer, 2015
-    :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 import numpy as _np
 import numba as _numba
@@ -16,25 +16,38 @@ from tqdm import trange as _trange
 _DRAW_MAX_SIGMA = 3
 
 
-def render(locs, info=None, oversampling=1, viewport=None, blur_method=None, min_blur_width=0):
+def render(
+    locs,
+    info=None,
+    oversampling=1,
+    viewport=None,
+    blur_method=None,
+    min_blur_width=0,
+):
     if viewport is None:
         try:
-            viewport = [(0, 0), (info[0]['Height'], info[0]['Width'])]
+            viewport = [(0, 0), (info[0]["Height"], info[0]["Width"])]
         except TypeError:
-            raise ValueError('Need info if no viewport is provided.')
+            raise ValueError("Need info if no viewport is provided.")
     (y_min, x_min), (y_max, x_max) = viewport
     if blur_method is None:
         return render_hist(locs, oversampling, y_min, x_min, y_max, x_max)
-    elif blur_method == 'gaussian':
-        return render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width)
-    elif blur_method == 'gaussian_iso':
-        return render_gaussian_iso(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width)
-    elif blur_method == 'smooth':
+    elif blur_method == "gaussian":
+        return render_gaussian(
+            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+        )
+    elif blur_method == "gaussian_iso":
+        return render_gaussian_iso(
+            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+        )
+    elif blur_method == "smooth":
         return render_smooth(locs, oversampling, y_min, x_min, y_max, x_max)
-    elif blur_method == 'convolve':
-        return render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width)
+    elif blur_method == "convolve":
+        return render_convolve(
+            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+        )
     else:
-        raise Exception('blur_method not understood.')
+        raise Exception("blur_method not understood.")
 
 
 @_numba.jit(nopython=True, nogil=True)
@@ -51,37 +64,49 @@ def _render_setup(locs, oversampling, y_min, x_min, y_max, x_max):
     image = _np.zeros((n_pixel_y, n_pixel_x), dtype=_np.float32)
     return image, n_pixel_y, n_pixel_x, x, y, in_view
 
+
 @_numba.jit(nopython=True, nogil=True)
-def _render_setup3d(locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize):
+def _render_setup3d(
+    locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize
+):
     n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
     n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
-    n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min)/pixelsize))
+    n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min) / pixelsize))
     x = locs.x
     y = locs.y
     z = locs.z
-    in_view = (x > x_min) & (y > y_min) & (z > z_min) & (x < x_max) & (y < y_max) & (z < z_max)
+    in_view = (
+        (x > x_min)
+        & (y > y_min)
+        & (z > z_min)
+        & (x < x_max)
+        & (y < y_max)
+        & (z < z_max)
+    )
     x = x[in_view]
     y = y[in_view]
     z = z[in_view]
     x = oversampling * (x - x_min)
     y = oversampling * (y - y_min)
-    z = oversampling * (z - z_min)/pixelsize
+    z = oversampling * (z - z_min) / pixelsize
     image = _np.zeros((n_pixel_y, n_pixel_x, n_pixel_z), dtype=_np.float32)
     return image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view
+
 
 @_numba.jit(nopython=True, nogil=True)
 def _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
     n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
-    n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min)/pixelsize))
+    n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min) / pixelsize))
     x = locs.x
     z = locs.z
     in_view = (x > x_min) & (z > z_min) & (x < x_max) & (z < z_max)
     x = x[in_view]
     z = z[in_view]
     x = oversampling * (x - x_min)
-    z = oversampling * (z - z_min)/pixelsize
+    z = oversampling * (z - z_min) / pixelsize
     image = _np.zeros((n_pixel_x, n_pixel_z), dtype=_np.float32)
     return image, n_pixel_z, n_pixel_x, x, z, in_view
+
 
 @_numba.jit(nopython=True, nogil=True)
 def _fill(image, x, y):
@@ -89,6 +114,7 @@ def _fill(image, x, y):
     y = y.astype(_np.int32)
     for i, j in zip(x, y):
         image[j, i] += 1
+
 
 @_numba.jit(nopython=True, nogil=True)
 def _fill3d(image, x, y, z):
@@ -102,25 +128,48 @@ def _fill3d(image, x, y, z):
 
 @_numba.jit(nopython=True, nogil=True)
 def render_hist(locs, oversampling, y_min, x_min, y_max, x_max):
-    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
+        locs, oversampling, y_min, x_min, y_max, x_max
+    )
     _fill(image, x, y)
     return len(x), image
 
+
 @_numba.jit(nopython=True, nogil=True)
 def render_histz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
-    image, n_pixel_z, n_pixel_x, x, z, in_view = _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize)
+    image, n_pixel_z, n_pixel_x, x, z, in_view = _render_setupz(
+        locs, oversampling, x_min, z_min, x_max, z_max, pixelsize
+    )
     _fill(image, z, x)
     return len(x), image
 
+
 @_numba.jit(nopython=True, nogil=True)
-def render_hist3d(locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize):
-    image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize)
+def render_hist3d(
+    locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize
+):
+    image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(
+        locs,
+        oversampling,
+        y_min,
+        x_min,
+        y_max,
+        x_max,
+        z_min,
+        z_max,
+        pixelsize,
+    )
     _fill3d(image, x, y, z)
     return len(x), image
 
+
 @_numba.jit(nopython=True, nogil=True)
-def render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
-    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+def render_gaussian(
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+):
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
+        locs, oversampling, y_min, x_min, y_max, x_max
+    )
     blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
     blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
     sy = blur_height[in_view]
@@ -142,15 +191,25 @@ def render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_wid
             j_max = n_pixel_x
         for i in range(i_min, i_max):
             for j in range(j_min, j_max):
-                image[i, j] += _np.exp(-((j - x_ + 0.5)**2/(2 * sx_**2) + (i - y_ + 0.5)**2/(2 * sy_**2))) / (2 * _np.pi * sx_ * sy_)
+                image[i, j] += _np.exp(
+                    -(
+                        (j - x_ + 0.5) ** 2 / (2 * sx_ ** 2)
+                        + (i - y_ + 0.5) ** 2 / (2 * sy_ ** 2)
+                    )
+                ) / (2 * _np.pi * sx_ * sy_)
     return len(x), image
 
+
 @_numba.jit(nopython=True, nogil=True)
-def render_gaussian_iso(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
-    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+def render_gaussian_iso(
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+):
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
+        locs, oversampling, y_min, x_min, y_max, x_max
+    )
     blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
     blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
-    sy = (blur_height[in_view] + blur_width[in_view])/2
+    sy = (blur_height[in_view] + blur_width[in_view]) / 2
     sx = sy
     for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
         max_y = _DRAW_MAX_SIGMA * sy_
@@ -169,24 +228,39 @@ def render_gaussian_iso(locs, oversampling, y_min, x_min, y_max, x_max, min_blur
             j_max = n_pixel_x
         for i in range(i_min, i_max):
             for j in range(j_min, j_max):
-                image[i, j] += _np.exp(-((j - x_ + 0.5)**2/(2 * sx_**2) + (i - y_ + 0.5)**2/(2 * sy_**2))) / (2 * _np.pi * sx_ * sy_)
+                image[i, j] += _np.exp(
+                    -(
+                        (j - x_ + 0.5) ** 2 / (2 * sx_ ** 2)
+                        + (i - y_ + 0.5) ** 2 / (2 * sy_ ** 2)
+                    )
+                ) / (2 * _np.pi * sx_ * sy_)
     return len(x), image
 
 
-def render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
-    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+def render_convolve(
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+):
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
+        locs, oversampling, y_min, x_min, y_max, x_max
+    )
     _fill(image, x, y)
     n = len(x)
     if n == 0:
         return 0, image
     else:
-        blur_width = oversampling * max(_np.median(locs.lpx[in_view]), min_blur_width)
-        blur_height = oversampling * max(_np.median(locs.lpy[in_view]), min_blur_width)
+        blur_width = oversampling * max(
+            _np.median(locs.lpx[in_view]), min_blur_width
+        )
+        blur_height = oversampling * max(
+            _np.median(locs.lpy[in_view]), min_blur_width
+        )
         return n, _fftconvolve(image, blur_width, blur_height)
 
 
 def render_smooth(locs, oversampling, y_min, x_min, y_max, x_max):
-    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(locs, oversampling, y_min, x_min, y_max, x_max)
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
+        locs, oversampling, y_min, x_min, y_max, x_max
+    )
     _fill(image, x, y)
     n = len(x)
     if n == 0:
@@ -202,26 +276,28 @@ def _fftconvolve(image, blur_width, blur_height):
     kernel_x = _signal.gaussian(kernel_width, blur_width)
     kernel = _np.outer(kernel_y, kernel_x)
     kernel /= kernel.sum()
-    return _signal.fftconvolve(image, kernel, mode='same')
+    return _signal.fftconvolve(image, kernel, mode="same")
 
 
 def segment(locs, info, segmentation, kwargs={}, callback=None):
-    Y = info[0]['Height']
-    X = info[0]['Width']
-    n_frames = info[0]['Frames']
+    Y = info[0]["Height"]
+    X = info[0]["Width"]
+    n_frames = info[0]["Frames"]
     n_seg = n_segments(info, segmentation)
-    bounds = _np.linspace(0, n_frames-1, n_seg+1, dtype=_np.uint32)
+    bounds = _np.linspace(0, n_frames - 1, n_seg + 1, dtype=_np.uint32)
     segments = _np.zeros((n_seg, Y, X))
     if callback is not None:
         callback(0)
-    for i in _trange(n_seg, desc='Generating segments', unit='segments'):
-        segment_locs = locs[(locs.frame >= bounds[i]) & (locs.frame < bounds[i+1])]
+    for i in _trange(n_seg, desc="Generating segments", unit="segments"):
+        segment_locs = locs[
+            (locs.frame >= bounds[i]) & (locs.frame < bounds[i + 1])
+        ]
         _, segments[i] = render(segment_locs, info, **kwargs)
         if callback is not None:
-            callback(i+1)
+            callback(i + 1)
     return bounds, segments
 
 
 def n_segments(info, segmentation):
-    n_frames = info[0]['Frames']
-    return int(_np.round(n_frames/segmentation))
+    n_frames = info[0]["Frames"]
+    return int(_np.round(n_frames / segmentation))
