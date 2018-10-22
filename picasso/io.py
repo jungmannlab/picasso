@@ -266,9 +266,21 @@ class TiffMap:
             if tag == 51123:
                 # This is the Micro-Manager tag. We generate an info dict that contains any info we need.
                 readout = self.read(type, count).strip(b'\0')      # Strip null bytes which MM 1.4.22 adds
-                mm_info = _json.loads(readout.decode())
+                mm_info_raw = _json.loads(readout.decode())
+                # Convert to ensure compatbility with MM 2.0
+                mm_info = {}
+                for key in mm_info_raw.keys():
+                    if key != 'scopeDataKeys':
+                        try:
+                            mm_info[key] = mm_info_raw[key].get('PropVal')
+                        except AttributeError:
+                            mm_info[key] = mm_info_raw[key]
+
                 info['Micro-Manager Metadata'] = mm_info
-                info['Camera'] = mm_info['Camera']
+                if 'Camera' in mm_info.keys():
+                    info['Camera'] = mm_info['Camera']
+                else:
+                    info['Camera'] = 'None'
         try:
             self.file.seek(self.last_ifd_offset)
             content = self.file.read()
@@ -288,7 +300,8 @@ class TiffMap:
             print('Error reading Micro-Manager metadata.')
 
         return info
-
+    
+    
     def get_frame(self, index, array=None):
         self.file.seek(self.image_offsets[index])
         frame = _np.reshape(_np.fromfile(self.file, dtype=self._tif_dtype, count=self.frame_size), self.frame_shape)
