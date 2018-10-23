@@ -4,8 +4,8 @@
 
     General purpose library for handling input and output of files
 
-    :author: Joerg Schnitzbauer, 2015
-    :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
+    :author: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 import os.path as _ospath
 import numpy as _np
@@ -173,7 +173,7 @@ class TiffMap:
             elif tag == 258:
                 bits_per_sample = self.read(type, count)
                 dtype_str = 'u' + str(int(bits_per_sample/8))
-                # Picasso uses internatlly exclusively little endian byte order...
+                # Picasso uses internally exclusively little endian byte order...
                 self.dtype = _np.dtype(dtype_str)
                 # ... the tif byte order might be different, so we also store the file dtype
                 self._tif_dtype = _np.dtype(self._tif_byte_order + dtype_str)
@@ -198,9 +198,10 @@ class TiffMap:
                     self.image_offsets.append(self.read(type, count))
                     break
             self.file.seek(offset + 2 + n_entries * 12)
+            last_offset = offset + 2 + n_entries * 12
             offset = self.read('L')
         self.n_frames = len(self.image_offsets)
-        self.last_ifd_offset = offset + 2 + n_entries * 12
+        self.last_ifd_offset = last_offset
         self.lock = _threading.Lock()
 
     def __enter__(self):
@@ -281,23 +282,29 @@ class TiffMap:
                     info['Camera'] = mm_info['Camera']
                 else:
                     info['Camera'] = 'None'
-        try:
-            self.file.seek(self.last_ifd_offset)
-            content = self.file.read()
-            search=r"\{\"Summary\":\"(.*)\"\}"
-            fullstring=str(content)
-            s = _re.search(search, fullstring)
-            
-            if s:
-                comments = s.group(1).split('\\\\n')
-            else:
-                comments = ''
+        # Acquistion comments
+        self.file.seek(self.last_ifd_offset)
+        comments = ''
+        offset = 0
+        while True:  # Fin the block with the summary
+            line = self.file.readline()
+            if 'Summary' in str(line):
+                break
+            if not line:
+                break
+            offset += len(line)
 
-            info['Micro-Manager Acquisiton Comments'] = comments
-            
-        except Exception as e:
-            print(e)
-            print('Error reading Micro-Manager metadata.')
+        if line:
+            for i in range(len(line)):
+                self.file.seek(self.last_ifd_offset + offset + i)
+                readout = self.read('L')
+                if readout == 84720485:  # Acquisition comments
+                    count = self.read('L')
+                    readout = self.file.read(4*count).strip(b'\0')
+                    comments = _json.loads(readout.decode())['Summary'].split('\n')
+                    break
+
+        info['Micro-Manager Acquisiton Comments'] = comments
 
         return info
     
