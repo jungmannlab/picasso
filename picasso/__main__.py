@@ -9,12 +9,11 @@
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 import os.path
-from picasso.gui import average
-
 
 def _average(args):
     from glob import glob
     from .io import load_locs, NoMetadataFileError
+    from picasso.gui import average
 
     kwargs = {'iterations': args.iterations,
               'oversampling': args.oversampling}
