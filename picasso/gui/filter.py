@@ -21,14 +21,13 @@ import os.path
 from .. import io, lib
 
 
-plt.style.use('ggplot')
+plt.style.use("ggplot")
 
 
 ROW_HEIGHT = 30
 
 
 class TableModel(QtCore.QAbstractTableModel):
-
     def __init__(self, locs, index, parent=None):
         super().__init__(parent)
         self.locs = locs
@@ -61,7 +60,6 @@ class TableModel(QtCore.QAbstractTableModel):
 
 
 class TableView(QtGui.QTableView):
-
     def __init__(self, window, parent=None):
         super().__init__(parent)
         self.window = window
@@ -85,12 +83,11 @@ class TableView(QtGui.QTableView):
         urls = event.mimeData().urls()
         path = urls[0].toLocalFile()
         extension = os.path.splitext(path)[1].lower()
-        if extension == '.hdf5':
+        if extension == ".hdf5":
             self.window.open(path)
 
 
 class PlotWindow(QtGui.QWidget):
-
     def __init__(self, main_window, locs):
         super().__init__()
         self.main_window = main_window
@@ -102,9 +99,9 @@ class PlotWindow(QtGui.QWidget):
         self.setLayout(vbox)
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
-        self.setWindowTitle('Picasso: Filter')
+        self.setWindowTitle("Picasso: Filter")
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons', 'filter.ico')
+        icon_path = os.path.join(this_directory, "icons", "filter.ico")
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
 
@@ -115,7 +112,6 @@ class PlotWindow(QtGui.QWidget):
 
 
 class HistWindow(PlotWindow):
-
     def __init__(self, main_window, locs, field):
         self.field = field
         super().__init__(main_window, locs)
@@ -131,14 +127,22 @@ class HistWindow(PlotWindow):
         axes = self.figure.add_subplot(111)
         axes.hist(data, bins, rwidth=1, linewidth=0)
         data_range = data.ptp()
-        axes.set_xlim([bins[0] - 0.05*data_range, data.max() + 0.05*data_range])
-        self.span = SpanSelector(axes, self.on_span_select, 'horizontal', useblit=True, rectprops=dict(facecolor='green', alpha=0.2))
+        axes.set_xlim([bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range])
+        self.span = SpanSelector(
+            axes,
+            self.on_span_select,
+            "horizontal",
+            useblit=True,
+            rectprops=dict(facecolor="green", alpha=0.2),
+        )
         self.canvas.draw()
 
     def on_span_select(self, xmin, xmax):
-        print('span selected')
+        print("span selected")
         self.locs = self.locs[np.isfinite(self.locs[self.field])]
-        self.locs = self.locs[(self.locs[self.field] > xmin) & (self.locs[self.field] < xmax)]
+        self.locs = self.locs[
+            (self.locs[self.field] > xmin) & (self.locs[self.field] < xmax)
+        ]
         self.main_window.update_locs(self.locs)
         self.main_window.log_filter(self.field, xmin.item(), xmax.item())
         self.plot()
@@ -149,7 +153,6 @@ class HistWindow(PlotWindow):
 
 
 class Hist2DWindow(PlotWindow):
-
     def __init__(self, main_window, locs, field_x, field_y):
         self.field_x = field_x
         self.field_y = field_y
@@ -160,7 +163,7 @@ class Hist2DWindow(PlotWindow):
         # Prepare the data
         x = self.locs[self.field_x]
         y = self.locs[self.field_y]
-        valid = (np.isfinite(x) & np.isfinite(y))
+        valid = np.isfinite(x) & np.isfinite(y)
         x = x[valid]
         y = y[valid]
         # Prepare the figure
@@ -170,17 +173,23 @@ class Hist2DWindow(PlotWindow):
         # Start hist2 version
         bins_x = lib.calculate_optimal_bins(x, 1000)
         bins_y = lib.calculate_optimal_bins(y, 1000)
-        counts, x_edges, y_edges, image = axes.hist2d(x, y, bins=[bins_x, bins_y], norm=LogNorm())
+        counts, x_edges, y_edges, image = axes.hist2d(
+            x, y, bins=[bins_x, bins_y], norm=LogNorm()
+        )
         x_range = x.ptp()
-        axes.set_xlim([bins_x[0] - 0.05*x_range, x.max() + 0.05*x_range])
+        axes.set_xlim([bins_x[0] - 0.05 * x_range, x.max() + 0.05 * x_range])
         y_range = y.ptp()
-        axes.set_ylim([bins_y[0] - 0.05*y_range, y.max() + 0.05*y_range])
+        axes.set_ylim([bins_y[0] - 0.05 * y_range, y.max() + 0.05 * y_range])
         self.figure.colorbar(image, ax=axes)
         axes.grid(False)
         axes.get_xaxis().set_label_text(self.field_x)
         axes.get_yaxis().set_label_text(self.field_y)
-        self.selector = RectangleSelector(axes, self.on_rect_select, useblit=False,
-                                          rectprops=dict(facecolor='green', alpha=0.2, fill=True))
+        self.selector = RectangleSelector(
+            axes,
+            self.on_rect_select,
+            useblit=False,
+            rectprops=dict(facecolor="green", alpha=0.2, fill=True),
+        )
         self.canvas.draw()
 
     def on_rect_select(self, press_event, release_event):
@@ -192,8 +201,12 @@ class Hist2DWindow(PlotWindow):
         ymax = max(y1, y2)
         self.locs = self.locs[np.isfinite(self.locs[self.field_x])]
         self.locs = self.locs[np.isfinite(self.locs[self.field_y])]
-        self.locs = self.locs[(self.locs[self.field_x] > xmin) & (self.locs[self.field_x] < xmax)]
-        self.locs = self.locs[(self.locs[self.field_y] > ymin) & (self.locs[self.field_y] < ymax)]
+        self.locs = self.locs[
+            (self.locs[self.field_x] > xmin) & (self.locs[self.field_x] < xmax)
+        ]
+        self.locs = self.locs[
+            (self.locs[self.field_y] > ymin) & (self.locs[self.field_y] < ymax)
+        ]
         self.main_window.update_locs(self.locs)
         self.main_window.log_filter(self.field_x, xmin.item(), xmax.item())
         self.main_window.log_filter(self.field_y, ymin.item(), ymax.item())
@@ -205,32 +218,31 @@ class Hist2DWindow(PlotWindow):
 
 
 class Window(QtGui.QMainWindow):
-
     def __init__(self):
         super().__init__()
         # Init GUI
-        self.setWindowTitle('Picasso: Filter')
+        self.setWindowTitle("Picasso: Filter")
         self.resize(1100, 750)
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons', 'filter.ico')
+        icon_path = os.path.join(this_directory, "icons", "filter.ico")
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         menu_bar = self.menuBar()
-        file_menu = menu_bar.addMenu('File')
-        open_action = file_menu.addAction('Open')
+        file_menu = menu_bar.addMenu("File")
+        open_action = file_menu.addAction("Open")
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
-        save_action = file_menu.addAction('Save')
+        save_action = file_menu.addAction("Save")
         save_action.setShortcut(QtGui.QKeySequence.Save)
         save_action.triggered.connect(self.save_file_dialog)
         file_menu.addAction(save_action)
-        plot_menu = menu_bar.addMenu('Plot')
-        histogram_action = plot_menu.addAction('Histogram')
-        histogram_action.setShortcut('Ctrl+H')
+        plot_menu = menu_bar.addMenu("Plot")
+        histogram_action = plot_menu.addAction("Histogram")
+        histogram_action.setShortcut("Ctrl+H")
         histogram_action.triggered.connect(self.plot_histogram)
-        scatter_action = plot_menu.addAction('2D Histogram')
-        scatter_action.setShortcut('Ctrl+D')
+        scatter_action = plot_menu.addAction("2D Histogram")
+        scatter_action.setShortcut("Ctrl+D")
         scatter_action.triggered.connect(self.plot_hist2d)
         self.table_view = TableView(self, self)
         main_widget = QtGui.QWidget()
@@ -248,7 +260,9 @@ class Window(QtGui.QMainWindow):
         self.locs = None
 
     def open_file_dialog(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Open localizations', filter='*.hdf5')
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Open localizations", filter="*.hdf5"
+        )
         if path:
             self.open(path)
 
@@ -291,7 +305,9 @@ class Window(QtGui.QMainWindow):
             indices = [index.column() for index in indices]
             field_x, field_y = [self.locs.dtype.names[index] for index in indices]
             if not self.hist2d_windows[field_x][field_y]:
-                self.hist2d_windows[field_x][field_y] = Hist2DWindow(self, self.locs, field_x, field_y)
+                self.hist2d_windows[field_x][field_y] = Hist2DWindow(
+                    self, self.locs, field_x, field_y
+                )
             self.hist2d_windows[field_x][field_y].show()
 
     def update_locs(self, locs):
@@ -310,7 +326,7 @@ class Window(QtGui.QMainWindow):
         if self.locs is not None:
             view_height = self.table_view.viewport().height()
             n_rows = int(view_height / ROW_HEIGHT) + 2
-            table_model = TableModel(self.locs[index:index + n_rows], index, self)
+            table_model = TableModel(self.locs[index : index + n_rows], index, self)
             self.table_view.setModel(table_model)
 
     def log_filter(self, field, xmin, xmax):
@@ -322,11 +338,13 @@ class Window(QtGui.QMainWindow):
 
     def save_file_dialog(self):
         base, ext = os.path.splitext(self.locs_path)
-        out_path = base + '_filter.hdf5'
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', out_path, filter='*.hdf5')
+        out_path = base + "_filter.hdf5"
+        path = QtGui.QFileDialog.getSaveFileName(
+            self, "Save localizations", out_path, filter="*.hdf5"
+        )
         if path:
             filter_info = self.filter_log.copy()
-            filter_info.update({'Generated by': 'Picasso Filter'})
+            filter_info.update({"Generated by": "Picasso Filter"})
             info = self.info + [filter_info]
             io.save_locs(path, self.locs, info)
 
@@ -348,14 +366,15 @@ def main():
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
-        message = ''.join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
+        message = "".join(traceback.format_exception(type, value, tback))
+        errorbox = QtGui.QMessageBox.critical(window, "An error occured", message)
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
+
     sys.excepthook = excepthook
 
     sys.exit(app.exec_())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
