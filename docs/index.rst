@@ -11,6 +11,7 @@ Welcome to Picasso's documentation!
    :caption: Contents:
 
    readme
+   files
    design
    simulate
    localize
