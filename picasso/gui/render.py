@@ -21,7 +21,10 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 import yaml
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.backends.backend_qt4agg import (
+    FigureCanvasQTAgg,
+    NavigationToolbar2QT,
+)
 from scipy.ndimage.filters import gaussian_filter
 from numpy.lib.recfunctions import stack_arrays
 from PyQt4 import QtCore, QtGui
@@ -87,7 +90,9 @@ class FloatEdit(QtGui.QLineEdit):
 
     def __init__(self):
         super().__init__()
-        self.setSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Preferred)
+        self.setSizePolicy(
+            QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Preferred
+        )
         self.editingFinished.connect(self.onEditingFinished)
 
     def onEditingFinished(self):
@@ -277,7 +282,9 @@ class DatasetDialog(QtGui.QDialog):
         self.checks.append(c)
         self.checks[-1].setChecked(True)
         self.checks[-1].stateChanged.connect(self.update_viewport)
-        self.colorselection[-1].currentIndexChanged.connect(self.update_viewport)
+        self.colorselection[-1].currentIndexChanged.connect(
+            self.update_viewport
+        )
         index = len(self.colorselection)
         self.colorselection[-1].currentIndexChanged.connect(
             lambda: self.set_color(index - 1)
@@ -291,7 +298,9 @@ class DatasetDialog(QtGui.QDialog):
             palette = self.colordisp_all[n].palette()
             palette.setColor(
                 QtGui.QPalette.Window,
-                QtGui.QColor.fromRgbF(colors[n][0], colors[n][1], colors[n][2], 1),
+                QtGui.QColor.fromRgbF(
+                    colors[n][0], colors[n][1], colors[n][2], 1
+                ),
             )
             self.colordisp_all[n].setPalette(palette)
 
@@ -307,10 +316,14 @@ class DatasetDialog(QtGui.QDialog):
             colors = get_colors(n_channels)
             palette.setColor(
                 QtGui.QPalette.Window,
-                QtGui.QColor.fromRgbF(colors[n][0], colors[n][1], colors[n][2], 1),
+                QtGui.QColor.fromRgbF(
+                    colors[n][0], colors[n][1], colors[n][2], 1
+                ),
             )
         else:
-            palette.setColor(QtGui.QPalette.Window, QtGui.QColor(selectedcolor))
+            palette.setColor(
+                QtGui.QPalette.Window, QtGui.QColor(selectedcolor)
+            )
         self.colordisp_all[n].setPalette(palette)
 
 
@@ -337,8 +350,12 @@ class PlotDialog(QtGui.QDialog):
             self,
         )
         layout_grid.addWidget(self.buttons)
-        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
-        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
+        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(
+            self.on_accept
+        )
+        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(
+            self.on_reject
+        )
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(
             self.on_cancel
         )
@@ -373,12 +390,12 @@ class PlotDialog(QtGui.QDialog):
             locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
             colors = locs["z"][:]
-            colors[colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])] = np.mean(
-                locs["z"]
-            ) + 3 * np.std(locs["z"])
-            colors[colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])] = np.mean(
-                locs["z"]
-            ) - 3 * np.std(locs["z"])
+            colors[
+                colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])
+            ] = np.mean(locs["z"]) + 3 * np.std(locs["z"])
+            colors[
+                colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
+            ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
             ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet")
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
@@ -455,8 +472,12 @@ class PlotDialogIso(QtGui.QDialog):
             self,
         )
         layout_grid.addWidget(self.buttons)
-        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
-        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
+        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(
+            self.on_accept
+        )
+        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(
+            self.on_reject
+        )
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(
             self.on_cancel
         )
@@ -477,7 +498,9 @@ class PlotDialogIso(QtGui.QDialog):
         self.close()
 
     @staticmethod
-    def getParams(all_picked_locs, current, length, mode, color_sys, pixelsize):
+    def getParams(
+        all_picked_locs, current, length, mode, color_sys, pixelsize
+    ):
 
         dialog = PlotDialog(None)
         fig = dialog.figure
@@ -494,12 +517,12 @@ class PlotDialogIso(QtGui.QDialog):
             locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
             colors = locs["z"][:]
-            colors[colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])] = np.mean(
-                locs["z"]
-            ) + 3 * np.std(locs["z"])
-            colors[colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])] = np.mean(
-                locs["z"]
-            ) - 3 * np.std(locs["z"])
+            colors[
+                colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])
+            ] = np.mean(locs["z"]) + 3 * np.std(locs["z"])
+            colors[
+                colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
+            ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
 
             ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet")
             ax.set_xlabel("X [Px]")
@@ -675,8 +698,12 @@ class ClusterDialog(QtGui.QDialog):
 
         self.layout_grid.addWidget(self.n_clusters_spin, 10, 4, 1, 1)
 
-        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
-        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
+        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(
+            self.on_accept
+        )
+        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(
+            self.on_reject
+        )
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(
             self.on_cancel
         )
@@ -695,10 +722,18 @@ class ClusterDialog(QtGui.QDialog):
         c = QtGui.QCheckBox(str(element[0] + 1))
 
         self.layout_grid.addWidget(c, self.n_lines, 4, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(x_mean)), self.n_lines, 0, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(y_mean)), self.n_lines, 1, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(z_mean)), self.n_lines, 2, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(element[1])), self.n_lines, 3, 1, 1)
+        self.layout_grid.addWidget(
+            QtGui.QLabel(str(x_mean)), self.n_lines, 0, 1, 1
+        )
+        self.layout_grid.addWidget(
+            QtGui.QLabel(str(y_mean)), self.n_lines, 1, 1, 1
+        )
+        self.layout_grid.addWidget(
+            QtGui.QLabel(str(z_mean)), self.n_lines, 2, 1, 1
+        )
+        self.layout_grid.addWidget(
+            QtGui.QLabel(str(element[1])), self.n_lines, 3, 1, 1
+        )
         self.n_lines += 1
         self.checks.append(c)
         self.checks[-1].setChecked(True)
@@ -727,7 +762,9 @@ class ClusterDialog(QtGui.QDialog):
             self.close()
 
     @staticmethod
-    def getParams(all_picked_locs, current, length, n_clusters, color_sys, pixelsize):
+    def getParams(
+        all_picked_locs, current, length, n_clusters, color_sys, pixelsize
+    ):
 
         dialog = ClusterDialog(None)
 
@@ -739,7 +776,11 @@ class ClusterDialog(QtGui.QDialog):
         ax2 = fig.add_subplot(122, projection="3d")
         plt.axis("equal")
         dialog.label.setText(
-            "3D Scatterplot of Pick " + str(current + 1) + "  of: " + str(length) + "."
+            "3D Scatterplot of Pick "
+            + str(current + 1)
+            + "  of: "
+            + str(length)
+            + "."
         )
 
         print("Mode 1")
@@ -748,8 +789,12 @@ class ClusterDialog(QtGui.QDialog):
 
         est = KMeans(n_clusters=n_clusters)
 
-        scaled_locs = lib.append_to_rec(locs, locs["x"] * pixelsize, "x_scaled")
-        scaled_locs = lib.append_to_rec(scaled_locs, locs["y"] * pixelsize, "y_scaled")
+        scaled_locs = lib.append_to_rec(
+            locs, locs["x"] * pixelsize, "x_scaled"
+        )
+        scaled_locs = lib.append_to_rec(
+            scaled_locs, locs["y"] * pixelsize, "y_scaled"
+        )
 
         X = np.asarray(scaled_locs["x_scaled"])
         Y = np.asarray(scaled_locs["y_scaled"])
@@ -854,8 +899,12 @@ class ClusterDialog_2D(QtGui.QDialog):
 
         self.layout_grid.addWidget(self.n_clusters_spin, 2, 4, 1, 1)
 
-        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(self.on_accept)
-        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(self.on_reject)
+        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(
+            self.on_accept
+        )
+        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(
+            self.on_reject
+        )
         self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(
             self.on_cancel
         )
@@ -873,9 +922,15 @@ class ClusterDialog_2D(QtGui.QDialog):
         c = QtGui.QCheckBox(str(element[0] + 1))
 
         self.layout_grid.addWidget(c, self.n_lines, 3, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(x_mean)), self.n_lines, 0, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(y_mean)), self.n_lines, 1, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel(str(element[1])), self.n_lines, 2, 1, 1)
+        self.layout_grid.addWidget(
+            QtGui.QLabel(str(x_mean)), self.n_lines, 0, 1, 1
+        )
+        self.layout_grid.addWidget(
+            QtGui.QLabel(str(y_mean)), self.n_lines, 1, 1, 1
+        )
+        self.layout_grid.addWidget(
+            QtGui.QLabel(str(element[1])), self.n_lines, 2, 1, 1
+        )
         self.n_lines += 1
         self.checks.append(c)
         self.checks[-1].setChecked(True)
@@ -915,7 +970,11 @@ class ClusterDialog_2D(QtGui.QDialog):
         ax1 = fig.add_subplot(121)
         ax2 = fig.add_subplot(122)
         dialog.label.setText(
-            "2D Scatterplot of Pick " + str(current + 1) + "  of: " + str(length) + "."
+            "2D Scatterplot of Pick "
+            + str(current + 1)
+            + "  of: "
+            + str(length)
+            + "."
         )
 
         print("Mode 1")
@@ -1089,7 +1148,9 @@ class InfoDialog(QtGui.QDialog):
         self.n_picks = QtGui.QLabel()
         self.picks_grid.addWidget(self.n_picks, 0, 1)
         compute_pick_info_button = QtGui.QPushButton("Calculate info below")
-        compute_pick_info_button.clicked.connect(self.window.view.update_pick_info_long)
+        compute_pick_info_button.clicked.connect(
+            self.window.view.update_pick_info_long
+        )
         self.picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 3)
         self.picks_grid.addWidget(QtGui.QLabel("<b>Mean</b"), 2, 1)
         self.picks_grid.addWidget(QtGui.QLabel("<b>Std</b>"), 2, 2)
@@ -1141,7 +1202,9 @@ class InfoDialog(QtGui.QDialog):
             calculate_influx_button, self.picks_grid.rowCount(), 0, 1, 3
         )
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("Influx rate (1/frames):"), row, 0)
+        self.picks_grid.addWidget(
+            QtGui.QLabel("Influx rate (1/frames):"), row, 0
+        )
         self.influx_rate = FloatEdit()
         self.influx_rate.setValue(0.03)
         self.influx_rate.valueChanged.connect(self.update_n_units)
@@ -1155,7 +1218,9 @@ class InfoDialog(QtGui.QDialog):
         self.pick_hist_window = PickHistWindow(self)
         pick_hists = QtGui.QPushButton("Histograms")
         pick_hists.clicked.connect(self.pick_hist_window.show)
-        self.picks_grid.addWidget(pick_hists, self.picks_grid.rowCount(), 0, 1, 3)
+        self.picks_grid.addWidget(
+            pick_hists, self.picks_grid.rowCount(), 0, 1, 3
+        )
 
     def calculate_nena_lp(self):
         channel = self.window.view.get_channel("Calculate NeNA precision")
@@ -1164,7 +1229,9 @@ class InfoDialog(QtGui.QDialog):
             info = self.window.view.infos[channel]
             self.nena_button.setParent(None)
             self.movie_grid.removeWidget(self.nena_button)
-            progress = lib.ProgressDialog("Calculating NeNA precision", 0, 100, self)
+            progress = lib.ProgressDialog(
+                "Calculating NeNA precision", 0, 100, self
+            )
             result_lp = postprocess.nena(locs, info, progress.set_value)
             self.nena_label = QtGui.QLabel()
             self.movie_grid.addWidget(self.nena_label, 1, 1)
@@ -1178,7 +1245,9 @@ class InfoDialog(QtGui.QDialog):
 
     def calibrate_influx(self):
         # influx = np.mean(1 / self.pick_info['dark']) / self.units_per_pick.value()
-        influx = 1 / self.pick_info["pooled dark"] / self.units_per_pick.value()
+        influx = (
+            1 / self.pick_info["pooled dark"] / self.units_per_pick.value()
+        )
         self.influx_rate.setValue(influx)
         self.update_n_units()
 
@@ -1318,13 +1387,17 @@ class MaskSettingsDialog(QtGui.QDialog):
 
     def save_mask(self):
         # Open dialog to save mask
-        path = QtGui.QFileDialog.getSaveFileName(self, "Save mask to", filter="*.npy")
+        path = QtGui.QFileDialog.getSaveFileName(
+            self, "Save mask to", filter="*.npy"
+        )
         if path:
             np.save(path, self.mask)
 
     def load_mask(self):
         # Save dialog to load mask
-        path = QtGui.QFileDialog.getOpenFileName(self, "Load mask", filter="*.npy")
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Load mask", filter="*.npy"
+        )
         if path:
             self.mask = np.load(path)
             # adjust oversampling for mask
@@ -1359,7 +1432,10 @@ class MaskSettingsDialog(QtGui.QDialog):
                 self.blur = self.mask_blur.value()
                 self.cached_oversampling = 0
 
-            if self.mask_tresh.value() == self.thresh and self.cached_thresh == 1:
+            if (
+                self.mask_tresh.value() == self.thresh
+                and self.cached_thresh == 1
+            ):
                 self.cached_thresh = 1
             else:
                 self.tresh = self.mask_tresh.value()
@@ -1396,7 +1472,12 @@ class MaskSettingsDialog(QtGui.QDialog):
             self.H,
             interpolation="nearest",
             origin="low",
-            extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]],
+            extent=[
+                self.xedges[0],
+                self.xedges[-1],
+                self.yedges[0],
+                self.yedges[-1],
+            ],
         )
         ax1.grid(False)
         ax1.set_xlim(self.x_min_d, self.x_max_d)
@@ -1406,7 +1487,12 @@ class MaskSettingsDialog(QtGui.QDialog):
             self.H_blur,
             interpolation="nearest",
             origin="low",
-            extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]],
+            extent=[
+                self.xedges[0],
+                self.xedges[-1],
+                self.yedges[0],
+                self.yedges[-1],
+            ],
         )
         ax2.grid(False)
         ax2.set_xlim(self.x_min_d, self.x_max_d)
@@ -1416,7 +1502,12 @@ class MaskSettingsDialog(QtGui.QDialog):
             self.mask,
             interpolation="nearest",
             origin="low",
-            extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]],
+            extent=[
+                self.xedges[0],
+                self.xedges[-1],
+                self.yedges[0],
+                self.yedges[-1],
+            ],
         )
         ax3.grid(False)
         ax3.set_xlim(self.x_min_d, self.x_max_d)
@@ -1426,7 +1517,12 @@ class MaskSettingsDialog(QtGui.QDialog):
             np.zeros_like(self.H),
             interpolation="nearest",
             origin="low",
-            extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]],
+            extent=[
+                self.xedges[0],
+                self.xedges[-1],
+                self.yedges[0],
+                self.yedges[-1],
+            ],
         )
         ax4.grid(False)
         ax4.set_xlim(self.x_min_d, self.x_max_d)
@@ -1440,10 +1536,16 @@ class MaskSettingsDialog(QtGui.QDialog):
         steps_y = len(self.yedges)
 
         x_ind = (
-            np.floor((locs["x"] - self.x_min) / (self.x_max - self.x_min) * steps_x) - 1
+            np.floor(
+                (locs["x"] - self.x_min) / (self.x_max - self.x_min) * steps_x
+            )
+            - 1
         )
         y_ind = (
-            np.floor((locs["y"] - self.y_min) / (self.y_max - self.y_min) * steps_y) - 1
+            np.floor(
+                (locs["y"] - self.y_min) / (self.y_max - self.y_min) * steps_y
+            )
+            - 1
         )
         x_ind = x_ind.astype(int)
         y_ind = y_ind.astype(int)
@@ -1453,7 +1555,9 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.index_locs_out = locs[~index]
 
         H_new, xedges, yedges = np.histogram2d(
-            self.index_locs["x"], self.index_locs["y"], bins=(self.xedges, self.yedges)
+            self.index_locs["x"],
+            self.index_locs["y"],
+            bins=(self.xedges, self.yedges),
         )
         self.H_new = H_new.T  # Let each row list bins with common y range.
 
@@ -1462,7 +1566,12 @@ class MaskSettingsDialog(QtGui.QDialog):
             self.H_new,
             interpolation="nearest",
             origin="low",
-            extent=[self.xedges[0], self.xedges[-1], self.yedges[0], self.yedges[-1]],
+            extent=[
+                self.xedges[0],
+                self.xedges[-1],
+                self.yedges[0],
+                self.yedges[-1],
+            ],
         )
         ax4.grid(False)
         self.mask_exists = 1
@@ -1477,7 +1586,9 @@ class MaskSettingsDialog(QtGui.QDialog):
             self, "Save localizations within mask", out_path, filter="*.hdf5"
         )
         if path:
-            info = self.infos[channel] + [{"Generated by": "Picasso Render : Mask in "}]
+            info = self.infos[channel] + [
+                {"Generated by": "Picasso Render : Mask in "}
+            ]
             clusterfilter_info = {
                 "Oversampling": self.oversampling,
                 "Blur": self.blur,
@@ -1487,10 +1598,15 @@ class MaskSettingsDialog(QtGui.QDialog):
             io.save_locs(path, self.index_locs, info)
         out_path = base + "_mask_out.hdf5"
         path = QtGui.QFileDialog.getSaveFileName(
-            self, "Save localizations outside of mask", out_path, filter="*.hdf5"
+            self,
+            "Save localizations outside of mask",
+            out_path,
+            filter="*.hdf5",
         )
         if path:
-            info = self.infos[channel] + [{"Generated by": "Picasso Render : Mask out"}]
+            info = self.infos[channel] + [
+                {"Generated by": "Picasso Render : Mask out"}
+            ]
             clusterfilter_info = {
                 "Oversampling": self.oversampling,
                 "Blur": self.blur,
@@ -1527,11 +1643,15 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.pick_similar_range.setDecimals(1)
         pick_grid.addWidget(self.pick_similar_range, 1, 1)
         self.pick_annotation = QtGui.QCheckBox("Annotate picks")
-        self.pick_annotation.stateChanged.connect(self.on_pick_diameter_changed)
+        self.pick_annotation.stateChanged.connect(
+            self.on_pick_diameter_changed
+        )
         pick_grid.addWidget(self.pick_annotation, 2, 0)
 
     def on_pick_diameter_changed(self, diameter):
-        self.window.view.index_blocks = [None for _ in self.window.view.index_blocks]
+        self.window.view.index_blocks = [
+            None for _ in self.window.view.index_blocks
+        ]
         self.window.view.update_scene(use_cache=True)
 
 
@@ -1564,7 +1684,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         general_grid.addWidget(self.oversampling, 1, 1)
         self.dynamic_oversampling = QtGui.QCheckBox("dynamic")
         self.dynamic_oversampling.setChecked(True)
-        self.dynamic_oversampling.toggled.connect(self.set_dynamic_oversampling)
+        self.dynamic_oversampling.toggled.connect(
+            self.set_dynamic_oversampling
+        )
         general_grid.addWidget(self.dynamic_oversampling, 2, 1)
         self.high_oversampling = QtGui.QCheckBox("high oversampling")
         general_grid.addWidget(self.high_oversampling, 3, 1)
@@ -1612,7 +1734,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.blur_buttongroup.addButton(smooth_button)
         convolve_button = QtGui.QRadioButton("Global Localization Precision")
         self.blur_buttongroup.addButton(convolve_button)
-        gaussian_button = QtGui.QRadioButton("Individual Localization Precision")
+        gaussian_button = QtGui.QRadioButton(
+            "Individual Localization Precision"
+        )
         self.blur_buttongroup.addButton(gaussian_button)
         gaussian_iso_button = QtGui.QRadioButton(
             "Individual Localization Precision, iso"
@@ -1626,7 +1750,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         blur_grid.addWidget(gaussian_iso_button, 4, 0, 1, 2)
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene)
-        blur_grid.addWidget(QtGui.QLabel("Min. Blur (cam. pixel):"), 5, 0, 1, 1)
+        blur_grid.addWidget(
+            QtGui.QLabel("Min. Blur (cam. pixel):"), 5, 0, 1, 1
+        )
         self.min_blur_width = QtGui.QDoubleSpinBox()
         self.min_blur_width.setRange(0, 999999)
         self.min_blur_width.setSingleStep(0.01)
@@ -1718,7 +1844,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.color_step.setValue(32)
         self.color_step.setKeyboardTracking(False)
         self.color_step.setEnabled(False)
-        self.color_step.valueChanged.connect(self.window.view.activate_render_property)
+        self.color_step.valueChanged.connect(
+            self.window.view.activate_render_property
+        )
         render_grid.addWidget(self.color_step, 3, 1)
 
         self.render_check = QtGui.QCheckBox("Render")
@@ -1841,13 +1969,19 @@ class SlicerDialog(QtGui.QDialog):
         self.colors = get_colors(n_channels)
 
         self.bins = np.arange(
-            np.amin(np.hstack(self.zcoord)), np.amax(np.hstack(self.zcoord)), slice
+            np.amin(np.hstack(self.zcoord)),
+            np.amax(np.hstack(self.zcoord)),
+            slice,
         )
         self.patches = []
         ax.hold(True)
         for i in range(len(self.zcoord)):
             n, bins, patches = plt.hist(
-                self.zcoord[i], self.bins, normed=1, facecolor=self.colors[i], alpha=0.5
+                self.zcoord[i],
+                self.bins,
+                normed=1,
+                facecolor=self.colors[i],
+                alpha=0.5,
             )
             self.patches.append(patches)
 
@@ -1928,12 +2062,16 @@ class SlicerDialog(QtGui.QDialog):
                             + ".tif"
                         )
                         if self.fullCheck.isChecked():
-                            movie_height, movie_width = self.window.view.movie_size()
+                            movie_height, movie_width = (
+                                self.window.view.movie_size()
+                            )
                             viewport = [(0, 0), (movie_height, movie_width)]
                             qimage = self.window.view.render_scene(
                                 cache=False, viewport=viewport
                             )
-                            gray = qimage.convertToFormat(QtGui.QImage.Format_RGB16)
+                            gray = qimage.convertToFormat(
+                                QtGui.QImage.Format_RGB16
+                            )
                         else:
                             gray = self.window.view.qimage.convertToFormat(
                                 QtGui.QImage.Format_RGB16
@@ -1955,10 +2093,16 @@ class SlicerDialog(QtGui.QDialog):
                     self.sl.setValue(i)
                     print("Slide: " + str(i))
                     out_path = (
-                        base + "_Z" + "{num:03d}".format(num=i) + "_CH001" + ".tif"
+                        base
+                        + "_Z"
+                        + "{num:03d}".format(num=i)
+                        + "_CH001"
+                        + ".tif"
                     )
                     if self.fullCheck.isChecked():
-                        movie_height, movie_width = self.window.view.movie_size()
+                        movie_height, movie_width = (
+                            self.window.view.movie_size()
+                        )
                         viewport = [(0, 0), (movie_height, movie_width)]
                         qimage = self.window.view.render_scene(
                             cache=False, viewport=viewport
@@ -1978,7 +2122,9 @@ class View(QtGui.QLabel):
         icon = QtGui.QIcon(icon_path)
         self.icon = icon
         self.setAcceptDrops(True)
-        self.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
+        self.setSizePolicy(
+            QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding
+        )
         self.rubberband = QtGui.QRubberBand(QtGui.QRubberBand.Rectangle, self)
         self.rubberband.setStyleSheet("selection-background-color: white")
         self.window = window
@@ -2042,7 +2188,9 @@ class View(QtGui.QLabel):
                         )
                     else:
                         drift = (drift_x, drift_y)
-                        drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
+                        drift = np.rec.array(
+                            drift, dtype=[("x", "f"), ("y", "f")]
+                        )
                 except:
                     # drift already initialized before
                     pass
@@ -2051,7 +2199,9 @@ class View(QtGui.QLabel):
         self._driftfiles.append(None)
         self.currentdrift.append(None)
         if len(self.locs) == 1:
-            self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
+            self.median_lp = np.mean(
+                [np.median(locs.lpx), np.median(locs.lpy)]
+            )
             if hasattr(locs, "group"):
                 groups = np.unique(locs.group)
                 groupcopy = locs.group.copy()
@@ -2090,7 +2240,9 @@ class View(QtGui.QLabel):
             if render:
                 self.update_scene()
 
-        self.window.display_settings_dialog.parameter.addItems(locs.dtype.names)
+        self.window.display_settings_dialog.parameter.addItems(
+            locs.dtype.names
+        )
 
         if hasattr(locs, "z"):
             self.window.slicer_dialog.zcoord.append(locs.z)
@@ -2160,7 +2312,9 @@ class View(QtGui.QLabel):
         if len(self._picks) > 0:
             shift = self.shift_from_picked()
             print("Shift {}".format(shift))
-            sp = lib.ProgressDialog("Shifting channels", 0, len(self.locs), self)
+            sp = lib.ProgressDialog(
+                "Shifting channels", 0, len(self.locs), self
+            )
             sp.set_value(0)
             for i, locs_ in enumerate(self.locs):
                 locs_.y -= shift[0][i]
@@ -2181,7 +2335,9 @@ class View(QtGui.QLabel):
             shift_z = []
             display = True
 
-            progress = lib.ProgressDialog("Aligning images..", 0, max_iterations, self)
+            progress = lib.ProgressDialog(
+                "Aligning images..", 0, max_iterations, self
+            )
             progress.show()
             progress.set_value(0)
 
@@ -2189,7 +2345,9 @@ class View(QtGui.QLabel):
                 completed = "True"
                 progress.set_value(iteration)
                 shift = self.shift_from_rcc()
-                sp = lib.ProgressDialog("Shifting channels", 0, len(self.locs), self)
+                sp = lib.ProgressDialog(
+                    "Shifting channels", 0, len(self.locs), self
+                )
                 sp.set_value(0)
                 temp_shift_x = []
                 temp_shift_y = []
@@ -2240,7 +2398,8 @@ class View(QtGui.QLabel):
             picked_locs = self.picked_locs(channel, add_group=False)
             out_locs = []
             r_max = 2 * max(
-                self.infos[channel][0]["Height"], self.infos[channel][0]["Width"]
+                self.infos[channel][0]["Height"],
+                self.infos[channel][0]["Width"],
             )
             max_dark = self.infos[channel][0]["Frames"]
             progress = lib.ProgressDialog(
@@ -2260,7 +2419,9 @@ class View(QtGui.QLabel):
                 else:
                     out_locs.append(pick_locs_out)
                 progress.set_value(i + 1)
-            self.locs[channel] = stack_arrays(out_locs, asrecarray=True, usemask=False)
+            self.locs[channel] = stack_arrays(
+                out_locs, asrecarray=True, usemask=False
+            )
 
             if hasattr(self.locs[channel], "group"):
                 groups = np.unique(self.locs[channel].group)
@@ -2312,7 +2473,9 @@ class View(QtGui.QLabel):
         d = np.zeros((n_channels, n_channels))
         for i in range(n_channels - 1):
             for j in range(i + 1, n_channels):
-                d[i, j] = np.nanmean([cj - ci for ci, cj in zip(coms[i], coms[j])])
+                d[i, j] = np.nanmean(
+                    [cj - ci for ci, cj in zip(coms[i], coms[j])]
+                )
         return d
 
     def shift_from_picked(self):
@@ -2475,9 +2638,13 @@ class View(QtGui.QLabel):
     ):
         if not picks_only:
             self.viewport = self.adjust_viewport_to_view(viewport)
-            qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
+            qimage = self.render_scene(
+                autoscale=autoscale, use_cache=use_cache
+            )
             qimage = qimage.scaled(
-                self.width(), self.height(), QtCore.Qt.KeepAspectRatioByExpanding
+                self.width(),
+                self.height(),
+                QtCore.Qt.KeepAspectRatioByExpanding,
             )
             self.qimage_no_picks = self.draw_scalebar(qimage)
             self.qimage_no_picks = self.draw_minimap(self.qimage_no_picks)
@@ -2508,7 +2675,9 @@ class View(QtGui.QLabel):
                 picks_only=picks_only,
                 points_only=points_only,
             )
-            self.window.slicer_dialog.slicer_cache[slicerposition] = self.pixmap
+            self.window.slicer_dialog.slicer_cache[
+                slicerposition
+            ] = self.pixmap
         else:
             self.setPixmap(pixmap)
 
@@ -2516,7 +2685,9 @@ class View(QtGui.QLabel):
         urls = event.mimeData().urls()
         paths = [_.toLocalFile() for _ in urls]
         extensions = [os.path.splitext(_)[1].lower() for _ in paths]
-        paths = [path for path, ext in zip(paths, extensions) if ext == ".hdf5"]
+        paths = [
+            path for path, ext in zip(paths, extensions) if ext == ".hdf5"
+        ]
         self.add_multiple(paths)
 
     def fit_in_view(self, autoscale=False):
@@ -2551,7 +2722,11 @@ class View(QtGui.QLabel):
             pathlist.append("Save all at once")
             pathlist.append("Combine all channels")
             index, ok = QtGui.QInputDialog.getItem(
-                self, "Save localizations", "Channel:", pathlist, editable=False
+                self,
+                "Save localizations",
+                "Channel:",
+                pathlist,
+                editable=False,
             )
             if ok:
                 return pathlist.index(index)
@@ -2568,7 +2743,11 @@ class View(QtGui.QLabel):
             pathlist = list(self.locs_paths)
             pathlist.append("Save all at once")
             index, ok = QtGui.QInputDialog.getItem(
-                self, "Save pick properties", "Channel:", pathlist, editable=False
+                self,
+                "Save pick properties",
+                "Channel:",
+                pathlist,
+                editable=False,
             )
             if ok:
                 return pathlist.index(index)
@@ -2598,7 +2777,9 @@ class View(QtGui.QLabel):
             self.window.display_settings_dialog.blur_buttongroup.checkedButton()
         )
         optimal_oversampling = self.display_pixels_per_viewport_pixels()
-        if self.window.display_settings_dialog.dynamic_oversampling.isChecked():
+        if (
+            self.window.display_settings_dialog.dynamic_oversampling.isChecked()
+        ):
             oversampling = optimal_oversampling
             self.window.display_settings_dialog.set_oversampling_silently(
                 optimal_oversampling
@@ -2607,7 +2788,9 @@ class View(QtGui.QLabel):
             oversampling = float(
                 self.window.display_settings_dialog.oversampling.value()
             )
-            if self.window.display_settings_dialog.high_oversampling.isChecked():
+            if (
+                self.window.display_settings_dialog.high_oversampling.isChecked()
+            ):
                 pass
             else:
                 if oversampling > optimal_oversampling:
@@ -2639,7 +2822,9 @@ class View(QtGui.QLabel):
             regions = yaml.load(f)
         self._picks = regions["Centers"]
         self.update_pick_info_short()
-        self.window.tools_settings_dialog.pick_diameter.setValue(regions["Diameter"])
+        self.window.tools_settings_dialog.pick_diameter.setValue(
+            regions["Diameter"]
+        )
         self.update_scene(picks_only=True)
 
     def substract_picks(self, path):
@@ -2656,7 +2841,8 @@ class View(QtGui.QLabel):
 
             distances = (
                 np.sum(
-                    (euclidean_distances(oldpicks, self._picks) < diameter / 2) * 1,
+                    (euclidean_distances(oldpicks, self._picks) < diameter / 2)
+                    * 1,
                     axis=1,
                 )
                 >= 1
@@ -2672,7 +2858,9 @@ class View(QtGui.QLabel):
                 plt.title("Old picks and new picks")
                 plt.scatter(x_cord, -y_cord, c="r", label="Newpicks")
                 plt.scatter(x_cord_old, -y_cord_old, c="b", label="Oldpicks")
-                plt.scatter(x_cord_new, -y_cord_new, c="g", label="Picks to keep")
+                plt.scatter(
+                    x_cord_new, -y_cord_new, c="g", label="Picks to keep"
+                )
                 fig1.show()
             self._picks = filtered_list
 
@@ -2706,7 +2894,9 @@ class View(QtGui.QLabel):
     def mouseMoveEvent(self, event):
         if self._mode == "Zoom":
             if self.rubberband.isVisible():
-                self.rubberband.setGeometry(QtCore.QRect(self.origin, event.pos()))
+                self.rubberband.setGeometry(
+                    QtCore.QRect(self.origin, event.pos())
+                )
             if self._pan:
                 rel_x_move = (event.x() - self.pan_start_x) / self.width()
                 rel_y_move = (event.y() - self.pan_start_y) / self.height()
@@ -2734,7 +2924,10 @@ class View(QtGui.QLabel):
 
     def mouseReleaseEvent(self, event):
         if self._mode == "Zoom":
-            if event.button() == QtCore.Qt.LeftButton and self.rubberband.isVisible():
+            if (
+                event.button() == QtCore.Qt.LeftButton
+                and self.rubberband.isVisible()
+            ):
                 end = QtCore.QPoint(event.pos())
                 if end.x() > self.origin.x() and end.y() > self.origin.y():
                     x_min_rel = self.origin.x() / self.width()
@@ -2835,13 +3028,15 @@ class View(QtGui.QLabel):
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
                 colors = locs["z"][:]
-                colors[colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])] = np.mean(
-                    locs["z"]
-                ) + 3 * np.std(locs["z"])
-                colors[colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])] = np.mean(
-                    locs["z"]
-                ) - 3 * np.std(locs["z"])
-                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet")
+                colors[
+                    colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])
+                ] = np.mean(locs["z"]) + 3 * np.std(locs["z"])
+                colors[
+                    colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
+                ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
+                ax.scatter(
+                    locs["x"], locs["y"], locs["z"], c=colors, cmap="jet"
+                )
 
                 ax.set_xlim(
                     np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -2942,10 +3137,16 @@ class View(QtGui.QLabel):
             )
         )
 
-        msgBox.addButton(QtGui.QPushButton("Accept"), QtGui.QMessageBox.YesRole)
+        msgBox.addButton(
+            QtGui.QPushButton("Accept"), QtGui.QMessageBox.YesRole
+        )
         msgBox.addButton(QtGui.QPushButton("Reject"), QtGui.QMessageBox.NoRole)
-        msgBox.addButton(QtGui.QPushButton("Back"), QtGui.QMessageBox.ResetRole)
-        msgBox.addButton(QtGui.QPushButton("Cancel"), QtGui.QMessageBox.RejectRole)
+        msgBox.addButton(
+            QtGui.QPushButton("Back"), QtGui.QMessageBox.ResetRole
+        )
+        msgBox.addButton(
+            QtGui.QPushButton("Cancel"), QtGui.QMessageBox.RejectRole
+        )
 
         qr = self.frameGeometry()
         cp = QtGui.QDesktopWidget().availableGeometry().center()
@@ -2985,7 +3186,9 @@ class View(QtGui.QLabel):
                 ax1.set_title("Acceptor intensity vs frame")
                 ax2.plot(fret_dict["frames"], fret_dict["don_trace"])
                 ax2.set_title("Donor intensity vs frame")
-                ax3.scatter(fret_dict["fret_timepoints"], fret_dict["fret_events"])
+                ax3.scatter(
+                    fret_dict["fret_timepoints"], fret_dict["fret_events"]
+                )
                 ax3.set_title(r"$\frac{I_A}{I_D+I_A}$")
 
                 ax1.set_xlim(0, (fret_dict["maxframes"] + 1))
@@ -2999,7 +3202,10 @@ class View(QtGui.QLabel):
                 size = fig.canvas.size()
                 width, height = size.width(), size.height()
                 im = QtGui.QImage(
-                    fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32
+                    fig.canvas.buffer_rgba(),
+                    width,
+                    height,
+                    QtGui.QImage.Format_ARGB32,
                 )
 
                 self.setPixmap((QtGui.QPixmap(im)))
@@ -3053,7 +3259,9 @@ class View(QtGui.QLabel):
         don_picks = self.picked_locs(channel_donor)
 
         K = len(self._picks)
-        progress = lib.ProgressDialog("Calculating fret in Picks...", 0, K, self)
+        progress = lib.ProgressDialog(
+            "Calculating fret in Picks...", 0, K, self
+        )
         progress.show()
 
         all_fret_locs = []
@@ -3099,7 +3307,9 @@ class View(QtGui.QLabel):
                 base, ext = os.path.splitext(path)
                 out_path = base + ".hdf5"
                 pick_info = {"Generated by:": "Picasso Render FRET"}
-                io.save_locs(out_path, locs, self.infos[channel_acceptor] + [pick_info])
+                io.save_locs(
+                    out_path, locs, self.infos[channel_acceptor] + [pick_info]
+                )
 
     def show_traces(self):
         print("Showing  traces")
@@ -3240,7 +3450,9 @@ class View(QtGui.QLabel):
                         )
                         for l in range(len(self.locs_paths)):
                             locs = all_picked_locs[l][i]
-                            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                            locs = stack_arrays(
+                                locs, asrecarray=True, usemask=False
+                            )
                             ax.scatter(locs["x"], locs["y"], c=colors[l])
 
                         ax.set_xlabel("X [Px]")
@@ -3314,7 +3526,9 @@ class View(QtGui.QLabel):
                             + "."
                         )
                         locs = all_picked_locs[i]
-                        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                        locs = stack_arrays(
+                            locs, asrecarray=True, usemask=False
+                        )
                         ax.scatter(locs["x"], locs["y"], c=colors[channel])
                         ax.set_xlabel("X [Px]")
                         ax.set_ylabel("Y [Px]")
@@ -3438,7 +3652,12 @@ class View(QtGui.QLabel):
                 if self._picks:
                     for i, pick in enumerate(self._picks):
                         reply = PlotDialogIso.getParams(
-                            all_picked_locs, i, len(self._picks), 0, colors, pixelsize
+                            all_picked_locs,
+                            i,
+                            len(self._picks),
+                            0,
+                            colors,
+                            pixelsize,
                         )
                         if reply == 1:
                             pass  # accepted
@@ -3455,7 +3674,12 @@ class View(QtGui.QLabel):
                     for i, pick in enumerate(self._picks):
 
                         reply = PlotDialogIso.getParams(
-                            all_picked_locs, i, len(self._picks), 1, 1, pixelsize
+                            all_picked_locs,
+                            i,
+                            len(self._picks),
+                            1,
+                            1,
+                            pixelsize,
                         )
                         if reply == 1:
                             pass
@@ -3519,7 +3743,10 @@ class View(QtGui.QLabel):
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
                     n_clusters, ok = QtGui.QInputDialog.getInteger(
-                        self, "Input Dialog", "Enter inital number of clusters:", 10
+                        self,
+                        "Input Dialog",
+                        "Enter inital number of clusters:",
+                        10,
                     )
 
                     for i, pick in enumerate(self._picks):
@@ -3536,7 +3763,11 @@ class View(QtGui.QLabel):
                                 )
                             else:
                                 reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog_2D.getParams(
-                                    all_picked_locs, i, len(self._picks), n_clusters, 1
+                                    all_picked_locs,
+                                    i,
+                                    len(self._picks),
+                                    n_clusters,
+                                    1,
                                 )
                             n_clusters = n_clusters_new
 
@@ -3556,17 +3787,25 @@ class View(QtGui.QLabel):
                 self, "Save picked localizations", out_path, filter="*.hdf5"
             )
             if path:
-                saved_locs = stack_arrays(saved_locs, asrecarray=True, usemask=False)
+                saved_locs = stack_arrays(
+                    saved_locs, asrecarray=True, usemask=False
+                )
                 if saved_locs is not None:
                     d = self.window.tools_settings_dialog.pick_diameter.value()
-                    pick_info = {"Generated by:": "Picasso Render", "Pick Diameter:": d}
-                    io.save_locs(path, saved_locs, self.infos[channel] + [pick_info])
+                    pick_info = {
+                        "Generated by:": "Picasso Render",
+                        "Pick Diameter:": d,
+                    }
+                    io.save_locs(
+                        path, saved_locs, self.infos[channel] + [pick_info]
+                    )
 
             base, ext = os.path.splitext(path)
             out_path = base + "_pickprops.hdf5"
             # TODO: save pick properties
             r_max = 2 * max(
-                self.infos[channel][0]["Height"], self.infos[channel][0]["Width"]
+                self.infos[channel][0]["Height"],
+                self.infos[channel][0]["Width"],
             )
             max_dark, ok = QtGui.QInputDialog.getInteger(
                 self, "Input Dialog", "Enter gap size:", 3
@@ -3619,7 +3858,9 @@ class View(QtGui.QLabel):
             info = self.infos[channel]
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
-            std_range = self.window.tools_settings_dialog.pick_similar_range.value()
+            std_range = (
+                self.window.tools_settings_dialog.pick_similar_range.value()
+            )
             index_blocks = self.get_index_blocks(channel)
             n_locs = []
             rmsd = []
@@ -3634,9 +3875,13 @@ class View(QtGui.QLabel):
                 progress.show()
                 for i, pick in enumerate(self._picks):
                     x, y = pick
-                    block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+                    block_locs = postprocess.get_block_locs_at(
+                        x, y, index_blocks
+                    )
                     pick_locs = lib.locs_at(x, y, block_locs, r)
-                    locs = stack_arrays(pick_locs, asrecarray=True, usemask=False)
+                    locs = stack_arrays(
+                        pick_locs, asrecarray=True, usemask=False
+                    )
                     loccount.append(len(locs))
                     progress.set_value(i)
 
@@ -3656,18 +3901,25 @@ class View(QtGui.QLabel):
                 width, height = size.width(), size.height()
 
                 im = QtGui.QImage(
-                    fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32
+                    fig.canvas.buffer_rgba(),
+                    width,
+                    height,
+                    QtGui.QImage.Format_ARGB32,
                 )
 
                 self.setPixmap((QtGui.QPixmap(im)))
                 self.setAlignment(QtCore.Qt.AlignCenter)
 
                 minlocs, ok = QtGui.QInputDialog.getInteger(
-                    self, "Input Dialog", "Enter minimum number of localizations:"
+                    self,
+                    "Input Dialog",
+                    "Enter minimum number of localizations:",
                 )
                 if ok:
                     maxlocs, ok2 = QtGui.QInputDialog.getInteger(
-                        self, "Input Dialog", "Enter maximum number of localizations:"
+                        self,
+                        "Input Dialog",
+                        "Enter maximum number of localizations:",
                     )
                     if ok2:
                         progress = lib.ProgressDialog(
@@ -3722,7 +3974,9 @@ class View(QtGui.QLabel):
             info = self.infos[channel]
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
-            std_range = self.window.tools_settings_dialog.pick_similar_range.value()
+            std_range = (
+                self.window.tools_settings_dialog.pick_similar_range.value()
+            )
             index_blocks = self.get_index_blocks(channel)
             n_locs = []
             rmsd = []
@@ -3749,7 +4003,9 @@ class View(QtGui.QLabel):
             y_range_shift = y_range_base + d / 2
             d2 = d ** 2
             nx = len(x_range)
-            locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
+            locs, size, x_index, y_index, block_starts, block_ends, K, L = (
+                index_blocks
+            )
             progress = lib.ProgressDialog("Pick similar", 0, nx, self)
             progress.set_value(0)
             for i, x_grid in enumerate(x_range):
@@ -3766,7 +4022,9 @@ class View(QtGui.QLabel):
                         block_locs = postprocess.get_block_locs_at(
                             x_grid, y_grid, index_blocks
                         )
-                        picked_locs = lib.locs_at(x_grid, y_grid, block_locs, r)
+                        picked_locs = lib.locs_at(
+                            x_grid, y_grid, block_locs, r
+                        )
                         if len(picked_locs) > 1:
                             # Move to COM peak
                             x_test_old = x_grid
@@ -3779,11 +4037,14 @@ class View(QtGui.QLabel):
                             ):
                                 x_test_old = x_test
                                 y_test_old = y_test
-                                picked_locs = lib.locs_at(x_test, y_test, block_locs, r)
+                                picked_locs = lib.locs_at(
+                                    x_test, y_test, block_locs, r
+                                )
                                 x_test = picked_locs.x.mean()
                                 y_test = picked_locs.y.mean()
                             if np.all(
-                                (x_similar - x_test) ** 2 + (y_similar - y_test) ** 2
+                                (x_similar - x_test) ** 2
+                                + (y_similar - y_test) ** 2
                                 > d2
                             ):
                                 if min_n_locs < len(picked_locs) < max_n_locs:
@@ -3792,8 +4053,12 @@ class View(QtGui.QLabel):
                                         < self.rmsd_at_com(picked_locs)
                                         < max_rmsd
                                     ):
-                                        x_similar = np.append(x_similar, x_test)
-                                        y_similar = np.append(y_similar, y_test)
+                                        x_similar = np.append(
+                                            x_similar, x_test
+                                        )
+                                        y_similar = np.append(
+                                            y_similar, y_test
+                                        )
                 progress.set_value(i + 1)
             similar = list(zip(x_similar, y_similar))
             self._picks = []
@@ -3824,7 +4089,9 @@ class View(QtGui.QLabel):
 
     def remove_picks(self, position):
         x, y = position
-        pick_diameter_2 = self.window.tools_settings_dialog.pick_diameter.value() ** 2
+        pick_diameter_2 = (
+            self.window.tools_settings_dialog.pick_diameter.value() ** 2
+        )
         new_picks = []
         for x_, y_ in self._picks:
             d2 = (x - x_) ** 2 + (y - y_) ** 2
@@ -3837,7 +4104,9 @@ class View(QtGui.QLabel):
         self._points = []
         self.update_scene()
 
-    def render_scene(self, autoscale=False, use_cache=False, cache=True, viewport=None):
+    def render_scene(
+        self, autoscale=False, use_cache=False, cache=True, viewport=None
+    ):
         kwargs = self.get_render_kwargs(viewport=viewport)
         n_channels = len(self.locs)
         if n_channels == 1:
@@ -3892,7 +4161,9 @@ class View(QtGui.QLabel):
                     if self.window.slicer_dialog.slicerRadioButton.isChecked():
                         z_min = self.window.slicer_dialog.slicermin
                         z_max = self.window.slicer_dialog.slicermax
-                        in_view = (locsall[i].z > z_min) & (locsall[i].z <= z_max)
+                        in_view = (locsall[i].z > z_min) & (
+                            locsall[i].z <= z_max
+                        )
                         locsall[i] = locsall[i][in_view]
             n_channels = len(locs)
             colors = get_colors(n_channels)
@@ -3937,29 +4208,53 @@ class View(QtGui.QLabel):
 
         # Color images
         for i in range(len(self.locs)):
-            if self.window.dataset_dialog.colorselection[i].currentText() == "red":
+            if (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "red"
+            ):
                 colors[i] = (1, 0, 0)
-            elif self.window.dataset_dialog.colorselection[i].currentText() == "green":
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "green"
+            ):
                 colors[i] = (0, 1, 0)
-            elif self.window.dataset_dialog.colorselection[i].currentText() == "blue":
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "blue"
+            ):
                 colors[i] = (0, 0, 1)
-            elif self.window.dataset_dialog.colorselection[i].currentText() == "gray":
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "gray"
+            ):
                 colors[i] = (1, 1, 1)
-            elif self.window.dataset_dialog.colorselection[i].currentText() == "cyan":
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "cyan"
+            ):
                 colors[i] = (0, 1, 1)
             elif (
-                self.window.dataset_dialog.colorselection[i].currentText() == "magenta"
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "magenta"
             ):
                 colors[i] = (1, 0, 1)
-            elif self.window.dataset_dialog.colorselection[i].currentText() == "yellow":
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "yellow"
+            ):
                 colors[i] = (1, 1, 0)
-            elif self.window.dataset_dialog.colorselection[i].currentText() != "auto":
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                != "auto"
+            ):
                 colorstring = (
                     self.window.dataset_dialog.colorselection[i]
                     .currentText()
                     .lstrip("#")
                 )
-                rgbval = tuple(int(colorstring[i : i + 2], 16) / 255 for i in (0, 2, 4))
+                rgbval = tuple(
+                    int(colorstring[i : i + 2], 16) / 255 for i in (0, 2, 4)
+                )
                 colors[i] = rgbval
 
             if self.window.dataset_dialog.wbackground.isChecked():
@@ -4034,7 +4329,10 @@ class View(QtGui.QLabel):
         locs = stack_arrays(locs, asrecarray=True, usemask=False)
         if locs is not None:
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            pick_info = {"Generated by:": "Picasso Render", "Pick Diameter:": d}
+            pick_info = {
+                "Generated by:": "Picasso Render",
+                "Pick Diameter:": d,
+            }
             io.save_locs(path, locs, self.infos[channel] + [pick_info])
 
     def save_picked_locs_multi(self, path):
@@ -4046,12 +4344,17 @@ class View(QtGui.QLabel):
                 datatype = locs.dtype
             else:
                 templocs = self.picked_locs(self.locs_paths.index(channel))
-                templocs = stack_arrays(templocs, asrecarray=True, usemask=False)
+                templocs = stack_arrays(
+                    templocs, asrecarray=True, usemask=False
+                )
                 locs = np.append(locs, templocs)
         locs = locs.view(np.recarray)
         if locs is not None:
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            pick_info = {"Generated by:": "Picasso Render", "Pick Diameter:": d}
+            pick_info = {
+                "Generated by:": "Picasso Render",
+                "Pick Diameter:": d,
+            }
             io.save_locs(path, locs, self.infos[0] + [pick_info])
 
     def save_pick_properties(self, path, channel):
@@ -4060,7 +4363,9 @@ class View(QtGui.QLabel):
         r_max = min(pick_diameter, 1)
         max_dark = self.window.info_dialog.max_dark_time.value()
         out_locs = []
-        progress = lib.ProgressDialog("Calculating kinetics", 0, len(picked_locs), self)
+        progress = lib.ProgressDialog(
+            "Calculating kinetics", 0, len(picked_locs), self
+        )
         progress.set_value(0)
         dark = np.empty(len(picked_locs))
         length = np.empty(len(picked_locs))
@@ -4082,7 +4387,9 @@ class View(QtGui.QLabel):
             progress.set_value(i + 1)
         out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
         n_groups = len(picked_locs)
-        progress = lib.ProgressDialog("Calculating pick properties", 0, n_groups, self)
+        progress = lib.ProgressDialog(
+            "Calculating pick properties", 0, n_groups, self
+        )
         pick_props = postprocess.groupprops(out_locs)
         n_units = self.window.info_dialog.calculate_n_units(dark)
         pick_props = lib.append_to_rec(pick_props, n_units, "n_units")
@@ -4138,7 +4445,9 @@ class View(QtGui.QLabel):
                 self.z_color = np.floor((self.locs[0].z - min_z) / z_step)
                 z_locs = []
                 if not hasattr(self, "z_locs"):
-                    pb = lib.ProgressDialog("Indexing colors", 0, N_Z_COLORS, self)
+                    pb = lib.ProgressDialog(
+                        "Indexing colors", 0, N_Z_COLORS, self
+                    )
                     pb.set_value(0)
                     for i in tqdm(range(N_Z_COLORS)):
                         z_locs.append(self.locs[0][self.z_color == i])
@@ -4203,14 +4512,22 @@ class View(QtGui.QLabel):
 
         if self.window.display_settings_dialog.render_check.isChecked():
             self.x_render_state = True
-            parameter = self.window.display_settings_dialog.parameter.currentText()
+            parameter = (
+                self.window.display_settings_dialog.parameter.currentText()
+            )
             colors = self.window.display_settings_dialog.color_step.value()
-            min_val = self.window.display_settings_dialog.minimum_render.value()
-            max_val = self.window.display_settings_dialog.maximum_render.value()
+            min_val = (
+                self.window.display_settings_dialog.minimum_render.value()
+            )
+            max_val = (
+                self.window.display_settings_dialog.maximum_render.value()
+            )
 
             x_step = (max_val - min_val) / colors
 
-            self.x_color = np.floor((self.locs[0][parameter] - min_val) / x_step)
+            self.x_color = np.floor(
+                (self.locs[0][parameter] - min_val) / x_step
+            )
 
             # values above and below will be fixed:
             self.x_color[self.x_color < 0] = 0
@@ -4228,7 +4545,9 @@ class View(QtGui.QLabel):
                         break
 
             if x_locs == []:
-                pb = lib.ProgressDialog("Indexing " + parameter, 0, colors, self)
+                pb = lib.ProgressDialog(
+                    "Indexing " + parameter, 0, colors, self
+                )
                 pb.set_value(0)
                 for i in tqdm(range(colors + 1)):
                     x_locs.append(self.locs[0][self.x_color == i])
@@ -4291,7 +4610,9 @@ class View(QtGui.QLabel):
         self.window.display_settings_dialog.maximum_render.blockSignals(True)
         self.window.display_settings_dialog.minimum_render.blockSignals(True)
 
-        self.window.display_settings_dialog.maximum_render.setRange(lower, upper)
+        self.window.display_settings_dialog.maximum_render.setRange(
+            lower, upper
+        )
         self.window.display_settings_dialog.maximum_render.setValue(max_val)
         self.window.display_settings_dialog.minimum_render.setValue(min_val)
 
@@ -4440,7 +4761,9 @@ class View(QtGui.QLabel):
         if channel is not None:
             self._undrift_from_picked2d(channel)
 
-    def _undrift_from_picked_coordinate(self, channel, picked_locs, coordinate):
+    def _undrift_from_picked_coordinate(
+        self, channel, picked_locs, coordinate
+    ):
         n_picks = len(picked_locs)
         n_frames = self.infos[channel][0]["Frames"]
 
@@ -4470,7 +4793,9 @@ class View(QtGui.QLabel):
             return np.isnan(y), lambda z: z.nonzero()[0]
 
         nans, nonzero = nan_helper(drift_mean)
-        drift_mean[nans] = np.interp(nonzero(nans), nonzero(~nans), drift_mean[~nans])
+        drift_mean[nans] = np.interp(
+            nonzero(nans), nonzero(~nans), drift_mean[~nans]
+        )
 
         return drift_mean
 
@@ -4478,8 +4803,12 @@ class View(QtGui.QLabel):
         picked_locs = self.picked_locs(channel)
         status = lib.StatusDialog("Calculating drift...", self)
 
-        drift_x = self._undrift_from_picked_coordinate(channel, picked_locs, "x")
-        drift_y = self._undrift_from_picked_coordinate(channel, picked_locs, "y")
+        drift_x = self._undrift_from_picked_coordinate(
+            channel, picked_locs, "x"
+        )
+        drift_y = self._undrift_from_picked_coordinate(
+            channel, picked_locs, "y"
+        )
 
         # Apply drift
         self.locs[channel].x -= drift_x[self.locs[channel].frame]
@@ -4491,7 +4820,9 @@ class View(QtGui.QLabel):
 
         # If z coordinate exists, also apply drift there
         if all([hasattr(_, "z") for _ in picked_locs]):
-            drift_z = self._undrift_from_picked_coordinate(channel, picked_locs, "z")
+            drift_z = self._undrift_from_picked_coordinate(
+                channel, picked_locs, "z"
+            )
             self.locs[channel].z -= drift_z[self.locs[channel].frame]
             drift = lib.append_to_rec(drift, drift_z, "z")
 
@@ -4505,8 +4836,12 @@ class View(QtGui.QLabel):
         picked_locs = self.picked_locs(channel)
         status = lib.StatusDialog("Calculating drift...", self)
 
-        drift_x = self._undrift_from_picked_coordinate(channel, picked_locs, "x")
-        drift_y = self._undrift_from_picked_coordinate(channel, picked_locs, "y")
+        drift_x = self._undrift_from_picked_coordinate(
+            channel, picked_locs, "x"
+        )
+        drift_y = self._undrift_from_picked_coordinate(
+            channel, picked_locs, "y"
+        )
 
         # Apply drift
         self.locs[channel].x -= drift_x[self.locs[channel].frame]
@@ -4569,10 +4904,18 @@ class View(QtGui.QLabel):
 
         if hasattr(drift, "z"):
             np.savetxt(
-                driftfile, self._drift[channel], header="dx\tdy\tdz", newline="\r\n"
+                driftfile,
+                self._drift[channel],
+                header="dx\tdy\tdz",
+                newline="\r\n",
             )
         else:
-            np.savetxt(driftfile, self._drift[channel], header="dx\tdy", newline="\r\n")
+            np.savetxt(
+                driftfile,
+                self._drift[channel],
+                header="dx\tdy",
+                newline="\r\n",
+            )
 
     def unfold_groups(self):
         if not hasattr(self, "unfold_status"):
@@ -4608,7 +4951,10 @@ class View(QtGui.QLabel):
 
     def unfold_groups_square(self):
         n_square, ok = QtGui.QInputDialog.getInteger(
-            self, "Input Dialog", "Set number of elements per row and column:", 100
+            self,
+            "Input Dialog",
+            "Set number of elements per row and column:",
+            100,
         )
         if hasattr(self.locs[0], "group"):
 
@@ -4637,7 +4983,9 @@ class View(QtGui.QLabel):
                 for j in range(len(self._picks)):
                     for k in range(len(groups)):
                         x_pick, y_pick = self._picks[j]
-                        self._picks.append((x_pick + shift_x[k], y_pick + shift_y[k]))
+                        self._picks.append(
+                            (x_pick + shift_x[k], y_pick + shift_y[k])
+                        )
 
                 self.n_picks = len(self._picks)
                 self.update_pick_info_short()
@@ -4705,9 +5053,13 @@ class View(QtGui.QLabel):
                     np.mean((locs.x - com_x) ** 2 + (locs.y - com_y) ** 2)
                 )
                 if has_z:
-                    rmsd_z[i] = np.sqrt(np.mean((locs.z - np.mean(locs.z)) ** 2))
+                    rmsd_z[i] = np.sqrt(
+                        np.mean((locs.z - np.mean(locs.z)) ** 2)
+                    )
                 if not hasattr(locs, "len"):
-                    locs = postprocess.link(locs, info, r_max=r_max, max_dark_time=t)
+                    locs = postprocess.link(
+                        locs, info, r_max=r_max, max_dark_time=t
+                    )
                 locs = postprocess.compute_dark_times(locs)
                 length[i] = estimate_kinetic_rate(locs.len)
                 dark[i] = estimate_kinetic_rate(locs.dark)
@@ -4721,8 +5073,12 @@ class View(QtGui.QLabel):
             self.window.info_dialog.n_localizations_std.setText(
                 "{:.2f}".format(np.nanstd(N))
             )
-            self.window.info_dialog.rmsd_mean.setText("{:.2}".format(np.nanmean(rmsd)))
-            self.window.info_dialog.rmsd_std.setText("{:.2}".format(np.nanstd(rmsd)))
+            self.window.info_dialog.rmsd_mean.setText(
+                "{:.2}".format(np.nanmean(rmsd))
+            )
+            self.window.info_dialog.rmsd_std.setText(
+                "{:.2}".format(np.nanstd(rmsd))
+            )
             if has_z:
                 self.window.info_dialog.rmsd_z_mean.setText(
                     "{:.2f}".format(np.nanmean(rmsd_z))
@@ -4730,7 +5086,9 @@ class View(QtGui.QLabel):
                 self.window.info_dialog.rmsd_z_std.setText(
                     "{:.2f}".format(np.nanstd(rmsd_z))
                 )
-            pooled_locs = stack_arrays(new_locs, usemask=False, asrecarray=True)
+            pooled_locs = stack_arrays(
+                new_locs, usemask=False, asrecarray=True
+            )
             fit_result_len = fit_cum_exp(pooled_locs.len)
             fit_result_dark = fit_cum_exp(pooled_locs.dark)
             self.window.info_dialog.length_mean.setText(
@@ -4739,8 +5097,12 @@ class View(QtGui.QLabel):
             self.window.info_dialog.length_std.setText(
                 "{:.2f}".format(np.nanstd(length))
             )
-            self.window.info_dialog.dark_mean.setText("{:.2f}".format(np.nanmean(dark)))
-            self.window.info_dialog.dark_std.setText("{:.2f}".format(np.nanstd(dark)))
+            self.window.info_dialog.dark_mean.setText(
+                "{:.2f}".format(np.nanmean(dark))
+            )
+            self.window.info_dialog.dark_std.setText(
+                "{:.2f}".format(np.nanstd(dark))
+            )
             self.window.info_dialog.pick_info = {
                 "pooled dark": estimate_kinetic_rate(pooled_locs.dark),
                 "length": length,
@@ -4871,8 +5233,12 @@ class Window(QtGui.QMainWindow):
         save_picked_action = file_menu.addAction("Save picked localizations")
         save_picked_action.setShortcut("Ctrl+Shift+S")
         save_picked_action.triggered.connect(self.save_picked_locs)
-        save_pick_properties_action = file_menu.addAction("Save pick properties")
-        save_pick_properties_action.triggered.connect(self.save_pick_properties)
+        save_pick_properties_action = file_menu.addAction(
+            "Save pick properties"
+        )
+        save_pick_properties_action.triggered.connect(
+            self.save_pick_properties
+        )
         save_picks_action = file_menu.addAction("Save pick regions")
         save_picks_action.triggered.connect(self.save_picks)
         load_picks_action = file_menu.addAction("Load pick regions")
@@ -4889,19 +5255,27 @@ class Window(QtGui.QMainWindow):
         export_txt_action.triggered.connect(self.export_txt)
         export_txt_nis_action = file_menu.addAction("Export as .txt for NIS")
         export_txt_nis_action.triggered.connect(self.export_txt_nis)
-        export_txt_imaris_action = file_menu.addAction("Export as .txt for IMARIS")
+        export_txt_imaris_action = file_menu.addAction(
+            "Export as .txt for IMARIS"
+        )
         export_txt_imaris_action.triggered.connect(self.export_txt_imaris)
-        export_txt_chimera_action = file_menu.addAction("Export as .xyz for Chimera")
+        export_txt_chimera_action = file_menu.addAction(
+            "Export as .xyz for Chimera"
+        )
         export_txt_chimera_action.triggered.connect(self.export_xyz_chimera)
         export_3d_visp_action = file_menu.addAction("Export as .3d for ViSP")
         export_3d_visp_action.triggered.connect(self.export_3d_visp)
-        export_ts_action = file_menu.addAction("Export as .csv for ThunderSTORM")
+        export_ts_action = file_menu.addAction(
+            "Export as .csv for ThunderSTORM"
+        )
         export_ts_action.triggered.connect(self.export_ts)
 
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings")
         display_settings_action.setShortcut("Ctrl+D")
-        display_settings_action.triggered.connect(self.display_settings_dialog.show)
+        display_settings_action.triggered.connect(
+            self.display_settings_dialog.show
+        )
         view_menu.addAction(display_settings_action)
         view_menu.addSeparator()
         to_left_action = view_menu.addAction("Left")
@@ -4969,7 +5343,9 @@ class Window(QtGui.QMainWindow):
         tools_menu.addSeparator()
         tools_settings_action = tools_menu.addAction("Tools settings")
         tools_settings_action.setShortcut("Ctrl+T")
-        tools_settings_action.triggered.connect(self.tools_settings_dialog.show)
+        tools_settings_action.triggered.connect(
+            self.tools_settings_dialog.show
+        )
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
         tools_menu.addSeparator()
         plotpick3dsingle_action = tools_menu.addAction("Plot single pick 3D")
@@ -4979,7 +5355,9 @@ class Window(QtGui.QMainWindow):
         plotpick_action.triggered.connect(self.view.show_pick)
         plotpick3d_action = tools_menu.addAction("Plot picks (3D)")
         plotpick3d_action.triggered.connect(self.view.show_pick_3d)
-        plotpick3d_iso_action = tools_menu.addAction("Plot picks (3D) - 4 Panels")
+        plotpick3d_iso_action = tools_menu.addAction(
+            "Plot picks (3D) - 4 Panels"
+        )
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
         analyzepick_action = tools_menu.addAction("Analyze picks")
         analyzepick_action.triggered.connect(self.view.analyze_picks)
@@ -4999,8 +5377,12 @@ class Window(QtGui.QMainWindow):
         self.fret_traces_action = tools_menu.addAction("Show FRET traces")
         self.fret_traces_action.triggered.connect(self.view.show_fret)
 
-        self.calculate_fret_action = tools_menu.addAction("Calculate FRET in picks")
-        self.calculate_fret_action.triggered.connect(self.view.calculate_fret_dialog)
+        self.calculate_fret_action = tools_menu.addAction(
+            "Calculate FRET in picks"
+        )
+        self.calculate_fret_action.triggered.connect(
+            self.view.calculate_fret_dialog
+        )
 
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.setShortcut("Ctrl+U")
@@ -5009,18 +5391,26 @@ class Window(QtGui.QMainWindow):
             "Undrift from picked (3D)"
         )
         undrift_from_picked_action.setShortcut("Ctrl+Shift+U")
-        undrift_from_picked_action.triggered.connect(self.view.undrift_from_picked)
+        undrift_from_picked_action.triggered.connect(
+            self.view.undrift_from_picked
+        )
         undrift_from_picked2d_action = postprocess_menu.addAction(
             "Undrift from picked (2D)"
         )
-        undrift_from_picked2d_action.triggered.connect(self.view.undrift_from_picked2d)
+        undrift_from_picked2d_action.triggered.connect(
+            self.view.undrift_from_picked2d
+        )
         link_action = postprocess_menu.addAction("Link localizations (3D)")
         link_action.triggered.connect(self.view.link)
-        align_action = postprocess_menu.addAction("Align channels (3D if picked)")
+        align_action = postprocess_menu.addAction(
+            "Align channels (3D if picked)"
+        )
         align_action.triggered.connect(self.view.align)
         combine_action = postprocess_menu.addAction("Combine picked (3D)")
         combine_action.triggered.connect(self.view.combine)
-        apply_action = postprocess_menu.addAction("Apply expression to localizations")
+        apply_action = postprocess_menu.addAction(
+            "Apply expression to localizations"
+        )
         apply_action.setShortcut("Ctrl+A")
         apply_action.triggered.connect(self.open_apply_dialog)
         group_action = postprocess_menu.addAction("Remove group info")
@@ -5031,7 +5421,9 @@ class Window(QtGui.QMainWindow):
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
         unfold_action = postprocess_menu.addAction("Unfold / Refold groups")
         unfold_action.triggered.connect(self.view.unfold_groups)
-        unfold_action_square = postprocess_menu.addAction("Unfold groups (square)")
+        unfold_action_square = postprocess_menu.addAction(
+            "Unfold groups (square)"
+        )
         unfold_action_square.triggered.connect(self.view.unfold_groups_square)
         self.load_user_settings()
 
@@ -5041,7 +5433,9 @@ class Window(QtGui.QMainWindow):
             "Colormap"
         ] = self.display_settings_dialog.colormap.currentText()
         if self.view.locs_paths != []:
-            settings["Render"]["PWD"] = os.path.dirname(self.view.locs_paths[0])
+            settings["Render"]["PWD"] = os.path.dirname(
+                self.view.locs_paths[0]
+            )
         io.save_user_settings(settings)
         QtGui.qApp.closeAllWindows()
 
@@ -5074,7 +5468,9 @@ class Window(QtGui.QMainWindow):
             qimage.save(path)
 
     def export_txt(self):
-        channel = self.view.get_channel("Save localizations as txt (frames,x,y)")
+        channel = self.view.get_channel(
+            "Save localizations as txt (frames,x,y)"
+        )
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".frc.txt"
@@ -5130,7 +5526,9 @@ class Window(QtGui.QMainWindow):
                         for row in loctxt
                     ]
                     with open(path, "wb") as f:
-                        f.write(b"X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n")
+                        f.write(
+                            b"X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+                        )
                         np.savetxt(
                             f,
                             loctxt,
@@ -5150,7 +5548,9 @@ class Window(QtGui.QMainWindow):
                         )
                         print("File saved to {}".format(path))
                 else:
-                    loctxt = locs[["x", "y", "sx", "bg", "photons", "frame"]].copy()
+                    loctxt = locs[
+                        ["x", "y", "sx", "bg", "photons", "frame"]
+                    ].copy()
                     loctxt = [
                         (
                             row[0] * pixelsize,
@@ -5165,7 +5565,9 @@ class Window(QtGui.QMainWindow):
                         for row in loctxt
                     ]
                     with open(path, "wb") as f:
-                        f.write(b"X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n")
+                        f.write(
+                            b"X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+                        )
                         np.savetxt(
                             f,
                             loctxt,
@@ -5193,7 +5595,9 @@ class Window(QtGui.QMainWindow):
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".chi.xyz"
             path = QtGui.QFileDialog.getSaveFileName(
-                self, "Save localizations as xyz for chimera (molecule,x,y,z)", out_path
+                self,
+                "Save localizations as xyz for chimera (molecule,x,y,z)",
+                out_path,
             )
             if path:
                 locs = self.view.locs[channel]
@@ -5227,7 +5631,9 @@ class Window(QtGui.QMainWindow):
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".visp.3d"
             path = QtGui.QFileDialog.getSaveFileName(
-                self, "Save localizations as xyz for chimera (molecule,x,y,z)", out_path
+                self,
+                "Save localizations as xyz for chimera (molecule,x,y,z)",
+                out_path,
             )
             if path:
                 locs = self.view.locs[channel]
@@ -5282,7 +5688,9 @@ class Window(QtGui.QMainWindow):
                 )
 
     def export_ts(self):
-        channel = self.view.get_channel("Save localizations as csv for ThunderSTORM")
+        channel = self.view.get_channel(
+            "Save localizations as csv for ThunderSTORM"
+        )
         pixelsize = self.display_settings_dialog.pixelsize.value()
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
@@ -5538,7 +5946,10 @@ class Window(QtGui.QMainWindow):
         if len(colormap) == 0:
             colormap = "magma"
         for index in range(self.display_settings_dialog.colormap.count()):
-            if self.display_settings_dialog.colormap.itemText(index) == colormap:
+            if (
+                self.display_settings_dialog.colormap.itemText(index)
+                == colormap
+            ):
                 self.display_settings_dialog.colormap.setCurrentIndex(index)
                 break
         pwd = []
@@ -5579,7 +5990,9 @@ class Window(QtGui.QMainWindow):
                     var_1 = input[1]
                     var_2 = input[2]
                     templocs = self.view.locs[channel][var_1].copy()
-                    self.view.locs[channel][var_1] = self.view.locs[channel][var_2]
+                    self.view.locs[channel][var_1] = self.view.locs[channel][
+                        var_2
+                    ]
                     self.view.locs[channel][var_2] = templocs
 
             elif input[0] == "spiral" and len(input) == 3:
@@ -5611,7 +6024,9 @@ class Window(QtGui.QMainWindow):
             else:
                 vars = self.view.locs[channel].dtype.names
                 exec(cmd, {k: self.view.locs[channel][k] for k in vars})
-            lib.ensure_sanity(self.view.locs[channel], self.view.infos[channel])
+            lib.ensure_sanity(
+                self.view.locs[channel], self.view.infos[channel]
+            )
             self.view.index_blocks[channel] = None
             self.view.update_scene()
 
@@ -5637,7 +6052,9 @@ class Window(QtGui.QMainWindow):
 
     def remove_group(self):
         channel = self.view.get_channel("Remove group")
-        self.view.locs[channel] = lib.remove_from_rec(self.view.locs[channel], "group")
+        self.view.locs[channel] = lib.remove_from_rec(
+            self.view.locs[channel], "group"
+        )
         self.view.update_scene
         self.view.zoom_in()
         self.view.zoom_out()
@@ -5654,7 +6071,9 @@ class Window(QtGui.QMainWindow):
                 datatype = locs.dtype
             else:
                 templocs = self.view.locs[i]
-                templocs = stack_arrays(templocs, asrecarray=True, usemask=False)
+                templocs = stack_arrays(
+                    templocs, asrecarray=True, usemask=False
+                )
                 print(locs)
                 print(templocs)
                 locs = np.append(locs, templocs)
@@ -5710,7 +6129,10 @@ class Window(QtGui.QMainWindow):
                 base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + "_picked_multi.hdf5"
                 path = QtGui.QFileDialog.getSaveFileName(
-                    self, "Save picked localizations", out_path, filter="*.hdf5"
+                    self,
+                    "Save picked localizations",
+                    out_path,
+                    filter="*.hdf5",
                 )
                 if path:
                     self.view.save_picked_locs_multi(path)
@@ -5725,7 +6147,10 @@ class Window(QtGui.QMainWindow):
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_picked.hdf5"
                 path = QtGui.QFileDialog.getSaveFileName(
-                    self, "Save picked localizations", out_path, filter="*.hdf5"
+                    self,
+                    "Save picked localizations",
+                    out_path,
+                    filter="*.hdf5",
                 )
                 if path:
                     self.view.save_picked_locs(path, channel)
@@ -5740,8 +6165,12 @@ class Window(QtGui.QMainWindow):
             self.view.save_picks(path)
 
     def update_info(self):
-        self.info_dialog.width_label.setText("{} pixel".format((self.view.width())))
-        self.info_dialog.height_label.setText("{} pixel".format((self.view.height())))
+        self.info_dialog.width_label.setText(
+            "{} pixel".format((self.view.width()))
+        )
+        self.info_dialog.height_label.setText(
+            "{} pixel".format((self.view.height()))
+        )
         self.info_dialog.locs_label.setText("{:,}".format(self.view.n_locs))
         try:
             self.info_dialog.xy_label.setText(
@@ -5773,7 +6202,9 @@ def main():
         lib.cancel_dialogs()
         QtCore.QCoreApplication.instance().processEvents()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtGui.QMessageBox.critical(
+            window, "An error occured", message
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

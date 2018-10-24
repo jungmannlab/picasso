@@ -12,7 +12,10 @@
 import sys
 import traceback
 from PyQt4 import QtCore, QtGui
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg, NavigationToolbar2QT
+from matplotlib.backends.backend_qt4agg import (
+    FigureCanvasQTAgg,
+    NavigationToolbar2QT,
+)
 import matplotlib.pyplot as plt
 from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
@@ -127,7 +130,9 @@ class HistWindow(PlotWindow):
         axes = self.figure.add_subplot(111)
         axes.hist(data, bins, rwidth=1, linewidth=0)
         data_range = data.ptp()
-        axes.set_xlim([bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range])
+        axes.set_xlim(
+            [bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range]
+        )
         self.span = SpanSelector(
             axes,
             self.on_span_select,
@@ -295,7 +300,9 @@ class Window(QtGui.QMainWindow):
                 index = index.column()
                 field = self.locs.dtype.names[index]
                 if not self.hist_windows[field]:
-                    self.hist_windows[field] = HistWindow(self, self.locs, field)
+                    self.hist_windows[field] = HistWindow(
+                        self, self.locs, field
+                    )
                 self.hist_windows[field].show()
 
     def plot_hist2d(self):
@@ -303,7 +310,9 @@ class Window(QtGui.QMainWindow):
         indices = selection_model.selectedColumns()
         if len(indices) == 2:
             indices = [index.column() for index in indices]
-            field_x, field_y = [self.locs.dtype.names[index] for index in indices]
+            field_x, field_y = [
+                self.locs.dtype.names[index] for index in indices
+            ]
             if not self.hist2d_windows[field_x][field_y]:
                 self.hist2d_windows[field_x][field_y] = Hist2DWindow(
                     self, self.locs, field_x, field_y
@@ -326,7 +335,9 @@ class Window(QtGui.QMainWindow):
         if self.locs is not None:
             view_height = self.table_view.viewport().height()
             n_rows = int(view_height / ROW_HEIGHT) + 2
-            table_model = TableModel(self.locs[index : index + n_rows], index, self)
+            table_model = TableModel(
+                self.locs[index : index + n_rows], index, self
+            )
             self.table_view.setModel(table_model)
 
     def log_filter(self, field, xmin, xmax):
@@ -367,7 +378,9 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtGui.QMessageBox.critical(
+            window, "An error occured", message
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

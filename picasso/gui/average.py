@@ -42,7 +42,15 @@ def compute_xcorr(CF_image_avg, image):
 
 
 def align_group(
-    angles, oversampling, t_min, t_max, CF_image_avg, image_half, counter, lock, group
+    angles,
+    oversampling,
+    t_min,
+    t_max,
+    CF_image_avg,
+    image_half,
+    counter,
+    lock,
+    group,
 ):
     with lock:
         counter.value += 1
@@ -132,7 +140,12 @@ class Worker(QtCore.QThread):
             result = pool.map_async(fc, range(n_groups), groups_per_worker)
             while not result.ready():
                 self.progressMade.emit(
-                    it + 1, self.iterations, counter.value, n_groups, self.locs, False
+                    it + 1,
+                    self.iterations,
+                    counter.value,
+                    n_groups,
+                    self.locs,
+                    False,
                 )
                 time.sleep(0.5)
             self.locs.x = np.ctypeslib.as_array(x)
@@ -140,7 +153,12 @@ class Worker(QtCore.QThread):
             self.locs.x -= np.mean(self.locs.x)
             self.locs.y -= np.mean(self.locs.y)
             self.progressMade.emit(
-                it + 1, self.iterations, counter.value, n_groups, self.locs, True
+                it + 1,
+                self.iterations,
+                counter.value,
+                n_groups,
+                self.locs,
+                True,
             )
 
 
@@ -212,7 +230,9 @@ class View(QtGui.QLabel):
         if update_image:
             self.update_image()
         self.window.status_bar.showMessage(
-            "Iteration {:,}/{:,}, Group {:,}/{:,}".format(it, total_it, g, n_groups)
+            "Iteration {:,}/{:,}, Group {:,}/{:,}".format(
+                it, total_it, g, n_groups
+            )
         )
 
     def open(self, path):
@@ -224,8 +244,12 @@ class View(QtGui.QLabel):
         groups = np.unique(self.locs.group)
         n_groups = len(groups)
         n_locs = len(self.locs)
-        self.group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
-        progress = lib.ProgressDialog("Creating group index", 0, len(groups), self)
+        self.group_index = scipy.sparse.lil_matrix(
+            (n_groups, n_locs), dtype=np.bool
+        )
+        progress = lib.ProgressDialog(
+            "Creating group index", 0, len(groups), self
+        )
         progress.set_value(0)
         for i, group in enumerate(groups):
             index = np.where(self.locs.group == group)[0]
@@ -251,7 +275,9 @@ class View(QtGui.QLabel):
         x = sharedctypes.RawArray("f", self.locs.x)
         y = sharedctypes.RawArray("f", self.locs.y)
         n_workers = max(1, int(0.75 * multiprocessing.cpu_count()))
-        pool = multiprocessing.Pool(n_workers, init_pool, (x, y, self.group_index))
+        pool = multiprocessing.Pool(
+            n_workers, init_pool, (x, y, self.group_index)
+        )
         self.window.status_bar.showMessage("Ready for processing!")
         status.close()
 
@@ -359,7 +385,9 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtGui.QMessageBox.critical(
+            window, "An error occured", message
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

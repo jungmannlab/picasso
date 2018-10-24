@@ -49,7 +49,8 @@ def local_maxima(frame, box):
     for i in range(box_half, Y - box_half_1):
         for j in range(box_half, X - box_half_1):
             local_frame = frame[
-                i - box_half : i + box_half + 1, j - box_half : j + box_half + 1
+                i - box_half : i + box_half + 1,
+                j - box_half : j + box_half + 1,
             ]
             flat_max = _np.argmax(local_frame)
             i_local_max = int(flat_max / box)
@@ -73,10 +74,14 @@ def net_gradient(frame, y, x, box, uy, ux):
     ng = _np.zeros(len(x), dtype=_np.float32)
     for i, (yi, xi) in enumerate(zip(y, x)):
         for k_index, k in enumerate(range(yi - box_half, yi + box_half + 1)):
-            for l_index, m in enumerate(range(xi - box_half, xi + box_half + 1)):
+            for l_index, m in enumerate(
+                range(xi - box_half, xi + box_half + 1)
+            ):
                 if not (k == yi and m == xi):
                     gy, gx = gradient_at(frame, k, m, i)
-                    ng[i] += gy * uy[k_index, l_index] + gx * ux[k_index, l_index]
+                    ng[i] += (
+                        gy * uy[k_index, l_index] + gx * ux[k_index, l_index]
+                    )
     return ng
 
 
@@ -167,7 +172,9 @@ def identify_async(movie, minimum_ng, box, roi=None):
     executor = _ThreadPoolExecutor(n_workers)
     lock = _threading.Lock()
     f = [
-        executor.submit(_identify_worker, movie, current, minimum_ng, box, roi, lock)
+        executor.submit(
+            _identify_worker, movie, current, minimum_ng, box, roi, lock
+        )
         for _ in range(n_workers)
     ]
     executor.shutdown(wait=False)
@@ -198,7 +205,9 @@ def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
 
 
 @_numba.jit(nopython=True, cache=False)
-def _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots):
+def _cut_spots_frame(
+    frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots
+):
     for j in range(start, N):
         if ids_frame[j] > frame_number:
             break
@@ -219,7 +228,15 @@ def _cut_spots(movie, ids, box):
         start = 0
         for frame_number, frame in enumerate(movie):
             start = _cut_spots_frame(
-                frame, frame_number, ids.frame, ids.x, ids.y, r, start, N, spots
+                frame,
+                frame_number,
+                ids.frame,
+                ids.x,
+                ids.y,
+                r,
+                start,
+                N,
+                spots,
             )
         return spots
 
@@ -239,23 +256,39 @@ def get_spots(movie, identifications, box, camera_info):
 
 
 def fit(
-    movie, camera_info, identifications, box, eps=0.001, max_it=100, method="sigma"
+    movie,
+    camera_info,
+    identifications,
+    box,
+    eps=0.001,
+    max_it=100,
+    method="sigma",
 ):
     spots = get_spots(movie, identifications, box, camera_info)
     theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle(
         spots, eps, max_it, method=method
     )
-    return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
+    return locs_from_fits(
+        identifications, theta, CRLBs, likelihoods, iterations, box
+    )
 
 
 def fit_async(
-    movie, camera_info, identifications, box, eps=0.001, max_it=100, method="sigma"
+    movie,
+    camera_info,
+    identifications,
+    box,
+    eps=0.001,
+    max_it=100,
+    method="sigma",
 ):
     spots = get_spots(movie, identifications, box, camera_info)
     return _gaussmle.gaussmle_async(spots, eps, max_it, method=method)
 
 
-def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
+def locs_from_fits(
+    identifications, theta, CRLBs, likelihoods, iterations, box
+):
     box_offset = int(box / 2)
     y = theta[:, 0] + identifications.y - box_offset
     x = theta[:, 1] + identifications.x - box_offset

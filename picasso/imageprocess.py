@@ -21,9 +21,9 @@ _plt.style.use("ggplot")
 def xcorr(imageA, imageB):
     FimageA = _fft.fft2(imageA)
     CFimageB = _np.conj(_fft.fft2(imageB))
-    return _fft.fftshift(_np.real(_fft.ifft2((FimageA * CFimageB)))) / _np.sqrt(
-        imageA.size
-    )
+    return _fft.fftshift(
+        _np.real(_fft.ifft2((FimageA * CFimageB)))
+    ) / _np.sqrt(imageA.size)
 
 
 def get_image_shift(imageA, imageB, box, roi=None, display=False):
@@ -54,7 +54,8 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
     # Find the brightest pixel and cut out the fit ROI
     y_max_, x_max_ = _np.unravel_index(XCorr.argmax(), XCorr.shape)
     FitROI = XCorr[
-        y_max_ - fit_X : y_max_ + fit_X + 1, x_max_ - fit_X : x_max_ + fit_X + 1
+        y_max_ - fit_X : y_max_ + fit_X + 1,
+        x_max_ - fit_X : x_max_ + fit_X + 1,
     ]
 
     # The fit model
@@ -62,7 +63,9 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
         A = a * _np.exp(-0.5 * ((x - xc) ** 2 + (y - yc) ** 2) / s ** 2) + b
         return A.flatten()
 
-    gaussian2d = _lmfit.Model(flat_2d_gaussian, name="2D Gaussian", independent_vars=[])
+    gaussian2d = _lmfit.Model(
+        flat_2d_gaussian, name="2D Gaussian", independent_vars=[]
+    )
 
     # Set up initial parameters and fit
     params = _lmfit.Parameters()

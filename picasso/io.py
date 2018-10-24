@@ -97,7 +97,11 @@ def load_info(path, qt_parent=None):
         with open(filename, "r") as info_file:
             info = list(_yaml.load_all(info_file))
     except FileNotFoundError as e:
-        print("\nAn error occured. Could not find metadata file:\n{}".format(filename))
+        print(
+            "\nAn error occured. Could not find metadata file:\n{}".format(
+                filename
+            )
+        )
         if qt_parent is not None:
             _QMessageBox.critical(
                 qt_parent,
@@ -151,7 +155,16 @@ def save_user_settings(settings):
 class TiffMap:
 
     TIFF_TYPES = {1: "B", 2: "c", 3: "H", 4: "L", 5: "RATIONAL"}
-    TYPE_SIZES = {"c": 1, "B": 1, "h": 2, "H": 2, "i": 4, "I": 4, "L": 4, "RATIONAL": 8}
+    TYPE_SIZES = {
+        "c": 1,
+        "B": 1,
+        "h": 2,
+        "H": 2,
+        "i": 4,
+        "I": 4,
+        "L": 4,
+        "RATIONAL": 8,
+    }
 
     def __init__(self, path, verbose=False):
         if verbose:
@@ -243,7 +256,9 @@ class TiffMap:
                 indices = range(*it.indices(self.n_frames))
                 return _np.array([self.get_frame(_) for _ in indices])
             elif it == Ellipsis:
-                return _np.array([self.get_frame(_) for _ in range(self.n_frames)])
+                return _np.array(
+                    [self.get_frame(_) for _ in range(self.n_frames)]
+                )
             elif isinstance(it, int) or _np.issubdtype(it, _np.integer):
                 return self.get_frame(it)
             raise TypeError
@@ -313,7 +328,9 @@ class TiffMap:
                 if readout == 84720485:  # Acquisition comments
                     count = self.read("L")
                     readout = self.file.read(4 * count).strip(b"\0")
-                    comments = _json.loads(readout.decode())["Summary"].split("\n")
+                    comments = _json.loads(readout.decode())["Summary"].split(
+                        "\n"
+                    )
                     break
 
         info["Micro-Manager Acquisiton Comments"] = comments
@@ -323,7 +340,9 @@ class TiffMap:
     def get_frame(self, index, array=None):
         self.file.seek(self.image_offsets[index])
         frame = _np.reshape(
-            _np.fromfile(self.file, dtype=self._tif_dtype, count=self.frame_size),
+            _np.fromfile(
+                self.file, dtype=self._tif_dtype, count=self.frame_size
+            ),
             self.frame_shape,
         )
         # We only want to deal with little endian byte order downstream:
@@ -374,7 +393,9 @@ class TiffMultiMap:
         matches = [_re.match(pattern, _) for _ in entries]
         matches = [_ for _ in matches if _ is not None]
         paths_indices = [(int(_.group(1)), _.group(0)) for _ in matches]
-        self.paths = [self.path] + [path for index, path in sorted(paths_indices)]
+        self.paths = [self.path] + [
+            path for index, path in sorted(paths_indices)
+        ]
         self.maps = [TiffMap(path, verbose=verbose) for path in self.paths]
         self.n_maps = len(self.maps)
         self.n_frames_per_map = [_.n_frames for _ in self.maps]
@@ -492,7 +513,9 @@ def get_movie_groups(paths):
                 match_info["index"] = int(match_info["index"])
         basenames = set([_["base"] for _ in match_infos])
         for basename in basenames:
-            match_infos_group = [_ for _ in match_infos if _["base"] == basename]
+            match_infos_group = [
+                _ for _ in match_infos if _["base"] == basename
+            ]
             group = [_["path"] for _ in match_infos_group]
             indices = [_["index"] for _ in match_infos_group]
             group = [path for (index, path) in sorted(zip(indices, group))]
@@ -507,7 +530,10 @@ def to_raw(path, verbose=True):
     if n_groups:
         for i, (basename, group) in enumerate(groups.items()):
             if verbose:
-                print("Converting movie {}/{}...".format(i + 1, n_groups), end="\r")
+                print(
+                    "Converting movie {}/{}...".format(i + 1, n_groups),
+                    end="\r",
+                )
             to_raw_combined(basename, group)
         if verbose:
             print()

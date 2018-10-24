@@ -20,8 +20,12 @@ import yaml
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
-from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.backends.backend_qt4agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qt4agg import (
+    FigureCanvasQTAgg as FigureCanvas,
+)
+from matplotlib.backends.backend_qt4agg import (
+    NavigationToolbar2QT as NavigationToolbar,
+)
 from PyQt4 import QtCore, QtGui
 from PyQt4.QtCore import QDateTime, Qt
 from PyQt4.QtGui import (
@@ -121,7 +125,9 @@ class Window(QtGui.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Picasso: Simulate")
-        self.setSizePolicy(QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding)
+        self.setSizePolicy(
+            QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding
+        )
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "simulate.ico")
         icon = QtGui.QIcon(icon_path)
@@ -348,13 +354,17 @@ class Window(QtGui.QMainWindow):
         igrid.addWidget(photonslopeUnit, 8 - igridindex, 2)
 
         igrid.addWidget(self.photonslopemodeEdit, 9 - igridindex, 1)
-        igrid.addWidget(QtGui.QLabel("Constant detection rate"), 9 - igridindex, 0)
+        igrid.addWidget(
+            QtGui.QLabel("Constant detection rate"), 9 - igridindex, 0
+        )
 
         if ADVANCEDMODE:
             igrid.addWidget(photonslopeStd, 10 - igridindex, 0)
             igrid.addWidget(self.photonslopeStdEdit, 10 - igridindex, 1)
             igrid.addWidget(
-                QtGui.QLabel("Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>"),
+                QtGui.QLabel(
+                    "Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>"
+                ),
                 10 - igridindex,
                 2,
             )
@@ -574,10 +584,16 @@ class Window(QtGui.QMainWindow):
         structurerandomOrientation = QtGui.QLabel("Random orientation")
 
         self.structurerandomEdit.stateChanged.connect(self.generatePositions)
-        self.structurerandomOrientationEdit.stateChanged.connect(self.generatePositions)
-        self.structureIncorporationEdit.valueChanged.connect(self.generatePositions)
+        self.structurerandomOrientationEdit.stateChanged.connect(
+            self.generatePositions
+        )
+        self.structureIncorporationEdit.valueChanged.connect(
+            self.generatePositions
+        )
 
-        self.structurecombo.currentIndexChanged.connect(self.changeStructureType)
+        self.structurecombo.currentIndexChanged.connect(
+            self.changeStructureType
+        )
 
         sgrid.addWidget(structureno, 1, 0)
         sgrid.addWidget(self.structurenoEdit, 1, 1)
@@ -641,7 +657,9 @@ class Window(QtGui.QMainWindow):
         quitButton.clicked.connect(QtCore.QCoreApplication.instance().quit)
         quitButton.resize(quitButton.sizeHint())
 
-        loadButton = QtGui.QPushButton("Load settings from previous simulation")
+        loadButton = QtGui.QPushButton(
+            "Load settings from previous simulation"
+        )
 
         btngridR = QtGui.QGridLayout()
 
@@ -649,7 +667,9 @@ class Window(QtGui.QMainWindow):
         self.exportkinetics = QtGui.QCheckBox()
 
         btngridR.addWidget(loadButton, 0, 0, 1, 2)
-        btngridR.addWidget(QtGui.QLabel("Exchange rounds to be simulated:"), 1, 0)
+        btngridR.addWidget(
+            QtGui.QLabel("Exchange rounds to be simulated:"), 1, 0
+        )
         btngridR.addWidget(self.exchangeroundsEdit, 1, 1)
         btngridR.addWidget(QtGui.QLabel("Concatenate several rounds:"), 2, 0)
         btngridR.addWidget(self.conroundsEdit, 2, 1)
@@ -981,7 +1001,9 @@ class Window(QtGui.QMainWindow):
         return x_str
 
     def simulate(self):
-        exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
+        exchangeroundstoSim = _np.asarray(
+            (self.exchangeroundsEdit.text()).split(",")
+        )
         exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
 
         noexchangecolors = len(set(exchangeroundstoSim))
@@ -1018,7 +1040,9 @@ class Window(QtGui.QMainWindow):
             structureFrame = self.structureframeEdit.value()
             structureIncorporation = self.structureIncorporationEdit.value()
             structureArrangement = int(self.structurerandomEdit.checkState())
-            structureOrientation = int(self.structurerandomOrientationEdit.checkState())
+            structureOrientation = int(
+                self.structurerandomOrientationEdit.checkState()
+            )
             structurex = self.structurexxEdit.text()
             structurey = self.structureyyEdit.text()
             structureextxt = self.structureexEdit.text()
@@ -1073,7 +1097,9 @@ class Window(QtGui.QMainWindow):
                 equationC = EQC_DEFAULT
                 bgstdoffset = BGSTDOFFSET_DEFAULT
 
-            structurexx, structureyy, structureex, structure3d = self.readStructure()
+            structurexx, structureyy, structureex, structure3d = (
+                self.readStructure()
+            )
 
             self.statusBar().showMessage("Simulation started")
             struct = self.newstruct
@@ -1089,7 +1115,9 @@ class Window(QtGui.QMainWindow):
             t0 = time.time()
 
             if self.concatExchangeEdit.checkState():
-                noexchangecolors = 1  # Overwrite the number to not trigger the for loop
+                noexchangecolors = (
+                    1
+                )  # Overwrite the number to not trigger the for loop
 
             for i in range(0, noexchangecolors):
 
@@ -1099,7 +1127,8 @@ class Window(QtGui.QMainWindow):
                 elif self.concatExchangeEdit.checkState():
                     fileName = fileNameOld
                     partstruct = struct[
-                        :, struct[2, :] == exchangecolors[self.currentround - 1]
+                        :,
+                        struct[2, :] == exchangecolors[self.currentround - 1],
                     ]
                 else:
                     fileName = fileNameOld
@@ -1109,7 +1138,9 @@ class Window(QtGui.QMainWindow):
 
                 bindingsitesx = partstruct[0, :]
                 bindingsitesy = partstruct[1, :]
-                nosites = len(bindingsitesx)  # number of binding sites in image
+                nosites = len(
+                    bindingsitesx
+                )  # number of binding sites in image
                 photondist = _np.zeros((nosites, frames), dtype=_np.int)
                 spotkinetics = _np.zeros((nosites, 4), dtype=_np.float)
                 meandark = int(taud)
@@ -1227,7 +1258,9 @@ class Window(QtGui.QMainWindow):
                         )
 
                         self.statusBar().showMessage(outputmsg)
-                        self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
+                        self.mainpbar.setValue(
+                            _np.round(runner / frames * 1000) / 10
+                        )
                         app.processEvents()
 
                     if self.currentround == 1:
@@ -1244,13 +1277,17 @@ class Window(QtGui.QMainWindow):
                         + ". Please set and start next round."
                     )
                     if self.currentround == conrounds:
-                        self.statusBar().showMessage("Adding noise to movie ...")
+                        self.statusBar().showMessage(
+                            "Adding noise to movie ..."
+                        )
                         movie = simulate.noisy_p(movie, background)
                         movie = simulate.check_type(movie)
                         self.statusBar().showMessage("Saving movie ...")
 
                         simulate.saveMovie(fileName, movie, info)
-                        self.statusBar().showMessage("Movie saved to: " + fileName)
+                        self.statusBar().showMessage(
+                            "Movie saved to: " + fileName
+                        )
                         dt = time.time() - t0
                         self.statusBar().showMessage(
                             "All computations finished. Last file saved to: "
@@ -1278,7 +1315,9 @@ class Window(QtGui.QMainWindow):
                             )
                             _io.save_info(kinfo_path, [timetrace])
 
-                        self.statusBar().showMessage("Movie saved to: " + fileName)
+                        self.statusBar().showMessage(
+                            "Movie saved to: " + fileName
+                        )
 
                 else:
                     app = QtCore.QCoreApplication.instance()
@@ -1304,19 +1343,25 @@ class Window(QtGui.QMainWindow):
                         )
 
                         self.statusBar().showMessage(outputmsg)
-                        self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
+                        self.mainpbar.setValue(
+                            _np.round(runner / frames * 1000) / 10
+                        )
                         app.processEvents()
 
                     movie = simulate.noisy_p(movie, background)
                     movie = simulate.check_type(movie)
                     self.mainpbar.setValue(100)
-                    self.statusBar().showMessage("Converting to image ... complete.")
+                    self.statusBar().showMessage(
+                        "Converting to image ... complete."
+                    )
                     self.statusBar().showMessage("Saving movie ...")
 
                     simulate.saveMovie(fileName, movie, info)
                     if self.exportkinetics.isChecked():
                         # Export the kinetic data if this is checked
-                        kinfo_path = _ospath.splitext(fileName)[0] + "_kinetics.yaml"
+                        kinfo_path = (
+                            _ospath.splitext(fileName)[0] + "_kinetics.yaml"
+                        )
                         _io.save_info(kinfo_path, [timetrace])
                     self.statusBar().showMessage("Movie saved to: " + fileName)
                     dt = time.time() - t0
@@ -1328,7 +1373,9 @@ class Window(QtGui.QMainWindow):
                     self.currentround = 0
 
     def loadSettings(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, "Open yaml", filter="*.yaml")
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Open yaml", filter="*.yaml"
+        )
         if path:
             info = _io.load_info(path)
             self.framesEdit.setValue(info[0]["Frames"])
@@ -1353,12 +1400,18 @@ class Window(QtGui.QMainWindow):
                 pass
 
             try:
-                self.backgroundlevelEdit.setValue(info[0]["Imager.BackgroundLevel"])
+                self.backgroundlevelEdit.setValue(
+                    info[0]["Imager.BackgroundLevel"]
+                )
             except:
                 pass
-            self.structureIncorporationEdit.setValue(info[0]["Structure.Incorporation"])
+            self.structureIncorporationEdit.setValue(
+                info[0]["Structure.Incorporation"]
+            )
 
-            self.structurerandomEdit.setCheckState(info[0]["Structure.Arrangement"])
+            self.structurerandomEdit.setCheckState(
+                info[0]["Structure.Arrangement"]
+            )
             self.structurerandomOrientationEdit.setCheckState(
                 info[0]["Structure.Orientation"]
             )
@@ -1376,7 +1429,9 @@ class Window(QtGui.QMainWindow):
             self.photonslopeStdEdit.setValue(info[0]["Imager.PhotonslopeStd"])
 
             self.camerasizeEdit.setValue(info[0]["Camera.Image Size"])
-            self.integrationtimeEdit.setValue(info[0]["Camera.Integration Time"])
+            self.integrationtimeEdit.setValue(
+                info[0]["Camera.Integration Time"]
+            )
             self.framesEdit.setValue(info[0]["Camera.Frames"])
             self.pixelsizeEdit.setValue(info[0]["Camera.Pixelsize"])
 
@@ -1388,13 +1443,17 @@ class Window(QtGui.QMainWindow):
                 self.EquationAEdit.setValue(info[0]["Noise.EquationA"])
                 self.EquationBEdit.setValue(info[0]["Noise.EquationB"])
                 self.EquationCEdit.setValue(info[0]["Noise.EquationC"])
-                self.BgStdoffsetEdit.setValue(info[0]["Noise.BackgroundStdOff"])
+                self.BgStdoffsetEdit.setValue(
+                    info[0]["Noise.BackgroundStdOff"]
+                )
 
             # SET POSITIONS
             handlexx = _np.asarray((info[0]["Structure.HandleX"]).split(","))
             handleyy = _np.asarray((info[0]["Structure.HandleY"]).split(","))
             handleex = _np.asarray((info[0]["Structure.HandleEx"]).split(","))
-            handless = _np.asarray((info[0]["Structure.HandleStruct"]).split(","))
+            handless = _np.asarray(
+                (info[0]["Structure.HandleStruct"]).split(",")
+            )
 
             handlexx = handlexx.astype(_np.float)
             handleyy = handleyy.astype(_np.float)
@@ -1406,7 +1465,9 @@ class Window(QtGui.QMainWindow):
 
             handle3d = _np.asarray((info[0]["Structure.Handle3d"]).split(","))
             handle3d = handle3d.astype(_np.float)
-            structure = _np.array([handlexx, handleyy, handleex, handless, handle3d])
+            structure = _np.array(
+                [handlexx, handleyy, handleex, handless, handle3d]
+            )
 
             self.structurecombo.setCurrentIndex(2)
             self.newstruct = structure
@@ -1414,7 +1475,9 @@ class Window(QtGui.QMainWindow):
             self.statusBar().showMessage("Settings loaded from: " + path)
 
     def importDesign(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, "Open yaml", filter="*.yaml")
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Open yaml", filter="*.yaml"
+        )
         if path:
             info = _io.load_info(path)
             self.structurexxEdit.setText(info[0]["Structure.StructureX"])
@@ -1457,11 +1520,17 @@ class Window(QtGui.QMainWindow):
 
                 info = _io.load_info(path)
 
-                x = self.readLine(info[0]["Structure.StructureX"], textmode=False)
-                y = self.readLine(info[0]["Structure.StructureY"], textmode=False)
+                x = self.readLine(
+                    info[0]["Structure.StructureX"], textmode=False
+                )
+                y = self.readLine(
+                    info[0]["Structure.StructureY"], textmode=False
+                )
                 try:
                     ex = self.readLine(
-                        info[0]["Structure.StructureEx"], type="int", textmode=False
+                        info[0]["Structure.StructureEx"],
+                        type="int",
+                        textmode=False,
                     )
                 except:
                     ex = _np.ones_like(x)
@@ -1518,7 +1587,9 @@ class Window(QtGui.QMainWindow):
             self.structureMode = False
             self.generatePositions()
 
-            self.statusBar().showMessage("A total of {} points loaded.".format(minlen))
+            self.statusBar().showMessage(
+                "A total of {} points loaded.".format(minlen)
+            )
 
     def readStructure(self):
         structurexx = self.readLine(self.structurexxEdit)
@@ -1527,7 +1598,10 @@ class Window(QtGui.QMainWindow):
         structure3d = self.readLine(self.structure3DEdit)
 
         minlen = min(
-            len(structureex), len(structurexx), len(structureyy), len(structure3d)
+            len(structureex),
+            len(structurexx),
+            len(structureyy),
+            len(structure3d),
         )
 
         structurexx = structurexx[0:minlen]
@@ -1539,7 +1613,9 @@ class Window(QtGui.QMainWindow):
 
     def plotStructure(self):
 
-        structurexx, structureyy, structureex, structure3d = self.readStructure()
+        structurexx, structureyy, structureex, structure3d = (
+            self.readStructure()
+        )
         noexchangecolors = len(set(structureex))
         exchangecolors = list(set(structureex))
         # self.figure2.suptitle('Structure [nm]')
@@ -1572,7 +1648,9 @@ class Window(QtGui.QMainWindow):
         self.plotStructure()
         pixelsize = self.pixelsizeEdit.value()
         if self.structureMode:
-            structurexx, structureyy, structureex, structure3d = self.readStructure()
+            structurexx, structureyy, structureex, structure3d = (
+                self.readStructure()
+            )
             structure = simulate.defineStructure(
                 structurexx, structureyy, structureex, structure3d, pixelsize
             )
@@ -1594,7 +1672,9 @@ class Window(QtGui.QMainWindow):
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
         arrangement = int(self.structurerandomEdit.checkState())
-        gridpos = simulate.generatePositions(number, imageSize, frame, arrangement)
+        gridpos = simulate.generatePositions(
+            number, imageSize, frame, arrangement
+        )
 
         orientation = int(self.structurerandomOrientationEdit.checkState())
         incorporation = self.structureIncorporationEdit.value() / 100
@@ -1602,7 +1682,12 @@ class Window(QtGui.QMainWindow):
 
         if self.structureMode:
             self.newstruct = simulate.prepareStructures(
-                structure, gridpos, orientation, number, incorporation, exchange
+                structure,
+                gridpos,
+                orientation,
+                number,
+                incorporation,
+                exchange,
             )
         else:
             self.newstruct = simulate.prepareStructures(
@@ -1615,10 +1700,12 @@ class Window(QtGui.QMainWindow):
             )
 
             in_x = _np.logical_and(
-                self.newstruct[0, :] < (imageSize - frame), self.newstruct[0, :] > frame
+                self.newstruct[0, :] < (imageSize - frame),
+                self.newstruct[0, :] > frame,
             )
             in_y = _np.logical_and(
-                self.newstruct[1, :] < (imageSize - frame), self.newstruct[1, :] > frame
+                self.newstruct[1, :] < (imageSize - frame),
+                self.newstruct[1, :] > frame,
             )
             in_frame = _np.logical_and(in_x, in_y)
             self.newstruct = self.newstruct[:, in_frame]
@@ -1661,8 +1748,12 @@ class Window(QtGui.QMainWindow):
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
         structureex = struct1[2, :]
-        structurexx_nm = _np.multiply(structurexx - min(structurexx), pixelsize)
-        structureyy_nm = _np.multiply(structureyy - min(structureyy), pixelsize)
+        structurexx_nm = _np.multiply(
+            structurexx - min(structurexx), pixelsize
+        )
+        structureyy_nm = _np.multiply(
+            structureyy - min(structureyy), pixelsize
+        )
 
         for i in range(0, noexchangecolors):
             plotxx = []
@@ -1685,7 +1776,9 @@ class Window(QtGui.QMainWindow):
         self.canvas2.draw()
 
     def plotPositions(self):
-        structurexx, structureyy, structureex, structure3d = self.readStructure()
+        structurexx, structureyy, structureex, structure3d = (
+            self.readStructure()
+        )
         pixelsize = self.pixelsizeEdit.value()
         structure = simulate.defineStructure(
             structurexx, structureyy, structureex, structure3d, pixelsize
@@ -1695,7 +1788,9 @@ class Window(QtGui.QMainWindow):
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
         arrangement = int(self.structurerandomEdit.checkState())
-        gridpos = simulate.generatePositions(number, imageSize, frame, arrangement)
+        gridpos = simulate.generatePositions(
+            number, imageSize, frame, arrangement
+        )
 
         orientation = int(self.structurerandomOrientationEdit.checkState())
         incorporation = self.structureIncorporationEdit.value() / 100
@@ -1738,8 +1833,12 @@ class Window(QtGui.QMainWindow):
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
         structureex = struct1[2, :]
-        structurexx_nm = _np.multiply(structurexx - min(structurexx), pixelsize)
-        structureyy_nm = _np.multiply(structureyy - min(structureyy), pixelsize)
+        structurexx_nm = _np.multiply(
+            structurexx - min(structurexx), pixelsize
+        )
+        structureyy_nm = _np.multiply(
+            structureyy - min(structureyy), pixelsize
+        )
 
         for i in range(0, noexchangecolors):
             plotxx = []
@@ -1762,7 +1861,9 @@ class Window(QtGui.QMainWindow):
         self.canvas2.draw()
 
     def openDialog(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, "Open design", filter="*.yaml")
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Open design", filter="*.yaml"
+        )
         if path:
             self.mainscene.loadCanvas(path)
             self.statusBar().showMessage("File loaded from: " + path)
@@ -1795,7 +1896,9 @@ class Window(QtGui.QMainWindow):
 
         x_3dStd = _np.array([las, time, bg])
         p0S = [1, 1, 1]
-        fitParamsStd, fitCovariances = curve_fit(fitFuncStd, x_3dStd, bgstd, p0S)
+        fitParamsStd, fitCovariances = curve_fit(
+            fitFuncStd, x_3dStd, bgstd, p0S
+        )
 
         print(" fit coefficients2:\n", fitParamsStd)
 
@@ -1908,7 +2011,10 @@ class Window(QtGui.QMainWindow):
                     x = _np.linspace(xmin, xmax, 100)
                     p = norm.pdf(x, sigmamu, sigmastd)
                     ax2.plot(x, p)
-                    title = "PSF:\n mu = %.2f\n  std = %.2f" % (sigmamu, sigmastd)
+                    title = "PSF:\n mu = %.2f\n  std = %.2f" % (
+                        sigmamu,
+                        sigmastd,
+                    )
                     ax2.set_title(title)
 
                     # Background
@@ -1922,7 +2028,10 @@ class Window(QtGui.QMainWindow):
                     x = _np.linspace(xmin, xmax, 100)
                     p = norm.pdf(x, bgmu, bgstd)
                     ax3.plot(x, p)
-                    title = "Background:\n mu = %.2f\n  std = %.2f" % (bgmu, bgstd)
+                    title = "Background:\n mu = %.2f\n  std = %.2f" % (
+                        bgmu,
+                        bgstd,
+                    )
                     ax3.set_title(title)
                     figure3.tight_layout()
                     figure3.show()
@@ -1962,7 +2071,9 @@ class Window(QtGui.QMainWindow):
                     self.photonrateEdit.setValue(photonrate)
                     self.photonratestdEdit.setValue(photonratestd)
                     self.photonslopeEdit.setValue(photonrate / laserpower)
-                    self.photonslopeStdEdit.setValue(photonratestd / laserpower)
+                    self.photonslopeStdEdit.setValue(
+                        photonratestd / laserpower
+                    )
 
                     # SET NOISE AND FRAME
                     self.BgoffsetEdit.setValue(bgmu - bgmodel)
@@ -2000,7 +2111,9 @@ class CalibrationDialog(QtGui.QDialog):
         self.evalTifButton.clicked.connect(self.evalTif)
 
         self.buttons = QDialogButtonBox(
-            QDialogButtonBox.ActionRole | QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
+            QDialogButtonBox.ActionRole
+            | QDialogButtonBox.Ok
+            | QDialogButtonBox.Cancel,
             Qt.Horizontal,
             self,
         )
@@ -2044,7 +2157,10 @@ class CalibrationDialog(QtGui.QDialog):
     def savePlate(self, filename, data):
         with open(filename, "w", newline="") as csvfile:
             Writer = csv.writer(
-                csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL
+                csvfile,
+                delimiter=",",
+                quotechar="|",
+                quoting=csv.QUOTE_MINIMAL,
             )
             for j in range(0, len(data)):
                 exportdata = data[j]
@@ -2073,7 +2189,12 @@ class CalibrationDialog(QtGui.QDialog):
         for element in self.tifFiles:
             counter = counter + 1
             self.pbar.setValue((counter - 1) / self.tifCounter * 100)
-            print("Current Dataset: " + str(counter) + " of " + str(self.tifCounter))
+            print(
+                "Current Dataset: "
+                + str(counter)
+                + " of "
+                + str(self.tifCounter)
+            )
             QtGui.qApp.processEvents()
             movie, info = _io.load_movie(element)
 
@@ -2120,7 +2241,9 @@ class CalibrationDialog(QtGui.QDialog):
 
     def loadTif(self):
 
-        self.path = QtGui.QFileDialog.getExistingDirectory(self, "Select Directory")
+        self.path = QtGui.QFileDialog.getExistingDirectory(
+            self, "Select Directory"
+        )
         if self.path:
 
             self.tifCounter = len(_glob.glob1(self.path, "*.tif"))
@@ -2135,7 +2258,9 @@ class CalibrationDialog(QtGui.QDialog):
             )
 
             for i in range(0, self.tifCounter):
-                self.table.setItem(i, 0, QtGui.QTableWidgetItem(self.tifFiles[i]))
+                self.table.setItem(
+                    i, 0, QtGui.QTableWidgetItem(self.tifFiles[i])
+                )
 
     def changeComb(self, indexval):
 
@@ -2146,7 +2271,9 @@ class CalibrationDialog(QtGui.QDialog):
             self.table.setItem(indexval, 3, QtGui.QTableWidgetItem(""))
         else:
             self.table.setItem(
-                indexval, 2, QtGui.QTableWidgetItem(self.ImagersShort[comboval])
+                indexval,
+                2,
+                QtGui.QTableWidgetItem(self.ImagersShort[comboval]),
             )
             self.table.setItem(
                 indexval, 3, QtGui.QTableWidgetItem(self.ImagersLong[comboval])
@@ -2208,7 +2335,9 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtGui.QMessageBox.critical(
+            window, "An error occured", message
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

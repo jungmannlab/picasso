@@ -139,30 +139,40 @@ def paintgen(
             if onFrames == 1:  # CASE 1: all photons are emitted in one frame
                 photonsinframe[1 + tempFrame] = int(
                     _np.random.poisson(
-                        ((tempFrame + 1) * time - eventsum[i - 1]) / time * photons
+                        ((tempFrame + 1) * time - eventsum[i - 1])
+                        / time
+                        * photons
                     )
                 )
-            elif onFrames == 2:  # CASE 2: all photons are emitted in two frames
+            elif (
+                onFrames == 2
+            ):  # CASE 2: all photons are emitted in two frames
                 emittedphotons = (
                     ((tempFrame + 1) * time - eventsum[i - 1]) / time * photons
                 )
                 if j == 1:  # photons in first onframe
                     photonsinframe[1 + tempFrame] = int(
                         _np.random.poisson(
-                            ((tempFrame + 1) * time - eventsum[i - 1]) / time * photons
+                            ((tempFrame + 1) * time - eventsum[i - 1])
+                            / time
+                            * photons
                         )
                     )
                 else:  # photons in second onframe
                     photonsinframe[2 + tempFrame] = int(
                         _np.random.poisson(
-                            (eventsum[i] - (tempFrame + 1) * time) / time * photons
+                            (eventsum[i] - (tempFrame + 1) * time)
+                            / time
+                            * photons
                         )
                     )
             else:  # CASE 3: all photons are mitted in three or more frames
                 if j == 1:
                     photonsinframe[1 + tempFrame] = int(
                         _np.random.poisson(
-                            ((tempFrame + 1) * time - eventsum[i - 1]) / time * photons
+                            ((tempFrame + 1) * time - eventsum[i - 1])
+                            / time
+                            * photons
                         )
                     )  # Indexing starts with 0
                 elif j == onFrames:
@@ -174,12 +184,17 @@ def paintgen(
                         )
                     )
                 else:
-                    photonsinframe[tempFrame + j] = int(_np.random.poisson(photons))
+                    photonsinframe[tempFrame + j] = int(
+                        _np.random.poisson(photons)
+                    )
 
-        totalphotons = _np.sum(photonsinframe[1 + tempFrame : tempFrame + 1 + onFrames])
+        totalphotons = _np.sum(
+            photonsinframe[1 + tempFrame : tempFrame + 1 + onFrames]
+        )
         if totalphotons > photonbudget:
             photonsinframe[onFrames + tempFrame] = int(
-                photonsinframe[onFrames + tempFrame] - (totalphotons - photonbudget)
+                photonsinframe[onFrames + tempFrame]
+                - (totalphotons - photonbudget)
             )
 
     photonsinframe = photonsinframe[0:frames]
@@ -199,7 +214,14 @@ def paintgen(
 
 
 def distphotons(
-    structures, itime, frames, taud, taub, photonrate, photonratestd, photonbudget
+    structures,
+    itime,
+    frames,
+    taud,
+    taub,
+    photonrate,
+    photonratestd,
+    photonbudget,
 ):
     """
     Distrbute Photons
@@ -216,7 +238,13 @@ def distphotons(
     photonposall = [1, 1]
 
     photonsinframe, timetrace, spotkinetics = paintgen(
-        meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget
+        meandark,
+        meanbright,
+        frames,
+        time,
+        photonrate,
+        photonratestd,
+        photonbudget,
     )
 
     return photonsinframe, timetrace, spotkinetics
@@ -247,7 +275,9 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
         if photoncount > 0:
             mu = [bindingsitesx[i], bindingsitesy[i]]
             photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
-            photonposframe[n_photons_step[i] : n_photons_step[i + 1], :] = photonpos
+            photonposframe[
+                n_photons_step[i] : n_photons_step[i + 1], :
+            ] = photonpos
 
     return photonposframe
 
@@ -289,7 +319,12 @@ def saveMovie(filename, movie, info):
 
 # Function to store the coordinates of a structure in a container. The coordinates wil be adjustet so that the center of mass is the origin
 def defineStructure(
-    structurexxpx, structureyypx, structureex, structure3d, pixelsize, mean=True
+    structurexxpx,
+    structureyypx,
+    structureex,
+    structure3d,
+    pixelsize,
+    mean=True,
 ):
     if mean:
         structurexxpx = structurexxpx - _np.mean(structurexxpx)
@@ -351,7 +386,9 @@ def incorporateStructure(structure, incorporation):
     """
     Returns a subset of the strucutre to reflect incorporation of stpales
     """
-    newstructure = structure[:, (_np.random.rand(structure.shape[1]) < incorporation)]
+    newstructure = structure[
+        :, (_np.random.rand(structure.shape[1]) < incorporation)
+    ]
     return newstructure
 
 
@@ -387,7 +424,13 @@ def prepareStructures(
         newx = structure[0, :] + gridpos[i, 0]
         newy = structure[1, :] + gridpos[i, 1]
         newstruct = _np.array(
-            [newx, newy, structure[2, :], structure[2, :] * 0 + i, structure[3, :]]
+            [
+                newx,
+                newy,
+                structure[2, :],
+                structure[2, :] * 0 + i,
+                structure[3, :],
+            ]
         )
         if i == 0:
             newpos = newstruct

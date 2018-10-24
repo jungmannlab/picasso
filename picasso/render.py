@@ -17,7 +17,12 @@ _DRAW_MAX_SIGMA = 3
 
 
 def render(
-    locs, info=None, oversampling=1, viewport=None, blur_method=None, min_blur_width=0
+    locs,
+    info=None,
+    oversampling=1,
+    viewport=None,
+    blur_method=None,
+    min_blur_width=0,
 ):
     if viewport is None:
         try:
@@ -151,7 +156,9 @@ def render_hist3d(
 
 
 @_numba.jit(nopython=True, nogil=True)
-def render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
+def render_gaussian(
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max
     )
@@ -186,7 +193,9 @@ def render_gaussian(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_wid
 
 
 @_numba.jit(nopython=True, nogil=True)
-def render_gaussian_iso(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
+def render_gaussian_iso(
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max
     )
@@ -220,7 +229,9 @@ def render_gaussian_iso(locs, oversampling, y_min, x_min, y_max, x_max, min_blur
     return len(x), image
 
 
-def render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width):
+def render_convolve(
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width
+):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max
     )
@@ -229,8 +240,12 @@ def render_convolve(locs, oversampling, y_min, x_min, y_max, x_max, min_blur_wid
     if n == 0:
         return 0, image
     else:
-        blur_width = oversampling * max(_np.median(locs.lpx[in_view]), min_blur_width)
-        blur_height = oversampling * max(_np.median(locs.lpy[in_view]), min_blur_width)
+        blur_width = oversampling * max(
+            _np.median(locs.lpx[in_view]), min_blur_width
+        )
+        blur_height = oversampling * max(
+            _np.median(locs.lpy[in_view]), min_blur_width
+        )
         return n, _fftconvolve(image, blur_width, blur_height)
 
 
@@ -266,7 +281,9 @@ def segment(locs, info, segmentation, kwargs={}, callback=None):
     if callback is not None:
         callback(0)
     for i in _trange(n_seg, desc="Generating segments", unit="segments"):
-        segment_locs = locs[(locs.frame >= bounds[i]) & (locs.frame < bounds[i + 1])]
+        segment_locs = locs[
+            (locs.frame >= bounds[i]) & (locs.frame < bounds[i + 1])
+        ]
         _, segments[i] = render(segment_locs, info, **kwargs)
         if callback is not None:
             callback(i + 1)

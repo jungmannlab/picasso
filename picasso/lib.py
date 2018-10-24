@@ -28,7 +28,12 @@ _dialogs = []
 class ProgressDialog(QtGui.QProgressDialog):
     def __init__(self, description, minimum, maximum, parent):
         super().__init__(
-            description, None, minimum, maximum, parent, QtCore.Qt.CustomizeWindowHint
+            description,
+            None,
+            minimum,
+            maximum,
+            parent,
+            QtCore.Qt.CustomizeWindowHint,
         )
         _dialogs.append(self)
         self.setMinimumDuration(500)
@@ -45,7 +50,9 @@ class ProgressDialog(QtGui.QProgressDialog):
 
 class StatusDialog(QtGui.QDialog):
     def __init__(self, description, parent):
-        super(StatusDialog, self).__init__(parent, QtCore.Qt.CustomizeWindowHint)
+        super(StatusDialog, self).__init__(
+            parent, QtCore.Qt.CustomizeWindowHint
+        )
         _dialogs.append(self)
         vbox = QtGui.QVBoxLayout(self)
         label = QtGui.QLabel(description)
@@ -106,7 +113,12 @@ def append_to_rec(rec_array, data, name):
     if hasattr(rec_array, name):
         rec_array = remove_from_rec(rec_array, name)
     return _append_fields(
-        rec_array, name, data, dtypes=data.dtype, usemask=False, asrecarray=True
+        rec_array,
+        name,
+        data,
+        dtypes=data.dtype,
+        usemask=False,
+        asrecarray=True,
     )
     return rec_array
 
@@ -114,7 +126,10 @@ def append_to_rec(rec_array, data, name):
 def ensure_sanity(locs, info):
     # no inf or nan:
     locs = locs[
-        _np.all(_np.array([_np.isfinite(locs[_]) for _ in locs.dtype.names]), axis=0)
+        _np.all(
+            _np.array([_np.isfinite(locs[_]) for _ in locs.dtype.names]),
+            axis=0,
+        )
     ]
     # other sanity checks:
     locs = locs[locs.x > 0]

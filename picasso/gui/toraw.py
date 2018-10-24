@@ -94,7 +94,9 @@ class Window(QtGui.QWidget):
             text = "Converting 1 movie..."
         else:
             text = "Converting {} movies...".format(n_movies)
-        self.progress_dialog = QtGui.QProgressDialog(text, "Cancel", 0, n_movies, self)
+        self.progress_dialog = QtGui.QProgressDialog(
+            text, "Cancel", 0, n_movies, self
+        )
         progress_bar = QtGui.QProgressBar(self.progress_dialog)
         progress_bar.setTextVisible(False)
         self.progress_dialog.setBar(progress_bar)
@@ -117,7 +119,9 @@ class Window(QtGui.QWidget):
 
     def on_finished(self, done):
         self.progress_dialog.close()
-        QtGui.QMessageBox.information(self, "Picasso: ToRaw", "Conversion complete.")
+        QtGui.QMessageBox.information(
+            self, "Picasso: ToRaw", "Conversion complete."
+        )
 
 
 class Worker(QtCore.QThread):
@@ -145,7 +149,9 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtGui.QMessageBox.critical(
+            window, "An error occured", message
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 
