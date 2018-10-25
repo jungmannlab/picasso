@@ -1,4 +1,6 @@
-﻿# Picasso
+# Picasso
+![alt text](http://picasso.jungmannlab.org/main_render.png)
+
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our [Nature Protocols publication](https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html).
 
 ## Installation
