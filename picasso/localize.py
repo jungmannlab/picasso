@@ -4,8 +4,8 @@
 
     Identify and localize fluorescent single molecules in a frame sequence
 
-    :author: Joerg Schnitzbauer, 2015
-    :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 import numpy as _np
 import numba as _numba
@@ -49,8 +49,8 @@ def local_maxima(frame, box):
     for i in range(box_half, Y - box_half_1):
         for j in range(box_half, X - box_half_1):
             local_frame = frame[
-                i - box_half : i + box_half + 1,
-                j - box_half : j + box_half + 1,
+                i - box_half: i + box_half + 1,
+                j - box_half: j + box_half + 1,
             ]
             flat_max = _np.argmax(local_frame)
             i_local_max = int(flat_max / box)
@@ -108,7 +108,7 @@ def identify_in_image(image, minimum_ng, box):
 
 def identify_in_frame(frame, minimum_ng, box, roi=None):
     if roi is not None:
-        frame = frame[roi[0][0] : roi[1][0], roi[0][1] : roi[1][1]]
+        frame = frame[roi[0][0]: roi[1][0], roi[0][1]: roi[1][1]]
     image = _np.float32(frame)  # otherwise numba goes crazy
     y, x, net_gradient = identify_in_image(image, minimum_ng, box)
     if roi is not None:
@@ -200,7 +200,7 @@ def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     r = int(box / 2)
     spots = _np.zeros((n_spots, box, box), dtype=movie.dtype)
     for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
-        spots[id] = movie[frame, yc - r : yc + r + 1, xc - r : xc + r + 1]
+        spots[id] = movie[frame, yc - r: yc + r + 1, xc - r: xc + r + 1]
     return spots
 
 
@@ -213,7 +213,7 @@ def _cut_spots_frame(
             break
         yc = ids_y[j]
         xc = ids_x[j]
-        spots[j] = frame[yc - r : yc + r + 1, xc - r : xc + r + 1]
+        spots[j] = frame[yc - r: yc + r + 1, xc - r: xc + r + 1]
     return j
 
 
