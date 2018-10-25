@@ -1,3 +1,14 @@
+"""
+    picasso.gausslq
+    ~~~~~~~~~~~~~~~~
+
+    Fit spots with Gaussian least squares
+
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+"""
+
+
 from scipy import optimize as _optimize
 import numpy as _np
 from tqdm import tqdm as _tqdm
