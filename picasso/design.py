@@ -2,15 +2,12 @@
     picasso.design
     ~~~~~~~~~~~~~~~~
 
-    Design rectangular rothemund origami
+    Design rectangular rothemund origami (RRO)
 
-    :author: Maximilian Thomas Strauss, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+    :author: Maximilian Thomas Strauss, 2016-2018
+    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 import csv
-
-import numpy as _np
-
 from . import io as _io
 
 

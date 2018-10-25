@@ -2,7 +2,7 @@
     picasso/__init__.py
     ~~~~~~~~~~~~~~~~~~~~
 
-    :author: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 import os.path as _ospath

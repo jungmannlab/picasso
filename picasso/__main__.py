@@ -5,7 +5,7 @@
 
     Picasso command line interface
 
-    :author: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 import os.path

@@ -1,3 +1,13 @@
+"""
+    picasso.avgroi
+    ~~~~~~~~~~~~~~~~
+
+    Return average intensity of Spot
+
+    :author: Maximilian Thomas Strauss, 2016
+    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+"""
+
 from scipy import optimize as _optimize
 import numpy as _np
 from tqdm import tqdm as _tqdm
