@@ -1,5 +1,10 @@
 localize
 ========
+
+.. image:: ../docs/localize.png
+   :scale: 100 %
+   :alt: UML Localize
+
 Camera Config
 -------------
 
