@@ -5,7 +5,7 @@
     Image processing functions
 
     :author: Joerg Schnitzbauer, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 import matplotlib.pyplot as _plt
 import numpy as _np
@@ -50,12 +50,12 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
     # A quarter of the fit ROI
     fit_X = int(box / 2)
     # A coordinate grid for the fitting ROI
-    y, x = _np.mgrid[-fit_X : fit_X + 1, -fit_X : fit_X + 1]
+    y, x = _np.mgrid[-fit_X: fit_X + 1, -fit_X: fit_X + 1]
     # Find the brightest pixel and cut out the fit ROI
     y_max_, x_max_ = _np.unravel_index(XCorr.argmax(), XCorr.shape)
     FitROI = XCorr[
-        y_max_ - fit_X : y_max_ + fit_X + 1,
-        x_max_ - fit_X : x_max_ + fit_X + 1,
+        y_max_ - fit_X: y_max_ + fit_X + 1,
+        x_max_ - fit_X: x_max_ + fit_X + 1,
     ]
 
     # The fit model
