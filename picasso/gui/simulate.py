@@ -6,7 +6,7 @@
     Simulate single molcule fluorescence data
 
     :author: Maximilian Thomas Strauss, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 import csv
@@ -1011,7 +1011,7 @@ class Window(QtGui.QMainWindow):
 
         if (
             self.concatExchangeEdit.checkState()
-        ):  # If exchange rounds shall be considered as rounds to be concatenated the number of conrounds is equel to the exchangerounds
+        ):
             conrounds = noexchangecolors
         else:
             conrounds = self.conroundsEdit.value()

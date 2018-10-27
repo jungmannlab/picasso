@@ -129,7 +129,6 @@ class PickHistWindow(QtGui.QTabWidget):
         self.figure.clear()
         # Length
         axes = self.figure.add_subplot(121)
-        # axes.set_title('Length (cumulative) \n' r'$\mu={},\ \sigma={}$'.format(1,2))
         a = fit_result_len.best_values["a"]
         t = fit_result_len.best_values["t"]
         c = fit_result_len.best_values["c"]
@@ -1244,7 +1243,6 @@ class InfoDialog(QtGui.QDialog):
             show_plot_button.clicked.connect(self.show_nena_plot)
 
     def calibrate_influx(self):
-        # influx = np.mean(1 / self.pick_info['dark']) / self.units_per_pick.value()
         influx = (
             1 / self.pick_info["pooled dark"] / self.units_per_pick.value()
         )
@@ -2191,7 +2189,8 @@ class View(QtGui.QLabel):
                         drift = np.rec.array(
                             drift, dtype=[("x", "f"), ("y", "f")]
                         )
-                except:
+                except Exception as e:
+                    print(e)
                     # drift already initialized before
                     pass
 
@@ -2212,7 +2211,8 @@ class View(QtGui.QLabel):
                         choice = QtGui.QMessageBox.question(
                             self,
                             "Group question",
-                            "Groups are not consecutive and more than 5000 groups detected. Re-Index groups? This may take a while.",
+                            ("Groups are not consecutive and more than 5000 groups detected."
+                                " Re-Index groups? This may take a while."),
                             QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
                         )
                         if choice == QtGui.QMessageBox.Yes:
@@ -2248,7 +2248,7 @@ class View(QtGui.QLabel):
             self.window.slicer_dialog.zcoord.append(locs.z)
         self.window.mask_settings_dialog.locs.append(
             locs
-        )  # TODO: at some point replace this, this is not very memory efficient
+        )  # TODO: replace at some point, not very efficient
         self.window.mask_settings_dialog.paths.append(path)
         self.window.mask_settings_dialog.infos.append(info)
         os.chdir(os.path.dirname(path))
@@ -2285,7 +2285,10 @@ class View(QtGui.QLabel):
         self.update_scene(picks_only=True)
 
     def adjust_viewport_to_view(self, viewport):
-        """ Adds space to a desired viewport so that it matches the window aspect ratio. """
+        """
+        Adds space to a desired viewport
+        so that it matches the window aspect ratio.
+        """
         viewport_height = viewport[1][0] - viewport[0][0]
         viewport_width = viewport[1][1] - viewport[0][1]
         view_height = self.height()
@@ -2460,7 +2463,10 @@ class View(QtGui.QLabel):
                 self.update_scene()
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
-        """ Calculates the shift from each channel to each other along a given coordinate. """
+        """
+        Calculates the shift from each channel
+        to each other along a given coordinate.
+        """
         n_channels = len(locs)
         # Calculating center of mass for each channel and pick
         coms = []
@@ -2479,7 +2485,10 @@ class View(QtGui.QLabel):
         return d
 
     def shift_from_picked(self):
-        """ Used by align. For each pick, calculate the center of mass and does rcc based on shifts """
+        """
+        Used by align. For each pick, calculate the center
+        of mass and does rcc based on shifts
+        """
         n_channels = len(self.locs)
         locs = [self.picked_locs(_) for _ in range(n_channels)]
         dy = self.shifts_from_picked_coordinate(locs, "y")
@@ -2491,7 +2500,10 @@ class View(QtGui.QLabel):
         return lib.minimize_shifts(dx, dy, shifts_z=dz)
 
     def shift_from_rcc(self):
-        """ Used by align. Estimates image shifts based on image correlation. """
+        """
+        Used by align. Estimates image shifts
+        based on image correlation.
+        """
         n_channels = len(self.locs)
         rp = lib.ProgressDialog("Rendering images", 0, n_channels, self)
         rp.set_value(0)
@@ -2772,7 +2784,10 @@ class View(QtGui.QLabel):
                 return None
 
     def get_render_kwargs(self, viewport=None):
-        """ Returns a dictionary to be used for the keyword arguments of render. """
+        """
+        Returns a dictionary to be used for the
+        keyword arguments of render.
+        """
         blur_button = (
             self.window.display_settings_dialog.blur_buttongroup.checkedButton()
         )
@@ -2797,7 +2812,8 @@ class View(QtGui.QLabel):
                     QtGui.QMessageBox.information(
                         self,
                         "Oversampling too high",
-                        "Oversampling will be adjusted to match the display pixel density.",
+                        ("Oversampling will be adjusted to",
+                            " match the display pixel density."),
                     )
                     oversampling = optimal_oversampling
                     self.window.display_settings_dialog.set_oversampling_silently(

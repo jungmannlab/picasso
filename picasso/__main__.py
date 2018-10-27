@@ -870,8 +870,8 @@ def main():
     link_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
     link_parser.add_argument(
@@ -880,8 +880,8 @@ def main():
         type=float,
         default=1.0,
         help=(
-            "maximum distance between localizations",
-            " to consider them the same binding event (default=1.0)",
+            "maximum distance between localizations"
+            " to consider them the same binding event (default=1.0)"
         ),
     )
     link_parser.add_argument(
@@ -890,8 +890,8 @@ def main():
         type=int,
         default=1,
         help=(
-            "maximum dark time between localizations",
-            " to still consider them the same binding event (default=1)",
+            "maximum dark time between localizations"
+            " to still consider them the same binding event (default=1)"
         ),
     )
 
@@ -902,8 +902,8 @@ def main():
     cluster_combine_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
 
@@ -914,8 +914,8 @@ def main():
     cluster_combine_dist_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
 
@@ -926,8 +926,8 @@ def main():
     clusterfilter_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
     clusterfilter_parser.add_argument("clusterfile", help="a hdf5 clusterfile")
@@ -948,8 +948,8 @@ def main():
     undrift_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
     undrift_parser.add_argument(
@@ -964,8 +964,8 @@ def main():
         type=float,
         default=1000,
         help=(
-            "the number of frames to be combined",
-            " for one temporal segment (default=1000)",
+            "the number of frames to be combined"
+            " for one temporal segment (default=1000)"
         ),
     )
     undrift_parser.add_argument(
@@ -988,16 +988,16 @@ def main():
     density_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
     density_parser.add_argument(
         "radius",
         type=float,
         help=(
-            "maximal distance between to localizations",
-            " to be considered local",
+            "maximal distance between to localizations"
+            " to be considered local"
         ),
     )
 
@@ -1009,24 +1009,24 @@ def main():
     dbscan_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
     dbscan_parser.add_argument(
         "radius",
         type=float,
         help=(
-            "maximal distance between to localizations",
-            " to be considered local",
+            "maximal distance between to localizations"
+            " to be considered local"
         ),
     )
     dbscan_parser.add_argument(
         "density",
         type=int,
         help=(
-            "minimum local density for localizations",
-            " to be assigned to a cluster",
+            "minimum local density for localizations"
+            " to be assigned to a cluster"
         ),
     )
 
@@ -1037,8 +1037,8 @@ def main():
     dark_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
 
@@ -1072,8 +1072,8 @@ def main():
     groupprops_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
 
@@ -1094,8 +1094,8 @@ def main():
     pc_parser.add_argument(
         "files",
         help=(
-            "one or multiple hdf5 localization files",
-            "specified by a unix style path pattern",
+            "one or multiple hdf5 localization files"
+            "specified by a unix style path pattern"
         ),
     )
 
@@ -1107,8 +1107,8 @@ def main():
         "files",
         nargs="?",
         help=(
-            "one movie file or a folder containing movie files",
-            " specified by a unix style path pattern",
+            "one movie file or a folder containing movie files"
+            " specified by a unix style path pattern"
         ),
     )
     localize_parser.add_argument(
@@ -1151,8 +1151,8 @@ def main():
         "files",
         nargs="?",
         help=(
-            "one or multiple hdf5 clustered files",
-            " specified by a unix style path pattern",
+            "one or multiple hdf5 clustered files"
+            " specified by a unix style path pattern"
         ),
     )
 
@@ -1164,8 +1164,8 @@ def main():
         "files",
         nargs="?",
         help=(
-            "one or multiple localization files",
-            " specified by a unix style path pattern",
+            "one or multiple localization files"
+            " specified by a unix style path pattern"
         ),
     )
     render_parser.add_argument(
@@ -1230,8 +1230,8 @@ def main():
         type=float,
         default=10,
         help=(
-            "oversampling of the super-resolution images",
-            " for alignment evaluation",
+            "oversampling of the super-resolution images"
+            " for alignment evaluation"
         ),
     )
     average_parser.add_argument("-i", "--iterations", type=int, default=20)

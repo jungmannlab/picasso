@@ -3,7 +3,7 @@
     ~~~~~~~~~~~~~~~~~~~~
     Graphical user interface for averaging particles
     :author: Joerg Schnitzbauer, 2015
-    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 import functools
 import multiprocessing
