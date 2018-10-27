@@ -16,7 +16,8 @@ def saveInfo(filename, info):
 
 
 def convertPlateIndex(plate, platename):
-    # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE] format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
+    # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
+    # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
 
     platerow = [
         "A",
@@ -84,7 +85,8 @@ def convertPlateIndex(plate, platename):
 
 
 def convertPlateIndexColor(plate, platename):
-    # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE] format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
+    # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
+    # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
 
     platerow = [
         "A",
