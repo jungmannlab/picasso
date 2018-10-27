@@ -136,7 +136,9 @@ def save_info(path, info, default_flow_style=False):
 
 
 def _to_dict_walk(node):
-    """ Converts mapping objects (subclassed from dict) to actual dict objects, including nested ones """
+    """ Converts mapping objects (subclassed from dict)
+    to actual dict objects, including nested ones
+    """
     node = dict(node)
     for key, val in node.items():
         if isinstance(val, dict):
@@ -190,9 +192,10 @@ class TiffMap:
             elif tag == 258:
                 bits_per_sample = self.read(type, count)
                 dtype_str = "u" + str(int(bits_per_sample / 8))
-                # Picasso uses internally exclusively little endian byte order...
+                # Picasso uses internally exclusively little endian byte order
                 self.dtype = _np.dtype(dtype_str)
-                # ... the tif byte order might be different, so we also store the file dtype
+                # the tif byte order might be different
+                # so we also store the file dtype
                 self._tif_dtype = _np.dtype(self._tif_byte_order + dtype_str)
         self.frame_shape = (self.height, self.width)
         self.frame_size = self.height * self.width
@@ -228,7 +231,8 @@ class TiffMap:
         self.close()
 
     def __getitem__(self, it):
-        with self.lock:  # Otherwise we get messed up when reading frames from multiple threads
+
+        with self.lock:  # for reading frames from multiple threads
             if isinstance(it, tuple):
                 if isinstance(it, int) or _np.issubdtype(it[0], _np.integer):
                     return self[it[0]][it[1:]]
@@ -290,7 +294,8 @@ class TiffMap:
             if count * self.TYPE_SIZES[type] > 4:
                 self.file.seek(self.read("L"))
             if tag == 51123:
-                # This is the Micro-Manager tag. We generate an info dict that contains any info we need.
+                # This is the Micro-Manager tag
+                # We generate an info dict that contains any info we need.
                 readout = self.read(type, count).strip(
                     b"\0"
                 )  # Strip null bytes which MM 1.4.22 adds
@@ -499,8 +504,8 @@ def get_movie_groups(paths):
     groups = {}
     if len(paths) > 0:
         pattern = _re.compile(
-            "(.*?)(_(\d*))?.ome.tif"
-        )  # This matches the basename + an optional appendix of the file number
+            r"(.*?)(_(\d*))?.ome.tif"
+        )  # This matches the basename + an opt appendix of the file number
         matches = [_re.match(pattern, path) for path in paths]
         match_infos = [
             {"path": _.group(), "base": _.group(1), "index": _.group(3)}
