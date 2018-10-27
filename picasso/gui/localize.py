@@ -20,17 +20,17 @@ from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
 
 try:
     from pygpufit import gpufit as gf
+
     gpufit_installed = True
 except ImportError:
     gpufit_installed = False
 
 
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
-DEFAULT_PARAMETERS = {'Box Size': 7, 'Min. Net Gradient': 5000}
+DEFAULT_PARAMETERS = {"Box Size": 7, "Min. Net Gradient": 5000}
 
 
 class RubberBand(QtGui.QRubberBand):
-
     def __init__(self, parent):
         super().__init__(QtGui.QRubberBand.Rectangle, parent)
 
@@ -60,7 +60,9 @@ class View(QtGui.QGraphicsView):
     def mousePressEvent(self, event):
         if event.button() == QtCore.Qt.LeftButton:
             self.roi_origin = QtCore.QPoint(event.pos())
-            self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, QtCore.QSize()))
+            self.rubberband.setGeometry(
+                QtCore.QRect(self.roi_origin, QtCore.QSize())
+            )
             self.rubberband.show()
         elif event.button() == QtCore.Qt.RightButton:
             self.pan = True
@@ -73,10 +75,16 @@ class View(QtGui.QGraphicsView):
 
     def mouseMoveEvent(self, event):
         if event.buttons() == QtCore.Qt.LeftButton:
-            self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, event.pos()))
+            self.rubberband.setGeometry(
+                QtCore.QRect(self.roi_origin, event.pos())
+            )
         if self.pan:
-            self.hscrollbar.setValue(self.hscrollbar.value() - event.x() + self.pan_start_x)
-            self.vscrollbar.setValue(self.vscrollbar.value() - event.y() + self.pan_start_y)
+            self.hscrollbar.setValue(
+                self.hscrollbar.value() - event.x() + self.pan_start_x
+            )
+            self.vscrollbar.setValue(
+                self.vscrollbar.value() - event.y() + self.pan_start_y
+            )
             self.pan_start_x = event.x()
             self.pan_start_y = event.y()
             event.accept()
@@ -92,7 +100,10 @@ class View(QtGui.QGraphicsView):
                 self.roi = None
                 self.rubberband.hide()
             else:
-                roi_points = (self.mapToScene(self.roi_origin), self.mapToScene(self.roi_end))
+                roi_points = (
+                    self.mapToScene(self.roi_origin),
+                    self.mapToScene(self.roi_end),
+                )
                 self.roi = list([[int(_.y()), int(_.x())] for _ in roi_points])
             self.window.draw_frame()
         elif event.button() == QtCore.Qt.RightButton:
@@ -126,7 +137,7 @@ class Scene(QtGui.QGraphicsScene):
         if not event.mimeData().hasUrls():
             return False
         path, extension = self.path_from_drop(event)
-        if extension.lower() not in ['.raw', '.tif']:
+        if extension.lower() not in [".raw", ".tif"]:
             return False
         return True
 
@@ -143,14 +154,13 @@ class Scene(QtGui.QGraphicsScene):
 
 
 class FitMarker(QtGui.QGraphicsItemGroup):
-
     def __init__(self, x, y, size, parent=None):
         super().__init__(parent)
-        L = size/2
-        line1 = QtGui.QGraphicsLineItem(x-L, y-L, x+L, y+L)
+        L = size / 2
+        line1 = QtGui.QGraphicsLineItem(x - L, y - L, x + L, y + L)
         line1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
         self.addToGroup(line1)
-        line2 = QtGui.QGraphicsLineItem(x-L, y+L, x+L, y-L)
+        line2 = QtGui.QGraphicsLineItem(x - L, y + L, x + L, y - L)
         line2.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
         self.addToGroup(line2)
 
@@ -170,7 +180,6 @@ class OddSpinBox(QtGui.QSpinBox):
 
 
 class CamSettingComboBox(QtGui.QComboBox):
-
     def __init__(self, cam_combos, camera, index):
         super().__init__()
         self.cam_combos = cam_combos
@@ -179,7 +188,7 @@ class CamSettingComboBox(QtGui.QComboBox):
 
     def change_target_choices(self, index):
         cam_combos = self.cam_combos[self.camera]
-        sensitivity = CONFIG['Cameras'][self.camera]['Sensitivity']
+        sensitivity = CONFIG["Cameras"][self.camera]["Sensitivity"]
         for i in range(self.index + 1):
             sensitivity = sensitivity[cam_combos[i].currentText()]
         target = cam_combos[self.index + 1]
@@ -190,43 +199,58 @@ class CamSettingComboBox(QtGui.QComboBox):
 
 
 class PromptInfoDialog(QtGui.QDialog):
-
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle('Enter movie info')
+        self.setWindowTitle("Enter movie info")
         vbox = QtGui.QVBoxLayout(self)
         grid = QtGui.QGridLayout()
-        grid.addWidget(QtGui.QLabel('Byte Order:'), 0, 0)
+        grid.addWidget(QtGui.QLabel("Byte Order:"), 0, 0)
         self.byte_order = QtGui.QComboBox()
-        self.byte_order.addItems(['Little Endian (loads faster)', 'Big Endian'])
+        self.byte_order.addItems(
+            ["Little Endian (loads faster)", "Big Endian"]
+        )
         grid.addWidget(self.byte_order, 0, 1)
-        grid.addWidget(QtGui.QLabel('Data Type:'), 1, 0)
+        grid.addWidget(QtGui.QLabel("Data Type:"), 1, 0)
         self.dtype = QtGui.QComboBox()
-        self.dtype.addItems(['float16', 'float32', 'float64', 'int8', 'int16', 'int32', 'uint8', 'uint16', 'uint32'])
+        self.dtype.addItems(
+            [
+                "float16",
+                "float32",
+                "float64",
+                "int8",
+                "int16",
+                "int32",
+                "uint8",
+                "uint16",
+                "uint32",
+            ]
+        )
         grid.addWidget(self.dtype, 1, 1)
-        grid.addWidget(QtGui.QLabel('Frames:'), 2, 0)
+        grid.addWidget(QtGui.QLabel("Frames:"), 2, 0)
         self.frames = QtGui.QSpinBox()
         self.frames.setRange(1, 1e9)
         grid.addWidget(self.frames, 2, 1)
-        grid.addWidget(QtGui.QLabel('Height:'), 3, 0)
+        grid.addWidget(QtGui.QLabel("Height:"), 3, 0)
         self.movie_height = QtGui.QSpinBox()
         self.movie_height.setRange(1, 1e9)
         grid.addWidget(self.movie_height, 3, 1)
-        grid.addWidget(QtGui.QLabel('Width'), 4, 0)
+        grid.addWidget(QtGui.QLabel("Width"), 4, 0)
         self.movie_width = QtGui.QSpinBox()
         self.movie_width.setRange(1, 1e9)
         grid.addWidget(self.movie_width, 4, 1)
-        self.save = QtGui.QCheckBox('Save info to yaml file')
+        self.save = QtGui.QCheckBox("Save info to yaml file")
         self.save.setChecked(True)
         grid.addWidget(self.save, 5, 0, 1, 2)
         vbox.addLayout(grid)
         hbox = QtGui.QHBoxLayout()
         vbox.addLayout(hbox)
         # OK and Cancel buttons
-        self.buttons = QtGui.QDialogButtonBox(QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
-                                              QtCore.Qt.Horizontal,
-                                              self)
+        self.buttons = QtGui.QDialogButtonBox(
+            QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
         vbox.addWidget(self.buttons)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
@@ -237,11 +261,13 @@ class PromptInfoDialog(QtGui.QDialog):
         dialog = PromptInfoDialog(parent)
         result = dialog.exec_()
         info = {}
-        info['Byte Order'] = '>' if dialog.byte_order.currentText() == 'Big Endian' else '<'
-        info['Data Type'] = dialog.dtype.currentText()
-        info['Frames'] = dialog.frames.value()
-        info['Height'] = dialog.movie_height.value()
-        info['Width'] = dialog.movie_width.value()
+        info["Byte Order"] = (
+            ">" if dialog.byte_order.currentText() == "Big Endian" else "<"
+        )
+        info["Data Type"] = dialog.dtype.currentText()
+        info["Frames"] = dialog.frames.value()
+        info["Height"] = dialog.movie_height.value()
+        info["Width"] = dialog.movie_width.value()
         save = dialog.save.isChecked()
         return (info, save, result == QtGui.QDialog.Accepted)
 
@@ -252,28 +278,28 @@ class ParametersDialog(QtGui.QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.window = parent
-        self.setWindowTitle('Parameters')
+        self.setWindowTitle("Parameters")
         self.resize(300, 0)
         self.setModal(False)
 
         vbox = QtGui.QVBoxLayout(self)
-        identification_groupbox = QtGui.QGroupBox('Identification')
+        identification_groupbox = QtGui.QGroupBox("Identification")
         vbox.addWidget(identification_groupbox)
         identification_grid = QtGui.QGridLayout(identification_groupbox)
 
         # Box Size
-        identification_grid.addWidget(QtGui.QLabel('Box side length:'), 0, 0)
+        identification_grid.addWidget(QtGui.QLabel("Box side length:"), 0, 0)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
-        self.box_spinbox.setValue(DEFAULT_PARAMETERS['Box Size'])
+        self.box_spinbox.setValue(DEFAULT_PARAMETERS["Box Size"])
         self.box_spinbox.valueChanged.connect(self.on_box_changed)
         identification_grid.addWidget(self.box_spinbox, 0, 1)
 
         # Min. Net Gradient
-        identification_grid.addWidget(QtGui.QLabel('Min. Net Gradient:'), 1, 0)
+        identification_grid.addWidget(QtGui.QLabel("Min. Net Gradient:"), 1, 0)
         self.mng_spinbox = QtGui.QSpinBox()
         self.mng_spinbox.setRange(0, 1e9)
-        self.mng_spinbox.setValue(DEFAULT_PARAMETERS['Min. Net Gradient'])
+        self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
         self.mng_spinbox.setKeyboardTracking(False)
         self.mng_spinbox.valueChanged.connect(self.on_mng_spinbox_changed)
         identification_grid.addWidget(self.mng_spinbox, 1, 1)
@@ -282,7 +308,7 @@ class ParametersDialog(QtGui.QDialog):
         self.mng_slider = QtGui.QSlider()
         self.mng_slider.setOrientation(QtCore.Qt.Horizontal)
         self.mng_slider.setRange(0, 10000)
-        self.mng_slider.setValue(DEFAULT_PARAMETERS['Min. Net Gradient'])
+        self.mng_slider.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
         self.mng_slider.setSingleStep(1)
         self.mng_slider.setPageStep(20)
         self.mng_slider.valueChanged.connect(self.on_mng_slider_changed)
@@ -309,22 +335,22 @@ class ParametersDialog(QtGui.QDialog):
         self.mng_max_spinbox.valueChanged.connect(self.on_mng_max_changed)
         hbox.addWidget(self.mng_max_spinbox)
 
-        self.preview_checkbox = QtGui.QCheckBox('Preview')
+        self.preview_checkbox = QtGui.QCheckBox("Preview")
         self.preview_checkbox.setTristate(False)
         # self.preview_checkbox.setChecked(True)
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
         # Camera:
-        if 'Cameras' in CONFIG:
+        if "Cameras" in CONFIG:
             # Experiment settings
-            exp_groupbox = QtGui.QGroupBox('Experiment settings')
+            exp_groupbox = QtGui.QGroupBox("Experiment settings")
             vbox.addWidget(exp_groupbox)
             exp_grid = QtGui.QGridLayout(exp_groupbox)
-            exp_grid.addWidget(QtGui.QLabel('Camera:'), 0, 0)
+            exp_grid.addWidget(QtGui.QLabel("Camera:"), 0, 0)
             self.camera = QtGui.QComboBox()
             exp_grid.addWidget(self.camera, 0, 1)
-            cameras = sorted(list(CONFIG['Cameras'].keys()))
+            cameras = sorted(list(CONFIG["Cameras"].keys()))
             self.camera.addItems(cameras)
             self.camera.currentIndexChanged.connect(self.on_camera_changed)
 
@@ -336,55 +362,71 @@ class ParametersDialog(QtGui.QDialog):
                 cam_widget = QtGui.QWidget()
                 cam_grid = QtGui.QGridLayout(cam_widget)
                 self.cam_settings.addWidget(cam_widget)
-                cam_config = CONFIG['Cameras'][camera]
-                if 'Sensitivity' in cam_config:
-                    sensitivity = cam_config['Sensitivity']
-                    if 'Sensitivity Categories' in cam_config:
+                cam_config = CONFIG["Cameras"][camera]
+                if "Sensitivity" in cam_config:
+                    sensitivity = cam_config["Sensitivity"]
+                    if "Sensitivity Categories" in cam_config:
                         self.cam_combos[camera] = []
-                        categories = cam_config['Sensitivity Categories']
+                        categories = cam_config["Sensitivity Categories"]
                         for i, category in enumerate(categories):
                             row_count = cam_grid.rowCount()
-                            cam_grid.addWidget(QtGui.QLabel(category+':'), row_count, 0)
-                            cat_combo = CamSettingComboBox(self.cam_combos, camera, i)
+                            cam_grid.addWidget(
+                                QtGui.QLabel(category + ":"), row_count, 0
+                            )
+                            cat_combo = CamSettingComboBox(
+                                self.cam_combos, camera, i
+                            )
                             cam_grid.addWidget(cat_combo, row_count, 1)
                             self.cam_combos[camera].append(cat_combo)
-                        self.cam_combos[camera][0].addItems(sorted(list(sensitivity.keys())))
+                        self.cam_combos[camera][0].addItems(
+                            sorted(list(sensitivity.keys()))
+                        )
                         for cam_combo in self.cam_combos[camera][:-1]:
-                            cam_combo.currentIndexChanged.connect(cam_combo.change_target_choices)
+                            cam_combo.currentIndexChanged.connect(
+                                cam_combo.change_target_choices
+                            )
                         self.cam_combos[camera][0].change_target_choices(0)
-                        self.cam_combos[camera][-1].currentIndexChanged.connect(self.update_sensitivity)
-                if 'Quantum Efficiency' in cam_config:
+                        self.cam_combos[camera][
+                            -1
+                        ].currentIndexChanged.connect(self.update_sensitivity)
+                if "Quantum Efficiency" in cam_config:
                     try:
-                        qes = cam_config['Quantum Efficiency'].keys()
+                        qes = cam_config["Quantum Efficiency"].keys()
                     except AttributeError:
                         pass
                     else:
                         row_count = cam_grid.rowCount()
-                        cam_grid.addWidget(QtGui.QLabel('Emission Wavelength:'), row_count, 0)
+                        cam_grid.addWidget(
+                            QtGui.QLabel("Emission Wavelength:"), row_count, 0
+                        )
                         emission_combo = QtGui.QComboBox()
                         cam_grid.addWidget(emission_combo, row_count, 1)
                         wavelengths = sorted([str(_) for _ in qes])
                         emission_combo.addItems(wavelengths)
-                        emission_combo.currentIndexChanged.connect(self.on_emission_changed)
+                        emission_combo.currentIndexChanged.connect(
+                            self.on_emission_changed
+                        )
                         self.emission_combos[camera] = emission_combo
                 spacer = QtGui.QWidget()
-                spacer.setSizePolicy(QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Expanding)
+                spacer.setSizePolicy(
+                    QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Expanding
+                )
                 cam_grid.addWidget(spacer, cam_grid.rowCount(), 0)
 
         # Photon conversion
-        photon_groupbox = QtGui.QGroupBox('Photon Conversion')
+        photon_groupbox = QtGui.QGroupBox("Photon Conversion")
         vbox.addWidget(photon_groupbox)
         photon_grid = QtGui.QGridLayout(photon_groupbox)
 
         # EM Gain
-        photon_grid.addWidget(QtGui.QLabel('EM Gain:'), 0, 0)
+        photon_grid.addWidget(QtGui.QLabel("EM Gain:"), 0, 0)
         self.gain = QtGui.QSpinBox()
         self.gain.setRange(1, 1e6)
         self.gain.setValue(1)
         photon_grid.addWidget(self.gain, 0, 1)
 
         # Baseline
-        photon_grid.addWidget(QtGui.QLabel('Baseline:'), 1, 0)
+        photon_grid.addWidget(QtGui.QLabel("Baseline:"), 1, 0)
         self.baseline = QtGui.QDoubleSpinBox()
         self.baseline.setRange(0, 1e6)
         self.baseline.setValue(100.0)
@@ -393,7 +435,7 @@ class ParametersDialog(QtGui.QDialog):
         photon_grid.addWidget(self.baseline, 1, 1)
 
         # Sensitivity
-        photon_grid.addWidget(QtGui.QLabel('Sensitivity:'), 2, 0)
+        photon_grid.addWidget(QtGui.QLabel("Sensitivity:"), 2, 0)
         self.sensitivity = QtGui.QDoubleSpinBox()
         self.sensitivity.setRange(0, 1e6)
         self.sensitivity.setValue(1.0)
@@ -402,7 +444,7 @@ class ParametersDialog(QtGui.QDialog):
         photon_grid.addWidget(self.sensitivity, 2, 1)
 
         # QE
-        photon_grid.addWidget(QtGui.QLabel('Quantum Efficiency:'), 3, 0)
+        photon_grid.addWidget(QtGui.QLabel("Quantum Efficiency:"), 3, 0)
         self.qe = QtGui.QDoubleSpinBox()
         self.qe.setRange(0, 1)
         self.qe.setValue(0.9)
@@ -410,9 +452,8 @@ class ParametersDialog(QtGui.QDialog):
         self.qe.setSingleStep(0.1)
         photon_grid.addWidget(self.qe, 3, 1)
 
-
         # QE
-        photon_grid.addWidget(QtGui.QLabel('Pixelsize (nm):'), 4, 0)
+        photon_grid.addWidget(QtGui.QLabel("Pixelsize (nm):"), 4, 0)
         self.pixelsize = QtGui.QSpinBox()
         self.pixelsize.setRange(0, 1000)
         self.pixelsize.setValue(130)
@@ -420,15 +461,15 @@ class ParametersDialog(QtGui.QDialog):
         photon_grid.addWidget(self.pixelsize, 4, 1)
 
         # Fit Settings
-        fit_groupbox = QtGui.QGroupBox('Fit Settings')
+        fit_groupbox = QtGui.QGroupBox("Fit Settings")
         vbox.addWidget(fit_groupbox)
         fit_grid = QtGui.QGridLayout(fit_groupbox)
 
-
-
-        fit_grid.addWidget(QtGui.QLabel('Method:'), 1, 0)
+        fit_grid.addWidget(QtGui.QLabel("Method:"), 1, 0)
         self.fit_method = QtGui.QComboBox()
-        self.fit_method.addItems(['MLE, integrated Gaussian', 'LQ, Gaussian','Average of ROI'])
+        self.fit_method.addItems(
+            ["MLE, integrated Gaussian", "LQ, Gaussian", "Average of ROI"]
+        )
         fit_grid.addWidget(self.fit_method, 1, 1)
         fit_stack = QtGui.QStackedWidget()
         fit_grid.addWidget(fit_stack, 2, 0, 1, 2)
@@ -439,13 +480,13 @@ class ParametersDialog(QtGui.QDialog):
         mle_widget = QtGui.QWidget()
         fit_stack.addWidget(mle_widget)
         mle_grid = QtGui.QGridLayout(mle_widget)
-        mle_grid.addWidget(QtGui.QLabel('Convergence criterion:'), 0, 0)
+        mle_grid.addWidget(QtGui.QLabel("Convergence criterion:"), 0, 0)
         self.convergence_criterion = QtGui.QDoubleSpinBox()
         self.convergence_criterion.setRange(0, 1e6)
         self.convergence_criterion.setDecimals(6)
         self.convergence_criterion.setValue(0.001)
         mle_grid.addWidget(self.convergence_criterion, 0, 1)
-        mle_grid.addWidget(QtGui.QLabel('Max. iterations:'), 1, 0)
+        mle_grid.addWidget(QtGui.QLabel("Max. iterations:"), 1, 0)
         self.max_it = QtGui.QSpinBox()
         self.max_it.setRange(1, 1e6)
         self.max_it.setValue(1000)
@@ -455,7 +496,7 @@ class ParametersDialog(QtGui.QDialog):
         lq_widget = QtGui.QWidget()
         lq_grid = QtGui.QGridLayout(lq_widget)
 
-        self.gpufit_checkbox = QtGui.QCheckBox('Use GPUfit')
+        self.gpufit_checkbox = QtGui.QCheckBox("Use GPUfit")
         self.gpufit_checkbox.setTristate(False)
         self.gpufit_checkbox.setDisabled(True)
         self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
@@ -471,47 +512,60 @@ class ParametersDialog(QtGui.QDialog):
         fit_stack.addWidget(avg_widget)
 
         # 3D
-        z_groupbox = QtGui.QGroupBox('3D via Astigmatism')
+        z_groupbox = QtGui.QGroupBox("3D via Astigmatism")
         vbox.addWidget(z_groupbox)
         z_grid = QtGui.QGridLayout(z_groupbox)
-        z_grid.addWidget(QtGui.QLabel('Non-integrated Gaussian fitting is recommend!'), 0, 0, 1, 2)
-        load_z_calib = QtGui.QPushButton('Load calibration')
+        z_grid.addWidget(
+            QtGui.QLabel("Non-integrated Gaussian fitting is recommend!"),
+            0,
+            0,
+            1,
+            2,
+        )
+        load_z_calib = QtGui.QPushButton("Load calibration")
         load_z_calib.setAutoDefault(False)
         load_z_calib.clicked.connect(self.load_z_calib)
         z_grid.addWidget(load_z_calib, 1, 1)
-        self.fit_z_checkbox = QtGui.QCheckBox('Fit Z')
+        self.fit_z_checkbox = QtGui.QCheckBox("Fit Z")
         self.fit_z_checkbox.setEnabled(False)
         z_grid.addWidget(self.fit_z_checkbox, 3, 1)
-        self.z_calib_label = QtGui.QLabel('-- no calibration loaded --')
+        self.z_calib_label = QtGui.QLabel("-- no calibration loaded --")
         self.z_calib_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.z_calib_label.setSizePolicy(QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Fixed)
+        self.z_calib_label.setSizePolicy(
+            QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Fixed
+        )
         z_grid.addWidget(self.z_calib_label, 1, 0)
-        z_grid.addWidget(QtGui.QLabel('Magnification factor:'), 2, 0)
+        z_grid.addWidget(QtGui.QLabel("Magnification factor:"), 2, 0)
         self.magnification_factor = QtGui.QDoubleSpinBox()
         self.magnification_factor.setRange(0, 1e6)
         self.magnification_factor.setDecimals(4)
         self.magnification_factor.setValue(0.79)
         z_grid.addWidget(self.magnification_factor, 2, 1)
 
-        if 'Cameras' in CONFIG:
+        if "Cameras" in CONFIG:
             camera = self.camera.currentText()
-            if camera in CONFIG['Cameras']:
+            if camera in CONFIG["Cameras"]:
                 self.on_camera_changed(0)
-                camera_config = CONFIG['Cameras'][camera]
-                if 'Sensitivity' in camera_config and 'Sensitivity Categories' in camera_config:
+                camera_config = CONFIG["Cameras"][camera]
+                if (
+                    "Sensitivity" in camera_config
+                    and "Sensitivity Categories" in camera_config
+                ):
                     self.update_sensitivity()
 
     def on_fit_method_changed(self, state):
-        if self.fit_method.currentText() == 'LQ, Gaussian':
+        if self.fit_method.currentText() == "LQ, Gaussian":
             self.gpufit_checkbox.setDisabled(False)
         else:
             self.gpufit_checkbox.setChecked(False)
             self.gpufit_checkbox.setDisabled(True)
 
     def load_z_calib(self):
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Load 3d calibration', directory=None, filter='*.yaml')
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Load 3d calibration", directory=None, filter="*.yaml"
+        )
         if path:
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 self.z_calibration = yaml.load(f)
                 self.z_calibration_path = path
             self.z_calib_label.setAlignment(QtCore.Qt.AlignRight)
@@ -526,28 +580,28 @@ class ParametersDialog(QtGui.QDialog):
         self.gain.setValue(1)
         self.cam_settings.setCurrentIndex(index)
         camera = self.camera.currentText()
-        cam_config = CONFIG['Cameras'][camera]
-        if 'Baseline' in cam_config:
-            self.baseline.setValue(cam_config['Baseline'])
-        if 'DefaultGain' in cam_config:
-            self.gain.setValue(cam_config['DefaultGain'])
-        if 'Pixelsize' in cam_config:
-            self.pixelsize.setValue(cam_config['Pixelsize'])
+        cam_config = CONFIG["Cameras"][camera]
+        if "Baseline" in cam_config:
+            self.baseline.setValue(cam_config["Baseline"])
+        if "DefaultGain" in cam_config:
+            self.gain.setValue(cam_config["DefaultGain"])
+        if "Pixelsize" in cam_config:
+            self.pixelsize.setValue(cam_config["Pixelsize"])
         self.update_sensitivity()
         self.update_qe()
 
     def update_qe(self):
         camera = self.camera.currentText()
-        cam_config = CONFIG['Cameras'][camera]
-        if 'Quantum Efficiency' in cam_config:
-            qe = cam_config['Quantum Efficiency']
+        cam_config = CONFIG["Cameras"][camera]
+        if "Quantum Efficiency" in cam_config:
+            qe = cam_config["Quantum Efficiency"]
             try:
                 self.qe.setValue(qe)
             except TypeError:
                 # qe is not a number
                 em_combo = self.emission_combos[camera]
                 wavelength = float(em_combo.currentText())
-                qe = cam_config['Quantum Efficiency'][wavelength]
+                qe = cam_config["Quantum Efficiency"][wavelength]
                 self.qe.setValue(qe)
 
     def on_emission_changed(self, index):
@@ -578,42 +632,58 @@ class ParametersDialog(QtGui.QDialog):
         self.window.draw_frame()
 
     def set_camera_parameters(self, info):
-        if 'Cameras' in CONFIG and 'Camera' in info:
-            cameras = [self.camera.itemText(_) for _ in range(self.camera.count())]
-            camera = info['Camera']
+        if "Cameras" in CONFIG and "Camera" in info:
+            cameras = [
+                self.camera.itemText(_) for _ in range(self.camera.count())
+            ]
+            camera = info["Camera"]
             if camera in cameras:
                 index = cameras.index(camera)
                 self.camera.setCurrentIndex(index)
-                if 'Micro-Manager Metadata' in info:
-                    mm_info = info['Micro-Manager Metadata']
-                    cam_config = CONFIG['Cameras'][camera]
-                    if 'Gain Property Name' in cam_config:
-                        gain_property_name = cam_config['Gain Property Name']
-                        gain = mm_info[camera + '-' + gain_property_name]
-                        if 'EM Switch Property' in cam_config:
-                            switch_property_name = cam_config['EM Switch Property']['Name']
-                            switch_property_value = mm_info[camera + '-' + switch_property_name]
-                            if switch_property_value == cam_config['EM Switch Property'][True]:
+                if "Micro-Manager Metadata" in info:
+                    mm_info = info["Micro-Manager Metadata"]
+                    cam_config = CONFIG["Cameras"][camera]
+                    if "Gain Property Name" in cam_config:
+                        gain_property_name = cam_config["Gain Property Name"]
+                        gain = mm_info[camera + "-" + gain_property_name]
+                        if "EM Switch Property" in cam_config:
+                            switch_property_name = cam_config[
+                                "EM Switch Property"
+                            ]["Name"]
+                            switch_property_value = mm_info[
+                                camera + "-" + switch_property_name
+                            ]
+                            if (
+                                switch_property_value
+                                == cam_config["EM Switch Property"][True]
+                            ):
                                 self.gain.setValue(int(gain))
                             else:
                                 self.gain.setValue(1)
-                    if 'Sensitivity Categories' in cam_config:
+                    if "Sensitivity Categories" in cam_config:
                         cam_combos = self.cam_combos[camera]
-                        categories = cam_config['Sensitivity Categories']
+                        categories = cam_config["Sensitivity Categories"]
                         for i, category in enumerate(categories):
-                            property_name = camera + '-' + category
+                            property_name = camera + "-" + category
                             if property_name in mm_info:
-                                exp_setting = mm_info[camera + '-' + category]
+                                exp_setting = mm_info[camera + "-" + category]
                                 cam_combo = cam_combos[i]
                                 for index in range(cam_combo.count()):
-                                    if cam_combo.itemText(index) == exp_setting:
+                                    if (
+                                        cam_combo.itemText(index)
+                                        == exp_setting
+                                    ):
                                         cam_combo.setCurrentIndex(index)
                                         break
-                    if 'Quantum Efficiency' in cam_config:
-                        if 'Channel Device' in cam_config:
-                            channel_device_name = cam_config['Channel Device']['Name']
+                    if "Quantum Efficiency" in cam_config:
+                        if "Channel Device" in cam_config:
+                            channel_device_name = cam_config["Channel Device"][
+                                "Name"
+                            ]
                             channel = mm_info[channel_device_name]
-                            channels = cam_config['Channel Device']['Emission Wavelengths']
+                            channels = cam_config["Channel Device"][
+                                "Emission Wavelengths"
+                            ]
                             if channel in channels:
                                 wavelength = str(channels[channel])
                                 em_combo = self.emission_combos[camera]
@@ -622,18 +692,21 @@ class ParametersDialog(QtGui.QDialog):
                                         em_combo.setCurrentIndex(index)
                                         break
                                 else:
-                                    raise ValueError('No quantum efficiency found for wavelength ' + wavelength)
+                                    raise ValueError(
+                                        "No quantum efficiency found for wavelength "
+                                        + wavelength
+                                    )
 
     def update_sensitivity(self, index=None):
         camera = self.camera.currentText()
-        cam_config = CONFIG['Cameras'][camera]
-        sensitivity = cam_config['Sensitivity']
-        if 'Sensitivity' in cam_config:
+        cam_config = CONFIG["Cameras"][camera]
+        sensitivity = cam_config["Sensitivity"]
+        if "Sensitivity" in cam_config:
             try:
                 self.sensitivity.setValue(sensitivity)
             except TypeError:
                 # sensitivity is not a number
-                categories = cam_config['Sensitivity Categories']
+                categories = cam_config["Sensitivity Categories"]
                 for i, category in enumerate(categories):
                     cat_combo = self.cam_combos[camera][i]
                     sensitivity = sensitivity[cat_combo.currentText()]
@@ -641,29 +714,28 @@ class ParametersDialog(QtGui.QDialog):
 
 
 class ContrastDialog(QtGui.QDialog):
-
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle('Contrast')
+        self.setWindowTitle("Contrast")
         self.resize(200, 0)
         self.setModal(False)
         grid = QtGui.QGridLayout(self)
-        black_label = QtGui.QLabel('Black:')
+        black_label = QtGui.QLabel("Black:")
         grid.addWidget(black_label, 0, 0)
         self.black_spinbox = QtGui.QSpinBox()
         self.black_spinbox.setKeyboardTracking(False)
         self.black_spinbox.setRange(0, 999999)
         self.black_spinbox.valueChanged.connect(self.on_contrast_changed)
         grid.addWidget(self.black_spinbox, 0, 1)
-        white_label = QtGui.QLabel('White:')
+        white_label = QtGui.QLabel("White:")
         grid.addWidget(white_label, 1, 0)
         self.white_spinbox = QtGui.QSpinBox()
         self.white_spinbox.setKeyboardTracking(False)
         self.white_spinbox.setRange(0, 999999)
         self.white_spinbox.valueChanged.connect(self.on_contrast_changed)
         grid.addWidget(self.white_spinbox, 1, 1)
-        self.auto_checkbox = QtGui.QCheckBox('Auto')
+        self.auto_checkbox = QtGui.QCheckBox("Auto")
         self.auto_checkbox.setTristate(False)
         self.auto_checkbox.setChecked(True)
         self.auto_checkbox.stateChanged.connect(self.on_auto_changed)
@@ -696,9 +768,9 @@ class Window(QtGui.QMainWindow):
     def __init__(self):
         super().__init__()
         # Init GUI
-        self.setWindowTitle('Picasso: Localize')
+        self.setWindowTitle("Picasso: Localize")
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, 'icons', 'localize.ico')
+        icon_path = os.path.join(this_directory, "icons", "localize.ico")
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(768, 768)
@@ -728,7 +800,7 @@ class Window(QtGui.QMainWindow):
 
         self.movie_path = []
 
-        #Load user settings
+        # Load user settings
         self.load_user_settings()
 
     def load_user_settings(self):
@@ -737,9 +809,9 @@ class Window(QtGui.QMainWindow):
         box_size = []
         gradient = []
         try:
-            pwd = settings['Localize']['PWD']
-            box_size = settings['Localize']['box_size']
-            gradient = settings['Localize']['gradient']
+            pwd = settings["Localize"]["PWD"]
+            box_size = settings["Localize"]["box_size"]
+            gradient = settings["Localize"]["gradient"]
         except:
             pass
         if len(pwd) == 0:
@@ -751,13 +823,16 @@ class Window(QtGui.QMainWindow):
 
         self.pwd = pwd
 
-
     def closeEvent(self, event):
         settings = io.load_user_settings()
         if self.movie_path != []:
-            settings['Localize']['PWD'] = os.path.dirname(self.movie_path)
-            settings['Localize']['box_size'] = self.parameters_dialog.box_spinbox.value()
-            settings['Localize']['gradient'] = self.parameters_dialog.mng_slider.value()
+            settings["Localize"]["PWD"] = os.path.dirname(self.movie_path)
+            settings["Localize"][
+                "box_size"
+            ] = self.parameters_dialog.box_spinbox.value()
+            settings["Localize"][
+                "gradient"
+            ] = self.parameters_dialog.mng_slider.value()
         io.save_user_settings(settings)
         QtGui.qApp.closeAllWindows()
 
@@ -765,21 +840,23 @@ class Window(QtGui.QMainWindow):
         menu_bar = self.menuBar()
 
         """ File """
-        file_menu = menu_bar.addMenu('File')
-        open_action = file_menu.addAction('Open movie')
-        open_action.setShortcut('Ctrl+O')
+        file_menu = menu_bar.addMenu("File")
+        open_action = file_menu.addAction("Open movie")
+        open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
-        load_picks_action = file_menu.addAction('Load picks as identifications')
+        load_picks_action = file_menu.addAction(
+            "Load picks as identifications"
+        )
         load_picks_action.triggered.connect(self.open_picks)
-        load_locs_action = file_menu.addAction('Load locs as identifications')
+        load_locs_action = file_menu.addAction("Load locs as identifications")
         load_locs_action.triggered.connect(self.open_locs)
-        save_action = file_menu.addAction('Save localizations')
-        save_action.setShortcut('Ctrl+S')
+        save_action = file_menu.addAction("Save localizations")
+        save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.save_locs_dialog)
         file_menu.addAction(save_action)
-        save_spots_action = file_menu.addAction('Save spots')
-        save_spots_action.setShortcut('Ctrl+Shift+S')
+        save_spots_action = file_menu.addAction("Save spots")
+        save_spots_action.setShortcut("Ctrl+Shift+S")
         save_spots_action.triggered.connect(self.save_spots_dialog)
         file_menu.addAction(save_spots_action)
         # file_menu.addSeparator()
@@ -793,77 +870,77 @@ class Window(QtGui.QMainWindow):
         # file_menu.addAction(save_parameters_action)
 
         """ View """
-        view_menu = menu_bar.addMenu('View')
-        previous_frame_action = view_menu.addAction('Previous frame')
-        previous_frame_action.setShortcut('Left')
+        view_menu = menu_bar.addMenu("View")
+        previous_frame_action = view_menu.addAction("Previous frame")
+        previous_frame_action.setShortcut("Left")
         previous_frame_action.triggered.connect(self.previous_frame)
         view_menu.addAction(previous_frame_action)
-        next_frame_action = view_menu.addAction('Next frame')
-        next_frame_action.setShortcut('Right')
+        next_frame_action = view_menu.addAction("Next frame")
+        next_frame_action.setShortcut("Right")
         next_frame_action.triggered.connect(self.next_frame)
         view_menu.addAction(next_frame_action)
         view_menu.addSeparator()
-        first_frame_action = view_menu.addAction('First frame')
-        first_frame_action.setShortcut('Home')
+        first_frame_action = view_menu.addAction("First frame")
+        first_frame_action.setShortcut("Home")
         first_frame_action.triggered.connect(self.first_frame)
         view_menu.addAction(first_frame_action)
-        last_frame_action = view_menu.addAction('Last frame')
-        last_frame_action.setShortcut('End')
+        last_frame_action = view_menu.addAction("Last frame")
+        last_frame_action.setShortcut("End")
         last_frame_action.triggered.connect(self.last_frame)
         view_menu.addAction(last_frame_action)
-        go_to_frame_action = view_menu.addAction('Go to frame')
-        go_to_frame_action.setShortcut('Ctrl+G')
+        go_to_frame_action = view_menu.addAction("Go to frame")
+        go_to_frame_action.setShortcut("Ctrl+G")
         go_to_frame_action.triggered.connect(self.to_frame)
         view_menu.addAction(go_to_frame_action)
         view_menu.addSeparator()
-        zoom_in_action = view_menu.addAction('Zoom in')
-        zoom_in_action.setShortcuts(['Ctrl++', 'Ctrl+='])
+        zoom_in_action = view_menu.addAction("Zoom in")
+        zoom_in_action.setShortcuts(["Ctrl++", "Ctrl+="])
         zoom_in_action.triggered.connect(self.zoom_in)
         view_menu.addAction(zoom_in_action)
-        zoom_out_action = view_menu.addAction('Zoom out')
-        zoom_out_action.setShortcut('Ctrl+-')
+        zoom_out_action = view_menu.addAction("Zoom out")
+        zoom_out_action.setShortcut("Ctrl+-")
         zoom_out_action.triggered.connect(self.zoom_out)
         view_menu.addAction(zoom_out_action)
-        fit_in_view_action = view_menu.addAction('Fit image to window')
-        fit_in_view_action.setShortcut('Ctrl+W')
+        fit_in_view_action = view_menu.addAction("Fit image to window")
+        fit_in_view_action.setShortcut("Ctrl+W")
         fit_in_view_action.triggered.connect(self.fit_in_view)
         view_menu.addAction(fit_in_view_action)
         view_menu.addSeparator()
-        display_settings_action = view_menu.addAction('Contrast')
-        display_settings_action.setShortcut('Ctrl+C')
+        display_settings_action = view_menu.addAction("Contrast")
+        display_settings_action.setShortcut("Ctrl+C")
         display_settings_action.triggered.connect(self.contrast_dialog.show)
         view_menu.addAction(display_settings_action)
 
         """ Analyze """
-        analyze_menu = menu_bar.addMenu('Analyze')
-        parameters_action = analyze_menu.addAction('Parameters')
-        parameters_action.setShortcut('Ctrl+P')
+        analyze_menu = menu_bar.addMenu("Analyze")
+        parameters_action = analyze_menu.addAction("Parameters")
+        parameters_action.setShortcut("Ctrl+P")
         parameters_action.triggered.connect(self.parameters_dialog.show)
         analyze_menu.addAction(parameters_action)
         analyze_menu.addSeparator()
-        identify_action = analyze_menu.addAction('Identify')
-        identify_action.setShortcut('Ctrl+I')
+        identify_action = analyze_menu.addAction("Identify")
+        identify_action.setShortcut("Ctrl+I")
         identify_action.triggered.connect(self.identify)
         analyze_menu.addAction(identify_action)
-        fit_action = analyze_menu.addAction('Fit')
-        fit_action.setShortcut('Ctrl+F')
+        fit_action = analyze_menu.addAction("Fit")
+        fit_action.setShortcut("Ctrl+F")
         fit_action.triggered.connect(self.fit)
         analyze_menu.addAction(fit_action)
-        localize_action = analyze_menu.addAction('Localize (Identify && Fit)')
-        localize_action.setShortcut('Ctrl+L')
+        localize_action = analyze_menu.addAction("Localize (Identify && Fit)")
+        localize_action.setShortcut("Ctrl+L")
         localize_action.triggered.connect(self.localize)
         analyze_menu.addAction(localize_action)
         analyze_menu.addSeparator()
-        calibrate_z_action = analyze_menu.addAction('Calibrate 3D')
+        calibrate_z_action = analyze_menu.addAction("Calibrate 3D")
         calibrate_z_action.triggered.connect(self.calibrate_z)
 
     @property
     def camera_info(self):
         camera_info = {}
-        camera_info['baseline'] = self.parameters_dialog.baseline.value()
-        camera_info['gain'] = self.parameters_dialog.gain.value()
-        camera_info['sensitivity'] = self.parameters_dialog.sensitivity.value()
-        camera_info['qe'] = self.parameters_dialog.qe.value()
+        camera_info["baseline"] = self.parameters_dialog.baseline.value()
+        camera_info["gain"] = self.parameters_dialog.gain.value()
+        camera_info["sensitivity"] = self.parameters_dialog.sensitivity.value()
+        camera_info["qe"] = self.parameters_dialog.qe.value()
         return camera_info
 
     def calibrate_z(self):
@@ -874,13 +951,13 @@ class Window(QtGui.QMainWindow):
             dir = None
         else:
             dir = self.pwd
-        
-        path = QtGui.QFileDialog.getOpenFileName(self, 'Open image sequence', directory = dir, filter='*.raw; *.tif')
+
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Open image sequence", directory=dir, filter="*.raw; *.tif"
+        )
         if path:
             self.pwd = path
             self.open(path)
-
-
 
     def open(self, path):
         t0 = time.time()
@@ -895,59 +972,83 @@ class Window(QtGui.QMainWindow):
             self.set_frame(0)
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
-            self.status_bar.showMessage('Opened movie in {:.2f} seconds.'.format(dt))
+            self.status_bar.showMessage(
+                "Opened movie in {:.2f} seconds.".format(dt)
+            )
 
     def open_picks(self):
         if self.movie_path != []:
             dir = os.path.dirname(self.movie_path)
         else:
             dir = None
-        path = QtGui.QFileDialog.getOpenFileName(self,  'Open picks', directory = dir, filter='*.yaml')
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Open picks", directory=dir, filter="*.yaml"
+        )
         if path:
             self.load_picks(path)
 
-    def load_picks(self,path):
+    def load_picks(self, path):
         try:
-            with open(path, 'r') as f:
+            with open(path, "r") as f:
                 regions = yaml.load(f)
-            self._picks = regions['Centers']
-            maxframes = int(self.info[0]['Frames'])
-            #ask for drift correction
-            driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', directory = os.path.dirname(path), filter='*.txt')
+            self._picks = regions["Centers"]
+            maxframes = int(self.info[0]["Frames"])
+            # ask for drift correction
+            driftpath = QtGui.QFileDialog.getOpenFileName(
+                self,
+                "Open drift file",
+                directory=os.path.dirname(path),
+                filter="*.txt",
+            )
             if driftpath:
                 drift = np.genfromtxt(driftpath)
             data = []
             n_id = 0
             for element in self._picks:
-                #drifted:
-                xloc = np.ones((maxframes,), dtype=np.float)*element[0]
-                yloc = np.ones((maxframes,), dtype=np.float)*element[1]
+                # drifted:
+                xloc = np.ones((maxframes,), dtype=np.float) * element[0]
+                yloc = np.ones((maxframes,), dtype=np.float) * element[1]
                 if driftpath:
                     xloc += drift[:, 1]
                     yloc += drift[:, 0]
                 else:
                     pass
                 frames = np.arange(maxframes)
-                gradient = np.ones(maxframes)+100
-                n_id_all = np.ones(maxframes)+n_id
-                temp = np.array([frames,xloc,yloc,gradient,n_id_all])
-                data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
-                n_id+=1
+                gradient = np.ones(maxframes) + 100
+                n_id_all = np.ones(maxframes) + n_id
+                temp = np.array([frames, xloc, yloc, gradient, n_id_all])
+                data.append([tuple(temp[:, j]) for j in range(temp.shape[1])])
+                n_id += 1
 
             data = [item for sublist in data for item in sublist]
-            identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float), ('n_id', int)])
+            identifications = np.array(
+                data,
+                dtype=[
+                    ("frame", int),
+                    ("x", float),
+                    ("y", float),
+                    ("net_gradient", float),
+                    ("n_id", int),
+                ],
+            )
 
             self.identifications = identifications.view(np.recarray)
-            self.identifications.sort(kind='mergesort', order='frame')
+            self.identifications.sort(kind="mergesort", order="frame")
             self.locs = None
 
             self.loaded_picks = True
 
-            self.last_identification_info={'Box Size': self.parameters_dialog.box_spinbox.value(),
-                    'Min. Net Gradient': self.parameters_dialog.mng_slider.value()}
+            self.last_identification_info = {
+                "Box Size": self.parameters_dialog.box_spinbox.value(),
+                "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
+            }
             self.ready_for_fit = True
             self.draw_frame()
-            self.status_bar.showMessage('Created a total of {} identifications.'.format(len(self.identifications)))
+            self.status_bar.showMessage(
+                "Created a total of {} identifications.".format(
+                    len(self.identifications)
+                )
+            )
 
         except io.NoMetadataFileError:
             return
@@ -957,55 +1058,86 @@ class Window(QtGui.QMainWindow):
             dir = os.path.dirname(self.movie_path)
         else:
             dir = None
-        path = QtGui.QFileDialog.getOpenFileName(self,  'Open locs', directory = dir, filter='*.hdf5')
+        path = QtGui.QFileDialog.getOpenFileName(
+            self, "Open locs", directory=dir, filter="*.hdf5"
+        )
         if path:
             self.load_locs(path)
 
-    def load_locs(self,path):
+    def load_locs(self, path):
         try:
             locs, info = io.load_locs(path)
 
             print(locs)
             print(info)
-            max_frames = int(self.info[0]['Frames'])
-            n_frames, ok = QtGui.QInputDialog.getInteger(self, 'Input Dialog',
-                'Enter number of frames around localization event:',100)
+            max_frames = int(self.info[0]["Frames"])
+            n_frames, ok = QtGui.QInputDialog.getInteger(
+                self,
+                "Input Dialog",
+                "Enter number of frames around localization event:",
+                100,
+            )
 
-            #driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', filter='*.txt')
-            #if driftpath:
+            # driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', filter='*.txt')
+            # if driftpath:
             #    drift = np.genfromtxt(driftpath)
             data = []
             n_id = 0
             for element in locs:
-                currentframe = element['frame']
-                if currentframe>n_frames and currentframe<(max_frames-n_frames):
-                    xloc = np.ones((2*n_frames+1,), dtype=np.float)*element['x']
-                    yloc = np.ones((2*n_frames+1,), dtype=np.float)*element['y']
-                    frames = np.arange(currentframe-n_frames,currentframe+n_frames+1)
-                    gradient = np.ones(2*n_frames+1)+100
-                    n_id_all = np.ones(2*n_frames+1)+n_id
-                    temp = np.array([frames,xloc,yloc,gradient,n_id_all])
-                    data.append([tuple(temp[:,j]) for j in range(temp.shape[1])])
-                n_id+=1
+                currentframe = element["frame"]
+                if currentframe > n_frames and currentframe < (
+                    max_frames - n_frames
+                ):
+                    xloc = (
+                        np.ones((2 * n_frames + 1,), dtype=np.float)
+                        * element["x"]
+                    )
+                    yloc = (
+                        np.ones((2 * n_frames + 1,), dtype=np.float)
+                        * element["y"]
+                    )
+                    frames = np.arange(
+                        currentframe - n_frames, currentframe + n_frames + 1
+                    )
+                    gradient = np.ones(2 * n_frames + 1) + 100
+                    n_id_all = np.ones(2 * n_frames + 1) + n_id
+                    temp = np.array([frames, xloc, yloc, gradient, n_id_all])
+                    data.append(
+                        [tuple(temp[:, j]) for j in range(temp.shape[1])]
+                    )
+                n_id += 1
 
             data = [item for sublist in data for item in sublist]
-            identifications = np.array(data, dtype=[('frame', int), ('x', float), ('y', float), ('net_gradient', float), ('n_id', int)])
+            identifications = np.array(
+                data,
+                dtype=[
+                    ("frame", int),
+                    ("x", float),
+                    ("y", float),
+                    ("net_gradient", float),
+                    ("n_id", int),
+                ],
+            )
             self.identifications = identifications.view(np.recarray)
-            self.identifications.sort(kind='mergesort', order='frame')
+            self.identifications.sort(kind="mergesort", order="frame")
             self.locs = None
 
             self.loaded_picks = True
 
-            self.last_identification_info={'Box Size': self.parameters_dialog.box_spinbox.value(),
-                    'Min. Net Gradient': self.parameters_dialog.mng_slider.value()}
+            self.last_identification_info = {
+                "Box Size": self.parameters_dialog.box_spinbox.value(),
+                "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
+            }
             self.ready_for_fit = True
             self.draw_frame()
-            self.status_bar.showMessage('Created a total of {} identifications.'.format(len(self.identifications)))
+            self.status_bar.showMessage(
+                "Created a total of {} identifications.".format(
+                    len(self.identifications)
+                )
+            )
 
         except io.NoMetadataFileError:
             return
-
-
 
     def prompt_info(self):
         info, save, ok = PromptInfoDialog.getMovieSpecs(self)
@@ -1019,7 +1151,7 @@ class Window(QtGui.QMainWindow):
 
     def next_frame(self):
         if self.movie is not None:
-            if self.current_frame_number + 1 < self.info[0]['Frames']:
+            if self.current_frame_number + 1 < self.info[0]["Frames"]:
                 self.set_frame(self.current_frame_number + 1)
 
     def first_frame(self):
@@ -1028,12 +1160,19 @@ class Window(QtGui.QMainWindow):
 
     def last_frame(self):
         if self.movie is not None:
-            self.set_frame(self.info[0]['Frames'] - 1)
+            self.set_frame(self.info[0]["Frames"] - 1)
 
     def to_frame(self):
         if self.movie is not None:
-            frames = self.info[0]['Frames']
-            number, ok = QtGui.QInputDialog.getInt(self, 'Go to frame', 'Frame number:', self.current_frame_number+1, 1, frames)
+            frames = self.info[0]["Frames"]
+            number, ok = QtGui.QInputDialog.getInt(
+                self,
+                "Go to frame",
+                "Frame number:",
+                self.current_frame_number + 1,
+                1,
+                frames,
+            )
             if ok:
                 self.set_frame(number - 1)
 
@@ -1044,12 +1183,14 @@ class Window(QtGui.QMainWindow):
             white = self.movie[number].max()
             self.contrast_dialog.change_contrast_silently(black, white)
         self.draw_frame()
-        self.status_bar_frame_indicator.setText('{:,}/{:,}'.format(number + 1, self.info[0]['Frames']))
+        self.status_bar_frame_indicator.setText(
+            "{:,}/{:,}".format(number + 1, self.info[0]["Frames"])
+        )
 
     def draw_frame(self):
         if self.movie is not None:
             frame = self.movie[self.current_frame_number]
-            frame = frame.astype('float32')
+            frame = frame.astype("float32")
             if self.contrast_dialog.auto_checkbox.isChecked():
                 frame -= frame.min()
                 frame /= frame.max()
@@ -1059,34 +1200,50 @@ class Window(QtGui.QMainWindow):
             frame *= 255.0
             frame = np.maximum(frame, 0)
             frame = np.minimum(frame, 255)
-            frame = frame.astype('uint8')
+            frame = frame.astype("uint8")
             height, width = frame.shape
-            image = QtGui.QImage(frame.data, width, height, width, QtGui.QImage.Format_Indexed8)
+            image = QtGui.QImage(
+                frame.data, width, height, width, QtGui.QImage.Format_Indexed8
+            )
             image.setColorTable(CMAP_GRAYSCALE)
             pixmap = QtGui.QPixmap.fromImage(image)
             self.scene = Scene(self)
             self.scene.addPixmap(pixmap)
             self.view.setScene(self.scene)
             if self.ready_for_fit:
-                identifications_frame = self.identifications[self.identifications.frame == self.current_frame_number]
-                box = self.last_identification_info['Box Size']
-                self.draw_identifications(identifications_frame, box, QtGui.QColor('yellow'))
+                identifications_frame = self.identifications[
+                    self.identifications.frame == self.current_frame_number
+                ]
+                box = self.last_identification_info["Box Size"]
+                self.draw_identifications(
+                    identifications_frame, box, QtGui.QColor("yellow")
+                )
             else:
                 if self.parameters_dialog.preview_checkbox.isChecked():
-                    identifications_frame = localize.identify_by_frame_number(self.movie,
-                                                                              self.parameters['Min. Net Gradient'],
-                                                                              self.parameters['Box Size'],
-                                                                              self.current_frame_number,
-                                                                              self.view.roi)
-                    box = self.parameters['Box Size']
-                    self.status_bar.showMessage('Found {:,} spots in current frame.'.format(len(identifications_frame)))
-                    self.draw_identifications(identifications_frame, box, QtGui.QColor('red'))
+                    identifications_frame = localize.identify_by_frame_number(
+                        self.movie,
+                        self.parameters["Min. Net Gradient"],
+                        self.parameters["Box Size"],
+                        self.current_frame_number,
+                        self.view.roi,
+                    )
+                    box = self.parameters["Box Size"]
+                    self.status_bar.showMessage(
+                        "Found {:,} spots in current frame.".format(
+                            len(identifications_frame)
+                        )
+                    )
+                    self.draw_identifications(
+                        identifications_frame, box, QtGui.QColor("red")
+                    )
                 else:
-                    self.status_bar.showMessage('')
+                    self.status_bar.showMessage("")
             if self.locs is not None:
-                locs_frame = self.locs[self.locs.frame == self.current_frame_number]
+                locs_frame = self.locs[
+                    self.locs.frame == self.current_frame_number
+                ]
                 for loc in locs_frame:
-                    self.scene.addItem(FitMarker(loc.x+0.5, loc.y+0.5, 1))
+                    self.scene.addItem(FitMarker(loc.x + 0.5, loc.y + 0.5, 1))
 
     def draw_identifications(self, identifications, box, color):
         box_half = int(box / 2)
@@ -1097,29 +1254,41 @@ class Window(QtGui.QMainWindow):
 
     def open_parameters(self):
         if self.pwd == []:
-            path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', filter='*.yaml')
+            path = QtGui.QFileDialog.getOpenFileName(
+                self, "Open parameters", filter="*.yaml"
+            )
         else:
-            path = QtGui.QFileDialog.getOpenFileName(self, 'Open parameters', directory = self.pwd, filter='*.yaml')
+            path = QtGui.QFileDialog.getOpenFileName(
+                self, "Open parameters", directory=self.pwd, filter="*.yaml"
+            )
         if path:
             self.load_parameters(path)
 
     def load_parameters(self, path):
-        with open(path, 'r') as file:
+        with open(path, "r") as file:
             parameters = yaml.load(file)
-            self.parameters_dialog.box_spinbox.setValue(parameters['Box Size'])
-            self.parameters_dialog.mng_spinbox.setValue(parameters['Min. Net Gradient'])
-            self.status_bar.showMessage('Parameter file {} loaded.'.format(path))
+            self.parameters_dialog.box_spinbox.setValue(parameters["Box Size"])
+            self.parameters_dialog.mng_spinbox.setValue(
+                parameters["Min. Net Gradient"]
+            )
+            self.status_bar.showMessage(
+                "Parameter file {} loaded.".format(path)
+            )
 
     def save_parameters(self):
-        path = QtGui.QFileDialog.getSaveFileName(self, 'Save parameters', filter='*.yaml')
+        path = QtGui.QFileDialog.getSaveFileName(
+            self, "Save parameters", filter="*.yaml"
+        )
         if path:
-            with open(path, 'w') as file:
+            with open(path, "w") as file:
                 yaml.dump(self.parameters, file)
 
     @property
     def parameters(self):
-        return {'Box Size': self.parameters_dialog.box_spinbox.value(),
-                'Min. Net Gradient': self.parameters_dialog.mng_slider.value()}
+        return {
+            "Box Size": self.parameters_dialog.box_spinbox.value(),
+            "Min. Net Gradient": self.parameters_dialog.mng_slider.value(),
+        }
 
     def on_parameters_changed(self):
         self.locs = None
@@ -1128,32 +1297,40 @@ class Window(QtGui.QMainWindow):
 
     def identify(self, fit_afterwards=False, calibrate_z=False):
         if self.movie is not None:
-            self.status_bar.showMessage('Preparing identification...')
-            self.identificaton_worker = IdentificationWorker(self, fit_afterwards, calibrate_z)
-            self.identificaton_worker.progressMade.connect(self.on_identify_progress)
-            self.identificaton_worker.finished.connect(self.on_identify_finished)
+            self.status_bar.showMessage("Preparing identification...")
+            self.identificaton_worker = IdentificationWorker(
+                self, fit_afterwards, calibrate_z
+            )
+            self.identificaton_worker.progressMade.connect(
+                self.on_identify_progress
+            )
+            self.identificaton_worker.finished.connect(
+                self.on_identify_finished
+            )
             self.identificaton_worker.start()
 
     def on_identify_progress(self, frame_number, parameters):
-        n_frames = self.info[0]['Frames']
-        box = parameters['Box Size']
-        mng = parameters['Min. Net Gradient']
-        message = 'Identifying in frame {:,} / {:,} (Box Size: {:,}; Min. Net Gradient: {:,}) ...'.format(frame_number,
-                                                                                                          n_frames,
-                                                                                                          box,
-                                                                                                          mng)
+        n_frames = self.info[0]["Frames"]
+        box = parameters["Box Size"]
+        mng = parameters["Min. Net Gradient"]
+        message = "Identifying in frame {:,} / {:,} (Box Size: {:,}; Min. Net Gradient: {:,}) ...".format(
+            frame_number, n_frames, box, mng
+        )
         self.status_bar.showMessage(message)
 
-    def on_identify_finished(self, parameters, roi, identifications, fit_afterwards, calibrate_z):
+    def on_identify_finished(
+        self, parameters, roi, identifications, fit_afterwards, calibrate_z
+    ):
         if len(identifications):
             self.locs = None
             self.last_identification_info = parameters.copy()
-            self.last_identification_info['ROI'] = roi
+            self.last_identification_info["ROI"] = roi
             n_identifications = len(identifications)
-            box = parameters['Box Size']
-            mng = parameters['Min. Net Gradient']
-            message = 'Identified {:,} spots (Box Size: {:,}; Min. Net Gradient: {:,}). Ready for fit.'.format(n_identifications,
-                                                                                                               box, mng)
+            box = parameters["Box Size"]
+            mng = parameters["Min. Net Gradient"]
+            message = "Identified {:,} spots (Box Size: {:,}; Min. Net Gradient: {:,}). Ready for fit.".format(
+                n_identifications, box, mng
+            )
             self.status_bar.showMessage(message)
             self.identifications = identifications
             self.ready_for_fit = True
@@ -1163,62 +1340,103 @@ class Window(QtGui.QMainWindow):
 
     def fit(self, calibrate_z=False):
         if self.movie is not None and self.ready_for_fit:
-            self.status_bar.showMessage('Preparing fit...')
+            self.status_bar.showMessage("Preparing fit...")
             method = self.parameters_dialog.fit_method.currentText()
-            method = {'MLE, integrated Gaussian': 'mle', 'LQ, Gaussian': 'lq', 'Average of ROI': 'avg'}[method]
+            method = {
+                "MLE, integrated Gaussian": "mle",
+                "LQ, Gaussian": "lq",
+                "Average of ROI": "avg",
+            }[method]
             eps = self.parameters_dialog.convergence_criterion.value()
             max_it = self.parameters_dialog.max_it.value()
             fit_z = self.parameters_dialog.fit_z_checkbox.isChecked()
             use_gpufit = self.parameters_dialog.gpufit_checkbox.isChecked()
-            self.fit_worker = FitWorker(self.movie, self.camera_info, self.identifications, self.parameters['Box Size'],
-                                        method, eps, max_it, fit_z, calibrate_z, use_gpufit)
+            self.fit_worker = FitWorker(
+                self.movie,
+                self.camera_info,
+                self.identifications,
+                self.parameters["Box Size"],
+                method,
+                eps,
+                max_it,
+                fit_z,
+                calibrate_z,
+                use_gpufit,
+            )
             self.fit_worker.progressMade.connect(self.on_fit_progress)
             self.fit_worker.finished.connect(self.on_fit_finished)
             self.fit_worker.start()
 
     def fit_z(self):
-        self.status_bar.showMessage('Fitting z position...')
-        self.fit_z_worker = FitZWorker(self.locs, self.info, self.parameters_dialog.z_calibration, self.parameters_dialog.magnification_factor.value())
+        self.status_bar.showMessage("Fitting z position...")
+        self.fit_z_worker = FitZWorker(
+            self.locs,
+            self.info,
+            self.parameters_dialog.z_calibration,
+            self.parameters_dialog.magnification_factor.value(),
+        )
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
         self.fit_z_worker.start()
 
     def on_fit_progress(self, current, total):
         if self.parameters_dialog.gpufit_checkbox.isChecked():
-            self.status_bar.showMessage('Fitting spots by GPUfit...')
+            self.status_bar.showMessage("Fitting spots by GPUfit...")
         else:
-            message = 'Fitting spot {:,} / {:,} ...'.format(current, total)
+            message = "Fitting spot {:,} / {:,} ...".format(current, total)
             self.status_bar.showMessage(message)
 
     def on_fit_finished(self, locs, elapsed_time, fit_z, calibrate_z):
-        self.status_bar.showMessage('Fitted {:,} spots in {:.2f} seconds.'.format(len(locs), elapsed_time))
+        self.status_bar.showMessage(
+            "Fitted {:,} spots in {:.2f} seconds.".format(
+                len(locs), elapsed_time
+            )
+        )
         self.locs = locs
         self.draw_frame()
         base, ext = os.path.splitext(self.movie_path)
         if calibrate_z:
-            step, ok = QtGui.QInputDialog.getDouble(self, '3D Calibration', 'Calibration step size (nm):', value=5, decimals=2)
+            step, ok = QtGui.QInputDialog.getDouble(
+                self,
+                "3D Calibration",
+                "Calibration step size (nm):",
+                value=5,
+                decimals=2,
+            )
             if ok:
                 base, ext = os.path.splitext(self.movie_path)
-                out_path = base + '_3d_calib.yaml'
-                path = QtGui.QFileDialog.getSaveFileName(self, 'Save 3D calibration', out_path, filter='*.yaml')
+                out_path = base + "_3d_calib.yaml"
+                path = QtGui.QFileDialog.getSaveFileName(
+                    self, "Save 3D calibration", out_path, filter="*.yaml"
+                )
                 if path:
-                    zfit.calibrate_z(locs, self.info, step, self.parameters_dialog.magnification_factor.value(), path=path)
+                    zfit.calibrate_z(
+                        locs,
+                        self.info,
+                        step,
+                        self.parameters_dialog.magnification_factor.value(),
+                        path=path,
+                    )
         else:
             if fit_z:
                 self.fit_z()
             else:
-                locs_path = base + '_locs.hdf5'
+                locs_path = base + "_locs.hdf5"
                 self.save_locs(locs_path)
 
     def on_fit_z_progress(self, current, total):
-        message = 'Fitting z coordinate {:,} / {:,} ...'.format(current, total)
+        message = "Fitting z coordinate {:,} / {:,} ...".format(current, total)
         self.status_bar.showMessage(message)
 
     def on_fit_z_finished(self, locs, elapsed_time):
-        self.status_bar.showMessage('Fitted {:,} z coordinates in {:.2f} seconds.'.format(len(locs), elapsed_time))
+        self.status_bar.showMessage(
+            "Fitted {:,} z coordinates in {:.2f} seconds.".format(
+                len(locs), elapsed_time
+            )
+        )
         self.locs = locs
         base, ext = os.path.splitext(self.movie_path)
-        self.save_locs(base + '_locs.hdf5')
+        self.save_locs(base + "_locs.hdf5")
 
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
@@ -1230,37 +1448,47 @@ class Window(QtGui.QMainWindow):
         self.view.scale(7 / 10, 7 / 10)
 
     def save_spots(self, path):
-        box = self.parameters['Box Size']
-        spots = localize.get_spots(self.movie, self.identifications, box, self.camera_info)
+        box = self.parameters["Box Size"]
+        spots = localize.get_spots(
+            self.movie, self.identifications, box, self.camera_info
+        )
         io.save_datasets(path, self.info, spots=spots)
 
     def save_spots_dialog(self):
         if self.movie_path == []:
-            print('No spots to save.')
+            print("No spots to save.")
         else:
             base, ext = os.path.splitext(self.movie_path)
-            path = base + '_spots.hdf5'
-            path = QtGui.QFileDialog.getSaveFileName(self, 'Save spots', path, filter='*.hdf5')
+            path = base + "_spots.hdf5"
+            path = QtGui.QFileDialog.getSaveFileName(
+                self, "Save spots", path, filter="*.hdf5"
+            )
             if path:
                 self.save_spots(path)
 
     def save_locs(self, path):
         localize_info = self.last_identification_info.copy()
-        localize_info['Generated by'] = 'Picasso Localize'
-        localize_info['Pixelsize'] = self.parameters_dialog.pixelsize.value()
+        localize_info["Generated by"] = "Picasso Localize"
+        localize_info["Pixelsize"] = self.parameters_dialog.pixelsize.value()
         if self.parameters_dialog.fit_z_checkbox.isChecked():
-            localize_info['Z Calibration Path'] = self.parameters_dialog.z_calibration_path
-            localize_info['Z Calibration'] = self.parameters_dialog.z_calibration
+            localize_info[
+                "Z Calibration Path"
+            ] = self.parameters_dialog.z_calibration_path
+            localize_info[
+                "Z Calibration"
+            ] = self.parameters_dialog.z_calibration
         info = self.info + [localize_info]
         io.save_locs(path, self.locs, info)
 
     def save_locs_dialog(self):
         if self.movie_path == []:
-            print('No localizations to save.')
+            print("No localizations to save.")
         else:
             base, ext = os.path.splitext(self.movie_path)
-            locs_path = base + '_locs.hdf5'
-            path = QtGui.QFileDialog.getSaveFileName(self, 'Save localizations', locs_path, filter='*.hdf5')
+            locs_path = base + "_locs.hdf5"
+            path = QtGui.QFileDialog.getSaveFileName(
+                self, "Save localizations", locs_path, filter="*.hdf5"
+            )
             if path:
                 self.save_locs(path)
 
@@ -1287,16 +1515,24 @@ class IdentificationWorker(QtCore.QThread):
 
     def run(self):
         N = len(self.movie)
-        current, futures = localize.identify_async(self.movie,
-                                                   self.parameters['Min. Net Gradient'],
-                                                   self.parameters['Box Size'],
-                                                   self.roi)
+        current, futures = localize.identify_async(
+            self.movie,
+            self.parameters["Min. Net Gradient"],
+            self.parameters["Box Size"],
+            self.roi,
+        )
         while current[0] < N:
             self.progressMade.emit(current[0], self.parameters)
             time.sleep(0.2)
         self.progressMade.emit(current[0], self.parameters)
         identifications = localize.identifications_from_futures(futures)
-        self.finished.emit(self.parameters, self.roi, identifications, self.fit_afterwards, self.calibrate_z)
+        self.finished.emit(
+            self.parameters,
+            self.roi,
+            identifications,
+            self.fit_afterwards,
+            self.calibrate_z,
+        )
 
 
 class FitWorker(QtCore.QThread):
@@ -1304,7 +1540,19 @@ class FitWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float, bool, bool)
 
-    def __init__(self, movie, camera_info, identifications, box, method, eps, max_it, fit_z, calibrate_z, use_gpufit):
+    def __init__(
+        self,
+        movie,
+        camera_info,
+        identifications,
+        box,
+        method,
+        eps,
+        max_it,
+        fit_z,
+        calibrate_z,
+        use_gpufit,
+    ):
         super().__init__()
         self.movie = movie
         self.camera_info = camera_info
@@ -1320,42 +1568,63 @@ class FitWorker(QtCore.QThread):
     def run(self):
         N = len(self.identifications)
         t0 = time.time()
-        spots = localize.get_spots(self.movie, self.identifications, self.box, self.camera_info)
-        if self.method == 'lq':
+        spots = localize.get_spots(
+            self.movie, self.identifications, self.box, self.camera_info
+        )
+        if self.method == "lq":
             if self.use_gpufit:
                 self.progressMade.emit(1, 1)
                 theta = gausslq.fit_spots_gpufit(spots)
-                em = self.camera_info['gain'] > 1
-                locs = gausslq.locs_from_fits_gpufit(self.identifications, theta, self.box, em)
+                em = self.camera_info["gain"] > 1
+                locs = gausslq.locs_from_fits_gpufit(
+                    self.identifications, theta, self.box, em
+                )
             else:
-                fs = gausslq.fit_spots_parallel(spots, async=True)
+                fs = gausslq.fit_spots_parallel(spots, asynch=True)
                 n_tasks = len(fs)
                 while lib.n_futures_done(fs) < n_tasks:
-                    self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
+                    self.progressMade.emit(
+                        round(N * lib.n_futures_done(fs) / n_tasks), N
+                    )
                     time.sleep(0.2)
                 theta = gausslq.fits_from_futures(fs)
-                em = self.camera_info['gain'] > 1
-                locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
-        elif self.method == 'mle':
-            current, thetas, CRLBs, likelihoods, iterations = gaussmle.gaussmle_async(spots, self.eps, self.max_it, method='sigmaxy')
+                em = self.camera_info["gain"] > 1
+                locs = gausslq.locs_from_fits(
+                    self.identifications, theta, self.box, em
+                )
+        elif self.method == "mle":
+            current, thetas, CRLBs, likelihoods, iterations = gaussmle.gaussmle_async(
+                spots, self.eps, self.max_it, method="sigmaxy"
+            )
             while current[0] < N:
                 self.progressMade.emit(current[0], N)
                 time.sleep(0.2)
-            locs = gaussmle.locs_from_fits(self.identifications, thetas, CRLBs, likelihoods, iterations, self.box)
-        elif self.method == 'avg':
-            print('Average intensity')
-            #just get out the average intensity
-            fs = avgroi.fit_spots_parallel(spots, async=True)
+            locs = gaussmle.locs_from_fits(
+                self.identifications,
+                thetas,
+                CRLBs,
+                likelihoods,
+                iterations,
+                self.box,
+            )
+        elif self.method == "avg":
+            print("Average intensity")
+            # just get out the average intensity
+            fs = avgroi.fit_spots_parallel(spots, asynch=True)
             n_tasks = len(fs)
             while lib.n_futures_done(fs) < n_tasks:
-                self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
+                self.progressMade.emit(
+                    round(N * lib.n_futures_done(fs) / n_tasks), N
+                )
                 time.sleep(0.2)
             theta = avgroi.fits_from_futures(fs)
-            em = self.camera_info['gain'] > 1
-            locs = avgroi.locs_from_fits(self.identifications, theta, self.box, em)
+            em = self.camera_info["gain"] > 1
+            locs = avgroi.locs_from_fits(
+                self.identifications, theta, self.box, em
+            )
         else:
-            print('This should never happen...')
-        self.progressMade.emit(N+1, N)
+            print("This should never happen...")
+        self.progressMade.emit(N + 1, N)
         dt = time.time() - t0
         self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
 
@@ -1375,10 +1644,19 @@ class FitZWorker(QtCore.QThread):
     def run(self):
         t0 = time.time()
         N = len(self.locs)
-        fs = zfit.fit_z_parallel(self.locs, self.info, self.calibration, self.magnification_factor, filter=0, async=True)
+        fs = zfit.fit_z_parallel(
+            self.locs,
+            self.info,
+            self.calibration,
+            self.magnification_factor,
+            filter=0,
+            asynch=True,
+        )
         n_tasks = len(fs)
         while lib.n_futures_done(fs) < n_tasks:
-            self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
+            self.progressMade.emit(
+                round(N * lib.n_futures_done(fs) / n_tasks), N
+            )
             time.sleep(0.2)
         locs = zfit.locs_from_futures(fs, filter=0)
         dt = time.time() - t0
@@ -1392,14 +1670,17 @@ def main():
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
-        message = ''.join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(window, 'An error occured', message)
+        message = "".join(traceback.format_exception(type, value, tback))
+        errorbox = QtGui.QMessageBox.critical(
+            window, "An error occured", message
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
+
     sys.excepthook = excepthook
 
     sys.exit(app.exec_())
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
