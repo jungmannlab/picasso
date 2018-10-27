@@ -4,8 +4,8 @@
 
     Data analysis of localization lists
 
-    :author: Joerg Schnitzbauer, 2015
-    :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2015-2018
+    :copyright: Copyright (c) 2015-2018 Jungmann Lab, MPI Biochemistry
 """
 
 import numpy as _np
@@ -47,7 +47,8 @@ def get_index_blocks(locs, info, size, callback=None):
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     K, L = block_starts.shape
     # Fill in block starts and ends
-    # We are running this in a thread with a nogil numba function. This helps updating a potential GUI with the callback.
+    # We are running this in a thread with a nogil numba function.
+    # This helps updating a potential GUI with the callback.
     if callback is not None:
         callback(0)
         counter = [0]
