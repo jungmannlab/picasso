@@ -5,7 +5,7 @@
     Handy functions and classes
 
     :author: Joerg Schnitzbauer, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 
@@ -21,7 +21,8 @@ from lmfit import Model as _Model
 
 
 # A global variable where we store all open progress and status dialogs.
-# In case of an exception, we close them all, so that the GUI remains responsive.
+# In case of an exception, we close them all,
+# so that the GUI remains responsive.
 _dialogs = []
 
 
@@ -188,11 +189,12 @@ def remove_from_rec(rec_array, name):
 
 def locs_glob_map(func, pattern, args=[], kwargs={}, extension=""):
     """
-    Maps a function to localization files, specified by a unix style path pattern.
-    The function must take two arguments: locs and info. It may take additional args and kwargs which
-    are supplied to this map function.
-    A new locs file will be saved if an extension is provided. In that case the mapped function must return
-    new locs and a new info dict.
+    Maps a function to localization files, specified by a unix style path
+    pattern.
+    The function must take two arguments: locs and info. It may take additional
+    args and kwargs which are supplied to this map function.
+    A new locs file will be saved if an extension is provided. In that case the
+    mapped function must return new locs and a new info dict.
     """
     paths = _glob.glob(pattern)
     for path in paths:
