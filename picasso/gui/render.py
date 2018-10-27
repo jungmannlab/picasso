@@ -2211,7 +2211,8 @@ class View(QtGui.QLabel):
                         choice = QtGui.QMessageBox.question(
                             self,
                             "Group question",
-                            ("Groups are not consecutive and more than 5000 groups detected."
+                            ("Groups are not consecutive"
+                                " and more than 5000 groups detected."
                                 " Re-Index groups? This may take a while."),
                             QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
                         )
@@ -2812,7 +2813,7 @@ class View(QtGui.QLabel):
                     QtGui.QMessageBox.information(
                         self,
                         "Oversampling too high",
-                        ("Oversampling will be adjusted to",
+                        ("Oversampling will be adjusted to"
                             " match the display pixel density."),
                     )
                     oversampling = optimal_oversampling

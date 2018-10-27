@@ -519,7 +519,7 @@ class Window(QtGui.QMainWindow):
             msgBox = QtGui.QMessageBox(self)
             msgBox.setWindowTitle("Error")
             msgBox.setText(
-                ("Datafile does not contain group information.",
+                ("Datafile does not contain group information."
                     " Please load file with picked localizations.")
             )
             msgBox.exec_()
