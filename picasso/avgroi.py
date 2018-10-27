@@ -5,7 +5,7 @@
     Return average intensity of Spot
 
     :author: Maximilian Thomas Strauss, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 from scipy import optimize as _optimize
@@ -43,19 +43,24 @@ def fit_spots(spots):
     return theta
 
 
-def fit_spots_parallel(spots, async=False):
+def fit_spots_parallel(spots, asynch=False):
     n_workers = max(1, int(0.75 * _multiprocessing.cpu_count()))
     n_spots = len(spots)
     n_tasks = 100 * n_workers
-    spots_per_task = [int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(n_spots / n_tasks) for _ in range(n_tasks)]
+    spots_per_task = [
+        int(n_spots / n_tasks + 1)
+        if _ < n_spots % n_tasks
+        else int(n_spots / n_tasks)
+        for _ in range(n_tasks)
+    ]
     start_indices = _np.cumsum([0] + spots_per_task[:-1])
     fs = []
     executor = _futures.ProcessPoolExecutor(n_workers)
     for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i:i+n_spots_task]))
-    if async:
+        fs.append(executor.submit(fit_spots, spots[i: i + n_spots_task]))
+    if asynch:
         return fs
-    with _tqdm(total=n_tasks, unit='task') as progress_bar:
+    with _tqdm(total=n_tasks, unit="task") as progress_bar:
         for f in _futures.as_completed(fs):
             progress_bar.update()
     return fits_from_futures(fs)
@@ -68,31 +73,77 @@ def fits_from_futures(futures):
 
 def locs_from_fits(identifications, theta, box, em):
     # box_offset = int(box/2)
-    x = theta[:, 0] + identifications.x     # - box_offset
-    y = theta[:, 1] + identifications.y     # - box_offset
-    lpx = _postprocess.localization_precision(theta[:, 2], theta[:, 4], theta[:, 3], em=em)
-    lpy = _postprocess.localization_precision(theta[:, 2], theta[:, 5], theta[:, 3], em=em)
+    x = theta[:, 0] + identifications.x  # - box_offset
+    y = theta[:, 1] + identifications.y  # - box_offset
+    lpx = _postprocess.localization_precision(
+        theta[:, 2], theta[:, 4], theta[:, 3], em=em
+    )
+    lpy = _postprocess.localization_precision(
+        theta[:, 2], theta[:, 5], theta[:, 3], em=em
+    )
     a = _np.maximum(theta[:, 4], theta[:, 5])
     b = _np.minimum(theta[:, 4], theta[:, 5])
     ellipticity = (a - b) / a
-    if hasattr(identifications, 'n_id'):
-        locs = _np.rec.array((identifications.frame, x, y,
-                              theta[:, 2], theta[:, 4], theta[:, 5],
-                              theta[:, 3], lpx, lpy, ellipticity,
-                              identifications.net_gradient, identifications.n_id),
-                             dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
-                                    ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
-                                    ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
-                                    ('ellipticity', 'f4'), ('net_gradient', 'f4'), ('n_id', 'u4')])
-        locs.sort(kind='mergesort', order='n_id')
+    if hasattr(identifications, "n_id"):
+        locs = _np.rec.array(
+            (
+                identifications.frame,
+                x,
+                y,
+                theta[:, 2],
+                theta[:, 4],
+                theta[:, 5],
+                theta[:, 3],
+                lpx,
+                lpy,
+                ellipticity,
+                identifications.net_gradient,
+                identifications.n_id,
+            ),
+            dtype=[
+                ("frame", "u4"),
+                ("x", "f4"),
+                ("y", "f4"),
+                ("photons", "f4"),
+                ("sx", "f4"),
+                ("sy", "f4"),
+                ("bg", "f4"),
+                ("lpx", "f4"),
+                ("lpy", "f4"),
+                ("ellipticity", "f4"),
+                ("net_gradient", "f4"),
+                ("n_id", "u4"),
+            ],
+        )
+        locs.sort(kind="mergesort", order="n_id")
     else:
-        locs = _np.rec.array((identifications.frame, x, y,
-                              theta[:, 2], theta[:, 4], theta[:, 5],
-                              theta[:, 3], lpx, lpy, ellipticity,
-                              identifications.net_gradient),
-                             dtype=[('frame', 'u4'), ('x', 'f4'), ('y', 'f4'),
-                                    ('photons', 'f4'), ('sx', 'f4'), ('sy', 'f4'),
-                                    ('bg', 'f4'), ('lpx', 'f4'), ('lpy', 'f4'),
-                                    ('ellipticity', 'f4'), ('net_gradient', 'f4')])
-        locs.sort(kind='mergesort', order='frame')
+        locs = _np.rec.array(
+            (
+                identifications.frame,
+                x,
+                y,
+                theta[:, 2],
+                theta[:, 4],
+                theta[:, 5],
+                theta[:, 3],
+                lpx,
+                lpy,
+                ellipticity,
+                identifications.net_gradient,
+            ),
+            dtype=[
+                ("frame", "u4"),
+                ("x", "f4"),
+                ("y", "f4"),
+                ("photons", "f4"),
+                ("sx", "f4"),
+                ("sy", "f4"),
+                ("bg", "f4"),
+                ("lpx", "f4"),
+                ("lpy", "f4"),
+                ("ellipticity", "f4"),
+                ("net_gradient", "f4"),
+            ],
+        )
+        locs.sort(kind="mergesort", order="frame")
     return locs
