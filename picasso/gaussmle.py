@@ -347,7 +347,8 @@ def _mlefit_sigma(
     max_step[2:4] = 0.1 * theta[2:4]
     max_step[4] = 0.2 * theta[4]
 
-    # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
+    # Memory allocation
+    # (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
     d2udt2 = _np.zeros(n_params, dtype=_np.float32)
     numerator = _np.zeros(n_params, dtype=_np.float32)
@@ -502,7 +503,8 @@ def _mlefit_sigmaxy(
     max_step[2:4] = 0.1 * theta[2:4]
     max_step[4:6] = 0.2 * theta[4:6]
 
-    # Memory allocation (we do that outside of the loops to avoid huge delays in threaded code):
+    # Memory allocation
+    # (we do that outside of the loops to avoid huge delays in threaded code):
     dudt = _np.zeros(n_params, dtype=_np.float32)
     d2udt2 = _np.zeros(n_params, dtype=_np.float32)
     numerator = _np.zeros(n_params, dtype=_np.float32)
@@ -561,7 +563,9 @@ def _mlefit_sigmaxy(
         # The update
         for ll in range(n_params):
             if denominator[ll] == 0.0:
-                # This is case is not handled in Lidke's code, but it seems to be a problem here (maybe due to many iterations)
+                # This is case is not handled in Lidke's code
+                # but it seems to be a problem here
+                # (maybe due to many iterations)
                 theta[ll] -= GAMMA[ll] * _np.sign(numerator[ll]) * max_step[ll]
             else:
                 theta[ll] -= GAMMA[ll] * _np.minimum(
