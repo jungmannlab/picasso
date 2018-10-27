@@ -109,7 +109,7 @@ def paintgen(
 
     photonsinframe = _np.zeros(
         int(frames + _np.ceil(meanbright / time * 20))
-    )  # an on-event might be longer than the movie, so allocate more memory. Estimate meanbright/time*10
+    )  # an on-event might be longer than the movie, so allocate more memory
 
     # calculate photon numbers
     for i in range(1, maxloc, 2):
@@ -133,7 +133,7 @@ def paintgen(
         if photons * onFrames > photonbudget:
             onFrames = int(
                 _np.ceil(photonbudget / (photons * onFrames) * onFrames)
-            )  # Reduce the number of on-frames once the photonbudget is reached
+            )  # Reduce the number of on-frames if the photonbudget is reached
 
         for j in range(0, (onFrames)):
             if onFrames == 1:  # CASE 1: all photons are emitted in one frame
@@ -189,7 +189,7 @@ def paintgen(
                     )
 
         totalphotons = _np.sum(
-            photonsinframe[1 + tempFrame : tempFrame + 1 + onFrames]
+            photonsinframe[1 + tempFrame: tempFrame + 1 + onFrames]
         )
         if totalphotons > photonbudget:
             photonsinframe[onFrames + tempFrame] = int(
@@ -209,7 +209,6 @@ def paintgen(
         ]
     else:
         spotkinetics = [0, sum(photonsinframe > 0), 0, 0]
-    # spotkinetics is an output variable, that gives out the number of on-events, the number of localizations, the mean of the dark and bright times
     return photonsinframe, timetrace, spotkinetics
 
 
@@ -276,7 +275,7 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
             mu = [bindingsitesx[i], bindingsitesy[i]]
             photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
             photonposframe[
-                n_photons_step[i] : n_photons_step[i + 1], :
+                n_photons_step[i]: n_photons_step[i + 1], :
             ] = photonpos
 
     return photonposframe
@@ -317,7 +316,8 @@ def saveMovie(filename, movie, info):
     _io.save_raw(filename, movie, [info])
 
 
-# Function to store the coordinates of a structure in a container. The coordinates wil be adjustet so that the center of mass is the origin
+# Function to store the coordinates of a structure in a container.
+# The coordinates wil be adjustet so that the center of mass is the origin
 def defineStructure(
     structurexxpx,
     structureyypx,
@@ -404,7 +404,12 @@ def randomExchange(pos):
 
 def prepareStructures(
     structure, gridpos, orientation, number, incorporation, exchange
-):  # prepareStructures: Input positions, the structure definition, consider rotation etc.
+):
+    """
+    prepareStructures:
+    Input positions, the structure definitionconsider rotation etc.
+
+    """
     newpos = []
     oldstructure = _np.array(
         [structure[0, :], structure[1, :], structure[2, :], structure[3, :]]
