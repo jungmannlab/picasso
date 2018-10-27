@@ -6,7 +6,7 @@
     Design rectangular rothemund origami
 
     :author: Maximilian Thomas Strauss,  2016
-    :copyright: Copyright (c) 2016 Jungmann Lab,  Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2016 Jungmann Lab,  MPI of Biochemistry
 """
 
 import glob
@@ -66,7 +66,6 @@ def plotPlate(selection, selectioncolors, platename):
             xpos = xcord * radius * 2 + radius
             ypos = ycord * radius * 2 + radius
             if string in selection:
-                # circle = plt.Circle((xpos, ypos), radiusc,  facecolor='black', edgecolor='black')
                 circle = plt.Circle(
                     (xpos, ypos),
                     radiusc,
@@ -494,9 +493,16 @@ class FoldingDialog(QtGui.QDialog):
         self.table.setColumnCount(8)
         # PRE-SET LABELS
         self.table.setHorizontalHeaderLabels(
-            (
-                "Component, Initial concentration[uM], Parts, Pool-concentration[nM], Target concentration[nM], Volume[ul],  Excess, Colorcode "
-            ).split(", ")
+            [
+                "Component",
+                "Initial concentration[uM]",
+                "Parts",
+                "Pool-concentration[nM]",
+                "Target concentration[nM]",
+                "Volume[ul]",
+                "Excess",
+                "Colorcode",
+            ]
         )
         self.clcButton = QtGui.QPushButton("Recalculate")
         self.clcButton.clicked.connect(self.clcExcess)
@@ -606,10 +612,16 @@ class PlateDialog(QtGui.QDialog):
         layout = QtGui.QVBoxLayout(self)
         self.info = QtGui.QLabel("Please make selection:  ")
         self.radio1 = QtGui.QRadioButton(
-            "Export only the sequences needed for this design. (176 staples in 2 plates)"
+            (
+                "Export only the sequences needed for this design."
+                " (176 staples in 2 plates)"
+            )
         )
         self.radio2 = QtGui.QRadioButton(
-            "Export full 2 full plates for all sequences used (176 staples * number of unique sequences)"
+            (
+                "Export full 2 full plates for all sequences used"
+                " (176 staples * number of unique sequences)"
+            )
         )
 
         self.setWindowTitle("Plate export")
@@ -1229,7 +1241,10 @@ class Window(QtGui.QMainWindow):
             "None",
         ]:
             self.statusBar().showMessage(
-                "Error: No extensions have been set. Please set extensions first."
+                (
+                    "Error: No extensions have been set."
+                    " Please set extensions first."
+                )
             )
         elif seqcheck >= 1:
             self.statusBar().showMessage(
@@ -1283,7 +1298,10 @@ class Window(QtGui.QMainWindow):
             "None",
         ]:
             self.statusBar().showMessage(
-                "Error: No extensions have been set. Please set extensions first."
+                (
+                    "Error: No extensions have been set."
+                    " Please set extensions first."
+                )
             )
         elif seqcheck >= 1:
             self.statusBar().showMessage(
@@ -1356,7 +1374,10 @@ class Window(QtGui.QMainWindow):
                     )
                 else:
                     self.statusBar().showMessage(
-                        "Error: Sequences sequences missing. Please check *.csv file.."
+                        (
+                            "Error: Sequences sequences missing."
+                            " Please check *.csv file.."
+                        )
                     )
 
                 allfig = dict()
@@ -1395,7 +1416,6 @@ class Window(QtGui.QMainWindow):
                                 pad_inches=0.2,
                                 dpi=200,
                             )
-                            # pdf.savefig(allfig[x],   bbox_inches='tight',  pad_inches=0.1)
                             base, ext = _ospath.splitext(path)
                             csv_path = base + ".csv"
                             design.savePlate(csv_path, exportlist)
