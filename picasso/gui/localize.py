@@ -5,8 +5,8 @@
 
     Graphical user interface for localizing single molecules
 
-    :author: Joerg Schnitzbauer, 2015
-    :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2015-2018
+    :copyright: Copyright (c) 2015-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 import os.path
@@ -120,7 +120,9 @@ class View(QtGui.QGraphicsView):
 
 
 class Scene(QtGui.QGraphicsScene):
-    """ Scenes render indivdual frames and can be displayed in a `View` widget """
+    """
+    Scenes render indivdual frames and can be displayed in a `View` widget
+    """
 
     def __init__(self, window, parent=None):
         super().__init__(parent)
@@ -190,7 +192,7 @@ class CamSettingComboBox(QtGui.QComboBox):
         cam_combos = self.cam_combos[self.camera]
         sensitivity = CONFIG["Cameras"][self.camera]["Sensitivity"]
         for i in range(self.index + 1):
-            sensitivity = sensitivity[cam_combos[i].currentText()]
+            sensitivity = sensitivity[cam_combos[i].currText()]
         target = cam_combos[self.index + 1]
         target.blockSignals(True)
         target.clear()
@@ -262,9 +264,9 @@ class PromptInfoDialog(QtGui.QDialog):
         result = dialog.exec_()
         info = {}
         info["Byte Order"] = (
-            ">" if dialog.byte_order.currentText() == "Big Endian" else "<"
+            ">" if dialog.byte_order.currText() == "Big Endian" else "<"
         )
-        info["Data Type"] = dialog.dtype.currentText()
+        info["Data Type"] = dialog.dtype.currText()
         info["Frames"] = dialog.frames.value()
         info["Height"] = dialog.movie_height.value()
         info["Width"] = dialog.movie_width.value()
@@ -352,7 +354,7 @@ class ParametersDialog(QtGui.QDialog):
             exp_grid.addWidget(self.camera, 0, 1)
             cameras = sorted(list(CONFIG["Cameras"].keys()))
             self.camera.addItems(cameras)
-            self.camera.currentIndexChanged.connect(self.on_camera_changed)
+            self.camera.currIndexChanged.connect(self.on_camera_changed)
 
             self.cam_settings = QtGui.QStackedWidget()
             exp_grid.addWidget(self.cam_settings, 1, 0, 1, 2)
@@ -382,13 +384,13 @@ class ParametersDialog(QtGui.QDialog):
                             sorted(list(sensitivity.keys()))
                         )
                         for cam_combo in self.cam_combos[camera][:-1]:
-                            cam_combo.currentIndexChanged.connect(
+                            cam_combo.currIndexChanged.connect(
                                 cam_combo.change_target_choices
                             )
                         self.cam_combos[camera][0].change_target_choices(0)
-                        self.cam_combos[camera][
-                            -1
-                        ].currentIndexChanged.connect(self.update_sensitivity)
+                        self.cam_combos[camera][-1].currIndexChanged.connect(
+                            self.update_sensitivity
+                        )
                 if "Quantum Efficiency" in cam_config:
                     try:
                         qes = cam_config["Quantum Efficiency"].keys()
@@ -403,7 +405,7 @@ class ParametersDialog(QtGui.QDialog):
                         cam_grid.addWidget(emission_combo, row_count, 1)
                         wavelengths = sorted([str(_) for _ in qes])
                         emission_combo.addItems(wavelengths)
-                        emission_combo.currentIndexChanged.connect(
+                        emission_combo.currIndexChanged.connect(
                             self.on_emission_changed
                         )
                         self.emission_combos[camera] = emission_combo
@@ -473,8 +475,8 @@ class ParametersDialog(QtGui.QDialog):
         fit_grid.addWidget(self.fit_method, 1, 1)
         fit_stack = QtGui.QStackedWidget()
         fit_grid.addWidget(fit_stack, 2, 0, 1, 2)
-        self.fit_method.currentIndexChanged.connect(fit_stack.setCurrentIndex)
-        self.fit_method.currentIndexChanged.connect(self.on_fit_method_changed)
+        self.fit_method.currIndexChanged.connect(fit_stack.setcurrIndex)
+        self.fit_method.currIndexChanged.connect(self.on_fit_method_changed)
 
         # MLE
         mle_widget = QtGui.QWidget()
@@ -543,7 +545,7 @@ class ParametersDialog(QtGui.QDialog):
         z_grid.addWidget(self.magnification_factor, 2, 1)
 
         if "Cameras" in CONFIG:
-            camera = self.camera.currentText()
+            camera = self.camera.currText()
             if camera in CONFIG["Cameras"]:
                 self.on_camera_changed(0)
                 camera_config = CONFIG["Cameras"][camera]
@@ -554,7 +556,7 @@ class ParametersDialog(QtGui.QDialog):
                     self.update_sensitivity()
 
     def on_fit_method_changed(self, state):
-        if self.fit_method.currentText() == "LQ, Gaussian":
+        if self.fit_method.currText() == "LQ, Gaussian":
             self.gpufit_checkbox.setDisabled(False)
         else:
             self.gpufit_checkbox.setChecked(False)
@@ -578,8 +580,8 @@ class ParametersDialog(QtGui.QDialog):
 
     def on_camera_changed(self, index):
         self.gain.setValue(1)
-        self.cam_settings.setCurrentIndex(index)
-        camera = self.camera.currentText()
+        self.cam_settings.setcurrIndex(index)
+        camera = self.camera.currText()
         cam_config = CONFIG["Cameras"][camera]
         if "Baseline" in cam_config:
             self.baseline.setValue(cam_config["Baseline"])
@@ -591,7 +593,7 @@ class ParametersDialog(QtGui.QDialog):
         self.update_qe()
 
     def update_qe(self):
-        camera = self.camera.currentText()
+        camera = self.camera.currText()
         cam_config = CONFIG["Cameras"][camera]
         if "Quantum Efficiency" in cam_config:
             qe = cam_config["Quantum Efficiency"]
@@ -600,7 +602,7 @@ class ParametersDialog(QtGui.QDialog):
             except TypeError:
                 # qe is not a number
                 em_combo = self.emission_combos[camera]
-                wavelength = float(em_combo.currentText())
+                wavelength = float(em_combo.currText())
                 qe = cam_config["Quantum Efficiency"][wavelength]
                 self.qe.setValue(qe)
 
@@ -639,7 +641,7 @@ class ParametersDialog(QtGui.QDialog):
             camera = info["Camera"]
             if camera in cameras:
                 index = cameras.index(camera)
-                self.camera.setCurrentIndex(index)
+                self.camera.setcurrIndex(index)
                 if "Micro-Manager Metadata" in info:
                     mm_info = info["Micro-Manager Metadata"]
                     cam_config = CONFIG["Cameras"][camera]
@@ -673,7 +675,7 @@ class ParametersDialog(QtGui.QDialog):
                                         cam_combo.itemText(index)
                                         == exp_setting
                                     ):
-                                        cam_combo.setCurrentIndex(index)
+                                        cam_combo.setcurrIndex(index)
                                         break
                     if "Quantum Efficiency" in cam_config:
                         if "Channel Device" in cam_config:
@@ -689,16 +691,18 @@ class ParametersDialog(QtGui.QDialog):
                                 em_combo = self.emission_combos[camera]
                                 for index in range(em_combo.count()):
                                     if em_combo.itemText(index) == wavelength:
-                                        em_combo.setCurrentIndex(index)
+                                        em_combo.setcurrIndex(index)
                                         break
                                 else:
                                     raise ValueError(
-                                        "No quantum efficiency found for wavelength "
-                                        + wavelength
+                                        (
+                                            "No quantum efficiency found"
+                                            " for wavelength " + wavelength
+                                        )
                                     )
 
     def update_sensitivity(self, index=None):
-        camera = self.camera.currentText()
+        camera = self.camera.currText()
         cam_config = CONFIG["Cameras"][camera]
         sensitivity = cam_config["Sensitivity"]
         if "Sensitivity" in cam_config:
@@ -709,7 +713,7 @@ class ParametersDialog(QtGui.QDialog):
                 categories = cam_config["Sensitivity Categories"]
                 for i, category in enumerate(categories):
                     cat_combo = self.cam_combos[camera][i]
-                    sensitivity = sensitivity[cat_combo.currentText()]
+                    sensitivity = sensitivity[cat_combo.currText()]
                 self.sensitivity.setValue(sensitivity)
 
 
@@ -756,7 +760,7 @@ class ContrastDialog(QtGui.QDialog):
     def on_auto_changed(self, state):
         if state:
             movie = self.window.movie
-            frame_number = self.window.current_frame_number
+            frame_number = self.window.curr_frame_number
             frame = movie[frame_number]
             self.change_contrast_silently(frame.min(), frame.max())
             self.window.draw_frame()
@@ -785,7 +789,8 @@ class Window(QtGui.QMainWindow):
         self.status_bar_frame_indicator = QtGui.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
 
-        #: Holds the current movie as a numpy memmap in the format (frame, y, x)
+        #: Holds the curr movie as a numpy
+        # memmap in the format (frame, y, x)
         self.movie = None
 
         #: A dictionary of analysis parameters used for the last operation
@@ -812,7 +817,8 @@ class Window(QtGui.QMainWindow):
             pwd = settings["Localize"]["PWD"]
             box_size = settings["Localize"]["box_size"]
             gradient = settings["Localize"]["gradient"]
-        except:
+        except Exception as e:
+            print(e)
             pass
         if len(pwd) == 0:
             pwd = []
@@ -1078,14 +1084,15 @@ class Window(QtGui.QMainWindow):
                 100,
             )
 
-            # driftpath = QtGui.QFileDialog.getOpenFileName(self,  'Open drift file', filter='*.txt')
+            # driftpath = QtGui.QFileDialog.getOpenFileName(self,
+            # 'Open drift file', filter='*.txt')
             # if driftpath:
             #    drift = np.genfromtxt(driftpath)
             data = []
             n_id = 0
             for element in locs:
-                currentframe = element["frame"]
-                if currentframe > n_frames and currentframe < (
+                currframe = element["frame"]
+                if currframe > n_frames and currframe < (
                     max_frames - n_frames
                 ):
                     xloc = (
@@ -1097,7 +1104,7 @@ class Window(QtGui.QMainWindow):
                         * element["y"]
                     )
                     frames = np.arange(
-                        currentframe - n_frames, currentframe + n_frames + 1
+                        currframe - n_frames, currframe + n_frames + 1
                     )
                     gradient = np.ones(2 * n_frames + 1) + 100
                     n_id_all = np.ones(2 * n_frames + 1) + n_id
@@ -1146,13 +1153,13 @@ class Window(QtGui.QMainWindow):
 
     def previous_frame(self):
         if self.movie is not None:
-            if self.current_frame_number > 0:
-                self.set_frame(self.current_frame_number - 1)
+            if self.curr_frame_number > 0:
+                self.set_frame(self.curr_frame_number - 1)
 
     def next_frame(self):
         if self.movie is not None:
-            if self.current_frame_number + 1 < self.info[0]["Frames"]:
-                self.set_frame(self.current_frame_number + 1)
+            if self.curr_frame_number + 1 < self.info[0]["Frames"]:
+                self.set_frame(self.curr_frame_number + 1)
 
     def first_frame(self):
         if self.movie is not None:
@@ -1169,7 +1176,7 @@ class Window(QtGui.QMainWindow):
                 self,
                 "Go to frame",
                 "Frame number:",
-                self.current_frame_number + 1,
+                self.curr_frame_number + 1,
                 1,
                 frames,
             )
@@ -1177,7 +1184,7 @@ class Window(QtGui.QMainWindow):
                 self.set_frame(number - 1)
 
     def set_frame(self, number):
-        self.current_frame_number = number
+        self.curr_frame_number = number
         if self.contrast_dialog.auto_checkbox.isChecked():
             black = self.movie[number].min()
             white = self.movie[number].max()
@@ -1189,7 +1196,7 @@ class Window(QtGui.QMainWindow):
 
     def draw_frame(self):
         if self.movie is not None:
-            frame = self.movie[self.current_frame_number]
+            frame = self.movie[self.curr_frame_number]
             frame = frame.astype("float32")
             if self.contrast_dialog.auto_checkbox.isChecked():
                 frame -= frame.min()
@@ -1212,7 +1219,7 @@ class Window(QtGui.QMainWindow):
             self.view.setScene(self.scene)
             if self.ready_for_fit:
                 identifications_frame = self.identifications[
-                    self.identifications.frame == self.current_frame_number
+                    self.identifications.frame == self.curr_frame_number
                 ]
                 box = self.last_identification_info["Box Size"]
                 self.draw_identifications(
@@ -1224,12 +1231,12 @@ class Window(QtGui.QMainWindow):
                         self.movie,
                         self.parameters["Min. Net Gradient"],
                         self.parameters["Box Size"],
-                        self.current_frame_number,
+                        self.curr_frame_number,
                         self.view.roi,
                     )
                     box = self.parameters["Box Size"]
                     self.status_bar.showMessage(
-                        "Found {:,} spots in current frame.".format(
+                        "Found {:,} spots in curr frame.".format(
                             len(identifications_frame)
                         )
                     )
@@ -1240,7 +1247,7 @@ class Window(QtGui.QMainWindow):
                     self.status_bar.showMessage("")
             if self.locs is not None:
                 locs_frame = self.locs[
-                    self.locs.frame == self.current_frame_number
+                    self.locs.frame == self.curr_frame_number
                 ]
                 for loc in locs_frame:
                     self.scene.addItem(FitMarker(loc.x + 0.5, loc.y + 0.5, 1))
@@ -1313,9 +1320,10 @@ class Window(QtGui.QMainWindow):
         n_frames = self.info[0]["Frames"]
         box = parameters["Box Size"]
         mng = parameters["Min. Net Gradient"]
-        message = "Identifying in frame {:,} / {:,} (Box Size: {:,}; Min. Net Gradient: {:,}) ...".format(
-            frame_number, n_frames, box, mng
-        )
+        message = (
+            "Identifying in frame {:,} / {:,}"
+            " (Box Size: {:,}; Min. Net Gradient: {:,}) ..."
+        ).format(frame_number, n_frames, box, mng)
         self.status_bar.showMessage(message)
 
     def on_identify_finished(
@@ -1328,9 +1336,10 @@ class Window(QtGui.QMainWindow):
             n_identifications = len(identifications)
             box = parameters["Box Size"]
             mng = parameters["Min. Net Gradient"]
-            message = "Identified {:,} spots (Box Size: {:,}; Min. Net Gradient: {:,}). Ready for fit.".format(
-                n_identifications, box, mng
-            )
+            message = (
+                "Identified {:,} spots (Box Size: {:,}; "
+                "Min. Net Gradient: {:,}). Ready for fit."
+            ).format(n_identifications, box, mng)
             self.status_bar.showMessage(message)
             self.identifications = identifications
             self.ready_for_fit = True
@@ -1341,7 +1350,7 @@ class Window(QtGui.QMainWindow):
     def fit(self, calibrate_z=False):
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage("Preparing fit...")
-            method = self.parameters_dialog.fit_method.currentText()
+            method = self.parameters_dialog.fit_method.currText()
             method = {
                 "MLE, integrated Gaussian": "mle",
                 "LQ, Gaussian": "lq",
@@ -1379,11 +1388,11 @@ class Window(QtGui.QMainWindow):
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
         self.fit_z_worker.start()
 
-    def on_fit_progress(self, current, total):
+    def on_fit_progress(self, curr, total):
         if self.parameters_dialog.gpufit_checkbox.isChecked():
             self.status_bar.showMessage("Fitting spots by GPUfit...")
         else:
-            message = "Fitting spot {:,} / {:,} ...".format(current, total)
+            message = "Fitting spot {:,} / {:,} ...".format(curr, total)
             self.status_bar.showMessage(message)
 
     def on_fit_finished(self, locs, elapsed_time, fit_z, calibrate_z):
@@ -1424,8 +1433,8 @@ class Window(QtGui.QMainWindow):
                 locs_path = base + "_locs.hdf5"
                 self.save_locs(locs_path)
 
-    def on_fit_z_progress(self, current, total):
-        message = "Fitting z coordinate {:,} / {:,} ...".format(current, total)
+    def on_fit_z_progress(self, curr, total):
+        message = "Fitting z coordinate {:,} / {:,} ...".format(curr, total)
         self.status_bar.showMessage(message)
 
     def on_fit_z_finished(self, locs, elapsed_time):
@@ -1493,7 +1502,7 @@ class Window(QtGui.QMainWindow):
                 self.save_locs(path)
 
     def localize(self, calibrate_z=False):
-        if self.identifications != None and calibrate_z == True:
+        if self.identifications is not None and calibrate_z is True:
             self.fit(calibrate_z=calibrate_z)
         else:
             self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
@@ -1515,16 +1524,16 @@ class IdentificationWorker(QtCore.QThread):
 
     def run(self):
         N = len(self.movie)
-        current, futures = localize.identify_async(
+        curr, futures = localize.identify_async(
             self.movie,
             self.parameters["Min. Net Gradient"],
             self.parameters["Box Size"],
             self.roi,
         )
-        while current[0] < N:
-            self.progressMade.emit(current[0], self.parameters)
+        while curr[0] < N:
+            self.progressMade.emit(curr[0], self.parameters)
             time.sleep(0.2)
-        self.progressMade.emit(current[0], self.parameters)
+        self.progressMade.emit(curr[0], self.parameters)
         identifications = localize.identifications_from_futures(futures)
         self.finished.emit(
             self.parameters,
@@ -1593,17 +1602,17 @@ class FitWorker(QtCore.QThread):
                     self.identifications, theta, self.box, em
                 )
         elif self.method == "mle":
-            current, thetas, CRLBs, likelihoods, iterations = gaussmle.gaussmle_async(
+            curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
                 spots, self.eps, self.max_it, method="sigmaxy"
             )
-            while current[0] < N:
-                self.progressMade.emit(current[0], N)
+            while curr[0] < N:
+                self.progressMade.emit(curr[0], N)
                 time.sleep(0.2)
             locs = gaussmle.locs_from_fits(
                 self.identifications,
                 thetas,
                 CRLBs,
-                likelihoods,
+                llhoods,
                 iterations,
                 self.box,
             )
