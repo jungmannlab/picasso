@@ -4277,7 +4277,7 @@ class View(QtGui.QLabel):
                     .lstrip("#")
                 )
                 rgbval = tuple(
-                    int(colorstring[i : i + 2], 16) / 255 for i in (0, 2, 4)
+                    int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
                 )
                 colors[i] = rgbval
 
@@ -5765,11 +5765,28 @@ class Window(QtGui.QMainWindow):
                             for index, row in enumerate(loctxt)
                         ]
                         # For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm],
-                        #  sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm], len
+                        #  sigma2 [nm], intensity[Photons], offset[photon]
+                        # uncertainty_xy [nm], len
+                        header = ""
+                        for element in [
+                            "id",
+                            "frame",
+                            "x [nm]",
+                            "y [nm]",
+                            "z [nm]",
+                            "sigma1 [nm]",
+                            "sigma2 [nm]",
+                            "intensity [photon]",
+                            "offset [photon]",
+                            "bkgstd [photon]",
+                            "uncertainty_xy [nm]",
+                            "detections",
+                        ]:
+                            header += '"' + element + '",'
+                        header = header[:-1] + "\r\n"
                         with open(path, "wb") as f:
-                            f.write(
-                                b'"id","frame"",""x [nm]"",""y [nm]"",""z [nm]"",""sigma1 [nm]"",""sigma2 [nm]","intensity [photon]","offset [photon]","bkgstd [photon]","uncertainty_xy [nm]","detections"\r\n'
-                            )
+                            f.write(str.encode(header))
+
                             np.savetxt(
                                 f,
                                 loctxt,
@@ -5821,11 +5838,24 @@ class Window(QtGui.QMainWindow):
                             )
                             for index, row in enumerate(loctxt)
                         ]
-                        # For 2D: id, frame, x[nm], y[nm], sigma [nm], intensity[Photons], offset[photon], uncertainty_xy [nm], len
+                        header = ""
+                        for element in [
+                            "id",
+                            "frame",
+                            "x [nm]",
+                            "y [nm]",
+                            "sigma [nm]",
+                            "intensity [photon]",
+                            "offset [photon]",
+                            "bkgstd [photon]",
+                            "uncertainty_xy [nm]",
+                            "detections",
+                        ]:
+                            header += '"' + element + '",'
+                        header = header[:-1] + "\r\n"
+
                         with open(path, "wb") as f:
-                            f.write(
-                                b'\'id","frame","x [nm]","y [nm]","sigma [nm]","intensity [photon]","offset [photon]","bkgstd [photon]","uncertainty_xy [nm]","detections"\r\n'
-                            )
+                            f.write(str.encode(header))
                             np.savetxt(
                                 f,
                                 loctxt,
@@ -5878,11 +5908,28 @@ class Window(QtGui.QMainWindow):
                             )
                             for index, row in enumerate(loctxt)
                         ]
-                        # For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm]
+                        # For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm],
+                        # sigma2 [nm], intensity[Photons], offset[photon],
+                        # uncertainty_xy [nm]
+                        header = ""
+                        for element in [
+                            "id",
+                            "frame",
+                            "x [nm]",
+                            "y [nm]",
+                            "z [nm]",
+                            "sigma1 [nm]",
+                            "sigma2 [nm]",
+                            "intensity [photon]",
+                            "offset [photon]",
+                            "bkgstd [photon]",
+                            "uncertainty_xy [nm]",
+                        ]:
+                            header += '"' + element + '",'
+                        header = header[:-1] + "\r\n"
+
                         with open(path, "wb") as f:
-                            f.write(
-                                b'"id","frame","x [nm]","y [nm]","z [nm]","sigma1 [nm]","sigma2 [nm]","intensity [photon]","offset [photon]","bkgstd [photon]","uncertainty_xy [nm]"\r\n'
-                            )
+                            f.write(str.encode(header))
                             np.savetxt(
                                 f,
                                 loctxt,
@@ -5931,11 +5978,26 @@ class Window(QtGui.QMainWindow):
                             )
                             for index, row in enumerate(loctxt)
                         ]
-                        # For 2D: id, frame, x[nm], y[nm], sigma [nm], intensity[Photons], offset[photon], uncertainty_xy [nm]
+                        # For 2D: id, frame, x[nm], y[nm], sigma [nm],
+                        # intensity[Photons], offset[photon],
+                        # uncertainty_xy [nm]
+                        header = ""
+                        for element in [
+                            "id",
+                            "frame",
+                            "x [nm]",
+                            "y [nm]",
+                            "sigma [nm]",
+                            "intensity [photon]",
+                            "offset [photon]",
+                            "bkgstd [photon]",
+                            "uncertainty_xy [nm]",
+                        ]:
+                            header += '"' + element + '",'
+                        header = header[:-1] + "\r\n"
+
                         with open(path, "wb") as f:
-                            f.write(
-                                b'"id","frame","x [nm]","y [nm]","sigma [nm]","intensity [photon]","offset [photon]","bkgstd [photon]","uncertainty_xy [nm]"\r\n'
-                            )
+                            f.write(str.encode(header))
                             np.savetxt(
                                 f,
                                 loctxt,
