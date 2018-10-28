@@ -174,7 +174,7 @@ def _distance_histogram(
 
 
 def distance_histogram(locs, info, bin_size, r_max):
-    locs, size, x_index, y_index, block_starts, block_ends, K, L = get_index_blocks(
+    locs, size, x_index, y_index, b_starts, b_ends, K, L = get_index_blocks(
         locs, info, r_max
     )
     N = len(locs)
@@ -188,8 +188,8 @@ def distance_histogram(locs, info, bin_size, r_max):
             r_max,
             x_index,
             y_index,
-            block_starts,
-            block_ends,
+            b_starts,
+            b_ends,
             start,
             chunk,
         )
@@ -1264,7 +1264,10 @@ def link_loc_groups(locs, info, link_group, remove_ambiguous_lengths=True):
 
 
 def localization_precision(photons, s, bg, em):
-    """ Calculates the theoretical localization preicision according to Mortensen et al., Nat Meth, 2010 """
+    """
+    Calculates the theoretical localization preicision
+    according to Mortensen et al., Nat Meth, 2010
+    """
     s2 = s ** 2
     sa2 = s2 + 1 / 12
     v = sa2 * (16 / 9 + (8 * _np.pi * sa2 * bg) / photons) / photons

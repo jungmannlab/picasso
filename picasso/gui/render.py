@@ -2211,9 +2211,11 @@ class View(QtGui.QLabel):
                         choice = QtGui.QMessageBox.question(
                             self,
                             "Group question",
-                            ("Groups are not consecutive"
+                            (
+                                "Groups are not consecutive"
                                 " and more than 5000 groups detected."
-                                " Re-Index groups? This may take a while."),
+                                " Re-Index groups? This may take a while."
+                            ),
                             QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
                         )
                         if choice == QtGui.QMessageBox.Yes:
@@ -2241,9 +2243,7 @@ class View(QtGui.QLabel):
             if render:
                 self.update_scene()
 
-        self.window.display_settings_dlg.parameter.addItems(
-            locs.dtype.names
-        )
+        self.window.display_settings_dlg.parameter.addItems(locs.dtype.names)
 
         if hasattr(locs, "z"):
             self.window.slicer_dialog.zcoord.append(locs.z)
@@ -2793,9 +2793,7 @@ class View(QtGui.QLabel):
             self.window.display_settings_dlg.blur_buttongroup.checkedButton()
         )
         optimal_oversampling = self.display_pixels_per_viewport_pixels()
-        if (
-            self.window.display_settings_dlg.dynamic_oversampling.isChecked()
-        ):
+        if self.window.display_settings_dlg.dynamic_oversampling.isChecked():
             oversampling = optimal_oversampling
             self.window.display_settings_dlg.set_oversampling_silently(
                 optimal_oversampling
@@ -2804,17 +2802,17 @@ class View(QtGui.QLabel):
             oversampling = float(
                 self.window.display_settings_dlg.oversampling.value()
             )
-            if (
-                self.window.display_settings_dlg.high_oversampling.isChecked()
-            ):
+            if self.window.display_settings_dlg.high_oversampling.isChecked():
                 pass
             else:
                 if oversampling > optimal_oversampling:
                     QtGui.QMessageBox.information(
                         self,
                         "Oversampling too high",
-                        ("Oversampling will be adjusted to"
-                            " match the display pixel density."),
+                        (
+                            "Oversampling will be adjusted to"
+                            " match the display pixel density."
+                        ),
                     )
                     oversampling = optimal_oversampling
                     self.window.display_settings_dlg.set_oversampling_silently(
@@ -3143,10 +3141,12 @@ class View(QtGui.QLabel):
         dt = time.time() - params["t0"]
 
         msgBox.setText(
-            ("Keep pick No: {} of {} ?\n"
+            (
+                "Keep pick No: {} of {} ?\n"
                 "Picks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \n"
                 "Time elapsed: {:.2f} Minutes, "
-                "Picks per Minute: {:.2f}").format(
+                "Picks per Minute: {:.2f}"
+            ).format(
                 params["i"] + 1,
                 params["n_total"],
                 params["n_removed"],
@@ -4277,7 +4277,7 @@ class View(QtGui.QLabel):
                     .lstrip("#")
                 )
                 rgbval = tuple(
-                    int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
+                    int(colorstring[i : i + 2], 16) / 255 for i in (0, 2, 4)
                 )
                 colors[i] = rgbval
 
@@ -4540,12 +4540,8 @@ class View(QtGui.QLabel):
                 self.window.display_settings_dlg.parameter.currentText()
             )
             colors = self.window.display_settings_dlg.color_step.value()
-            min_val = (
-                self.window.display_settings_dlg.minimum_render.value()
-            )
-            max_val = (
-                self.window.display_settings_dlg.maximum_render.value()
-            )
+            min_val = self.window.display_settings_dlg.minimum_render.value()
+            max_val = self.window.display_settings_dlg.maximum_render.value()
 
             x_step = (max_val - min_val) / colors
 
@@ -4634,9 +4630,7 @@ class View(QtGui.QLabel):
         self.window.display_settings_dlg.maximum_render.blockSignals(True)
         self.window.display_settings_dlg.minimum_render.blockSignals(True)
 
-        self.window.display_settings_dlg.maximum_render.setRange(
-            lower, upper
-        )
+        self.window.display_settings_dlg.maximum_render.setRange(lower, upper)
         self.window.display_settings_dlg.maximum_render.setValue(max_val)
         self.window.display_settings_dlg.minimum_render.setValue(min_val)
 
@@ -4771,8 +4765,10 @@ class View(QtGui.QLabel):
                     QtGui.QMessageBox.information(
                         self,
                         "RCC Error",
-                        ("RCC failed. Consider changing segmentation "
-                            "and make sure there are enough locs per frame."),
+                        (
+                            "RCC failed. Consider changing segmentation "
+                            "and make sure there are enough locs per frame."
+                        ),
                     )
                     rcc_progress.set_value(n_pairs)
                     self.update_scene()
@@ -5520,8 +5516,10 @@ class Window(QtGui.QMainWindow):
 
     def export_txt_nis(self):
         channel = self.view.get_channel(
-            ("Save localizations as txt for NIS "
-                "(x,y,z,channel,width,bg,length,area,frame)")
+            (
+                "Save localizations as txt for NIS "
+                "(x,y,z,channel,width,bg,length,area,frame)"
+            )
         )
         pixelsize = self.display_settings_dlg.pixelsize.value()
 
@@ -5533,8 +5531,10 @@ class Window(QtGui.QMainWindow):
             out_path = base + ".nis.txt"
             path = QtGui.QFileDialog.getSaveFileName(
                 self,
-                ("Save localizations as txt for NIS "
-                    "(x,y,z,channel,width,bg,length,area,frame)"),
+                (
+                    "Save localizations as txt for NIS "
+                    "(x,y,z,channel,width,bg,length,area,frame)"
+                ),
                 out_path,
                 filter="*.nis.txt",
             )
@@ -5559,9 +5559,7 @@ class Window(QtGui.QMainWindow):
                         for row in loctxt
                     ]
                     with open(path, "wb") as f:
-                        f.write(
-                            z_header
-                        )
+                        f.write(z_header)
                         np.savetxt(
                             f,
                             loctxt,
@@ -5598,9 +5596,7 @@ class Window(QtGui.QMainWindow):
                         for row in loctxt
                     ]
                     with open(path, "wb") as f:
-                        f.write(
-                            header
-                        )
+                        f.write(header)
                         np.savetxt(
                             f,
                             loctxt,
@@ -5980,10 +5976,7 @@ class Window(QtGui.QMainWindow):
         if len(colormap) == 0:
             colormap = "magma"
         for index in range(self.display_settings_dlg.colormap.count()):
-            if (
-                self.display_settings_dlg.colormap.itemText(index)
-                == colormap
-            ):
+            if self.display_settings_dlg.colormap.itemText(index) == colormap:
                 self.display_settings_dlg.colormap.setCurrentIndex(index)
                 break
         pwd = []
