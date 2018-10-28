@@ -600,7 +600,8 @@ class Window(QtGui.QMainWindow):
                 print("Dataset loaded from {}.".format(path))
             else:
                 print(
-                    "Dataset loaded from {}, Total number of datasets {}.".format(
+                    ("Dataset loaded from {},"
+                        " Total number of datasets {}.").format(
                         path, len(self.locs)
                     )
                 )
@@ -1356,7 +1357,8 @@ class Window(QtGui.QMainWindow):
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
             plt.close(fig)
 
-        # TODO: Sort these functions out, combine with radio_sym / also for convolving.
+        # TODO: Sort these functions out,
+        # combine with radio_sym / also for convolving.
         if self.radio_sym_custom.isChecked():
             print("Using custom symmetry.")
             symmetry_txt = np.asarray((self.symcustomEdit.text()).split(","))
@@ -1814,7 +1816,8 @@ class Window(QtGui.QMainWindow):
                         b_max, a_max = np.unravel_index(
                             xcorr.argmax(), xcorr.shape
                         )
-                        # store the transformation if the correlation is larger than before
+                        # store the transformation if the correlation
+                        # is larger than before
                         all_xcorr[k, j] = xcorr[b_max, a_max]
                         all_db[k, j] = (
                             np.ceil(b_max - image_halfb) / self.oversampling
@@ -1938,7 +1941,10 @@ class Window(QtGui.QMainWindow):
         )
 
     def adjust_viewport_to_view(self, viewport):
-        """ Adds space to a desired viewport so that it matches the window aspect ratio. """
+        """
+        Adds space to a desired viewport so that
+        it matches the window aspect ratio.
+        """
         viewport_height = viewport[1][0] - viewport[0][0]
         viewport_width = viewport[1][1] - viewport[0][1]
         view_height = self.height()
@@ -2039,7 +2045,8 @@ class Window(QtGui.QMainWindow):
         image = self.scale_contrast(image, autoscale=autoscale)
         image = self.to_8bit(image)
         Y, X = image.shape
-        # cmap = self.window.display_settings_dialog.colormap.currentText() TODO: selection of colormap?
+        # cmap = self.window.display_settings_dialog.colormap.currentText()
+        # TODO: selection of colormap?
         cmap = "hot"
         cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
         self._bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
