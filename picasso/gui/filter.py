@@ -4,8 +4,8 @@
 
     Graphical user interface for filtering localization lists
 
-    :author: Joerg Schnitzbauer, 2015
-    :copyright: Copyright (c) 2015 Jungmann Lab, Max Planck Institute of Biochemistry
+    :authors: Joerg Schnitzbauer Maximilian Thomas Strauss, 2015-2018
+    :copyright: Copyright (c) 2015=2018 Jungmann Lab, MPI of Biochemistry
 """
 
 
@@ -336,7 +336,7 @@ class Window(QtGui.QMainWindow):
             view_height = self.table_view.viewport().height()
             n_rows = int(view_height / ROW_HEIGHT) + 2
             table_model = TableModel(
-                self.locs[index : index + n_rows], index, self
+                self.locs[index: index + n_rows], index, self
             )
             self.table_view.setModel(table_model)
 
