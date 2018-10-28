@@ -1009,9 +1009,7 @@ class Window(QtGui.QMainWindow):
         noexchangecolors = len(set(exchangeroundstoSim))
         exchangecolors = list(set(exchangeroundstoSim))
 
-        if (
-            self.concatExchangeEdit.checkState()
-        ):
+        if self.concatExchangeEdit.checkState():
             conrounds = noexchangecolors
         else:
             conrounds = self.conroundsEdit.value()
@@ -1149,7 +1147,7 @@ class Window(QtGui.QMainWindow):
                 timetrace = {}
 
                 for i in range(0, nosites):
-                    photondisttemp, timetracetemp, spotkineticstemp = simulate.distphotons(
+                    p_temp, t_temp, k_temp = simulate.distphotons(
                         partstruct,
                         itime,
                         frames,
@@ -1159,9 +1157,9 @@ class Window(QtGui.QMainWindow):
                         photonratestd,
                         photonbudget,
                     )
-                    photondist[i, :] = photondisttemp
-                    spotkinetics[i, :] = spotkineticstemp
-                    timetrace[i] = self.vectorToString(timetracetemp)
+                    photondist[i, :] = p_temp
+                    spotkinetics[i, :] = k_temp
+                    timetrace[i] = self.vectorToString(t_temp)
                     outputmsg = (
                         "Distributing photons ... "
                         + str(_np.round(i / nosites * 1000) / 10)
@@ -1372,7 +1370,7 @@ class Window(QtGui.QMainWindow):
                     )
                     self.currentround = 0
 
-    def loadSettings(self):
+    def loadSettings(self):  # TODO: re-write exceptions, check key
         path = QtGui.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml"
         )
@@ -1390,20 +1388,23 @@ class Window(QtGui.QMainWindow):
                 self.mode3DEdit.setCheckState(info[0]["Structure.3D"])
                 self.cx(info[0]["Structure.CX"])
                 self.cy(info[0]["Structure.CY"])
-            except:
+            except Exception as e:
+                print(e)
                 pass
             try:
                 self.photonslopemodeEdit.setCheckState(
                     info[0]["Imager.Constant Photonrate Std"]
                 )
-            except:
+            except Exception as e:
+                print(e)
                 pass
 
             try:
                 self.backgroundlevelEdit.setValue(
                     info[0]["Imager.BackgroundLevel"]
                 )
-            except:
+            except Exception as e:
+                print(e)
                 pass
             self.structureIncorporationEdit.setValue(
                 info[0]["Structure.Incorporation"]
@@ -1532,12 +1533,14 @@ class Window(QtGui.QMainWindow):
                         type="int",
                         textmode=False,
                     )
-                except:
+                except Exception as e:
+                    print(e)
                     ex = _np.ones_like(x)
 
                 try:
                     z = self.readLine(info[0]["Structure.Structure3D"])
-                except:
+                except Exception as e:
+                    print(e)
                     z = _np.zeros_like(x)
 
                 minlen = min(len(x), len(y), len(ex), len(z))
@@ -1566,7 +1569,8 @@ class Window(QtGui.QMainWindow):
 
                 try:
                     z = clusters["com_z"]
-                except:
+                except Exception as e:
+                    print(e)
                     z = _np.zeros_like(x)
 
                 ex = _np.ones_like(x)
@@ -2252,9 +2256,14 @@ class CalibrationDialog(QtGui.QDialog):
             self.table.setRowCount(int(self.tifCounter))
             self.table.setColumnCount(6)
             self.table.setHorizontalHeaderLabels(
-                (
-                    "FileName,Imager concentration[nM],Integration time [ms],Laserpower,Mean [Photons],Std [Photons]"
-                ).split(",")
+                [
+                    "FileName",
+                    "Imager concentration[nM]",
+                    "Integration time [ms]",
+                    "Laserpower",
+                    "Mean [Photons]",
+                    "Std [Photons]",
+                ]
             )
 
             for i in range(0, self.tifCounter):
