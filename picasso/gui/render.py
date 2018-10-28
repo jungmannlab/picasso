@@ -5,7 +5,7 @@
     Graphical user interface for rendering localization images
 
     :author: Joerg Schnitzbauer & Maximilian Strauss, 2017-2018
-    :copyright: Copyright (c) 2017 Jungmann Lab, Max Planck Institute of Biochemistry
+    :copyright: Copyright (c) 2017 Jungmann Lab, MPI of Biochemistry
 """
 import os
 import os.path
@@ -668,7 +668,7 @@ class PlotDialogIso(QtGui.QDialog):
         return dialog.result
 
 
-class ClusterDialog(QtGui.QDialog):
+class ClsDlg(QtGui.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -765,7 +765,7 @@ class ClusterDialog(QtGui.QDialog):
         all_picked_locs, current, length, n_clusters, color_sys, pixelsize
     ):
 
-        dialog = ClusterDialog(None)
+        dialog = ClsDlg(None)
 
         dialog.start_clusters = n_clusters
         dialog.n_clusters_spin.setValue(n_clusters)
@@ -804,7 +804,7 @@ class ClusterDialog(QtGui.QDialog):
         labels = est.labels_
 
         counts = list(Counter(labels).items())
-        # labeled_locs = lib.append_to_rec(labeled_locs,labels,'cluster')
+        # l_locs = lib.append_to_rec(l_locs,labels,'cluster')
 
         ax1.scatter(locs["x"], locs["y"], locs["z"], c=labels.astype(np.float))
 
@@ -846,12 +846,12 @@ class ClusterDialog(QtGui.QDialog):
         labels = [0 if x in checks else x for x in labels]
         labels = np.asarray(labels)
 
-        labeled_locs = lib.append_to_rec(scaled_locs, labels, "cluster")
-        labeled_locs_new_group = labeled_locs.copy()
+        l_locs = lib.append_to_rec(scaled_locs, labels, "cluster")
+        l_locs_new_group = l_locs.copy()
         power = np.round(n_clusters / 10) + 1
-        labeled_locs_new_group["group"] = (
-            labeled_locs_new_group["group"] * 10 ** power
-            + labeled_locs_new_group["cluster"]
+        l_locs_new_group["group"] = (
+            l_locs_new_group["group"] * 10 ** power
+            + l_locs_new_group["cluster"]
         )
 
         # Combine clustered locs
@@ -859,18 +859,18 @@ class ClusterDialog(QtGui.QDialog):
         for element in np.unique(labels):
             if element != 0:
                 clustered_locs.append(
-                    labeled_locs_new_group[labeled_locs["cluster"] == element]
+                    l_locs_new_group[l_locs["cluster"] == element]
                 )
 
         return (
             dialog.result,
             dialog.n_clusters_spin.value(),
-            labeled_locs,
+            l_locs,
             clustered_locs,
         )
 
 
-class ClusterDialog_2D(QtGui.QDialog):
+class ClsDlg2D(QtGui.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -960,7 +960,7 @@ class ClusterDialog_2D(QtGui.QDialog):
     @staticmethod
     def getParams(all_picked_locs, current, length, n_clusters, color_sys):
 
-        dialog = ClusterDialog_2D(None)
+        dialog = ClsDlg2D(None)
 
         dialog.start_clusters = n_clusters
         dialog.n_clusters_spin.setValue(n_clusters)
@@ -993,7 +993,7 @@ class ClusterDialog_2D(QtGui.QDialog):
         labels = est.labels_
 
         counts = list(Counter(labels).items())
-        # labeled_locs = lib.append_to_rec(labeled_locs,labels,'cluster')
+        # l_locs = lib.append_to_rec(l_locs,labels,'cluster')
 
         ax1.scatter(locs["x"], locs["y"], c=labels.astype(np.float))
 
@@ -1026,12 +1026,12 @@ class ClusterDialog_2D(QtGui.QDialog):
         labels = [0 if x in checks else x for x in labels]
         labels = np.asarray(labels)
 
-        labeled_locs = lib.append_to_rec(scaled_locs, labels, "cluster")
-        labeled_locs_new_group = labeled_locs.copy()
+        l_locs = lib.append_to_rec(scaled_locs, labels, "cluster")
+        l_locs_new_group = l_locs.copy()
         power = np.round(n_clusters / 10) + 1
-        labeled_locs_new_group["group"] = (
-            labeled_locs_new_group["group"] * 10 ** power
-            + labeled_locs_new_group["cluster"]
+        l_locs_new_group["group"] = (
+            l_locs_new_group["group"] * 10 ** power
+            + l_locs_new_group["cluster"]
         )
 
         # Combine clustered locs
@@ -1039,13 +1039,13 @@ class ClusterDialog_2D(QtGui.QDialog):
         for element in np.unique(labels):
             if element != 0:
                 clustered_locs.append(
-                    labeled_locs_new_group[labeled_locs["cluster"] == element]
+                    l_locs_new_group[l_locs["cluster"] == element]
                 )
 
         return (
             dialog.result,
             dialog.n_clusters_spin.value(),
-            labeled_locs,
+            l_locs,
             clustered_locs,
         )
 
@@ -2158,7 +2158,7 @@ class View(QtGui.QLabel):
         for element in info:
             if "Picasso Localize" in element.values():
                 if "Pixelsize" in element:
-                    self.window.display_settings_dialog.pixelsize.setValue(
+                    self.window.display_settings_dlg.pixelsize.setValue(
                         element["Pixelsize"]
                     )
 
@@ -2241,7 +2241,7 @@ class View(QtGui.QLabel):
             if render:
                 self.update_scene()
 
-        self.window.display_settings_dialog.parameter.addItems(
+        self.window.display_settings_dlg.parameter.addItems(
             locs.dtype.names
         )
 
@@ -2552,7 +2552,7 @@ class View(QtGui.QLabel):
         ox = []
         oy = []
         oldpoint = []
-        pixelsize = self.window.display_settings_dialog.pixelsize.value()
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         for point in self._points:
             if oldpoint != []:
                 ox, oy = self.map_to_view(*oldpoint)
@@ -2590,9 +2590,9 @@ class View(QtGui.QLabel):
         return image
 
     def draw_scalebar(self, image):
-        if self.window.display_settings_dialog.scalebar_groupbox.isChecked():
-            pixelsize = self.window.display_settings_dialog.pixelsize.value()
-            scalebar = self.window.display_settings_dialog.scalebar.value()
+        if self.window.display_settings_dlg.scalebar_groupbox.isChecked():
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            scalebar = self.window.display_settings_dlg.scalebar.value()
             length_camerapxl = scalebar / pixelsize
             length_displaypxl = int(
                 round(self.width() * length_camerapxl / self.viewport_width())
@@ -2604,7 +2604,7 @@ class View(QtGui.QLabel):
             x = self.width() - length_displaypxl - 35
             y = self.height() - height - 20
             painter.drawRect(x, y, length_displaypxl + 0, height + 0)
-            if self.window.display_settings_dialog.scalebar_text.isChecked():
+            if self.window.display_settings_dlg.scalebar_text.isChecked():
                 font = painter.font()
                 font.setPixelSize(20)
                 painter.setFont(font)
@@ -2623,7 +2623,7 @@ class View(QtGui.QLabel):
         return image
 
     def draw_minimap(self, image):
-        if self.window.display_settings_dialog.minimap.isChecked():
+        if self.window.display_settings_dlg.minimap.isChecked():
             movie_height, movie_width = self.movie_size()
             length_minimap = 100
             height_minimap = movie_height / movie_width * 100
@@ -2662,7 +2662,7 @@ class View(QtGui.QLabel):
             self.qimage_no_picks = self.draw_scalebar(qimage)
             self.qimage_no_picks = self.draw_minimap(self.qimage_no_picks)
             dppvp = self.display_pixels_per_viewport_pixels()
-            self.window.display_settings_dialog.set_zoom_silently(dppvp)
+            self.window.display_settings_dlg.set_zoom_silently(dppvp)
         self.qimage = self.draw_picks(self.qimage_no_picks)
         self.qimage = self.draw_points(self.qimage)
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
@@ -2790,22 +2790,22 @@ class View(QtGui.QLabel):
         keyword arguments of render.
         """
         blur_button = (
-            self.window.display_settings_dialog.blur_buttongroup.checkedButton()
+            self.window.display_settings_dlg.blur_buttongroup.checkedButton()
         )
         optimal_oversampling = self.display_pixels_per_viewport_pixels()
         if (
-            self.window.display_settings_dialog.dynamic_oversampling.isChecked()
+            self.window.display_settings_dlg.dynamic_oversampling.isChecked()
         ):
             oversampling = optimal_oversampling
-            self.window.display_settings_dialog.set_oversampling_silently(
+            self.window.display_settings_dlg.set_oversampling_silently(
                 optimal_oversampling
             )
         else:
             oversampling = float(
-                self.window.display_settings_dialog.oversampling.value()
+                self.window.display_settings_dlg.oversampling.value()
             )
             if (
-                self.window.display_settings_dialog.high_oversampling.isChecked()
+                self.window.display_settings_dlg.high_oversampling.isChecked()
             ):
                 pass
             else:
@@ -2817,7 +2817,7 @@ class View(QtGui.QLabel):
                             " match the display pixel density."),
                     )
                     oversampling = optimal_oversampling
-                    self.window.display_settings_dialog.set_oversampling_silently(
+                    self.window.display_settings_dlg.set_oversampling_silently(
                         optimal_oversampling
                     )
         if viewport is None:
@@ -2825,11 +2825,11 @@ class View(QtGui.QLabel):
         return {
             "oversampling": oversampling,
             "viewport": viewport,
-            "blur_method": self.window.display_settings_dialog.blur_methods[
+            "blur_method": self.window.display_settings_dlg.blur_methods[
                 blur_button
             ],
             "min_blur_width": float(
-                self.window.display_settings_dialog.min_blur_width.value()
+                self.window.display_settings_dlg.min_blur_width.value()
             ),
         }
 
@@ -3143,7 +3143,10 @@ class View(QtGui.QLabel):
         dt = time.time() - params["t0"]
 
         msgBox.setText(
-            "Keep pick No: {} of {} ?\nPicks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \nTime elapsed: {:.2f} Minutes, Picks per Minute: {:.2f}".format(
+            ("Keep pick No: {} of {} ?\n"
+                "Picks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \n"
+                "Time elapsed: {:.2f} Minutes, "
+                "Picks per Minute: {:.2f}").format(
                 params["i"] + 1,
                 params["n_total"],
                 params["n_removed"],
@@ -3604,7 +3607,7 @@ class View(QtGui.QLabel):
     def show_pick_3d(self):
         print("Show pick 3D")
         channel = self.get_channel3d("Show Pick 3D")
-        pixelsize = self.window.display_settings_dialog.pixelsize.value()
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         removelist = []
         if channel is not None:
             n_channels = len(self.locs_paths)
@@ -3655,7 +3658,7 @@ class View(QtGui.QLabel):
         # essentially the same as show_pick_3d
         channel = self.get_channel3d("Show Pick 3D")
         removelist = []
-        pixelsize = self.window.display_settings_dialog.pixelsize.value()
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if channel is not None:
             n_channels = len(self.locs_paths)
             colors = get_colors(n_channels)
@@ -3682,7 +3685,7 @@ class View(QtGui.QLabel):
                         elif reply == 2:
                             break
                         else:
-                            discard
+                            # discard
                             removelist.append(pick)
             else:
                 all_picked_locs = self.picked_locs(channel)
@@ -3715,14 +3718,14 @@ class View(QtGui.QLabel):
 
     def analyze_cluster(self):
         """
-        Tool to detect clusters with k-means clustering for later evaluation 
+        Tool to detect clusters with k-means clustering
         """
         print("Analyzing clusters...")
         channel = self.get_channel3d("Show Pick 3D")
         removelist = []
         saved_locs = []
         clustered_locs = []
-        pixelsize = self.window.display_settings_dialog.pixelsize.value()
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         if channel is not None:
             n_channels = len(self.locs_paths)
@@ -3737,7 +3740,7 @@ class View(QtGui.QLabel):
                 if self._picks:
                     for i, pick in enumerate(self._picks):
                         if hasattr(all_picked_locs[0], "z"):
-                            reply = ClusterDialog.getParams(
+                            reply = ClsDlg.getParams(
                                 all_picked_locs,
                                 i,
                                 len(self._picks),
@@ -3746,7 +3749,7 @@ class View(QtGui.QLabel):
                                 pixelsize,
                             )
                         else:
-                            reply = ClusterDialog_2D.getParams(
+                            reply = ClsDlg2D.getParams(
                                 all_picked_locs, i, len(self._picks), 0, colors
                             )
                         if reply == 1:
@@ -3770,7 +3773,7 @@ class View(QtGui.QLabel):
                         reply = 3
                         while reply == 3:
                             if hasattr(all_picked_locs[0], "z"):
-                                reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog.getParams(
+                                reply, nc, l_locs, c_locs = ClsDlg.getParams(
                                     all_picked_locs,
                                     i,
                                     len(self._picks),
@@ -3779,19 +3782,19 @@ class View(QtGui.QLabel):
                                     pixelsize,
                                 )
                             else:
-                                reply, n_clusters_new, labeled_locs, clustered_locs_temp = ClusterDialog_2D.getParams(
+                                reply, nc, l_locs, c_locs = ClsDlg2D.getParams(
                                     all_picked_locs,
                                     i,
                                     len(self._picks),
                                     n_clusters,
                                     1,
                                 )
-                            n_clusters = n_clusters_new
+                            n_clusters = nc
 
                         if reply == 1:
                             print("Accepted")
-                            saved_locs.append(labeled_locs)
-                            clustered_locs.extend(clustered_locs_temp)
+                            saved_locs.append(l_locs)
+                            clustered_locs.extend(c_locs)
                         elif reply == 2:
                             break
                         else:
@@ -3965,7 +3968,10 @@ class View(QtGui.QLabel):
         return np.sqrt(np.mean((locs.x - com_x) ** 2 + (locs.y - com_y) ** 2))
 
     def index_locs(self, channel):
-        """ Indexes localizations in a grid with grid size equal to the pick radius. """
+        """
+        Indexes localizations in a grid
+        with grid size equal to the pick radius.
+        """
         locs = self.locs[channel]
         info = self.infos[channel]
         d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -4190,7 +4196,8 @@ class View(QtGui.QLabel):
             else:
                 renderings = []
                 for i in range(len(self.locs)):
-                    # We render all images first, and later decide to keep them or not
+                    # We render all images first
+                    # and later decide to keep them or not
                     renderings.append(render.render(locsall[i], **kwargs))
                 renderings = [render.render(_, **kwargs) for _ in locsall]
                 n_locs = sum([_[0] for _ in renderings])
@@ -4270,7 +4277,7 @@ class View(QtGui.QLabel):
                     .lstrip("#")
                 )
                 rgbval = tuple(
-                    int(colorstring[i : i + 2], 16) / 255 for i in (0, 2, 4)
+                    int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
                 )
                 colors[i] = rgbval
 
@@ -4330,7 +4337,7 @@ class View(QtGui.QLabel):
         image = self.scale_contrast(image, autoscale=autoscale)
         image = self.to_8bit(image)
         Y, X = image.shape
-        cmap = self.window.display_settings_dialog.colormap.currentText()
+        cmap = self.window.display_settings_dlg.colormap.currentText()
         cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
         self._bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
         self._bgra[..., 0] = cmap[:, 2][image]
@@ -4432,15 +4439,15 @@ class View(QtGui.QLabel):
             else:
                 max_ = min([_.max() for _ in image])
             upper = INITIAL_REL_MAXIMUM * max_
-            self.window.display_settings_dialog.silent_minimum_update(0)
-            self.window.display_settings_dialog.silent_maximum_update(upper)
+            self.window.display_settings_dlg.silent_minimum_update(0)
+            self.window.display_settings_dlg.silent_maximum_update(upper)
 
-        upper = self.window.display_settings_dialog.maximum.value()
-        lower = self.window.display_settings_dialog.minimum.value()
+        upper = self.window.display_settings_dlg.maximum.value()
+        lower = self.window.display_settings_dlg.minimum.value()
 
         if upper == lower:
             upper = lower + 1 / (10 ** 6)
-            self.window.display_settings_dialog.silent_maximum_update(upper)
+            self.window.display_settings_dlg.silent_maximum_update(upper)
 
         image = (image - lower) / (upper - lower)
         image[~np.isfinite(image)] = 0
@@ -4450,7 +4457,7 @@ class View(QtGui.QLabel):
 
     def render_3d(self):
         if hasattr(self.locs[0], "z"):
-            if self.z_render == True:
+            if self.z_render is True:
                 self.z_render = False
             else:
                 self.z_render = True
@@ -4474,7 +4481,7 @@ class View(QtGui.QLabel):
             self.update_scene()
 
     def render_time(self):
-        if self.t_render == True:
+        if self.t_render is True:
             self.t_render = False
         else:
             self.t_render = True
@@ -4495,10 +4502,10 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def show_legend(self):
-        parameter = self.window.display_settings_dialog.parameter.currentText()
-        n_colors = self.window.display_settings_dialog.color_step.value()
-        min_val = self.window.display_settings_dialog.minimum_render.value()
-        max_val = self.window.display_settings_dialog.maximum_render.value()
+        parameter = self.window.display_settings_dlg.parameter.currentText()
+        n_colors = self.window.display_settings_dlg.color_step.value()
+        min_val = self.window.display_settings_dlg.minimum_render.value()
+        max_val = self.window.display_settings_dlg.maximum_render.value()
 
         colors = get_colors(n_colors)
 
@@ -4527,17 +4534,17 @@ class View(QtGui.QLabel):
     def activate_render_property(self):
         self.deactivate_property_menu()
 
-        if self.window.display_settings_dialog.render_check.isChecked():
+        if self.window.display_settings_dlg.render_check.isChecked():
             self.x_render_state = True
             parameter = (
-                self.window.display_settings_dialog.parameter.currentText()
+                self.window.display_settings_dlg.parameter.currentText()
             )
-            colors = self.window.display_settings_dialog.color_step.value()
+            colors = self.window.display_settings_dlg.color_step.value()
             min_val = (
-                self.window.display_settings_dialog.minimum_render.value()
+                self.window.display_settings_dlg.minimum_render.value()
             )
             max_val = (
-                self.window.display_settings_dialog.maximum_render.value()
+                self.window.display_settings_dlg.maximum_render.value()
             )
 
             x_step = (max_val - min_val) / colors
@@ -4589,7 +4596,7 @@ class View(QtGui.QLabel):
 
             self.update_scene()
 
-            self.window.display_settings_dialog.show_legend.setEnabled(True)
+            self.window.display_settings_dlg.show_legend.setEnabled(True)
 
         else:
             self.x_render_state = False
@@ -4597,19 +4604,19 @@ class View(QtGui.QLabel):
         self.activate_property_menu()
 
     def activate_property_menu(self):
-        self.window.display_settings_dialog.minimum_render.setEnabled(True)
-        self.window.display_settings_dialog.maximum_render.setEnabled(True)
-        self.window.display_settings_dialog.color_step.setEnabled(True)
+        self.window.display_settings_dlg.minimum_render.setEnabled(True)
+        self.window.display_settings_dlg.maximum_render.setEnabled(True)
+        self.window.display_settings_dlg.color_step.setEnabled(True)
 
     def deactivate_property_menu(self):
-        self.window.display_settings_dialog.minimum_render.setEnabled(False)
-        self.window.display_settings_dialog.maximum_render.setEnabled(False)
-        self.window.display_settings_dialog.color_step.setEnabled(False)
+        self.window.display_settings_dlg.minimum_render.setEnabled(False)
+        self.window.display_settings_dlg.maximum_render.setEnabled(False)
+        self.window.display_settings_dlg.color_step.setEnabled(False)
 
     def set_property(self):
 
-        self.window.display_settings_dialog.render_check.setEnabled(False)
-        parameter = self.window.display_settings_dialog.parameter.currentText()
+        self.window.display_settings_dlg.render_check.setEnabled(False)
+        parameter = self.window.display_settings_dlg.parameter.currentText()
 
         min_val = np.min(self.locs[0][parameter])
         max_val = np.max(self.locs[0][parameter])
@@ -4624,22 +4631,22 @@ class View(QtGui.QLabel):
         else:
             upper = -min_val * 100
 
-        self.window.display_settings_dialog.maximum_render.blockSignals(True)
-        self.window.display_settings_dialog.minimum_render.blockSignals(True)
+        self.window.display_settings_dlg.maximum_render.blockSignals(True)
+        self.window.display_settings_dlg.minimum_render.blockSignals(True)
 
-        self.window.display_settings_dialog.maximum_render.setRange(
+        self.window.display_settings_dlg.maximum_render.setRange(
             lower, upper
         )
-        self.window.display_settings_dialog.maximum_render.setValue(max_val)
-        self.window.display_settings_dialog.minimum_render.setValue(min_val)
+        self.window.display_settings_dlg.maximum_render.setValue(max_val)
+        self.window.display_settings_dlg.minimum_render.setValue(min_val)
 
-        self.window.display_settings_dialog.maximum_render.blockSignals(False)
-        self.window.display_settings_dialog.minimum_render.blockSignals(False)
+        self.window.display_settings_dlg.maximum_render.blockSignals(False)
+        self.window.display_settings_dlg.minimum_render.blockSignals(False)
 
         self.activate_property_menu()
 
-        self.window.display_settings_dialog.render_check.setEnabled(True)
-        self.window.display_settings_dialog.render_check.setCheckState(False)
+        self.window.display_settings_dlg.render_check.setEnabled(True)
+        self.window.display_settings_dlg.render_check.setCheckState(False)
 
         self.activate_render_property()
 
@@ -4759,11 +4766,13 @@ class View(QtGui.QLabel):
                     self.index_blocks[channel] = None
                     self.add_drift(channel, drift)
                     self.update_scene()
-                except:
+                except Exception as e:
+                    print(e)
                     QtGui.QMessageBox.information(
                         self,
                         "RCC Error",
-                        "RCC failed. Consider changing segmentation and make sure there are enough locs per frame.",
+                        ("RCC failed. Consider changing segmentation "
+                            "and make sure there are enough locs per frame."),
                     )
                     rcc_progress.set_value(n_pairs)
                     self.update_scene()
@@ -4799,7 +4808,8 @@ class View(QtGui.QLabel):
         sd = (drift - drift_mean) ** 2
         # Mean of square deviation for each pick
         msd = np.nanmean(sd, 1)
-        # New mean drift over picks, where each pick is weighted according to its msd
+        # New mean drift over picks
+        # where each pick is weighted according to its msd
         nan_mask = np.isnan(drift)
         drift = np.ma.MaskedArray(drift, mask=nan_mask)
         drift_mean = np.ma.average(drift, axis=0, weights=1 / msd)
@@ -5234,7 +5244,7 @@ class Window(QtGui.QMainWindow):
         self.view = View(self)
         self.view.setMinimumSize(1, 1)
         self.setCentralWidget(self.view)
-        self.display_settings_dialog = DisplaySettingsDialog(self)
+        self.display_settings_dlg = DisplaySettingsDialog(self)
         self.tools_settings_dialog = ToolsSettingsDialog(self)
         self.mask_settings_dialog = MaskSettingsDialog(self)
         self.slicer_dialog = SlicerDialog(self)
@@ -5291,7 +5301,7 @@ class Window(QtGui.QMainWindow):
         display_settings_action = view_menu.addAction("Display settings")
         display_settings_action.setShortcut("Ctrl+D")
         display_settings_action.triggered.connect(
-            self.display_settings_dialog.show
+            self.display_settings_dlg.show
         )
         view_menu.addAction(display_settings_action)
         view_menu.addSeparator()
@@ -5448,7 +5458,7 @@ class Window(QtGui.QMainWindow):
         settings = io.load_user_settings()
         settings["Render"][
             "Colormap"
-        ] = self.display_settings_dialog.colormap.currentText()
+        ] = self.display_settings_dlg.colormap.currentText()
         if self.view.locs_paths != []:
             settings["Render"]["PWD"] = os.path.dirname(
                 self.view.locs_paths[0]
@@ -5510,15 +5520,21 @@ class Window(QtGui.QMainWindow):
 
     def export_txt_nis(self):
         channel = self.view.get_channel(
-            "Save localizations as txt for NIS (x,y,z,channel,width,bg,length,area,frame)"
+            ("Save localizations as txt for NIS "
+                "(x,y,z,channel,width,bg,length,area,frame)")
         )
-        pixelsize = self.display_settings_dialog.pixelsize.value()
+        pixelsize = self.display_settings_dlg.pixelsize.value()
+
+        z_header = b"X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+        header = b"X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".nis.txt"
             path = QtGui.QFileDialog.getSaveFileName(
                 self,
-                "Save localizations as txt for NIS (x,y,z,channel,width,bg,length,area,frame)",
+                ("Save localizations as txt for NIS "
+                    "(x,y,z,channel,width,bg,length,area,frame)"),
                 out_path,
                 filter="*.nis.txt",
             )
@@ -5544,7 +5560,7 @@ class Window(QtGui.QMainWindow):
                     ]
                     with open(path, "wb") as f:
                         f.write(
-                            b"X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+                            z_header
                         )
                         np.savetxt(
                             f,
@@ -5583,7 +5599,7 @@ class Window(QtGui.QMainWindow):
                     ]
                     with open(path, "wb") as f:
                         f.write(
-                            b"X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+                            header
                         )
                         np.savetxt(
                             f,
@@ -5607,7 +5623,7 @@ class Window(QtGui.QMainWindow):
         channel = self.view.get_channel(
             "Save localizations as xyz for chimera (molecule,x,y,z)"
         )
-        pixelsize = self.display_settings_dialog.pixelsize.value()
+        pixelsize = self.display_settings_dlg.pixelsize.value()
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".chi.xyz"
@@ -5643,7 +5659,7 @@ class Window(QtGui.QMainWindow):
         channel = self.view.get_channel(
             "Save localizations as xyz for chimera (molecule,x,y,z)"
         )
-        pixelsize = self.display_settings_dialog.pixelsize.value()
+        pixelsize = self.display_settings_dlg.pixelsize.value()
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".visp.3d"
@@ -5675,7 +5691,7 @@ class Window(QtGui.QMainWindow):
         channel = self.view.get_channel(
             "Save localizations as txt for IMARIS (x,y,z,frame,channel)"
         )
-        pixelsize = self.display_settings_dialog.pixelsize.value()
+        pixelsize = self.display_settings_dlg.pixelsize.value()
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".imaris.txt"
@@ -5708,7 +5724,7 @@ class Window(QtGui.QMainWindow):
         channel = self.view.get_channel(
             "Save localizations as csv for ThunderSTORM"
         )
-        pixelsize = self.display_settings_dialog.pixelsize.value()
+        pixelsize = self.display_settings_dlg.pixelsize.value()
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".csv"
@@ -5752,7 +5768,8 @@ class Window(QtGui.QMainWindow):
                             )
                             for index, row in enumerate(loctxt)
                         ]
-                        # For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm], sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm], len
+                        # For 3D: id, frame, x[nm], y[nm], z[nm], sigma1 [nm],
+                        #  sigma2 [nm], intensity[Photons], offset[photon], uncertainty_xy [nm], len
                         with open(path, "wb") as f:
                             f.write(
                                 b'"id","frame"",""x [nm]"",""y [nm]"",""z [nm]"",""sigma1 [nm]"",""sigma2 [nm]","intensity [photon]","offset [photon]","bkgstd [photon]","uncertainty_xy [nm]","detections"\r\n'
@@ -5962,17 +5979,18 @@ class Window(QtGui.QMainWindow):
         colormap = settings["Render"]["Colormap"]
         if len(colormap) == 0:
             colormap = "magma"
-        for index in range(self.display_settings_dialog.colormap.count()):
+        for index in range(self.display_settings_dlg.colormap.count()):
             if (
-                self.display_settings_dialog.colormap.itemText(index)
+                self.display_settings_dlg.colormap.itemText(index)
                 == colormap
             ):
-                self.display_settings_dialog.colormap.setCurrentIndex(index)
+                self.display_settings_dlg.colormap.setCurrentIndex(index)
                 break
         pwd = []
         try:
             pwd = settings["Render"]["PWD"]
-        except:
+        except Exception as e:
+            print(e)
             pass
         if len(pwd) == 0:
             pwd = []
@@ -5991,7 +6009,7 @@ class Window(QtGui.QMainWindow):
                     if var_1 == "z":
                         var_2 = "z"
                         var_1 = input[2]
-                    pixelsize = self.display_settings_dialog.pixelsize.value()
+                    pixelsize = self.display_settings_dlg.pixelsize.value()
                     templocs = self.view.locs[channel][var_1].copy()
                     movie_height, movie_width = self.view.movie_size()
                     if var_1 == "x":
@@ -6037,7 +6055,7 @@ class Window(QtGui.QMainWindow):
             elif input[0] == "uspiral":
                 self.view.locs[channel]["x"] = self.view.x_spiral
                 self.view.locs[channel]["y"] = self.view.y_spiral
-                self.display_settings_dialog.render_check.setChecked(False)
+                self.display_settings_dlg.render_check.setChecked(False)
             else:
                 vars = self.view.locs[channel].dtype.names
                 exec(cmd, {k: self.view.locs[channel][k] for k in vars})
