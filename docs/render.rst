@@ -32,14 +32,16 @@ Resets the current picked regions and loads regions from a \*.yaml file that con
 Export as .csv for ThunderSTORM
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This will export the dataset in a \*.csv file to use with ThunderSTORM.
+This will export the dataset in a .csv file to use with ThunderSTORM.
 
 Note that for large datasets the writing of the file may take some time.
 
 Note that the pixel size value that is set in Display Settings will be
 used for exporting.
 
-Thefollowing columns will be exported: \* 3D: id, frame, x [nm], y [nm], z [nm], sigma1 [nm], sigma2 [nm], intensity[photon], offset[photon], uncertainty_xy [nm] \* 2D: id, frame, x [nm], y [nm], sigma [nm], intensity [photon], offset [photon], uncertainty_xy [nm]
+Thefollowing columns will be exported:
+3D: id, frame, x [nm], y [nm], z [nm], sigma1 [nm], sigma2 [nm], intensity[photon], offset[photon], uncertainty_xy [nm] 
+2D: id, frame, x [nm], y [nm], sigma [nm], intensity [photon], offset [photon], uncertainty_xy [nm]
 
 The uncertainty_xy is calculated as the mean of lpx and lpy. For 2D, sigma is calculated as the mean of sx and sy.
 
@@ -60,12 +62,15 @@ Apply expressions to localizations
 This tool allows you to apply expressions to localizations.
 
 Examples:
-\* ``x +=1`` will shift all localization by one to the right
-\* ``x +=1;y+=1``\ will shift all localization by one to the right and
-one up ### Notes: \* Using two variables in one statement is not
-supported (e.g. ``x = y``) \* To filter localizations use picasso filter
-### Additional commands: \* ``flip x z`` will exchange the x axis with y
-axis if z localizations are present (side projection), similar for
-``flip y z`` \* ``spiral r n`` will plot each localization over the time
-of the movie in a spiral with radius r and n number of turns (e.g. to
-detect repetitive binding), ``uspiral`` to reverse
+^^^^^^^^^
+``x +=1`` will shift all localization by one to the right
+``x +=1;y+=1`` will shift all localization by one to the right and one up.
+
+Notes:
+^^^^^^
+Using two variables in one statement is not supported (e.g. ``x = y``) To filter localizations use picasso filter.
+
+Additional commands:
+^^^^^^^^^^^^^^^^^^^^
+``flip x z`` will exchange the x axis with y axis if z localizations are present (side projection), similar for ``flip y z``.
+``spiral r n`` will plot each localization over the time of the movie in a spiral with radius r and n number of turns (e.g. to detect repetitive binding), ``uspiral`` to reverse.
