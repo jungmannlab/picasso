@@ -5,8 +5,8 @@ design
    :scale: 50 %
    :alt: UML Design
 
-How to use the design module?
------------------------------
+Design rectangular DNA origami
+------------------------------
 
 -  Start the design module. A canvas with hexagons, corresponding to the flat origami sheet will appear.
 -  Design a pattern of DNA-PAINT binding sites by clicking on the hexagons.
