@@ -19,4 +19,4 @@ Design rectangular DNA origami
 -  Use “Pipetting scheme” and select the folder with your plate list to generate a pipetting scheme.
 -  Use “Folding scheme” to get a table for pipetting folding mixes
 -  A design can be saved and loaded using the "Save" and "Load"-Buttons.
--  A saved design can also be loaded into the 'simulate' module.
+-  A saved design can also be loaded into the ‘Picasso: Simulate’ module.
