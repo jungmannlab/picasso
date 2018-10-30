@@ -1,6 +1,9 @@
 Picasso
 =======
-
+.. image:: https://readthedocs.org/projects/picassosr/badge/?version=latest
+   :target: https://picassosr.readthedocs.io/en/latest/?badge=latest
+   :alt: Documentation Status
+                
 .. image:: ../main_render.png
    :scale: 100 %
    :alt: UML Render view

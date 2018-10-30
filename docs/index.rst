@@ -6,6 +6,9 @@
 Welcome to Picasso's documentation!
 ===================================
 
+This documentation is based on the `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__. It's aim is to cover all the recent updates.
+Verison: 
+
 .. toctree::
    :maxdepth: 2
    :caption: Contents:
@@ -18,10 +21,6 @@ Welcome to Picasso's documentation!
    render
    average
    cmd
-
-
-
-
 
 Indices and tables
 ==================
