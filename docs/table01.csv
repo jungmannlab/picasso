@@ -1,0 +1,17 @@
+﻿Column Name,Description,C Data Type
+frame ,"The frame in which the localization occurred, starting with zero for the first frame. ",unsigned long 
+x ,The subpixel x coordinate in camera pixels ,float 
+y ,The subpixel y coordinate in camera pixels ,float 
+photons ,"The total number of detected photons from this event, not including background or camera offset ",float 
+sx ,The Point Spread Function width in camera pixels ,float 
+sy ,The Point Spread Function height in camera pixels ,float 
+bg ,"The number of background photons per pixel, not including the camera offset ",float 
+lpx ,"The localization precision in x direction, in camera pixels, as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float 
+lpy ,"The localization precision in y direction, in camera pixels, as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float 
+net_gradient ,"The net gradient of this spot which is defined by the sum of gradient vector magnitudes within the fix box, projected to the spot center. ",float 
+likelihood ,The log-likelihood of the fit ,float 
+iterations ,The number of iterations of the fit procedure ,long 
+group ,"(Optional) An identifier to assign multiple localizations to groups, for example by picking regions of interest ",long 
+len ,"(Optional) The length of the event, if localizations from consecutive frames have been linked ",long 
+n ,"(Optional) The number of localizations in this event, if localizations from consecutive frames have been linked, potentially diverging from the “len” column due to a transient dark time tolerance ",long 
+photon_rate ,"(Optional) The mean number of photons per frame, if localizations from consecutive frames have been linked. The total number of photons is set in the “photons” column. ",float 
