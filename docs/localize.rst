@@ -5,6 +5,12 @@ localize
    :scale: 50 %
    :alt: UML Localize
 
+Localize allows to perform super-resolution reconstruction of image stacks. For spot detection, a gradient-based approach is used. For Fitting, the following algorithms are implemented:
+
+- MLE, integrated Gaussian (based on `Smith et al., 2014 <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2862147/>`_.)
+- LQ, Gaussian (least squares)
+- Average of ROI
+
 Identification and fitting of single-molecule spots
 ---------------------------------------------------
 
@@ -131,7 +137,8 @@ Once there are several cameras present, Picasso will select the camera who's nam
 Theory
 ~~~~~~
 
-3D Calibration is performed by an adapted version of the 2008 Science paper by Huang ``Three-dimensional Super-resolution Imaging by Stochastic Optical Reconstruction Microscopy``.
+3D Calibration is performed by an adapted version of `Huang et al., 2008 <https://www.ncbi.nlm.nih.gov/pubmed/18174397/>`_.
+
 
 Calibrating z
 ~~~~~~~~~~~~~
@@ -146,5 +153,5 @@ The calibration coefficients are stored in the yaml file and contain the paramet
 Fitting z
 ~~~~~~~~~
 
-For each localization, sigma_x and sigma_y is determined. Similar to the Science paper, the following equation is used to minimize the Distance D: \* D = (sx0.5 - wx0.5)2 + (sy0.5 - wy0.5)2 with w being c[6]z0 +
-c[5]z1 .. + c[0]z6.
+For each localization, sigma_x and sigma_y is determined. Similar to the Science paper, the following equation is used to minimize the Distance D:  ``D = (sx0.5 - wx0.5)^2 + (sy0.5 - wy0.5)^2`` with w being ``c[6]z0 +
+c[5]z1 .. + c[0]z6``.
