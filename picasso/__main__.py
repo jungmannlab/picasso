@@ -1068,7 +1068,10 @@ def main():
     # group properties
     groupprops_parser = subparsers.add_parser(
         "groupprops",
-        help="calculate and various properties of localization groups",
+        help=(
+            "calculate kinetics "
+            "and various properties of localization groups"
+        ),
     )
     groupprops_parser.add_argument(
         "files",
