@@ -192,7 +192,7 @@ class CamSettingComboBox(QtGui.QComboBox):
         cam_combos = self.cam_combos[self.camera]
         sensitivity = CONFIG["Cameras"][self.camera]["Sensitivity"]
         for i in range(self.index + 1):
-            sensitivity = sensitivity[cam_combos[i].currText()]
+            sensitivity = sensitivity[cam_combos[i].currentText()]
         target = cam_combos[self.index + 1]
         target.blockSignals(True)
         target.clear()
@@ -264,9 +264,9 @@ class PromptInfoDialog(QtGui.QDialog):
         result = dialog.exec_()
         info = {}
         info["Byte Order"] = (
-            ">" if dialog.byte_order.currText() == "Big Endian" else "<"
+            ">" if dialog.byte_order.currentText() == "Big Endian" else "<"
         )
-        info["Data Type"] = dialog.dtype.currText()
+        info["Data Type"] = dialog.dtype.currentText()
         info["Frames"] = dialog.frames.value()
         info["Height"] = dialog.movie_height.value()
         info["Width"] = dialog.movie_width.value()
@@ -545,7 +545,7 @@ class ParametersDialog(QtGui.QDialog):
         z_grid.addWidget(self.magnification_factor, 2, 1)
 
         if "Cameras" in CONFIG:
-            camera = self.camera.currText()
+            camera = self.camera.currentText()
             if camera in CONFIG["Cameras"]:
                 self.on_camera_changed(0)
                 camera_config = CONFIG["Cameras"][camera]
@@ -556,7 +556,7 @@ class ParametersDialog(QtGui.QDialog):
                     self.update_sensitivity()
 
     def on_fit_method_changed(self, state):
-        if self.fit_method.currText() == "LQ, Gaussian":
+        if self.fit_method.currentText() == "LQ, Gaussian":
             self.gpufit_checkbox.setDisabled(False)
         else:
             self.gpufit_checkbox.setChecked(False)
@@ -581,7 +581,7 @@ class ParametersDialog(QtGui.QDialog):
     def on_camera_changed(self, index):
         self.gain.setValue(1)
         self.cam_settings.setCurrentIndex(index)
-        camera = self.camera.currText()
+        camera = self.camera.currentText()
         cam_config = CONFIG["Cameras"][camera]
         if "Baseline" in cam_config:
             self.baseline.setValue(cam_config["Baseline"])
@@ -593,7 +593,7 @@ class ParametersDialog(QtGui.QDialog):
         self.update_qe()
 
     def update_qe(self):
-        camera = self.camera.currText()
+        camera = self.camera.currentText()
         cam_config = CONFIG["Cameras"][camera]
         if "Quantum Efficiency" in cam_config:
             qe = cam_config["Quantum Efficiency"]
@@ -602,7 +602,7 @@ class ParametersDialog(QtGui.QDialog):
             except TypeError:
                 # qe is not a number
                 em_combo = self.emission_combos[camera]
-                wavelength = float(em_combo.currText())
+                wavelength = float(em_combo.currentText())
                 qe = cam_config["Quantum Efficiency"][wavelength]
                 self.qe.setValue(qe)
 
@@ -702,7 +702,7 @@ class ParametersDialog(QtGui.QDialog):
                                     )
 
     def update_sensitivity(self, index=None):
-        camera = self.camera.currText()
+        camera = self.camera.currentText()
         cam_config = CONFIG["Cameras"][camera]
         sensitivity = cam_config["Sensitivity"]
         if "Sensitivity" in cam_config:
@@ -713,7 +713,7 @@ class ParametersDialog(QtGui.QDialog):
                 categories = cam_config["Sensitivity Categories"]
                 for i, category in enumerate(categories):
                     cat_combo = self.cam_combos[camera][i]
-                    sensitivity = sensitivity[cat_combo.currText()]
+                    sensitivity = sensitivity[cat_combo.currentText()]
                 self.sensitivity.setValue(sensitivity)
 
 
@@ -1350,7 +1350,7 @@ class Window(QtGui.QMainWindow):
     def fit(self, calibrate_z=False):
         if self.movie is not None and self.ready_for_fit:
             self.status_bar.showMessage("Preparing fit...")
-            method = self.parameters_dialog.fit_method.currText()
+            method = self.parameters_dialog.fit_method.currentText()
             method = {
                 "MLE, integrated Gaussian": "mle",
                 "LQ, Gaussian": "lq",
