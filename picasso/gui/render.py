@@ -4677,50 +4677,59 @@ class View(QtGui.QLabel):
             info = self.infos[channel]
             drift = self._drift[channel]
 
-            if hasattr(self._drift[channel], "z"):
-                fig1 = plt.figure(figsize=(25.5, 6))
-                plt.suptitle("Corrected drift")
-                plt.subplot(1, 3, 1)
-                plt.plot(drift.x, label="x")
-                plt.plot(drift.y, label="y")
-                plt.legend(loc="best")
-                plt.xlabel("Frame")
-                plt.ylabel("Drift (pixel)")
-                plt.subplot(1, 3, 2)
-                plt.plot(
-                    drift.x,
-                    drift.y,
-                    color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
-                )
-                plt.axis("equal")
-                plt.xlabel("x")
-                plt.ylabel("y")
-                plt.subplot(1, 3, 3)
-                plt.plot(drift.z, label="z")
-                plt.legend(loc="best")
-                plt.xlabel("Frame")
-                plt.ylabel("Drift (nm)")
-                fig1.show()
-
+            if drift is None:
+                QtGui.QMessageBox.information(
+                    self, "Driftfile error",
+                    ("No driftfile found."
+                     " Nothing to display."
+                     " Please perform drift correction first."))
             else:
-                fig1 = plt.figure(figsize=(17, 6))
-                plt.suptitle("Corrected drift")
-                plt.subplot(1, 2, 1)
-                plt.plot(drift.x, label="x")
-                plt.plot(drift.y, label="y")
-                plt.legend(loc="best")
-                plt.xlabel("Frame")
-                plt.ylabel("Drift (pixel)")
-                plt.subplot(1, 2, 2)
-                plt.plot(
-                    drift.x,
-                    drift.y,
-                    color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
-                )
-                plt.axis("equal")
-                plt.xlabel("x")
-                plt.ylabel("y")
-                fig1.show()
+                if hasattr(self._drift[channel], "z"):
+                    fig1 = plt.figure(figsize=(25.5, 6))
+                    plt.suptitle("Corrected drift")
+                    plt.subplot(1, 3, 1)
+                    plt.plot(drift.x, label="x")
+                    plt.plot(drift.y, label="y")
+                    plt.legend(loc="best")
+                    plt.xlabel("Frame")
+                    plt.ylabel("Drift (pixel)")
+                    plt.subplot(1, 3, 2)
+                    plt.plot(
+                        drift.x,
+                        drift.y,
+                        color=list(
+                            plt.rcParams["axes.prop_cycle"])[2]["color"]
+                    )
+                    plt.axis("equal")
+                    plt.xlabel("x")
+                    plt.ylabel("y")
+                    plt.subplot(1, 3, 3)
+                    plt.plot(drift.z, label="z")
+                    plt.legend(loc="best")
+                    plt.xlabel("Frame")
+                    plt.ylabel("Drift (nm)")
+                    fig1.show()
+
+                else:
+                    fig1 = plt.figure(figsize=(17, 6))
+                    plt.suptitle("Corrected drift")
+                    plt.subplot(1, 2, 1)
+                    plt.plot(drift.x, label="x")
+                    plt.plot(drift.y, label="y")
+                    plt.legend(loc="best")
+                    plt.xlabel("Frame")
+                    plt.ylabel("Drift (pixel)")
+                    plt.subplot(1, 2, 2)
+                    plt.plot(
+                        drift.x,
+                        drift.y,
+                        color=list(
+                            plt.rcParams["axes.prop_cycle"])[2]["color"]
+                    )
+                    plt.axis("equal")
+                    plt.xlabel("x")
+                    plt.ylabel("y")
+                    fig1.show()
 
     def undrift(self):
         """ Undrifts with rcc. """
