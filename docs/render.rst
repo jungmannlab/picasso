@@ -173,6 +173,19 @@ Shows info for the currrent dataset. See Info Dialog.
 Tools
 ~~~~~
 
+Zoom (CTRL + Z)
+^^^^^^^^^^^^^^^
+Selects the zoom tool. The mouse can now be used for zoom and pan. 
+
+Pick (CTRL + P)
+^^^^^^^^^^^^^^^
+Selects the pick tool. The mouse can now be used for picking localizations. The radius of the pick can be set in the `Tools settings` (CTRL + T) dialog.
+
+Measure (CTRL + M)
+^^^^^^^^^^^^^^^^^^
+Selects the measure tool. The mouse can now be used for measuring distances. Left click adds a crosshair for measuring, right click deletes the last crosshair.
+
+
 Postprocess
 ~~~~~~~~~~~
 
