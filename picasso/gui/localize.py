@@ -354,7 +354,7 @@ class ParametersDialog(QtGui.QDialog):
             exp_grid.addWidget(self.camera, 0, 1)
             cameras = sorted(list(CONFIG["Cameras"].keys()))
             self.camera.addItems(cameras)
-            self.camera.currIndexChanged.connect(self.on_camera_changed)
+            self.camera.currentIndexChanged.connect(self.on_camera_changed)
 
             self.cam_settings = QtGui.QStackedWidget()
             exp_grid.addWidget(self.cam_settings, 1, 0, 1, 2)
@@ -384,11 +384,11 @@ class ParametersDialog(QtGui.QDialog):
                             sorted(list(sensitivity.keys()))
                         )
                         for cam_combo in self.cam_combos[camera][:-1]:
-                            cam_combo.currIndexChanged.connect(
+                            cam_combo.currentIndexChanged.connect(
                                 cam_combo.change_target_choices
                             )
                         self.cam_combos[camera][0].change_target_choices(0)
-                        self.cam_combos[camera][-1].currIndexChanged.connect(
+                        self.cam_combos[camera][-1].currentIndexChanged.connect(
                             self.update_sensitivity
                         )
                 if "Quantum Efficiency" in cam_config:
@@ -405,7 +405,7 @@ class ParametersDialog(QtGui.QDialog):
                         cam_grid.addWidget(emission_combo, row_count, 1)
                         wavelengths = sorted([str(_) for _ in qes])
                         emission_combo.addItems(wavelengths)
-                        emission_combo.currIndexChanged.connect(
+                        emission_combo.currentIndexChanged.connect(
                             self.on_emission_changed
                         )
                         self.emission_combos[camera] = emission_combo
@@ -475,8 +475,8 @@ class ParametersDialog(QtGui.QDialog):
         fit_grid.addWidget(self.fit_method, 1, 1)
         fit_stack = QtGui.QStackedWidget()
         fit_grid.addWidget(fit_stack, 2, 0, 1, 2)
-        self.fit_method.currIndexChanged.connect(fit_stack.setcurrIndex)
-        self.fit_method.currIndexChanged.connect(self.on_fit_method_changed)
+        self.fit_method.currentIndexChanged.connect(fit_stack.setCurrentIndex)
+        self.fit_method.currentIndexChanged.connect(self.on_fit_method_changed)
 
         # MLE
         mle_widget = QtGui.QWidget()
@@ -580,7 +580,7 @@ class ParametersDialog(QtGui.QDialog):
 
     def on_camera_changed(self, index):
         self.gain.setValue(1)
-        self.cam_settings.setcurrIndex(index)
+        self.cam_settings.setCurrentIndex(index)
         camera = self.camera.currText()
         cam_config = CONFIG["Cameras"][camera]
         if "Baseline" in cam_config:
