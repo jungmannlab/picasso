@@ -5,7 +5,9 @@ CMD
    :scale: 50 %
    :alt: UML Picasso cmd
 
-Localize
+Here is a list of command-line commands that can be used with picasso.
+
+localize
 --------
 It is possible to reconstruct images via command line. Type: ``python -m picasso localize args`` within an environment or ``picasso localize args`` if Picasso is installed.
 
@@ -46,3 +48,80 @@ csv2hdf
 Convert csv files (thunderSTORM) to hdf. Type ``python -m picasso csv2hdf filepath pixelsize``. Note that the following columns need to be present:
 ``frame, x_nm, y_nm, sigma_nm, intensity_photon, offset_photon, uncertainty_xy_nm`` for 2D files
 ``frame, x_nm, y_nm, z_nm, sigma1_nm, sigma2_nm, intensity_photon, offset_photon, uncertainty_xy_nm`` for 3D files
+
+join
+----
+Combine two hdf5 localization files. Type ``python -m picasso join file1 file2``. A new joined file will be created. Note that the frame information is preserved, i.e. frame 1 now can contain localizations from file 1 and file 2. Therefore, do not perform kinetic analysis and drift correction on joined files.
+
+link
+----
+Link localizations in consecutive frames.
+
+cluster_combine
+---------------
+Combines the localizations in each cluster of a group.
+
+cluster_combine_dist
+--------------------
+Calculate the nearest neighbor for each combined cluster
+
+clusterfilter
+-------------
+Filter localizations by properties of their clusters.
+
+undrift
+-------
+Correct localization coordinates for drift with RCC.
+
+density
+-------
+Compute the local density of localizations
+
+dbscan
+------
+Cluster localizations with the dbscan clustering algorithm.
+
+dark
+----
+Compute the dark time for grouped localizations.
+
+align
+-----
+Align one localization file to antoher via RCC.
+Type ``python -m picasso align file1 file2``
+
+groupprops
+----------
+Calculate the properties of localization groups
+
+pc
+--
+Calculate the pair-correlation of localzaitions
+
+nneighbor
+---------
+Calcualte the nearest neighbor within a clustered dataset
+
+render
+------
+Start the render module
+
+design
+------
+Start the design module.
+
+simulate
+--------
+Start the simulation module.
+
+average
+-------
+Start the 2D averaging module
+
+average3
+--------
+Start the 3D averaging module
+
+
+
+
