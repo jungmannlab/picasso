@@ -641,7 +641,7 @@ class ParametersDialog(QtGui.QDialog):
             camera = info["Camera"]
             if camera in cameras:
                 index = cameras.index(camera)
-                self.camera.setcurrIndex(index)
+                self.camera.setCurrentIndex(index)
                 if "Micro-Manager Metadata" in info:
                     mm_info = info["Micro-Manager Metadata"]
                     cam_config = CONFIG["Cameras"][camera]
@@ -675,7 +675,7 @@ class ParametersDialog(QtGui.QDialog):
                                         cam_combo.itemText(index)
                                         == exp_setting
                                     ):
-                                        cam_combo.setcurrIndex(index)
+                                        cam_combo.setCurrentIndex(index)
                                         break
                     if "Quantum Efficiency" in cam_config:
                         if "Channel Device" in cam_config:
@@ -691,7 +691,7 @@ class ParametersDialog(QtGui.QDialog):
                                 em_combo = self.emission_combos[camera]
                                 for index in range(em_combo.count()):
                                     if em_combo.itemText(index) == wavelength:
-                                        em_combo.setcurrIndex(index)
+                                        em_combo.setCurrentIndex(index)
                                         break
                                 else:
                                     raise ValueError(
