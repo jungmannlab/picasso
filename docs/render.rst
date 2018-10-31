@@ -44,6 +44,37 @@ Picking of regions of interest
 8. (Optional) The picked positions and diameter itself can be saved by selecting ``File > Save pick regions``. Such saved pick information can also be loaded into ``Picasso: Render`` by selecting ``File > Load pick regions``.
 
 
+Dialogs
+-------
+
+Display Settings
+~~~~~~~~~~~~~~~~
+Allows to change the display settings. Open via ``View > Display Settings``.
+
+General
+^^^^^^^
+
+Contast
+^^^^^^^
+
+Blur
+^^^^
+
+Camera
+^^^^^^
+
+Scale Bar
+^^^^^^^^^
+Activate scalebar. The length of the scalebar is calculated with the Pixel Size set in the Camera dialog. Activate  ``Print scale bar length`` to additionally print the length.
+
+Render properties
+^^^^^^^^^^^^^^^^^
+This allows to render properties by color.
+
+Info
+~~~~
+
+
 Menu items
 ----------
 
@@ -92,8 +123,52 @@ The uncertainty_xy is calculated as the mean of lpx and lpy. For 2D, sigma is ca
 
 For the case of linked localizations, a column named ``detections`` will be added, which contains the len parameter - that’s the duration of a blinking event and not the number n of linked localizations. This is meant to be better for downstream kinetic analysis. For a gradient that is well-chosen n ~ len and for a gap size of 0 len = n.
 
+Export as .txt for FRC
+^^^^^^^^^^^^^^^^^^^^^^
+Export as .txt file to be used for fourier ring correlation plugin in ImageJ. 
+
+Export as .txt for IMARIS
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Export as .txt file to be used for IMARIS import.
+
+Export as .xyz for Chimera
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Export as .txt file to be used for Chimera import.
+
+Export as .3d for ViSP
+^^^^^^^^^^^^^^^^^^^^^^
+Export as .3d file to be used ViSP.
+
 View
 ~~~~
+
+Display settings (CTRL + D)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Opens the Display Settings Dialog.
+
+Left / Right / Up / Down
+^^^^^^^^^^^^^^^^^^^^^^^^
+Moves the current field of view in the particular direction. Also possible by using the arrow keys.
+
+Zoom in (CTRL +)
+^^^^^^^^^^^^^^^^
+Zoom into the image.
+
+Zoom out (CTRL -)
+^^^^^^^^^^^^^^^^^
+Zoom out of the image.
+
+Fit image to window
+^^^^^^^^^^^^^^^^^^^
+Fits the image to be displayed in the window.
+
+Show drift
+^^^^^^^^^^
+After drift correction, a drift file is created. If the drift file is present, the drift can be displayed with this option.
+
+Show info
+^^^^^^^^^
+Shows info for the currrent dataset. See Info Dialog.
 
 Tools
 ~~~~~
@@ -108,8 +183,8 @@ This tool allows you to apply expressions to localizations.
 
 Examples
 ++++++++
-``x +=1`` will shift all localization by one to the right
-``x +=1;y+=1`` will shift all localization by one to the right and one up.
+- ``x +=1`` will shift all localization by one to the right
+- ``x +=1;y+=1`` will shift all localization by one to the right and one up.
 
 Notes
 +++++
