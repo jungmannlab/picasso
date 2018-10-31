@@ -360,15 +360,15 @@ class ParametersDialog(QtGui.QDialog):
             exp_grid.addWidget(self.cam_settings, 1, 0, 1, 2)
             self.cam_combos = {}
             self.emission_combos = {}
-            for camera in cameras:
+            for cam in cameras:
                 cam_widget = QtGui.QWidget()
                 cam_grid = QtGui.QGridLayout(cam_widget)
                 self.cam_settings.addWidget(cam_widget)
-                cam_config = CONFIG["Cameras"][camera]
+                cam_config = CONFIG["Cameras"][cam]
                 if "Sensitivity" in cam_config:
                     sensitivity = cam_config["Sensitivity"]
                     if "Sensitivity Categories" in cam_config:
-                        self.cam_combos[camera] = []
+                        self.cam_combos[cam] = []
                         categories = cam_config["Sensitivity Categories"]
                         for i, category in enumerate(categories):
                             row_count = cam_grid.rowCount()
@@ -376,19 +376,19 @@ class ParametersDialog(QtGui.QDialog):
                                 QtGui.QLabel(category + ":"), row_count, 0
                             )
                             cat_combo = CamSettingComboBox(
-                                self.cam_combos, camera, i
+                                self.cam_combos, cam, i
                             )
                             cam_grid.addWidget(cat_combo, row_count, 1)
-                            self.cam_combos[camera].append(cat_combo)
-                        self.cam_combos[camera][0].addItems(
+                            self.cam_combos[cam].append(cat_combo)
+                        self.cam_combos[cam][0].addItems(
                             sorted(list(sensitivity.keys()))
                         )
-                        for cam_combo in self.cam_combos[camera][:-1]:
+                        for cam_combo in self.cam_combos[cam][:-1]:
                             cam_combo.currentIndexChanged.connect(
                                 cam_combo.change_target_choices
                             )
-                        self.cam_combos[camera][0].change_target_choices(0)
-                        self.cam_combos[camera][-1].currentIndexChanged.connect(
+                        self.cam_combos[cam][0].change_target_choices(0)
+                        self.cam_combos[cam][-1].currentIndexChanged.connect(
                             self.update_sensitivity
                         )
                 if "Quantum Efficiency" in cam_config:
@@ -408,7 +408,7 @@ class ParametersDialog(QtGui.QDialog):
                         emission_combo.currentIndexChanged.connect(
                             self.on_emission_changed
                         )
-                        self.emission_combos[camera] = emission_combo
+                        self.emission_combos[cam] = emission_combo
                 spacer = QtGui.QWidget()
                 spacer.setSizePolicy(
                     QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Expanding
