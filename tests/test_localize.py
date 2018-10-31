@@ -11,10 +11,14 @@ def test_localize():
     """
     import argparse
 
+    import os
+    cwd = os.getcwd()
+    print(cwd)
+
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
 
-    args.files = "./data/testdata.raw"
+    args.files = "./tests/data/testdata.raw"
     args.fit_method = "mle"
     args.box_side_length = 7
     args.gradient = 5000
@@ -27,6 +31,3 @@ def test_localize():
     for fit_method in ["mle"]:
         args.fit_method = fit_method
         main._localize(args)
-
-
-test_localize()

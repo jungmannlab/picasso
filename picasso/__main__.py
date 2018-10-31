@@ -788,6 +788,7 @@ def _localize(args):
             print("                                          ")
     else:
         print("Error. No files found.")
+        raise FileNotFoundError
 
 
 def _render(args):
