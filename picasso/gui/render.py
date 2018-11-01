@@ -5342,8 +5342,6 @@ class Window(QtGui.QMainWindow):
         info_action = view_menu.addAction("Show info")
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self.info_dialog.show)
-        drift_action = view_menu.addAction("Show drift")
-        drift_action.triggered.connect(self.view.show_drift)
 
         slicer_action = view_menu.addAction("Slice (3D)")
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
@@ -5419,7 +5417,7 @@ class Window(QtGui.QMainWindow):
         self.calculate_fret_action.triggered.connect(
             self.view.calculate_fret_dialog
         )
-
+        # Drift oeprations
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.setShortcut("Ctrl+U")
         undrift_action.triggered.connect(self.view.undrift)
@@ -5436,6 +5434,13 @@ class Window(QtGui.QMainWindow):
         undrift_from_picked2d_action.triggered.connect(
             self.view.undrift_from_picked2d
         )
+        drift_action = postprocess_menu.addAction("Undo drift (2D)")
+        drift_action.triggered.connect(self.view.undo_drift)
+
+        drift_action = postprocess_menu.addAction("Show drift")
+        drift_action.triggered.connect(self.view.show_drift)
+        
+        postprocess_menu.addSeparator()
         link_action = postprocess_menu.addAction("Link localizations (3D)")
         link_action.triggered.connect(self.view.link)
         align_action = postprocess_menu.addAction(
@@ -5451,8 +5456,6 @@ class Window(QtGui.QMainWindow):
         apply_action.triggered.connect(self.open_apply_dialog)
         group_action = postprocess_menu.addAction("Remove group info")
         group_action.triggered.connect(self.remove_group)
-        drift_action = postprocess_menu.addAction("Undo drift (2D)")
-        drift_action.triggered.connect(self.view.undo_drift)
         unfold_action = postprocess_menu.addAction("Unfold / Refold groups")
         unfold_action.triggered.connect(self.view.unfold_groups)
         unfold_action_square = postprocess_menu.addAction(
