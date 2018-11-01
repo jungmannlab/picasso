@@ -35,7 +35,7 @@ Sample instructions to create an environment and installation of packages with c
 
 1. Open the console and create a new conda environment: ``conda create --name picasso python=3.5``
 2. Activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
-3. Install the necessary packages with conda: ``conda install h5py matplotlib numba numpy scipy pyqt=4 pyyaml scikit-learn colorama tqdm``
+3. Install the necessary packages with conda: ``conda install h5py matplotlib=1.5.1 numba numpy scipy pyqt=4 pyyaml scikit-learn colorama tqdm``
 4. Additionally install the lmfit package with pip: ``pip install lmfit``
 5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
 6. Continue with the installation of Picasso
