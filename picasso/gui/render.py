@@ -5344,6 +5344,10 @@ class Window(QtGui.QMainWindow):
         info_action.triggered.connect(self.info_dialog.show)
         drift_action = view_menu.addAction("Show drift")
         drift_action.triggered.connect(self.view.show_drift)
+
+        slicer_action = view_menu.addAction("Slice (3D)")
+        slicer_action.triggered.connect(self.slicer_dialog.initialize)
+
         view_menu.addAction(info_action)
         tools_menu = self.menu_bar.addMenu("Tools")
         tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
@@ -5449,8 +5453,6 @@ class Window(QtGui.QMainWindow):
         group_action.triggered.connect(self.remove_group)
         drift_action = postprocess_menu.addAction("Undo drift (2D)")
         drift_action.triggered.connect(self.view.undo_drift)
-        slicer_action = postprocess_menu.addAction("Slice (3D)")
-        slicer_action.triggered.connect(self.slicer_dialog.initialize)
         unfold_action = postprocess_menu.addAction("Unfold / Refold groups")
         unfold_action.triggered.connect(self.view.unfold_groups)
         unfold_action_square = postprocess_menu.addAction(
