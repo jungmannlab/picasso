@@ -5439,7 +5439,7 @@ class Window(QtGui.QMainWindow):
 
         drift_action = postprocess_menu.addAction("Show drift")
         drift_action.triggered.connect(self.view.show_drift)
-        
+
         postprocess_menu.addSeparator()
         link_action = postprocess_menu.addAction("Link localizations (3D)")
         link_action.triggered.connect(self.view.link)
@@ -5454,6 +5454,9 @@ class Window(QtGui.QMainWindow):
         )
         apply_action.setShortcut("Ctrl+A")
         apply_action.triggered.connect(self.open_apply_dialog)
+        
+        # Group related 
+        postprocess_menu.addSeparator()
         group_action = postprocess_menu.addAction("Remove group info")
         group_action.triggered.connect(self.remove_group)
         unfold_action = postprocess_menu.addAction("Unfold / Refold groups")
