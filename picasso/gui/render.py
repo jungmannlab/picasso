@@ -3331,7 +3331,7 @@ class View(QtGui.QLabel):
                     out_path, locs, self.infos[channel_acceptor] + [pick_info]
                 )
 
-    def show_traces(self):
+    def select_traces(self):
         print("Showing  traces")
         fig = plt.figure(figsize=(5, 5))
         fig.canvas.set_window_title("Trace")
@@ -5367,22 +5367,25 @@ class Window(QtGui.QMainWindow):
         tools_menu.addAction(measure_tool_action)
         tools_actiongroup.triggered.connect(self.view.set_mode)
         tools_menu.addSeparator()
+        tools_settings_action = tools_menu.addAction("Tools settings")
+        tools_settings_action.setShortcut("Ctrl+T")
+        tools_settings_action.triggered.connect(
+            self.tools_settings_dialog.show
+        )
+        tools_menu.addSeparator()
         pick_similar_action = tools_menu.addAction("Pick similar")
         pick_similar_action.setShortcut("Ctrl+Shift+P")
         pick_similar_action.triggered.connect(self.view.pick_similar)
         show_trace_action = tools_menu.addAction("Show trace")
         show_trace_action.setShortcut("Ctrl+R")
         show_trace_action.triggered.connect(self.view.show_trace)
-        show_traces_action = tools_menu.addAction("Show traces")
-        show_traces_action.triggered.connect(self.view.show_traces)
         clear_picks_action = tools_menu.addAction("Clear picks")
         clear_picks_action.triggered.connect(self.view.clear_picks)
         tools_menu.addSeparator()
-        tools_settings_action = tools_menu.addAction("Tools settings")
-        tools_settings_action.setShortcut("Ctrl+T")
-        tools_settings_action.triggered.connect(
-            self.tools_settings_dialog.show
-        )
+        select_traces_action = tools_menu.addAction("Select traces")
+        select_traces_action.triggered.connect(self.view.select_traces)
+        tools_menu.addSeparator()
+
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
         tools_menu.addSeparator()
         plotpick3dsingle_action = tools_menu.addAction("Plot single pick 3D")
@@ -5454,7 +5457,7 @@ class Window(QtGui.QMainWindow):
         )
         apply_action.setShortcut("Ctrl+A")
         apply_action.triggered.connect(self.open_apply_dialog)
-        
+
         # Group related 
         postprocess_menu.addSeparator()
         group_action = postprocess_menu.addAction("Remove group info")
