@@ -5403,7 +5403,7 @@ class Window(QtGui.QMainWindow):
         filter_picks_action.triggered.connect(self.view.filter_picks)
 
         tools_menu.addSeparator()
-        cluster_action = tools_menu.addAction("Analyze Clusters")
+        cluster_action = tools_menu.addAction("Cluster in pick (k-means)")
         cluster_action.triggered.connect(self.view.analyze_cluster)
 
         pickadd_action = tools_menu.addAction("Substract pick regions")
