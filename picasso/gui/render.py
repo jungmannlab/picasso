@@ -3870,8 +3870,7 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
-    def analyze_picks(self):
-        print("Show picks")
+    def filter_picks(self):
         channel = self.get_channel("Pick similar")
         if channel is not None:
             locs = self.locs[channel]
@@ -5384,23 +5383,24 @@ class Window(QtGui.QMainWindow):
         tools_menu.addSeparator()
         select_traces_action = tools_menu.addAction("Select traces")
         select_traces_action.triggered.connect(self.view.select_traces)
-        tools_menu.addSeparator()
 
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
-        tools_menu.addSeparator()
-        plotpick3dsingle_action = tools_menu.addAction("Plot single pick 3D")
-        plotpick3dsingle_action.triggered.connect(self.view.plot3d)
-        plotpick3dsingle_action.setShortcut("Ctrl+3")
-        plotpick_action = tools_menu.addAction("Plot picks")
+        plotpick_action = tools_menu.addAction("Select picks (2D)")
         plotpick_action.triggered.connect(self.view.show_pick)
-        plotpick3d_action = tools_menu.addAction("Plot picks (3D)")
+        plotpick3d_action = tools_menu.addAction("Select picks (3D)")
         plotpick3d_action.triggered.connect(self.view.show_pick_3d)
         plotpick3d_iso_action = tools_menu.addAction(
-            "Plot picks (3D) - 4 Panels"
+            "Select picks (3D) - 4 Panels"
         )
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
-        analyzepick_action = tools_menu.addAction("Analyze picks")
-        analyzepick_action.triggered.connect(self.view.analyze_picks)
+
+        tools_menu.addSeparator()
+        plotpick3dsingle_action = tools_menu.addAction("Plot pick 3D")
+        plotpick3dsingle_action.triggered.connect(self.view.plot3d)
+        plotpick3dsingle_action.setShortcut("Ctrl+3")
+
+        filter_picks_action = tools_menu.addAction("Filter picks")
+        filter_picks_action.triggered.connect(self.view.filter_picks)
 
         tools_menu.addSeparator()
         cluster_action = tools_menu.addAction("Analyze Clusters")
