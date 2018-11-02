@@ -5401,8 +5401,7 @@ class Window(QtGui.QMainWindow):
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
         analyzepick_action = tools_menu.addAction("Analyze picks")
         analyzepick_action.triggered.connect(self.view.analyze_picks)
-        mask_action = tools_menu.addAction("Mask image")
-        mask_action.triggered.connect(self.mask_settings_dialog.init_dialog)
+
         tools_menu.addSeparator()
         cluster_action = tools_menu.addAction("Analyze Clusters")
         cluster_action.triggered.connect(self.view.analyze_cluster)
@@ -5420,6 +5419,9 @@ class Window(QtGui.QMainWindow):
         self.calculate_fret_action.triggered.connect(
             self.view.calculate_fret_dialog
         )
+        tools_menu.addSeparator()
+        mask_action = tools_menu.addAction("Mask image")
+        mask_action.triggered.connect(self.mask_settings_dialog.init_dialog)
         # Drift oeprations
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.setShortcut("Ctrl+U")
@@ -5450,15 +5452,10 @@ class Window(QtGui.QMainWindow):
             "Align channels (3D if picked)"
         )
         align_action.triggered.connect(self.view.align)
-        combine_action = postprocess_menu.addAction("Combine picked (3D)")
+        combine_action = postprocess_menu.addAction("Combine picked locs (3D)")
         combine_action.triggered.connect(self.view.combine)
-        apply_action = postprocess_menu.addAction(
-            "Apply expression to localizations"
-        )
-        apply_action.setShortcut("Ctrl+A")
-        apply_action.triggered.connect(self.open_apply_dialog)
 
-        # Group related 
+        # Group related
         postprocess_menu.addSeparator()
         group_action = postprocess_menu.addAction("Remove group info")
         group_action.triggered.connect(self.remove_group)
@@ -5468,6 +5465,13 @@ class Window(QtGui.QMainWindow):
             "Unfold groups (square)"
         )
         unfold_action_square.triggered.connect(self.view.unfold_groups_square)
+        postprocess_menu.addSeparator()
+        apply_action = postprocess_menu.addAction(
+            "Apply expression to localizations"
+        )
+        apply_action.setShortcut("Ctrl+A")
+        apply_action.triggered.connect(self.open_apply_dialog)
+
         self.load_user_settings()
 
     def closeEvent(self, event):
