@@ -1686,10 +1686,8 @@ class DisplaySettingsDialog(QtGui.QDialog):
             self.set_dynamic_oversampling
         )
         general_grid.addWidget(self.dynamic_oversampling, 2, 1)
-        self.high_oversampling = QtGui.QCheckBox("high oversampling")
-        general_grid.addWidget(self.high_oversampling, 3, 1)
         self.minimap = QtGui.QCheckBox("show minimap")
-        general_grid.addWidget(self.minimap, 4, 1)
+        general_grid.addWidget(self.minimap, 3, 1)
         self.minimap.stateChanged.connect(self.update_scene)
         # Contrast
         contrast_groupbox = QtGui.QGroupBox("Contrast")
@@ -2802,22 +2800,19 @@ class View(QtGui.QLabel):
             oversampling = float(
                 self.window.display_settings_dlg.oversampling.value()
             )
-            if self.window.display_settings_dlg.high_oversampling.isChecked():
-                pass
-            else:
-                if oversampling > optimal_oversampling:
-                    QtGui.QMessageBox.information(
-                        self,
-                        "Oversampling too high",
-                        (
-                            "Oversampling will be adjusted to"
-                            " match the display pixel density."
-                        ),
-                    )
-                    oversampling = optimal_oversampling
-                    self.window.display_settings_dlg.set_oversampling_silently(
-                        optimal_oversampling
-                    )
+            if oversampling > optimal_oversampling:
+                QtGui.QMessageBox.information(
+                    self,
+                    "Oversampling too high",
+                    (
+                        "Oversampling will be adjusted to"
+                        " match the display pixel density."
+                    ),
+                )
+                oversampling = optimal_oversampling
+                self.window.display_settings_dlg.set_oversampling_silently(
+                    optimal_oversampling
+                )
         if viewport is None:
             viewport = self.viewport
         return {
