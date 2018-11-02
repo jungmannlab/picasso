@@ -4340,6 +4340,7 @@ class View(QtGui.QLabel):
         return self._bgra
 
     def resizeEvent(self, event):
+        # TODO: find out why x_render crashes when resizing
         self.window.display_settings_dlg.render_check.setCheckState(False)
         self.x_render_state = False
         self.update_scene()
