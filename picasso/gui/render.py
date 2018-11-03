@@ -5280,24 +5280,9 @@ class Window(QtGui.QMainWindow):
         export_complete_action.setShortcut("Ctrl+Shift+E")
         export_complete_action.triggered.connect(self.export_complete)
         file_menu.addSeparator()
-        export_txt_action = file_menu.addAction("Export as .txt for FRC")
-        export_txt_action.triggered.connect(self.export_txt)
-        export_txt_nis_action = file_menu.addAction("Export as .txt for NIS")
-        export_txt_nis_action.triggered.connect(self.export_txt_nis)
-        export_txt_imaris_action = file_menu.addAction(
-            "Export as .txt for IMARIS"
-        )
-        export_txt_imaris_action.triggered.connect(self.export_txt_imaris)
-        export_txt_chimera_action = file_menu.addAction(
-            "Export as .xyz for Chimera"
-        )
-        export_txt_chimera_action.triggered.connect(self.export_xyz_chimera)
-        export_3d_visp_action = file_menu.addAction("Export as .3d for ViSP")
-        export_3d_visp_action.triggered.connect(self.export_3d_visp)
-        export_ts_action = file_menu.addAction(
-            "Export as .csv for ThunderSTORM"
-        )
-        export_ts_action.triggered.connect(self.export_ts)
+
+        export_multi_action = file_menu.addAction("Export localizations")
+        export_multi_action.triggered.connect(self.export_multi)
 
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings")
@@ -5737,6 +5722,28 @@ class Window(QtGui.QMainWindow):
                     newline="\r\n",
                     delimiter="\t",
                 )
+
+    def export_multi(self):
+        items = (".txt for FRC (ImageJ)", ".txt for NIS",
+                 ".txt for IMARIS", ".xyz for Chimera", ".3d for ViSP",
+                 ".csv for ThunderSTORM")
+        item, ok = QtGui.QInputDialog.getItem(self, "Select Export",
+                                              "Formats", items, 0, False)
+        if ok and item:
+            if item == ".txt for FRC (ImageJ)":
+                self.export_txt()
+            elif item == ".txt for NIS":
+                self.export_txt_nis()
+            elif item == ".txt for IMARIS":
+                self.export_txt_imaris()
+            elif item == ".xyz for Chimera":
+                self.export_xyz_chimera()
+            elif item == ".3d for ViSP":
+                self.export_3d_visp()
+            elif item == ".csv for ThunderSTORM":
+                self.export_ts()
+            else:
+                print('This should never happen')
 
     def export_ts(self):
         channel = self.view.get_channel(
