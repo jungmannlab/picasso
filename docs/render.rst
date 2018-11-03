@@ -105,8 +105,12 @@ Load pick regions
 ^^^^^^^^^^^^^^^^^
 Resets the current picked regions and loads regions from a .yaml file that contains pick regions.
 
+Export localizations
+^^^^^^^^^^^^^^^^^^^^
+Select export for various other programs. Note that some exporters only work for 3D files (with z coordinates).
+
 Export as .csv for ThunderSTORM
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
++++++++++++++++++++++++++++++++
 
 This will export the dataset in a .csv file to use with ThunderSTORM.
 
@@ -124,19 +128,19 @@ The uncertainty_xy is calculated as the mean of lpx and lpy. For 2D, sigma is ca
 For the case of linked localizations, a column named ``detections`` will be added, which contains the len parameter - that’s the duration of a blinking event and not the number n of linked localizations. This is meant to be better for downstream kinetic analysis. For a gradient that is well-chosen n ~ len and for a gap size of 0 len = n.
 
 Export as .txt for FRC
-^^^^^^^^^^^^^^^^^^^^^^
-Export as .txt file to be used for fourier ring correlation plugin in ImageJ. 
+++++++++++++++++++++++
+Export as .txt file to be used for the fourier ring correlation plugin in ImageJ. 
 
 Export as .txt for IMARIS
-^^^^^^^^^^^^^^^^^^^^^^^^^
++++++++++++++++++++++++++
 Export as .txt file to be used for IMARIS import.
 
 Export as .xyz for Chimera
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+++++++++++++++++++++++++++
 Export as .txt file to be used for Chimera import.
 
 Export as .3d for ViSP
-^^^^^^^^^^^^^^^^^^^^^^
+++++++++++++++++++++++
 Export as .3d file to be used ViSP.
 
 View
