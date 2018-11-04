@@ -171,12 +171,13 @@ Fit image to window
 Fits the image to be displayed in the window.
 
 Slice (3D)
-^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^
 Opens the slicer dialog which allows to slice through 3D datasets.
 
 Show info
 ^^^^^^^^^
 Shows info for the currrent dataset. See Info Dialog.
+
 
 Tools
 ~~~~~
@@ -196,6 +197,22 @@ Selects the measure tool. The mouse can now be used for measuring distances. Lef
 
 Postprocess
 ~~~~~~~~~~~
+
+Undrift by RCC
+^^^^^^^^^^^^^^
+Performs drift correction by redundant cross-correlation.
+
+Undrift from picked (3D)
+^^^^^^^^^^^^^^^^^^^^^^^^
+Performs drift correction using the picked localizations as fiducials. Also performs drift correction in z if dataset has 3D information.
+
+Undrift from picked (2D)
+^^^^^^^^^^^^^^^^^^^^^^^^
+Performs drift correction using the picked localizations as fiducials. Does not perform drift correction in z even if dataset has 3D information.
+
+Undo drift (2D)
+^^^^^^^^^^^^^^^
+Undos previous drift correction (only 2D part). Can be pressed again to redo.
 
 Show drift
 ^^^^^^^^^^
