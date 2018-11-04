@@ -150,6 +150,10 @@ Display settings (CTRL + D)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Opens the Display Settings Dialog.
 
+Datasets
+^^^^^^^^
+Open a dialog to select the color and toggle visibility for each loaded dataset.
+
 Left / Right / Up / Down
 ^^^^^^^^^^^^^^^^^^^^^^^^
 Moves the current field of view in the particular direction. Also possible by using the arrow keys.
@@ -166,9 +170,9 @@ Fit image to window
 ^^^^^^^^^^^^^^^^^^^
 Fits the image to be displayed in the window.
 
-Show drift
-^^^^^^^^^^
-After drift correction, a drift file is created. If the drift file is present, the drift can be displayed with this option.
+Slice (3D)
+^^^^^^^^^^^^^^^^^^^
+Opens the slicer dialog which allows to slice through 3D datasets.
 
 Show info
 ^^^^^^^^^
@@ -192,6 +196,10 @@ Selects the measure tool. The mouse can now be used for measuring distances. Lef
 
 Postprocess
 ~~~~~~~~~~~
+
+Show drift
+^^^^^^^^^^
+After drift correction, a drift file is created. If the drift file is present, the drift can be displayed with this option.
 
 Apply expressions to localizations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
