@@ -2245,6 +2245,10 @@ class View(QtGui.QLabel):
 
         if hasattr(locs, "z"):
             self.window.slicer_dialog.zcoord.append(locs.z)
+            # unlock 3D settings
+            for action in self.window.actions_3d:
+                action.setVisible(True)
+
         self.window.mask_settings_dialog.locs.append(
             locs
         )  # TODO: replace at some point, not very efficient
@@ -5456,6 +5460,14 @@ class Window(QtGui.QMainWindow):
         apply_action.triggered.connect(self.open_apply_dialog)
 
         self.load_user_settings()
+
+        # Define 3D entries
+
+        self.actions_3d = [plotpick3dsingle_action, plotpick3d_action,
+                           plotpick3d_iso_action, slicer_action]
+
+        for action in self.actions_3d:
+            action.setVisible(False)
 
     def closeEvent(self, event):
         settings = io.load_user_settings()
