@@ -21,6 +21,7 @@ This documentation is based on the `Nature Protocols publication <https://www.na
    average
    files
    cmd
+   faq
 
 Indices and tables
 ==================
