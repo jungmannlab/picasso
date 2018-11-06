@@ -107,7 +107,7 @@ Resets the current picked regions and loads regions from a .yaml file that conta
 
 Export localizations
 ^^^^^^^^^^^^^^^^^^^^
-Select export for various other programs. Note that some exporters only work for 3D files (with z coordinates).
+Select export for various other programs. Note that some exporters only work for 3D files (with z coordinates). For additional file converters check out the convert folder at Picasso's GitHub page.
 
 Export as .csv for ThunderSTORM
 +++++++++++++++++++++++++++++++
