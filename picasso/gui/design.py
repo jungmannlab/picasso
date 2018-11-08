@@ -1007,7 +1007,12 @@ class Scene(QtGui.QGraphicsScene):
 
     def loadCanvas(self, path):
         info = _io.load_info(path)
-        structure = info[0]["Structure"]
+        try:
+            structure = info[0]["Structure"]
+        except KeyError:
+            self.window.statusBar().showMessage(
+                "Error. Filetype not recognized"
+                )
         structure = structure[::-1]
         allitems = self.items()
         lenitems = len(allitems)
@@ -1407,8 +1412,14 @@ class Window(QtGui.QMainWindow):
                     )
 
                 if path:
+                    progress = lib.ProgressDialog(
+                        "Exporting PDFs", 0, len(platenames), self
+                        )
+                    progress.set_value(0)
+                    progress.show()
                     with PdfPages(path) as pdf:
                         for x in range(0, len(platenames)):
+                            progress.set_value(x)
                             # pdf.savefig(allfig[x])
                             pdf.savefig(
                                 allfig[x],
@@ -1419,6 +1430,7 @@ class Window(QtGui.QMainWindow):
                             base, ext = _ospath.splitext(path)
                             csv_path = base + ".csv"
                             design.savePlate(csv_path, exportlist)
+                    progress.close()
                     self.statusBar().showMessage(
                         "Pippetting scheme saved to: " + path
                     )
