@@ -2531,6 +2531,16 @@ class View(QtGui.QLabel):
         else:
             event.ignore()
 
+    def check_picks(self):
+        if len(self._picks) == 0:
+            QtGui.QMessageBox.information(
+                self, "Pick Error",
+                ("No localizations picked."
+                 " Please pick first."))
+            return False
+        else:
+            return True
+
     def draw_picks(self, image):
         image = image.copy()
         d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -3990,6 +4000,26 @@ class View(QtGui.QLabel):
             self.index_locs(channel)
         return self.index_blocks[channel]
 
+    def pick_similar_wrapper(self):
+        if self.check_picks():
+            self.pick_similar()
+
+    def show_trace_wrapper(self):
+        if self.check_picks():
+            self.show_trace()
+
+    def clear_picks_wrapper(self):
+        if self.check_picks():
+            self.clear_picks()
+
+    def undrift_from_picked_wrapper(self):
+        if self.check_picks():
+            self.undrift_from_picked()
+
+    def undrift_from_picked2d_wrapper(self):
+        if self.check_picks():
+            self.undrift_from_picked2d()
+
     def pick_similar(self):
         channel = self.get_channel("Pick similar")
         if channel is not None:
@@ -5363,12 +5393,12 @@ class Window(QtGui.QMainWindow):
         tools_menu.addSeparator()
         pick_similar_action = tools_menu.addAction("Pick similar")
         pick_similar_action.setShortcut("Ctrl+Shift+P")
-        pick_similar_action.triggered.connect(self.view.pick_similar)
+        pick_similar_action.triggered.connect(self.view.pick_similar_wrapper)
         show_trace_action = tools_menu.addAction("Show trace")
         show_trace_action.setShortcut("Ctrl+R")
-        show_trace_action.triggered.connect(self.view.show_trace)
+        show_trace_action.triggered.connect(self.view.show_trace_wrapper)
         clear_picks_action = tools_menu.addAction("Clear picks")
-        clear_picks_action.triggered.connect(self.view.clear_picks)
+        clear_picks_action.triggered.connect(self.view.clear_picks_wrapper)
         tools_menu.addSeparator()
         select_traces_action = tools_menu.addAction("Select traces")
         select_traces_action.triggered.connect(self.view.select_traces)
@@ -5420,13 +5450,13 @@ class Window(QtGui.QMainWindow):
         )
         undrift_from_picked_action.setShortcut("Ctrl+Shift+U")
         undrift_from_picked_action.triggered.connect(
-            self.view.undrift_from_picked
+            self.view.undrift_from_picked_wrapper
         )
         undrift_from_picked2d_action = postprocess_menu.addAction(
             "Undrift from picked (2D)"
         )
         undrift_from_picked2d_action.triggered.connect(
-            self.view.undrift_from_picked2d
+            self.view.undrift_from_picked2d_wrapper
         )
         drift_action = postprocess_menu.addAction("Undo drift (2D)")
         drift_action.triggered.connect(self.view.undo_drift)
