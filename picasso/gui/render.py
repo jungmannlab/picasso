@@ -83,6 +83,28 @@ def kinetic_rate_from_fit(data):
 
 estimate_kinetic_rate = kinetic_rate_from_fit
 
+# One for plot pick etc
+def check_pick(f):
+    def wrapper(*args):
+        if len(args[0]._picks) == 0:
+            QtGui.QMessageBox.information(
+                args[0], "Pick Error",
+                ("No localizations picked."
+                 " Please pick first."))
+        return f(args[0])
+    return wrapper
+
+# At least twice for pick_similar etc
+def check_picks(f):
+    def wrapper(*args):
+        if len(args[0]._picks) < 2:
+            QtGui.QMessageBox.information(
+                args[0], "Pick Error",
+                ("No localizations picked."
+                 " Please pick at least twice first."))
+        return f(args[0])
+    return wrapper
+
 
 class FloatEdit(QtGui.QLineEdit):
 
@@ -2400,46 +2422,46 @@ class View(QtGui.QLabel):
                 plt.legend(loc="best")
                 fig1.show()
 
+    @check_pick
     def combine(self):
-        if len(self._picks) > 0:
-            channel = self.get_channel()
-            picked_locs = self.picked_locs(channel, add_group=False)
-            out_locs = []
-            r_max = 2 * max(
-                self.infos[channel][0]["Height"],
-                self.infos[channel][0]["Width"],
+        channel = self.get_channel()
+        picked_locs = self.picked_locs(channel, add_group=False)
+        out_locs = []
+        r_max = 2 * max(
+            self.infos[channel][0]["Height"],
+            self.infos[channel][0]["Width"],
+        )
+        max_dark = self.infos[channel][0]["Frames"]
+        progress = lib.ProgressDialog(
+            "Combining localizations in picks", 0, len(picked_locs), self
+        )
+        progress.set_value(0)
+        for i, pick_locs in enumerate(picked_locs):
+            pick_locs_out = postprocess.link(
+                pick_locs,
+                self.infos[channel],
+                r_max=r_max,
+                max_dark_time=max_dark,
+                remove_ambiguous_lengths=False,
             )
-            max_dark = self.infos[channel][0]["Frames"]
-            progress = lib.ProgressDialog(
-                "Combining localizations in picks", 0, len(picked_locs), self
-            )
-            progress.set_value(0)
-            for i, pick_locs in enumerate(picked_locs):
-                pick_locs_out = postprocess.link(
-                    pick_locs,
-                    self.infos[channel],
-                    r_max=r_max,
-                    max_dark_time=max_dark,
-                    remove_ambiguous_lengths=False,
-                )
-                if not pick_locs_out:
-                    print("no locs in pick - skipped")
-                else:
-                    out_locs.append(pick_locs_out)
-                progress.set_value(i + 1)
-            self.locs[channel] = stack_arrays(
-                out_locs, asrecarray=True, usemask=False
-            )
+            if not pick_locs_out:
+                print("no locs in pick - skipped")
+            else:
+                out_locs.append(pick_locs_out)
+            progress.set_value(i + 1)
+        self.locs[channel] = stack_arrays(
+            out_locs, asrecarray=True, usemask=False
+        )
 
-            if hasattr(self.locs[channel], "group"):
-                groups = np.unique(self.locs[channel].group)
-                # In case a group is missing
-                groups = np.arange(np.max(groups) + 1)
-                np.random.shuffle(groups)
-                groups %= N_GROUP_COLORS
-                self.group_color = groups[self.locs[channel].group]
+        if hasattr(self.locs[channel], "group"):
+            groups = np.unique(self.locs[channel].group)
+            # In case a group is missing
+            groups = np.arange(np.max(groups) + 1)
+            np.random.shuffle(groups)
+            groups %= N_GROUP_COLORS
+            self.group_color = groups[self.locs[channel].group]
 
-            self.update_scene()
+        self.update_scene()
 
     def link(self):
         channel = self.get_channel()
@@ -2521,6 +2543,7 @@ class View(QtGui.QLabel):
         rc = lib.ProgressDialog("Correlating image pairs", 0, n_pairs, self)
         return imageprocess.rcc(images, callback=rc.set_value)
 
+    @check_pick
     def clear_picks(self):
         self._picks = []
         self.update_scene(picks_only=True)
@@ -2530,16 +2553,6 @@ class View(QtGui.QLabel):
             event.accept()
         else:
             event.ignore()
-
-    def check_picks(self):
-        if len(self._picks) == 0:
-            QtGui.QMessageBox.information(
-                self, "Pick Error",
-                ("No localizations picked."
-                 " Please pick first."))
-            return False
-        else:
-            return True
 
     def draw_picks(self, image):
         image = image.copy()
@@ -3087,6 +3100,7 @@ class View(QtGui.QLabel):
             fig.canvas.draw()
             fig.show()
 
+    @check_pick
     def show_trace(self):
         self.current_trace_x = 0
         self.current_trace_y = 0
@@ -3449,6 +3463,7 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
+    @check_pick
     def show_pick(self):
         print("Showing picks...")
         channel = self.get_channel3d("Select Channel")
@@ -3615,6 +3630,7 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
+    @check_pick
     def show_pick_3d(self):
         print("Show pick 3D")
         channel = self.get_channel3d("Show Pick 3D")
@@ -3665,6 +3681,7 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
+    @check_pick
     def show_pick_3d_iso(self):
         # essentially the same as show_pick_3d
         channel = self.get_channel3d("Show Pick 3D")
@@ -3727,6 +3744,7 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
+    @check_pick
     def analyze_cluster(self):
         """
         Tool to detect clusters with k-means clustering
@@ -3881,6 +3899,7 @@ class View(QtGui.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
+    @check_picks
     def filter_picks(self):
         channel = self.get_channel("Pick similar")
         if channel is not None:
@@ -4000,26 +4019,7 @@ class View(QtGui.QLabel):
             self.index_locs(channel)
         return self.index_blocks[channel]
 
-    def pick_similar_wrapper(self):
-        if self.check_picks():
-            self.pick_similar()
-
-    def show_trace_wrapper(self):
-        if self.check_picks():
-            self.show_trace()
-
-    def clear_picks_wrapper(self):
-        if self.check_picks():
-            self.clear_picks()
-
-    def undrift_from_picked_wrapper(self):
-        if self.check_picks():
-            self.undrift_from_picked()
-
-    def undrift_from_picked2d_wrapper(self):
-        if self.check_picks():
-            self.undrift_from_picked2d()
-
+    @check_picks
     def pick_similar(self):
         channel = self.get_channel("Pick similar")
         if channel is not None:
@@ -4815,11 +4815,13 @@ class View(QtGui.QLabel):
                     rcc_progress.set_value(n_pairs)
                     self.update_scene()
 
+    @check_picks
     def undrift_from_picked(self):
         channel = self.get_channel("Undrift from picked")
         if channel is not None:
             self._undrift_from_picked(channel)
 
+    @check_picks
     def undrift_from_picked2d(self):
         channel = self.get_channel("Undrift from picked")
         if channel is not None:
@@ -5393,12 +5395,12 @@ class Window(QtGui.QMainWindow):
         tools_menu.addSeparator()
         pick_similar_action = tools_menu.addAction("Pick similar")
         pick_similar_action.setShortcut("Ctrl+Shift+P")
-        pick_similar_action.triggered.connect(self.view.pick_similar_wrapper)
+        pick_similar_action.triggered.connect(self.view.pick_similar)
         show_trace_action = tools_menu.addAction("Show trace")
         show_trace_action.setShortcut("Ctrl+R")
-        show_trace_action.triggered.connect(self.view.show_trace_wrapper)
+        show_trace_action.triggered.connect(self.view.show_trace)
         clear_picks_action = tools_menu.addAction("Clear picks")
-        clear_picks_action.triggered.connect(self.view.clear_picks_wrapper)
+        clear_picks_action.triggered.connect(self.view.clear_picks)
         tools_menu.addSeparator()
         select_traces_action = tools_menu.addAction("Select traces")
         select_traces_action.triggered.connect(self.view.select_traces)
@@ -5450,13 +5452,13 @@ class Window(QtGui.QMainWindow):
         )
         undrift_from_picked_action.setShortcut("Ctrl+Shift+U")
         undrift_from_picked_action.triggered.connect(
-            self.view.undrift_from_picked_wrapper
+            self.view.undrift_from_picked
         )
         undrift_from_picked2d_action = postprocess_menu.addAction(
             "Undrift from picked (2D)"
         )
         undrift_from_picked2d_action.triggered.connect(
-            self.view.undrift_from_picked2d_wrapper
+            self.view.undrift_from_picked2d
         )
         drift_action = postprocess_menu.addAction("Undo drift (2D)")
         drift_action.triggered.connect(self.view.undo_drift)
@@ -6102,6 +6104,7 @@ class Window(QtGui.QMainWindow):
         if path:
             self.view.load_picks(path)
 
+    @check_pick
     def substract_picks(self):
         if self.view._picks:
             path = QtGui.QFileDialog.getOpenFileName(
