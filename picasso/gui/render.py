@@ -83,6 +83,7 @@ def kinetic_rate_from_fit(data):
 
 estimate_kinetic_rate = kinetic_rate_from_fit
 
+
 # One for plot pick etc
 def check_pick(f):
     def wrapper(*args):
@@ -94,6 +95,7 @@ def check_pick(f):
         else:
             return f(args[0])
     return wrapper
+
 
 # At least twice for pick_similar etc
 def check_picks(f):
