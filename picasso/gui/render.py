@@ -91,7 +91,8 @@ def check_pick(f):
                 args[0], "Pick Error",
                 ("No localizations picked."
                  " Please pick first."))
-        return f(args[0])
+        else:
+            return f(args[0])
     return wrapper
 
 # At least twice for pick_similar etc
@@ -102,7 +103,8 @@ def check_picks(f):
                 args[0], "Pick Error",
                 ("No localizations picked."
                  " Please pick at least twice first."))
-        return f(args[0])
+        else:
+            return f(args[0])
     return wrapper
 
 
