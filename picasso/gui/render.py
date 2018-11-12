@@ -2249,6 +2249,8 @@ class View(QtGui.QLabel):
             for action in self.window.actions_3d:
                 action.setVisible(True)
 
+        for menu in self.window.menus:
+            menu.setDisabled(False)
         self.window.mask_settings_dialog.locs.append(
             locs
         )  # TODO: replace at some point, not very efficient
@@ -5468,6 +5470,11 @@ class Window(QtGui.QMainWindow):
 
         for action in self.actions_3d:
             action.setVisible(False)
+
+        # De-select all menus until file is loaded
+        self.menus = [view_menu, postprocess_menu, tools_menu]
+        for menu in self.menus:
+            menu.setDisabled(True)
 
     def closeEvent(self, event):
         settings = io.load_user_settings()
