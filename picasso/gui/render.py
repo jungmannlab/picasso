@@ -5367,7 +5367,7 @@ class Window(QtGui.QMainWindow):
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self.info_dialog.show)
 
-        slicer_action = view_menu.addAction("Slice (3D)")
+        slicer_action = view_menu.addAction("Slice")
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
 
         view_menu.addAction(info_action)
@@ -5396,40 +5396,35 @@ class Window(QtGui.QMainWindow):
         tools_settings_action.triggered.connect(
             self.tools_settings_dialog.show
         )
-        tools_menu.addSeparator()
         pick_similar_action = tools_menu.addAction("Pick similar")
         pick_similar_action.setShortcut("Ctrl+Shift+P")
         pick_similar_action.triggered.connect(self.view.pick_similar)
+        tools_menu.addSeparator()
         show_trace_action = tools_menu.addAction("Show trace")
         show_trace_action.setShortcut("Ctrl+R")
         show_trace_action.triggered.connect(self.view.show_trace)
-        clear_picks_action = tools_menu.addAction("Clear picks")
-        clear_picks_action.triggered.connect(self.view.clear_picks)
+        plotpick3dsingle_action = tools_menu.addAction("Plot pick (XYZ scatter)")
+        plotpick3dsingle_action.triggered.connect(self.view.plot3d)
+        plotpick3dsingle_action.setShortcut("Ctrl+3")
         tools_menu.addSeparator()
-        select_traces_action = tools_menu.addAction("Select traces")
+        select_traces_action = tools_menu.addAction("Select picks (trace)")
         select_traces_action.triggered.connect(self.view.select_traces)
 
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
-        plotpick_action = tools_menu.addAction("Select picks (2D)")
+        plotpick_action = tools_menu.addAction("Select picks (XY scatter)")
         plotpick_action.triggered.connect(self.view.show_pick)
-        plotpick3d_action = tools_menu.addAction("Select picks (3D)")
+        plotpick3d_action = tools_menu.addAction("Select picks (XYZ scatter)")
         plotpick3d_action.triggered.connect(self.view.show_pick_3d)
         plotpick3d_iso_action = tools_menu.addAction(
-            "Select picks (3D) - 4 Panels"
+            "Select picks (XYZ scatter, 4 panels)"
         )
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
 
-        tools_menu.addSeparator()
-        plotpick3dsingle_action = tools_menu.addAction("Plot pick 3D")
-        plotpick3dsingle_action.triggered.connect(self.view.plot3d)
-        plotpick3dsingle_action.setShortcut("Ctrl+3")
-
-        filter_picks_action = tools_menu.addAction("Filter picks")
+        filter_picks_action = tools_menu.addAction("Filter picks by locs")
         filter_picks_action.triggered.connect(self.view.filter_picks)
 
-        tools_menu.addSeparator()
-        cluster_action = tools_menu.addAction("Cluster in pick (k-means)")
-        cluster_action.triggered.connect(self.view.analyze_cluster)
+        clear_picks_action = tools_menu.addAction("Clear picks")
+        clear_picks_action.triggered.connect(self.view.clear_picks)
 
         pickadd_action = tools_menu.addAction("Substract pick regions")
         pickadd_action.triggered.connect(self.substract_picks)
@@ -5445,6 +5440,9 @@ class Window(QtGui.QMainWindow):
             self.view.calculate_fret_dialog
         )
         tools_menu.addSeparator()
+        cluster_action = tools_menu.addAction("Cluster in pick (k-means)")
+        cluster_action.triggered.connect(self.view.analyze_cluster)
+
         mask_action = tools_menu.addAction("Mask image")
         mask_action.triggered.connect(self.mask_settings_dialog.init_dialog)
         # Drift oeprations
@@ -5452,7 +5450,7 @@ class Window(QtGui.QMainWindow):
         undrift_action.setShortcut("Ctrl+U")
         undrift_action.triggered.connect(self.view.undrift)
         undrift_from_picked_action = postprocess_menu.addAction(
-            "Undrift from picked (3D)"
+            "Undrift from picked"
         )
         undrift_from_picked_action.setShortcut("Ctrl+Shift+U")
         undrift_from_picked_action.triggered.connect(
@@ -5464,21 +5462,11 @@ class Window(QtGui.QMainWindow):
         undrift_from_picked2d_action.triggered.connect(
             self.view.undrift_from_picked2d
         )
-        drift_action = postprocess_menu.addAction("Undo drift (2D)")
+        drift_action = postprocess_menu.addAction("Undo drift")
         drift_action.triggered.connect(self.view.undo_drift)
 
         drift_action = postprocess_menu.addAction("Show drift")
         drift_action.triggered.connect(self.view.show_drift)
-
-        postprocess_menu.addSeparator()
-        link_action = postprocess_menu.addAction("Link localizations (3D)")
-        link_action.triggered.connect(self.view.link)
-        align_action = postprocess_menu.addAction(
-            "Align channels (3D if picked)"
-        )
-        align_action.triggered.connect(self.view.align)
-        combine_action = postprocess_menu.addAction("Combine picked locs (3D)")
-        combine_action.triggered.connect(self.view.combine)
 
         # Group related
         postprocess_menu.addSeparator()
@@ -5490,6 +5478,17 @@ class Window(QtGui.QMainWindow):
             "Unfold groups (square)"
         )
         unfold_action_square.triggered.connect(self.view.unfold_groups_square)
+
+        postprocess_menu.addSeparator()
+        link_action = postprocess_menu.addAction("Link localizations")
+        link_action.triggered.connect(self.view.link)
+        align_action = postprocess_menu.addAction(
+            "Align channels (RCC or from picked)"
+        )
+        align_action.triggered.connect(self.view.align)
+        combine_action = postprocess_menu.addAction("Combine locs in picks")
+        combine_action.triggered.connect(self.view.combine)
+
         postprocess_menu.addSeparator()
         apply_action = postprocess_menu.addAction(
             "Apply expression to localizations"
@@ -5502,7 +5501,8 @@ class Window(QtGui.QMainWindow):
         # Define 3D entries
 
         self.actions_3d = [plotpick3dsingle_action, plotpick3d_action,
-                           plotpick3d_iso_action, slicer_action]
+                           plotpick3d_iso_action, slicer_action,
+                           undrift_from_picked2d_action]
 
         for action in self.actions_3d:
             action.setVisible(False)
