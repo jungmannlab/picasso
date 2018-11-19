@@ -294,7 +294,7 @@ class Window(QtGui.QMainWindow):
 
         self.radio_sym = QtGui.QRadioButton("x symmetry")
         self.symEdit = QtGui.QSpinBox()
-        self.symEdit.setRange(2, 50)
+        self.symEdit.setRange(2, 100)
         self.symEdit.setValue(8)
 
         self.radio_sym_custom = QtGui.QRadioButton("custom symmetry")
