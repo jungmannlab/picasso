@@ -5426,6 +5426,7 @@ class Window(QtGui.QMainWindow):
 
         clear_picks_action = tools_menu.addAction("Clear picks")
         clear_picks_action.triggered.connect(self.view.clear_picks)
+        clear_picks_action.setShortcut("Ctrl+C")
 
         pickadd_action = tools_menu.addAction("Substract pick regions")
         pickadd_action.triggered.connect(self.substract_picks)
