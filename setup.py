@@ -2,12 +2,12 @@ from setuptools import setup
 
 setup(
     name="picasso",
-    version="0.2.2",
+    version="0.2.3",
     author="Joerg Schnitzbauer, Maximilian T. Strauss",
     author_email=(
         "joschnitzbauer (at) gmail.com, straussmaximilian (at) gmail.com"
     ),
-    url="https://gitlab.com/jungmannlab/picasso",
+    url="https://github.com/jungmannlab/picasso",
     packages=["picasso", "picasso.gui"],
     classifiers=[
         "Programming Language :: Python",
