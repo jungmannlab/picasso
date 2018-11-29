@@ -13,6 +13,7 @@ What doest MLE / LQ stand for?
 Picasso freezes during the localization step
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 If it is always at the same localization:
+
 - Try fitting with the LQ method; it tends to be more  robust
 - Try increasing the gradient
 - Make sure to set the correct camera parameters (Baseline etc.)
