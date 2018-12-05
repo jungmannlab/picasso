@@ -6110,7 +6110,6 @@ class Window(QtGui.QMainWindow):
         if path:
             self.view.load_picks(path)
 
-    @check_pick
     def substract_picks(self):
         if self.view._picks:
             path = QtGui.QFileDialog.getOpenFileName(
