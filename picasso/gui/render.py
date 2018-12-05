@@ -2700,6 +2700,7 @@ class View(QtGui.QLabel):
         self.setPixmap(self.pixmap)
         self.window.update_info()
 
+
     def draw_scene_slicer(
         self,
         viewport,
@@ -4183,6 +4184,7 @@ class View(QtGui.QLabel):
         qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
         return qimage
 
+    # TODO : check if we still need this function
     def render_scene_hist(
         self, autoscale=False, use_cache=False, cache=True, viewport=None
     ):
@@ -4380,9 +4382,6 @@ class View(QtGui.QLabel):
         return self._bgra
 
     def resizeEvent(self, event):
-        # TODO: find out why x_render crashes when resizing
-        self.window.display_settings_dlg.render_check.setCheckState(False)
-        self.x_render_state = False
         self.update_scene()
 
     def save_picked_locs(self, path, channel):
