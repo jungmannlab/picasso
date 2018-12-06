@@ -71,6 +71,10 @@ def _initial_sigmas(spot, y, x, size):
         sy = 0.01
     if ~_np.isfinite(sx):
         sx = 0.01
+    if sx == 0:
+        sx = 0.01
+    if sy  == 0:
+        sy = 0.01
     return sy, sx
 
 
@@ -528,7 +532,6 @@ def _mlefit_sigmaxy(
             for jj in range(size):
                 PSFx = _gaussian_integral(ii, theta[0], theta[4])
                 PSFy = _gaussian_integral(jj, theta[1], theta[5])
-
                 # Derivatives
                 dudt[0], d2udt2[0] = _derivative_gaussian_integral(
                     ii, theta[0], theta[4], theta[2], PSFy
