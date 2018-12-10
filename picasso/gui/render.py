@@ -1310,7 +1310,7 @@ class MaskSettingsDialog(QtGui.QDialog):
 
         mask_grid.addWidget(QtGui.QLabel("Oversampling"), 0, 0)
         self.mask_oversampling = QtGui.QSpinBox()
-        self.mask_oversampling.setRange(0, 999999)
+        self.mask_oversampling.setRange(1, 999999)
         self.mask_oversampling.setValue(1)
         self.mask_oversampling.setSingleStep(1)
         self.mask_oversampling.setKeyboardTracking(False)
