@@ -6264,11 +6264,19 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             if channel is (len(self.view.locs_paths)):
                 print("Save all at once.")
-                for i in tqdm(range(len(self.view.locs_paths))):
-                    channel = i
-                    base, ext = os.path.splitext(self.view.locs_paths[channel])
-                    out_path = base + "_apickprops.hdf5"
-                    self.view.save_pick_properties(out_path, channel)
+                suffix, ok = QtGui.QInputDialog.getText(
+                    self,
+                    "Input Dialog",
+                    "Enter suffix",
+                    QtGui.QLineEdit.Normal,
+                    "_apicked"
+                )
+                if ok:
+                    for i in tqdm(range(len(self.view.locs_paths))):
+                        channel = i
+                        base, ext = os.path.splitext(self.view.locs_paths[channel])
+                        out_path = base + suffix +".hdf5"
+                        self.view.save_pick_properties(out_path, channel)
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_pickprops.hdf5"
