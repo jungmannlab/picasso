@@ -1651,17 +1651,13 @@ class MaskSettingsDialog(QtGui.QDialog):
             io.save_locs(path, self.index_locs_out, info)
 
 
-class ToolsSettingsDialog(QtGui.QDialog):
+class PickToolCircleSettings(QtGui.QWidget):
+
     def __init__(self, window):
-        super().__init__(window)
+        super().__init__()
+        self.grid = QtGui.QGridLayout(self)
         self.window = window
-        self.setWindowTitle("Tools Settings")
-        self.setModal(False)
-        vbox = QtGui.QVBoxLayout(self)
-        pick_groupbox = QtGui.QGroupBox("Pick")
-        vbox.addWidget(pick_groupbox)
-        pick_grid = QtGui.QGridLayout(pick_groupbox)
-        pick_grid.addWidget(QtGui.QLabel("Diameter (cam. pixel):"), 0, 0)
+        self.grid.addWidget(QtGui.QLabel("Diameter (cam. pixel):"), 0, 0)
         self.pick_diameter = QtGui.QDoubleSpinBox()
         self.pick_diameter.setRange(0, 999999)
         self.pick_diameter.setValue(1)
@@ -1669,25 +1665,77 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.pick_diameter.setDecimals(3)
         self.pick_diameter.setKeyboardTracking(False)
         self.pick_diameter.valueChanged.connect(self.on_pick_diameter_changed)
-        pick_grid.addWidget(self.pick_diameter, 0, 1)
-        pick_grid.addWidget(QtGui.QLabel("Pick similar +/- range (std)"), 1, 0)
+        self.grid.addWidget(self.pick_diameter, 0, 1)
+        self.grid.addWidget(QtGui.QLabel("Pick similar +/- range (std)"), 1, 0)
         self.pick_similar_range = QtGui.QDoubleSpinBox()
         self.pick_similar_range.setRange(0, 100000)
         self.pick_similar_range.setValue(2)
         self.pick_similar_range.setSingleStep(0.1)
         self.pick_similar_range.setDecimals(1)
-        pick_grid.addWidget(self.pick_similar_range, 1, 1)
+        self.grid.addWidget(self.pick_similar_range, 1, 1)
         self.pick_annotation = QtGui.QCheckBox("Annotate picks")
         self.pick_annotation.stateChanged.connect(
             self.on_pick_diameter_changed
         )
-        pick_grid.addWidget(self.pick_annotation, 2, 0)
+        self.grid.addWidget(self.pick_annotation, 2, 0)
 
     def on_pick_diameter_changed(self, diameter):
         self.window.view.index_blocks = [
             None for _ in self.window.view.index_blocks
         ]
         self.window.view.update_scene(use_cache=True)
+
+
+class PickToolRectangleSettings(QtGui.QWidget):
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        self.grid = QtGui.QGridLayout(self)
+        self.grid.addWidget(QtGui.QLabel("Width (cam. pixel):"), 0, 0)
+        self.pick_width = QtGui.QDoubleSpinBox()
+        self.pick_width.setRange(0, 999999)
+        self.pick_width.setValue(1)
+        self.pick_width.setSingleStep(0.1)
+        self.pick_width.setDecimals(3)
+        self.pick_width.setKeyboardTracking(False)
+        self.pick_width.valueChanged.connect(self.on_pick_width_changed)
+        self.grid.addWidget(self.pick_width, 0, 1)
+        self.grid.setRowStretch(1, 1)
+
+    def on_pick_width_changed(self, width):
+        pass
+
+
+class ToolsSettingsDialog(QtGui.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Tools Settings")
+        self.setModal(False)
+        self.vbox = QtGui.QVBoxLayout(self)
+
+        self.pick_groupbox = QtGui.QGroupBox("Pick")
+        self.vbox.addWidget(self.pick_groupbox)
+        pick_grid = QtGui.QGridLayout(self.pick_groupbox)
+
+        pick_grid.addWidget(QtGui.QLabel("Shape:"), 1, 0)
+        self.pick_shape = QtGui.QComboBox()
+        self.pick_shape.addItems(["Circle", "Rectangle"])
+        pick_grid.addWidget(self.pick_shape, 1, 1)
+        pick_stack = QtGui.QStackedWidget()
+        pick_grid.addWidget(pick_stack, 2, 0, 1, 2)
+        self.pick_shape.currentIndexChanged.connect(pick_stack.setCurrentIndex)
+
+        # Circle
+        self.pick_circle_settings = PickToolCircleSettings(window)
+        pick_stack.addWidget(self.pick_circle_settings)
+        self.pick_diameter = self.pick_circle_settings.pick_diameter
+
+        # Rectangle
+        self.pick_rectangle_settings = PickToolRectangleSettings(window)
+        pick_stack.addWidget(self.pick_rectangle_settings)
+        self.pick_width = self.pick_rectangle_settings.pick_width
 
 
 class DisplaySettingsDialog(QtGui.QDialog):
