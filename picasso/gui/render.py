@@ -2619,7 +2619,8 @@ class View(QtGui.QLabel):
         else:
             event.ignore()
 
-    def get_pick_rectangle_polygon(self, start_x, start_y, end_x, end_y, width):
+    def get_pick_rectangle_polygon(self, start_x, start_y, end_x, end_y, width,
+        return_most_right=False):
         drawn_x = end_x - start_x
         if drawn_x == 0:
             alpha = np.pi / 2
@@ -2644,6 +2645,12 @@ class View(QtGui.QLabel):
         p.append(p2)
         p.append(p3)
         p.append(p4)
+        if return_most_right:
+            X = [x1, x2, x3, x4]
+            ix_most_right = np.argmax(X)
+            x_most_right = X[ix_most_right]
+            y_most_right = [y1, y2, y3, y4][ix_most_right]
+            return p, (x_most_right, y_most_right)
         return p
 
     def draw_picks(self, image):
@@ -2669,13 +2676,11 @@ class View(QtGui.QLabel):
                 start_x, start_y = self.map_to_view(*pick[0])
                 end_x, end_y = self.map_to_view(*pick[1])
                 painter.drawLine(start_x, start_y, end_x, end_y)
-                polygon = self.get_pick_rectangle_polygon(start_x, start_y, end_x, end_y, w)
+                polygon, most_right = self.get_pick_rectangle_polygon(
+                    start_x, start_y, end_x, end_y, w, return_most_right=True)
                 painter.drawPolygon(polygon)
                 if self.window.tools_settings_dialog.pick_annotation.isChecked():
-                    both_x = [start_x, end_x]
-                    both_y = [start_y, end_y]
-                    ix = np.argmax(both_x)
-                    painter.drawText(both_x[ix] + w / 2, both_y[ix] + w / 2, str(i))
+                    painter.drawText(*most_right, str(i))
             painter.end()
         return image
 
@@ -2688,6 +2693,15 @@ class View(QtGui.QLabel):
                          self.rectangle_pick_start_y,
                          self.rectangle_pick_current_x,
                          self.rectangle_pick_current_y)
+        w = self.window.tools_settings_dialog.pick_width.value()
+        w *= self.width() / self.viewport_width()
+        polygon = self.get_pick_rectangle_polygon(
+            self.rectangle_pick_start_x,
+            self.rectangle_pick_start_y,
+            self.rectangle_pick_current_x,
+            self.rectangle_pick_current_y,
+            w)
+        painter.drawPolygon(polygon)
         painter.end()
         return image
 
