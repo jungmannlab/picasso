@@ -2619,6 +2619,33 @@ class View(QtGui.QLabel):
         else:
             event.ignore()
 
+    def get_pick_rectangle_polygon(self, start_x, start_y, end_x, end_y, width):
+        drawn_x = end_x - start_x
+        if drawn_x == 0:
+            alpha = np.pi / 2
+        else:
+            alpha = np.arctan((end_y - start_y) / (end_x - start_x))
+        dx = width * np.sin(alpha) / 2
+        dy = width * np.cos(alpha) / 2
+        x1 = start_x - dx
+        x2 = start_x + dx
+        x4 = end_x - dx
+        x3 = end_x + dx
+        y1 = start_y + dy
+        y2 = start_y - dy
+        y4 = end_y + dy
+        y3 = end_y - dy
+        p1 = QtCore.QPointF(x1, y1)
+        p2 = QtCore.QPointF(x2, y2)
+        p3 = QtCore.QPointF(x3, y3)
+        p4 = QtCore.QPointF(x4, y4)
+        p = QtGui.QPolygonF()
+        p.append(p1)
+        p.append(p2)
+        p.append(p3)
+        p.append(p4)
+        return p
+
     def draw_picks(self, image):
         image = image.copy()
         if self._pick_shape == "Circle":
@@ -2642,6 +2669,8 @@ class View(QtGui.QLabel):
                 start_x, start_y = self.map_to_view(*pick[0])
                 end_x, end_y = self.map_to_view(*pick[1])
                 painter.drawLine(start_x, start_y, end_x, end_y)
+                polygon = self.get_pick_rectangle_polygon(start_x, start_y, end_x, end_y, w)
+                painter.drawPolygon(polygon)
                 if self.window.tools_settings_dialog.pick_annotation.isChecked():
                     both_x = [start_x, end_x]
                     both_y = [start_y, end_y]
