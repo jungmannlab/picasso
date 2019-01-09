@@ -3017,6 +3017,7 @@ class View(QtGui.QLabel):
 
     def load_picks(self, path):
         """ Loads picks centers and diameter from yaml file. """
+        # @TODO: implement for rectangle picks
         with open(path, "r") as f:
             regions = yaml.load(f)
         self._picks = regions["Centers"]
@@ -3027,6 +3028,7 @@ class View(QtGui.QLabel):
         self.update_scene(picks_only=True)
 
     def substract_picks(self, path):
+        # @TODO: implement message that it currently doesn't work with rectangle picks
         oldpicks = self._picks.copy()
         with open(path, "r") as f:
             regions = yaml.load(f)
@@ -3400,7 +3402,7 @@ class View(QtGui.QLabel):
         acc_picks = self.picked_locs(channel_acceptor)
         don_picks = self.picked_locs(channel_donor)
 
-        if self._picks:
+        if self._picks:  # @TODO: check if pick is rectangular. if so abort and display message
             params = {}
             params["t0"] = time.time()
             i = 0
@@ -3480,6 +3482,7 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def calculate_fret_dialog(self):
+        # @TODO: abort and message if picks are rectangular
         print("Calculating FRET")
         fret_events = []
 
@@ -4207,6 +4210,7 @@ class View(QtGui.QLabel):
 
     @check_picks
     def pick_similar(self):
+        # @TODO: abort and message if picks are rectangular
         channel = self.get_channel("Pick similar")
         if channel is not None:
             locs = self.locs[channel]
@@ -4305,6 +4309,7 @@ class View(QtGui.QLabel):
 
     def picked_locs(self, channel, add_group=True):
         """ Returns picked localizations in the specified channel """
+        # @TODO prio1: make it work also for rectangle picks
         if len(self._picks):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
@@ -4327,6 +4332,7 @@ class View(QtGui.QLabel):
             return picked_locs
 
     def remove_picks(self, position):
+        # @TODO prio2: make it work also for rectangular picks
         x, y = position
         pick_diameter_2 = (
             self.window.tools_settings_dialog.pick_diameter.value() ** 2
@@ -4644,6 +4650,7 @@ class View(QtGui.QLabel):
         io.save_datasets(path, info, groups=pick_props)
 
     def save_picks(self, path):
+        # @TODO prio2: make it work also for rectangular pick
         d = self.window.tools_settings_dialog.pick_diameter.value()
         picks = {"Diameter": d, "Centers": [list(_) for _ in self._picks]}
         with open(path, "w") as f:
@@ -5195,6 +5202,7 @@ class View(QtGui.QLabel):
             groups = np.unique(self.locs[0].group)
 
             if self._picks:
+                # @TODO: check if picks are rectangular. if so abort and message
                 for j in range(len(self._picks)):
                     for i in range(len(groups) - 1):
                         position = self._picks[j][:]
@@ -5243,6 +5251,7 @@ class View(QtGui.QLabel):
             self.locs[0].y += offset_y
 
             if self._picks:
+                # @TODO: check if rectangular. if so, abort and message
                 # Also unfold picks
                 groups = np.unique(self.locs[0].group)
 
