@@ -2619,8 +2619,7 @@ class View(QtGui.QLabel):
         else:
             event.ignore()
 
-    def get_pick_rectangle_polygon(self, start_x, start_y, end_x, end_y, width,
-        return_most_right=False):
+    def get_pick_rectangle_corners(self, start_x, start_y, end_x, end_y, width):
         drawn_x = end_x - start_x
         if drawn_x == 0:
             alpha = np.pi / 2
@@ -2636,20 +2635,18 @@ class View(QtGui.QLabel):
         y2 = start_y - dy
         y4 = end_y + dy
         y3 = end_y - dy
-        p1 = QtCore.QPointF(x1, y1)
-        p2 = QtCore.QPointF(x2, y2)
-        p3 = QtCore.QPointF(x3, y3)
-        p4 = QtCore.QPointF(x4, y4)
+        return [x1, x2, x3, x4], [y1, y2, y3, y4]
+
+    def get_pick_rectangle_polygon(self, start_x, start_y, end_x, end_y, width,
+        return_most_right=False):
+        X, Y = self.get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width)
         p = QtGui.QPolygonF()
-        p.append(p1)
-        p.append(p2)
-        p.append(p3)
-        p.append(p4)
+        for x, y in zip(X, Y):
+            p.append(QtCore.QPointF(x, y))
         if return_most_right:
-            X = [x1, x2, x3, x4]
             ix_most_right = np.argmax(X)
             x_most_right = X[ix_most_right]
-            y_most_right = [y1, y2, y3, y4][ix_most_right]
+            y_most_right = Y[ix_most_right]
             return p, (x_most_right, y_most_right)
         return p
 
@@ -3016,19 +3013,26 @@ class View(QtGui.QLabel):
         }
 
     def load_picks(self, path):
-        """ Loads picks centers and diameter from yaml file. """
-        # @TODO: implement for rectangle picks
+        """ Loads picks from yaml file. """
         with open(path, "r") as f:
             regions = yaml.load(f)
-        self._picks = regions["Centers"]
+        loaded_shape = regions["Shape"]
+        shape_index = self.window.tools_settings_dialog.pick_shape.findText(loaded_shape)
+        self.window.tools_settings_dialog.pick_shape.setCurrentIndex(shape_index)
+        if loaded_shape == "Circle":
+            self._picks = regions["Centers"]
+            self.window.tools_settings_dialog.pick_diameter.setValue(regions["Diameter"])
+        elif loaded_shape == "Rectangle":
+            self._picks = regions["Center-Axis-Points"]
+            self.window.tools_settings_dialog.pick_width.setValue(regions["Width"])
+        else:
+            raise ValueError("Unrecognized pick shape")
         self.update_pick_info_short()
-        self.window.tools_settings_dialog.pick_diameter.setValue(
-            regions["Diameter"]
-        )
         self.update_scene(picks_only=True)
 
     def substract_picks(self, path):
-        # @TODO: implement message that it currently doesn't work with rectangle picks
+        if self._pick_shape == "Rectangle":
+            raise NotImplementedError("Subtracting picks not implemented for rectangle picks")
         oldpicks = self._picks.copy()
         with open(path, "r") as f:
             regions = yaml.load(f)
@@ -3402,7 +3406,9 @@ class View(QtGui.QLabel):
         acc_picks = self.picked_locs(channel_acceptor)
         don_picks = self.picked_locs(channel_donor)
 
-        if self._picks:  # @TODO: check if pick is rectangular. if so abort and display message
+        if self._picks:
+            if self._pick_shape == "Rectangle":
+                raise NotImplementedError("Not implemented for rectangle picks")
             params = {}
             params["t0"] = time.time()
             i = 0
@@ -3482,7 +3488,8 @@ class View(QtGui.QLabel):
         self.update_scene()
 
     def calculate_fret_dialog(self):
-        # @TODO: abort and message if picks are rectangular
+        if self._pick_shape == "Rectangle":
+            raise NotImplementedError("Not implemented for rectangle picks")
         print("Calculating FRET")
         fret_events = []
 
@@ -4210,7 +4217,8 @@ class View(QtGui.QLabel):
 
     @check_picks
     def pick_similar(self):
-        # @TODO: abort and message if picks are rectangular
+        if self._pick_shape == "Rectangle":
+            raise NotImplementedError("Pick similar not implemented for rectangle picks")
         channel = self.get_channel("Pick similar")
         if channel is not None:
             locs = self.locs[channel]
@@ -4311,28 +4319,59 @@ class View(QtGui.QLabel):
         """ Returns picked localizations in the specified channel """
         # @TODO prio1: make it work also for rectangle picks
         if len(self._picks):
-            d = self.window.tools_settings_dialog.pick_diameter.value()
-            r = d / 2
-            index_blocks = self.get_index_blocks(channel)
-            picked_locs = []
-            progress = lib.ProgressDialog(
-                "Creating localization list", 0, len(self._picks), self
-            )
-            progress.set_value(0)
-            for i, pick in enumerate(self._picks):
-                x, y = pick
-                block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
-                group_locs = lib.locs_at(x, y, block_locs, r)
-                if add_group:
-                    group = i * np.ones(len(group_locs), dtype=np.int32)
-                    group_locs = lib.append_to_rec(group_locs, group, "group")
-                group_locs.sort(kind="mergesort", order="frame")
-                picked_locs.append(group_locs)
-                progress.set_value(i + 1)
+            if self._pick_shape == 'Circle':
+                d = self.window.tools_settings_dialog.pick_diameter.value()
+                r = d / 2
+                index_blocks = self.get_index_blocks(channel)
+                picked_locs = []
+                progress = lib.ProgressDialog(
+                    "Creating localization list", 0, len(self._picks), self
+                )
+                progress.set_value(0)
+                for i, pick in enumerate(self._picks):
+                    x, y = pick
+                    block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+                    group_locs = lib.locs_at(x, y, block_locs, r)
+                    if add_group:
+                        group = i * np.ones(len(group_locs), dtype=np.int32)
+                        group_locs = lib.append_to_rec(group_locs, group, "group")
+                    group_locs.sort(kind="mergesort", order="frame")
+                    picked_locs.append(group_locs)
+                    progress.set_value(i + 1)
+            elif self._pick_shape == 'Rectangle':
+                w = self.window.tools_settings_dialog.pick_width.value()
+                channel_locs = self.locs[channel]
+                picked_locs = []
+                progress = lib.ProgressDialog(
+                    "Creating localization list", 0, len(self._picks), self
+                )
+                progress.set_value(0)
+                for i, pick in enumerate(self._picks):
+                    (xs, ys), (xe, ye) = pick
+                    X, Y = self.get_pick_rectangle_corners(xs, ys, xe, ye, w)
+                    x_min = min(X)
+                    x_max = max(X)
+                    y_min = min(Y)
+                    y_max = max(Y)
+                    group_locs = channel_locs[channel_locs.x > x_min]
+                    group_locs = group_locs[group_locs.x < x_max]
+                    group_locs = group_locs[group_locs.y > y_min]
+                    group_locs = group_locs[group_locs.y < y_max]
+                    # @TODO: filter for locks in reactangle
+                    if add_group:
+                        group = i * np.ones(len(group_locs), dtype=np.int32)
+                        group_locs = lib.append_to_rec(group_locs, group, "group")
+                    group_locs.sort(kind="mergesort", order="frame")
+                    picked_locs.append(group_locs)
+                    progress.set_value(i + 1)
+            else:
+                raise ValueError("Invalid value for pick shape")
+
             return picked_locs
 
     def remove_picks(self, position):
-        # @TODO prio2: make it work also for rectangular picks
+        # @TODO prio2: make it work also for rectangular picks, for now:
+        raise NotImplementedError("Removing picks doesn't work yet for rectangle picks")
         x, y = position
         pick_diameter_2 = (
             self.window.tools_settings_dialog.pick_diameter.value() ** 2
@@ -4575,11 +4614,14 @@ class View(QtGui.QLabel):
         locs = self.picked_locs(channel)
         locs = stack_arrays(locs, asrecarray=True, usemask=False)
         if locs is not None:
-            d = self.window.tools_settings_dialog.pick_diameter.value()
-            pick_info = {
-                "Generated by:": "Picasso Render",
-                "Pick Diameter:": d,
-            }
+            pick_info = {"Generated by": "Picasso Render : Pick",
+                         "Pick Shape": self._pick_shape}
+            if self._pick_shape == "Circle":
+                d = self.window.tools_settings_dialog.pick_diameter.value()
+                pick_info["Pick Diameter"] = d
+            elif self._pick_shape == "Rectangle":
+                w = self.window.tools_settings_dialog.pick_width.value()
+                pick_info["Pick Width"] = w
             io.save_locs(path, locs, self.infos[channel] + [pick_info])
 
     def save_picked_locs_multi(self, path):
@@ -4650,9 +4692,15 @@ class View(QtGui.QLabel):
         io.save_datasets(path, info, groups=pick_props)
 
     def save_picks(self, path):
-        # @TODO prio2: make it work also for rectangular pick
-        d = self.window.tools_settings_dialog.pick_diameter.value()
-        picks = {"Diameter": d, "Centers": [list(_) for _ in self._picks]}
+        if self._pick_shape == "Circle":
+            d = self.window.tools_settings_dialog.pick_diameter.value()
+            picks = {"Diameter": d, "Centers": [list(_) for _ in self._picks]}
+        elif self._pick_shape == "Rectangle":
+            w = self.window.tools_settings_dialog.pick_width.value()
+            picks = {"Width": w, "Center-Axis-Points": [[list(s), list(e)] for s, e in self._picks]}
+        else:
+            raise ValueError("Unrecognized pick shape")
+        picks["Shape"] = self._pick_shape
         with open(path, "w") as f:
             yaml.dump(picks, f)
 
@@ -5202,7 +5250,8 @@ class View(QtGui.QLabel):
             groups = np.unique(self.locs[0].group)
 
             if self._picks:
-                # @TODO: check if picks are rectangular. if so abort and message
+                if self._pick_shape == "Rectangle":
+                    raise NotImplementedError("Unfolding not implemented for rectangle picks")
                 for j in range(len(self._picks)):
                     for i in range(len(groups) - 1):
                         position = self._picks[j][:]
@@ -5251,7 +5300,8 @@ class View(QtGui.QLabel):
             self.locs[0].y += offset_y
 
             if self._picks:
-                # @TODO: check if rectangular. if so, abort and message
+                if self._pick_shape == "Rectangle":
+                    raise NotImplementedError("Not implemented for rectangle picks")
                 # Also unfold picks
                 groups = np.unique(self.locs[0].group)
 
