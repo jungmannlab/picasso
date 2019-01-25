@@ -719,8 +719,12 @@ def _localize(args):
             zpath = input("Path to *.yaml calibration file: ")
 
             if zpath:
-                with open(zpath, "r") as f:
-                    z_calibration = yaml.load(f)
+                try:
+                    with open(zpath, "r") as f:
+                        z_calibration = yaml.load(f)
+                except:
+                    print('Error loading calibration file.')
+                    raise
 
         for path in paths:
             print("------------------------------------------")
