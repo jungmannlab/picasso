@@ -339,7 +339,7 @@ class DatasetDialog(QtGui.QDialog):
         p.clicked.connect(self.close_file)
 
     def close_file(self):
-        print(self.sender().objectName())
+        print(self.sender.objectName())
         # TODO call close routine
 
     def update_viewport(self):
