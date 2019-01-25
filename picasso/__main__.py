@@ -711,7 +711,7 @@ def _localize(args):
             convergence = 0
             max_iterations = 0
 
-        if args.fit_method == "lq-3d":
+        if args.fit_method == "lq-3d" or args.fit_method == "lq-gpu-3d":
             from . import zfit
             print("------------------------------------------")
             print('Fitting 3D')
@@ -747,7 +747,7 @@ def _localize(args):
                 spots = get_spots(movie, ids, box, camera_info)
                 theta = gausslq.fit_spots_parallel(spots, asynch=False)
                 locs = gausslq.locs_from_fits(ids, theta, box, args.gain)
-            elif args.fit_method == "lq-gpu":
+            elif args.fit_method == "lq-gpu" or args.fit_method == "lq-gpu-3d":
                 spots = get_spots(movie, ids, box, camera_info)
                 theta = gausslq.fit_spots_gpufit(spots)
                 em = camera_info["gain"] > 1
@@ -787,10 +787,9 @@ def _localize(args):
                 "Max. Iterations": max_iterations,
             }
 
-            if args.fit_method == "lq-3d":
+            if args.fit_method == "lq-3d" or args.fit_method == "lq-gpu-3d":
                 print("------------------------------------------")
-                print("Fitting 3D...",end='')
-                # Additionally fit 3d 
+                print("Fitting 3D...", end='')
                 fs = zfit.fit_z_parallel(locs, info, z_calibration, magnification_factor, filter=0, asynch=True)
                 locs = zfit.locs_from_futures(fs, filter=0)
                 localize_info["Z Calibration Path"] = zpath
@@ -1151,7 +1150,7 @@ def main():
     localize_parser.add_argument(
         "-a",
         "--fit-method",
-        choices=["mle", "lq", "lq-gpu", "lq-3d", "avg"],
+        choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"],
         default="mle",
     )
     localize_parser.add_argument(
