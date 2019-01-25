@@ -5,8 +5,8 @@
 
     Picasso command line interface
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss
+    :copyright: Copyright (c) 2016-2019 Jungmann Lab, MPI of Biochemistry
 """
 import os.path
 
@@ -618,6 +618,7 @@ def _localize(args):
     import os.path as _ospath
     import re as _re
     import os as _os
+    import yaml as yaml
 
     print("    ____  _____________   __________ ____ ")
     print("   / __ \\/  _/ ____/   | / ___/ ___// __ \\")
@@ -710,6 +711,17 @@ def _localize(args):
             convergence = 0
             max_iterations = 0
 
+        if args.fit_method == "lq-3d":
+            from . import zfit
+            print("------------------------------------------")
+            print('Fitting 3D')
+            magnification_factor = float(input("Enter Magnification factor: "))
+            zpath = input("Path to *.yaml calibration file: ")
+
+            if zpath:
+                with open(zpath, "r") as f:
+                    z_calibration = yaml.load(f)
+
         for path in paths:
             print("------------------------------------------")
             print("------------------------------------------")
@@ -731,7 +743,7 @@ def _localize(args):
             )
             ids = identifications_from_futures(futures)
 
-            if args.fit_method == "lq":
+            if args.fit_method == "lq" or args.fit_method == "lq-3d":
                 spots = get_spots(movie, ids, box, camera_info)
                 theta = gausslq.fit_spots_parallel(spots, asynch=False)
                 locs = gausslq.locs_from_fits(ids, theta, box, args.gain)
@@ -775,6 +787,16 @@ def _localize(args):
                 "Max. Iterations": max_iterations,
             }
             info.append(localize_info)
+
+            if args.fit_method == "lq-3d":
+                print("------------------------------------------")
+                print("Fitting 3D...",end='')
+                # Additionally fit 3d 
+                fs = zfit.fit_z_parallel(locs, info, z_calibration, magnification_factor, filter=0, asynch=True)
+                locs = zfit.locs_from_futures(fs, filter=0)
+                print("complete.")
+                print("------------------------------------------")
+
             base, ext = splitext(path)
             out_path = base + "_locs.hdf5"
             save_locs(out_path, locs, info)
@@ -1126,7 +1148,7 @@ def main():
     localize_parser.add_argument(
         "-a",
         "--fit-method",
-        choices=["mle", "lq", "lq-gpu", "avg"],
+        choices=["mle", "lq", "lq-gpu", "lq-3d", "avg"],
         default="mle",
     )
     localize_parser.add_argument(
