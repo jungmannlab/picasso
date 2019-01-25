@@ -272,6 +272,8 @@ class DatasetDialog(QtGui.QDialog):
         c = QtGui.QCheckBox(path)
         p = QtGui.QPushButton('x')
         currentline = len(self.layout)
+        p.setObjectName(str(currentline))
+
         colordrop = QtGui.QComboBox(self)
         colordrop.setEditable(True)
         colordrop.lineEdit().setMaxLength(7)
@@ -337,7 +339,7 @@ class DatasetDialog(QtGui.QDialog):
         p.clicked.connect(self.close_file)
 
     def close_file(self):
-        print(self.sender)
+        print(self.sender().objectName())
         # TODO call close routine
 
     def update_viewport(self):
