@@ -786,7 +786,6 @@ def _localize(args):
                 "Convergence Criterion": convergence,
                 "Max. Iterations": max_iterations,
             }
-            info.append(localize_info)
 
             if args.fit_method == "lq-3d":
                 print("------------------------------------------")
@@ -794,8 +793,12 @@ def _localize(args):
                 # Additionally fit 3d 
                 fs = zfit.fit_z_parallel(locs, info, z_calibration, magnification_factor, filter=0, asynch=True)
                 locs = zfit.locs_from_futures(fs, filter=0)
+                localize_info["Z Calibration Path"] = zpath
+                localize_info["Z Calibration"] = z_calibration
                 print("complete.")
                 print("------------------------------------------")
+
+            info.append(localize_info)
 
             base, ext = splitext(path)
             out_path = base + "_locs.hdf5"
