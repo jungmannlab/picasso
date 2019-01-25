@@ -22,7 +22,7 @@ The reconstruction parameters can be specified by adding respective arguments. I
 ::
 
    ‘-b’, ‘–box-side-length’, type=int, default=7, help=‘box side length’
-   ‘-a’, ‘–fit-method’, choices=[‘mle’, ‘lq’, ‘avg’], default=‘mle’ 
+   ‘-a’, ‘–fit-method’, choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"], default=‘mle’ 
    ‘-g’, ‘–gradient’, type=int, default=5000, help=‘minimum net gradient’
    ‘-d’, ‘–drift’, type=int, default=1000, help=‘segmentation size for subsequent RCC, 0 to deactivate’
    ‘-bl’, ‘–baseline’, type=int, default=0, help=‘camera baseline’
@@ -35,6 +35,8 @@ settings after an unsuccessful attempt, the program will continue with the next 
 drift corrected locs will be created.
 
 Note 2: Make sure to set the camera settings correctly, otherwise Photon counts are wrong plus the MLE might have problems.
+
+Note 3: If you select one of the 3D algorithms (lq-3d or lq-gpu-3d) the programm will ask you to enter the magnification factor and the path to the 3D calibration file. 
 
 Example
 ^^^^^^^
