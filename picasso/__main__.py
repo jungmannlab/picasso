@@ -1171,13 +1171,13 @@ def main():
         "-bl", "--baseline", type=int, default=0, help="camera baseline"
     )
     localize_parser.add_argument(
-        "-s", "--sensitivity", type=int, default=1, help="camera sensitivity"
+        "-s", "--sensitivity", type=float, default=1, help="camera sensitivity"
     )
     localize_parser.add_argument(
         "-ga", "--gain", type=int, default=1, help="camera gain"
     )
     localize_parser.add_argument(
-        "-qe", "--qe", type=int, default=1, help="camera quantum efficiency"
+        "-qe", "--qe", type=float, default=1, help="camera quantum efficiency"
     )
 
     # nneighbors
