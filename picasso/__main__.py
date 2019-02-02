@@ -62,7 +62,6 @@ def _csv2hdf(path, pixelsize):
         from .io import save_locs
         import os.path
         import numpy as _np
-        from numpy import savetxt
 
         for path in _tqdm(paths):
             print("Converting {}".format(path))
@@ -156,10 +155,7 @@ def _hdf2csv(path):
     else:
         paths = glob(path)
     if paths:
-        from .io import load_filter
         import os.path
-        import numpy as _np
-        from numpy import savetxt
 
         for path in _tqdm(paths):
             base, ext = os.path.splitext(path)
@@ -285,16 +281,12 @@ def _cluster_combine_dist(files):
 
 def _clusterfilter(files, clusterfile, parameter, minval, maxval):
     from glob import glob
-    from itertools import chain
-    from .io import load_locs, save_locs
-    from .postprocess import align
-    from os.path import splitext
     from tqdm import tqdm
     import numpy as np
 
     paths = glob(files)
     if paths:
-        from . import io, postprocess
+        from . import io
 
         for path in paths:
             try:
@@ -477,9 +469,6 @@ def _nneighbor(files):
 
     paths = glob.glob(files)
     if paths:
-        from . import io, postprocess
-        from h5py import File
-
         for path in paths:
             print("Loading {} ...".format(path))
             with _h5py.File(path, "r") as locs_file:
@@ -614,7 +603,7 @@ def _localize(args):
     )
     from os.path import splitext, isdir
     from time import sleep
-    from . import gausslq, gaussmle, avgroi, lib
+    from . import gausslq, avgroi
     import os.path as _ospath
     import re as _re
     import os as _os
@@ -666,7 +655,6 @@ def _localize(args):
             entries = [_.path for _ in _os.scandir(directory) if _.is_file()]
             matches = [_re.match(pattern, _) for _ in entries]
             matches = [_ for _ in matches if _ is not None]
-            paths_indices = [(int(_.group(1)), _.group(0)) for _ in matches]
             datafiles = [_.group(0) for _ in matches]
             if datafiles != []:
                 for element in datafiles:
@@ -722,7 +710,8 @@ def _localize(args):
                 try:
                     with open(zpath, "r") as f:
                         z_calibration = yaml.load(f)
-                except:
+                except Exception as e:
+                    print(e)
                     print('Error loading calibration file.')
                     raise
 
@@ -794,7 +783,9 @@ def _localize(args):
             if args.fit_method == "lq-3d" or args.fit_method == "lq-gpu-3d":
                 print("------------------------------------------")
                 print("Fitting 3D...", end='')
-                fs = zfit.fit_z_parallel(locs, info, z_calibration, magnification_factor, filter=0, asynch=True)
+                fs = zfit.fit_z_parallel(locs, info, z_calibration,
+                                         magnification_factor,
+                                         filter=0, asynch=True)
                 locs = zfit.locs_from_futures(fs, filter=0)
                 localize_info["Z Calibration Path"] = zpath
                 localize_info["Z Calibration"] = z_calibration
