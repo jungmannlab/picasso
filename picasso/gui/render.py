@@ -3133,11 +3133,12 @@ class View(QtGui.QLabel):
             else:
                 event.ignore()
         elif self._mode == "Pick":
-            if self._pick_shape == "Rectangle":
-                self._rectangle_pick_ongoing = True
-                self.rectangle_pick_start_x = event.x()
-                self.rectangle_pick_start_y = event.y()
-                self.rectangle_pick_start = self.map_to_movie(event.pos())
+            if event.button() == QtCore.Qt.LeftButton:
+                if self._pick_shape == "Rectangle":
+                    self._rectangle_pick_ongoing = True
+                    self.rectangle_pick_start_x = event.x()
+                    self.rectangle_pick_start_y = event.y()
+                    self.rectangle_pick_start = self.map_to_movie(event.pos())
 
     def mouseReleaseEvent(self, event):
         if self._mode == "Zoom":
@@ -3184,7 +3185,8 @@ class View(QtGui.QLabel):
                     self.add_pick((self.rectangle_pick_start, rectangle_pick_end))
                     event.accept()
                 elif event.button() == QtCore.Qt.RightButton:
-                    # remove the pick on which was clicked
+                    x, y = self.map_to_movie(event.pos())
+                    self.remove_picks((x, y))
                     event.accept()
                 else:
                     event.ignore()
@@ -4317,17 +4319,17 @@ class View(QtGui.QLabel):
 
     def picked_locs(self, channel, add_group=True):
         """ Returns picked localizations in the specified channel """
-        # @TODO prio1: make it work also for rectangle picks
+
         if len(self._picks):
+            picked_locs = []
+            progress = lib.ProgressDialog(
+                "Creating localization list", 0, len(self._picks), self
+            )
+            progress.set_value(0)
             if self._pick_shape == 'Circle':
                 d = self.window.tools_settings_dialog.pick_diameter.value()
                 r = d / 2
                 index_blocks = self.get_index_blocks(channel)
-                picked_locs = []
-                progress = lib.ProgressDialog(
-                    "Creating localization list", 0, len(self._picks), self
-                )
-                progress.set_value(0)
                 for i, pick in enumerate(self._picks):
                     x, y = pick
                     block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
@@ -4341,11 +4343,6 @@ class View(QtGui.QLabel):
             elif self._pick_shape == 'Rectangle':
                 w = self.window.tools_settings_dialog.pick_width.value()
                 channel_locs = self.locs[channel]
-                picked_locs = []
-                progress = lib.ProgressDialog(
-                    "Creating localization list", 0, len(self._picks), self
-                )
-                progress.set_value(0)
                 for i, pick in enumerate(self._picks):
                     (xs, ys), (xe, ye) = pick
                     X, Y = self.get_pick_rectangle_corners(xs, ys, xe, ye, w)
@@ -4370,17 +4367,25 @@ class View(QtGui.QLabel):
             return picked_locs
 
     def remove_picks(self, position):
-        # @TODO prio2: make it work also for rectangular picks, for now:
-        raise NotImplementedError("Removing picks doesn't work yet for rectangle picks")
         x, y = position
-        pick_diameter_2 = (
-            self.window.tools_settings_dialog.pick_diameter.value() ** 2
-        )
         new_picks = []
-        for x_, y_ in self._picks:
-            d2 = (x - x_) ** 2 + (y - y_) ** 2
-            if d2 > pick_diameter_2:
-                new_picks.append((x_, y_))
+        if self._pick_shape == 'Circle':
+            pick_diameter_2 = (
+                self.window.tools_settings_dialog.pick_diameter.value() ** 2
+            )
+            for x_, y_ in self._picks:
+                d2 = (x - x_) ** 2 + (y - y_) ** 2
+                if d2 > pick_diameter_2:
+                    new_picks.append((x_, y_))
+        elif self._pick_shape == 'Rectangle':
+            width = self.window.tools_settings_dialog.pick_width.value()
+            x = np.array([x])
+            y = np.array([y])
+            for pick in self._picks:
+                (start_x, start_y), (end_x, end_y) = pick
+                X, Y = self.get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width)
+                if not lib.check_if_in_rectangle(x, y, np.array(X), np.array(Y))[0]:
+                    new_picks.append(pick)
         self._picks = []
         self.add_picks(new_picks)
 
