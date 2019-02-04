@@ -4357,7 +4357,7 @@ class View(QtGui.QLabel):
                     group_locs = group_locs[group_locs.x < x_max]
                     group_locs = group_locs[group_locs.y > y_min]
                     group_locs = group_locs[group_locs.y < y_max]
-                    # @TODO: filter for locks in reactangle
+                    group_locs = lib.locs_in_rectangle(group_locs, X, Y)
                     if add_group:
                         group = i * np.ones(len(group_locs), dtype=np.int32)
                         group_locs = lib.append_to_rec(group_locs, group, "group")
