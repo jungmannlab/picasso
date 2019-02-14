@@ -5,8 +5,8 @@
 
     Picasso command line interface
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss
+    :copyright: Copyright (c) 2016-2019 Jungmann Lab, MPI of Biochemistry
 """
 import os.path
 
@@ -62,7 +62,6 @@ def _csv2hdf(path, pixelsize):
         from .io import save_locs
         import os.path
         import numpy as _np
-        from numpy import savetxt
 
         for path in _tqdm(paths):
             print("Converting {}".format(path))
@@ -156,10 +155,7 @@ def _hdf2csv(path):
     else:
         paths = glob(path)
     if paths:
-        from .io import load_filter
         import os.path
-        import numpy as _np
-        from numpy import savetxt
 
         for path in _tqdm(paths):
             base, ext = os.path.splitext(path)
@@ -285,16 +281,12 @@ def _cluster_combine_dist(files):
 
 def _clusterfilter(files, clusterfile, parameter, minval, maxval):
     from glob import glob
-    from itertools import chain
-    from .io import load_locs, save_locs
-    from .postprocess import align
-    from os.path import splitext
     from tqdm import tqdm
     import numpy as np
 
     paths = glob(files)
     if paths:
-        from . import io, postprocess
+        from . import io
 
         for path in paths:
             try:
@@ -477,9 +469,6 @@ def _nneighbor(files):
 
     paths = glob.glob(files)
     if paths:
-        from . import io, postprocess
-        from h5py import File
-
         for path in paths:
             print("Loading {} ...".format(path))
             with _h5py.File(path, "r") as locs_file:
@@ -614,10 +603,11 @@ def _localize(args):
     )
     from os.path import splitext, isdir
     from time import sleep
-    from . import gausslq, gaussmle, avgroi, lib
+    from . import gausslq, avgroi
     import os.path as _ospath
     import re as _re
     import os as _os
+    import yaml as yaml
 
     print("    ____  _____________   __________ ____ ")
     print("   / __ \\/  _/ ____/   | / ___/ ___// __ \\")
@@ -665,7 +655,6 @@ def _localize(args):
             entries = [_.path for _ in _os.scandir(directory) if _.is_file()]
             matches = [_re.match(pattern, _) for _ in entries]
             matches = [_ for _ in matches if _ is not None]
-            paths_indices = [(int(_.group(1)), _.group(0)) for _ in matches]
             datafiles = [_.group(0) for _ in matches]
             if datafiles != []:
                 for element in datafiles:
@@ -710,6 +699,22 @@ def _localize(args):
             convergence = 0
             max_iterations = 0
 
+        if args.fit_method == "lq-3d" or args.fit_method == "lq-gpu-3d":
+            from . import zfit
+            print("------------------------------------------")
+            print('Fitting 3D')
+            magnification_factor = float(input("Enter Magnification factor: "))
+            zpath = input("Path to *.yaml calibration file: ")
+
+            if zpath:
+                try:
+                    with open(zpath, "r") as f:
+                        z_calibration = yaml.load(f)
+                except Exception as e:
+                    print(e)
+                    print('Error loading calibration file.')
+                    raise
+
         for path in paths:
             print("------------------------------------------")
             print("------------------------------------------")
@@ -731,11 +736,11 @@ def _localize(args):
             )
             ids = identifications_from_futures(futures)
 
-            if args.fit_method == "lq":
+            if args.fit_method == "lq" or args.fit_method == "lq-3d":
                 spots = get_spots(movie, ids, box, camera_info)
                 theta = gausslq.fit_spots_parallel(spots, asynch=False)
                 locs = gausslq.locs_from_fits(ids, theta, box, args.gain)
-            elif args.fit_method == "lq-gpu":
+            elif args.fit_method == "lq-gpu" or args.fit_method == "lq-gpu-3d":
                 spots = get_spots(movie, ids, box, camera_info)
                 theta = gausslq.fit_spots_gpufit(spots)
                 em = camera_info["gain"] > 1
@@ -774,7 +779,21 @@ def _localize(args):
                 "Convergence Criterion": convergence,
                 "Max. Iterations": max_iterations,
             }
+
+            if args.fit_method == "lq-3d" or args.fit_method == "lq-gpu-3d":
+                print("------------------------------------------")
+                print("Fitting 3D...", end='')
+                fs = zfit.fit_z_parallel(locs, info, z_calibration,
+                                         magnification_factor,
+                                         filter=0, asynch=True)
+                locs = zfit.locs_from_futures(fs, filter=0)
+                localize_info["Z Calibration Path"] = zpath
+                localize_info["Z Calibration"] = z_calibration
+                print("complete.")
+                print("------------------------------------------")
+
             info.append(localize_info)
+
             base, ext = splitext(path)
             out_path = base + "_locs.hdf5"
             save_locs(out_path, locs, info)
@@ -1126,7 +1145,7 @@ def main():
     localize_parser.add_argument(
         "-a",
         "--fit-method",
-        choices=["mle", "lq", "lq-gpu", "avg"],
+        choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"],
         default="mle",
     )
     localize_parser.add_argument(
@@ -1143,13 +1162,13 @@ def main():
         "-bl", "--baseline", type=int, default=0, help="camera baseline"
     )
     localize_parser.add_argument(
-        "-s", "--sensitivity", type=int, default=1, help="camera sensitivity"
+        "-s", "--sensitivity", type=float, default=1, help="camera sensitivity"
     )
     localize_parser.add_argument(
         "-ga", "--gain", type=int, default=1, help="camera gain"
     )
     localize_parser.add_argument(
-        "-qe", "--qe", type=int, default=1, help="camera quantum efficiency"
+        "-qe", "--qe", type=float, default=1, help="camera quantum efficiency"
     )
 
     # nneighbors
