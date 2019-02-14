@@ -3018,7 +3018,15 @@ class View(QtGui.QLabel):
         """ Loads picks from yaml file. """
         with open(path, "r") as f:
             regions = yaml.load(f)
-        loaded_shape = regions["Shape"]
+
+        # Backwards compatibility for old picked region files
+        if "Shape" in regions:
+            loaded_shape = regions["Shape"]
+        elif "Centers" in regions and "Diameter" in regions:
+            loaded_shape = "Circle"
+        else:
+            raise ValueError("Unrecognized picks file")
+
         shape_index = self.window.tools_settings_dialog.pick_shape.findText(loaded_shape)
         self.window.tools_settings_dialog.pick_shape.setCurrentIndex(shape_index)
         if loaded_shape == "Circle":
