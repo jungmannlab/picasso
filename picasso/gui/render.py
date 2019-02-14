@@ -346,8 +346,9 @@ class DatasetDialog(QtGui.QDialog):
         p.clicked.connect(self.close_file)
 
     def close_file(self):
-        print(self.sender.objectName())
         # TODO call close routine
+        raise NotImplementedError("Closing not implemented yet.")
+        # print(self.sender.objectName())
 
     def update_viewport(self):
         if self.window.view.viewport:
