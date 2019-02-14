@@ -188,7 +188,7 @@ Selects the zoom tool. The mouse can now be used for zoom and pan.
 
 Pick (CTRL + P)
 ^^^^^^^^^^^^^^^
-Selects the pick tool. The mouse can now be used for picking localizations. The radius of the pick can be set in the `Tools settings` (CTRL + T) dialog.
+Selects the pick tool. The mouse can now be used for picking localizations. User can set the pick shape in the `Tools settings` (CTRL + T) dialog. The default shape is Circle with the diameter to be set. For rectangles, the user draws the length, while the width is controlled via a parameter for all drawn rectangles, similar to the diameter for circular picks.
 
 Measure (CTRL + M)
 ^^^^^^^^^^^^^^^^^^
@@ -196,7 +196,7 @@ Selects the measure tool. The mouse can now be used for measuring distances. Lef
 
 Tools settings (CTRL + T)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-Define the settings of the tools, i.e., the radius of the pick, the range of pick similar and an option to annotate each pick.
+Define the settings of the tools, i.e., the radius of the pick and an option to annotate each pick. For the circular picks the range of pick similar can be set.
 
 Show trace (CTRL + R)
 ^^^^^^^^^^^^^^^^^^^^^
