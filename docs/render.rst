@@ -87,11 +87,12 @@ Open an .hdf5 file to open in render.
 
 Save localizations [Ctrl+S]
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Save the localizations that are currently loaded in render to an .hdf5 file. 
+Save the localizations that are currently loaded in render to an .hdf5 file.
 
 Save picked localizations [Ctrl+Shift+S]
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Save the localizations that are within a picked region (yellow circle). Each pick will get a different group number. To display the group number in Render, select ``Annotate picks`` in Tools/Tools ettings.
+Save the localizations that are within a picked region (yellow circle or rectangle). Each pick will get a different group number. To display the group number in Render, select ``Annotate picks`` in Tools/Tools Settings.
+In case of rectangular picks, the saved localizations file will contain new columns `x_pick_rot` and `y_pick_rot`, which localization coordinates into the coordinate system of the pick rectangle (coordinate (0,0) is where the rectangle was started to be drawn and `x_pick_rot` is in direction of the drawn line.)
 
 Save pick properties
 ^^^^^^^^^^^^^^^^^^^^
@@ -120,7 +121,7 @@ Note that the pixel size value that is set in Display Settings will be
 used for exporting.
 
 Thefollowing columns will be exported:
-3D: id, frame, x [nm], y [nm], z [nm], sigma1 [nm], sigma2 [nm], intensity[photon], offset[photon], uncertainty_xy [nm] 
+3D: id, frame, x [nm], y [nm], z [nm], sigma1 [nm], sigma2 [nm], intensity[photon], offset[photon], uncertainty_xy [nm]
 2D: id, frame, x [nm], y [nm], sigma [nm], intensity [photon], offset [photon], uncertainty_xy [nm]
 
 The uncertainty_xy is calculated as the mean of lpx and lpy. For 2D, sigma is calculated as the mean of sx and sy.
@@ -129,7 +130,7 @@ For the case of linked localizations, a column named ``detections`` will be adde
 
 Export as .txt for FRC
 ++++++++++++++++++++++
-Export as .txt file to be used for the fourier ring correlation plugin in ImageJ. 
+Export as .txt file to be used for the fourier ring correlation plugin in ImageJ.
 
 Export as .txt for IMARIS
 +++++++++++++++++++++++++
@@ -184,7 +185,7 @@ Tools
 
 Zoom (CTRL + Z)
 ^^^^^^^^^^^^^^^
-Selects the zoom tool. The mouse can now be used for zoom and pan. 
+Selects the zoom tool. The mouse can now be used for zoom and pan.
 
 Pick (CTRL + P)
 ^^^^^^^^^^^^^^^
