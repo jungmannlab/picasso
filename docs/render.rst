@@ -92,7 +92,7 @@ Save the localizations that are currently loaded in render to an .hdf5 file.
 Save picked localizations [Ctrl+Shift+S]
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Save the localizations that are within a picked region (yellow circle or rectangle). Each pick will get a different group number. To display the group number in Render, select ``Annotate picks`` in Tools/Tools Settings.
-In case of rectangular picks, the saved localizations file will contain new columns `x_pick_rot` and `y_pick_rot`, which are localization coordinates into the coordinate system of the pick rectangle (coordinate (0,0) is where the rectangle was started to be drawn and `x_pick_rot` is in direction of the drawn line.)
+In case of rectangular picks, the saved localizations file will contain new columns `x_pick_rot` and `y_pick_rot`, which are localization coordinates into the coordinate system of the pick rectangle (coordinate (0,0) is where the rectangle was started to be drawn and `y_pick_rot` is in direction of the drawn line.)
 These columns can be used to easily plot density profiles of localizations along the rectangle dimensions (e.g. with "Filter").
 
 Save pick properties
