@@ -4408,7 +4408,7 @@ class View(QtGui.QLabel):
                     group_locs = group_locs[group_locs.y < y_max]
                     group_locs = lib.locs_in_rectangle(group_locs, X, Y)
                     # store rotated coordinates in x_rot and y_rot
-                    angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
+                    angle = -np.arctan2((ye - ys), (xe - xs))
                     x_shifted = group_locs.x - xs
                     y_shifted = group_locs.y - ys
                     x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(angle)
