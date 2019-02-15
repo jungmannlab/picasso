@@ -150,7 +150,7 @@ Display settings (CTRL + D)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Opens the Display Settings Dialog.
 
-Datasets
+Files
 ^^^^^^^^
 Open a dialog to select the color and toggle visibility for each loaded dataset.
 
@@ -188,11 +188,40 @@ Selects the zoom tool. The mouse can now be used for zoom and pan.
 
 Pick (CTRL + P)
 ^^^^^^^^^^^^^^^
-Selects the pick tool. The mouse can now be used for picking localizations. The radius of the pick can be set in the `Tools settings` (CTRL + T) dialog.
+Selects the pick tool. The mouse can now be used for picking localizations. User can set the pick shape in the `Tools settings` (CTRL + T) dialog. The default shape is Circle with the diameter to be set. For rectangles, the user draws the length, while the width is controlled via a parameter for all drawn rectangles, similar to the diameter for circular picks.
 
 Measure (CTRL + M)
 ^^^^^^^^^^^^^^^^^^
 Selects the measure tool. The mouse can now be used for measuring distances. Left click adds a crosshair for measuring, right click deletes the last crosshair.
+
+Tools settings (CTRL + T)
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Define the settings of the tools, i.e., the radius of the pick and an option to annotate each pick. For the circular picks the range of pick similar can be set.
+
+Show trace (CTRL + R)
+^^^^^^^^^^^^^^^^^^^^^
+Shows the time trace of the currently selected pick(s).
+
+Plot pick (XYZ scatter) (CTRL + 3)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Displays a 3D scatterplot of the localizations of the currently selected pick(s).
+
+Select picks (trace)
+^^^^^^^^^^^^^^^^^^^^
+Opens a dialog to that goes through all picks, displays its trace and asks to keep or discard it.
+
+Select picks (XY scatter)
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Opens a dialog to that goes through all picks, displays a xy-scatterplot and asks to keep or discard it.
+
+Select picks (XYZ scatter)
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+Opens a dialog to that goes through all picks, displays a xyz-scatterplot and asks to keep or discard it.
+
+Select picks (XYZ scatter, 4 panels)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Opens a dialog to that goes through all picks, displays four panels with an xyz-scatterplot and a top, bottom and side projection and asks to keep or discard it.
+
 
 
 Postprocess

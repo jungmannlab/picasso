@@ -159,9 +159,9 @@ def locs_at(x, y, locs, r):
 def check_if_in_rectangle(x, y, X, Y):
     """
     Checks if locs with coordinates (x, y) are in rectangle with corners (X, Y)
-    by counting the number of rectangle sides which are hit by a ray originating
-    from each loc to the right. If the number of hit rectangle sides is odd,
-    then the loc is in the rectangle
+    by counting the number of rectangle sides which are hit by a ray
+    originating from each loc to the right. If the number of hit rectangle
+    sides is odd, then the loc is in the rectangle
     """
     n_locs = len(x)
     ray_hits_rectangle_side = _np.zeros((n_locs, 4))
@@ -169,7 +169,7 @@ def check_if_in_rectangle(x, y, X, Y):
         # get two y coordinates of corner points forming one rectangle side
         y_corner_1 = Y[i]
         # take the first if we're at the last side:
-        y_corner_2 = Y[0] if i == 3 else  Y[i + 1]
+        y_corner_2 = Y[0] if i == 3 else Y[i + 1]
         y_corners_min = min(y_corner_1, y_corner_2)
         y_corners_max = max(y_corner_1, y_corner_2)
         for j in range(n_locs):
@@ -178,7 +178,7 @@ def check_if_in_rectangle(x, y, X, Y):
             if (y_corners_min <= y_loc <= y_corners_max):
                 x_corner_1 = X[i]
                 # take the first if we're at the last side:
-                x_corner_2 = X[0] if i == 3 else  X[i + 1]
+                x_corner_2 = X[0] if i == 3 else X[i + 1]
                 # calculate intersection point of ray and side:
                 m_inv = (x_corner_2 - x_corner_1) / (y_corner_2 - y_corner_1)
                 x_intersect = m_inv * (y_loc - y_corner_1) + x_corner_1
@@ -192,7 +192,10 @@ def check_if_in_rectangle(x, y, X, Y):
 
 
 def locs_in_rectangle(locs, X, Y):
-    is_in_rectangle = check_if_in_rectangle(locs.x, locs.y, _np.array(X), _np.array(Y))
+    is_in_rectangle = check_if_in_rectangle(locs.x,
+                                            locs.y,
+                                            _np.array(X),
+                                            _np.array(Y))
     return locs[is_in_rectangle]
 
 

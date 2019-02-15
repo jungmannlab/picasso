@@ -89,11 +89,13 @@ def check_pick(f):
     def wrapper(*args):
         if len(args[0]._picks) == 0:
             QtGui.QMessageBox.information(
-                args[0], "Pick Error",
-                ("No localizations picked."
-                 " Please pick first."))
+                args[0],
+                "Pick Error",
+                ("No localizations picked." " Please pick first."),
+            )
         else:
             return f(args[0])
+
     return wrapper
 
 
@@ -102,11 +104,16 @@ def check_picks(f):
     def wrapper(*args):
         if len(args[0]._picks) < 2:
             QtGui.QMessageBox.information(
-                args[0], "Pick Error",
-                ("No localizations picked."
-                 " Please pick at least twice first."))
+                args[0],
+                "Pick Error",
+                (
+                    "No localizations picked."
+                    " Please pick at least twice first."
+                ),
+            )
         else:
             return f(args[0])
+
     return wrapper
 
 
@@ -270,8 +277,10 @@ class DatasetDialog(QtGui.QDialog):
 
     def add_entry(self, path):
         c = QtGui.QCheckBox(path)
-        p = QtGui.QPushButton('x')
+        p = QtGui.QPushButton("x")
         currentline = len(self.layout)
+        p.setObjectName(str(currentline))
+
         colordrop = QtGui.QComboBox(self)
         colordrop.setEditable(True)
         colordrop.lineEdit().setMaxLength(7)
@@ -337,8 +346,9 @@ class DatasetDialog(QtGui.QDialog):
         p.clicked.connect(self.close_file)
 
     def close_file(self):
-        print(self.sender)
         # TODO call close routine
+        raise NotImplementedError("Closing not implemented yet.")
+        # print(self.sender.objectName())
 
     def update_viewport(self):
         if self.window.view.viewport:
@@ -1652,7 +1662,6 @@ class MaskSettingsDialog(QtGui.QDialog):
 
 
 class PickToolCircleSettings(QtGui.QWidget):
-
     def __init__(self, window, tools_settings_dialog):
         super().__init__()
         self.grid = QtGui.QGridLayout(self)
@@ -1664,7 +1673,9 @@ class PickToolCircleSettings(QtGui.QWidget):
         self.pick_diameter.setSingleStep(0.1)
         self.pick_diameter.setDecimals(3)
         self.pick_diameter.setKeyboardTracking(False)
-        self.pick_diameter.valueChanged.connect(tools_settings_dialog.on_pick_dimension_changed)
+        self.pick_diameter.valueChanged.connect(
+            tools_settings_dialog.on_pick_dimension_changed
+        )
         self.grid.addWidget(self.pick_diameter, 0, 1)
         self.grid.addWidget(QtGui.QLabel("Pick similar +/- range (std)"), 1, 0)
         self.pick_similar_range = QtGui.QDoubleSpinBox()
@@ -1676,7 +1687,6 @@ class PickToolCircleSettings(QtGui.QWidget):
 
 
 class PickToolRectangleSettings(QtGui.QWidget):
-
     def __init__(self, window, tools_settings_dialog):
         super().__init__()
         self.window = window
@@ -1688,7 +1698,9 @@ class PickToolRectangleSettings(QtGui.QWidget):
         self.pick_width.setSingleStep(0.1)
         self.pick_width.setDecimals(3)
         self.pick_width.setKeyboardTracking(False)
-        self.pick_width.valueChanged.connect(tools_settings_dialog.on_pick_dimension_changed)
+        self.pick_width.valueChanged.connect(
+            tools_settings_dialog.on_pick_dimension_changed
+        )
         self.grid.addWidget(self.pick_width, 0, 1)
         self.grid.setRowStretch(1, 1)
 
@@ -1716,6 +1728,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
         # Circle
         self.pick_circle_settings = PickToolCircleSettings(window, self)
         pick_stack.addWidget(self.pick_circle_settings)
+        self.pick_similar_range = self.pick_circle_settings.pick_similar_range
         self.pick_diameter = self.pick_circle_settings.pick_diameter
 
         # Rectangle
@@ -1724,9 +1737,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.pick_width = self.pick_rectangle_settings.pick_width
 
         self.pick_annotation = QtGui.QCheckBox("Annotate picks")
-        self.pick_annotation.stateChanged.connect(
-            self.update_scene_with_cache
-        )
+        self.pick_annotation.stateChanged.connect(self.update_scene_with_cache)
         pick_grid.addWidget(self.pick_annotation, 3, 0)
 
     def on_pick_dimension_changed(self, *args):
@@ -2493,8 +2504,7 @@ class View(QtGui.QLabel):
         picked_locs = self.picked_locs(channel, add_group=False)
         out_locs = []
         r_max = 2 * max(
-            self.infos[channel][0]["Height"],
-            self.infos[channel][0]["Width"],
+            self.infos[channel][0]["Height"], self.infos[channel][0]["Width"]
         )
         max_dark = self.infos[channel][0]["Frames"]
         progress = lib.ProgressDialog(
@@ -2619,7 +2629,9 @@ class View(QtGui.QLabel):
         else:
             event.ignore()
 
-    def get_pick_rectangle_corners(self, start_x, start_y, end_x, end_y, width):
+    def get_pick_rectangle_corners(
+        self, start_x, start_y, end_x, end_y, width
+    ):
         drawn_x = end_x - start_x
         if drawn_x == 0:
             alpha = np.pi / 2
@@ -2637,9 +2649,12 @@ class View(QtGui.QLabel):
         y3 = end_y - dy
         return [x1, x2, x3, x4], [y1, y2, y3, y4]
 
-    def get_pick_rectangle_polygon(self, start_x, start_y, end_x, end_y, width,
-        return_most_right=False):
-        X, Y = self.get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width)
+    def get_pick_rectangle_polygon(
+        self, start_x, start_y, end_x, end_y, width, return_most_right=False
+    ):
+        X, Y = self.get_pick_rectangle_corners(
+            start_x, start_y, end_x, end_y, width
+        )
         p = QtGui.QPolygonF()
         for x, y in zip(X, Y):
             p.append(QtCore.QPointF(x, y))
@@ -2661,7 +2676,9 @@ class View(QtGui.QLabel):
             for i, pick in enumerate(self._picks):
                 cx, cy = self.map_to_view(*pick)
                 painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
-                if self.window.tools_settings_dialog.pick_annotation.isChecked():
+                if (
+                    self.window.tools_settings_dialog.pick_annotation.isChecked()
+                ):
                     painter.drawText(cx + d / 2, cy + d / 2, str(i))
             painter.end()
         elif self._pick_shape == "Rectangle":
@@ -2674,9 +2691,12 @@ class View(QtGui.QLabel):
                 end_x, end_y = self.map_to_view(*pick[1])
                 painter.drawLine(start_x, start_y, end_x, end_y)
                 polygon, most_right = self.get_pick_rectangle_polygon(
-                    start_x, start_y, end_x, end_y, w, return_most_right=True)
+                    start_x, start_y, end_x, end_y, w, return_most_right=True
+                )
                 painter.drawPolygon(polygon)
-                if self.window.tools_settings_dialog.pick_annotation.isChecked():
+                if (
+                    self.window.tools_settings_dialog.pick_annotation.isChecked()
+                ):
                     painter.drawText(*most_right, str(i))
             painter.end()
         return image
@@ -2686,10 +2706,12 @@ class View(QtGui.QLabel):
         image = image.copy()
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor("green"))
-        painter.drawLine(self.rectangle_pick_start_x,
-                         self.rectangle_pick_start_y,
-                         self.rectangle_pick_current_x,
-                         self.rectangle_pick_current_y)
+        painter.drawLine(
+            self.rectangle_pick_start_x,
+            self.rectangle_pick_start_y,
+            self.rectangle_pick_current_x,
+            self.rectangle_pick_current_y,
+        )
         w = self.window.tools_settings_dialog.pick_width.value()
         w *= self.width() / self.viewport_width()
         polygon = self.get_pick_rectangle_polygon(
@@ -2697,7 +2719,8 @@ class View(QtGui.QLabel):
             self.rectangle_pick_start_y,
             self.rectangle_pick_current_x,
             self.rectangle_pick_current_y,
-            w)
+            w,
+        )
         painter.drawPolygon(polygon)
         painter.end()
         return image
@@ -2907,7 +2930,6 @@ class View(QtGui.QLabel):
             else:
                 return None
 
-
     def save_channel(self, title="Choose a channel"):
         n_channels = len(self.locs_paths)
         if n_channels == 0:
@@ -3016,15 +3038,31 @@ class View(QtGui.QLabel):
         """ Loads picks from yaml file. """
         with open(path, "r") as f:
             regions = yaml.load(f)
-        loaded_shape = regions["Shape"]
-        shape_index = self.window.tools_settings_dialog.pick_shape.findText(loaded_shape)
-        self.window.tools_settings_dialog.pick_shape.setCurrentIndex(shape_index)
+
+        # Backwards compatibility for old picked region files
+        if "Shape" in regions:
+            loaded_shape = regions["Shape"]
+        elif "Centers" in regions and "Diameter" in regions:
+            loaded_shape = "Circle"
+        else:
+            raise ValueError("Unrecognized picks file")
+
+        shape_index = self.window.tools_settings_dialog.pick_shape.findText(
+            loaded_shape
+        )
+        self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
+            shape_index
+        )
         if loaded_shape == "Circle":
             self._picks = regions["Centers"]
-            self.window.tools_settings_dialog.pick_diameter.setValue(regions["Diameter"])
+            self.window.tools_settings_dialog.pick_diameter.setValue(
+                regions["Diameter"]
+            )
         elif loaded_shape == "Rectangle":
             self._picks = regions["Center-Axis-Points"]
-            self.window.tools_settings_dialog.pick_width.setValue(regions["Width"])
+            self.window.tools_settings_dialog.pick_width.setValue(
+                regions["Width"]
+            )
         else:
             raise ValueError("Unrecognized pick shape")
         self.update_pick_info_short()
@@ -3032,7 +3070,9 @@ class View(QtGui.QLabel):
 
     def substract_picks(self, path):
         if self._pick_shape == "Rectangle":
-            raise NotImplementedError("Subtracting picks not implemented for rectangle picks")
+            raise NotImplementedError(
+                "Subtracting picks not implemented for rectangle picks"
+            )
         oldpicks = self._picks.copy()
         with open(path, "r") as f:
             regions = yaml.load(f)
@@ -3182,7 +3222,9 @@ class View(QtGui.QLabel):
                 if event.button() == QtCore.Qt.LeftButton:
                     rectangle_pick_end = self.map_to_movie(event.pos())
                     self._rectangle_pick_ongoing = False
-                    self.add_pick((self.rectangle_pick_start, rectangle_pick_end))
+                    self.add_pick(
+                        (self.rectangle_pick_start, rectangle_pick_end)
+                    )
                     event.accept()
                 elif event.button() == QtCore.Qt.RightButton:
                     x, y = self.map_to_movie(event.pos())
@@ -3191,7 +3233,9 @@ class View(QtGui.QLabel):
                 else:
                     event.ignore()
             else:
-                raise ValueError("`self._pick_shape` must be one of ('Circle', 'Rectangle').")
+                raise ValueError(
+                    "`self._pick_shape` must be one of ('Circle', 'Rectangle')."
+                )
         elif self._mode == "Measure":
             if event.button() == QtCore.Qt.LeftButton:
                 x, y = self.map_to_movie(event.pos())
@@ -3410,7 +3454,9 @@ class View(QtGui.QLabel):
 
         if self._picks:
             if self._pick_shape == "Rectangle":
-                raise NotImplementedError("Not implemented for rectangle picks")
+                raise NotImplementedError(
+                    "Not implemented for rectangle picks"
+                )
             params = {}
             params["t0"] = time.time()
             i = 0
@@ -4220,7 +4266,9 @@ class View(QtGui.QLabel):
     @check_picks
     def pick_similar(self):
         if self._pick_shape == "Rectangle":
-            raise NotImplementedError("Pick similar not implemented for rectangle picks")
+            raise NotImplementedError(
+                "Pick similar not implemented for rectangle picks"
+            )
         channel = self.get_channel("Pick similar")
         if channel is not None:
             locs = self.locs[channel]
@@ -4326,21 +4374,25 @@ class View(QtGui.QLabel):
                 "Creating localization list", 0, len(self._picks), self
             )
             progress.set_value(0)
-            if self._pick_shape == 'Circle':
+            if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
                 r = d / 2
                 index_blocks = self.get_index_blocks(channel)
                 for i, pick in enumerate(self._picks):
                     x, y = pick
-                    block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
+                    block_locs = postprocess.get_block_locs_at(
+                        x, y, index_blocks
+                    )
                     group_locs = lib.locs_at(x, y, block_locs, r)
                     if add_group:
                         group = i * np.ones(len(group_locs), dtype=np.int32)
-                        group_locs = lib.append_to_rec(group_locs, group, "group")
+                        group_locs = lib.append_to_rec(
+                            group_locs, group, "group"
+                        )
                     group_locs.sort(kind="mergesort", order="frame")
                     picked_locs.append(group_locs)
                     progress.set_value(i + 1)
-            elif self._pick_shape == 'Rectangle':
+            elif self._pick_shape == "Rectangle":
                 w = self.window.tools_settings_dialog.pick_width.value()
                 channel_locs = self.locs[channel]
                 for i, pick in enumerate(self._picks):
@@ -4365,7 +4417,9 @@ class View(QtGui.QLabel):
                     group_locs = lib.append_to_rec(group_locs, y_pick_rot, "y_pick_rot")
                     if add_group:
                         group = i * np.ones(len(group_locs), dtype=np.int32)
-                        group_locs = lib.append_to_rec(group_locs, group, "group")
+                        group_locs = lib.append_to_rec(
+                            group_locs, group, "group"
+                        )
                     group_locs.sort(kind="mergesort", order="frame")
                     picked_locs.append(group_locs)
                     progress.set_value(i + 1)
@@ -4377,7 +4431,7 @@ class View(QtGui.QLabel):
     def remove_picks(self, position):
         x, y = position
         new_picks = []
-        if self._pick_shape == 'Circle':
+        if self._pick_shape == "Circle":
             pick_diameter_2 = (
                 self.window.tools_settings_dialog.pick_diameter.value() ** 2
             )
@@ -4385,14 +4439,18 @@ class View(QtGui.QLabel):
                 d2 = (x - x_) ** 2 + (y - y_) ** 2
                 if d2 > pick_diameter_2:
                     new_picks.append((x_, y_))
-        elif self._pick_shape == 'Rectangle':
+        elif self._pick_shape == "Rectangle":
             width = self.window.tools_settings_dialog.pick_width.value()
             x = np.array([x])
             y = np.array([y])
             for pick in self._picks:
                 (start_x, start_y), (end_x, end_y) = pick
-                X, Y = self.get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width)
-                if not lib.check_if_in_rectangle(x, y, np.array(X), np.array(Y))[0]:
+                X, Y = self.get_pick_rectangle_corners(
+                    start_x, start_y, end_x, end_y, width
+                )
+                if not lib.check_if_in_rectangle(
+                    x, y, np.array(X), np.array(Y)
+                )[0]:
                     new_picks.append(pick)
         self._picks = []
         self.add_picks(new_picks)
@@ -4552,7 +4610,7 @@ class View(QtGui.QLabel):
                     .lstrip("#")
                 )
                 rgbval = tuple(
-                    int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
+                    int(colorstring[i : i + 2], 16) / 255 for i in (0, 2, 4)
                 )
                 colors[i] = rgbval
 
@@ -4627,8 +4685,10 @@ class View(QtGui.QLabel):
         locs = self.picked_locs(channel)
         locs = stack_arrays(locs, asrecarray=True, usemask=False)
         if locs is not None:
-            pick_info = {"Generated by": "Picasso Render : Pick",
-                         "Pick Shape": self._pick_shape}
+            pick_info = {
+                "Generated by": "Picasso Render : Pick",
+                "Pick Shape": self._pick_shape,
+            }
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
                 pick_info["Pick Diameter"] = d
@@ -4710,7 +4770,12 @@ class View(QtGui.QLabel):
             picks = {"Diameter": d, "Centers": [list(_) for _ in self._picks]}
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
-            picks = {"Width": w, "Center-Axis-Points": [[list(s), list(e)] for s, e in self._picks]}
+            picks = {
+                "Width": w,
+                "Center-Axis-Points": [
+                    [list(s), list(e)] for s, e in self._picks
+                ],
+            }
         else:
             raise ValueError("Unrecognized pick shape")
         picks["Shape"] = self._pick_shape
@@ -4934,16 +4999,27 @@ class View(QtGui.QLabel):
         self.update_cursor()
 
     def on_pick_shape_changed(self, pick_shape_index):
-        current_text = self.window.tools_settings_dialog.pick_shape.currentText()
+        current_text = (
+            self.window.tools_settings_dialog.pick_shape.currentText()
+        )
         if current_text == self._pick_shape:
             return
         if len(self._picks):
             qm = QtGui.QMessageBox()
             qm.setWindowTitle("Changing pick shape")
-            ret = qm.question(self, '', "This action will delete any existing picks. Continue?", qm.Yes | qm.No)
+            ret = qm.question(
+                self,
+                "",
+                "This action will delete any existing picks. Continue?",
+                qm.Yes | qm.No,
+            )
             if ret == qm.No:
-                shape_index = self.window.tools_settings_dialog.pick_shape.findText(self._pick_shape)
-                self.window.tools_settings_dialog.pick_shape.setCurrentIndex(shape_index)
+                shape_index = self.window.tools_settings_dialog.pick_shape.findText(
+                    self._pick_shape
+                )
+                self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
+                    shape_index
+                )
                 return
         self._pick_shape = current_text
         self._picks = []
@@ -4982,10 +5058,14 @@ class View(QtGui.QLabel):
 
             if drift is None:
                 QtGui.QMessageBox.information(
-                    self, "Driftfile error",
-                    ("No driftfile found."
-                     " Nothing to display."
-                     " Please perform drift correction first."))
+                    self,
+                    "Driftfile error",
+                    (
+                        "No driftfile found."
+                        " Nothing to display."
+                        " Please perform drift correction first."
+                    ),
+                )
             else:
                 if hasattr(self._drift[channel], "z"):
                     fig1 = plt.figure(figsize=(25.5, 6))
@@ -5000,8 +5080,9 @@ class View(QtGui.QLabel):
                     plt.plot(
                         drift.x,
                         drift.y,
-                        color=list(
-                            plt.rcParams["axes.prop_cycle"])[2]["color"]
+                        color=list(plt.rcParams["axes.prop_cycle"])[2][
+                            "color"
+                        ],
                     )
                     plt.axis("equal")
                     plt.xlabel("x")
@@ -5026,8 +5107,9 @@ class View(QtGui.QLabel):
                     plt.plot(
                         drift.x,
                         drift.y,
-                        color=list(
-                            plt.rcParams["axes.prop_cycle"])[2]["color"]
+                        color=list(plt.rcParams["axes.prop_cycle"])[2][
+                            "color"
+                        ],
                     )
                     plt.axis("equal")
                     plt.xlabel("x")
@@ -5264,7 +5346,9 @@ class View(QtGui.QLabel):
 
             if self._picks:
                 if self._pick_shape == "Rectangle":
-                    raise NotImplementedError("Unfolding not implemented for rectangle picks")
+                    raise NotImplementedError(
+                        "Unfolding not implemented for rectangle picks"
+                    )
                 for j in range(len(self._picks)):
                     for i in range(len(groups) - 1):
                         position = self._picks[j][:]
@@ -5314,7 +5398,9 @@ class View(QtGui.QLabel):
 
             if self._picks:
                 if self._pick_shape == "Rectangle":
-                    raise NotImplementedError("Not implemented for rectangle picks")
+                    raise NotImplementedError(
+                        "Not implemented for rectangle picks"
+                    )
                 # Also unfold picks
                 groups = np.unique(self.locs[0].group)
 
@@ -5349,7 +5435,9 @@ class View(QtGui.QLabel):
             self.unsetCursor()
         elif self._mode == "Pick":
             if self._pick_shape == "Circle":
-                diameter = self.window.tools_settings_dialog.pick_diameter.value()
+                diameter = (
+                    self.window.tools_settings_dialog.pick_diameter.value()
+                )
                 diameter = self.width() * diameter / self.viewport_width()
                 if (
                     diameter < 100
@@ -5563,8 +5651,12 @@ class Window(QtGui.QMainWindow):
         self.setCentralWidget(self.view)
         self.display_settings_dlg = DisplaySettingsDialog(self)
         self.tools_settings_dialog = ToolsSettingsDialog(self)
-        self.view._pick_shape = self.tools_settings_dialog.pick_shape.currentText()
-        self.tools_settings_dialog.pick_shape.currentIndexChanged.connect(self.view.on_pick_shape_changed)
+        self.view._pick_shape = (
+            self.tools_settings_dialog.pick_shape.currentText()
+        )
+        self.tools_settings_dialog.pick_shape.currentIndexChanged.connect(
+            self.view.on_pick_shape_changed
+        )
         self.mask_settings_dialog = MaskSettingsDialog(self)
         self.slicer_dialog = SlicerDialog(self)
         self.info_dialog = InfoDialog(self)
@@ -5679,7 +5771,9 @@ class Window(QtGui.QMainWindow):
         show_trace_action = tools_menu.addAction("Show trace")
         show_trace_action.setShortcut("Ctrl+R")
         show_trace_action.triggered.connect(self.view.show_trace)
-        plotpick3dsingle_action = tools_menu.addAction("Plot pick (XYZ scatter)")
+        plotpick3dsingle_action = tools_menu.addAction(
+            "Plot pick (XYZ scatter)"
+        )
         plotpick3dsingle_action.triggered.connect(self.view.plot3d)
         plotpick3dsingle_action.setShortcut("Ctrl+3")
         tools_menu.addSeparator()
@@ -5777,9 +5871,13 @@ class Window(QtGui.QMainWindow):
 
         # Define 3D entries
 
-        self.actions_3d = [plotpick3dsingle_action, plotpick3d_action,
-                           plotpick3d_iso_action, slicer_action,
-                           undrift_from_picked2d_action]
+        self.actions_3d = [
+            plotpick3dsingle_action,
+            plotpick3d_action,
+            plotpick3d_iso_action,
+            slicer_action,
+            undrift_from_picked2d_action,
+        ]
 
         for action in self.actions_3d:
             action.setVisible(False)
@@ -6056,11 +6154,17 @@ class Window(QtGui.QMainWindow):
                 )
 
     def export_multi(self):
-        items = (".txt for FRC (ImageJ)", ".txt for NIS",
-                 ".txt for IMARIS", ".xyz for Chimera", ".3d for ViSP",
-                 ".csv for ThunderSTORM")
-        item, ok = QtGui.QInputDialog.getItem(self, "Select Export",
-                                              "Formats", items, 0, False)
+        items = (
+            ".txt for FRC (ImageJ)",
+            ".txt for NIS",
+            ".txt for IMARIS",
+            ".xyz for Chimera",
+            ".3d for ViSP",
+            ".csv for ThunderSTORM",
+        )
+        item, ok = QtGui.QInputDialog.getItem(
+            self, "Select Export", "Formats", items, 0, False
+        )
         if ok and item:
             if item == ".txt for FRC (ImageJ)":
                 self.export_txt()
@@ -6075,7 +6179,7 @@ class Window(QtGui.QMainWindow):
             elif item == ".csv for ThunderSTORM":
                 self.export_ts()
             else:
-                print('This should never happen')
+                print("This should never happen")
 
     def export_ts(self):
         channel = self.view.get_channel(
@@ -6545,13 +6649,15 @@ class Window(QtGui.QMainWindow):
                     "Input Dialog",
                     "Enter suffix",
                     QtGui.QLineEdit.Normal,
-                    "_apicked"
+                    "_apicked",
                 )
                 if ok:
                     for i in tqdm(range(len(self.view.locs_paths))):
                         channel = i
-                        base, ext = os.path.splitext(self.view.locs_paths[channel])
-                        out_path = base + suffix +".hdf5"
+                        base, ext = os.path.splitext(
+                            self.view.locs_paths[channel]
+                        )
+                        out_path = base + suffix + ".hdf5"
                         self.view.save_pick_properties(out_path, channel)
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
@@ -6572,17 +6678,21 @@ class Window(QtGui.QMainWindow):
                     "Input Dialog",
                     "Enter suffix",
                     QtGui.QLineEdit.Normal,
-                    "_arender"
+                    "_arender",
                 )
                 if ok:
                     for i in tqdm(range(len(self.view.locs_paths))):
                         channel = i
-                        base, ext = os.path.splitext(self.view.locs_paths[channel])
-                        out_path = base + suffix +".hdf5"
+                        base, ext = os.path.splitext(
+                            self.view.locs_paths[channel]
+                        )
+                        out_path = base + suffix + ".hdf5"
                         info = self.view.infos[channel] + [
                             {
                                 "Generated by": "Picasso Render",
-                                "Last driftfile": self.view._driftfiles[channel],
+                                "Last driftfile": self.view._driftfiles[
+                                    channel
+                                ],
                             }
                         ]
                         io.save_locs(out_path, self.view.locs[channel], info)
