@@ -1728,6 +1728,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
         # Circle
         self.pick_circle_settings = PickToolCircleSettings(window, self)
         pick_stack.addWidget(self.pick_circle_settings)
+        self.pick_similar_range = self.pick_circle_settings.pick_similar_range
         self.pick_diameter = self.pick_circle_settings.pick_diameter
 
         # Rectangle
