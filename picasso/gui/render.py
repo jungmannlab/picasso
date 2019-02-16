@@ -2677,9 +2677,7 @@ class View(QtGui.QLabel):
             for i, pick in enumerate(self._picks):
                 cx, cy = self.map_to_view(*pick)
                 painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
-                if (
-                    t_dialog.pick_annotation.isChecked()
-                ):
+                if t_dialog.pick_annotation.isChecked():
                     painter.drawText(cx + d / 2, cy + d / 2, str(i))
             painter.end()
         elif self._pick_shape == "Rectangle":
@@ -2695,9 +2693,7 @@ class View(QtGui.QLabel):
                     start_x, start_y, end_x, end_y, w, return_most_right=True
                 )
                 painter.drawPolygon(polygon)
-                if (
-                    t_dialog.pick_annotation.isChecked()
-                ):
+                if t_dialog.pick_annotation.isChecked():
                     painter.drawText(*most_right, str(i))
             painter.end()
         return image
@@ -3235,7 +3231,7 @@ class View(QtGui.QLabel):
                     event.ignore()
             else:
                 raise ValueError(
-                    "`self._pick_shape` must be one of ('Circle', 'Rectangle')."
+                    "`self._pick_shape` must be of ('Circle', 'Rectangle')."
                 )
         elif self._mode == "Measure":
             if event.button() == QtCore.Qt.LeftButton:
@@ -4412,10 +4408,18 @@ class View(QtGui.QLabel):
                     angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
                     x_shifted = group_locs.x - xs
                     y_shifted = group_locs.y - ys
-                    x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(angle)
-                    y_pick_rot = x_shifted * np.sin(angle) + y_shifted * np.cos(angle)
-                    group_locs = lib.append_to_rec(group_locs, x_pick_rot, "x_pick_rot")
-                    group_locs = lib.append_to_rec(group_locs, y_pick_rot, "y_pick_rot")
+                    x_pick_rot = x_shifted * np.cos(
+                        angle
+                    ) - y_shifted * np.sin(angle)
+                    y_pick_rot = x_shifted * np.sin(
+                        angle
+                    ) + y_shifted * np.cos(angle)
+                    group_locs = lib.append_to_rec(
+                        group_locs, x_pick_rot, "x_pick_rot"
+                    )
+                    group_locs = lib.append_to_rec(
+                        group_locs, y_pick_rot, "y_pick_rot"
+                    )
                     if add_group:
                         group = i * np.ones(len(group_locs), dtype=np.int32)
                         group_locs = lib.append_to_rec(
@@ -5002,8 +5006,9 @@ class View(QtGui.QLabel):
         self.update_cursor()
 
     def on_pick_shape_changed(self, pick_shape_index):
+        t_dialog = self.window.tools_settings_dialog
         current_text = (
-            self.window.tools_settings_dialog.pick_shape.currentText()
+            t_dialog.pick_shape.currentText()
         )
         if current_text == self._pick_shape:
             return
@@ -5017,7 +5022,7 @@ class View(QtGui.QLabel):
                 qm.Yes | qm.No,
             )
             if ret == qm.No:
-                shape_index = self.window.tools_settings_dialog.pick_shape.findText(
+                shape_index = t_dialog.pick_shape.findText(
                     self._pick_shape
                 )
                 self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
@@ -5444,7 +5449,7 @@ class View(QtGui.QLabel):
                 diameter = self.width() * diameter / self.viewport_width()
                 if (
                     diameter < 100
-                ):  # remote desktop session crashes if pick is larger than view
+                ):  # remote desktop crashes if pick is larger than view
                     pixmap_size = ceil(diameter)
                     pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
                     pixmap.fill(QtCore.Qt.transparent)
