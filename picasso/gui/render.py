@@ -4407,6 +4407,14 @@ class View(QtGui.QLabel):
                     group_locs = group_locs[group_locs.y > y_min]
                     group_locs = group_locs[group_locs.y < y_max]
                     group_locs = lib.locs_in_rectangle(group_locs, X, Y)
+                    # store rotated coordinates in x_rot and y_rot
+                    angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
+                    x_shifted = group_locs.x - xs
+                    y_shifted = group_locs.y - ys
+                    x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(angle)
+                    y_pick_rot = x_shifted * np.sin(angle) + y_shifted * np.cos(angle)
+                    group_locs = lib.append_to_rec(group_locs, x_pick_rot, "x_pick_rot")
+                    group_locs = lib.append_to_rec(group_locs, y_pick_rot, "y_pick_rot")
                     if add_group:
                         group = i * np.ones(len(group_locs), dtype=np.int32)
                         group_locs = lib.append_to_rec(
