@@ -4612,7 +4612,7 @@ class View(QtGui.QLabel):
                     .lstrip("#")
                 )
                 rgbval = tuple(
-                    int(colorstring[i : i + 2], 16) / 255 for i in (0, 2, 4)
+                    int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
                 )
                 colors[i] = rgbval
 
