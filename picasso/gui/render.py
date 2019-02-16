@@ -4448,10 +4448,12 @@ class View(QtGui.QLabel):
                 X, Y = self.get_pick_rectangle_corners(
                     start_x, start_y, end_x, end_y, width
                 )
-                if not lib.check_if_in_rectangle(
-                    x, y, np.array(X), np.array(Y)
-                )[0]:
-                    new_picks.append(pick)
+                # do not check if rectangle has no size
+                if not Y[0] == Y[1]:
+                    if not lib.check_if_in_rectangle(
+                        x, y, np.array(X), np.array(Y)
+                    )[0]:
+                        new_picks.append(pick)
         self._picks = []
         self.add_picks(new_picks)
 
