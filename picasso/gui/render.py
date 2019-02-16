@@ -2667,8 +2667,9 @@ class View(QtGui.QLabel):
 
     def draw_picks(self, image):
         image = image.copy()
+        t_dialog = self.window.tools_settings_dialog
         if self._pick_shape == "Circle":
-            d = self.window.tools_settings_dialog.pick_diameter.value()
+            d = t_dialog.pick_diameter.value()
             d *= self.width() / self.viewport_width()
             # d = int(round(d))
             painter = QtGui.QPainter(image)
@@ -2677,12 +2678,12 @@ class View(QtGui.QLabel):
                 cx, cy = self.map_to_view(*pick)
                 painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
                 if (
-                    self.window.tools_settings_dialog.pick_annotation.isChecked()
+                    t_dialog.pick_annotation.isChecked()
                 ):
                     painter.drawText(cx + d / 2, cy + d / 2, str(i))
             painter.end()
         elif self._pick_shape == "Rectangle":
-            w = self.window.tools_settings_dialog.pick_width.value()
+            w = t_dialog.pick_width.value()
             w *= self.width() / self.viewport_width()
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QColor("yellow"))
@@ -2695,7 +2696,7 @@ class View(QtGui.QLabel):
                 )
                 painter.drawPolygon(polygon)
                 if (
-                    self.window.tools_settings_dialog.pick_annotation.isChecked()
+                    t_dialog.pick_annotation.isChecked()
                 ):
                     painter.drawText(*most_right, str(i))
             painter.end()
