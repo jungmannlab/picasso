@@ -73,7 +73,7 @@ def _initial_sigmas(spot, y, x, size):
         sx = 0.01
     if sx == 0:
         sx = 0.01
-    if sy  == 0:
+    if sy == 0:
         sy = 0.01
     return sy, sx
 
