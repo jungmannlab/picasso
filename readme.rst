@@ -89,9 +89,9 @@ Citing Picasso
 
 If you use picasso in your research, please cite our Nature Protocols publication describing the software. 
 
-J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann 
-Super-Resolution Microscopy with DNA-PAINT 
-Nature Protocols (2017). 12: 1198-1228 DOI: `https://doi.org/10.1038/nprot.2017.024 <https://doi.org/10.1038/nprot.2017.024>`__
+| J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann 
+| Super-Resolution Microscopy with DNA-PAINT 
+| Nature Protocols (2017). 12: 1198-1228 DOI: `https://doi.org/10.1038/nprot.2017.024 <https://doi.org/10.1038/nprot.2017.024>`__
 
 Credits
 -------
