@@ -75,7 +75,7 @@ To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit
 Bug Reports and Feature Requests
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. I will gladly guide you through the codebase and credit you accordingly.
+If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. I will gladly guide you through the codebase and credit you accordingly. You can also contact me via picasso@jungmannlab.org.
 
 Contributions & Copyright
 -------------------------
