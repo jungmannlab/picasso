@@ -666,7 +666,7 @@ def _localize(args):
 
         tif_files = check_consecutive_tif(files)
 
-        paths = tif_files + glob(files + "*.raw")
+        paths = tif_files + glob(files + "/*.raw")
         print("A total of {} files detected".format(len(paths)))
     else:
         paths = glob(files)
