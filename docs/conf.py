@@ -20,13 +20,13 @@
 # -- Project information -----------------------------------------------------
 
 project = 'Picasso'
-copyright = '2018, Maximilian Thomas Strauss'
-author = '\Maximilian Thomas Strauss'
+copyright = '2019, Maximilian Thomas Strauss'
+author = 'Maximilian Thomas Strauss'
 
 # The short X.Y version
 version = ''
 # The full version, including alpha/beta/rc tags
-release = '0.2.2'
+release = '0.2.7'
 
 
 # -- General configuration ---------------------------------------------------
