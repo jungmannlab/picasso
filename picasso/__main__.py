@@ -593,7 +593,7 @@ def _pair_correlation(files, bin_size, r_max):
 def _localize(args):
     files = args.files
     from glob import glob
-    from .io import load_movie, save_locs
+    from .io import load_movie, save_locs, save_info
     from .localize import (
         get_spots,
         identify_async,
@@ -671,18 +671,29 @@ def _localize(args):
     else:
         paths = glob(files)
 
+    # Check for raw files: make sure that each contains a yaml file
+    def prompt_info():
+        info = {}
+        info["Byte Order"] = input("Byte Order (< or >): ")
+        info["Data Type"] = input('Data Type (e.g. "uint16"): ')
+        info["Frames"] = int(input("Frames: "))
+        info["Height"] = int(input("Height: "))
+        info["Width"] = int(input("Width: "))
+        save = input("Use for all remaining raw files in folder (y/n)?") == "y"
+        return info, save
+
+    save = False
+    for path in paths:
+        base, ext = _ospath.splitext(path)
+        if ext == '.raw':
+            if not _os.path.isfile(base+'.yaml'):
+                print('No yaml found for {}. Please enter:'.format(path))
+                if not save:
+                    info, save = prompt_info()
+                info_path = base+'.yaml'
+                save_info(info_path, [info])
+
     if paths:
-
-        def prompt_info():
-            info = {}
-            info["Byte Order"] = input("Byte Order (< or >): ")
-            info["Data Type"] = input('Data Type (e.g. "uint16"): ')
-            info["Frames"] = int(input("Frames: "))
-            info["Height"] = int(input("Height: "))
-            info["Width"] = int(input("Width: "))
-            save = input("Save info to yaml file (y/n): ") == "y"
-            return info, save
-
         box = args.box_side_length
         min_net_gradient = args.gradient
         camera_info = {}
