@@ -92,8 +92,17 @@ Render properties
 ^^^^^^^^^^^^^^^^^
 This allows to render properties by color.
 
-Info
-~~~~
+Show Info
+~~~~~~~~~
+Displays the info dialog.
+
+Display
+^^^^^^^
+Shows the image width/height, the coordinates and dimensions of the current of the current FoV.
+
+Movie
+^^^^^
+Displays the median fit precision of the dataset. Clicking on ``Calculate`` allows to calculate the precision via the NeNA approach. See `DOI: 10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`.
 
 
 Menu items
