@@ -53,6 +53,19 @@ Allows to change the display settings. Open via ``View > Display Settings``.
 
 General
 ^^^^^^^
+Adjust the general display settings.
+
+Zooom
++++++
+Set the magnification factor.
+
+Oversampling
+++++++++++++
+Set the oversampling. Choose ``dynamic`` to automatically adjust to current window size when zooming.
+
+Minimap
++++++++
+Click ``show minimap`` to display a minimap in the upper left corner to localize where the current field of view is within the image.
 
 Contast
 ^^^^^^^
