@@ -5163,13 +5163,13 @@ class View(QtGui.QLabel):
                     self.add_drift(channel, drift)
                     self.update_scene()
                 except Exception as e:
-                    print(e)
                     QtGui.QMessageBox.information(
                         self,
                         "RCC Error",
                         (
-                            "RCC failed. Consider changing segmentation "
-                            "and make sure there are enough locs per frame."
+                            "RCC failed. \nConsider changing segmentation "
+                            "and make sure there are enough locs per frame.\n"
+                            "The following exception occured:\n\n {}".format(e)
                         ),
                     )
                     rcc_progress.set_value(n_pairs)
