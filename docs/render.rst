@@ -67,14 +67,22 @@ Minimap
 +++++++
 Click ``show minimap`` to display a minimap in the upper left corner to localize where the current field of view is within the image.
 
-Contast
-^^^^^^^
+Contrast
+^^^^^^^^
+Define the minimum and maximum density of the and select a colormap. Available colormaps are ['gray', hot', 'inferno', 'magma', 'plasma', 'viridis']. The selected colormap will be saved when closing render.
 
 Blur
 ^^^^
+Select a blur method. Available options are:
+* None
+* One-Pixel-Blur
+* Individual Localization Precision
+* Individual Localization Precision, iso
+
 
 Camera
 ^^^^^^
+Select the pixelsize of the camera. This will be automatically set to a default value or the value specified in the *.yaml file.
 
 Scale Bar
 ^^^^^^^^^
