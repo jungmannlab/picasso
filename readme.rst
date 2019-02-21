@@ -80,7 +80,7 @@ If you have a feature request or a bug report, please post it as an issue on the
 Contributions & Copyright
 -------------------------
 
-| Contributors: Joerg Schnitzbauer, Maximilian Strauss, Adrian Przybylski, Andrey Aristov
+| Contributors: Joerg Schnitzbauer, Maximilian Strauss, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki 
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of
   Biochemistry
 
