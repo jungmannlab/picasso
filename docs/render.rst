@@ -43,7 +43,6 @@ Picking of regions of interest
 7. (Optional) Statistics about each pick region can be saved by selecting ``File > Save pick properties``. The resulting HDF5 file is not a localization file. Instead, it holds a data set called ``groups`` in which the rows show statistical values for each pick region.
 8. (Optional) The picked positions and diameter itself can be saved by selecting ``File > Save pick regions``. Such saved pick information can also be loaded into ``Picasso: Render`` by selecting ``File > Load pick regions``.
 
-
 Dialogs
 -------
 
@@ -79,7 +78,6 @@ Select a blur method. Available options are:
 * Individual Localization Precision
 * Individual Localization Precision, iso
 
-
 Camera
 ^^^^^^
 Select the pixelsize of the camera. This will be automatically set to a default value or the value specified in the *.yaml file.
@@ -103,6 +101,14 @@ Shows the image width/height, the coordinates and dimensions of the current of t
 Movie
 ^^^^^
 Displays the median fit precision of the dataset. Clicking on ``Calculate`` allows to calculate the precision via the NeNA approach. See `DOI: 10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`.
+
+Field of view
+^^^^^^^^^^^^^
+Shows the number of localizations in the current FoV.
+
+Picks
+^^^^^
+Allows to calculate statistics about the picked localizations. Press ``Calcualte info below`` to calculate. ``Ignore dark times`` allows to treat conseuctive localizations as on, even if there is a number of localizations (specified by the parameter) missing between them. When defining the number of units per pick you can calibrate the influc rate via ``Calibrate influx``. A histogram of the dark and bright time can be plotted when clicking ``Histograms``. 
 
 
 Menu items
@@ -182,8 +188,8 @@ Display settings (CTRL + D)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Opens the Display Settings Dialog.
 
-Files
-^^^^^^^^
+Files (CTRL + F)
+^^^^^^^^^^^^^^^^
 Open a dialog to select the color and toggle visibility for each loaded dataset.
 
 Left / Right / Up / Down
