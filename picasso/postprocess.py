@@ -921,7 +921,7 @@ def cluster_combine_dist(locs):
             group_id = temp["group"]
             n = temp["n"]
             min_dist = _np.zeros(n_cluster)
-            min_distxy = _np.zeros(n_cluster)
+            min_dist_xy = _np.zeros(n_cluster)
             for i, clusterval in enumerate(cluster):
                 # find nearest neighbor in xyz
                 group_locs = temp[temp["cluster"] != clusterval]
