@@ -206,7 +206,7 @@ Zoom out of the image.
 
 Fit image to window
 ^^^^^^^^^^^^^^^^^^^
-Fits the image to be displayed in the window.
+Fits the reconstructed image to be fully displayed in the window.
 
 Slice (3D)
 ^^^^^^^^^^
@@ -236,13 +236,13 @@ Tools settings (CTRL + T)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Define the settings of the tools, i.e., the radius of the pick and an option to annotate each pick. For the circular picks the range of pick similar can be set.
 
+Pick similar (CTRL + Shift + P)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Automatically identifies picks that are similar to the existing picks.
+
 Show trace (CTRL + R)
 ^^^^^^^^^^^^^^^^^^^^^
 Shows the time trace of the currently selected pick(s).
-
-Plot pick (XYZ scatter) (CTRL + 3)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Displays a 3D scatterplot of the localizations of the currently selected pick(s).
 
 Select picks (trace)
 ^^^^^^^^^^^^^^^^^^^^
@@ -252,6 +252,10 @@ Select picks (XY scatter)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Opens a dialog to that goes through all picks, displays a xy-scatterplot and asks to keep or discard it.
 
+Plot pick (XYZ scatter) (CTRL + 3)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Displays a 3D scatterplot of the localizations of the currently selected pick(s).
+
 Select picks (XYZ scatter)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 Opens a dialog to that goes through all picks, displays a xyz-scatterplot and asks to keep or discard it.
@@ -260,7 +264,30 @@ Select picks (XYZ scatter, 4 panels)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Opens a dialog to that goes through all picks, displays four panels with an xyz-scatterplot and a top, bottom and side projection and asks to keep or discard it.
 
+Filter picks by locs
+^^^^^^^^^^^^^^^^^^^^
+Allows to filter picks by the number of localizations in each picks. When clicking, a histogram of the number of localizations of all selected picks will be calculated. A lower and upper boundary can be selected to filter the picks.
 
+Clear picks (Ctrl + C)
+^^^^^^^^^^^^^^^^^^^^^^
+Clears all currently selected picks.
+
+Substract pick regions
+^^^^^^^^^^^^^^^^^^^^^^
+Allows to load another pick regions file to substract from the currently selected picks. Can be slow for large number of picks
+
+Show FRET traces
+^^^^^^^^^^^^^^^^
+
+Calculate FRET in picks
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Cluster in pick (k-means)
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Allows to perform k-means clustering in picks. Users can specify the number of clusters and deselect individual clusters. Picks can be kept or removed. After looping through all picks an *.hdf5 file with the cluster information can be saved.
+
+Mask image
+^^^^^^^^^^
 
 Postprocess
 ~~~~~~~~~~~
