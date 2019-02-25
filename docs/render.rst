@@ -312,6 +312,30 @@ Show drift
 ^^^^^^^^^^
 After drift correction, a drift file is created. If the drift file is present, the drift can be displayed with this option.
 
+Remove group info
+^^^^^^^^^^^^^^^^^
+Removes the group information when loading a dataset that cointains group information. This will, i.e. turn the multicolor representation into a single color representation.
+
+Unfold / Refold groups
+^^^^^^^^^^^^^^^^^^^^^^
+Allows to "unfold" an average to display each structure individually in a line. Also works with picks.
+
+Unfold groups (square)
+^^^^^^^^^^^^^^^^^^^^^^
+Arranges an average in a square so that each structure is displayed individually
+
+Link localizations
+^^^^^^^^^^^^^^^^^^
+Links consecutive localizations
+
+Align channels (RCC or from picked)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Aligns channels to each other when several datasets are loaded. If picks are selected the alignment will be via the center of mass of the picks otherwise a RCC will be used. 
+
+Combine locs in picks
+^^^^^^^^^^^^^^^^^^^^^
+Combines all localizations in each pick to one.
+
 Apply expressions to localizations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
