@@ -862,7 +862,7 @@ def _render(args):
         base, ext = splitext(path)
         out_path = base + ".png"
         im_max = image.max() / 100
-        if scaling:
+        if scaling == "yes":
             imsave(
                 out_path, image, vmin=vmin * im_max, vmax=vmax * im_max, cmap=cmap
             )
@@ -1273,9 +1273,9 @@ def main():
     )
     render_parser.add_argument(
         "--scaling",
-        type=bool,
-        default=True,
-        help="if scaling is set to true the colormap value is relative in the range 0-100",
+        choices=["yes", "no"],
+        default="yes",
+        help="if scaling the colormap value is relative in the range 0-100",
     )
     render_parser.add_argument(
         "-c",
