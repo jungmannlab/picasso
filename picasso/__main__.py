@@ -832,7 +832,10 @@ def _render(args):
     from os.path import splitext
     from matplotlib.pyplot import imsave
     from os import startfile
+    from os.path import isdir
     from .io import load_user_settings, save_user_settings
+    from tqdm import tqdm
+    from glob import glob
 
     def render_many(
         locs,
@@ -874,19 +877,40 @@ def _render(args):
     settings["Render"]["Colormap"] = cmap
     save_user_settings(settings)
 
-    locs_glob_map(
-        render_many,
-        args.files,
-        args=(
-            args.oversampling,
-            args.blur_method,
-            args.min_blur_width,
-            args.vmin,
-            args.vmax,
-            cmap,
-            args.silent,
-        ),
-    )
+    if isdir(args.files):
+        print("Analyzing folder")
+        paths = glob(args.files + "/*.hdf5")
+        print("A total of {} files detected. Rendering.".format(len(paths)))
+
+        for path in tqdm(paths):
+                locs_glob_map(
+                    render_many,
+                    path,
+                    args=(
+                        args.oversampling,
+                        args.blur_method,
+                        args.min_blur_width,
+                        args.vmin,
+                        args.vmax,
+                        cmap,
+                        True,
+                    ),
+                )
+
+    else:
+        locs_glob_map(
+            render_many,
+            args.files,
+            args=(
+                args.oversampling,
+                args.blur_method,
+                args.min_blur_width,
+                args.vmin,
+                args.vmax,
+                cmap,
+                args.silent,
+            ),
+        )
 
 
 def main():
