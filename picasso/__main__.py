@@ -729,7 +729,7 @@ def _localize(args):
         for i, path in enumerate(paths):
             print("------------------------------------------")
             print("------------------------------------------")
-            print("Processing {}, File {} of {} ".format(path, i+1, len(paths)))
+            print("Processing {}, File {} of {}".format(path, i+1, len(paths)))
             print("------------------------------------------")
             movie, info = load_movie(path)
             current, futures = identify_async(movie, min_net_gradient, box)
