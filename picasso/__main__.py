@@ -726,10 +726,10 @@ def _localize(args):
                     print('Error loading calibration file.')
                     raise
 
-        for path in paths:
+        for i, path in enumerate(paths):
             print("------------------------------------------")
             print("------------------------------------------")
-            print("Processing {}".format(path))
+            print("Processing {}, File {} of {} ".format(path, i+1, len(paths)))
             print("------------------------------------------")
             movie, info = load_movie(path)
             current, futures = identify_async(movie, min_net_gradient, box)
