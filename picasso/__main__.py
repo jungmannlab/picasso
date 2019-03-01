@@ -846,6 +846,7 @@ def _render(args):
         min_blur_width,
         vmin,
         vmax,
+        scaling,
         cmap,
         silent,
     ):
@@ -861,9 +862,14 @@ def _render(args):
         base, ext = splitext(path)
         out_path = base + ".png"
         im_max = image.max() / 100
-        imsave(
-            out_path, image, vmin=vmin * im_max, vmax=vmax * im_max, cmap=cmap
-        )
+        if scaling:
+            imsave(
+                out_path, image, vmin=vmin * im_max, vmax=vmax * im_max, cmap=cmap
+            )
+        else:
+            imsave(
+                out_path, image, vmin=vmin, vmax=vmax, cmap=cmap
+            )
         if not silent:
             startfile(out_path)
 
@@ -892,6 +898,7 @@ def _render(args):
                         args.min_blur_width,
                         args.vmin,
                         args.vmax,
+                        args.scaling,
                         cmap,
                         True,
                     ),
@@ -907,6 +914,7 @@ def _render(args):
                 args.min_blur_width,
                 args.vmin,
                 args.vmax,
+                args.scaling,
                 cmap,
                 args.silent,
             ),
@@ -1255,13 +1263,19 @@ def main():
         "--vmin",
         type=float,
         default=0.0,
-        help="minimum colormap level in range 0-100",
+        help="minimum colormap level in range 0-100 or absolute value",
     )
     render_parser.add_argument(
         "--vmax",
         type=float,
         default=20.0,
-        help="maximum colormap level in range 0-100",
+        help="maximum colormap level in range 0-100 or absolute value",
+    )
+    render_parser.add_argument(
+        "--scaling",
+        type=bool,
+        default=True,
+        help="if scaling is set to true the colormap value is relative in the range 0-100",
     )
     render_parser.add_argument(
         "-c",
