@@ -3556,7 +3556,7 @@ class View(QtGui.QLabel):
             fret_dict, fret_locs = postprocess.calculate_fret(
                 acc_picks[i], don_picks[i]
             )
-            if fret_dict != {}:
+            if fret_dict["fret_events"] != []:
                 fret_events.append(fret_dict["fret_events"])
             if fret_locs != []:
                 all_fret_locs.append(fret_locs)
