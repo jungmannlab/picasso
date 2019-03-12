@@ -3556,8 +3556,10 @@ class View(QtGui.QLabel):
             fret_dict, fret_locs = postprocess.calculate_fret(
                 acc_picks[i], don_picks[i]
             )
-            fret_events.append(fret_dict["fret_events"])
-            all_fret_locs.append(fret_locs)
+            if fret_dict != {}:
+                fret_events.append(fret_dict["fret_events"])
+            if fret_locs != []:
+                all_fret_locs.append(fret_locs)
             progress.set_value(i + 1)
 
         progress.close()

@@ -1421,20 +1421,22 @@ def calculate_fret(acc_locs, don_locs):
     fret_events = fret_trace[selector]
     fret_timepoints = _np.arange(len(fret_trace))[selector]
 
-    # Calculate FRET localizations:  Select the localizations when FRET happens
-    sel_locs = []
-    for element in fret_timepoints:
-        sel_locs.append(don_locs[don_locs["frame"] == element])
+    fret_locs = []
+    if len(fret_timepoints) > 0:
+        # Calculate FRET localizations:  Select the localizations when FRET happens
+        sel_locs = []
+        for element in fret_timepoints:
+            sel_locs.append(don_locs[don_locs["frame"] == element])
 
-    fret_locs = stack_arrays(sel_locs, asrecarray=True, usemask=False)
+        fret_locs = stack_arrays(sel_locs, asrecarray=True, usemask=False)
 
-    fret_locs = _lib.append_to_rec(fret_locs, _np.array(fret_events), "fret")
+        fret_locs = _lib.append_to_rec(fret_locs, _np.array(fret_events), "fret")
 
-    fret_dict["fret_events"] = _np.array(fret_events)
-    fret_dict["fret_timepoints"] = fret_timepoints
-    fret_dict["acc_trace"] = acc_trace
-    fret_dict["don_trace"] = don_trace
-    fret_dict["frames"] = xvec
-    fret_dict["maxframes"] = max_frames
+        fret_dict["fret_events"] = _np.array(fret_events)
+        fret_dict["fret_timepoints"] = fret_timepoints
+        fret_dict["acc_trace"] = acc_trace
+        fret_dict["don_trace"] = don_trace
+        fret_dict["frames"] = xvec
+        fret_dict["maxframes"] = max_frames
 
     return fret_dict, fret_locs
