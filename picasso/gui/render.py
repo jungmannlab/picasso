@@ -3564,6 +3564,9 @@ class View(QtGui.QLabel):
 
         progress.close()
 
+        if fret_events == []:
+            raise ValueError("No FRET events detected. Inspect picks with Show FRET Traces and make sure to have FRET events.")
+
         fig1 = plt.figure()
         plt.hist(np.hstack(fret_events), bins=np.arange(0, 1, 0.02))
         plt.title(r"Distribution of $\frac{I_A}{I_D+I_A}$")
