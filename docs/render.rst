@@ -21,7 +21,7 @@ Redundant cross-correlation drift correction
 
 1. In ``Picasso: Render``, select ``Postprocess > Undrift by RCC``.
 2. A dialog will appear asking for the segmentation parameter. Although the default value, 1,000 frames, is a sensible choice for most movies, it might be necessary to adjust the segmentation parameter of the algorithm, depending on the total number of frames in the movie and the number of localizations per frame66. A smaller segment size results in better temporal drift resolution but requires a movie with more localizations per frame.
-3. After the algorithm finishes, the estimated drift will be displayed in a pop-up window and the display will show the drift-corrected image.
+3. After the algorithm finishes, the estimated drift will be displayed in a pop-up window, and the display will show the drift-corrected image.
 
 Marker-based drift correction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -36,7 +36,7 @@ Picking of regions of interest
 
 1. Manual selection. Open ``Picasso: Render`` and load the localization HDF5 file to be processed.
 2. Switch the active tool by selecting ``Tools > Pick``. The mouse cursor will now change to a circle. Alternatively, open ``Tools > Tools Settings`` to change the shape into a rectangle.
-3. Set the size of the pick circle by adjusting the ``Diameter`` field in the tool settings dialog (``Tools > Tools Settings``). Alternatively choose ``Width`` for a rectangular shape.
+3. Set the size of the pick circle by adjusting the ``Diameter`` field in the tool settings dialog (``Tools > Tools Settings``). Alternatively, choose ``Width`` for a rectangular shape.
 4. Pick regions of interest using the circular mouse cursor by clicking the left mouse button. All localizations within the circle will be selected for further processing.
 5. (Optional) Automated region of interest selection. Select ``Tools > Pick similar`` to automatically detect and pick structures that have similar numbers of localizations and RMS deviation (RMSD) from their center of mass than already-picked structures. The upper and lower thresholds for these similarity measures are the respective standard deviations of already-picked regions, scaled by a tunable factor. This factor can be adjusted using the field ``Tools > Tools Settings > Pick similar ± range``. To display the mean and standard deviation of localization number and RMSD for currently picked regions, select ``View > Show info`` and click ``Calculate info below``.
 6. (Optional) Exporting of pick information. All localizations in picked regions can be saved by selecting ``File > Save picked localizations``. The resulting HDF5 file will contain a new integer column ``group`` indicating to which pick each localization is assigned.
@@ -80,15 +80,15 @@ Select a blur method. Available options are:
 
 Camera
 ^^^^^^
-Select the pixelsize of the camera. This will be automatically set to a default value or the value specified in the *.yaml file.
+Select the pixel size of the camera. This will be automatically set to a default value or the value specified in the *.yaml file.
 
 Scale Bar
 ^^^^^^^^^
-Activate scalebar. The length of the scalebar is calculated with the Pixel Size set in the Camera dialog. Activate  ``Print scale bar length`` to additionally print the length.
+Activate scalebar. The length of the scale bar is calculated with the Pixel Size set in the Camera dialog. Activate  ``Print scale bar length`` to additionally print the length.
 
 Render properties
 ^^^^^^^^^^^^^^^^^
-This allows to render properties by color.
+This allows rendering properties by color.
 
 Show Info
 ~~~~~~~~~
@@ -96,11 +96,11 @@ Displays the info dialog.
 
 Display
 ^^^^^^^
-Shows the image width/height, the coordinates and dimensions of the current of the current FoV.
+Shows the image width/height, the coordinates, and dimensions of the current of the current FoV.
 
 Movie
 ^^^^^
-Displays the median fit precision of the dataset. Clicking on ``Calculate`` allows to calculate the precision via the NeNA approach. See `DOI: 10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`.
+Displays the median fit precision of the dataset. Clicking on ``Calculate`` allows calculating the precision via the NeNA approach. See `DOI: 10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`.
 
 Field of view
 ^^^^^^^^^^^^^
@@ -108,7 +108,7 @@ Shows the number of localizations in the current FoV.
 
 Picks
 ^^^^^
-Allows to calculate statistics about the picked localizations. Press ``Calcualte info below`` to calculate. ``Ignore dark times`` allows to treat conseuctive localizations as on, even if there is a number of localizations (specified by the parameter) missing between them. When defining the number of units per pick you can calibrate the influc rate via ``Calibrate influx``. A histogram of the dark and bright time can be plotted when clicking ``Histograms``. 
+Allows calculating statistics about the picked localizations. Press ``Calculate info below`` to calculate. ``Ignore dark times`` allows treating consecutive localizations as on, even if there are localizations (specified by the parameter) missing between them. When defining the number of units per pick, you can calibrate the influx rate via ``Calibrate influx``. A histogram of the dark and bright time can be plotted when clicking ``Histograms``. 
 
 
 Menu items
@@ -123,17 +123,17 @@ Open an .hdf5 file to open in render.
 
 Save localizations [Ctrl+S]
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Save the localizations that are currently loaded in render to an .hdf5 file.
+Save the localizations that are currently loaded in render to an hdf5 file.
 
 Save picked localizations [Ctrl+Shift+S]
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Save the localizations that are within a picked region (yellow circle or rectangle). Each pick will get a different group number. To display the group number in Render, select ``Annotate picks`` in Tools/Tools Settings.
-In case of rectangular picks, the saved localizations file will contain new columns `x_pick_rot` and `y_pick_rot`, which are localization coordinates into the coordinate system of the pick rectangle (coordinate (0,0) is where the rectangle was started to be drawn and `y_pick_rot` is in direction of the drawn line.)
-These columns can be used to easily plot density profiles of localizations along the rectangle dimensions (e.g. with "Filter").
+In case of rectangular picks, the saved localizations file will contain new columns `x_pick_rot` and `y_pick_rot`, which are localization coordinates into the coordinate system of the pick rectangle (coordinate (0,0) is where the rectangle was started to be drawn, and `y_pick_rot` is in the direction of the drawn line.)
+These columns can be used to plot density profiles of localizations along the rectangle dimensions easily (e.g., with "Filter").
 
 Save pick properties
 ^^^^^^^^^^^^^^^^^^^^
-Calculates the properties of each pick (i.e. mean frame, mean x mean y as well as kinetic information and saves it as an .hdf5 file.
+Calculates the properties of each pick (i.e., mean frame, mean x mean y as well as kinetic information and saves it as an hdf5 file.
 
 Save pick regions
 ^^^^^^^^^^^^^^^^^
@@ -194,7 +194,7 @@ Open a dialog to select the color and toggle visibility for each loaded dataset.
 
 Left / Right / Up / Down
 ^^^^^^^^^^^^^^^^^^^^^^^^
-Moves the current field of view in the particular direction. Also possible by using the arrow keys.
+Moves the current field of view in a particular direction. Also possible by using the arrow keys.
 
 Zoom in (CTRL +)
 ^^^^^^^^^^^^^^^^
@@ -210,11 +210,11 @@ Fits the reconstructed image to be fully displayed in the window.
 
 Slice (3D)
 ^^^^^^^^^^
-Opens the slicer dialog which allows to slice through 3D datasets.
+Opens the slicer dialog which allows for slicing through 3D datasets.
 
 Show info
 ^^^^^^^^^
-Shows info for the currrent dataset. See Info Dialog.
+Shows info for the current dataset. See Info Dialog.
 
 
 Tools
@@ -226,11 +226,11 @@ Selects the zoom tool. The mouse can now be used for zoom and pan.
 
 Pick (CTRL + P)
 ^^^^^^^^^^^^^^^
-Selects the pick tool. The mouse can now be used for picking localizations. User can set the pick shape in the `Tools settings` (CTRL + T) dialog. The default shape is Circle with the diameter to be set. For rectangles, the user draws the length, while the width is controlled via a parameter for all drawn rectangles, similar to the diameter for circular picks.
+Selects the pick tool. The mouse can now be used for picking localizations. The user can set the pick shape in the `Tools settings` (CTRL + T) dialog. The default shape is Circle with the diameter to be set. For rectangles, the user draws the length, while the width is controlled via a parameter for all drawn rectangles, similar to the diameter for circular picks.
 
 Measure (CTRL + M)
 ^^^^^^^^^^^^^^^^^^
-Selects the measure tool. The mouse can now be used for measuring distances. Left click adds a crosshair for measuring, right click deletes the last crosshair.
+Selects the measure tool. The mouse can now be used for measuring distances. Left click adds a crosshair for measuring; right-click deletes the last crosshair.
 
 Tools settings (CTRL + T)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -238,7 +238,7 @@ Define the settings of the tools, i.e., the radius of the pick and an option to 
 
 Pick similar (CTRL + Shift + P)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Automatically identifies picks that are similar to the existing picks.
+Automatically identifies picks that are similar to the current picks.
 
 Show trace (CTRL + R)
 ^^^^^^^^^^^^^^^^^^^^^
@@ -258,7 +258,7 @@ Displays a 3D scatterplot of the localizations of the currently selected pick(s)
 
 Select picks (XYZ scatter)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
-Opens a dialog to that goes through all picks, displays a xyz-scatterplot and asks to keep or discard it.
+Opens a dialog to that goes through all picks, displays an xyz-scatterplot and asks to keep or discard it.
 
 Select picks (XYZ scatter, 4 panels)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -266,15 +266,15 @@ Opens a dialog to that goes through all picks, displays four panels with an xyz-
 
 Filter picks by locs
 ^^^^^^^^^^^^^^^^^^^^
-Allows to filter picks by the number of localizations in each picks. When clicking, a histogram of the number of localizations of all selected picks will be calculated. A lower and upper boundary can be selected to filter the picks.
+Allows filtering picks by the number of localizations in each pick. When clicking, a histogram of the number of localizations of all selected picks will be calculated. A lower and upper boundary can be selected to filter the picks.
 
 Clear picks (Ctrl + C)
 ^^^^^^^^^^^^^^^^^^^^^^
 Clears all currently selected picks.
 
-Substract pick regions
+Subtract pick regions
 ^^^^^^^^^^^^^^^^^^^^^^
-Allows to load another pick regions file to substract from the currently selected picks. Can be slow for large number of picks
+Allows loading another pick regions file to subtract from the currently selected picks. Can be slow for a large number of picks.
 
 Show FRET traces
 ^^^^^^^^^^^^^^^^
@@ -284,7 +284,7 @@ Calculate FRET in picks
 ^^^^^^^^^^^^^^^^^^^^^^^
 Allows calculating FRET for several picks. This requires to have an acceptor and donor dataset loaded. Both channels should be aligned (i.e., via the Align channels function). The FRET intensity is calculated when two single-molecule events in one pick occur in the same frame. The intensity is calculated as I = I_A/(I_A+I_D). Here, I_A and I_D are the photon values of the localization minus the calculated background. Only FRET events in a range of > 0 and < 1 are kept. 
 
-After calculation, a histogram of the FRET intensities is displayed. Additionally, all localizations with a valid FRET intensity are saved in a *.hdf5 file. The localizations have an additional column with the FRET intensities. This allows reloading the FRET-localizations in render. To color-code for FRET-intensity, use the render properties function and select FRET. Additionally, a *.txt document is saved containing a list of the FRET values as it was used to display the histogram.
+After calculation, a histogram of the FRET intensities is displayed. Additionally, all localizations with a valid FRET intensity are saved in an hdf5 file. The localizations have an additional column with the FRET intensities. This allows reloading the FRET-localizations in render. To color-code for FRET-intensity, use the render properties function and select FRET. Additionally, a txt document is saved containing a list of the FRET values as it was used to display the histogram.
 
 Note: In order to calculate meaningful FRET data, the selected picks should contain data in the donor and acceptor channel. To ensure this, a sample workflow could be as follows:
 - Align the channels via ``Align channels (RCC or from picked)``
@@ -296,7 +296,7 @@ Note: In order to calculate meaningful FRET data, the selected picks should cont
 
 Cluster in pick (k-means)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-Allows to perform k-means clustering in picks. Users can specify the number of clusters and deselect individual clusters. Picks can be kept or removed. After looping through all picks an *.hdf5 file with the cluster information can be saved.
+Allows performing k-means clustering in picks. Users can specify the number of clusters and deselect individual clusters. Picks can be kept or removed. After looping through all picks an hdf5 file with the cluster information can be saved.
 
 Mask image
 ^^^^^^^^^^
@@ -310,7 +310,7 @@ Performs drift correction by redundant cross-correlation.
 
 Undrift from picked (3D)
 ^^^^^^^^^^^^^^^^^^^^^^^^
-Performs drift correction using the picked localizations as fiducials. Also performs drift correction in z if dataset has 3D information.
+Performs drift correction using the picked localizations as fiducials. Also performs drift correction in z if the dataset has 3D information.
 
 Undrift from picked (2D)
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -318,7 +318,7 @@ Performs drift correction using the picked localizations as fiducials. Does not 
 
 Undo drift (2D)
 ^^^^^^^^^^^^^^^
-Undos previous drift correction (only 2D part). Can be pressed again to redo.
+Undo previous drift correction (only 2D part). Can be pressed again to redo.
 
 Show drift
 ^^^^^^^^^^
@@ -326,7 +326,7 @@ After drift correction, a drift file is created. If the drift file is present, t
 
 Remove group info
 ^^^^^^^^^^^^^^^^^
-Removes the group information when loading a dataset that cointains group information. This will, i.e. turn the multicolor representation into a single color representation.
+Removes the group information when loading a dataset that contains group information. This will, i.e., turn the multicolor representation into a single color representation.
 
 Unfold / Refold groups
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -342,7 +342,7 @@ Links consecutive localizations
 
 Align channels (RCC or from picked)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Aligns channels to each other when several datasets are loaded. If picks are selected the alignment will be via the center of mass of the picks otherwise a RCC will be used. 
+Aligns channels to each other when several datasets are loaded. If picks are selected, the alignment will be via the center of mass of the picks; otherwise, a RCC will be used. 
 
 Combine locs in picks
 ^^^^^^^^^^^^^^^^^^^^^
@@ -364,5 +364,5 @@ Using two variables in one statement is not supported (e.g. ``x = y``) To filter
 
 Additional commands
 +++++++++++++++++++
-``flip x z`` will exchange the x axis with y axis if z localizations are present (side projection), similar for ``flip y z``.
-``spiral r n`` will plot each localization over the time of the movie in a spiral with radius r and n number of turns (e.g. to detect repetitive binding), ``uspiral`` to reverse.
+``flip x z`` will exchange the x-axis with y-axis if z localizations are present (side projection), similar for ``flip y z``.
+``spiral r n`` will plot each localization over the time of the movie in a spiral with radius r and n number of turns (e.g., to detect repetitive binding), ``uspiral`` to reverse.
