@@ -278,9 +278,21 @@ Allows to load another pick regions file to substract from the currently selecte
 
 Show FRET traces
 ^^^^^^^^^^^^^^^^
+Allows showing FRET traces for picks. This requires to have an acceptor and donor dataset loaded. Both channels should be aligned (i.e., via the ``Align channels (RCC or from picked)`` function). ``Show FRET traces`` will calculate a FRET intensity when two single-molecule events in one pick occur in the same frame and display a trace for these events. The intensity is calculated as I = I_A/(I_A+I_D). Here, I_A and I_D are the photon values of the localization minus the calculated background. Only FRET events > 0 and < 1 will be displayed. 
 
 Calculate FRET in picks
 ^^^^^^^^^^^^^^^^^^^^^^^
+Allows calculating FRET for several picks. This requires to have an acceptor and donor dataset loaded. Both channels should be aligned (i.e., via the Align channels function). The FRET intensity is calculated when two single-molecule events in one pick occur in the same frame. The intensity is calculated as I = I_A/(I_A+I_D). Here, I_A and I_D are the photon values of the localization minus the calculated background. Only FRET events in a range of > 0 and < 1 are kept. 
+
+After calculation, a histogram of the FRET intensities is displayed. Additionally, all localizations with a valid FRET intensity are saved in a *.hdf5 file. The localizations have an additional column with the FRET intensities. This allows reloading the FRET-localizations in render. To color-code for FRET-intensity, use the render properties function and select FRET. Additionally, a *.txt document is saved containing a list of the FRET values as it was used to display the histogram.
+
+Note: In order to calculate meaningful FRET data, the selected picks should contain data in the donor and acceptor channel. To ensure this, a sample workflow could be as follows:
+- Align the channels via ``Align channels (RCC or from picked)``
+- Pick some regions in one channel (i.e., the donor channel)
+- Calculate the pick properties 
+- Adjust the ``Pick similar`` parameter accordingly and pick similar
+- Filter in the other channel (i.e., the acceptor channel) via ``Filter picks by locs`` to have at least a minimum number of localizations
+- Use the calculate FRET in picks function
 
 Cluster in pick (k-means)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
