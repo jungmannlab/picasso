@@ -9,11 +9,11 @@ Here is a list of command-line commands that can be used with picasso.
 
 localize
 --------
-It is possible to reconstruct images via command line. Type: ``python -m picasso localize args`` within an environment or ``picasso localize args`` if Picasso is installed.
+Reconstructing images via command line is possible. Type: ``python -m picasso localize args`` within an environment or ``picasso localize args`` if Picasso is installed.
 
 Batch process a folder
 ~~~~~~~~~~~~~~~~~~~~~~
-To batch process a folder simply type the foldername (or drag in drop into console), e.g. ``python -m picasso localize foldername``. Picasso will analyze the folder and process all *.ome.tif in files in the folder. If the files have consecutive names (e.g. File.ome.tif, File_1.ome.tif, File_2.ome.tif) they will be treated as one. Note: Currently, only 2D Fitting is possible.
+To batch process a folder simply type the folder name (or drag in drop into the console), e.g. ``python -m picasso localize foldername``. Picasso will analyze the folder and process all *.ome.tif in files in the folder. If the files have consecutive names (e.g., File.ome.tif, File_1.ome.tif, File_2.ome.tif), they will be treated as one. Note: Currently, only 2D Fitting is possible.
 
 Adding additional arguments
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -31,12 +31,12 @@ The reconstruction parameters can be specified by adding respective arguments. I
    ‘-qe’, ‘–qe’, type=int, default=1, help=‘camera quantum efficiency’
 
 Note 1: Localize will automatically try to perform an RCC drift correction on the dataset. As this will not always work with the default
-settings after an unsuccessful attempt, the program will continue with the next file. If the drift corrections succeeds, another .hdf5 file with the
+settings after an unsuccessful attempt, the program will continue with the next file. If the drift correction succeeds, another hdf5 file with the
 drift corrected locs will be created.
 
-Note 2: Make sure to set the camera settings correctly, otherwise Photon counts are wrong plus the MLE might have problems.
+Note 2: Make sure to set the camera settings correctly; otherwise Photon counts are wrong plus the MLE might have problems.
 
-Note 3: If you select one of the 3D algorithms (lq-3d or lq-gpu-3d) the programm will ask you to enter the magnification factor and the path to the 3D calibration file. 
+Note 3: If you select one of the 3D algorithms (lq-3d or lq-gpu-3d) the program will ask you to enter the magnification factor and the path to the 3D calibration file. 
 
 Example
 ^^^^^^^
@@ -53,7 +53,7 @@ Convert csv files (thunderSTORM) to hdf. Type ``python -m picasso csv2hdf filepa
 
 join
 ----
-Combine two hdf5 localization files. Type ``python -m picasso join file1 file2``. A new joined file will be created. Note that the frame information is preserved, i.e. frame 1 now can contain localizations from file 1 and file 2. Therefore, do not perform kinetic analysis and drift correction on joined files.
+Combine two hdf5 localization files. Type ``python -m picasso join file1 file2``. A new joined file will be created. Note that the frame information is preserved, i.e., frame 1 now can contain localizations from file 1 and file 2. Therefore, do not perform kinetic analysis and drift correction on joined files.
 
 link
 ----
@@ -98,11 +98,11 @@ Calculate the properties of localization groups
 
 pc
 --
-Calculate the pair-correlation of localzaitions
+Calculate the pair-correlation of localizations
 
 nneighbor
 ---------
-Calcualte the nearest neighbor within a clustered dataset
+Calculate the nearest neighbor within a clustered dataset
 
 render
 ------
