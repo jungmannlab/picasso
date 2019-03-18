@@ -5,7 +5,7 @@ localize
    :scale: 50 %
    :alt: UML Localize
 
-Localize allows to perform super-resolution reconstruction of image stacks. For spot detection, a gradient-based approach is used. For Fitting, the following algorithms are implemented:
+Localize allows performing super-resolution reconstruction of image stacks. For spot detection, a gradient-based approach is used. For Fitting, the following algorithms are implemented:
 
 - MLE, integrated Gaussian (based on `Smith et al., 2014 <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2862147/>`_.)
 - LQ, Gaussian (least squares)
@@ -14,7 +14,7 @@ Localize allows to perform super-resolution reconstruction of image stacks. For 
 Identification and fitting of single-molecule spots
 ---------------------------------------------------
 
-1. In ``Picasso: Localize``, open a movie file by dragging the file into the window or by selecting ``File`` > ``Open``. If the movie is split into multiple μManager .tif files, open only the first file. Picasso will automatically detect the remaining files according to their file names. When opening a .raw file a dialog will appear for file specifications.
+1. In ``Picasso: Localize``, open a movie file by dragging the file into the window or by selecting ``File`` > ``Open``. If the movie is split into multiple μManager .tif files, open only the first file. Picasso will automatically detect the remaining files according to their file names. When opening a .raw file, a dialog will appear for file specifications.
 2. Adjust the image contrast (select ``View`` > ``Contrast``) so that the single-molecule spots are clearly visible.
 3. To adjust spot identification and fit parameters, open the ``Parameters`` dialog (select ``Analyze`` > ``Parameters``).
 4. In the ``Identification`` group, set the ``Box side length`` to the rounded integer value of 6 × σ + 1, where σ is the standard deviation of the PSF. In an optimized microscope setup, σ is one pixel, and the respective ``Box side length`` should be set to 7. The value of ``Min. net gradient`` specifies a minimum threshold above which spots should be considered for fitting. The net gradient value of a spot is roughly proportional to its intensity, independent of its local background. By checking ``Preview``, the spots identified with the current settings will be marked in the displayed frame. Adjust ``Min. net gradient`` to a value at which only spots are detected (no background).
@@ -24,7 +24,7 @@ Identification and fitting of single-molecule spots
 Camera Config
 -------------
 
-Picasso can remember default cameras and will use saved camera parameters. In order to use camera configs, create a file named ``config.yaml`` in the picasso folder. To start with a template, modify ``config_template.yaml`` that can be found in the folder per default. Picasso will compare the entries with Micro-Manager-Metadata and match the sensitivity values. If no matching entries can be found (e.g., if the file was not created with Micro-Manager) the config file will still be usable to create a dropdown menu to select the different categories. The camera config can also be used to define a default camera that will always be used. Indentions are used for definitions.
+Picasso can remember default cameras and will use saved camera parameters. In order to use camera configs, create a file named ``config.yaml`` in the picasso folder. To start with a template, modify ``config_template.yaml`` that can be found in the folder per default. Picasso will compare the entries with Micro-Manager-Metadata and match the sensitivity values. If no matching entries can be found (e.g., if the file was not created with Micro-Manager) the config file will still be used to create a dropdown menu to select the different categories. The camera config can also be used to define a default camera that will always be used. Indentions are used for definitions.
 
 Example 1: Default Camera
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -61,7 +61,7 @@ If the string ``Gain Property Name`` can be found in the config, picasso will se
 Sensitivity
 ^^^^^^^^^^^
 
-If the string ``Sensitivity Categories`` can be found in the config, picasso will create a dropdown menu for each entry and if the property can be found in the Micro-Manager Metadata, it will be automatically set.
+If the string ``Sensitivity Categories`` can be found in the config, picasso will create a dropdown menu for each entry, and if the property can be located in the Micro-Manager Metadata, it will be automatically set.
 
 ::
 
@@ -84,7 +84,7 @@ If the string ``Sensitivity Categories`` can be found in the config, picasso wil
            16-bit (low noise & high well capacity): 0.45
 
 Here, two Sensitivity Categories are given ``PixelReadoutRate`` and ``Sensitivity/DynamicRange``. In the upper dropdown menu, one now will be able to choose from ``540 MHz - fastest readout`` and
-``200 MHz - lowest noise``. Within 540 MHz it will be ``12-bit (high well capacity): 7.18``, ``12-bit (low noise): 0.29`` and ``16-bit (low noise & high well capacity): 0.46``. Accordingly for the 200 MHz entry. The dropdown menus can be further nested, e.g. when considering Gain modes:
+``200 MHz - lowest noise``. Within 540 MHz it will be ``12-bit (high well capacity): 7.18``, ``12-bit (low noise): 0.29`` and ``16-bit (low noise & high well capacity): 0.46``. Accordingly for the 200 MHz entry. The dropdown menus can be further nested, e.g., when considering Gain modes:
 
 ::
 
@@ -148,7 +148,7 @@ After entering the step size, picasso will calculate the mean and the variance f
 -  mean_sx = cx[6]z0 + cx[5]z1 .. + cx[0]z6
 -  mean_sy = cy[6]z0 + cy[5]z1 .. + cy[0]z6
 
-The calibration coefficients are stored in the yaml file and contain the parameters of cx and cy. The first entry being c[0], the last being c[6].
+The calibration coefficients are stored in the YAML file and contain the parameters of cx and cy. The first entry being c[0], the last being c[6].
 
 Fitting z
 ~~~~~~~~~
