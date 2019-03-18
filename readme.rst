@@ -41,7 +41,7 @@ Sample instructions to create an environment and installation of packages with c
 5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
 6. Continue with the installation of Picasso
 
-Note that sometimes outdated packages can cause problems. If you experience errors, please check whether your packages have the right version (e.g. see issue #4). Additionally make sure that you have the default package channel (e.g. see issue #30). Also note that there is also a requirements.txt which you can use to install all packages with pip (``pip install -r requirements.txt``). However currently you will also need PyQt4 (i.e. with ``conda install pyqt=4 -y``). In the past, not relying on conda caused troubles with creating the one-click installer. It is therefore recommended installing all packages with conda.
+Note that sometimes outdated packages can cause problems. If you experience errors, please check whether your packages have the right version (e.g. see issue #4). Additionally, make sure that you have the default package channel (e.g., see issue #30). Also, note that there is also a requirements.txt which you can use to install all packages with pip (``pip install -r requirements.txt``). However, currently, you will also need PyQt4 (i.e., with ``conda install pyqt=4 -y``). In the past, not relying on conda caused troubles with creating the one-click installer. It is therefore recommended installing all packages with conda.
 
 .. _installation-1:
 
@@ -63,7 +63,7 @@ Using Picasso as a module
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The individual modules of picasso can be started as follows:
-1. Open the console, activate the enviroment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows. 
+1. Open the console, activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows. 
 2. Start the picasso modules via ``python -m picasso ..``, e.g. ``python -m picasso render`` for the render module
 
 Using GPU for Fitting
@@ -98,7 +98,7 @@ Credits
 
 -  Design icon based on “Hexagon by Creative Stalls from the Noun
    Project”
--  Simulate icon based on “Microchip by Futishia from the Nount Project”
+-  Simulate icon based on “Microchip by Futishia from the Noun Project”
 -  Localize icon based on “Mountains by MONTANA RUCOBO from the Noun
    Project”
 -  Filter icon based on “Funnel by José Campos from the Noun Project”
