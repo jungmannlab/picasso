@@ -96,7 +96,7 @@ Displays the info dialog.
 
 Display
 ^^^^^^^
-Shows the image width/height, the coordinates, and dimensions of the current of the current FoV.
+Shows the image width/height, the coordinates, and dimensions of the current FoV.
 
 Movie
 ^^^^^
@@ -342,7 +342,7 @@ Links consecutive localizations
 
 Align channels (RCC or from picked)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Aligns channels to each other when several datasets are loaded. If picks are selected, the alignment will be via the center of mass of the picks; otherwise, a RCC will be used. 
+Aligns channels to each other when several datasets are loaded. If picks are selected, the alignment will be via the center of mass of the picks; otherwise, an RCC will be used. 
 
 Combine locs in picks
 ^^^^^^^^^^^^^^^^^^^^^
