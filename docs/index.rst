@@ -6,7 +6,7 @@
 Welcome to Picasso's documentation!
 ===================================
 
-This documentation is based on the `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__. It's aim is to cover all the recent updates.
+This documentation is based on the `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__. Its aim is to cover all the recent updates.
 
 .. toctree::
    :maxdepth: 2
