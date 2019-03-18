@@ -6,14 +6,14 @@ This section describes the different file format and name conventions used in Pi
 Movie Files
 -----------
 
-Picasso accepts two type of raw movie files: TIFF (preferably from μManager1) and raw binary data (file extension “.raw”).
+Picasso accepts two types of raw movie files: TIFF (preferably from μManager1) and raw binary data (file extension “.raw”).
 
 When loading raw binary files, the user will be prompted for movie metadata such as the number of frames, number of pixels, etc. Alternatively, this metadata can be supplied by an accompanying metadata file with the same filename as the raw binary file, but with the extension .yaml. See ``YAML Metadata Files`` for more details.
 
 HDF5 Files
 ----------
 
-HDF5 is a generic and efficient binary file format for storing data2. In Picasso, HDF5 files are used for storing tabular data of localization properties with the file extension .hdf5. Furthermore, Picasso saves statistical properties of groups of localizations in an HDF5 file.
+HDF5 is a generic and efficient binary file format for storing data2. In Picasso, HDF5 files are used for storing tabular data of localization properties with the file extension .hdf5. Furthermore, Picasso saves the statistical properties of groups of localizations in an HDF5 file.
 
 Generally, several datasets can be stored within an HDF5 file. These datasets are accessible by specifying a path within the HDF5 file, similar to a path of an operating system. When saving localizations, Picasso stores tabular data under the path ``/locs``. When saving statistical properties of groups of localizations, Picasso saves the table under the path ``/groups``.
 
@@ -51,6 +51,4 @@ YAML Metadata Files
 
 YAML files are document-oriented text files that can be opened and changed with any text editor3. In Picasso, YAML files are used to store metadata of movie or localization files.
 Each localization HDF5 file must always be accompanied with a YAML file of the same filename, except for the extension, which is ``.yaml``. Deleting this YAML metadata file will result in failure of the Picasso software!
-Raw binary files may be accompanied by a YAML metadata file to store data about the movie dimensions, etc. While the metadata file in this case is not required, it reduces the effort of typing in this metadata each time the movie is loaded with ``Picasso: Localize``. To generate such a YAML metadata file, load the raw movie into ``Picasso: Localize``, then enter all required information in the appearing dialog. Check the checkbox ``Save info to yaml file`` and click ok. The movie will be loaded and the metadata saved in a YAML file. This file will be detected the next time this raw movie is loaded and the metadata does not need to be entered again.
-
-
+Raw binary files may be accompanied by a YAML metadata file to store data about the movie dimensions, etc. While the metadata file, in this case, is not required, it reduces the effort of typing in this metadata each time the movie is loaded with ``Picasso: Localize``. To generate such a YAML metadata file, load the raw movie into ``Picasso: Localize``, then enter all required information in the appearing dialog. Check the checkbox ``Save info to yaml file`` and click ok. The movie will be loaded and the metadata saved in a YAML file. This file will be detected the next time this raw movie is loaded, and the metadata does not need to be entered again.a
