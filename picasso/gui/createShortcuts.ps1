@@ -33,3 +33,16 @@ $s.TargetPath="pythonw"
 $s.Arguments="-m picasso render"
 $s.IconLocation="$PSScriptRoot/icons/render.ico"
 $s.Save()
+
+$s=(New-Object -COM WScript.Shell).CreateShortcut("$PSScriptRoot/../../Average.lnk")
+$s.TargetPath="pythonw"
+$s.Arguments="-m picasso average"
+$s.IconLocation="$PSScriptRoot/icons/average.ico"
+$s.Save()
+
+$s=(New-Object -COM WScript.Shell).CreateShortcut("$PSScriptRoot/../../Average3.lnk")
+$s.TargetPath="pythonw"
+$s.Arguments="-m picasso average3"
+$s.IconLocation="$PSScriptRoot/icons/average.ico"
+$s.Save()
+
