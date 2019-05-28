@@ -159,6 +159,11 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     _plt.ylabel("Mean z precision")
 
     _plt.tight_layout(pad=2)
+
+    if path is not None:
+        dirname = path[0:-5]
+        _plt.savefig(dirname + ".png", format='png', dpi=300)
+    
     _plt.show()
 
     export = False
