@@ -100,7 +100,7 @@ Shows the image width/height, the coordinates, and dimensions of the current FoV
 
 Movie
 ^^^^^
-Displays the median fit precision of the dataset. Clicking on ``Calculate`` allows calculating the precision via the NeNA approach. See `DOI: 10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`.
+Displays the median fit precision of the dataset. Clicking on ``Calculate`` allows calculating the precision via the NeNA approach. See `DOI: 10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3/>`_.
 
 Field of view
 ^^^^^^^^^^^^^
