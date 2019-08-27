@@ -13,7 +13,9 @@ Reconstructing images via command line is possible. Type: ``python -m picasso lo
 
 Batch process a folder
 ~~~~~~~~~~~~~~~~~~~~~~
-To batch process a folder simply type the folder name (or drag in drop into the console), e.g. ``python -m picasso localize foldername``. Picasso will analyze the folder and process all *.ome.tif in files in the folder. If the files have consecutive names (e.g., File.ome.tif, File_1.ome.tif, File_2.ome.tif), they will be treated as one. Note: Currently, only 2D Fitting is possible.
+To batch process a folder simply type the folder name (or drag in drop into the console), e.g. ``python -m picasso localize foldername``. Picasso will analyze the folder and process all *.ome.tif in files in the folder. If the files have consecutive names (e.g., File.ome.tif, File_1.ome.tif, File_2.ome.tif), they will be treated as one. 
+
+If you want to analyze *.raw files, Picasso will check whether a *.raw file has a corresponding *.yaml file. If none is found, you can enter the specifications for each raw file. It is possible to use the same specifications for all *.raw files in that run. 
 
 Adding additional arguments
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
