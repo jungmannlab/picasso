@@ -4779,13 +4779,13 @@ class View(QtGui.QLabel):
     def save_picks(self, path):
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            picks = {"Diameter": d, "Centers": [list(_) for _ in self._picks]}
+            picks = {"Diameter": float(d), "Centers": [[float(_[0]), float(_[1])] for _ in self._picks]}
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
             picks = {
-                "Width": w,
+                "Width": float(w),
                 "Center-Axis-Points": [
-                    [list(s), list(e)] for s, e in self._picks
+                    [[float(s[0]), float(s[1])], [float(e[0]), float(e[1])]] for s, e in self._picks
                 ],
             }
         else:
