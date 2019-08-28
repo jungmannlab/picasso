@@ -864,7 +864,9 @@ def _render(args):
         im_max = image.max() / 100
         if scaling == "yes":
             imsave(
-                out_path, image, vmin=vmin * im_max, vmax=vmax * im_max, cmap=cmap
+                out_path, image,
+                vmin=vmin * im_max, vmax=vmax * im_max,
+                cmap=cmap
             )
         else:
             imsave(
