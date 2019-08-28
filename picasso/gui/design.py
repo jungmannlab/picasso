@@ -29,6 +29,7 @@ from PyQt4.QtGui import (
     QDialog,
     QDialogButtonBox,
     QVBoxLayout,
+    QFileDialog,
 )
 
 from .. import io as _io
@@ -45,7 +46,6 @@ def plotPlate(selection, selectioncolors, platename):
     inch = 25.4
     radius = 4.5 / inch  # diameter of 96 well plates is 9mm
     radiusc = 4 / inch
-    circles = dict()
     rows = 8
     cols = 12
     colsStr = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
@@ -803,7 +803,6 @@ class Scene(QtGui.QGraphicsScene):
 
         # MAKE A LABEL FOR THE HEXAGONS POINTING DOWNWARDS Ideally: Gray V
         # isolated ones:
-        down_arrow = dict()
         index1 = [3, 3, 3, 3, 10, 10, 10, 10]
         index2 = [2, 6, 10, 14, 2, 6, 10, 14]
         line1 = dict()
@@ -919,9 +918,6 @@ class Scene(QtGui.QGraphicsScene):
         allitems = self.items()
         lenitems = len(allitems)
         bindingitems = len(BINDING_SITES)
-        origamiitems = len(ORIGAMI_SITES)
-        paletteindex = lenitems - bindingitems + 9
-        canvascolors = []
 
         for i in range(0, maxcolor - 1):
             if tableshort[i] == "None":
@@ -1336,7 +1332,6 @@ class Window(QtGui.QMainWindow):
                 )
             else:
                 pipettlist = []
-                notfound = []
                 platelist = []
                 for i in range(1, len(structureData)):
                     sequencerow = structureData[i]
