@@ -1135,14 +1135,13 @@ class Window(QtGui.QMainWindow):
                 self.statusBar().showMessage("Distributing photons ...")
 
                 bindingsitesx = partstruct[0, :]
-                bindingsitesy = partstruct[1, :]
+
                 nosites = len(
                     bindingsitesx
                 )  # number of binding sites in image
                 photondist = _np.zeros((nosites, frames), dtype=_np.int)
                 spotkinetics = _np.zeros((nosites, 4), dtype=_np.float)
-                meandark = int(taud)
-                meanbright = int(taub)
+
 
                 timetrace = {}
 
@@ -2094,7 +2093,6 @@ class CalibrationDialog(QtGui.QDialog):
         layout = QtGui.QVBoxLayout(self)
 
         self.table = QtGui.QTableWidget()
-        tableitem = QtGui.QTableWidgetItem()
         self.table.setWindowTitle("Noise Model Calibration")
         self.setWindowTitle("Noise Model Calibration")
         # self.resize(800, 400)
