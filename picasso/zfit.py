@@ -163,7 +163,7 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     if path is not None:
         dirname = path[0:-5]
         _plt.savefig(dirname + ".png", format='png', dpi=300)
-    
+
     _plt.show()
 
     export = False
