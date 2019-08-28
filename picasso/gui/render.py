@@ -4715,7 +4715,6 @@ class View(QtGui.QLabel):
             if i == 0:
                 locs = self.picked_locs(self.locs_paths.index(channel))
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                datatype = locs.dtype
             else:
                 templocs = self.picked_locs(self.locs_paths.index(channel))
                 templocs = stack_arrays(
@@ -5439,7 +5438,6 @@ class View(QtGui.QLabel):
     def refold_groups(self):
         if hasattr(self.locs[0], "group"):
             self.locs[0].x -= self.locs[0].group * 2
-        groups = np.unique(self.locs[0].group)
         self.fit_in_view()
         self.infos[0][0]["Width"] = self.oldwidth
         self.unfold_status == "folded"
@@ -6637,7 +6635,6 @@ class Window(QtGui.QMainWindow):
             if i == 0:
                 locs = self.view.locs[i]
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                datatype = locs.dtype
             else:
                 templocs = self.view.locs[i]
                 templocs = stack_arrays(
