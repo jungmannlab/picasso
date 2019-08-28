@@ -800,7 +800,6 @@ class Window(QtGui.QMainWindow):
                         self.pixelsize,
                     )
                 )
-        n_locs = sum([_[0] for _ in renderings])
         images = np.array([_[1] for _ in renderings])
 
         pixmap1 = self.pixmap_from_colors(images, colors, 2)
@@ -878,7 +877,7 @@ class Window(QtGui.QMainWindow):
             )
             for _ in self.locs
         ]
-        n_locs = sum([_[0] for _ in renderings])
+
         images = np.array([_[1] for _ in renderings])
 
         if translateaxis == "x":
@@ -942,7 +941,6 @@ class Window(QtGui.QMainWindow):
                 y_rot = self.locs[j].y[index]
                 z_rot = self.locs[j].z[index]
 
-                xcorr_max = 0.0
                 plane = self.render_planes(
                     x_rot, y_rot, z_rot, proplane, self.pixelsize
                 )  #
@@ -1043,11 +1041,6 @@ class Window(QtGui.QMainWindow):
         self, CF_image_avg, angles, group, rotaxis, proplane
     ):
         n_channels = len(self.locs)
-        allrot = []
-        alldx = []
-        alldy = []
-        alldz = []
-
         n_angles = len(angles)
 
         all_xcorr = np.zeros((n_angles, n_channels))
@@ -1063,7 +1056,6 @@ class Window(QtGui.QMainWindow):
                 x_original = x_rot.copy()
                 y_original = y_rot.copy()
                 z_original = z_rot.copy()
-                xcorr_max = 0.0
 
                 if self.translatebtn.isChecked():
                     angles = [0]
@@ -1103,9 +1095,6 @@ class Window(QtGui.QMainWindow):
         # value with biggest cc value form table
         maximumcc = np.argmax(np.sum(all_xcorr, axis=1))
         rotfinal = angles[maximumcc]
-
-        dafinal = np.mean(all_da[maximumcc, :])
-        dbfinal = np.mean(all_db[maximumcc, :])
 
         for j in range(n_channels):
             index = self.group_index[j][group].nonzero()[1]
@@ -1164,7 +1153,6 @@ class Window(QtGui.QMainWindow):
             for _ in self.locs
         ]
 
-        n_locs = sum([_[0] for _ in renderings])
         images = np.array([_[1] for _ in renderings])
 
         # DELIVER CORRECT PROJECTION FOR IMAGE
@@ -1256,7 +1244,6 @@ class Window(QtGui.QMainWindow):
 
         CF_image_avg = image
 
-        # TODO: blur auf average !!!
         print("Convolving..")
         for i in tqdm(range(n_groups)):
             self.status_bar.showMessage("Group {} / {}.".format(i, n_groups))
@@ -1302,7 +1289,6 @@ class Window(QtGui.QMainWindow):
             )
             for _ in self.locs
         ]
-        n_locs = sum([_[0] for _ in renderings])
         images = np.array([_[1] for _ in renderings])
 
         # DELIVER CORRECT PROJECTION FOR IMAGE
@@ -1399,7 +1385,6 @@ class Window(QtGui.QMainWindow):
         # n_pixel, _ = image_avg.shape
         # image_half = n_pixel / 2
 
-        # TODO: blur auf average !!!
         print("Rotating..")
         for i in tqdm(range(n_groups)):
             self.status_bar.showMessage("Group {} / {}.".format(i, n_groups))
@@ -1604,7 +1589,6 @@ class Window(QtGui.QMainWindow):
         a_step = np.arcsin(1 / (self.oversampling * self.r))
         angles = np.arange(0, 2 * np.pi, a_step)
         n_channels = len(self.locs)
-        allrot = []
         n_angles = len(angles)
         all_corr = np.zeros((n_angles, n_channels))
 
@@ -1736,10 +1720,6 @@ class Window(QtGui.QMainWindow):
 
     def align_group(self, CF_image_avg, angles, group, rotaxis, proplane):
         n_channels = len(self.locs)
-        allrot = []
-        alldx = []
-        alldy = []
-        alldz = []
 
         n_angles = len(angles)
 
@@ -1762,7 +1742,6 @@ class Window(QtGui.QMainWindow):
                     x_original = x_rot.copy()
                     y_original = y_rot.copy()
                     z_original = z_rot.copy()
-                    xcorr_max = 0.0
 
                     if f == 1:  # Flipped round
                         if proplane == "xy":

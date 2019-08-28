@@ -125,7 +125,7 @@ class Worker(QtCore.QThread):
             n_pixel, _ = image_avg.shape
             image_half = n_pixel / 2
             CF_image_avg = np.conj(np.fft.fft2(image_avg))
-            # TODO: blur auf average !!!
+            # TODO: blur average
             fc = functools.partial(
                 align_group,
                 angles,
