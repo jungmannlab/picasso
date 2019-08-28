@@ -3444,8 +3444,6 @@ class View(QtGui.QLabel):
         removelist = []
 
         n_channels = len(self.locs_paths)
-        colors = get_colors(n_channels)
-
         acc_picks = self.picked_locs(channel_acceptor)
         don_picks = self.picked_locs(channel_donor)
 
@@ -3565,7 +3563,10 @@ class View(QtGui.QLabel):
         progress.close()
 
         if fret_events == []:
-            raise ValueError("No FRET events detected. Inspect picks with Show FRET Traces and make sure to have FRET events.")
+            raise ValueError(
+                "No FRET events detected. "
+                "Inspect picks with Show FRET Traces "
+                "and make sure to have FRET events.")
 
         fig1 = plt.figure()
         plt.hist(np.hstack(fret_events), bins=np.arange(0, 1, 0.02))
@@ -3800,7 +3801,6 @@ class View(QtGui.QLabel):
                     i = 0
                     while i < len(self._picks):
                         pick = self._picks[i]
-                        t0 = time.time()
                         fig.clf()
                         ax = fig.add_subplot(111)
                         ax.set_title(
@@ -4779,7 +4779,9 @@ class View(QtGui.QLabel):
     def save_picks(self, path):
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            picks = {"Diameter": float(d), "Centers": [[float(_[0]), float(_[1])] for _ in self._picks]}
+            picks = {
+                "Diameter": float(d),
+                "Centers": [[float(_[0]), float(_[1])] for _ in self._picks]}
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
             picks = {
@@ -5066,7 +5068,6 @@ class View(QtGui.QLabel):
         # Todo: Implement a check if there is drift already loaded and load
         channel = self.get_channel("Show drift")
         if channel is not None:
-            info = self.infos[channel]
             drift = self._drift[channel]
 
             if drift is None:
