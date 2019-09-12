@@ -13,7 +13,7 @@ import os.path
 import sys
 import yaml
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtWidgets import QSizePolicy, QPushButton, QWidget, QStackedWidget, QCheckBox, QSlider, QLabel, QGridLayout, QGroupBox, QHBoxLayout, QVBoxLayout, QApplication, QMainWindow, QDialog, QSpinBox, QDoubleSpinBox, QComboBox, QRubberBand, QGraphicsView, QGraphicsScene, QGraphicsItemGroup
+from PyQt5.QtWidgets import QGraphicsLineItem, QMessageBox, QFileDialog, qApp, QSizePolicy, QPushButton, QWidget, QStackedWidget, QCheckBox, QSlider, QLabel, QGridLayout, QGroupBox, QHBoxLayout, QVBoxLayout, QApplication, QMainWindow, QDialog, QSpinBox, QDoubleSpinBox, QComboBox, QRubberBand, QGraphicsView, QGraphicsScene, QGraphicsItemGroup
 import time
 import numpy as np
 import traceback
@@ -160,10 +160,10 @@ class FitMarker(QGraphicsItemGroup):
     def __init__(self, x, y, size, parent=None):
         super().__init__(parent)
         L = size / 2
-        line1 = QtGui.QGraphicsLineItem(x - L, y - L, x + L, y + L)
+        line1 = QGraphicsLineItem(x - L, y - L, x + L, y + L)
         line1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
         self.addToGroup(line1)
-        line2 = QtGui.QGraphicsLineItem(x - L, y + L, x + L, y - L)
+        line2 = QGraphicsLineItem(x - L, y + L, x + L, y - L)
         line2.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
         self.addToGroup(line2)
 
@@ -564,7 +564,7 @@ class ParametersDialog(QDialog):
             self.gpufit_checkbox.setDisabled(True)
 
     def load_z_calib(self):
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, ext = QFileDialog.getOpenFileName(
             self, "Load 3d calibration", directory=None, filter="*.yaml"
         )
         if path:
@@ -841,7 +841,7 @@ class Window(QMainWindow):
                 "gradient"
             ] = self.parameters_dialog.mng_slider.value()
         io.save_user_settings(settings)
-        QtGui.qApp.closeAllWindows()
+        qApp.closeAllWindows()
 
     def init_menu_bar(self):
         menu_bar = self.menuBar()
@@ -959,7 +959,7 @@ class Window(QMainWindow):
         else:
             dir = self.pwd
 
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, ext = QFileDialog.getOpenFileName(
             self, "Open image sequence", directory=dir, filter="*.raw; *.tif"
         )
         if path:
@@ -988,7 +988,7 @@ class Window(QMainWindow):
             dir = os.path.dirname(self.movie_path)
         else:
             dir = None
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, ext = QFileDialog.getOpenFileName(
             self, "Open picks", directory=dir, filter="*.yaml"
         )
         if path:
@@ -1001,7 +1001,7 @@ class Window(QMainWindow):
             self._picks = regions["Centers"]
             maxframes = int(self.info[0]["Frames"])
             # ask for drift correction
-            driftpath = QtGui.QFileDialog.getOpenFileName(
+            driftpath, ext = QFileDialog.getOpenFileName(
                 self,
                 "Open drift file",
                 directory=os.path.dirname(path),
@@ -1065,7 +1065,7 @@ class Window(QMainWindow):
             dir = os.path.dirname(self.movie_path)
         else:
             dir = None
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, ext = QFileDialog.getOpenFileName(
             self, "Open locs", directory=dir, filter="*.hdf5"
         )
         if path:
@@ -1085,7 +1085,7 @@ class Window(QMainWindow):
                 100,
             )
 
-            # driftpath = QtGui.QFileDialog.getOpenFileName(self,
+            # driftpath = QFileDialog.getOpenFileName(self,
             # 'Open drift file', filter='*.txt')
             # if driftpath:
             #    drift = np.genfromtxt(driftpath)
@@ -1262,11 +1262,11 @@ class Window(QMainWindow):
 
     def open_parameters(self):
         if self.pwd == []:
-            path = QtGui.QFileDialog.getOpenFileName(
+            path, ext = QFileDialog.getOpenFileName(
                 self, "Open parameters", filter="*.yaml"
             )
         else:
-            path = QtGui.QFileDialog.getOpenFileName(
+            path, ext = QFileDialog.getOpenFileName(
                 self, "Open parameters", directory=self.pwd, filter="*.yaml"
             )
         if path:
@@ -1284,7 +1284,7 @@ class Window(QMainWindow):
             )
 
     def save_parameters(self):
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QFileDialog.getSaveFileName(
             self, "Save parameters", filter="*.yaml"
         )
         if path:
@@ -1416,7 +1416,7 @@ class Window(QMainWindow):
             if ok:
                 base, ext = os.path.splitext(self.movie_path)
                 out_path = base + "_3d_calib.yaml"
-                path = QtGui.QFileDialog.getSaveFileName(
+                path, ext = QFileDialog.getSaveFileName(
                     self, "Save 3D calibration", out_path, filter="*.yaml"
                 )
                 if path:
@@ -1470,7 +1470,7 @@ class Window(QMainWindow):
         else:
             base, ext = os.path.splitext(self.movie_path)
             path = base + "_spots.hdf5"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QFileDialog.getSaveFileName(
                 self, "Save spots", path, filter="*.hdf5"
             )
             if path:
@@ -1496,7 +1496,7 @@ class Window(QMainWindow):
         else:
             base, ext = os.path.splitext(self.movie_path)
             locs_path = base + "_locs.hdf5"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QFileDialog.getSaveFileName(
                 self, "Save localizations", locs_path, filter="*.hdf5"
             )
             if path:
@@ -1681,7 +1681,7 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(
+        errorbox = QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()
