@@ -38,7 +38,11 @@ from PyQt5.QtWidgets import (
     QLabel,
     QHBoxLayout,
     QVBoxLayout,
-    QRadioButton
+    QRadioButton,
+    QTableWidget,
+    QFileDialog,
+    QTableWidgetItem,
+    QTableWidget
 )
 
 
@@ -385,7 +389,7 @@ class SeqDialog(QDialog):
 
         layout = QVBoxLayout,(self)
 
-        self.table = QtGui.QTableWidget()
+        self.table = QTableWidget()
         self.table.setWindowTitle("Extension table")
         self.setWindowTitle("Extension table")
         self.resize(500, 285)
@@ -415,17 +419,17 @@ class SeqDialog(QDialog):
         for i in range(len(colorcounts) - 1):
             if colorcounts[i] > 0:
                 self.table.setItem(
-                    rowRunner, 0, QtGui.QTableWidgetItem(str(i + 1))
+                    rowRunner, 0, QTableWidgetItem(str(i + 1))
                 )
                 self.table.setItem(
-                    rowRunner, 1, QtGui.QTableWidgetItem("Ext " + str(i + 1))
+                    rowRunner, 1, QTableWidgetItem("Ext " + str(i + 1))
                 )
                 self.table.item(rowRunner, 1).setBackground(allcolors[i + 1])
                 self.table.setItem(
-                    rowRunner, 3, QtGui.QTableWidgetItem(tableshort[i])
+                    rowRunner, 3, QTableWidgetItem(tableshort[i])
                 )
                 self.table.setItem(
-                    rowRunner, 4, QtGui.QTableWidgetItem(tablelong[i])
+                    rowRunner, 4, QTableWidgetItem(tablelong[i])
                 )
                 rowRunner += 1
 
@@ -452,16 +456,16 @@ class SeqDialog(QDialog):
         sender = self.sender()
         comboval = sender.currentIndex()
         if comboval == 0:
-            self.table.setItem(indexval, 3, QtGui.QTableWidgetItem("None"))
-            self.table.setItem(indexval, 4, QtGui.QTableWidgetItem("None"))
+            self.table.setItem(indexval, 3, QTableWidgetItem("None"))
+            self.table.setItem(indexval, 4, QTableWidgetItem("None"))
         else:
             self.table.setItem(
                 indexval,
                 3,
-                QtGui.QTableWidgetItem(self.ImagersShort[comboval]),
+                QTableWidgetItem(self.ImagersShort[comboval]),
             )
             self.table.setItem(
-                indexval, 4, QtGui.QTableWidgetItem(self.ImagersLong[comboval])
+                indexval, 4, QTableWidgetItem(self.ImagersLong[comboval])
             )
 
     def readoutTable(self):
@@ -494,7 +498,7 @@ class FoldingDialog(QDialog):
         super(FoldingDialog, self).__init__(parent)
 
         layout = QVBoxLayout,(self)
-        self.table = QtGui.QTableWidget()
+        self.table = QTableWidget()
         self.table.setWindowTitle("Folding table")
         self.setWindowTitle("Folding table")
         self.resize(800, 285)
@@ -552,11 +556,11 @@ class FoldingDialog(QDialog):
 
         table[0] = tablecontent
         if hasattr(self, "pwd"):
-            path = QtGui.QFileDialog.getSaveFileName(
+            path = QFileDialog.getSaveFileName(
                 self, "Export folding table to.", self.pwd, filter="*.csv"
             )
         else:
-            path = QtGui.QFileDialog.getSaveFileName(
+            path = QFileDialog.getSaveFileName(
                 self, "Export folding table to.", filter="*.csv"
             )
         if path:
@@ -605,7 +609,7 @@ class FoldingDialog(QDialog):
             )
 
     def writeTable(self, row, col, content):
-        self.table.setItem(row, col, QtGui.QTableWidgetItem(content))
+        self.table.setItem(row, col, QTableWidgetItem(content))
 
     def colorTable(self, row, col, color):
         self.table.item(row, col).setBackground(color)
@@ -1138,11 +1142,11 @@ class Window(QMainWindow):
 
     def openDialog(self):
         if hasattr(self, "pwd"):
-            path = QtGui.QFileDialog.getOpenFileName(
+            path = QFileDialog.getOpenFileName(
                 self, "Open design", self.pwd, filter="*.yaml"
             )
         else:
-            path = QtGui.QFileDialog.getOpenFileName(
+            path = QFileDialog.getOpenFileName(
                 self, "Open design", filter="*.yaml"
             )
         if path:
@@ -1156,11 +1160,11 @@ class Window(QMainWindow):
 
     def saveDialog(self):
         if hasattr(self, "pwd"):
-            path = QtGui.QFileDialog.getSaveFileName(
+            path = QFileDialog.getSaveFileName(
                 self, "Save design to..", self.pwd, filter="*.yaml"
             )
         else:
-            path = QtGui.QFileDialog.getSaveFileName(
+            path = QFileDialog.getSaveFileName(
                 self, "Save design to..", filter="*.yaml"
             )
         if path:
@@ -1179,11 +1183,11 @@ class Window(QMainWindow):
     def takeScreenshot(self):
         filetypes = "*.png;;*.pdf"
         if hasattr(self, "pwd"):
-            path, filter = QtGui.QFileDialog.getSaveFileNameAndFilter(
+            path, filter = QFileDialog.getSaveFileNameAndFilter(
                 self, "Save Screenshot to..", self.pwd, filter=filetypes
             )
         else:
-            path, filter = QtGui.QFileDialog.getSaveFileNameAndFilter(
+            path, filter = QFileDialog.getSaveFileNameAndFilter(
                 self, "Save Screenshot to..", filter=filetypes
             )
         if path:
@@ -1277,14 +1281,14 @@ class Window(QMainWindow):
                         + " Plates generated."
                     )
                     if hasattr(self, "pwd"):
-                        path = QtGui.QFileDialog.getSaveFileName(
+                        path = QFileDialog.getSaveFileName(
                             self,
                             "Save csv files to.",
                             self.pwd,
                             filter="*.csv",
                         )
                     else:
-                        path = QtGui.QFileDialog.getSaveFileName(
+                        path = QFileDialog.getSaveFileName(
                             self, "Save csv files to.", filter="*.csv"
                         )
                     if path:
@@ -1406,14 +1410,14 @@ class Window(QMainWindow):
                         selection, selectioncolors, platename
                     )
                 if hasattr(self, "pwd"):
-                    path = QtGui.QFileDialog.getSaveFileName(
+                    path = QFileDialog.getSaveFileName(
                         self,
                         "Save pipetting schemes to.",
                         self.pwd,
                         filter="*.pdf",
                     )
                 else:
-                    path = QtGui.QFileDialog.getSaveFileName(
+                    path = QFileDialog.getSaveFileName(
                         self, "Save pipetting schemes to.", filter="*.pdf"
                     )
 
