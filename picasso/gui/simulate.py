@@ -744,7 +744,7 @@ class Window(QtWidgets.QMainWindow):
         #    dir = os.path.dirname(self.window.movie_path)
         # else:
         dir = None
-        path, exe = QtWidgets.QFileDialog.getOpenFileName(
+        path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load 3d calibration", directory=dir, filter="*.yaml"
         )
         if path:
@@ -1010,7 +1010,7 @@ class Window(QtWidgets.QMainWindow):
         self.currentround += 1
 
         if self.currentround == 1:
-            fileNameOld = QtWidgets.QFileDialog.getSaveFileName(
+            fileNameOld, exe = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save movie to..", filter="*.raw"
             )
             if fileNameOld:
@@ -2143,7 +2143,7 @@ class CalibrationDialog(QtWidgets.QDialog):
             tablecontent.append(rowdata)
 
         table[0] = tablecontent
-        path, exe = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Export calibration table to.", filter="*.csv"
         )
         if path:
@@ -2236,7 +2236,7 @@ class CalibrationDialog(QtWidgets.QDialog):
 
     def loadTif(self):
 
-        self.path, exe = QtWidgets.QFileDialog.getExistingDirectory(
+        self.path = QtWidgets.QFileDialog.getExistingDirectory(
             self, "Select Directory"
         )
         if self.path:
