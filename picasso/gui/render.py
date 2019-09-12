@@ -2655,7 +2655,7 @@ class View(QtWidgets.QLabel):
         X, Y = self.get_pick_rectangle_corners(
             start_x, start_y, end_x, end_y, width
         )
-        p = QtWidgets.QPolygonF()
+        p = QtGui.QPolygonF()
         for x, y in zip(X, Y):
             p.append(QtCore.QPointF(x, y))
         if return_most_right:
@@ -2779,8 +2779,8 @@ class View(QtWidgets.QLabel):
             )
             height = max(int(round(0.15 * length_displaypxl)), 1)
             painter = QtGui.QPainter(image)
-            painter.setPen(QtWidgets.QPen(QtCore.Qt.NoPen))
-            painter.setBrush(QtWidgets.QBrush(QtGui.QColor("white")))
+            painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
             x = self.width() - length_displaypxl - 35
             y = self.height() - height - 20
             painter.drawRect(x, y, length_displaypxl + 0, height + 0)
@@ -5462,7 +5462,7 @@ class View(QtWidgets.QLabel):
                     offset = (pixmap_size - diameter) / 2
                     painter.drawEllipse(offset, offset, diameter, diameter)
                     painter.end()
-                    cursor = QtWidgets.QCursor(pixmap)
+                    cursor = QtGui.QCursor(pixmap)
                     self.setCursor(cursor)
             elif self._pick_shape == "Rectangle":
                 self.unsetCursor()
