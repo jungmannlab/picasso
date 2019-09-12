@@ -24,7 +24,7 @@ As an alternative to the stand-alone program for end-users, Picasso can be insta
 Requirements
 ^^^^^^^^^^^^
 
-Python 3.\* (currently tested with 3.5)
+Python 3.\* (currently tested with 3.7)
 '''''''''''''''''''''''''''''''''''''''
 
 We highly recommend the `Anaconda or Miniconda <https://www.continuum.io/downloads>`__ Python distribution which comes with a powerful package manager.
@@ -34,14 +34,14 @@ Setting up environment with conda
 
 Sample instructions to create an environment and installation of packages with conda are as follows:
 
-1. Open the console and create a new conda environment: ``conda create --name picasso python=3.5``
+1. Open the console and create a new conda environment: ``conda create --name picasso python=3.7``
 2. Activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
-3. Install the necessary packages with conda: ``conda install h5py matplotlib=1.5.1 numba numpy scipy pyqt=4 pyyaml scikit-learn colorama tqdm``
+3. Install the necessary packages with conda: ``conda install h5py matplotlib numba numpy scipy pyqt pyyaml scikit-learn colorama tqdm``
 4. Additionally install the lmfit package with pip: ``pip install lmfit``
 5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
 6. Continue with the installation of Picasso
 
-Note that sometimes outdated packages can cause problems. If you experience errors, please check whether your packages have the right version (e.g. see issue #4). Additionally, make sure that you have the default package channel (e.g., see issue #30). Also, note that there is also a requirements.txt which you can use to install all packages with pip (``pip install -r requirements.txt``). However, currently, you will also need PyQt4 (i.e., with ``conda install pyqt=4 -y``). In the past, not relying on conda caused troubles with creating the one-click installer. It is therefore recommended installing all packages with conda.
+Note that sometimes outdated packages can cause problems. As of version 0.3.0, Picasso switched from PyQt4 to PyQt5 so make sure to update PyQt. If you experience errors, please check whether your packages have the right version (e.g. see issue #4). Additionally, make sure that you have the default package channel (e.g., see issue #30). Also, note that there is also a requirements.txt which you can use to install all packages with pip (``pip install -r requirements.txt``). In the past, not relying on conda caused troubles with creating the one-click installer. It is therefore recommended installing all packages with conda.
 
 .. _installation-1:
 
