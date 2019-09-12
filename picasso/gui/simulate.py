@@ -26,12 +26,8 @@ from matplotlib.backends.backend_qt4agg import (
 from matplotlib.backends.backend_qt4agg import (
     NavigationToolbar2QT as NavigationToolbar,
 )
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, Qt
-from PyQt5.QtGui import (
-    QDialog,
-    QDialogButtonBox,
-)
+from PyQt5 import QtCore, QtGui, QtWidgets
+
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 import os.path as _ospath
@@ -118,12 +114,12 @@ CY_DEFAULT = [
 ]
 
 
-class Window(QtGui.QMainWindow):
+class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Picasso: Simulate")
         self.setSizePolicy(
-            QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "simulate.ico")
@@ -135,29 +131,29 @@ class Window(QtGui.QMainWindow):
         self.currentround = CURRENTROUND
         self.structureMode = True
 
-        self.grid = QtGui.QGridLayout()
+        self.grid = QtWidgets.QGridLayout()
         self.grid.setSpacing(5)
 
         # CAMERA PARAMETERS
-        camera_groupbox = QtGui.QGroupBox("Camera parameters")
-        cgrid = QtGui.QGridLayout(camera_groupbox)
+        camera_groupbox = QtWidgets.QGroupBox("Camera parameters")
+        cgrid = QtWidgets.QGridLayout(camera_groupbox)
 
-        camerasize = QtGui.QLabel("Image size")
-        integrationtime = QtGui.QLabel("Integration time")
-        totaltime = QtGui.QLabel("Total acquisition time")
-        frames = QtGui.QLabel("Frames")
-        pixelsize = QtGui.QLabel("Pixelsize")
+        camerasize = QtWidgets.QLabel("Image size")
+        integrationtime = QtWidgets.QLabel("Integration time")
+        totaltime = QtWidgets.QLabel("Total acquisition time")
+        frames = QtWidgets.QLabel("Frames")
+        pixelsize = QtWidgets.QLabel("Pixelsize")
 
-        self.camerasizeEdit = QtGui.QSpinBox()
+        self.camerasizeEdit = QtWidgets.QSpinBox()
         self.camerasizeEdit.setRange(1, 512)
-        self.integrationtimeEdit = QtGui.QSpinBox()
+        self.integrationtimeEdit = QtWidgets.QSpinBox()
         self.integrationtimeEdit.setRange(1, 10000)  # 1-10.000ms
-        self.framesEdit = QtGui.QSpinBox()
+        self.framesEdit = QtWidgets.QSpinBox()
         self.framesEdit.setRange(10, 100000000)  # 10-100.000.000 frames
         self.framesEdit.setSingleStep(1000)
-        self.pixelsizeEdit = QtGui.QSpinBox()
+        self.pixelsizeEdit = QtWidgets.QSpinBox()
         self.pixelsizeEdit.setRange(1, 1000)  # 1 to 1000 nm frame size
-        self.totaltimeEdit = QtGui.QLabel()
+        self.totaltimeEdit = QtWidgets.QLabel()
 
         # Deactivate keyboard tracking
 
@@ -177,42 +173,42 @@ class Window(QtGui.QMainWindow):
 
         cgrid.addWidget(camerasize, 1, 0)
         cgrid.addWidget(self.camerasizeEdit, 1, 1)
-        cgrid.addWidget(QtGui.QLabel("Px"), 1, 2)
+        cgrid.addWidget(QtWidgets.QLabel("Px"), 1, 2)
         cgrid.addWidget(integrationtime, 2, 0)
         cgrid.addWidget(self.integrationtimeEdit, 2, 1)
-        cgrid.addWidget(QtGui.QLabel("ms"), 2, 2)
+        cgrid.addWidget(QtWidgets.QLabel("ms"), 2, 2)
         cgrid.addWidget(frames, 3, 0)
         cgrid.addWidget(self.framesEdit, 3, 1)
         cgrid.addWidget(totaltime, 4, 0)
         cgrid.addWidget(self.totaltimeEdit, 4, 1)
-        cgrid.addWidget(QtGui.QLabel("min"), 4, 2)
+        cgrid.addWidget(QtWidgets.QLabel("min"), 4, 2)
         cgrid.addWidget(pixelsize, 5, 0)
         cgrid.addWidget(self.pixelsizeEdit, 5, 1)
-        cgrid.addWidget(QtGui.QLabel("nm"), 5, 2)
+        cgrid.addWidget(QtWidgets.QLabel("nm"), 5, 2)
 
         cgrid.addItem(
-            QtGui.QSpacerItem(
-                1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding
+            QtWidgets.QSpacerItem(
+                1, 1, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding
             )
         )
 
         # PAINT PARAMETERS
-        paint_groupbox = QtGui.QGroupBox("PAINT parameters")
-        pgrid = QtGui.QGridLayout(paint_groupbox)
+        paint_groupbox = QtWidgets.QGroupBox("PAINT parameters")
+        pgrid = QtWidgets.QGridLayout(paint_groupbox)
 
-        kon = QtGui.QLabel("k<sub>On</sub>")
-        imagerconcentration = QtGui.QLabel("Imager concentration")
-        taud = QtGui.QLabel("Dark time")
-        taub = QtGui.QLabel("Bright time")
+        kon = QtWidgets.QLabel("k<sub>On</sub>")
+        imagerconcentration = QtWidgets.QLabel("Imager concentration")
+        taud = QtWidgets.QLabel("Dark time")
+        taub = QtWidgets.QLabel("Bright time")
 
-        self.konEdit = QtGui.QDoubleSpinBox()
+        self.konEdit = QtWidgets.QDoubleSpinBox()
         self.konEdit.setRange(1, 10000000000)
         self.konEdit.setDecimals(0)
         self.konEdit.setSingleStep(100000)
-        self.imagerconcentrationEdit = QtGui.QDoubleSpinBox()
+        self.imagerconcentrationEdit = QtWidgets.QDoubleSpinBox()
         self.imagerconcentrationEdit.setRange(0.01, 1000)
-        self.taudEdit = QtGui.QLabel()
-        self.taubEdit = QtGui.QDoubleSpinBox()
+        self.taudEdit = QtWidgets.QLabel()
+        self.taubEdit = QtWidgets.QDoubleSpinBox()
         self.taubEdit.setRange(1, 10000)
         self.taubEdit.setDecimals(0)
         self.taubEdit.setSingleStep(10)
@@ -226,61 +222,61 @@ class Window(QtGui.QMainWindow):
 
         pgrid.addWidget(kon, 1, 0)
         pgrid.addWidget(self.konEdit, 1, 1)
-        pgrid.addWidget(QtGui.QLabel("M<sup>−1</sup>s<sup>−1</sup>"), 1, 2)
+        pgrid.addWidget(QtWidgets.QLabel("M<sup>−1</sup>s<sup>−1</sup>"), 1, 2)
         pgrid.addWidget(imagerconcentration, 2, 0)
         pgrid.addWidget(self.imagerconcentrationEdit, 2, 1)
-        pgrid.addWidget(QtGui.QLabel("nM"), 2, 2)
+        pgrid.addWidget(QtWidgets.QLabel("nM"), 2, 2)
         pgrid.addWidget(taud, 3, 0)
         pgrid.addWidget(self.taudEdit, 3, 1)
-        pgrid.addWidget(QtGui.QLabel("ms"), 3, 2)
+        pgrid.addWidget(QtWidgets.QLabel("ms"), 3, 2)
         pgrid.addWidget(taub, 4, 0)
         pgrid.addWidget(self.taubEdit, 4, 1)
-        pgrid.addWidget(QtGui.QLabel("ms"), 4, 2)
+        pgrid.addWidget(QtWidgets.QLabel("ms"), 4, 2)
         pgrid.addItem(
-            QtGui.QSpacerItem(
-                1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding
+            QtWidgets.QSpacerItem(
+                1, 1, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding
             )
         )
 
         # IMAGER Parameters
-        imager_groupbox = QtGui.QGroupBox("Imager parameters")
-        igrid = QtGui.QGridLayout(imager_groupbox)
+        imager_groupbox = QtWidgets.QGroupBox("Imager parameters")
+        igrid = QtWidgets.QGridLayout(imager_groupbox)
 
-        laserpower = QtGui.QLabel("Power density")
+        laserpower = QtWidgets.QLabel("Power density")
         if ADVANCEDMODE:
-            laserpower = QtGui.QLabel("Laserpower")
-        psf = QtGui.QLabel("PSF")
-        psf_fwhm = QtGui.QLabel("PSF(FWHM)")
-        photonrate = QtGui.QLabel("Photonrate")
-        photonsframe = QtGui.QLabel("Photons (frame)")
-        photonratestd = QtGui.QLabel("Photonrate Std")
-        photonstdframe = QtGui.QLabel("Photons Std (frame)")
-        photonbudget = QtGui.QLabel("Photonbudget")
-        photonslope = QtGui.QLabel("Photon detection rate")
-        photonslopeStd = QtGui.QLabel("Photonrate Std ")
+            laserpower = QtWidgets.QLabel("Laserpower")
+        psf = QtWidgets.QLabel("PSF")
+        psf_fwhm = QtWidgets.QLabel("PSF(FWHM)")
+        photonrate = QtWidgets.QLabel("Photonrate")
+        photonsframe = QtWidgets.QLabel("Photons (frame)")
+        photonratestd = QtWidgets.QLabel("Photonrate Std")
+        photonstdframe = QtWidgets.QLabel("Photons Std (frame)")
+        photonbudget = QtWidgets.QLabel("Photonbudget")
+        photonslope = QtWidgets.QLabel("Photon detection rate")
+        photonslopeStd = QtWidgets.QLabel("Photonrate Std ")
 
-        self.laserpowerEdit = QtGui.QDoubleSpinBox()
+        self.laserpowerEdit = QtWidgets.QDoubleSpinBox()
         self.laserpowerEdit.setRange(0, 10)
         self.laserpowerEdit.setSingleStep(0.1)
-        self.psfEdit = QtGui.QDoubleSpinBox()
+        self.psfEdit = QtWidgets.QDoubleSpinBox()
         self.psfEdit.setRange(0, 3)
         self.psfEdit.setSingleStep(0.01)
-        self.psf_fwhmEdit = QtGui.QLabel()
-        self.photonrateEdit = QtGui.QDoubleSpinBox()
+        self.psf_fwhmEdit = QtWidgets.QLabel()
+        self.photonrateEdit = QtWidgets.QDoubleSpinBox()
         self.photonrateEdit.setRange(0, 1000)
         self.photonrateEdit.setDecimals(0)
-        self.photonsframeEdit = QtGui.QLabel()
-        self.photonratestdEdit = QtGui.QDoubleSpinBox()
+        self.photonsframeEdit = QtWidgets.QLabel()
+        self.photonratestdEdit = QtWidgets.QDoubleSpinBox()
         self.photonratestdEdit.setRange(0, 1000)
         self.photonratestdEdit.setDecimals(0)
-        self.photonstdframeEdit = QtGui.QLabel()
-        self.photonbudgetEdit = QtGui.QDoubleSpinBox()
+        self.photonstdframeEdit = QtWidgets.QLabel()
+        self.photonbudgetEdit = QtWidgets.QDoubleSpinBox()
         self.photonbudgetEdit.setRange(0, 100000000)
         self.photonbudgetEdit.setSingleStep(100000)
         self.photonbudgetEdit.setDecimals(0)
 
-        self.photonslopeEdit = QtGui.QSpinBox()
-        self.photonslopeStdEdit = QtGui.QDoubleSpinBox()
+        self.photonslopeEdit = QtWidgets.QSpinBox()
+        self.photonslopeStdEdit = QtWidgets.QDoubleSpinBox()
 
         self.laserpowerEdit.setValue(LASERPOWER_DEFAULT)
         self.psfEdit.setValue(PSF_DEFAULT)
@@ -301,50 +297,50 @@ class Window(QtGui.QMainWindow):
         self.cx = CX_DEFAULT
         self.cy = CY_DEFAULT
 
-        self.photonslopemodeEdit = QtGui.QCheckBox()
+        self.photonslopemodeEdit = QtWidgets.QCheckBox()
 
         igrid.addWidget(psf, 0, 0)
         igrid.addWidget(self.psfEdit, 0, 1)
-        igrid.addWidget(QtGui.QLabel("Px"), 0, 2)
+        igrid.addWidget(QtWidgets.QLabel("Px"), 0, 2)
         igrid.addWidget(psf_fwhm, 1, 0)
         igrid.addWidget(self.psf_fwhmEdit, 1, 1)
-        igrid.addWidget(QtGui.QLabel("nm"), 1, 2)
+        igrid.addWidget(QtWidgets.QLabel("nm"), 1, 2)
 
         igrid.addWidget(laserpower, 2, 0)
         igrid.addWidget(self.laserpowerEdit, 2, 1)
-        igrid.addWidget(QtGui.QLabel("kW cm<sup>-2<sup>"), 2, 2)
+        igrid.addWidget(QtWidgets.QLabel("kW cm<sup>-2<sup>"), 2, 2)
         if ADVANCEDMODE:
-            igrid.addWidget(QtGui.QLabel("mW"), 2, 2)
+            igrid.addWidget(QtWidgets.QLabel("mW"), 2, 2)
 
         igridindex = 1
         if ADVANCEDMODE:
             igrid.addWidget(photonrate, 3, 0)
             igrid.addWidget(self.photonrateEdit, 3, 1)
-            igrid.addWidget(QtGui.QLabel("Photons ms<sup>-1<sup>"), 3, 2)
+            igrid.addWidget(QtWidgets.QLabel("Photons ms<sup>-1<sup>"), 3, 2)
 
             igridindex = 0
 
         igrid.addWidget(photonsframe, 4 - igridindex, 0)
         igrid.addWidget(self.photonsframeEdit, 4 - igridindex, 1)
-        igrid.addWidget(QtGui.QLabel("Photons"), 4 - igridindex, 2)
+        igrid.addWidget(QtWidgets.QLabel("Photons"), 4 - igridindex, 2)
         igridindex = 2
 
         if ADVANCEDMODE:
             igrid.addWidget(photonratestd, 5, 0)
             igrid.addWidget(self.photonratestdEdit, 5, 1)
-            igrid.addWidget(QtGui.QLabel("Photons ms<sup>-1<sup"), 5, 2)
+            igrid.addWidget(QtWidgets.QLabel("Photons ms<sup>-1<sup"), 5, 2)
             igridindex = 0
 
         igrid.addWidget(photonstdframe, 6 - igridindex, 0)
         igrid.addWidget(self.photonstdframeEdit, 6 - igridindex, 1)
-        igrid.addWidget(QtGui.QLabel("Photons"), 6 - igridindex, 2)
+        igrid.addWidget(QtWidgets.QLabel("Photons"), 6 - igridindex, 2)
         igrid.addWidget(photonbudget, 7 - igridindex, 0)
         igrid.addWidget(self.photonbudgetEdit, 7 - igridindex, 1)
-        igrid.addWidget(QtGui.QLabel("Photons"), 7 - igridindex, 2)
+        igrid.addWidget(QtWidgets.QLabel("Photons"), 7 - igridindex, 2)
         igrid.addWidget(photonslope, 8 - igridindex, 0)
         igrid.addWidget(self.photonslopeEdit, 8 - igridindex, 1)
 
-        photonslopeUnit = QtGui.QLabel(
+        photonslopeUnit = QtWidgets.QLabel(
             "Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>"
         )
         photonslopeUnit.setWordWrap(True)
@@ -352,14 +348,14 @@ class Window(QtGui.QMainWindow):
 
         igrid.addWidget(self.photonslopemodeEdit, 9 - igridindex, 1)
         igrid.addWidget(
-            QtGui.QLabel("Constant detection rate"), 9 - igridindex, 0
+            QtWidgets.QLabel("Constant detection rate"), 9 - igridindex, 0
         )
 
         if ADVANCEDMODE:
             igrid.addWidget(photonslopeStd, 10 - igridindex, 0)
             igrid.addWidget(self.photonslopeStdEdit, 10 - igridindex, 1)
             igrid.addWidget(
-                QtGui.QLabel(
+                QtWidgets.QLabel(
                     "Photons  ms<sup>-1</sup> kW<sup>-1</sup> cm<sup>2</sup>"
                 ),
                 10 - igridindex,
@@ -367,15 +363,15 @@ class Window(QtGui.QMainWindow):
             )
 
         if not ADVANCEDMODE:
-            backgroundframesimple = QtGui.QLabel("Background (Frame)")
-            self.backgroundframesimpleEdit = QtGui.QLabel()
+            backgroundframesimple = QtWidgets.QLabel("Background (Frame)")
+            self.backgroundframesimpleEdit = QtWidgets.QLabel()
             igrid.addWidget(backgroundframesimple, 12 - igridindex, 0)
             igrid.addWidget(self.backgroundframesimpleEdit, 12 - igridindex, 1)
 
         # Make a spinbox for adjusting the background level
-        backgroundlevel = QtGui.QLabel("Background level")
+        backgroundlevel = QtWidgets.QLabel("Background level")
 
-        self.backgroundlevelEdit = QtGui.QSpinBox()
+        self.backgroundlevelEdit = QtWidgets.QSpinBox()
         self.backgroundlevelEdit.setRange(1, 100)
 
         igrid.addWidget(backgroundlevel, 11 - igridindex, 0)
@@ -383,39 +379,39 @@ class Window(QtGui.QMainWindow):
         self.backgroundlevelEdit.valueChanged.connect(self.changeNoise)
 
         # NOISE MODEL
-        noise_groupbox = QtGui.QGroupBox("Noise Model")
-        ngrid = QtGui.QGridLayout(noise_groupbox)
+        noise_groupbox = QtWidgets.QGroupBox("Noise Model")
+        ngrid = QtWidgets.QGridLayout(noise_groupbox)
 
-        laserc = QtGui.QLabel("Lasercoefficient")
-        imagerc = QtGui.QLabel("Imagercoefficient")
+        laserc = QtWidgets.QLabel("Lasercoefficient")
+        imagerc = QtWidgets.QLabel("Imagercoefficient")
 
-        EquationA = QtGui.QLabel("Equation A")
-        EquationB = QtGui.QLabel("Equation B")
-        EquationC = QtGui.QLabel("Equation C")
+        EquationA = QtWidgets.QLabel("Equation A")
+        EquationB = QtWidgets.QLabel("Equation B")
+        EquationC = QtWidgets.QLabel("Equation C")
 
-        Bgoffset = QtGui.QLabel("Background Offset")
-        BgStdoffset = QtGui.QLabel("Background Std Offset")
+        Bgoffset = QtWidgets.QLabel("Background Offset")
+        BgStdoffset = QtWidgets.QLabel("Background Std Offset")
 
-        backgroundframe = QtGui.QLabel("Background (Frame)")
-        noiseLabel = QtGui.QLabel("Noise (Frame)")
+        backgroundframe = QtWidgets.QLabel("Background (Frame)")
+        noiseLabel = QtWidgets.QLabel("Noise (Frame)")
 
-        self.lasercEdit = QtGui.QDoubleSpinBox()
+        self.lasercEdit = QtWidgets.QDoubleSpinBox()
         self.lasercEdit.setRange(0, 100000)
         self.lasercEdit.setDecimals(6)
 
-        self.imagercEdit = QtGui.QDoubleSpinBox()
+        self.imagercEdit = QtWidgets.QDoubleSpinBox()
         self.imagercEdit.setRange(0, 100000)
         self.imagercEdit.setDecimals(6)
 
-        self.EquationBEdit = QtGui.QDoubleSpinBox()
+        self.EquationBEdit = QtWidgets.QDoubleSpinBox()
         self.EquationBEdit.setRange(-100000, 100000)
         self.EquationBEdit.setDecimals(6)
 
-        self.EquationAEdit = QtGui.QDoubleSpinBox()
+        self.EquationAEdit = QtWidgets.QDoubleSpinBox()
         self.EquationAEdit.setRange(-100000, 100000)
         self.EquationAEdit.setDecimals(6)
 
-        self.EquationCEdit = QtGui.QDoubleSpinBox()
+        self.EquationCEdit = QtWidgets.QDoubleSpinBox()
         self.EquationCEdit.setRange(-100000, 100000)
         self.EquationCEdit.setDecimals(6)
 
@@ -426,11 +422,11 @@ class Window(QtGui.QMainWindow):
         self.EquationBEdit.setValue(EQB_DEFAULT)
         self.EquationCEdit.setValue(EQC_DEFAULT)
 
-        self.BgoffsetEdit = QtGui.QDoubleSpinBox()
+        self.BgoffsetEdit = QtWidgets.QDoubleSpinBox()
         self.BgoffsetEdit.setRange(-100000, 100000)
         self.BgoffsetEdit.setDecimals(6)
 
-        self.BgStdoffsetEdit = QtGui.QDoubleSpinBox()
+        self.BgStdoffsetEdit = QtWidgets.QDoubleSpinBox()
         self.BgStdoffsetEdit.setRange(-100000, 100000)
         self.BgStdoffsetEdit.setDecimals(6)
 
@@ -443,11 +439,11 @@ class Window(QtGui.QMainWindow):
         ]:
             button.valueChanged.connect(self.changeNoise)
 
-        backgroundframe = QtGui.QLabel("Background (Frame)")
-        noiseLabel = QtGui.QLabel("Noise (Frame)")
+        backgroundframe = QtWidgets.QLabel("Background (Frame)")
+        noiseLabel = QtWidgets.QLabel("Noise (Frame)")
 
-        self.backgroundframeEdit = QtGui.QLabel()
-        self.noiseEdit = QtGui.QLabel()
+        self.backgroundframeEdit = QtWidgets.QLabel()
+        self.noiseEdit = QtWidgets.QLabel()
 
         tags = [
             laserc,
@@ -476,85 +472,85 @@ class Window(QtGui.QMainWindow):
             ngrid.addWidget(tag, i, 0)
             ngrid.addWidget(buttons[i], i, 1)
 
-        calibrateNoiseButton = QtGui.QPushButton("Calibrate Noise Model")
+        calibrateNoiseButton = QtWidgets.QPushButton("Calibrate Noise Model")
         calibrateNoiseButton.clicked.connect(self.calibrateNoise)
-        importButton = QtGui.QPushButton("Import from Experiment (hdf5)")
+        importButton = QtWidgets.QPushButton("Import from Experiment (hdf5)")
         importButton.clicked.connect(self.importhdf5)
 
         ngrid.addWidget(calibrateNoiseButton, 10, 0, 1, 3)
         ngrid.addWidget(importButton, 11, 0, 1, 3)
 
         # HANDLE DEFINTIIONS
-        structureIncorporation = QtGui.QLabel("Incorporation")
-        self.structureIncorporationEdit = QtGui.QDoubleSpinBox()
+        structureIncorporation = QtWidgets.QLabel("Incorporation")
+        self.structureIncorporationEdit = QtWidgets.QDoubleSpinBox()
         self.structureIncorporationEdit.setKeyboardTracking(False)
         self.structureIncorporationEdit.setRange(1, 100)
         self.structureIncorporationEdit.setDecimals(0)
         self.structureIncorporationEdit.setValue(INCORPORATION_DEFAULT)
 
-        handles_groupbox = QtGui.QGroupBox("Handles")
-        hgrid = QtGui.QGridLayout(handles_groupbox)
+        handles_groupbox = QtWidgets.QGroupBox("Handles")
+        hgrid = QtWidgets.QGridLayout(handles_groupbox)
 
         hgrid.addWidget(structureIncorporation, 0, 0)
         hgrid.addWidget(self.structureIncorporationEdit, 0, 1)
-        hgrid.addWidget(QtGui.QLabel("%"), 0, 2)
+        hgrid.addWidget(QtWidgets.QLabel("%"), 0, 2)
 
-        importHandlesButton = QtGui.QPushButton("Import handles")
+        importHandlesButton = QtWidgets.QPushButton("Import handles")
         importHandlesButton.clicked.connect(self.importHandles)
         hgrid.addWidget(importHandlesButton, 1, 0, 1, 3)
 
         # 3D Settings
-        self.mode3DEdit = QtGui.QCheckBox()
-        threed_groupbox = QtGui.QGroupBox("3D")
-        tgrid = QtGui.QGridLayout(threed_groupbox)
+        self.mode3DEdit = QtWidgets.QCheckBox()
+        threed_groupbox = QtWidgets.QGroupBox("3D")
+        tgrid = QtWidgets.QGridLayout(threed_groupbox)
         tgrid.addWidget(self.mode3DEdit, 0, 0)
-        tgrid.addWidget(QtGui.QLabel("3D"), 0, 1)
+        tgrid.addWidget(QtWidgets.QLabel("3D"), 0, 1)
 
-        load3dCalibrationButton = QtGui.QPushButton("Load 3D Calibration")
+        load3dCalibrationButton = QtWidgets.QPushButton("Load 3D Calibration")
         load3dCalibrationButton.clicked.connect(self.load3dCalibration)
         tgrid.addWidget(load3dCalibrationButton, 0, 2)
 
         # STRUCTURE DEFINITIONS
-        structure_groupbox = QtGui.QGroupBox("Structure")
-        sgrid = QtGui.QGridLayout(structure_groupbox)
+        structure_groupbox = QtWidgets.QGroupBox("Structure")
+        sgrid = QtWidgets.QGridLayout(structure_groupbox)
 
-        structureno = QtGui.QLabel("Number of structures")
-        structureframe = QtGui.QLabel("Frame")
+        structureno = QtWidgets.QLabel("Number of structures")
+        structureframe = QtWidgets.QLabel("Frame")
 
-        self.structure1 = QtGui.QLabel("Columns")
-        self.structure2 = QtGui.QLabel("Rows")
-        self.structure3 = QtGui.QLabel("Spacing X,Y")
-        self.structure3Label = QtGui.QLabel("nm")
+        self.structure1 = QtWidgets.QLabel("Columns")
+        self.structure2 = QtWidgets.QLabel("Rows")
+        self.structure3 = QtWidgets.QLabel("Spacing X,Y")
+        self.structure3Label = QtWidgets.QLabel("nm")
 
-        structurexx = QtGui.QLabel("Stucture X")
-        structureyy = QtGui.QLabel("Structure Y")
-        structure3d = QtGui.QLabel("Structure 3D")
-        structureex = QtGui.QLabel("Exchange labels")
+        structurexx = QtWidgets.QLabel("Stucture X")
+        structureyy = QtWidgets.QLabel("Structure Y")
+        structure3d = QtWidgets.QLabel("Structure 3D")
+        structureex = QtWidgets.QLabel("Exchange labels")
 
-        structurecomboLabel = QtGui.QLabel("Type")
+        structurecomboLabel = QtWidgets.QLabel("Type")
 
-        self.structurenoEdit = QtGui.QSpinBox()
+        self.structurenoEdit = QtWidgets.QSpinBox()
         self.structurenoEdit.setRange(1, 1000)
-        self.structureframeEdit = QtGui.QSpinBox()
+        self.structureframeEdit = QtWidgets.QSpinBox()
         self.structureframeEdit.setRange(4, 16)
-        self.structurexxEdit = QtGui.QLineEdit(STRUCTUREXX_DEFAULT)
-        self.structureyyEdit = QtGui.QLineEdit(STRUCTUREYY_DEFAULT)
-        self.structureexEdit = QtGui.QLineEdit(STRUCTUREEX_DEFAULT)
-        self.structure3DEdit = QtGui.QLineEdit(STRUCTURE3D_DEFAULT)
+        self.structurexxEdit = QtWidgets.QLineEdit(STRUCTUREXX_DEFAULT)
+        self.structureyyEdit = QtWidgets.QLineEdit(STRUCTUREYY_DEFAULT)
+        self.structureexEdit = QtWidgets.QLineEdit(STRUCTUREEX_DEFAULT)
+        self.structure3DEdit = QtWidgets.QLineEdit(STRUCTURE3D_DEFAULT)
 
-        self.structurecombo = QtGui.QComboBox()
+        self.structurecombo = QtWidgets.QComboBox()
         for entry in ["Grid", "Circle", "Custom"]:
             self.structurecombo.addItem(entry)
 
-        self.structure1Edit = QtGui.QSpinBox()
+        self.structure1Edit = QtWidgets.QSpinBox()
         self.structure1Edit.setKeyboardTracking(False)
         self.structure1Edit.setRange(1, 1000)
         self.structure1Edit.setValue(STRUCTURE1_DEFAULT)
-        self.structure2Edit = QtGui.QSpinBox()
+        self.structure2Edit = QtWidgets.QSpinBox()
         self.structure2Edit.setKeyboardTracking(False)
         self.structure2Edit.setRange(1, 1000)
         self.structure2Edit.setValue(STRUCTURE2_DEFAULT)
-        self.structure3Edit = QtGui.QLineEdit(STRUCTURE3_DEFAULT)
+        self.structure3Edit = QtWidgets.QLineEdit(STRUCTURE3_DEFAULT)
 
         self.structure1Edit.valueChanged.connect(self.changeStructDefinition)
         self.structure2Edit.valueChanged.connect(self.changeStructDefinition)
@@ -574,11 +570,11 @@ class Window(QtGui.QMainWindow):
         self.structurenoEdit.valueChanged.connect(self.generatePositions)
         self.structureframeEdit.valueChanged.connect(self.generatePositions)
 
-        self.structurerandomOrientationEdit = QtGui.QCheckBox()
-        self.structurerandomEdit = QtGui.QCheckBox()
+        self.structurerandomOrientationEdit = QtWidgets.QCheckBox()
+        self.structurerandomEdit = QtWidgets.QCheckBox()
 
-        structurerandom = QtGui.QLabel("Random arrangement")
-        structurerandomOrientation = QtGui.QLabel("Random orientation")
+        structurerandom = QtWidgets.QLabel("Random arrangement")
+        structurerandomOrientation = QtWidgets.QLabel("Random orientation")
 
         self.structurerandomEdit.stateChanged.connect(self.generatePositions)
         self.structurerandomOrientationEdit.stateChanged.connect(
@@ -596,7 +592,7 @@ class Window(QtGui.QMainWindow):
         sgrid.addWidget(self.structurenoEdit, 1, 1)
         sgrid.addWidget(structureframe, 2, 0)
         sgrid.addWidget(self.structureframeEdit, 2, 1)
-        sgrid.addWidget(QtGui.QLabel("Px"), 2, 2)
+        sgrid.addWidget(QtWidgets.QLabel("Px"), 2, 2)
         sgrid.addWidget(structurecomboLabel)
         sgrid.addWidget(self.structurecombo, 3, 1)
 
@@ -610,10 +606,10 @@ class Window(QtGui.QMainWindow):
 
         sgrid.addWidget(structurexx, 7, 0)
         sgrid.addWidget(self.structurexxEdit, 7, 1)
-        sgrid.addWidget(QtGui.QLabel("nm"), 7, 2)
+        sgrid.addWidget(QtWidgets.QLabel("nm"), 7, 2)
         sgrid.addWidget(structureyy, 8, 0)
         sgrid.addWidget(self.structureyyEdit, 8, 1)
-        sgrid.addWidget(QtGui.QLabel("nm"), 8, 2)
+        sgrid.addWidget(QtWidgets.QLabel("nm"), 8, 2)
         sindex = 0
 
         sgrid.addWidget(structure3d, 9, 0)
@@ -631,48 +627,48 @@ class Window(QtGui.QMainWindow):
 
         sindex += -2
 
-        importDesignButton = QtGui.QPushButton("Import structure from design")
+        importDesignButton = QtWidgets.QPushButton("Import structure from design")
         importDesignButton.clicked.connect(self.importDesign)
         sgrid.addWidget(importDesignButton, 15 + sindex, 0, 1, 3)
 
-        generateButton = QtGui.QPushButton("Generate positions")
+        generateButton = QtWidgets.QPushButton("Generate positions")
         generateButton.clicked.connect(self.generatePositions)
         sgrid.addWidget(generateButton, 17 + sindex, 0, 1, 3)
         cgrid.addItem(
-            QtGui.QSpacerItem(
-                1, 1, QtGui.QSizePolicy.Minimum, QtGui.QSizePolicy.Expanding
+            QtWidgets.QSpacerItem(
+                1, 1, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding
             )
         )
 
-        simulateButton = QtGui.QPushButton("Simulate data")
-        self.exchangeroundsEdit = QtGui.QLineEdit("1")
+        simulateButton = QtWidgets.QPushButton("Simulate data")
+        self.exchangeroundsEdit = QtWidgets.QLineEdit("1")
 
-        self.conroundsEdit = QtGui.QSpinBox()
+        self.conroundsEdit = QtWidgets.QSpinBox()
         self.conroundsEdit.setRange(1, 1000)
 
-        quitButton = QtGui.QPushButton("Quit", self)
+        quitButton = QtWidgets.QPushButton("Quit", self)
         quitButton.clicked.connect(QtCore.QCoreApplication.instance().quit)
         quitButton.resize(quitButton.sizeHint())
 
-        loadButton = QtGui.QPushButton(
+        loadButton = QtWidgets.QPushButton(
             "Load settings from previous simulation"
         )
 
-        btngridR = QtGui.QGridLayout()
+        btngridR = QtWidgets.QGridLayout()
 
-        self.concatExchangeEdit = QtGui.QCheckBox()
-        self.exportkinetics = QtGui.QCheckBox()
+        self.concatExchangeEdit = QtWidgets.QCheckBox()
+        self.exportkinetics = QtWidgets.QCheckBox()
 
         btngridR.addWidget(loadButton, 0, 0, 1, 2)
         btngridR.addWidget(
-            QtGui.QLabel("Exchange rounds to be simulated:"), 1, 0
+            QtWidgets.QLabel("Exchange rounds to be simulated:"), 1, 0
         )
         btngridR.addWidget(self.exchangeroundsEdit, 1, 1)
-        btngridR.addWidget(QtGui.QLabel("Concatenate several rounds:"), 2, 0)
+        btngridR.addWidget(QtWidgets.QLabel("Concatenate several rounds:"), 2, 0)
         btngridR.addWidget(self.conroundsEdit, 2, 1)
-        btngridR.addWidget(QtGui.QLabel("Concatenate Exchange"))
+        btngridR.addWidget(QtWidgets.QLabel("Concatenate Exchange"))
         btngridR.addWidget(self.concatExchangeEdit, 3, 1)
-        btngridR.addWidget(QtGui.QLabel("Export kinetic data"))
+        btngridR.addWidget(QtWidgets.QLabel("Export kinetic data"))
         btngridR.addWidget(self.exportkinetics, 4, 1)
         btngridR.addWidget(simulateButton, 5, 0, 1, 2)
         btngridR.addWidget(quitButton, 6, 0, 1, 2)
@@ -686,11 +682,11 @@ class Window(QtGui.QMainWindow):
         self.changeNoise()
         self.changePaint()
 
-        pos_groupbox = QtGui.QGroupBox("Positions [Px]")
-        str_groupbox = QtGui.QGroupBox("Structure [nm]")
+        pos_groupbox = QtWidgets.QGroupBox("Positions [Px]")
+        str_groupbox = QtWidgets.QGroupBox("Structure [nm]")
 
-        posgrid = QtGui.QGridLayout(pos_groupbox)
-        strgrid = QtGui.QGridLayout(str_groupbox)
+        posgrid = QtWidgets.QGridLayout(pos_groupbox)
+        strgrid = QtWidgets.QGridLayout(str_groupbox)
 
         self.figure1 = plt.figure()
         self.figure2 = plt.figure()
@@ -704,7 +700,7 @@ class Window(QtGui.QMainWindow):
         posgrid.addWidget(self.canvas1)
         strgrid.addWidget(self.canvas2)
 
-        self.mainpbar = QtGui.QProgressBar(self)
+        self.mainpbar = QtWidgets.QProgressBar(self)
         # Arrange Buttons
         if ADVANCEDMODE:
             self.grid.addWidget(pos_groupbox, 1, 0)
@@ -733,7 +729,7 @@ class Window(QtGui.QMainWindow):
             self.grid.addLayout(btngridR, 4, 1, 2, 1)
             self.grid.addWidget(self.mainpbar, 8, 0, 1, 4)
 
-        mainWidget = QtGui.QWidget()
+        mainWidget = QtWidgets.QWidget()
         mainWidget.setLayout(self.grid)
         self.setCentralWidget(mainWidget)
         self.setGeometry(300, 300, 300, 150)
@@ -748,7 +744,7 @@ class Window(QtGui.QMainWindow):
         #    dir = os.path.dirname(self.window.movie_path)
         # else:
         dir = None
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load 3d calibration", directory=dir, filter="*.yaml"
         )
         if path:
@@ -1014,7 +1010,7 @@ class Window(QtGui.QMainWindow):
         self.currentround += 1
 
         if self.currentround == 1:
-            fileNameOld = QtGui.QFileDialog.getSaveFileName(
+            fileNameOld = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save movie to..", filter="*.raw"
             )
             if fileNameOld:
@@ -1367,7 +1363,7 @@ class Window(QtGui.QMainWindow):
                     self.currentround = 0
 
     def loadSettings(self):  # TODO: re-write exceptions, check key
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml"
         )
         if path:
@@ -1472,7 +1468,7 @@ class Window(QtGui.QMainWindow):
             self.statusBar().showMessage("Settings loaded from: " + path)
 
     def importDesign(self):
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml"
         )
         if path:
@@ -1508,7 +1504,7 @@ class Window(QtGui.QMainWindow):
     def importHandles(self):
         # Import structure <>
         self.handles = {}
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml *.hdf5"
         )
         if path:
@@ -1621,7 +1617,7 @@ class Window(QtGui.QMainWindow):
         # self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
-        ax1.hold(True)
+        #ax1.hold(True)
         ax1.axis("equal")
 
         for i in range(0, noexchangecolors):
@@ -1713,7 +1709,7 @@ class Window(QtGui.QMainWindow):
         # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
         ax1.cla()
-        ax1.hold(True)
+        #ax1.hold(True)
         ax1.axis("equal")
         ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
         # PLOT FRAME
@@ -1742,7 +1738,7 @@ class Window(QtGui.QMainWindow):
         # self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
-        ax1.hold(True)
+        #ax1.hold(True)
         ax1.axis("equal")
 
         structurexx = struct1[0, :]
@@ -1799,7 +1795,7 @@ class Window(QtGui.QMainWindow):
         # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
         ax1.cla()
-        ax1.hold(True)
+        #ax1.hold(True)
         ax1.axis("equal")
         ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
         # PLOT FRAME
@@ -1828,7 +1824,7 @@ class Window(QtGui.QMainWindow):
         # self.figure2.suptitle('Structure [nm]')
         ax1 = self.figure2.add_subplot(111)
         ax1.cla()
-        ax1.hold(True)
+        #ax1.hold(True)
 
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
@@ -1861,7 +1857,7 @@ class Window(QtGui.QMainWindow):
         self.canvas2.draw()
 
     def openDialog(self):
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open design", filter="*.yaml"
         )
         if path:
@@ -1869,7 +1865,7 @@ class Window(QtGui.QMainWindow):
             self.statusBar().showMessage("File loaded from: " + path)
 
     def importhdf5(self):
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open localizations", filter="*.hdf5"
         )
         if path:
@@ -1948,23 +1944,23 @@ class Window(QtGui.QMainWindow):
             locs, self.info = _io.load_locs(path, qt_parent=self)
         except _io.NoMetadataFileError:
             return
-        integrationtime, ok1 = QtGui.QInputDialog.getText(
+        integrationtime, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter integration time in ms:"
         )
         integrationtime = int(integrationtime)
         if ok1:
-            imagerconcentration, ok2 = QtGui.QInputDialog.getText(
+            imagerconcentration, ok2 = QtWidgets.QInputDialog.getText(
                 self, "Input Dialog", "Enter imager concentration in nM:"
             )
             imagerconcentration = float(imagerconcentration)
 
             if ok2:
-                laserpower, ok3 = QtGui.QInputDialog.getText(
+                laserpower, ok3 = QtWidgets.QInputDialog.getText(
                     self, "Input Dialog", "Enter Laserpower in mW:"
                 )
                 laserpower = float(laserpower)
                 if ok3:
-                    cbaseline, ok4 = QtGui.QInputDialog.getText(
+                    cbaseline, ok4 = QtWidgets.QInputDialog.getText(
                         self, "Input Dialog", "Enter camera baseline"
                     )
                     cbaseline = float(cbaseline)
@@ -1988,7 +1984,7 @@ class Window(QtGui.QMainWindow):
                     photonsmu, photonsstd = norm.fit(photons)
                     ax1 = figure3.add_subplot(131)
                     ax1.cla()
-                    ax1.hold(True)
+                    #ax1.hold(True) # TODO: Investigate again what this causes
                     ax1.hist(photons, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
                     x = _np.linspace(xmin, xmax, 100)
@@ -2005,7 +2001,7 @@ class Window(QtGui.QMainWindow):
                     sigmamu, sigmastd = norm.fit(sigma)
                     ax2 = figure3.add_subplot(132)
                     ax2.cla()
-                    ax2.hold(True)
+                    #ax2.hold(True)
                     ax2.hist(sigma, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
                     x = _np.linspace(xmin, xmax, 100)
@@ -2021,7 +2017,7 @@ class Window(QtGui.QMainWindow):
                     bgmu, bgstd = norm.fit(bg)
                     ax3 = figure3.add_subplot(133)
                     ax3.cla()
-                    ax3.hold(True)
+                    #ax3.hold(True)
                     # Plot the histogram.
                     ax3.hist(bg, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
@@ -2083,13 +2079,13 @@ class Window(QtGui.QMainWindow):
                     self.laserpowerEdit.setValue(laserpower)
 
 
-class CalibrationDialog(QtGui.QDialog):
+class CalibrationDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super(CalibrationDialog, self).__init__(parent)
 
-        layout = QtGui.QVBoxLayout(self)
+        layout = QtWidgets.QVBoxLayout(self)
 
-        self.table = QtGui.QTableWidget()
+        self.table = QtWidgets.QTableWidget()
         self.table.setWindowTitle("Noise Model Calibration")
         self.setWindowTitle("Noise Model Calibration")
         # self.resize(800, 400)
@@ -2097,13 +2093,13 @@ class CalibrationDialog(QtGui.QDialog):
         layout.addWidget(self.table)
 
         # ADD BUTTONS:
-        self.loadTifButton = QtGui.QPushButton("Load Tifs")
+        self.loadTifButton = QtWidgets.QPushButton("Load Tifs")
         layout.addWidget(self.loadTifButton)
 
-        self.evalTifButton = QtGui.QPushButton("Evaluate Tifs")
+        self.evalTifButton = QtWidgets.QPushButton("Evaluate Tifs")
         layout.addWidget(self.evalTifButton)
 
-        self.pbar = QtGui.QProgressBar(self)
+        self.pbar = QtWidgets.QProgressBar(self)
         layout.addWidget(self.pbar)
 
         self.loadTifButton.clicked.connect(self.loadTif)
@@ -2147,7 +2143,7 @@ class CalibrationDialog(QtGui.QDialog):
             tablecontent.append(rowdata)
 
         table[0] = tablecontent
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, exe = QtWidgets.QFileDialog.getSaveFileName(
             self, "Export calibration table to.", filter="*.csv"
         )
         if path:
@@ -2168,7 +2164,7 @@ class CalibrationDialog(QtGui.QDialog):
 
     def evalTif(self):
 
-        baseline, ok1 = QtGui.QInputDialog.getText(
+        baseline, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter Camera Baseline:"
         )
         if ok1:
@@ -2176,7 +2172,7 @@ class CalibrationDialog(QtGui.QDialog):
         else:
             baseline = 200  # default
 
-        sensitvity, ok2 = QtGui.QInputDialog.getText(
+        sensitvity, ok2 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter Camera Sensitivity:"
         )
         if ok2:
@@ -2194,33 +2190,33 @@ class CalibrationDialog(QtGui.QDialog):
                 + " of "
                 + str(self.tifCounter)
             )
-            QtGui.qApp.processEvents()
+            QtWidgets.qApp.processEvents()
             movie, info = _io.load_movie(element)
 
             movie = movie[0:100, :, :]
 
             movie = (movie - baseline) * sensitvity
             self.table.setItem(
-                counter - 1, 4, QtGui.QTableWidgetItem(str((_np.mean(movie))))
+                counter - 1, 4, QtWidgets.QTableWidgetItem(str((_np.mean(movie))))
             )
             self.table.setItem(
-                counter - 1, 5, QtGui.QTableWidgetItem(str((_np.std(movie))))
+                counter - 1, 5, QtWidgets.QTableWidgetItem(str((_np.std(movie))))
             )
 
             self.table.setItem(
                 counter - 1,
                 1,
-                QtGui.QTableWidgetItem(str((self.ValueFind(element, "nM_")))),
+                QtWidgets.QTableWidgetItem(str((self.ValueFind(element, "nM_")))),
             )
             self.table.setItem(
                 counter - 1,
                 2,
-                QtGui.QTableWidgetItem(str((self.ValueFind(element, "ms_")))),
+                QtWidgets.QTableWidgetItem(str((self.ValueFind(element, "ms_")))),
             )
             self.table.setItem(
                 counter - 1,
                 3,
-                QtGui.QTableWidgetItem(str((self.ValueFind(element, "mW_")))),
+                QtWidgets.QTableWidgetItem(str((self.ValueFind(element, "mW_")))),
             )
 
         self.pbar.setValue(100)
@@ -2240,7 +2236,7 @@ class CalibrationDialog(QtGui.QDialog):
 
     def loadTif(self):
 
-        self.path = QtGui.QFileDialog.getExistingDirectory(
+        self.path, exe = QtWidgets.QFileDialog.getExistingDirectory(
             self, "Select Directory"
         )
         if self.path:
@@ -2263,7 +2259,7 @@ class CalibrationDialog(QtGui.QDialog):
 
             for i in range(0, self.tifCounter):
                 self.table.setItem(
-                    i, 0, QtGui.QTableWidgetItem(self.tifFiles[i])
+                    i, 0, QtWidgets.QTableWidgetItem(self.tifFiles[i])
                 )
 
     def changeComb(self, indexval):
@@ -2271,16 +2267,16 @@ class CalibrationDialog(QtGui.QDialog):
         sender = self.sender()
         comboval = sender.currentIndex()
         if comboval == 0:
-            self.table.setItem(indexval, 2, QtGui.QTableWidgetItem(""))
-            self.table.setItem(indexval, 3, QtGui.QTableWidgetItem(""))
+            self.table.setItem(indexval, 2, QtWidgets.QTableWidgetItem(""))
+            self.table.setItem(indexval, 3, QtWidgets.QTableWidgetItem(""))
         else:
             self.table.setItem(
                 indexval,
                 2,
-                QtGui.QTableWidgetItem(self.ImagersShort[comboval]),
+                QtWidgets.QTableWidgetItem(self.ImagersShort[comboval]),
             )
             self.table.setItem(
-                indexval, 3, QtGui.QTableWidgetItem(self.ImagersLong[comboval])
+                indexval, 3, QtWidgets.QTableWidgetItem(self.ImagersLong[comboval])
             )
 
     def readoutTable(self):
@@ -2331,7 +2327,7 @@ class CalibrationDialog(QtGui.QDialog):
 
 def main():
 
-    app = QtGui.QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     window = Window()
     window.show()
     sys.exit(app.exec_())
@@ -2339,7 +2335,7 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(
+        errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()
