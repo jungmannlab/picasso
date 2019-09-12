@@ -4,15 +4,14 @@
 
     Graphical user interface for filtering localization lists
 
-    :authors: Joerg Schnitzbauer Maximilian Thomas Strauss, 2015-2019
-    :copyright: Copyright (c) 2015-2019 Jungmann Lab, MPI of Biochemistry
+    :authors: Joerg Schnitzbauer Maximilian Thomas Strauss, 2015-2018
+    :copyright: Copyright (c) 2015=2018 Jungmann Lab, MPI of Biochemistry
 """
 
 
 import sys
 import traceback
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtWidgets import qApp, QMessageBox, QTableView, QWidget, QMainWindow, QApplication, QHeaderView, QHBoxLayout, QVBoxLayout, QScrollBar, QFileDialog
+from PyQt5 import QtCore, QtGui, QtWidgets
 from matplotlib.backends.backend_qt4agg import (
     FigureCanvasQTAgg,
     NavigationToolbar2QT,
@@ -63,14 +62,14 @@ class TableModel(QtCore.QAbstractTableModel):
         return None
 
 
-class TableView(QTableView):
+class TableView(QtWidgets.QTableView):
     def __init__(self, window, parent=None):
         super().__init__(parent)
         self.window = window
         self.setAcceptDrops(True)
         self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         vertical_header = self.verticalHeader()
-        vertical_header.setSectionResizeMode(QHeaderView.Fixed)
+        vertical_header.sectionResizeMode(QtWidgets.QHeaderView.Fixed)
         vertical_header.setDefaultSectionSize(ROW_HEIGHT)
         vertical_header.setFixedWidth(70)
 
@@ -91,7 +90,7 @@ class TableView(QTableView):
             self.window.open(path)
 
 
-class PlotWindow(QWidget):
+class PlotWindow(QtWidgets.QWidget):
     def __init__(self, main_window, locs):
         super().__init__()
         self.main_window = main_window
@@ -99,7 +98,7 @@ class PlotWindow(QWidget):
         self.figure = plt.Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.plot()
-        vbox = QVBoxLayout()
+        vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
@@ -223,7 +222,7 @@ class Hist2DWindow(PlotWindow):
         event.accept()
 
 
-class Window(QMainWindow):
+class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         # Init GUI
@@ -251,13 +250,13 @@ class Window(QMainWindow):
         scatter_action.setShortcut("Ctrl+D")
         scatter_action.triggered.connect(self.plot_hist2d)
         self.table_view = TableView(self, self)
-        main_widget = QWidget()
-        hbox = QHBoxLayout(main_widget)
+        main_widget = QtWidgets.QWidget()
+        hbox = QtWidgets.QHBoxLayout(main_widget)
         hbox.setContentsMargins(0,0,0,0)
         hbox.setSpacing(0)
         self.setCentralWidget(main_widget)
         hbox.addWidget(self.table_view)
-        self.vertical_scrollbar = QScrollBar()
+        self.vertical_scrollbar = QtWidgets.QScrollBar()
         self.vertical_scrollbar.valueChanged.connect(self.display_locs)
         hbox.addWidget(self.vertical_scrollbar)
         self.hist_windows = {}
@@ -266,7 +265,7 @@ class Window(QMainWindow):
         self.locs = None
 
     def open_file_dialog(self):
-        path, ext = QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open localizations", filter="*.hdf5"
         )
         if path:
@@ -352,7 +351,7 @@ class Window(QMainWindow):
         if 'x' in self.locs.dtype.names:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)
             out_path = base + "_filter.hdf5"
-            path, ext = QFileDialog.getSaveFileName(
+            path, exe = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save localizations", out_path, filter="*.hdf5"
             )
             if path:
@@ -366,25 +365,25 @@ class Window(QMainWindow):
             )
 
     def wheelEvent(self, event):
-        new_value = self.vertical_scrollbar.value() - 0.1 * event.angleDelta().y()
+        new_value = self.vertical_scrollbar.value() - 0.1 * event.angle_delta().y()
         self.vertical_scrollbar.setValue(new_value)
 
     def resizeEvent(self, event):
         self.display_locs(self.vertical_scrollbar.value())
 
     def closeEvent(self, event):
-        qApp.closeAllWindows()
+        QtWidgets.qApp.closeAllWindows()
 
 
 def main():
-    app = QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     window = Window()
     window.show()
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QMessageBox.critical(
+        errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()
