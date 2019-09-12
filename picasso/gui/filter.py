@@ -366,7 +366,7 @@ class Window(QMainWindow):
             )
 
     def wheelEvent(self, event):
-        new_value = self.vertical_scrollbar.value() - 0.1 * event.delta()
+        new_value = self.vertical_scrollbar.value() - 0.1 * event.angleDelta().y()
         self.vertical_scrollbar.setValue(new_value)
 
     def resizeEvent(self, event):
