@@ -305,7 +305,7 @@ class View(QtWidgets.QLabel):
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
-        qimage = QtWidgets.QImage(self._bgra.data, X, Y, QtWidgets.QImage.Format_RGB32)
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
         self._pixmap = QtGui.QPixmap.fromImage(qimage)
         self.set_pixmap(self._pixmap)
 

@@ -17,8 +17,7 @@ import collections as _collections
 import glob as _glob
 import os.path as _ospath
 from picasso import io as _io
-from PyQt5 import QtGui, QtCore
-from PyQt5.QtWidgets import QProgressDialog, QDialog
+from PyQt5 import QtGui, QtCore, QtWidgets
 from lmfit import Model as _Model
 
 
@@ -28,7 +27,7 @@ from lmfit import Model as _Model
 _dialogs = []
 
 
-class ProgressDialog(QProgressDialog):
+class ProgressDialog(QtWidgets.QProgressDialog):
     def __init__(self, description, minimum, maximum, parent):
         super().__init__(
             description,
@@ -51,14 +50,14 @@ class ProgressDialog(QProgressDialog):
         _dialogs.remove(self)
 
 
-class StatusDialog(QDialog):
+class StatusDialog(QtWidgets.QDialog):
     def __init__(self, description, parent):
         super(StatusDialog, self).__init__(
             parent, QtCore.Qt.CustomizeWindowHint
         )
         _dialogs.append(self)
-        vbox = QtGui.QVBoxLayout(self)
-        label = QtGui.QLabel(description)
+        vbox = QtWidgets.QVBoxLayout(self)
+        label = QtWidgets.QLabel(description)
         vbox.addWidget(label)
         self.show()
         QtCore.QCoreApplication.instance().processEvents()
