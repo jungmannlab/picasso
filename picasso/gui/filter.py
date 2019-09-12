@@ -12,7 +12,7 @@
 import sys
 import traceback
 from PyQt5 import QtCore, QtGui
-from PyQt5.QtWidgets import QTableView, QWidget, QMainWindow, QApplication, QHeaderView, QHBoxLayout, QScrollBar
+from PyQt5.QtWidgets import qApp, QMessageBox, QTableView, QWidget, QMainWindow, QApplication, QHeaderView, QHBoxLayout, QVBoxLayout, QScrollBar, QFileDialog
 from matplotlib.backends.backend_qt4agg import (
     FigureCanvasQTAgg,
     NavigationToolbar2QT,
@@ -99,7 +99,7 @@ class PlotWindow(QWidget):
         self.figure = plt.Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.plot()
-        vbox = QtGui.QVBoxLayout()
+        vbox = QVBoxLayout()
         self.setLayout(vbox)
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
@@ -266,7 +266,7 @@ class Window(QMainWindow):
         self.locs = None
 
     def open_file_dialog(self):
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, ext = QFileDialog.getOpenFileName(
             self, "Open localizations", filter="*.hdf5"
         )
         if path:
@@ -352,7 +352,7 @@ class Window(QMainWindow):
         if 'x' in self.locs.dtype.names:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)
             out_path = base + "_filter.hdf5"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QFileDialog.getSaveFileName(
                 self, "Save localizations", out_path, filter="*.hdf5"
             )
             if path:
@@ -373,7 +373,7 @@ class Window(QMainWindow):
         self.display_locs(self.vertical_scrollbar.value())
 
     def closeEvent(self, event):
-        QtGui.qApp.closeAllWindows()
+        qApp.closeAllWindows()
 
 
 def main():
@@ -384,7 +384,7 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(
+        errorbox = QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()
