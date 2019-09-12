@@ -20,7 +20,7 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
 from matplotlib.backends.backend_pdf import PdfPages
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
 from .. import io as _io
 from .. import design
@@ -299,8 +299,8 @@ class PipettingDialog(QtWidgets.QDialog):
         layout.addWidget(self.plateCounter)
         layout.addWidget(self.uniqueCounter)
 
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal, self
         )
 
         layout.addWidget(self.buttons)
@@ -310,11 +310,11 @@ class PipettingDialog(QtWidgets.QDialog):
 
     def loadFolder(self):
         if hasattr(self, "pwd"):
-            path, exe = QtWidget.QFileDialog.getExistingDirectory(
+            path = QtWidgets.QFileDialog.getExistingDirectory(
                 self, "Select Directory", self.pwd
             )
         else:
-            path, exe = QtWidget.QFileDialog.getExistingDirectory(self, "Select Directory")
+            path = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Directory")
         if path:
             self.folderEdit.setText(path)
             csvFiles = glob.glob(os.path.join(path, "*.csv"))
@@ -355,7 +355,7 @@ class PipettingDialog(QtWidgets.QDialog):
         result = dialog.exec_()
         fulllist = dialog.getfulllist()
 
-        return (fulllist, result == QDialog.Accepted)
+        return (fulllist, result == QtWidgets.QDialog.Accepted)
 
 
 class SeqDialog(QtWidgets.QDialog):
@@ -377,8 +377,8 @@ class SeqDialog(QtWidgets.QDialog):
 
         layout.addWidget(self.table)
 
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal, self
         )
 
         layout.addWidget(self.buttons)
@@ -593,7 +593,7 @@ class FoldingDialog(QtWidgets.QDialog):
         dialog = FoldingDialog(parent)
         result = dialog.exec_()
         tablelong, tableshort = dialog.evalTable()
-        return (tablelong, tableshort, result == QDialog.Accepted)
+        return (tablelong, tableshort, result == QtWidgets.QDialog.Accepted)
 
 
 class PlateDialog(QtWidgets.QDialog):
@@ -619,8 +619,8 @@ class PlateDialog(QtWidgets.QDialog):
         layout.addWidget(self.radio1)
         layout.addWidget(self.radio2)
 
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, Qt.Horizontal, self
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel, QtCore.Qt.Horizontal, self
         )
 
         layout.addWidget(self.buttons)
@@ -642,7 +642,7 @@ class PlateDialog(QtWidgets.QDialog):
         dialog = PlateDialog(parent)
         result = dialog.exec_()
         selection = dialog.evalSelection()
-        return (selection, result == QDialog.Accepted)
+        return (selection, result == QtWidgets.QDialog.Accepted)
 
 
 class BindingSiteItem(QtWidgets.QGraphicsPolygonItem):
@@ -1158,22 +1158,23 @@ class Window(QtWidgets.QMainWindow):
     def takeScreenshot(self):
         filetypes = "*.png;;*.pdf"
         if hasattr(self, "pwd"):
-            path, filter = QtWidgets.QFileDialog.getSaveFileNameAndFilter(
+            path, filter = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save Screenshot to..", self.pwd, filter=filetypes
             )
         else:
-            path, filter = QtWidgets.QFileDialog.getSaveFileNameAndFilter(
+            path, filter = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save Screenshot to..", filter=filetypes
             )
         if path:
             if filter == "*.png":
-                p = QPixmap.grabWidget(self.view)
+                #p = QtGui.QPixmap.grab(self.view)
+                p = self.view.grab()
                 p.save(path, filter[2:])
             else:
-                pdf_printer = QPrinter()
-                pdf_printer.setOutputFormat(QPrinter.PdfFormat)
+                pdf_printer = QtPrintSupport.QPrinter()
+                pdf_printer.setOutputFormat(QtPrintSupport.QPrinter.PdfFormat)
                 pdf_printer.setOutputFileName(path)
-                pdf_painter = QPainter()
+                pdf_painter = QtGui.QPainter()
                 pdf_painter.begin(pdf_printer)
                 self.view.render(pdf_painter)
                 pdf_painter.end()
