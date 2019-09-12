@@ -1,5 +1,5 @@
 """
-    gui/average
+    gui/average3
     ~~~~~~~~~~~~~~~~~~~~
 
     Graphical user interface for three-dimensional averaging of particles
