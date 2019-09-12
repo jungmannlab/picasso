@@ -22,11 +22,26 @@ import numpy as _np
 from matplotlib.backends.backend_pdf import PdfPages
 from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import QDateTime, Qt, pyqtSlot
-from PyQt5.QtGui import (
+from PyQt5.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFileDialog,
+    QGraphicsPolygonItem,
+    QGraphicsScene,
+    QMainWindow,
+    QWidget,
+    QApplication,
+    QGraphicsTextItem,
+    QGraphicsLineItem,
+    QGraphicsView,
+    QPushButton,
+    QLabel,
+    QHBoxLayout,
+    QVBoxLayout,
+    QRadioButton
 )
+
+
 
 from .. import io as _io
 from .. import design
@@ -283,17 +298,17 @@ def indextoStr(x, y):
     return strIndex
 
 
-class PipettingDialog(QtGui.QDialog):
+class PipettingDialog(QDialog):
     def __init__(self, parent=None):
         super(PipettingDialog, self).__init__(parent)
-        layout = QtGui.QVBoxLayout(self)
+        layout = QVBoxLayout,(self)
         self.setWindowTitle("Pipetting dialog")
 
-        self.loadButton = QtGui.QPushButton("Select folder")
-        self.folderEdit = QtGui.QLabel("")
-        self.csvCounter = QtGui.QLabel("")
-        self.plateCounter = QtGui.QLabel("")
-        self.uniqueCounter = QtGui.QLabel("")
+        self.loadButton = QPushButton("Select folder")
+        self.folderEdit = QLabel("")
+        self.csvCounter = QLabel("")
+        self.plateCounter = QLabel("")
+        self.uniqueCounter = QLabel("")
 
         self.fulllist = []
 
@@ -364,11 +379,11 @@ class PipettingDialog(QtGui.QDialog):
         return (fulllist, result == QDialog.Accepted)
 
 
-class SeqDialog(QtGui.QDialog):
+class SeqDialog(QDialog):
     def __init__(self, parent=None):
         super(SeqDialog, self).__init__(parent)
 
-        layout = QtGui.QVBoxLayout(self)
+        layout = QVBoxLayout,(self)
 
         self.table = QtGui.QTableWidget()
         self.table.setWindowTitle("Extension table")
@@ -474,11 +489,11 @@ class SeqDialog(QtGui.QDialog):
         return tablelong, tableshort
 
 
-class FoldingDialog(QtGui.QDialog):
+class FoldingDialog(QDialog):
     def __init__(self, parent=None):
         super(FoldingDialog, self).__init__(parent)
 
-        layout = QtGui.QVBoxLayout(self)
+        layout = QVBoxLayout,(self)
         self.table = QtGui.QTableWidget()
         self.table.setWindowTitle("Folding table")
         self.setWindowTitle("Folding table")
@@ -500,9 +515,9 @@ class FoldingDialog(QtGui.QDialog):
                 "Colorcode",
             ]
         )
-        self.clcButton = QtGui.QPushButton("Recalculate")
+        self.clcButton = QPushButton("Recalculate")
         self.clcButton.clicked.connect(self.clcExcess)
-        self.exportButton = QtGui.QPushButton("Export")
+        self.exportButton = QPushButton("Export")
         self.exportButton.clicked.connect(self.exportTable)
         layout.addWidget(self.table)
         layout.addWidget(self.clcButton)
@@ -602,18 +617,18 @@ class FoldingDialog(QtGui.QDialog):
         return (tablelong, tableshort, result == QDialog.Accepted)
 
 
-class PlateDialog(QtGui.QDialog):
+class PlateDialog(QDialog):
     def __init__(self, parent=None):
         super(PlateDialog, self).__init__(parent)
-        layout = QtGui.QVBoxLayout(self)
-        self.info = QtGui.QLabel("Please make selection:  ")
-        self.radio1 = QtGui.QRadioButton(
+        layout = QVBoxLayout,(self)
+        self.info = QLabel("Please make selection:  ")
+        self.radio1 = QRadioButton(
             (
                 "Export only the sequences needed for this design."
                 " (176 staples in 2 plates)"
             )
         )
-        self.radio2 = QtGui.QRadioButton(
+        self.radio2 = QRadioButton(
             (
                 "Export full 2 full plates for all sequences used"
                 " (176 staples * number of unique sequences)"
@@ -651,7 +666,7 @@ class PlateDialog(QtGui.QDialog):
         return (selection, result == QDialog.Accepted)
 
 
-class BindingSiteItem(QtGui.QGraphicsPolygonItem):
+class BindingSiteItem(QGraphicsPolygonItem):
     def __init__(self, y, x):
         hex_center_x, hex_center_y = indextoHex(y, x)
         center = QtCore.QPointF(hex_center_x, hex_center_y)
@@ -674,7 +689,7 @@ class BindingSiteItem(QtGui.QGraphicsPolygonItem):
         self.setBrush(defaultcolor)  # initialize all as grey
 
 
-class Scene(QtGui.QGraphicsScene):
+class Scene(QGraphicsScene):
     def __init__(self, window):
         super().__init__()
         self.window = window
@@ -746,7 +761,7 @@ class Scene(QtGui.QGraphicsScene):
         xofflbl = 1
 
         for i in range(0, maxcolor):
-            self.alllbl[i] = QtGui.QGraphicsTextItem("   ")
+            self.alllbl[i] = QGraphicsTextItem("   ")
             self.alllbl[i].setPos(
                 *(
                     1.5
@@ -764,7 +779,7 @@ class Scene(QtGui.QGraphicsScene):
             )
             self.addItem(self.alllbl[i])
 
-            self.alllblseq[i] = QtGui.QGraphicsTextItem("   ")
+            self.alllblseq[i] = QGraphicsTextItem("   ")
             self.alllblseq[i].setPos(
                 *(
                     1.5
@@ -783,7 +798,7 @@ class Scene(QtGui.QGraphicsScene):
             self.addItem(self.alllblseq[i])
 
         # MAKE A LABEL FOR THE CURRENTCOLOR
-        self.cclabel = QtGui.QGraphicsTextItem("Selected color")
+        self.cclabel = QGraphicsTextItem("Selected color")
         self.cclabel.setPos(
             *(
                 1.5
@@ -819,10 +834,10 @@ class Scene(QtGui.QGraphicsScene):
                 hex_center_y - 0.5 * HEX_SIDE_HALF + 2,
             )
 
-            line1[i] = QtGui.QGraphicsLineItem(
+            line1[i] = QGraphicsLineItem(
                 QtCore.QLineF(startpoint, midpoint)
             )
-            line2[i] = QtGui.QGraphicsLineItem(
+            line2[i] = QGraphicsLineItem(
                 QtCore.QLineF(midpoint, endpoint)
             )
 
@@ -1110,11 +1125,11 @@ class Scene(QtGui.QGraphicsScene):
         return allplates
 
 
-class Window(QtGui.QMainWindow):
+class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.mainscene = Scene(self)
-        self.view = QtGui.QGraphicsView(self.mainscene)
+        self.view = QGraphicsView(self.mainscene)
         self.view.setRenderHint(QtGui.QPainter.Antialiasing)
         self.setCentralWidget(self.view)
         self.statusBar().showMessage(
@@ -1488,7 +1503,7 @@ class Window(QtGui.QMainWindow):
         result = fdialog.exec()
 
 
-class MainWindow(QtGui.QWidget):
+class MainWindow(QWidget):
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setWindowTitle("Picasso: Design")
@@ -1505,14 +1520,14 @@ class MainWindow(QtGui.QWidget):
         self.window = Window()
 
         # define buttons
-        loadbtn = QtGui.QPushButton("Load")
-        savebtn = QtGui.QPushButton("Save")
-        clearbtn = QtGui.QPushButton("Clear")
-        sshotbtn = QtGui.QPushButton("Screenshot")
-        seqbtn = QtGui.QPushButton("Extensions")
-        platebtn = QtGui.QPushButton("Get plates")
-        pipettbtn = QtGui.QPushButton("Pipetting scheme")
-        foldbtn = QtGui.QPushButton("Folding scheme")
+        loadbtn = QPushButton("Load")
+        savebtn = QPushButton("Save")
+        clearbtn = QPushButton("Clear")
+        sshotbtn = QPushButton("Screenshot")
+        seqbtn = QPushButton("Extensions")
+        platebtn = QPushButton("Get plates")
+        pipettbtn = QPushButton("Pipetting scheme")
+        foldbtn = QPushButton("Folding scheme")
 
         loadbtn.clicked.connect(self.window.openDialog)
         savebtn.clicked.connect(self.window.saveDialog)
@@ -1523,7 +1538,7 @@ class MainWindow(QtGui.QWidget):
         pipettbtn.clicked.connect(self.window.pipettingScheme)
         foldbtn.clicked.connect(self.window.foldingScheme)
 
-        hbox = QtGui.QHBoxLayout()
+        hbox = QHBoxLayout()
         hbox.addWidget(loadbtn)
         hbox.addWidget(savebtn)
         hbox.addWidget(clearbtn)
@@ -1534,7 +1549,7 @@ class MainWindow(QtGui.QWidget):
         hbox.addWidget(foldbtn)
 
         # set layout
-        vbox = QtGui.QVBoxLayout()
+        vbox = QVBoxLayout()
         vbox.addWidget(self.window)
         vbox.addLayout(hbox)
         self.setLayout(vbox)
@@ -1546,7 +1561,7 @@ class MainWindow(QtGui.QWidget):
 
 
 def main():
-    app = QtGui.QApplication(sys.argv)
+    app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
