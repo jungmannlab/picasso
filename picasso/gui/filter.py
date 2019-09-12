@@ -4,14 +4,15 @@
 
     Graphical user interface for filtering localization lists
 
-    :authors: Joerg Schnitzbauer Maximilian Thomas Strauss, 2015-2018
-    :copyright: Copyright (c) 2015=2018 Jungmann Lab, MPI of Biochemistry
+    :authors: Joerg Schnitzbauer Maximilian Thomas Strauss, 2015-2019
+    :copyright: Copyright (c) 2015-2019 Jungmann Lab, MPI of Biochemistry
 """
 
 
 import sys
 import traceback
 from PyQt5 import QtCore, QtGui
+from PyQt5.QtWidgets import QTableView, QWidget, QMainWindow, QApplication, QHeaderView, QHBoxLayout, QScrollBar
 from matplotlib.backends.backend_qt4agg import (
     FigureCanvasQTAgg,
     NavigationToolbar2QT,
@@ -62,14 +63,14 @@ class TableModel(QtCore.QAbstractTableModel):
         return None
 
 
-class TableView(QtGui.QTableView):
+class TableView(QTableView):
     def __init__(self, window, parent=None):
         super().__init__(parent)
         self.window = window
         self.setAcceptDrops(True)
         self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         vertical_header = self.verticalHeader()
-        vertical_header.setResizeMode(QtGui.QHeaderView.Fixed)
+        vertical_header.setSectionResizeMode(QHeaderView.Fixed)
         vertical_header.setDefaultSectionSize(ROW_HEIGHT)
         vertical_header.setFixedWidth(70)
 
@@ -90,7 +91,7 @@ class TableView(QtGui.QTableView):
             self.window.open(path)
 
 
-class PlotWindow(QtGui.QWidget):
+class PlotWindow(QWidget):
     def __init__(self, main_window, locs):
         super().__init__()
         self.main_window = main_window
@@ -222,7 +223,7 @@ class Hist2DWindow(PlotWindow):
         event.accept()
 
 
-class Window(QtGui.QMainWindow):
+class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         # Init GUI
@@ -250,13 +251,13 @@ class Window(QtGui.QMainWindow):
         scatter_action.setShortcut("Ctrl+D")
         scatter_action.triggered.connect(self.plot_hist2d)
         self.table_view = TableView(self, self)
-        main_widget = QtGui.QWidget()
-        hbox = QtGui.QHBoxLayout(main_widget)
-        hbox.setMargin(0)
+        main_widget = QWidget()
+        hbox = QHBoxLayout(main_widget)
+        hbox.setContentsMargins(0,0,0,0)
         hbox.setSpacing(0)
         self.setCentralWidget(main_widget)
         hbox.addWidget(self.table_view)
-        self.vertical_scrollbar = QtGui.QScrollBar()
+        self.vertical_scrollbar = QScrollBar()
         self.vertical_scrollbar.valueChanged.connect(self.display_locs)
         hbox.addWidget(self.vertical_scrollbar)
         self.hist_windows = {}
@@ -376,7 +377,7 @@ class Window(QtGui.QMainWindow):
 
 
 def main():
-    app = QtGui.QApplication(sys.argv)
+    app = QApplication(sys.argv)
     window = Window()
     window.show()
 
