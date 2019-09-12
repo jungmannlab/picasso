@@ -17,7 +17,7 @@ import struct as _struct
 import json as _json
 import os as _os
 import threading as _threading
-from PyQt4.QtGui import QMessageBox as _QMessageBox
+from PyQt5.QtWidgets import QMessageBox as _QMessageBox
 from . import lib as _lib
 
 

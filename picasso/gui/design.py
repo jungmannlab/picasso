@@ -20,15 +20,11 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
 from matplotlib.backends.backend_pdf import PdfPages
-from PyQt4 import QtCore, QtGui
-from PyQt4.QtCore import QDateTime, Qt, pyqtSlot
-from PyQt4.QtGui import *
-from PyQt4.QtGui import (
-    QApplication,
-    QDateTimeEdit,
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtCore import QDateTime, Qt, pyqtSlot
+from PyQt5.QtGui import (
     QDialog,
     QDialogButtonBox,
-    QVBoxLayout,
     QFileDialog,
 )
 

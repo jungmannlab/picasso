@@ -12,7 +12,7 @@
 import os.path
 import sys
 import yaml
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui
 import time
 import numpy as np
 import traceback

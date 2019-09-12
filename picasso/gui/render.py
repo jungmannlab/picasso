@@ -27,7 +27,7 @@ from matplotlib.backends.backend_qt4agg import (
 )
 from scipy.ndimage.filters import gaussian_filter
 from numpy.lib.recfunctions import stack_arrays
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui
 
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans

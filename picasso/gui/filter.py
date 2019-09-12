@@ -11,7 +11,7 @@
 
 import sys
 import traceback
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui
 from matplotlib.backends.backend_qt4agg import (
     FigureCanvasQTAgg,
     NavigationToolbar2QT,

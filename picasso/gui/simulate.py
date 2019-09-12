@@ -26,14 +26,11 @@ from matplotlib.backends.backend_qt4agg import (
 from matplotlib.backends.backend_qt4agg import (
     NavigationToolbar2QT as NavigationToolbar,
 )
-from PyQt4 import QtCore, QtGui
-from PyQt4.QtCore import QDateTime, Qt
-from PyQt4.QtGui import (
-    QApplication,
-    QDateTimeEdit,
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtCore import QDateTime, Qt
+from PyQt5.QtGui import (
     QDialog,
     QDialogButtonBox,
-    QVBoxLayout,
 )
 from scipy.optimize import curve_fit
 from scipy.stats import norm

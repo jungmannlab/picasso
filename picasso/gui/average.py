@@ -17,7 +17,8 @@ import matplotlib.pyplot as plt
 import numba
 import numpy as np
 import scipy
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui
+from PyQt5.QtWidgets import QDialog, QLabel, QMainWindow, QApplication, QGridLayout, QDoubleSpinBox, QSpinBox
 
 from .. import io, lib, render
 
@@ -162,16 +163,16 @@ class Worker(QtCore.QThread):
             )
 
 
-class ParametersDialog(QtGui.QDialog):
+class ParametersDialog(QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Parameters")
         self.setModal(False)
-        grid = QtGui.QGridLayout(self)
+        grid = QGridLayout(self)
 
-        grid.addWidget(QtGui.QLabel("Oversampling:"), 0, 0)
-        self.oversampling = QtGui.QDoubleSpinBox()
+        grid.addWidget(QLabel("Oversampling:"), 0, 0)
+        self.oversampling = QDoubleSpinBox()
         self.oversampling.setRange(1, 1e7)
         self.oversampling.setValue(10)
         self.oversampling.setDecimals(1)
@@ -179,14 +180,14 @@ class ParametersDialog(QtGui.QDialog):
         self.oversampling.valueChanged.connect(self.window.view.update_image)
         grid.addWidget(self.oversampling, 0, 1)
 
-        grid.addWidget(QtGui.QLabel("Iterations:"), 1, 0)
-        self.iterations = QtGui.QSpinBox()
+        grid.addWidget(QLabel("Iterations:"), 1, 0)
+        self.iterations = QSpinBox()
         self.iterations.setRange(0, 1e7)
         self.iterations.setValue(10)
         grid.addWidget(self.iterations, 1, 1)
 
 
-class View(QtGui.QLabel):
+class View(QLabel):
     def __init__(self, window):
         super().__init__()
         self.window = window
@@ -329,7 +330,7 @@ class View(QtGui.QLabel):
         self.set_image(image_avg)
 
 
-class Window(QtGui.QMainWindow):
+class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Picasso: Average")
@@ -378,7 +379,7 @@ class Window(QtGui.QMainWindow):
 
 def main():
 
-    app = QtGui.QApplication(sys.argv)
+    app = QApplication(sys.argv)
     window = Window()
     window.show()
 
