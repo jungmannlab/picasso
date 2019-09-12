@@ -20,32 +20,7 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
 from matplotlib.backends.backend_pdf import PdfPages
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import QDateTime, Qt, pyqtSlot
-from PyQt5.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
-    QFileDialog,
-    QGraphicsPolygonItem,
-    QGraphicsScene,
-    QMainWindow,
-    QWidget,
-    QApplication,
-    QGraphicsTextItem,
-    QGraphicsLineItem,
-    QGraphicsView,
-    QPushButton,
-    QLabel,
-    QHBoxLayout,
-    QVBoxLayout,
-    QRadioButton,
-    QTableWidget,
-    QFileDialog,
-    QTableWidgetItem,
-    QTableWidget
-)
-
-
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .. import io as _io
 from .. import design
@@ -302,17 +277,17 @@ def indextoStr(x, y):
     return strIndex
 
 
-class PipettingDialog(QDialog):
+class PipettingDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super(PipettingDialog, self).__init__(parent)
-        layout = QVBoxLayout,(self)
+        layout = QtWidgets.QVBoxLayout(self)
         self.setWindowTitle("Pipetting dialog")
 
-        self.loadButton = QPushButton("Select folder")
-        self.folderEdit = QLabel("")
-        self.csvCounter = QLabel("")
-        self.plateCounter = QLabel("")
-        self.uniqueCounter = QLabel("")
+        self.loadButton = QtWidgets.QPushButton("Select folder")
+        self.folderEdit = QtWidgets.QLabel("")
+        self.csvCounter = QtWidgets.QLabel("")
+        self.plateCounter = QtWidgets.QLabel("")
+        self.uniqueCounter = QtWidgets.QLabel("")
 
         self.fulllist = []
 
@@ -335,11 +310,11 @@ class PipettingDialog(QDialog):
 
     def loadFolder(self):
         if hasattr(self, "pwd"):
-            path = QFileDialog.getExistingDirectory(
+            path, exe = QtWidget.QFileDialog.getExistingDirectory(
                 self, "Select Directory", self.pwd
             )
         else:
-            path = QFileDialog.getExistingDirectory(self, "Select Directory")
+            path, exe = QtWidget.QFileDialog.getExistingDirectory(self, "Select Directory")
         if path:
             self.folderEdit.setText(path)
             csvFiles = glob.glob(os.path.join(path, "*.csv"))
@@ -383,13 +358,13 @@ class PipettingDialog(QDialog):
         return (fulllist, result == QDialog.Accepted)
 
 
-class SeqDialog(QDialog):
+class SeqDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super(SeqDialog, self).__init__(parent)
 
-        layout = QVBoxLayout,(self)
+        layout = QtWidgets.QVBoxLayout(self)
 
-        self.table = QTableWidget()
+        self.table = QtWidgets.QTableWidget()
         self.table.setWindowTitle("Extension table")
         self.setWindowTitle("Extension table")
         self.resize(500, 285)
@@ -419,17 +394,17 @@ class SeqDialog(QDialog):
         for i in range(len(colorcounts) - 1):
             if colorcounts[i] > 0:
                 self.table.setItem(
-                    rowRunner, 0, QTableWidgetItem(str(i + 1))
+                    rowRunner, 0, QtWidgets.QTableWidgetItem(str(i + 1))
                 )
                 self.table.setItem(
-                    rowRunner, 1, QTableWidgetItem("Ext " + str(i + 1))
+                    rowRunner, 1, QtWidgets.QTableWidgetItem("Ext " + str(i + 1))
                 )
                 self.table.item(rowRunner, 1).setBackground(allcolors[i + 1])
                 self.table.setItem(
-                    rowRunner, 3, QTableWidgetItem(tableshort[i])
+                    rowRunner, 3, QtWidgets.QTableWidgetItem(tableshort[i])
                 )
                 self.table.setItem(
-                    rowRunner, 4, QTableWidgetItem(tablelong[i])
+                    rowRunner, 4, QtWidgets.QTableWidgetItem(tablelong[i])
                 )
                 rowRunner += 1
 
@@ -439,7 +414,7 @@ class SeqDialog(QDialog):
         comb = dict()
 
         for i in range(self.table.rowCount()):
-            comb[i] = QtGui.QComboBox()
+            comb[i] = QtWidgets.QComboBox()
 
         for element in self.ImagersShort:
             for i in range(self.table.rowCount()):
@@ -456,16 +431,16 @@ class SeqDialog(QDialog):
         sender = self.sender()
         comboval = sender.currentIndex()
         if comboval == 0:
-            self.table.setItem(indexval, 3, QTableWidgetItem("None"))
-            self.table.setItem(indexval, 4, QTableWidgetItem("None"))
+            self.table.setItem(indexval, 3, QtWidgets.QTableWidgetItem("None"))
+            self.table.setItem(indexval, 4, QtWidgets.QTableWidgetItem("None"))
         else:
             self.table.setItem(
                 indexval,
                 3,
-                QTableWidgetItem(self.ImagersShort[comboval]),
+                QtWidgets.QTableWidgetItem(self.ImagersShort[comboval]),
             )
             self.table.setItem(
-                indexval, 4, QTableWidgetItem(self.ImagersLong[comboval])
+                indexval, 4, QtWidgets.QTableWidgetItem(self.ImagersLong[comboval])
             )
 
     def readoutTable(self):
@@ -493,12 +468,12 @@ class SeqDialog(QDialog):
         return tablelong, tableshort
 
 
-class FoldingDialog(QDialog):
+class FoldingDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super(FoldingDialog, self).__init__(parent)
 
-        layout = QVBoxLayout,(self)
-        self.table = QTableWidget()
+        layout = QtWidgets.QVBoxLayout(self)
+        self.table = QtWidgets.QTableWidget()
         self.table.setWindowTitle("Folding table")
         self.setWindowTitle("Folding table")
         self.resize(800, 285)
@@ -519,9 +494,9 @@ class FoldingDialog(QDialog):
                 "Colorcode",
             ]
         )
-        self.clcButton = QPushButton("Recalculate")
+        self.clcButton = QtWidgets.QPushButton("Recalculate")
         self.clcButton.clicked.connect(self.clcExcess)
-        self.exportButton = QPushButton("Export")
+        self.exportButton = QtWidgets.QPushButton("Export")
         self.exportButton.clicked.connect(self.exportTable)
         layout.addWidget(self.table)
         layout.addWidget(self.clcButton)
@@ -556,11 +531,11 @@ class FoldingDialog(QDialog):
 
         table[0] = tablecontent
         if hasattr(self, "pwd"):
-            path = QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Export folding table to.", self.pwd, filter="*.csv"
             )
         else:
-            path = QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Export folding table to.", filter="*.csv"
             )
         if path:
@@ -609,7 +584,7 @@ class FoldingDialog(QDialog):
             )
 
     def writeTable(self, row, col, content):
-        self.table.setItem(row, col, QTableWidgetItem(content))
+        self.table.setItem(row, col, QtWidgets.QTableWidgetItem(content))
 
     def colorTable(self, row, col, color):
         self.table.item(row, col).setBackground(color)
@@ -621,18 +596,18 @@ class FoldingDialog(QDialog):
         return (tablelong, tableshort, result == QDialog.Accepted)
 
 
-class PlateDialog(QDialog):
+class PlateDialog(QtWidgets.QDialog):
     def __init__(self, parent=None):
         super(PlateDialog, self).__init__(parent)
-        layout = QVBoxLayout,(self)
-        self.info = QLabel("Please make selection:  ")
-        self.radio1 = QRadioButton(
+        layout = QtWidgets.QVBoxLayout(self)
+        self.info = QtWidgets.QLabel("Please make selection:  ")
+        self.radio1 = QtWidgets.QRadioButton(
             (
                 "Export only the sequences needed for this design."
                 " (176 staples in 2 plates)"
             )
         )
-        self.radio2 = QRadioButton(
+        self.radio2 = QtWidgets.QRadioButton(
             (
                 "Export full 2 full plates for all sequences used"
                 " (176 staples * number of unique sequences)"
@@ -670,7 +645,7 @@ class PlateDialog(QDialog):
         return (selection, result == QDialog.Accepted)
 
 
-class BindingSiteItem(QGraphicsPolygonItem):
+class BindingSiteItem(QtWidgets.QGraphicsPolygonItem):
     def __init__(self, y, x):
         hex_center_x, hex_center_y = indextoHex(y, x)
         center = QtCore.QPointF(hex_center_x, hex_center_y)
@@ -693,7 +668,7 @@ class BindingSiteItem(QGraphicsPolygonItem):
         self.setBrush(defaultcolor)  # initialize all as grey
 
 
-class Scene(QGraphicsScene):
+class Scene(QtWidgets.QGraphicsScene):
     def __init__(self, window):
         super().__init__()
         self.window = window
@@ -765,7 +740,7 @@ class Scene(QGraphicsScene):
         xofflbl = 1
 
         for i in range(0, maxcolor):
-            self.alllbl[i] = QGraphicsTextItem("   ")
+            self.alllbl[i] = QtWidgets.QGraphicsTextItem("   ")
             self.alllbl[i].setPos(
                 *(
                     1.5
@@ -783,7 +758,7 @@ class Scene(QGraphicsScene):
             )
             self.addItem(self.alllbl[i])
 
-            self.alllblseq[i] = QGraphicsTextItem("   ")
+            self.alllblseq[i] = QtWidgets.QGraphicsTextItem("   ")
             self.alllblseq[i].setPos(
                 *(
                     1.5
@@ -802,7 +777,7 @@ class Scene(QGraphicsScene):
             self.addItem(self.alllblseq[i])
 
         # MAKE A LABEL FOR THE CURRENTCOLOR
-        self.cclabel = QGraphicsTextItem("Selected color")
+        self.cclabel = QtWidgets.QGraphicsTextItem("Selected color")
         self.cclabel.setPos(
             *(
                 1.5
@@ -838,10 +813,10 @@ class Scene(QGraphicsScene):
                 hex_center_y - 0.5 * HEX_SIDE_HALF + 2,
             )
 
-            line1[i] = QGraphicsLineItem(
+            line1[i] = QtWidgets.QGraphicsLineItem(
                 QtCore.QLineF(startpoint, midpoint)
             )
-            line2[i] = QGraphicsLineItem(
+            line2[i] = QtWidgets.QGraphicsLineItem(
                 QtCore.QLineF(midpoint, endpoint)
             )
 
@@ -1129,11 +1104,11 @@ class Scene(QGraphicsScene):
         return allplates
 
 
-class Window(QMainWindow):
+class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.mainscene = Scene(self)
-        self.view = QGraphicsView(self.mainscene)
+        self.view = QtWidgets.QGraphicsView(self.mainscene)
         self.view.setRenderHint(QtGui.QPainter.Antialiasing)
         self.setCentralWidget(self.view)
         self.statusBar().showMessage(
@@ -1142,11 +1117,11 @@ class Window(QMainWindow):
 
     def openDialog(self):
         if hasattr(self, "pwd"):
-            path = QFileDialog.getOpenFileName(
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Open design", self.pwd, filter="*.yaml"
             )
         else:
-            path = QFileDialog.getOpenFileName(
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Open design", filter="*.yaml"
             )
         if path:
@@ -1160,11 +1135,11 @@ class Window(QMainWindow):
 
     def saveDialog(self):
         if hasattr(self, "pwd"):
-            path = QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save design to..", self.pwd, filter="*.yaml"
             )
         else:
-            path = QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save design to..", filter="*.yaml"
             )
         if path:
@@ -1183,11 +1158,11 @@ class Window(QMainWindow):
     def takeScreenshot(self):
         filetypes = "*.png;;*.pdf"
         if hasattr(self, "pwd"):
-            path, filter = QFileDialog.getSaveFileNameAndFilter(
+            path, filter = QtWidgets.QFileDialog.getSaveFileNameAndFilter(
                 self, "Save Screenshot to..", self.pwd, filter=filetypes
             )
         else:
-            path, filter = QFileDialog.getSaveFileNameAndFilter(
+            path, filter = QtWidgets.QFileDialog.getSaveFileNameAndFilter(
                 self, "Save Screenshot to..", filter=filetypes
             )
         if path:
@@ -1281,14 +1256,14 @@ class Window(QMainWindow):
                         + " Plates generated."
                     )
                     if hasattr(self, "pwd"):
-                        path = QFileDialog.getSaveFileName(
+                        path, ext = QtWidgets.QFileDialog.getSaveFileName(
                             self,
                             "Save csv files to.",
                             self.pwd,
                             filter="*.csv",
                         )
                     else:
-                        path = QFileDialog.getSaveFileName(
+                        path, ext = QtWidgets.QFileDialog.getSaveFileName(
                             self, "Save csv files to.", filter="*.csv"
                         )
                     if path:
@@ -1410,14 +1385,14 @@ class Window(QMainWindow):
                         selection, selectioncolors, platename
                     )
                 if hasattr(self, "pwd"):
-                    path = QFileDialog.getSaveFileName(
+                    path, ext = QtWidgets.QFileDialog.getSaveFileName(
                         self,
                         "Save pipetting schemes to.",
                         self.pwd,
                         filter="*.pdf",
                     )
                 else:
-                    path = QFileDialog.getSaveFileName(
+                    path, ext = QtWidgets.QFileDialog.getSaveFileName(
                         self, "Save pipetting schemes to.", filter="*.pdf"
                     )
 
@@ -1507,7 +1482,7 @@ class Window(QMainWindow):
         result = fdialog.exec()
 
 
-class MainWindow(QWidget):
+class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setWindowTitle("Picasso: Design")
@@ -1524,14 +1499,14 @@ class MainWindow(QWidget):
         self.window = Window()
 
         # define buttons
-        loadbtn = QPushButton("Load")
-        savebtn = QPushButton("Save")
-        clearbtn = QPushButton("Clear")
-        sshotbtn = QPushButton("Screenshot")
-        seqbtn = QPushButton("Extensions")
-        platebtn = QPushButton("Get plates")
-        pipettbtn = QPushButton("Pipetting scheme")
-        foldbtn = QPushButton("Folding scheme")
+        loadbtn = QtWidgets.QPushButton("Load")
+        savebtn = QtWidgets.QPushButton("Save")
+        clearbtn = QtWidgets.QPushButton("Clear")
+        sshotbtn = QtWidgets.QPushButton("Screenshot")
+        seqbtn = QtWidgets.QPushButton("Extensions")
+        platebtn = QtWidgets.QPushButton("Get plates")
+        pipettbtn = QtWidgets.QPushButton("Pipetting scheme")
+        foldbtn = QtWidgets.QPushButton("Folding scheme")
 
         loadbtn.clicked.connect(self.window.openDialog)
         savebtn.clicked.connect(self.window.saveDialog)
@@ -1542,7 +1517,7 @@ class MainWindow(QWidget):
         pipettbtn.clicked.connect(self.window.pipettingScheme)
         foldbtn.clicked.connect(self.window.foldingScheme)
 
-        hbox = QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         hbox.addWidget(loadbtn)
         hbox.addWidget(savebtn)
         hbox.addWidget(clearbtn)
@@ -1553,7 +1528,7 @@ class MainWindow(QWidget):
         hbox.addWidget(foldbtn)
 
         # set layout
-        vbox = QVBoxLayout()
+        vbox = QtWidgets.QVBoxLayout()
         vbox.addWidget(self.window)
         vbox.addLayout(hbox)
         self.setLayout(vbox)
@@ -1565,7 +1540,7 @@ class MainWindow(QWidget):
 
 
 def main():
-    app = QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
@@ -1573,7 +1548,7 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(
+        errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()
