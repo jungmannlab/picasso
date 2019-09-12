@@ -144,7 +144,7 @@ class View(QtWidgets.QLabel):
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
-        qimage = QtWidgets.QImage(self._bgra.data, X, Y, QtWidgets.QImage.Format_RGB32)
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
         self._pixmap = QtGui.QPixmap.fromImage(qimage)
         self.set_pixmap(self._pixmap)
 
@@ -762,7 +762,7 @@ class Window(QtWidgets.QMainWindow):
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
-        qimage = QtWidgets.QImage(self._bgra.data, X, Y, QtWidgets.QImage.Format_RGB32)
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
 
         qimage = qimage.scaled(
             self.viewxy.width(),
@@ -823,7 +823,7 @@ class Window(QtWidgets.QMainWindow):
         bgra = np.minimum(bgra, 1)
         self._bgra = self.to_8bit(bgra)
 
-        qimage = QtWidgets.QImage(self._bgra.data, X, Y, QtWidgets.QImage.Format_RGB32)
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
 
         qimage = qimage.scaled(
             self.viewxy.width(),
@@ -903,8 +903,8 @@ class Window(QtWidgets.QMainWindow):
         fig.canvas.draw()
         size = fig.canvas.size()
         width, height = size.width(), size.height()
-        im = QtWidgets.QImage(
-            fig.canvas.buffer_rgba(), width, height, QtWidgets.QImage.Format_ARGB32
+        im = QtGui.QImage(
+            fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32
         )
         self.viewcp.setPixmap((QtGui.QPixmap(im)))
         self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
@@ -1195,11 +1195,11 @@ class Window(QtWidgets.QMainWindow):
             fig.canvas.draw()
             size = fig.canvas.size()
             width, height = size.width(), size.height()
-            im = QtWidgets.QImage(
+            im = QtGui.QImage(
                 fig.canvas.buffer_rgba(),
                 width,
                 height,
-                QtWidgets.QImage.Format_ARGB32,
+                QtGui.QImage.Format_ARGB32,
             )
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
@@ -1228,11 +1228,11 @@ class Window(QtWidgets.QMainWindow):
             fig.canvas.draw()
             size = fig.canvas.size()
             width, height = size.width(), size.height()
-            im = QtWidgets.QImage(
+            im = QtGui.QImage(
                 fig.canvas.buffer_rgba(),
                 width,
                 height,
-                QtWidgets.QImage.Format_ARGB32,
+                QtGui.QImage.Format_ARGB32,
             )
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
@@ -1333,11 +1333,11 @@ class Window(QtWidgets.QMainWindow):
             fig.canvas.draw()
             size = fig.canvas.size()
             width, height = size.width(), size.height()
-            im = QtWidgets.QImage(
+            im = QtGui.QImage(
                 fig.canvas.buffer_rgba(),
                 width,
                 height,
-                QtWidgets.QImage.Format_ARGB32,
+                QtGui.QImage.Format_ARGB32,
             )
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
@@ -1367,11 +1367,11 @@ class Window(QtWidgets.QMainWindow):
             fig.canvas.draw()
             size = fig.canvas.size()
             width, height = size.width(), size.height()
-            im = QtWidgets.QImage(
+            im = QtGui.QImage(
                 fig.canvas.buffer_rgba(),
                 width,
                 height,
-                QtWidgets.QImage.Format_ARGB32,
+                QtGui.QImage.Format_ARGB32,
             )
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
             self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
@@ -1961,7 +1961,7 @@ class Window(QtWidgets.QMainWindow):
             )
         self._bgra[:, :, 3].fill(255)
         Y, X = self._bgra.shape[:2]
-        qimage = QtWidgets.QImage(self._bgra.data, X, Y, QtWidgets.QImage.Format_RGB32)
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
         return qimage
 
     def get_render_kwargs(
