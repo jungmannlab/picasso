@@ -27,7 +27,7 @@ from matplotlib.backends.backend_qt4agg import (
 )
 from scipy.ndimage.filters import gaussian_filter
 from numpy.lib.recfunctions import stack_arrays
-from PyQt5 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
@@ -88,7 +88,7 @@ estimate_kinetic_rate = kinetic_rate_from_fit
 def check_pick(f):
     def wrapper(*args):
         if len(args[0]._picks) == 0:
-            QtGui.QMessageBox.information(
+            QtWidgets.QMessageBox.information(
                 args[0],
                 "Pick Error",
                 ("No localizations picked." " Please pick first."),
@@ -103,7 +103,7 @@ def check_pick(f):
 def check_picks(f):
     def wrapper(*args):
         if len(args[0]._picks) < 2:
-            QtGui.QMessageBox.information(
+            QtWidgets.QMessageBox.information(
                 args[0],
                 "Pick Error",
                 (
@@ -117,14 +117,14 @@ def check_picks(f):
     return wrapper
 
 
-class FloatEdit(QtGui.QLineEdit):
+class FloatEdit(QtWidgets.QLineEdit):
 
     valueChanged = QtCore.pyqtSignal(float)
 
     def __init__(self):
         super().__init__()
         self.setSizePolicy(
-            QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Preferred
+            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred
         )
         self.editingFinished.connect(self.onEditingFinished)
 
@@ -142,7 +142,7 @@ class FloatEdit(QtGui.QLineEdit):
         return value
 
 
-class PickHistWindow(QtGui.QTabWidget):
+class PickHistWindow(QtWidgets.QTabWidget):
     def __init__(self, info_dialog):
         super().__init__()
         self.setWindowTitle("Pick Histograms")
@@ -153,7 +153,7 @@ class PickHistWindow(QtGui.QTabWidget):
         self.resize(1000, 500)
         self.figure = plt.Figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
-        vbox = QtGui.QVBoxLayout()
+        vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
@@ -201,32 +201,32 @@ class PickHistWindow(QtGui.QTabWidget):
         self.canvas.draw()
 
 
-class ApplyDialog(QtGui.QDialog):
+class ApplyDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         # vars = self.view.locs[0].dtype.names
         self.setWindowTitle("Apply expression")
-        vbox = QtGui.QVBoxLayout(self)
-        layout = QtGui.QGridLayout()
+        vbox = QtWidgets.QVBoxLayout(self)
+        layout = QtWidgets.QGridLayout()
         vbox.addLayout(layout)
-        layout.addWidget(QtGui.QLabel("Channel:"), 0, 0)
-        self.channel = QtGui.QComboBox()
+        layout.addWidget(QtWidgets.QLabel("Channel:"), 0, 0)
+        self.channel = QtWidgets.QComboBox()
         self.channel.addItems(self.window.view.locs_paths)
         layout.addWidget(self.channel, 0, 1)
         self.channel.currentIndexChanged.connect(self.update_vars)
-        layout.addWidget(QtGui.QLabel("Pre-defined variables:"), 1, 0)
-        self.label = QtGui.QLabel()
+        layout.addWidget(QtWidgets.QLabel("Pre-defined variables:"), 1, 0)
+        self.label = QtWidgets.QLabel()
         layout.addWidget(self.label, 1, 1)
         self.update_vars(0)
-        layout.addWidget(QtGui.QLabel("Expression:"), 2, 0)
-        self.cmd = QtGui.QLineEdit()
+        layout.addWidget(QtWidgets.QLabel("Expression:"), 2, 0)
+        self.cmd = QtWidgets.QLineEdit()
         layout.addWidget(self.cmd, 2, 1)
-        hbox = QtGui.QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
         # OK and Cancel buttons
-        self.buttons = QtGui.QDialogButtonBox(
-            QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
             QtCore.Qt.Horizontal,
             self,
         )
@@ -240,14 +240,14 @@ class ApplyDialog(QtGui.QDialog):
         result = dialog.exec_()
         cmd = dialog.cmd.text()
         channel = dialog.channel.currentIndex()
-        return (cmd, channel, result == QtGui.QDialog.Accepted)
+        return (cmd, channel, result == QtWidgets.QDialog.Accepted)
 
     def update_vars(self, index):
         vars = self.window.view.locs[index].dtype.names
         self.label.setText(str(vars))
 
 
-class DatasetDialog(QtGui.QDialog):
+class DatasetDialog(QtWidgets.QDialog):
     """
     A class to handle the Dataset Dialog:
     Tick and Untick, set colors and set relative intensity in display
@@ -259,29 +259,29 @@ class DatasetDialog(QtGui.QDialog):
         self.window = window
         self.setWindowTitle("Datasets")
         self.setModal(False)
-        self.layout = QtGui.QGridLayout()
+        self.layout = QtWidgets.QGridLayout()
         self.checks = []
         self.closebuttons = []
         self.colorselection = []
         self.colordisp_all = []
         self.intensitysettings = []
         self.setLayout(self.layout)
-        self.wbackground = QtGui.QCheckBox("White background")
+        self.wbackground = QtWidgets.QCheckBox("White background")
         self.layout.addWidget(self.wbackground, 0, 3)
-        self.layout.addWidget(QtGui.QLabel("Path"), 1, 0)
-        self.layout.addWidget(QtGui.QLabel("Color"), 1, 1)
-        self.layout.addWidget(QtGui.QLabel("#"), 1, 2)
-        self.layout.addWidget(QtGui.QLabel("Rel. Intensity"), 1, 3)
-        self.layout.addWidget(QtGui.QLabel("Close"), 1, 4)
+        self.layout.addWidget(QtWidgets.QLabel("Path"), 1, 0)
+        self.layout.addWidget(QtWidgets.QLabel("Color"), 1, 1)
+        self.layout.addWidget(QtWidgets.QLabel("#"), 1, 2)
+        self.layout.addWidget(QtWidgets.QLabel("Rel. Intensity"), 1, 3)
+        self.layout.addWidget(QtWidgets.QLabel("Close"), 1, 4)
         self.wbackground.stateChanged.connect(self.update_viewport)
 
     def add_entry(self, path):
-        c = QtGui.QCheckBox(path)
-        p = QtGui.QPushButton("x")
+        c = QtWidgets.QCheckBox(path)
+        p = QtWidgets.QPushButton("x")
         currentline = len(self.layout)
         p.setObjectName(str(currentline))
 
-        colordrop = QtGui.QComboBox(self)
+        colordrop = QtWidgets.QComboBox(self)
         colordrop.setEditable(True)
         colordrop.lineEdit().setMaxLength(7)
 
@@ -298,9 +298,9 @@ class DatasetDialog(QtGui.QDialog):
         ]:
             colordrop.addItem(default_color)
 
-        intensity = QtGui.QSpinBox(self)
+        intensity = QtWidgets.QSpinBox(self)
         intensity.setValue(1)
-        colordisp = QtGui.QLabel("      ")
+        colordisp = QtWidgets.QLabel("      ")
 
         palette = colordisp.palette()
         palette.setColor(QtGui.QPalette.Window, QtGui.QColor("black"))
@@ -373,36 +373,36 @@ class DatasetDialog(QtGui.QDialog):
         self.colordisp_all[n].setPalette(palette)
 
 
-class PlotDialog(QtGui.QDialog):
+class PlotDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Structure")
-        layout_grid = QtGui.QGridLayout(self)
+        layout_grid = QtWidgets.QGridLayout(self)
 
         self.figure = plt.figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.label = QtGui.QLabel()
+        self.label = QtWidgets.QLabel()
 
         layout_grid.addWidget(self.label, 0, 0, 1, 3)
         layout_grid.addWidget(self.canvas, 1, 0, 1, 3)
 
         # OK and Cancel buttons
-        self.buttons = QtGui.QDialogButtonBox(
-            QtGui.QDialogButtonBox.Yes
-            | QtGui.QDialogButtonBox.No
-            | QtGui.QDialogButtonBox.Cancel,
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Yes
+            | QtWidgets.QDialogButtonBox.No
+            | QtWidgets.QDialogButtonBox.Cancel,
             QtCore.Qt.Horizontal,
             self,
         )
         layout_grid.addWidget(self.buttons)
-        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.Yes).clicked.connect(
             self.on_accept
         )
-        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.No).clicked.connect(
             self.on_reject
         )
-        self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(
             self.on_cancel
         )
 
@@ -495,36 +495,36 @@ class PlotDialog(QtGui.QDialog):
         return dialog.result
 
 
-class PlotDialogIso(QtGui.QDialog):
+class PlotDialogIso(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Structure")
-        layout_grid = QtGui.QGridLayout(self)
+        layout_grid = QtWidgets.QGridLayout(self)
 
         self.figure = plt.figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.label = QtGui.QLabel()
+        self.label = QtWidgets.QLabel()
 
         layout_grid.addWidget(self.label, 0, 0, 1, 3)
         layout_grid.addWidget(self.canvas, 1, 0, 1, 3)
 
         # OK and Cancel buttons
-        self.buttons = QtGui.QDialogButtonBox(
-            QtGui.QDialogButtonBox.Yes
-            | QtGui.QDialogButtonBox.No
-            | QtGui.QDialogButtonBox.Cancel,
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Yes
+            | QtWidgets.QDialogButtonBox.No
+            | QtWidgets.QDialogButtonBox.Cancel,
             QtCore.Qt.Horizontal,
             self,
         )
         layout_grid.addWidget(self.buttons)
-        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.Yes).clicked.connect(
             self.on_accept
         )
-        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.No).clicked.connect(
             self.on_reject
         )
-        self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(
             self.on_cancel
         )
 
@@ -715,70 +715,70 @@ class PlotDialogIso(QtGui.QDialog):
         return dialog.result
 
 
-class ClsDlg(QtGui.QDialog):
+class ClsDlg(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Structure")
         self.showMaximized()
-        self.layout_grid = QtGui.QGridLayout(self)
+        self.layout_grid = QtWidgets.QGridLayout(self)
 
         self.figure = plt.figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.label = QtGui.QLabel()
+        self.label = QtWidgets.QLabel()
 
         self.layout_grid.addWidget(self.label, 0, 0, 1, 5)
         self.layout_grid.addWidget(self.canvas, 1, 0, 8, 5)
 
-        self.buttons = QtGui.QDialogButtonBox(
-            QtGui.QDialogButtonBox.Yes
-            | QtGui.QDialogButtonBox.No
-            | QtGui.QDialogButtonBox.Cancel,
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Yes
+            | QtWidgets.QDialogButtonBox.No
+            | QtWidgets.QDialogButtonBox.Cancel,
             QtCore.Qt.Horizontal,
             self,
         )
         self.layout_grid.addWidget(self.buttons, 10, 0, 1, 3)
-        self.layout_grid.addWidget(QtGui.QLabel("No clusters:"), 10, 3, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("No clusters:"), 10, 3, 1, 1)
 
-        self.n_clusters_spin = QtGui.QSpinBox()
+        self.n_clusters_spin = QtWidgets.QSpinBox()
 
         self.layout_grid.addWidget(self.n_clusters_spin, 10, 4, 1, 1)
 
-        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.Yes).clicked.connect(
             self.on_accept
         )
-        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.No).clicked.connect(
             self.on_reject
         )
-        self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(
             self.on_cancel
         )
 
         self.start_clusters = 0
         self.n_clusters_spin.valueChanged.connect(self.on_cluster)
         self.n_lines = 12
-        self.layout_grid.addWidget(QtGui.QLabel("Select"), 11, 4, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel("X-Center"), 11, 0, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel("Y-Center"), 11, 1, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel("Z-Center"), 11, 2, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel("Counts"), 11, 3, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("Select"), 11, 4, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("X-Center"), 11, 0, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("Y-Center"), 11, 1, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("Z-Center"), 11, 2, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("Counts"), 11, 3, 1, 1)
         self.checks = []
 
     def add_clusters(self, element, x_mean, y_mean, z_mean):
-        c = QtGui.QCheckBox(str(element[0] + 1))
+        c = QtWidgets.QCheckBox(str(element[0] + 1))
 
         self.layout_grid.addWidget(c, self.n_lines, 4, 1, 1)
         self.layout_grid.addWidget(
-            QtGui.QLabel(str(x_mean)), self.n_lines, 0, 1, 1
+            QtWidgets.QLabel(str(x_mean)), self.n_lines, 0, 1, 1
         )
         self.layout_grid.addWidget(
-            QtGui.QLabel(str(y_mean)), self.n_lines, 1, 1, 1
+            QtWidgets.QLabel(str(y_mean)), self.n_lines, 1, 1, 1
         )
         self.layout_grid.addWidget(
-            QtGui.QLabel(str(z_mean)), self.n_lines, 2, 1, 1
+            QtWidgets.QLabel(str(z_mean)), self.n_lines, 2, 1, 1
         )
         self.layout_grid.addWidget(
-            QtGui.QLabel(str(element[1])), self.n_lines, 3, 1, 1
+            QtWidgets.QLabel(str(element[1])), self.n_lines, 3, 1, 1
         )
         self.n_lines += 1
         self.checks.append(c)
@@ -917,65 +917,65 @@ class ClsDlg(QtGui.QDialog):
         )
 
 
-class ClsDlg2D(QtGui.QDialog):
+class ClsDlg2D(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Structure")
-        self.layout_grid = QtGui.QGridLayout(self)
+        self.layout_grid = QtWidgets.QGridLayout(self)
 
         self.figure = plt.figure()
         self.canvas = FigureCanvasQTAgg(self.figure)
-        self.label = QtGui.QLabel()
+        self.label = QtWidgets.QLabel()
 
         self.layout_grid.addWidget(self.label, 0, 0, 1, 5)
         self.layout_grid.addWidget(self.canvas, 1, 0, 1, 5)
 
-        self.buttons = QtGui.QDialogButtonBox(
-            QtGui.QDialogButtonBox.Yes
-            | QtGui.QDialogButtonBox.No
-            | QtGui.QDialogButtonBox.Cancel,
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Yes
+            | QtWidgets.QDialogButtonBox.No
+            | QtWidgets.QDialogButtonBox.Cancel,
             QtCore.Qt.Horizontal,
             self,
         )
         self.layout_grid.addWidget(self.buttons, 2, 0, 1, 3)
-        self.layout_grid.addWidget(QtGui.QLabel("No clusters:"), 2, 3, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("No clusters:"), 2, 3, 1, 1)
 
-        self.n_clusters_spin = QtGui.QSpinBox()
+        self.n_clusters_spin = QtWidgets.QSpinBox()
 
         self.layout_grid.addWidget(self.n_clusters_spin, 2, 4, 1, 1)
 
-        self.buttons.button(QtGui.QDialogButtonBox.Yes).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.Yes).clicked.connect(
             self.on_accept
         )
-        self.buttons.button(QtGui.QDialogButtonBox.No).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.No).clicked.connect(
             self.on_reject
         )
-        self.buttons.button(QtGui.QDialogButtonBox.Cancel).clicked.connect(
+        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(
             self.on_cancel
         )
 
         self.start_clusters = 0
         self.n_clusters_spin.valueChanged.connect(self.on_cluster)
         self.n_lines = 4
-        self.layout_grid.addWidget(QtGui.QLabel("Select"), 3, 3, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel("X-Center"), 3, 0, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel("Y-Center"), 3, 1, 1, 1)
-        self.layout_grid.addWidget(QtGui.QLabel("Counts"), 3, 2, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("Select"), 3, 3, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("X-Center"), 3, 0, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("Y-Center"), 3, 1, 1, 1)
+        self.layout_grid.addWidget(QtWidgets.QLabel("Counts"), 3, 2, 1, 1)
         self.checks = []
 
     def add_clusters(self, element, x_mean, y_mean):
-        c = QtGui.QCheckBox(str(element[0] + 1))
+        c = QtWidgets.QCheckBox(str(element[0] + 1))
 
         self.layout_grid.addWidget(c, self.n_lines, 3, 1, 1)
         self.layout_grid.addWidget(
-            QtGui.QLabel(str(x_mean)), self.n_lines, 0, 1, 1
+            QtWidgets.QLabel(str(x_mean)), self.n_lines, 0, 1, 1
         )
         self.layout_grid.addWidget(
-            QtGui.QLabel(str(y_mean)), self.n_lines, 1, 1, 1
+            QtWidgets.QLabel(str(y_mean)), self.n_lines, 1, 1, 1
         )
         self.layout_grid.addWidget(
-            QtGui.QLabel(str(element[1])), self.n_lines, 2, 1, 1
+            QtWidgets.QLabel(str(element[1])), self.n_lines, 2, 1, 1
         )
         self.n_lines += 1
         self.checks.append(c)
@@ -1097,29 +1097,29 @@ class ClsDlg2D(QtGui.QDialog):
         )
 
 
-class LinkDialog(QtGui.QDialog):
+class LinkDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Enter parameters")
-        vbox = QtGui.QVBoxLayout(self)
-        grid = QtGui.QGridLayout()
-        grid.addWidget(QtGui.QLabel("Max. distance (pixels):"), 0, 0)
-        self.max_distance = QtGui.QDoubleSpinBox()
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Max. distance (pixels):"), 0, 0)
+        self.max_distance = QtWidgets.QDoubleSpinBox()
         self.max_distance.setRange(0, 1e6)
         self.max_distance.setValue(1)
         grid.addWidget(self.max_distance, 0, 1)
-        grid.addWidget(QtGui.QLabel("Max. transient dark frames:"), 1, 0)
-        self.max_dark_time = QtGui.QDoubleSpinBox()
+        grid.addWidget(QtWidgets.QLabel("Max. transient dark frames:"), 1, 0)
+        self.max_dark_time = QtWidgets.QDoubleSpinBox()
         self.max_dark_time.setRange(0, 1e9)
         self.max_dark_time.setValue(1)
         grid.addWidget(self.max_dark_time, 1, 1)
         vbox.addLayout(grid)
-        hbox = QtGui.QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
         # OK and Cancel buttons
-        self.buttons = QtGui.QDialogButtonBox(
-            QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
             QtCore.Qt.Horizontal,
             self,
         )
@@ -1135,134 +1135,134 @@ class LinkDialog(QtGui.QDialog):
         return (
             dialog.max_distance.value(),
             dialog.max_dark_time.value(),
-            result == QtGui.QDialog.Accepted,
+            result == QtWidgets.QDialog.Accepted,
         )
 
 
-class InfoDialog(QtGui.QDialog):
+class InfoDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Info")
         self.setModal(False)
-        vbox = QtGui.QVBoxLayout(self)
+        vbox = QtWidgets.QVBoxLayout(self)
         # Display
-        display_groupbox = QtGui.QGroupBox("Display")
+        display_groupbox = QtWidgets.QGroupBox("Display")
         vbox.addWidget(display_groupbox)
-        display_grid = QtGui.QGridLayout(display_groupbox)
-        display_grid.addWidget(QtGui.QLabel("Image width:"), 0, 0)
-        self.width_label = QtGui.QLabel()
+        display_grid = QtWidgets.QGridLayout(display_groupbox)
+        display_grid.addWidget(QtWidgets.QLabel("Image width:"), 0, 0)
+        self.width_label = QtWidgets.QLabel()
         display_grid.addWidget(self.width_label, 0, 1)
-        display_grid.addWidget(QtGui.QLabel("Image height:"), 1, 0)
-        self.height_label = QtGui.QLabel()
+        display_grid.addWidget(QtWidgets.QLabel("Image height:"), 1, 0)
+        self.height_label = QtWidgets.QLabel()
         display_grid.addWidget(self.height_label, 1, 1)
 
-        display_grid.addWidget(QtGui.QLabel("View X / Y:"), 2, 0)
-        self.xy_label = QtGui.QLabel()
+        display_grid.addWidget(QtWidgets.QLabel("View X / Y:"), 2, 0)
+        self.xy_label = QtWidgets.QLabel()
         display_grid.addWidget(self.xy_label, 2, 1)
 
-        display_grid.addWidget(QtGui.QLabel("View width / height:"), 3, 0)
-        self.wh_label = QtGui.QLabel()
+        display_grid.addWidget(QtWidgets.QLabel("View width / height:"), 3, 0)
+        self.wh_label = QtWidgets.QLabel()
         display_grid.addWidget(self.wh_label, 3, 1)
 
         # Movie
-        movie_groupbox = QtGui.QGroupBox("Movie")
+        movie_groupbox = QtWidgets.QGroupBox("Movie")
         vbox.addWidget(movie_groupbox)
-        self.movie_grid = QtGui.QGridLayout(movie_groupbox)
-        self.movie_grid.addWidget(QtGui.QLabel("Median fit precision:"), 0, 0)
-        self.fit_precision = QtGui.QLabel("-")
+        self.movie_grid = QtWidgets.QGridLayout(movie_groupbox)
+        self.movie_grid.addWidget(QtWidgets.QLabel("Median fit precision:"), 0, 0)
+        self.fit_precision = QtWidgets.QLabel("-")
         self.movie_grid.addWidget(self.fit_precision, 0, 1)
-        self.movie_grid.addWidget(QtGui.QLabel("NeNA precision:"), 1, 0)
-        self.nena_button = QtGui.QPushButton("Calculate")
+        self.movie_grid.addWidget(QtWidgets.QLabel("NeNA precision:"), 1, 0)
+        self.nena_button = QtWidgets.QPushButton("Calculate")
         self.nena_button.clicked.connect(self.calculate_nena_lp)
         self.nena_button.setDefault(False)
         self.nena_button.setAutoDefault(False)
         self.movie_grid.addWidget(self.nena_button, 1, 1)
         # FOV
-        fov_groupbox = QtGui.QGroupBox("Field of view")
+        fov_groupbox = QtWidgets.QGroupBox("Field of view")
         vbox.addWidget(fov_groupbox)
-        fov_grid = QtGui.QGridLayout(fov_groupbox)
-        fov_grid.addWidget(QtGui.QLabel("# Localizations:"), 0, 0)
-        self.locs_label = QtGui.QLabel()
+        fov_grid = QtWidgets.QGridLayout(fov_groupbox)
+        fov_grid.addWidget(QtWidgets.QLabel("# Localizations:"), 0, 0)
+        self.locs_label = QtWidgets.QLabel()
         fov_grid.addWidget(self.locs_label, 0, 1)
 
         # Picks
-        picks_groupbox = QtGui.QGroupBox("Picks")
+        picks_groupbox = QtWidgets.QGroupBox("Picks")
         vbox.addWidget(picks_groupbox)
-        self.picks_grid = QtGui.QGridLayout(picks_groupbox)
-        self.picks_grid.addWidget(QtGui.QLabel("# Picks:"), 0, 0)
-        self.n_picks = QtGui.QLabel()
+        self.picks_grid = QtWidgets.QGridLayout(picks_groupbox)
+        self.picks_grid.addWidget(QtWidgets.QLabel("# Picks:"), 0, 0)
+        self.n_picks = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_picks, 0, 1)
-        compute_pick_info_button = QtGui.QPushButton("Calculate info below")
+        compute_pick_info_button = QtWidgets.QPushButton("Calculate info below")
         compute_pick_info_button.clicked.connect(
             self.window.view.update_pick_info_long
         )
         self.picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 3)
-        self.picks_grid.addWidget(QtGui.QLabel("<b>Mean</b"), 2, 1)
-        self.picks_grid.addWidget(QtGui.QLabel("<b>Std</b>"), 2, 2)
+        self.picks_grid.addWidget(QtWidgets.QLabel("<b>Mean</b"), 2, 1)
+        self.picks_grid.addWidget(QtWidgets.QLabel("<b>Std</b>"), 2, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("# Localizations:"), row, 0)
-        self.n_localizations_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(QtWidgets.QLabel("# Localizations:"), row, 0)
+        self.n_localizations_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_localizations_mean, row, 1)
-        self.n_localizations_std = QtGui.QLabel()
+        self.n_localizations_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_localizations_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("RMSD to COM:"), row, 0)
-        self.rmsd_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(QtWidgets.QLabel("RMSD to COM:"), row, 0)
+        self.rmsd_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_mean, row, 1)
-        self.rmsd_std = QtGui.QLabel()
+        self.rmsd_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("RMSD in z:"), row, 0)
-        self.rmsd_z_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(QtWidgets.QLabel("RMSD in z:"), row, 0)
+        self.rmsd_z_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_z_mean, row, 1)
-        self.rmsd_z_std = QtGui.QLabel()
+        self.rmsd_z_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_z_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("Ignore dark times <="), row, 0)
-        self.max_dark_time = QtGui.QSpinBox()
+        self.picks_grid.addWidget(QtWidgets.QLabel("Ignore dark times <="), row, 0)
+        self.max_dark_time = QtWidgets.QSpinBox()
         self.max_dark_time.setRange(0, 1e9)
         self.max_dark_time.setValue(1)
         self.picks_grid.addWidget(self.max_dark_time, row, 1, 1, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("Length:"), row, 0)
-        self.length_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(QtWidgets.QLabel("Length:"), row, 0)
+        self.length_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.length_mean, row, 1)
-        self.length_std = QtGui.QLabel()
+        self.length_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.length_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("Dark time:"), row, 0)
-        self.dark_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(QtWidgets.QLabel("Dark time:"), row, 0)
+        self.dark_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_mean, row, 1)
-        self.dark_std = QtGui.QLabel()
+        self.dark_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("# Units per pick:"), row, 0)
-        self.units_per_pick = QtGui.QSpinBox()
+        self.picks_grid.addWidget(QtWidgets.QLabel("# Units per pick:"), row, 0)
+        self.units_per_pick = QtWidgets.QSpinBox()
         self.units_per_pick.setRange(1, 1e6)
         self.units_per_pick.setValue(1)
         self.picks_grid.addWidget(self.units_per_pick, row, 1, 1, 2)
-        calculate_influx_button = QtGui.QPushButton("Calibrate influx")
+        calculate_influx_button = QtWidgets.QPushButton("Calibrate influx")
         calculate_influx_button.clicked.connect(self.calibrate_influx)
         self.picks_grid.addWidget(
             calculate_influx_button, self.picks_grid.rowCount(), 0, 1, 3
         )
         row = self.picks_grid.rowCount()
         self.picks_grid.addWidget(
-            QtGui.QLabel("Influx rate (1/frames):"), row, 0
+            QtWidgets.QLabel("Influx rate (1/frames):"), row, 0
         )
         self.influx_rate = FloatEdit()
         self.influx_rate.setValue(0.03)
         self.influx_rate.valueChanged.connect(self.update_n_units)
         self.picks_grid.addWidget(self.influx_rate, row, 1, 1, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtGui.QLabel("# Units:"), row, 0)
-        self.n_units_mean = QtGui.QLabel()
+        self.picks_grid.addWidget(QtWidgets.QLabel("# Units:"), row, 0)
+        self.n_units_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_units_mean, row, 1)
-        self.n_units_std = QtGui.QLabel()
+        self.n_units_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_units_std, row, 2)
         self.pick_hist_window = PickHistWindow(self)
-        pick_hists = QtGui.QPushButton("Histograms")
+        pick_hists = QtWidgets.QPushButton("Histograms")
         pick_hists.clicked.connect(self.pick_hist_window.show)
         self.picks_grid.addWidget(
             pick_hists, self.picks_grid.rowCount(), 0, 1, 3
@@ -1279,11 +1279,11 @@ class InfoDialog(QtGui.QDialog):
                 "Calculating NeNA precision", 0, 100, self
             )
             result_lp = postprocess.nena(locs, info, progress.set_value)
-            self.nena_label = QtGui.QLabel()
+            self.nena_label = QtWidgets.QLabel()
             self.movie_grid.addWidget(self.nena_label, 1, 1)
             self.nena_result, lp = result_lp
             self.nena_label.setText("{:.3} pixel".format(lp))
-            show_plot_button = QtGui.QPushButton("Show plot")
+            show_plot_button = QtWidgets.QPushButton("Show plot")
             self.movie_grid.addWidget(
                 show_plot_button, self.movie_grid.rowCount() - 1, 2
             )
@@ -1317,20 +1317,20 @@ class InfoDialog(QtGui.QDialog):
         fig1.show()
 
 
-class MaskSettingsDialog(QtGui.QDialog):
+class MaskSettingsDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Generate Mask")
         self.setModal(False)
 
-        vbox = QtGui.QVBoxLayout(self)
-        mask_groupbox = QtGui.QGroupBox("Mask Settings")
+        vbox = QtWidgets.QVBoxLayout(self)
+        mask_groupbox = QtWidgets.QGroupBox("Mask Settings")
         vbox.addWidget(mask_groupbox)
-        mask_grid = QtGui.QGridLayout(mask_groupbox)
+        mask_grid = QtWidgets.QGridLayout(mask_groupbox)
 
-        mask_grid.addWidget(QtGui.QLabel("Oversampling"), 0, 0)
-        self.mask_oversampling = QtGui.QSpinBox()
+        mask_grid.addWidget(QtWidgets.QLabel("Oversampling"), 0, 0)
+        self.mask_oversampling = QtWidgets.QSpinBox()
         self.mask_oversampling.setRange(1, 999999)
         self.mask_oversampling.setValue(1)
         self.mask_oversampling.setSingleStep(1)
@@ -1340,8 +1340,8 @@ class MaskSettingsDialog(QtGui.QDialog):
 
         mask_grid.addWidget(self.mask_oversampling, 0, 1)
 
-        mask_grid.addWidget(QtGui.QLabel("Blur"), 1, 0)
-        self.mask_blur = QtGui.QDoubleSpinBox()
+        mask_grid.addWidget(QtWidgets.QLabel("Blur"), 1, 0)
+        self.mask_blur = QtWidgets.QDoubleSpinBox()
         self.mask_blur.setRange(0, 999999)
         self.mask_blur.setValue(2)
         self.mask_blur.setSingleStep(0.1)
@@ -1350,8 +1350,8 @@ class MaskSettingsDialog(QtGui.QDialog):
 
         self.mask_blur.valueChanged.connect(self.update_plots)
 
-        mask_grid.addWidget(QtGui.QLabel("Threshold"), 2, 0)
-        self.mask_tresh = QtGui.QDoubleSpinBox()
+        mask_grid.addWidget(QtWidgets.QLabel("Threshold"), 2, 0)
+        self.mask_tresh = QtWidgets.QDoubleSpinBox()
         self.mask_tresh.setRange(0, 1)
         self.mask_tresh.setValue(0.5)
         self.mask_tresh.setSingleStep(0.01)
@@ -1364,20 +1364,20 @@ class MaskSettingsDialog(QtGui.QDialog):
         self.canvas = FigureCanvasQTAgg(self.figure)
         mask_grid.addWidget(self.canvas, 3, 0, 1, 2)
 
-        self.maskButton = QtGui.QPushButton("Mask")
+        self.maskButton = QtWidgets.QPushButton("Mask")
         mask_grid.addWidget(self.maskButton, 5, 0)
         self.maskButton.clicked.connect(self.mask_locs)
 
-        self.saveButton = QtGui.QPushButton("Save")
+        self.saveButton = QtWidgets.QPushButton("Save")
         self.saveButton.setEnabled(False)
         self.saveButton.clicked.connect(self.save_locs)
         mask_grid.addWidget(self.saveButton, 5, 1)
 
-        self.loadMaskButton = QtGui.QPushButton("Load Mask")
+        self.loadMaskButton = QtWidgets.QPushButton("Load Mask")
         self.loadMaskButton.clicked.connect(self.load_mask)
         mask_grid.addWidget(self.loadMaskButton, 4, 0)
 
-        self.saveMaskButton = QtGui.QPushButton("Save Mask")
+        self.saveMaskButton = QtWidgets.QPushButton("Save Mask")
         self.saveMaskButton.setEnabled(False)
         self.saveMaskButton.clicked.connect(self.save_mask)
         mask_grid.addWidget(self.saveMaskButton, 4, 1)
@@ -1432,7 +1432,7 @@ class MaskSettingsDialog(QtGui.QDialog):
 
     def save_mask(self):
         # Open dialog to save mask
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save mask to", filter="*.npy"
         )
         if path:
@@ -1440,7 +1440,7 @@ class MaskSettingsDialog(QtGui.QDialog):
 
     def load_mask(self):
         # Save dialog to load mask
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load mask", filter="*.npy"
         )
         if path:
@@ -1627,7 +1627,7 @@ class MaskSettingsDialog(QtGui.QDialog):
         channel = 0
         base, ext = os.path.splitext(self.paths[channel])
         out_path = base + "_mask_in.hdf5"
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save localizations within mask", out_path, filter="*.hdf5"
         )
         if path:
@@ -1642,7 +1642,7 @@ class MaskSettingsDialog(QtGui.QDialog):
             info.append(clusterfilter_info)
             io.save_locs(path, self.index_locs, info)
         out_path = base + "_mask_out.hdf5"
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save localizations outside of mask",
             out_path,
@@ -1661,13 +1661,13 @@ class MaskSettingsDialog(QtGui.QDialog):
             io.save_locs(path, self.index_locs_out, info)
 
 
-class PickToolCircleSettings(QtGui.QWidget):
+class PickToolCircleSettings(QtWidgets.QWidget):
     def __init__(self, window, tools_settings_dialog):
         super().__init__()
-        self.grid = QtGui.QGridLayout(self)
+        self.grid = QtWidgets.QGridLayout(self)
         self.window = window
-        self.grid.addWidget(QtGui.QLabel("Diameter (cam. pixel):"), 0, 0)
-        self.pick_diameter = QtGui.QDoubleSpinBox()
+        self.grid.addWidget(QtWidgets.QLabel("Diameter (cam. pixel):"), 0, 0)
+        self.pick_diameter = QtWidgets.QDoubleSpinBox()
         self.pick_diameter.setRange(0, 999999)
         self.pick_diameter.setValue(1)
         self.pick_diameter.setSingleStep(0.1)
@@ -1677,8 +1677,8 @@ class PickToolCircleSettings(QtGui.QWidget):
             tools_settings_dialog.on_pick_dimension_changed
         )
         self.grid.addWidget(self.pick_diameter, 0, 1)
-        self.grid.addWidget(QtGui.QLabel("Pick similar +/- range (std)"), 1, 0)
-        self.pick_similar_range = QtGui.QDoubleSpinBox()
+        self.grid.addWidget(QtWidgets.QLabel("Pick similar +/- range (std)"), 1, 0)
+        self.pick_similar_range = QtWidgets.QDoubleSpinBox()
         self.pick_similar_range.setRange(0, 100000)
         self.pick_similar_range.setValue(2)
         self.pick_similar_range.setSingleStep(0.1)
@@ -1686,13 +1686,13 @@ class PickToolCircleSettings(QtGui.QWidget):
         self.grid.addWidget(self.pick_similar_range, 1, 1)
 
 
-class PickToolRectangleSettings(QtGui.QWidget):
+class PickToolRectangleSettings(QtWidgets.QWidget):
     def __init__(self, window, tools_settings_dialog):
         super().__init__()
         self.window = window
-        self.grid = QtGui.QGridLayout(self)
-        self.grid.addWidget(QtGui.QLabel("Width (cam. pixel):"), 0, 0)
-        self.pick_width = QtGui.QDoubleSpinBox()
+        self.grid = QtWidgets.QGridLayout(self)
+        self.grid.addWidget(QtWidgets.QLabel("Width (cam. pixel):"), 0, 0)
+        self.pick_width = QtWidgets.QDoubleSpinBox()
         self.pick_width.setRange(0, 999999)
         self.pick_width.setValue(1)
         self.pick_width.setSingleStep(0.1)
@@ -1705,23 +1705,23 @@ class PickToolRectangleSettings(QtGui.QWidget):
         self.grid.setRowStretch(1, 1)
 
 
-class ToolsSettingsDialog(QtGui.QDialog):
+class ToolsSettingsDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Tools Settings")
         self.setModal(False)
-        self.vbox = QtGui.QVBoxLayout(self)
+        self.vbox = QtWidgets.QVBoxLayout(self)
 
-        self.pick_groupbox = QtGui.QGroupBox("Pick")
+        self.pick_groupbox = QtWidgets.QGroupBox("Pick")
         self.vbox.addWidget(self.pick_groupbox)
-        pick_grid = QtGui.QGridLayout(self.pick_groupbox)
+        pick_grid = QtWidgets.QGridLayout(self.pick_groupbox)
 
-        pick_grid.addWidget(QtGui.QLabel("Shape:"), 1, 0)
-        self.pick_shape = QtGui.QComboBox()
+        pick_grid.addWidget(QtWidgets.QLabel("Shape:"), 1, 0)
+        self.pick_shape = QtWidgets.QComboBox()
         self.pick_shape.addItems(["Circle", "Rectangle"])
         pick_grid.addWidget(self.pick_shape, 1, 1)
-        pick_stack = QtGui.QStackedWidget()
+        pick_stack = QtWidgets.QStackedWidget()
         pick_grid.addWidget(pick_stack, 2, 0, 1, 2)
         self.pick_shape.currentIndexChanged.connect(pick_stack.setCurrentIndex)
 
@@ -1736,7 +1736,7 @@ class ToolsSettingsDialog(QtGui.QDialog):
         pick_stack.addWidget(self.pick_rectangle_settings)
         self.pick_width = self.pick_rectangle_settings.pick_width
 
-        self.pick_annotation = QtGui.QCheckBox("Annotate picks")
+        self.pick_annotation = QtWidgets.QCheckBox("Annotate picks")
         self.pick_annotation.stateChanged.connect(self.update_scene_with_cache)
         pick_grid.addWidget(self.pick_annotation, 3, 0)
 
@@ -1750,49 +1750,49 @@ class ToolsSettingsDialog(QtGui.QDialog):
         self.window.view.update_scene(use_cache=True)
 
 
-class DisplaySettingsDialog(QtGui.QDialog):
+class DisplaySettingsDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Display Settings")
         self.resize(200, 0)
         self.setModal(False)
-        vbox = QtGui.QVBoxLayout(self)
+        vbox = QtWidgets.QVBoxLayout(self)
         # General
-        general_groupbox = QtGui.QGroupBox("General")
+        general_groupbox = QtWidgets.QGroupBox("General")
         vbox.addWidget(general_groupbox)
-        general_grid = QtGui.QGridLayout(general_groupbox)
-        general_grid.addWidget(QtGui.QLabel("Zoom:"), 0, 0)
-        self.zoom = QtGui.QDoubleSpinBox()
+        general_grid = QtWidgets.QGridLayout(general_groupbox)
+        general_grid.addWidget(QtWidgets.QLabel("Zoom:"), 0, 0)
+        self.zoom = QtWidgets.QDoubleSpinBox()
         self.zoom.setKeyboardTracking(False)
         self.zoom.setRange(10 ** (-self.zoom.decimals()), 1e6)
         self.zoom.valueChanged.connect(self.on_zoom_changed)
         general_grid.addWidget(self.zoom, 0, 1)
-        general_grid.addWidget(QtGui.QLabel("Oversampling:"), 1, 0)
+        general_grid.addWidget(QtWidgets.QLabel("Oversampling:"), 1, 0)
         self._oversampling = DEFAULT_OVERSAMPLING
-        self.oversampling = QtGui.QDoubleSpinBox()
+        self.oversampling = QtWidgets.QDoubleSpinBox()
         self.oversampling.setRange(0.001, 1000)
         self.oversampling.setSingleStep(5)
         self.oversampling.setValue(self._oversampling)
         self.oversampling.setKeyboardTracking(False)
         self.oversampling.valueChanged.connect(self.on_oversampling_changed)
         general_grid.addWidget(self.oversampling, 1, 1)
-        self.dynamic_oversampling = QtGui.QCheckBox("dynamic")
+        self.dynamic_oversampling = QtWidgets.QCheckBox("dynamic")
         self.dynamic_oversampling.setChecked(True)
         self.dynamic_oversampling.toggled.connect(
             self.set_dynamic_oversampling
         )
         general_grid.addWidget(self.dynamic_oversampling, 2, 1)
-        self.minimap = QtGui.QCheckBox("show minimap")
+        self.minimap = QtWidgets.QCheckBox("show minimap")
         general_grid.addWidget(self.minimap, 3, 1)
         self.minimap.stateChanged.connect(self.update_scene)
         # Contrast
-        contrast_groupbox = QtGui.QGroupBox("Contrast")
+        contrast_groupbox = QtWidgets.QGroupBox("Contrast")
         vbox.addWidget(contrast_groupbox)
-        contrast_grid = QtGui.QGridLayout(contrast_groupbox)
-        minimum_label = QtGui.QLabel("Min. Density:")
+        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
+        minimum_label = QtWidgets.QLabel("Min. Density:")
         contrast_grid.addWidget(minimum_label, 0, 0)
-        self.minimum = QtGui.QDoubleSpinBox()
+        self.minimum = QtWidgets.QDoubleSpinBox()
         self.minimum.setRange(0, 999999)
         self.minimum.setSingleStep(5)
         self.minimum.setValue(0)
@@ -1800,9 +1800,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.minimum.setKeyboardTracking(False)
         self.minimum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.minimum, 0, 1)
-        maximum_label = QtGui.QLabel("Max. Density:")
+        maximum_label = QtWidgets.QLabel("Max. Density:")
         contrast_grid.addWidget(maximum_label, 1, 0)
-        self.maximum = QtGui.QDoubleSpinBox()
+        self.maximum = QtWidgets.QDoubleSpinBox()
         self.maximum.setRange(0, 999999)
         self.maximum.setSingleStep(5)
         self.maximum.setValue(100)
@@ -1810,28 +1810,28 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
-        contrast_grid.addWidget(QtGui.QLabel("Colormap:"), 2, 0)
-        self.colormap = QtGui.QComboBox()
+        contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
+        self.colormap = QtWidgets.QComboBox()
         self.colormap.addItems(
             sorted(["hot", "viridis", "inferno", "plasma", "magma", "gray"])
         )
         contrast_grid.addWidget(self.colormap, 2, 1)
         self.colormap.currentIndexChanged.connect(self.update_scene)
         # Blur
-        blur_groupbox = QtGui.QGroupBox("Blur")
-        blur_grid = QtGui.QGridLayout(blur_groupbox)
-        self.blur_buttongroup = QtGui.QButtonGroup()
-        points_button = QtGui.QRadioButton("None")
+        blur_groupbox = QtWidgets.QGroupBox("Blur")
+        blur_grid = QtWidgets.QGridLayout(blur_groupbox)
+        self.blur_buttongroup = QtWidgets.QButtonGroup()
+        points_button = QtWidgets.QRadioButton("None")
         self.blur_buttongroup.addButton(points_button)
-        smooth_button = QtGui.QRadioButton("One-Pixel-Blur")
+        smooth_button = QtWidgets.QRadioButton("One-Pixel-Blur")
         self.blur_buttongroup.addButton(smooth_button)
-        convolve_button = QtGui.QRadioButton("Global Localization Precision")
+        convolve_button = QtWidgets.QRadioButton("Global Localization Precision")
         self.blur_buttongroup.addButton(convolve_button)
-        gaussian_button = QtGui.QRadioButton(
+        gaussian_button = QtWidgets.QRadioButton(
             "Individual Localization Precision"
         )
         self.blur_buttongroup.addButton(gaussian_button)
-        gaussian_iso_button = QtGui.QRadioButton(
+        gaussian_iso_button = QtWidgets.QRadioButton(
             "Individual Localization Precision, iso"
         )
         self.blur_buttongroup.addButton(gaussian_iso_button)
@@ -1844,9 +1844,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene)
         blur_grid.addWidget(
-            QtGui.QLabel("Min. Blur (cam. pixel):"), 5, 0, 1, 1
+            QtWidgets.QLabel("Min. Blur (cam. pixel):"), 5, 0, 1, 1
         )
-        self.min_blur_width = QtGui.QDoubleSpinBox()
+        self.min_blur_width = QtWidgets.QDoubleSpinBox()
         self.min_blur_width.setRange(0, 999999)
         self.min_blur_width.setSingleStep(0.01)
         self.min_blur_width.setValue(0)
@@ -1865,47 +1865,47 @@ class DisplaySettingsDialog(QtGui.QDialog):
         }
         # Scale bar
         # Camera_parameters
-        camera_groupbox = QtGui.QGroupBox("Camera")
-        self.camera_grid = QtGui.QGridLayout(camera_groupbox)
-        self.camera_grid.addWidget(QtGui.QLabel("Pixel Size:"), 0, 0)
-        self.pixelsize = QtGui.QDoubleSpinBox()
+        camera_groupbox = QtWidgets.QGroupBox("Camera")
+        self.camera_grid = QtWidgets.QGridLayout(camera_groupbox)
+        self.camera_grid.addWidget(QtWidgets.QLabel("Pixel Size:"), 0, 0)
+        self.pixelsize = QtWidgets.QDoubleSpinBox()
         self.pixelsize.setRange(1, 1000000000)
         self.pixelsize.setValue(130)
         self.pixelsize.setKeyboardTracking(False)
         self.pixelsize.valueChanged.connect(self.update_scene)
         self.camera_grid.addWidget(self.pixelsize, 0, 1)
         vbox.addWidget(camera_groupbox)
-        self.scalebar_groupbox = QtGui.QGroupBox("Scale Bar")
+        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
-        scalebar_grid = QtGui.QGridLayout(self.scalebar_groupbox)
-        scalebar_grid.addWidget(QtGui.QLabel("Scale Bar Length (nm):"), 0, 0)
-        self.scalebar = QtGui.QDoubleSpinBox()
+        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
+        scalebar_grid.addWidget(QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0)
+        self.scalebar = QtWidgets.QDoubleSpinBox()
         self.scalebar.setRange(0.0001, 10000000000)
         self.scalebar.setValue(500)
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.update_scene)
         scalebar_grid.addWidget(self.scalebar, 0, 1)
-        self.scalebar_text = QtGui.QCheckBox("Print scale bar length")
+        self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
         self.scalebar_text.stateChanged.connect(self.update_scene)
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
         self._silent_oversampling_update = False
 
         # Render
-        self.render_groupbox = QtGui.QGroupBox("Render properties")
+        self.render_groupbox = QtWidgets.QGroupBox("Render properties")
 
         vbox.addWidget(self.render_groupbox)
-        render_grid = QtGui.QGridLayout(self.render_groupbox)
-        render_grid.addWidget(QtGui.QLabel("Parameter:"), 0, 0)
-        self.parameter = QtGui.QComboBox()
+        render_grid = QtWidgets.QGridLayout(self.render_groupbox)
+        render_grid.addWidget(QtWidgets.QLabel("Parameter:"), 0, 0)
+        self.parameter = QtWidgets.QComboBox()
         render_grid.addWidget(self.parameter, 0, 1)
         self.parameter.activated.connect(self.window.view.set_property)
 
-        minimum_label_render = QtGui.QLabel("Min.:")
+        minimum_label_render = QtWidgets.QLabel("Min.:")
         render_grid.addWidget(minimum_label_render, 1, 0)
-        self.minimum_render = QtGui.QDoubleSpinBox()
+        self.minimum_render = QtWidgets.QDoubleSpinBox()
         self.minimum_render.setRange(-999999, 999999)
         self.minimum_render.setSingleStep(5)
         self.minimum_render.setValue(0)
@@ -1916,9 +1916,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
             self.window.view.activate_render_property
         )
         render_grid.addWidget(self.minimum_render, 1, 1)
-        maximum_label_render = QtGui.QLabel("Max.:")
+        maximum_label_render = QtWidgets.QLabel("Max.:")
         render_grid.addWidget(maximum_label_render, 2, 0)
-        self.maximum_render = QtGui.QDoubleSpinBox()
+        self.maximum_render = QtWidgets.QDoubleSpinBox()
         self.maximum_render.setRange(-999999, 999999)
         self.maximum_render.setSingleStep(5)
         self.maximum_render.setValue(100)
@@ -1929,9 +1929,9 @@ class DisplaySettingsDialog(QtGui.QDialog):
             self.window.view.activate_render_property
         )
         render_grid.addWidget(self.maximum_render, 2, 1)
-        color_step_label = QtGui.QLabel("Colors:")
+        color_step_label = QtWidgets.QLabel("Colors:")
         render_grid.addWidget(color_step_label, 3, 0)
-        self.color_step = QtGui.QSpinBox()
+        self.color_step = QtWidgets.QSpinBox()
         self.color_step.setRange(1, 256)
         self.color_step.setSingleStep(16)
         self.color_step.setValue(32)
@@ -1942,14 +1942,14 @@ class DisplaySettingsDialog(QtGui.QDialog):
         )
         render_grid.addWidget(self.color_step, 3, 1)
 
-        self.render_check = QtGui.QCheckBox("Render")
+        self.render_check = QtWidgets.QCheckBox("Render")
         self.render_check.stateChanged.connect(
             self.window.view.activate_render_property
         )
         self.render_check.setEnabled(False)
         render_grid.addWidget(self.render_check, 4, 0)
 
-        self.show_legend = QtGui.QPushButton("Show legend")
+        self.show_legend = QtWidgets.QPushButton("Show legend")
         render_grid.addWidget(self.show_legend, 4, 1)
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
@@ -1998,19 +1998,19 @@ class DisplaySettingsDialog(QtGui.QDialog):
         self.window.view.update_scene(use_cache=True)
 
 
-class SlicerDialog(QtGui.QDialog):
+class SlicerDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("3D Slicer ")
         self.setModal(False)
-        vbox = QtGui.QVBoxLayout(self)
-        slicer_groupbox = QtGui.QGroupBox("Slicer Settings")
+        vbox = QtWidgets.QVBoxLayout(self)
+        slicer_groupbox = QtWidgets.QGroupBox("Slicer Settings")
 
         vbox.addWidget(slicer_groupbox)
-        slicer_grid = QtGui.QGridLayout(slicer_groupbox)
-        slicer_grid.addWidget(QtGui.QLabel("Thickness of Slice [nm]:"), 0, 0)
-        self.pick_slice = QtGui.QSpinBox()
+        slicer_grid = QtWidgets.QGridLayout(slicer_groupbox)
+        slicer_grid.addWidget(QtWidgets.QLabel("Thickness of Slice [nm]:"), 0, 0)
+        self.pick_slice = QtWidgets.QSpinBox()
         self.pick_slice.setRange(1, 999999)
         self.pick_slice.setValue(50)
         self.pick_slice.setSingleStep(5)
@@ -2018,11 +2018,11 @@ class SlicerDialog(QtGui.QDialog):
         self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
         slicer_grid.addWidget(self.pick_slice, 0, 1)
 
-        self.sl = QtGui.QSlider(QtCore.Qt.Horizontal)
+        self.sl = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.sl.setMinimum(0)
         self.sl.setMaximum(50)
         self.sl.setValue(25)
-        self.sl.setTickPosition(QtGui.QSlider.TicksBelow)
+        self.sl.setTickPosition(QtWidgets.QSlider.TicksBelow)
         self.sl.setTickInterval(1)
         self.sl.valueChanged.connect(self.on_slice_position_changed)
 
@@ -2031,13 +2031,13 @@ class SlicerDialog(QtGui.QDialog):
         self.figure = plt.figure(figsize=(3, 3))
         self.canvas = FigureCanvasQTAgg(self.figure)
 
-        self.slicerRadioButton = QtGui.QCheckBox("Slice Dataset")
+        self.slicerRadioButton = QtWidgets.QCheckBox("Slice Dataset")
         self.slicerRadioButton.stateChanged.connect(self.toggle_slicer)
 
         self.zcoord = []
-        self.seperateCheck = QtGui.QCheckBox("Export channels separate")
-        self.fullCheck = QtGui.QCheckBox("Export full image")
-        self.exportButton = QtGui.QPushButton("Export Slices")
+        self.seperateCheck = QtWidgets.QCheckBox("Export channels separate")
+        self.fullCheck = QtWidgets.QCheckBox("Export full image")
+        self.exportButton = QtWidgets.QPushButton("Export Slices")
         self.exportButton.setAutoDefault(False)
 
         self.exportButton.clicked.connect(self.exportStack)
@@ -2124,7 +2124,7 @@ class SlicerDialog(QtGui.QDialog):
         except AttributeError:
             return
         out_path = base + ".tif"
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save z slices", out_path, filter="*.tif"
         )
 
@@ -2207,7 +2207,7 @@ class SlicerDialog(QtGui.QDialog):
                 progress.close()
 
 
-class View(QtGui.QLabel):
+class View(QtWidgets.QLabel):
     def __init__(self, window):
         super().__init__()
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -2216,9 +2216,9 @@ class View(QtGui.QLabel):
         self.icon = icon
         self.setAcceptDrops(True)
         self.setSizePolicy(
-            QtGui.QSizePolicy.Expanding, QtGui.QSizePolicy.Expanding
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
-        self.rubberband = QtGui.QRubberBand(QtGui.QRubberBand.Rectangle, self)
+        self.rubberband = QtWidgets.QRubberBand(QtWidgets.QRubberBand.Rectangle, self)
         self.rubberband.setStyleSheet("selection-background-color: white")
         self.window = window
         self._pixmap = None
@@ -2304,7 +2304,7 @@ class View(QtGui.QLabel):
                 if set(groups) == set(range(min(groups), max(groups) + 1)):
                     groupcopy = locs.group.copy()
                     if len(groups) > 5000:
-                        choice = QtGui.QMessageBox.question(
+                        choice = QtWidgets.QMessageBox.question(
                             self,
                             "Group question",
                             (
@@ -2312,9 +2312,9 @@ class View(QtGui.QLabel):
                                 " and more than 5000 groups detected."
                                 " Re-Index groups? This may take a while."
                             ),
-                            QtGui.QMessageBox.Yes | QtGui.QMessageBox.No,
+                            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                         )
-                        if choice == QtGui.QMessageBox.Yes:
+                        if choice == QtWidgets.QMessageBox.Yes:
                             pb = lib.ProgressDialog(
                                 "Re-Indexing groups", 0, len(groups), self
                             )
@@ -2541,7 +2541,7 @@ class View(QtGui.QLabel):
     def link(self):
         channel = self.get_channel()
         if hasattr(self.locs[channel], "len"):
-            QtGui.QMessageBox.information(
+            QtWidgets.QMessageBox.information(
                 self, "Link", "Localizations are already linked. Aborting..."
             )
             return
@@ -2655,7 +2655,7 @@ class View(QtGui.QLabel):
         X, Y = self.get_pick_rectangle_corners(
             start_x, start_y, end_x, end_y, width
         )
-        p = QtGui.QPolygonF()
+        p = QtWidgets.QPolygonF()
         for x, y in zip(X, Y):
             p.append(QtCore.QPointF(x, y))
         if return_most_right:
@@ -2779,8 +2779,8 @@ class View(QtGui.QLabel):
             )
             height = max(int(round(0.15 * length_displaypxl)), 1)
             painter = QtGui.QPainter(image)
-            painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
-            painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
+            painter.setPen(QtWidgets.QPen(QtCore.Qt.NoPen))
+            painter.setBrush(QtWidgets.QBrush(QtGui.QColor("white")))
             x = self.width() - length_displaypxl - 35
             y = self.height() - height - 20
             painter.drawRect(x, y, length_displaypxl + 0, height + 0)
@@ -2898,7 +2898,7 @@ class View(QtGui.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
-            index, ok = QtGui.QInputDialog.getItem(
+            index, ok = QtWidgets.QInputDialog.getItem(
                 self, title, "Channel:", pathlist, editable=False
             )
             if ok:
@@ -2915,7 +2915,7 @@ class View(QtGui.QLabel):
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
             pathlist.append("Save all at once")
-            index, ok = QtGui.QInputDialog.getItem(
+            index, ok = QtWidgets.QInputDialog.getItem(
                 self,
                 "Save localizations",
                 "Channel:",
@@ -2937,7 +2937,7 @@ class View(QtGui.QLabel):
             pathlist = list(self.locs_paths)
             pathlist.append("Save all at once")
             pathlist.append("Combine all channels")
-            index, ok = QtGui.QInputDialog.getItem(
+            index, ok = QtWidgets.QInputDialog.getItem(
                 self,
                 "Save localizations",
                 "Channel:",
@@ -2958,7 +2958,7 @@ class View(QtGui.QLabel):
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
             pathlist.append("Save all at once")
-            index, ok = QtGui.QInputDialog.getItem(
+            index, ok = QtWidgets.QInputDialog.getItem(
                 self,
                 "Save pick properties",
                 "Channel:",
@@ -2979,7 +2979,7 @@ class View(QtGui.QLabel):
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
             pathlist.append("Exchangerounds by color")
-            index, ok = QtGui.QInputDialog.getItem(
+            index, ok = QtWidgets.QInputDialog.getItem(
                 self, "Select channel", "Channel:", pathlist, editable=False
             )
             if ok:
@@ -3006,7 +3006,7 @@ class View(QtGui.QLabel):
                 self.window.display_settings_dlg.oversampling.value()
             )
             if oversampling > optimal_oversampling:
-                QtGui.QMessageBox.information(
+                QtWidgets.QMessageBox.information(
                     self,
                     "Oversampling too high",
                     (
@@ -3371,7 +3371,7 @@ class View(QtGui.QLabel):
             ax3.set_ylim([-0.1, 1.1])
 
             toolbar = f.canvas.toolbar
-            self.exportTraceButton = QtGui.QPushButton("Export")
+            self.exportTraceButton = QtWidgets.QPushButton("Export")
             toolbar.addWidget(self.exportTraceButton)
             self.exportTraceButton.clicked.connect(self.exportTrace)
             f.show()
@@ -3381,7 +3381,7 @@ class View(QtGui.QLabel):
         base, ext = os.path.splitext(self.locs_paths[self.channel])
         out_path = base + ".trace.txt"
 
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save trace as txt", out_path, filter="*.trace.txt"
         )
 
@@ -3389,7 +3389,7 @@ class View(QtGui.QLabel):
             np.savetxt(path, trace, fmt="%i", delimiter=",")
 
     def pick_message_box(self, params):
-        msgBox = QtGui.QMessageBox(self)
+        msgBox = QtWidgets.QMessageBox(self)
         msgBox.setWindowTitle("Select picks")
         msgBox.setWindowIcon(self.icon)
 
@@ -3418,18 +3418,18 @@ class View(QtGui.QLabel):
         )
 
         msgBox.addButton(
-            QtGui.QPushButton("Accept"), QtGui.QMessageBox.YesRole
+            QtWidgets.QPushButton("Accept"), QtWidgets.QMessageBox.YesRole
         )
-        msgBox.addButton(QtGui.QPushButton("Reject"), QtGui.QMessageBox.NoRole)
+        msgBox.addButton(QtWidgets.QPushButton("Reject"), QtWidgets.QMessageBox.NoRole)
         msgBox.addButton(
-            QtGui.QPushButton("Back"), QtGui.QMessageBox.ResetRole
+            QtWidgets.QPushButton("Back"), QtWidgets.QMessageBox.ResetRole
         )
         msgBox.addButton(
-            QtGui.QPushButton("Cancel"), QtGui.QMessageBox.RejectRole
+            QtWidgets.QPushButton("Cancel"), QtWidgets.QMessageBox.RejectRole
         )
 
         qr = self.frameGeometry()
-        cp = QtGui.QDesktopWidget().availableGeometry().center()
+        cp = QtWidgets.QDesktopWidget().availableGeometry().center()
         qr.moveCenter(cp)
         msgBox.move(qr.topLeft())
 
@@ -3578,7 +3578,7 @@ class View(QtGui.QLabel):
         base, ext = os.path.splitext(self.locs_paths[channel_acceptor])
         out_path = base + ".fret.txt"
 
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self,
             "Save FRET values as txt and picked locs",
             out_path,
@@ -4037,7 +4037,7 @@ class View(QtGui.QLabel):
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
-                    n_clusters, ok = QtGui.QInputDialog.getInteger(
+                    n_clusters, ok = QtWidgets.QInputDialog.getInteger(
                         self,
                         "Input Dialog",
                         "Enter inital number of clusters:",
@@ -4078,7 +4078,7 @@ class View(QtGui.QLabel):
         if saved_locs != []:
             base, ext = os.path.splitext(self.locs_paths[channel])
             out_path = base + "_cluster.hdf5"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save picked localizations", out_path, filter="*.hdf5"
             )
             if path:
@@ -4102,7 +4102,7 @@ class View(QtGui.QLabel):
                 self.infos[channel][0]["Height"],
                 self.infos[channel][0]["Width"],
             )
-            max_dark, ok = QtGui.QInputDialog.getInteger(
+            max_dark, ok = QtWidgets.QInputDialog.getInteger(
                 self, "Input Dialog", "Enter gap size:", 3
             )
             out_locs = []
@@ -4205,13 +4205,13 @@ class View(QtGui.QLabel):
                 self.setPixmap((QtGui.QPixmap(im)))
                 self.setAlignment(QtCore.Qt.AlignCenter)
 
-                minlocs, ok = QtGui.QInputDialog.getInteger(
+                minlocs, ok = QtWidgets.QInputDialog.getInteger(
                     self,
                     "Input Dialog",
                     "Enter minimum number of localizations:",
                 )
                 if ok:
-                    maxlocs, ok2 = QtGui.QInputDialog.getInteger(
+                    maxlocs, ok2 = QtWidgets.QInputDialog.getInteger(
                         self,
                         "Input Dialog",
                         "Enter maximum number of localizations:",
@@ -5019,7 +5019,7 @@ class View(QtGui.QLabel):
         if current_text == self._pick_shape:
             return
         if len(self._picks):
-            qm = QtGui.QMessageBox()
+            qm = QtWidgets.QMessageBox()
             qm.setWindowTitle("Changing pick shape")
             ret = qm.question(
                 self,
@@ -5070,7 +5070,7 @@ class View(QtGui.QLabel):
             drift = self._drift[channel]
 
             if drift is None:
-                QtGui.QMessageBox.information(
+                QtWidgets.QMessageBox.information(
                     self,
                     "Driftfile error",
                     (
@@ -5139,7 +5139,7 @@ class View(QtGui.QLabel):
                 default_segmentation = int(n_frames / 4)
             else:
                 default_segmentation = 1000
-            segmentation, ok = QtGui.QInputDialog.getInt(
+            segmentation, ok = QtWidgets.QInputDialog.getInt(
                 self, "Undrift by RCC", "Segmentation:", default_segmentation
             )
 
@@ -5168,7 +5168,7 @@ class View(QtGui.QLabel):
                     self.add_drift(channel, drift)
                     self.update_scene()
                 except Exception as e:
-                    QtGui.QMessageBox.information(
+                    QtWidgets.QMessageBox.information(
                         self,
                         "RCC Error",
                         (
@@ -5386,7 +5386,7 @@ class View(QtGui.QLabel):
             self.clear_picks()
 
     def unfold_groups_square(self):
-        n_square, ok = QtGui.QInputDialog.getInteger(
+        n_square, ok = QtWidgets.QInputDialog.getInteger(
             self,
             "Input Dialog",
             "Set number of elements per row and column:",
@@ -5462,7 +5462,7 @@ class View(QtGui.QLabel):
                     offset = (pixmap_size - diameter) / 2
                     painter.drawEllipse(offset, offset, diameter, diameter)
                     painter.end()
-                    cursor = QtGui.QCursor(pixmap)
+                    cursor = QtWidgets.QCursor(pixmap)
                     self.setCursor(cursor)
             elif self._pick_shape == "Rectangle":
                 self.unsetCursor()
@@ -5649,7 +5649,7 @@ class View(QtGui.QLabel):
         self.zoom(ZOOM)
 
 
-class Window(QtGui.QMainWindow):
+class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Picasso: Render")
@@ -5752,20 +5752,20 @@ class Window(QtGui.QMainWindow):
 
         view_menu.addAction(info_action)
         tools_menu = self.menu_bar.addMenu("Tools")
-        tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
+        tools_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
         zoom_tool_action = tools_actiongroup.addAction(
-            QtGui.QAction("Zoom", tools_menu, checkable=True)
+            QtWidgets.QAction("Zoom", tools_menu, checkable=True)
         )
         zoom_tool_action.setShortcut("Ctrl+Z")
         tools_menu.addAction(zoom_tool_action)
         zoom_tool_action.setChecked(True)
         pick_tool_action = tools_actiongroup.addAction(
-            QtGui.QAction("Pick", tools_menu, checkable=True)
+            QtWidgets.QAction("Pick", tools_menu, checkable=True)
         )
         pick_tool_action.setShortcut("Ctrl+P")
         tools_menu.addAction(pick_tool_action)
         measure_tool_action = tools_actiongroup.addAction(
-            QtGui.QAction("Measure", tools_menu, checkable=True)
+            QtWidgets.QAction("Measure", tools_menu, checkable=True)
         )
         measure_tool_action.setShortcut("Ctrl+M")
         tools_menu.addAction(measure_tool_action)
@@ -5909,7 +5909,7 @@ class Window(QtGui.QMainWindow):
                 self.view.locs_paths[0]
             )
         io.save_user_settings(settings)
-        QtGui.qApp.closeAllWindows()
+        QtWidgets.qApp.closeAllWindows()
 
     def export_current(self):
         try:
@@ -5917,7 +5917,7 @@ class Window(QtGui.QMainWindow):
         except AttributeError:
             return
         out_path = base + ".png"
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
         if path:
@@ -5930,7 +5930,7 @@ class Window(QtGui.QMainWindow):
         except AttributeError:
             return
         out_path = base + ".png"
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
         if path:
@@ -5946,7 +5946,7 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".frc.txt"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self,
                 "Save localizations as txt (frames,x,y)",
                 out_path,
@@ -5978,7 +5978,7 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".nis.txt"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self,
                 (
                     "Save localizations as txt for NIS "
@@ -6072,7 +6072,7 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".chi.xyz"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self,
                 "Save localizations as xyz for chimera (molecule,x,y,z)",
                 out_path,
@@ -6096,7 +6096,7 @@ class Window(QtGui.QMainWindow):
                         )
                         print("File saved to {}".format(path))
                 else:
-                    QtGui.QMessageBox.information(
+                    QtWidgets.QMessageBox.information(
                         self, "Dataset error", "Data has no z. Export skipped."
                     )
 
@@ -6108,7 +6108,7 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".visp.3d"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self,
                 "Save localizations as xyz for chimera (molecule,x,y,z)",
                 out_path,
@@ -6128,7 +6128,7 @@ class Window(QtGui.QMainWindow):
                         )
                         print("Saving complete.")
                 else:
-                    QtGui.QMessageBox.information(
+                    QtWidgets.QMessageBox.information(
                         self, "Dataset error", "Data has no z. Export skipped."
                     )
 
@@ -6140,7 +6140,7 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".imaris.txt"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self,
                 "Save localizations as txt for IMARIS (x,y,z,frame,channel)",
                 out_path,
@@ -6174,7 +6174,7 @@ class Window(QtGui.QMainWindow):
             ".3d for ViSP",
             ".csv for ThunderSTORM",
         )
-        item, ok = QtGui.QInputDialog.getItem(
+        item, ok = QtWidgets.QInputDialog.getItem(
             self, "Select Export", "Formats", items, 0, False
         )
         if ok and item:
@@ -6201,7 +6201,7 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
             out_path = base + ".csv"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save csv to", out_path, filter="*.csv"
             )
             if path:
@@ -6495,7 +6495,7 @@ class Window(QtGui.QMainWindow):
                             print("File saved to {}".format(path))
 
     def load_picks(self):
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load pick regions", filter="*.yaml"
         )
         if path:
@@ -6503,7 +6503,7 @@ class Window(QtGui.QMainWindow):
 
     def substract_picks(self):
         if self.view._picks:
-            path = QtGui.QFileDialog.getOpenFileName(
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load pick regions", filter="*.yaml"
             )
             if path:
@@ -6599,11 +6599,11 @@ class Window(QtGui.QMainWindow):
 
     def open_file_dialog(self):
         if self.pwd == []:
-            path = QtGui.QFileDialog.getOpenFileName(
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Add localizations", filter="*.hdf5"
             )
         else:
-            path = QtGui.QFileDialog.getOpenFileName(
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Add localizations", directory=self.pwd, filter="*.hdf5"
             )
         if path:
@@ -6655,11 +6655,11 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             if channel is (len(self.view.locs_paths)):
                 print("Save all at once.")
-                suffix, ok = QtGui.QInputDialog.getText(
+                suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtGui.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.Normal,
                     "_apicked",
                 )
                 if ok:
@@ -6673,7 +6673,7 @@ class Window(QtGui.QMainWindow):
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_pickprops.hdf5"
-                path = QtGui.QFileDialog.getSaveFileName(
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self, "Save pick properties", out_path, filter="*.hdf5"
                 )
                 if path:
@@ -6684,11 +6684,11 @@ class Window(QtGui.QMainWindow):
         if channel is not None:
             if channel is (len(self.view.locs_paths)):
                 print("Save all at once.")
-                suffix, ok = QtGui.QInputDialog.getText(
+                suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
                     "Input Dialog",
                     "Enter suffix",
-                    QtGui.QLineEdit.Normal,
+                    QtWidgets.QLineEdit.Normal,
                     "_arender",
                 )
                 if ok:
@@ -6711,7 +6711,7 @@ class Window(QtGui.QMainWindow):
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_render.hdf5"
-                path = QtGui.QFileDialog.getSaveFileName(
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self, "Save localizations", out_path, filter="*.hdf5"
                 )
                 if path:
@@ -6731,7 +6731,7 @@ class Window(QtGui.QMainWindow):
                 print("Multichannel")
                 base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + "_picked_multi.hdf5"
-                path = QtGui.QFileDialog.getSaveFileName(
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
                     "Save picked localizations",
                     out_path,
@@ -6749,7 +6749,7 @@ class Window(QtGui.QMainWindow):
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_picked.hdf5"
-                path = QtGui.QFileDialog.getSaveFileName(
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
                     "Save picked localizations",
                     out_path,
@@ -6761,7 +6761,7 @@ class Window(QtGui.QMainWindow):
     def save_picks(self):
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + "_picks.yaml"
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save pick regions", out_path, filter="*.yaml"
         )
         if path:
@@ -6797,7 +6797,7 @@ class Window(QtGui.QMainWindow):
 
 
 def main():
-    app = QtGui.QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     window = Window()
     window.show()
 
@@ -6805,7 +6805,7 @@ def main():
         lib.cancel_dialogs()
         QtCore.QCoreApplication.instance().processEvents()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(
+        errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()
