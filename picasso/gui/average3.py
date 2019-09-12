@@ -20,6 +20,7 @@ import scipy
 from scipy import signal
 
 from PyQt5 import QtCore, QtGui
+from PyQt5.QtWidgets import QWidget, QDialog, QLineEdit, QTextEdit, QCheckBox, QPushButton, QRadioButton, QLabel, QMainWindow, QApplication, QGroupBox, QGridLayout, QVBoxLayout, QDoubleSpinBox, QSpinBox
 
 from .. import io, lib, render
 
@@ -86,16 +87,16 @@ def compute_xcorr(CF_image_avg, image):
     return xcorr
 
 
-class ParametersDialog(QtGui.QDialog):
+class ParametersDialog(QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Parameters")
         self.setModal(False)
-        grid = QtGui.QGridLayout(self)
+        grid = QGridLayout(self)
 
-        grid.addWidget(QtGui.QLabel("Oversampling:"), 0, 0)
-        self.oversampling = QtGui.QDoubleSpinBox()
+        grid.addWidget(QLabel("Oversampling:"), 0, 0)
+        self.oversampling = QDoubleSpinBox()
         self.oversampling.setRange(1, 200)
         self.oversampling.setValue(DEFAULT_OVERSAMPLING)
         self.oversampling.setDecimals(1)
@@ -103,12 +104,12 @@ class ParametersDialog(QtGui.QDialog):
         self.oversampling.valueChanged.connect(self.window.updateLayout)
         grid.addWidget(self.oversampling, 0, 1)
 
-        self.iterations = QtGui.QSpinBox()
+        self.iterations = QSpinBox()
         self.iterations.setRange(1, 1)
         self.iterations.setValue(1)
 
 
-class View(QtGui.QLabel):
+class View(QLabel):
     def __init__(self, window):
         super().__init__()
         self.window = window
@@ -168,24 +169,24 @@ class View(QtGui.QLabel):
         self.set_image(image_avg)
 
 
-class DatasetDialog(QtGui.QDialog):
+class DatasetDialog(QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Datasets")
         self.setModal(False)
-        self.layout = QtGui.QVBoxLayout()
+        self.layout = QVBoxLayout()
         self.checks = []
         self.setLayout(self.layout)
 
     def add_entry(self, path):
-        c = QtGui.QCheckBox(path)
+        c = QCheckBox(path)
         self.layout.addWidget(c)
         self.checks.append(c)
         self.checks[-1].setChecked(True)
 
 
-class Window(QtGui.QMainWindow):
+class Window(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Picasso: Average3")
@@ -230,10 +231,10 @@ class Window(QtGui.QMainWindow):
         self._drift = []
 
         # Define DisplaySettingsDialog
-        self.viewxy = QtGui.QLabel("")
-        self.viewxz = QtGui.QLabel("")
-        self.viewyz = QtGui.QLabel("")
-        self.viewcp = QtGui.QLabel("")
+        self.viewxy = QLabel("")
+        self.viewxz = QLabel("")
+        self.viewyz = QLabel("")
+        self.viewcp = QLabel("")
 
         minsize = 512
         self.viewxy.setFixedWidth(minsize)
@@ -246,30 +247,30 @@ class Window(QtGui.QMainWindow):
         self.viewcp.setFixedHeight(minsize)
 
         # Define layout
-        display_groupbox = QtGui.QGroupBox("Display")
-        displaygrid = QtGui.QGridLayout(display_groupbox)
-        displaygrid.addWidget(QtGui.QLabel("XY"), 0, 0)
+        display_groupbox = QGroupBox("Display")
+        displaygrid = QGridLayout(display_groupbox)
+        displaygrid.addWidget(QLabel("XY"), 0, 0)
         displaygrid.addWidget(self.viewxy, 1, 0)
-        displaygrid.addWidget(QtGui.QLabel("XZ"), 0, 1)
+        displaygrid.addWidget(QLabel("XZ"), 0, 1)
         displaygrid.addWidget(self.viewxz, 1, 1)
-        displaygrid.addWidget(QtGui.QLabel("YZ"), 2, 0)
+        displaygrid.addWidget(QLabel("YZ"), 2, 0)
         displaygrid.addWidget(self.viewyz, 3, 0)
-        displaygrid.addWidget(QtGui.QLabel("CP"), 2, 1)
+        displaygrid.addWidget(QLabel("CP"), 2, 1)
         displaygrid.addWidget(self.viewcp, 3, 1)
 
-        button_groupbox = QtGui.QGroupBox("Buttons")
-        buttongrid = QtGui.QGridLayout(button_groupbox)
+        button_groupbox = QGroupBox("Buttons")
+        buttongrid = QGridLayout(button_groupbox)
 
-        rotation_groupbox = QtGui.QGroupBox("Rotation + Translation")
-        rotationgrid = QtGui.QGridLayout(rotation_groupbox)
-        centerofmassbtn = QtGui.QPushButton("Center of Mass XYZ")
+        rotation_groupbox = QGroupBox("Rotation + Translation")
+        rotationgrid = QGridLayout(rotation_groupbox)
+        centerofmassbtn = QPushButton("Center of Mass XYZ")
 
-        axis_groupbox = QtGui.QGroupBox("Axis")
-        axisgrid = QtGui.QGridLayout(axis_groupbox)
+        axis_groupbox = QGroupBox("Axis")
+        axisgrid = QGridLayout(axis_groupbox)
 
-        self.x_axisbtn = QtGui.QRadioButton("X")
-        self.y_axisbtn = QtGui.QRadioButton("Y")
-        self.z_axisbtn = QtGui.QRadioButton("Z")
+        self.x_axisbtn = QRadioButton("X")
+        self.y_axisbtn = QRadioButton("Y")
+        self.z_axisbtn = QRadioButton("Z")
 
         self.z_axisbtn.setChecked(True)
 
@@ -277,12 +278,12 @@ class Window(QtGui.QMainWindow):
         axisgrid.addWidget(self.y_axisbtn, 0, 1)
         axisgrid.addWidget(self.z_axisbtn, 0, 2)
 
-        proj_groupbox = QtGui.QGroupBox("Projection")
-        projgrid = QtGui.QGridLayout(proj_groupbox)
+        proj_groupbox = QGroupBox("Projection")
+        projgrid = QGridLayout(proj_groupbox)
 
-        self.xy_projbtn = QtGui.QRadioButton("XY")
-        self.yz_projbtn = QtGui.QRadioButton("YZ")
-        self.xz_projbtn = QtGui.QRadioButton("XZ")
+        self.xy_projbtn = QRadioButton("XY")
+        self.yz_projbtn = QRadioButton("YZ")
+        self.xz_projbtn = QRadioButton("XZ")
 
         self.xy_projbtn.setChecked(True)
 
@@ -290,24 +291,24 @@ class Window(QtGui.QMainWindow):
         projgrid.addWidget(self.yz_projbtn, 0, 1)
         projgrid.addWidget(self.xz_projbtn, 0, 2)
 
-        rotatebtn = QtGui.QPushButton("Rotate")
+        rotatebtn = QPushButton("Rotate")
 
-        self.radio_sym = QtGui.QRadioButton("x symmetry")
-        self.symEdit = QtGui.QSpinBox()
+        self.radio_sym = QRadioButton("x symmetry")
+        self.symEdit = QSpinBox()
         self.symEdit.setRange(2, 100)
         self.symEdit.setValue(8)
 
-        self.radio_sym_custom = QtGui.QRadioButton("custom symmetry")
-        self.symcustomEdit = QtGui.QLineEdit("90,180,270")
+        self.radio_sym_custom = QRadioButton("custom symmetry")
+        self.symcustomEdit = QLineEdit("90,180,270")
 
-        deg_groupbox = QtGui.QGroupBox("Degrees")
-        deggrid = QtGui.QGridLayout(deg_groupbox)
+        deg_groupbox = QGroupBox("Degrees")
+        deggrid = QGridLayout(deg_groupbox)
 
-        self.full_degbtn = QtGui.QRadioButton("Full")
-        self.part_degbtn = QtGui.QRadioButton("Part")
-        self.degEdit = QtGui.QTextEdit()
+        self.full_degbtn = QRadioButton("Full")
+        self.part_degbtn = QRadioButton("Part")
+        self.degEdit = QTextEdit()
 
-        self.degEdit = QtGui.QSpinBox()
+        self.degEdit = QSpinBox()
         self.degEdit.setRange(1, 10)
         self.degEdit.setValue(5)
 
@@ -333,41 +334,41 @@ class Window(QtGui.QMainWindow):
         centerofmassbtn.clicked.connect(self.centerofmass)
         rotatebtn.clicked.connect(self.rotate_groups)
 
-        self.translatebtn = QtGui.QCheckBox("Translate only")
+        self.translatebtn = QCheckBox("Translate only")
 
-        self.flipbtn = QtGui.QCheckBox("Consider flipped structures")
+        self.flipbtn = QCheckBox("Consider flipped structures")
 
-        self.alignxbtn = QtGui.QPushButton("Align X")
-        self.alignybtn = QtGui.QPushButton("Align Y")
-        self.alignzzbtn = QtGui.QPushButton("Align Z_Z")
-        self.alignzybtn = QtGui.QPushButton("Align Z_Y")
+        self.alignxbtn = QPushButton("Align X")
+        self.alignybtn = QPushButton("Align Y")
+        self.alignzzbtn = QPushButton("Align Z_Z")
+        self.alignzybtn = QPushButton("Align Z_Y")
 
-        self.translatexbtn = QtGui.QPushButton("Translate X")
-        self.translateybtn = QtGui.QPushButton("Translate Y")
-        self.translatezbtn = QtGui.QPushButton("Translate Z")
+        self.translatexbtn = QPushButton("Translate X")
+        self.translateybtn = QPushButton("Translate Y")
+        self.translatezbtn = QPushButton("Translate Z")
 
-        self.rotatexy_convbtn = QtGui.QPushButton("Rotate XY - Convolution")
+        self.rotatexy_convbtn = QPushButton("Rotate XY - Convolution")
 
-        self.scorebtn = QtGui.QPushButton("Calculate Score")
+        self.scorebtn = QPushButton("Calculate Score")
 
-        operate_groupbox = QtGui.QGroupBox("Operate")
-        operategrid = QtGui.QGridLayout(operate_groupbox)
+        operate_groupbox = QGroupBox("Operate")
+        operategrid = QGridLayout(operate_groupbox)
 
         rotationgrid.addWidget(self.translatebtn, 7, 0)
 
         rotationgrid.addWidget(self.flipbtn, 8, 0)
 
-        self.x_range = QtGui.QLineEdit("-3,3")
-        rotationgrid.addWidget(QtGui.QLabel("x-Range (Px)"), 9, 0)
+        self.x_range = QLineEdit("-3,3")
+        rotationgrid.addWidget(QLabel("x-Range (Px)"), 9, 0)
         rotationgrid.addWidget(self.x_range, 9, 1)
 
-        self.y_range = QtGui.QLineEdit("-3,3")
-        rotationgrid.addWidget(QtGui.QLabel("y-Range (Px)"), 10, 0)
+        self.y_range = QLineEdit("-3,3")
+        rotationgrid.addWidget(QLabel("y-Range (Px)"), 10, 0)
         rotationgrid.addWidget(self.y_range, 10, 1)
 
-        self.z_range = QtGui.QLineEdit("-1000,1000")
+        self.z_range = QLineEdit("-1000,1000")
 
-        rotationgrid.addWidget(QtGui.QLabel("z-Range (nm)"), 11, 0)
+        rotationgrid.addWidget(QLabel("z-Range (nm)"), 11, 0)
         rotationgrid.addWidget(self.z_range, 11, 1)
 
         self.z_range.textChanged.connect(self.adjust_z)
@@ -401,7 +402,7 @@ class Window(QtGui.QMainWindow):
 
         buttongrid.addWidget(operate_groupbox, 2, 0)
 
-        self.contrastEdit = QtGui.QDoubleSpinBox()
+        self.contrastEdit = QDoubleSpinBox()
         self.contrastEdit.setDecimals(1)
         self.contrastEdit.setRange(0, 10)
         self.contrastEdit.setValue(0.5)
@@ -409,12 +410,12 @@ class Window(QtGui.QMainWindow):
 
         self.contrastEdit.valueChanged.connect(self.updateLayout)
 
-        self.grid = QtGui.QGridLayout()
+        self.grid = QGridLayout()
         self.grid.addWidget(display_groupbox, 0, 0, 2, 1)
         self.grid.addWidget(button_groupbox, 0, 1, 1, 1)
 
-        contrast_groupbox = QtGui.QGroupBox("Contrast")
-        contrastgrid = QtGui.QGridLayout(contrast_groupbox)
+        contrast_groupbox = QGroupBox("Contrast")
+        contrastgrid = QGridLayout(contrast_groupbox)
 
         contrastgrid.addWidget(self.contrastEdit)
         buttongrid.addWidget(contrast_groupbox)
@@ -423,45 +424,45 @@ class Window(QtGui.QMainWindow):
         MODEL_Y_DEFAULT = "0,20,40,0,20,40,0,20,40,0,20,40"
         MODEL_Z_DEFAULT = "0,0,0,0,0,0,0,0,0,0,0,0"
 
-        self.modelchk = QtGui.QCheckBox("Use Model")
-        self.model_x = QtGui.QLineEdit(MODEL_X_DEFAULT)
-        self.model_y = QtGui.QLineEdit(MODEL_Y_DEFAULT)
-        self.model_z = QtGui.QLineEdit(MODEL_Z_DEFAULT)
+        self.modelchk = QCheckBox("Use Model")
+        self.model_x = QLineEdit(MODEL_X_DEFAULT)
+        self.model_y = QLineEdit(MODEL_Y_DEFAULT)
+        self.model_z = QLineEdit(MODEL_Z_DEFAULT)
 
-        self.model_preview_btn = QtGui.QPushButton("Preview")
+        self.model_preview_btn = QPushButton("Preview")
 
         self.model_preview_btn.clicked.connect(self.model_preview)
 
-        self.modelblurEdit = QtGui.QDoubleSpinBox()
+        self.modelblurEdit = QDoubleSpinBox()
         self.modelblurEdit.setDecimals(1)
         self.modelblurEdit.setRange(0, 10)
         self.modelblurEdit.setValue(0.5)
         self.modelblurEdit.setSingleStep(0.1)
 
-        self.pixelsizeEdit = QtGui.QSpinBox()
+        self.pixelsizeEdit = QSpinBox()
         self.pixelsizeEdit.setRange(1, 999)
         self.pixelsizeEdit.setValue(130)
 
-        model_groupbox = QtGui.QGroupBox("Model")
-        modelgrid = QtGui.QGridLayout(model_groupbox)
+        model_groupbox = QGroupBox("Model")
+        modelgrid = QGridLayout(model_groupbox)
 
         modelgrid.addWidget(self.modelchk, 0, 0)
-        modelgrid.addWidget(QtGui.QLabel("X-Coordinates"), 1, 0)
+        modelgrid.addWidget(QLabel("X-Coordinates"), 1, 0)
         modelgrid.addWidget(self.model_x, 1, 1)
-        modelgrid.addWidget(QtGui.QLabel("Y-Coordinates"), 2, 0)
+        modelgrid.addWidget(QLabel("Y-Coordinates"), 2, 0)
         modelgrid.addWidget(self.model_y, 2, 1)
-        modelgrid.addWidget(QtGui.QLabel("Z-Coordinates"), 3, 0)
+        modelgrid.addWidget(QLabel("Z-Coordinates"), 3, 0)
         modelgrid.addWidget(self.model_z, 3, 1)
-        modelgrid.addWidget(QtGui.QLabel("Blur:"), 4, 0)
+        modelgrid.addWidget(QLabel("Blur:"), 4, 0)
         modelgrid.addWidget(self.modelblurEdit, 4, 1)
-        modelgrid.addWidget(QtGui.QLabel("Pixelsize:"), 5, 0)
+        modelgrid.addWidget(QLabel("Pixelsize:"), 5, 0)
         modelgrid.addWidget(self.pixelsizeEdit, 5, 1)
         modelgrid.addWidget(self.model_preview_btn, 6, 0)
         modelgrid.addWidget(self.modelchk, 6, 1)
 
         buttongrid.addWidget(model_groupbox)
 
-        mainWidget = QtGui.QWidget()
+        mainWidget = QWidget()
         mainWidget.setLayout(self.grid)
         self.setCentralWidget(mainWidget)
         self.status_bar.showMessage("Average3 ready.")
@@ -2057,7 +2058,7 @@ class Window(QtGui.QMainWindow):
 
 def main():
 
-    app = QtGui.QApplication(sys.argv)
+    app = QApplication(sys.argv)
     window = Window()
     window.show()
 
