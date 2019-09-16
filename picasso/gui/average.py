@@ -17,7 +17,7 @@ import matplotlib.pyplot as plt
 import numba
 import numpy as np
 import scipy
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, render
 
@@ -162,16 +162,16 @@ class Worker(QtCore.QThread):
             )
 
 
-class ParametersDialog(QtGui.QDialog):
+class ParametersDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Parameters")
         self.setModal(False)
-        grid = QtGui.QGridLayout(self)
+        grid = QtWidgets.QGridLayout(self)
 
-        grid.addWidget(QtGui.QLabel("Oversampling:"), 0, 0)
-        self.oversampling = QtGui.QDoubleSpinBox()
+        grid.addWidget(QtWidgets.QLabel("Oversampling:"), 0, 0)
+        self.oversampling = QtWidgets.QDoubleSpinBox()
         self.oversampling.setRange(1, 1e7)
         self.oversampling.setValue(10)
         self.oversampling.setDecimals(1)
@@ -179,14 +179,14 @@ class ParametersDialog(QtGui.QDialog):
         self.oversampling.valueChanged.connect(self.window.view.update_image)
         grid.addWidget(self.oversampling, 0, 1)
 
-        grid.addWidget(QtGui.QLabel("Iterations:"), 1, 0)
-        self.iterations = QtGui.QSpinBox()
+        grid.addWidget(QtWidgets.QLabel("Iterations:"), 1, 0)
+        self.iterations = QtWidgets.QSpinBox()
         self.iterations.setRange(0, 1e7)
         self.iterations.setValue(10)
         grid.addWidget(self.iterations, 1, 1)
 
 
-class View(QtGui.QLabel):
+class View(QtWidgets.QLabel):
     def __init__(self, window):
         super().__init__()
         self.window = window
@@ -329,7 +329,7 @@ class View(QtGui.QLabel):
         self.set_image(image_avg)
 
 
-class Window(QtGui.QMainWindow):
+class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Picasso: Average")
@@ -361,7 +361,7 @@ class Window(QtGui.QMainWindow):
         self.status_bar = self.statusBar()
 
     def open(self):
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open localizations", filter="*.hdf5"
         )
         if path:
@@ -369,7 +369,7 @@ class Window(QtGui.QMainWindow):
 
     def save(self):
         out_path = os.path.splitext(self.view.path)[0] + "_avg.hdf5"
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, exe = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save localizations", out_path, filter="*.hdf5"
         )
         if path:
@@ -378,14 +378,14 @@ class Window(QtGui.QMainWindow):
 
 def main():
 
-    app = QtGui.QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     window = Window()
     window.show()
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(
+        errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()

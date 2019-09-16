@@ -5,14 +5,14 @@
 
     Graphical user interface for localizing single molecules
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2015-2018
-    :copyright: Copyright (c) 2015-2018 Jungmann Lab, MPI of Biochemistry
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2015-2019
+    :copyright: Copyright (c) 2015-2019 Jungmann Lab, MPI of Biochemistry
 """
 
 import os.path
 import sys
 import yaml
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui, QtWidgets
 import time
 import numpy as np
 import traceback
@@ -30,9 +30,9 @@ CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
 DEFAULT_PARAMETERS = {"Box Size": 7, "Min. Net Gradient": 5000}
 
 
-class RubberBand(QtGui.QRubberBand):
+class RubberBand(QtWidgets.QRubberBand):
     def __init__(self, parent):
-        super().__init__(QtGui.QRubberBand.Rectangle, parent)
+        super().__init__(QtWidgets.QRubberBand.Rectangle, parent)
 
     def paintEvent(self, event):
         painter = QtGui.QPainter(self)
@@ -44,7 +44,7 @@ class RubberBand(QtGui.QRubberBand):
         painter.drawRect(rect)
 
 
-class View(QtGui.QGraphicsView):
+class View(QtWidgets.QGraphicsView):
     """ The central widget which shows `Scene` objects of individual frames """
 
     def __init__(self, window):
@@ -119,7 +119,7 @@ class View(QtGui.QGraphicsView):
         self.scale(scale, scale)
 
 
-class Scene(QtGui.QGraphicsScene):
+class Scene(QtWidgets.QGraphicsScene):
     """
     Scenes render indivdual frames and can be displayed in a `View` widget
     """
@@ -155,19 +155,19 @@ class Scene(QtGui.QGraphicsScene):
         self.window.open(path)
 
 
-class FitMarker(QtGui.QGraphicsItemGroup):
+class FitMarker(QtWidgets.QGraphicsItemGroup):
     def __init__(self, x, y, size, parent=None):
         super().__init__(parent)
         L = size / 2
-        line1 = QtGui.QGraphicsLineItem(x - L, y - L, x + L, y + L)
+        line1 = QtWidgets.QGraphicsLineItem(x - L, y - L, x + L, y + L)
         line1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
         self.addToGroup(line1)
-        line2 = QtGui.QGraphicsLineItem(x - L, y + L, x + L, y - L)
+        line2 = QtWidgets.QGraphicsLineItem(x - L, y + L, x + L, y - L)
         line2.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
         self.addToGroup(line2)
 
 
-class OddSpinBox(QtGui.QSpinBox):
+class OddSpinBox(QtWidgets.QSpinBox):
     """ A spinbox that allows only odd numbers """
 
     def __init__(self, parent=None):
@@ -181,7 +181,7 @@ class OddSpinBox(QtGui.QSpinBox):
             self.setValue(value + 1)
 
 
-class CamSettingComboBox(QtGui.QComboBox):
+class CamSettingComboBox(QtWidgets.QComboBox):
     def __init__(self, cam_combos, camera, index):
         super().__init__()
         self.cam_combos = cam_combos
@@ -200,21 +200,21 @@ class CamSettingComboBox(QtGui.QComboBox):
         target.addItems(sorted(list(sensitivity.keys())))
 
 
-class PromptInfoDialog(QtGui.QDialog):
+class PromptInfoDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Enter movie info")
-        vbox = QtGui.QVBoxLayout(self)
-        grid = QtGui.QGridLayout()
-        grid.addWidget(QtGui.QLabel("Byte Order:"), 0, 0)
-        self.byte_order = QtGui.QComboBox()
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Byte Order:"), 0, 0)
+        self.byte_order = QtWidgets.QComboBox()
         self.byte_order.addItems(
             ["Little Endian (loads faster)", "Big Endian"]
         )
         grid.addWidget(self.byte_order, 0, 1)
-        grid.addWidget(QtGui.QLabel("Data Type:"), 1, 0)
-        self.dtype = QtGui.QComboBox()
+        grid.addWidget(QtWidgets.QLabel("Data Type:"), 1, 0)
+        self.dtype = QtWidgets.QComboBox()
         self.dtype.addItems(
             [
                 "float16",
@@ -229,27 +229,27 @@ class PromptInfoDialog(QtGui.QDialog):
             ]
         )
         grid.addWidget(self.dtype, 1, 1)
-        grid.addWidget(QtGui.QLabel("Frames:"), 2, 0)
-        self.frames = QtGui.QSpinBox()
+        grid.addWidget(QtWidgets.QLabel("Frames:"), 2, 0)
+        self.frames = QtWidgets.QSpinBox()
         self.frames.setRange(1, 1e9)
         grid.addWidget(self.frames, 2, 1)
-        grid.addWidget(QtGui.QLabel("Height:"), 3, 0)
-        self.movie_height = QtGui.QSpinBox()
+        grid.addWidget(QtWidgets.QLabel("Height:"), 3, 0)
+        self.movie_height = QtWidgets.QSpinBox()
         self.movie_height.setRange(1, 1e9)
         grid.addWidget(self.movie_height, 3, 1)
-        grid.addWidget(QtGui.QLabel("Width"), 4, 0)
-        self.movie_width = QtGui.QSpinBox()
+        grid.addWidget(QtWidgets.QLabel("Width"), 4, 0)
+        self.movie_width = QtWidgets.QSpinBox()
         self.movie_width.setRange(1, 1e9)
         grid.addWidget(self.movie_width, 4, 1)
-        self.save = QtGui.QCheckBox("Save info to yaml file")
+        self.save = QtWidgets.QCheckBox("Save info to yaml file")
         self.save.setChecked(True)
         grid.addWidget(self.save, 5, 0, 1, 2)
         vbox.addLayout(grid)
-        hbox = QtGui.QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
         # OK and Cancel buttons
-        self.buttons = QtGui.QDialogButtonBox(
-            QtGui.QDialogButtonBox.Ok | QtGui.QDialogButtonBox.Cancel,
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
             QtCore.Qt.Horizontal,
             self,
         )
@@ -271,10 +271,10 @@ class PromptInfoDialog(QtGui.QDialog):
         info["Height"] = dialog.movie_height.value()
         info["Width"] = dialog.movie_width.value()
         save = dialog.save.isChecked()
-        return (info, save, result == QtGui.QDialog.Accepted)
+        return (info, save, result == QtWidgets.QDialog.Accepted)
 
 
-class ParametersDialog(QtGui.QDialog):
+class ParametersDialog(QtWidgets.QDialog):
     """ The dialog showing analysis parameters """
 
     def __init__(self, parent=None):
@@ -284,13 +284,13 @@ class ParametersDialog(QtGui.QDialog):
         self.resize(300, 0)
         self.setModal(False)
 
-        vbox = QtGui.QVBoxLayout(self)
-        identification_groupbox = QtGui.QGroupBox("Identification")
+        vbox = QtWidgets.QVBoxLayout(self)
+        identification_groupbox = QtWidgets.QGroupBox("Identification")
         vbox.addWidget(identification_groupbox)
-        identification_grid = QtGui.QGridLayout(identification_groupbox)
+        identification_grid = QtWidgets.QGridLayout(identification_groupbox)
 
         # Box Size
-        identification_grid.addWidget(QtGui.QLabel("Box side length:"), 0, 0)
+        identification_grid.addWidget(QtWidgets.QLabel("Box side length:"), 0, 0)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
         self.box_spinbox.setValue(DEFAULT_PARAMETERS["Box Size"])
@@ -298,8 +298,8 @@ class ParametersDialog(QtGui.QDialog):
         identification_grid.addWidget(self.box_spinbox, 0, 1)
 
         # Min. Net Gradient
-        identification_grid.addWidget(QtGui.QLabel("Min. Net Gradient:"), 1, 0)
-        self.mng_spinbox = QtGui.QSpinBox()
+        identification_grid.addWidget(QtWidgets.QLabel("Min. Net Gradient:"), 1, 0)
+        self.mng_spinbox = QtWidgets.QSpinBox()
         self.mng_spinbox.setRange(0, 1e9)
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
         self.mng_spinbox.setKeyboardTracking(False)
@@ -307,7 +307,7 @@ class ParametersDialog(QtGui.QDialog):
         identification_grid.addWidget(self.mng_spinbox, 1, 1)
 
         # Slider
-        self.mng_slider = QtGui.QSlider()
+        self.mng_slider = QtWidgets.QSlider()
         self.mng_slider.setOrientation(QtCore.Qt.Horizontal)
         self.mng_slider.setRange(0, 10000)
         self.mng_slider.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
@@ -316,11 +316,11 @@ class ParametersDialog(QtGui.QDialog):
         self.mng_slider.valueChanged.connect(self.on_mng_slider_changed)
         identification_grid.addWidget(self.mng_slider, 2, 0, 1, 2)
 
-        hbox = QtGui.QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         identification_grid.addLayout(hbox, 3, 0, 1, 2)
 
         # Min SpinBox
-        self.mng_min_spinbox = QtGui.QSpinBox()
+        self.mng_min_spinbox = QtWidgets.QSpinBox()
         self.mng_min_spinbox.setRange(0, 999999)
         self.mng_min_spinbox.setKeyboardTracking(False)
         self.mng_min_spinbox.setValue(0)
@@ -330,14 +330,14 @@ class ParametersDialog(QtGui.QDialog):
         hbox.addStretch(1)
 
         # Max SpinBox
-        self.mng_max_spinbox = QtGui.QSpinBox()
+        self.mng_max_spinbox = QtWidgets.QSpinBox()
         self.mng_max_spinbox.setKeyboardTracking(False)
         self.mng_max_spinbox.setRange(0, 999999)
         self.mng_max_spinbox.setValue(10000)
         self.mng_max_spinbox.valueChanged.connect(self.on_mng_max_changed)
         hbox.addWidget(self.mng_max_spinbox)
 
-        self.preview_checkbox = QtGui.QCheckBox("Preview")
+        self.preview_checkbox = QtWidgets.QCheckBox("Preview")
         self.preview_checkbox.setTristate(False)
         # self.preview_checkbox.setChecked(True)
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
@@ -346,23 +346,23 @@ class ParametersDialog(QtGui.QDialog):
         # Camera:
         if "Cameras" in CONFIG:
             # Experiment settings
-            exp_groupbox = QtGui.QGroupBox("Experiment settings")
+            exp_groupbox = QtWidgets.QGroupBox("Experiment settings")
             vbox.addWidget(exp_groupbox)
-            exp_grid = QtGui.QGridLayout(exp_groupbox)
-            exp_grid.addWidget(QtGui.QLabel("Camera:"), 0, 0)
-            self.camera = QtGui.QComboBox()
+            exp_grid = QtWidgets.QGridLayout(exp_groupbox)
+            exp_grid.addWidget(QtWidgets.QLabel("Camera:"), 0, 0)
+            self.camera = QtWidgets.QComboBox()
             exp_grid.addWidget(self.camera, 0, 1)
             cameras = sorted(list(CONFIG["Cameras"].keys()))
             self.camera.addItems(cameras)
             self.camera.currentIndexChanged.connect(self.on_camera_changed)
 
-            self.cam_settings = QtGui.QStackedWidget()
+            self.cam_settings = QtWidgets.QStackedWidget()
             exp_grid.addWidget(self.cam_settings, 1, 0, 1, 2)
             self.cam_combos = {}
             self.emission_combos = {}
             for cam in cameras:
-                cam_widget = QtGui.QWidget()
-                cam_grid = QtGui.QGridLayout(cam_widget)
+                cam_widget = QtWidgets.QWidget()
+                cam_grid = QtWidgets.QGridLayout(cam_widget)
                 self.cam_settings.addWidget(cam_widget)
                 cam_config = CONFIG["Cameras"][cam]
                 if "Sensitivity" in cam_config:
@@ -373,7 +373,7 @@ class ParametersDialog(QtGui.QDialog):
                         for i, category in enumerate(categories):
                             row_count = cam_grid.rowCount()
                             cam_grid.addWidget(
-                                QtGui.QLabel(category + ":"), row_count, 0
+                                QtWidgets.QLabel(category + ":"), row_count, 0
                             )
                             cat_combo = CamSettingComboBox(
                                 self.cam_combos, cam, i
@@ -399,9 +399,9 @@ class ParametersDialog(QtGui.QDialog):
                     else:
                         row_count = cam_grid.rowCount()
                         cam_grid.addWidget(
-                            QtGui.QLabel("Emission Wavelength:"), row_count, 0
+                            QtWidgets.QLabel("Emission Wavelength:"), row_count, 0
                         )
-                        emission_combo = QtGui.QComboBox()
+                        emission_combo = QtWidgets.QComboBox()
                         cam_grid.addWidget(emission_combo, row_count, 1)
                         wavelengths = sorted([str(_) for _ in qes])
                         emission_combo.addItems(wavelengths)
@@ -409,27 +409,27 @@ class ParametersDialog(QtGui.QDialog):
                             self.on_emission_changed
                         )
                         self.emission_combos[cam] = emission_combo
-                spacer = QtGui.QWidget()
+                spacer = QtWidgets.QWidget()
                 spacer.setSizePolicy(
-                    QtGui.QSizePolicy.Preferred, QtGui.QSizePolicy.Expanding
+                    QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding
                 )
                 cam_grid.addWidget(spacer, cam_grid.rowCount(), 0)
 
         # Photon conversion
-        photon_groupbox = QtGui.QGroupBox("Photon Conversion")
+        photon_groupbox = QtWidgets.QGroupBox("Photon Conversion")
         vbox.addWidget(photon_groupbox)
-        photon_grid = QtGui.QGridLayout(photon_groupbox)
+        photon_grid = QtWidgets.QGridLayout(photon_groupbox)
 
         # EM Gain
-        photon_grid.addWidget(QtGui.QLabel("EM Gain:"), 0, 0)
-        self.gain = QtGui.QSpinBox()
+        photon_grid.addWidget(QtWidgets.QLabel("EM Gain:"), 0, 0)
+        self.gain = QtWidgets.QSpinBox()
         self.gain.setRange(1, 1e6)
         self.gain.setValue(1)
         photon_grid.addWidget(self.gain, 0, 1)
 
         # Baseline
-        photon_grid.addWidget(QtGui.QLabel("Baseline:"), 1, 0)
-        self.baseline = QtGui.QDoubleSpinBox()
+        photon_grid.addWidget(QtWidgets.QLabel("Baseline:"), 1, 0)
+        self.baseline = QtWidgets.QDoubleSpinBox()
         self.baseline.setRange(0, 1e6)
         self.baseline.setValue(100.0)
         self.baseline.setDecimals(1)
@@ -437,8 +437,8 @@ class ParametersDialog(QtGui.QDialog):
         photon_grid.addWidget(self.baseline, 1, 1)
 
         # Sensitivity
-        photon_grid.addWidget(QtGui.QLabel("Sensitivity:"), 2, 0)
-        self.sensitivity = QtGui.QDoubleSpinBox()
+        photon_grid.addWidget(QtWidgets.QLabel("Sensitivity:"), 2, 0)
+        self.sensitivity = QtWidgets.QDoubleSpinBox()
         self.sensitivity.setRange(0, 1e6)
         self.sensitivity.setValue(1.0)
         self.sensitivity.setDecimals(4)
@@ -446,8 +446,8 @@ class ParametersDialog(QtGui.QDialog):
         photon_grid.addWidget(self.sensitivity, 2, 1)
 
         # QE
-        photon_grid.addWidget(QtGui.QLabel("Quantum Efficiency:"), 3, 0)
-        self.qe = QtGui.QDoubleSpinBox()
+        photon_grid.addWidget(QtWidgets.QLabel("Quantum Efficiency:"), 3, 0)
+        self.qe = QtWidgets.QDoubleSpinBox()
         self.qe.setRange(0, 1)
         self.qe.setValue(0.9)
         self.qe.setDecimals(2)
@@ -455,50 +455,50 @@ class ParametersDialog(QtGui.QDialog):
         photon_grid.addWidget(self.qe, 3, 1)
 
         # QE
-        photon_grid.addWidget(QtGui.QLabel("Pixelsize (nm):"), 4, 0)
-        self.pixelsize = QtGui.QSpinBox()
+        photon_grid.addWidget(QtWidgets.QLabel("Pixelsize (nm):"), 4, 0)
+        self.pixelsize = QtWidgets.QSpinBox()
         self.pixelsize.setRange(0, 1000)
         self.pixelsize.setValue(130)
         self.pixelsize.setSingleStep(1)
         photon_grid.addWidget(self.pixelsize, 4, 1)
 
         # Fit Settings
-        fit_groupbox = QtGui.QGroupBox("Fit Settings")
+        fit_groupbox = QtWidgets.QGroupBox("Fit Settings")
         vbox.addWidget(fit_groupbox)
-        fit_grid = QtGui.QGridLayout(fit_groupbox)
+        fit_grid = QtWidgets.QGridLayout(fit_groupbox)
 
-        fit_grid.addWidget(QtGui.QLabel("Method:"), 1, 0)
-        self.fit_method = QtGui.QComboBox()
+        fit_grid.addWidget(QtWidgets.QLabel("Method:"), 1, 0)
+        self.fit_method = QtWidgets.QComboBox()
         self.fit_method.addItems(
             ["MLE, integrated Gaussian", "LQ, Gaussian", "Average of ROI"]
         )
         fit_grid.addWidget(self.fit_method, 1, 1)
-        fit_stack = QtGui.QStackedWidget()
+        fit_stack = QtWidgets.QStackedWidget()
         fit_grid.addWidget(fit_stack, 2, 0, 1, 2)
         self.fit_method.currentIndexChanged.connect(fit_stack.setCurrentIndex)
         self.fit_method.currentIndexChanged.connect(self.on_fit_method_changed)
 
         # MLE
-        mle_widget = QtGui.QWidget()
+        mle_widget = QtWidgets.QWidget()
         fit_stack.addWidget(mle_widget)
-        mle_grid = QtGui.QGridLayout(mle_widget)
-        mle_grid.addWidget(QtGui.QLabel("Convergence criterion:"), 0, 0)
-        self.convergence_criterion = QtGui.QDoubleSpinBox()
+        mle_grid = QtWidgets.QGridLayout(mle_widget)
+        mle_grid.addWidget(QtWidgets.QLabel("Convergence criterion:"), 0, 0)
+        self.convergence_criterion = QtWidgets.QDoubleSpinBox()
         self.convergence_criterion.setRange(0, 1e6)
         self.convergence_criterion.setDecimals(6)
         self.convergence_criterion.setValue(0.001)
         mle_grid.addWidget(self.convergence_criterion, 0, 1)
-        mle_grid.addWidget(QtGui.QLabel("Max. iterations:"), 1, 0)
-        self.max_it = QtGui.QSpinBox()
+        mle_grid.addWidget(QtWidgets.QLabel("Max. iterations:"), 1, 0)
+        self.max_it = QtWidgets.QSpinBox()
         self.max_it.setRange(1, 1e6)
         self.max_it.setValue(1000)
         mle_grid.addWidget(self.max_it, 1, 1)
 
         # LQ
-        lq_widget = QtGui.QWidget()
-        lq_grid = QtGui.QGridLayout(lq_widget)
+        lq_widget = QtWidgets.QWidget()
+        lq_grid = QtWidgets.QGridLayout(lq_widget)
 
-        self.gpufit_checkbox = QtGui.QCheckBox("Use GPUfit")
+        self.gpufit_checkbox = QtWidgets.QCheckBox("Use GPUfit")
         self.gpufit_checkbox.setTristate(False)
         self.gpufit_checkbox.setDisabled(True)
         self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
@@ -508,37 +508,37 @@ class ParametersDialog(QtGui.QDialog):
         lq_grid.addWidget(self.gpufit_checkbox)
 
         fit_stack.addWidget(lq_widget)
-        # lq_grid = QtGui.QGridLayout(lq_widget)
+        # lq_grid = QtWidgets.QGridLayout(lq_widget)
 
-        avg_widget = QtGui.QWidget()
+        avg_widget = QtWidgets.QWidget()
         fit_stack.addWidget(avg_widget)
 
         # 3D
-        z_groupbox = QtGui.QGroupBox("3D via Astigmatism")
+        z_groupbox = QtWidgets.QGroupBox("3D via Astigmatism")
         vbox.addWidget(z_groupbox)
-        z_grid = QtGui.QGridLayout(z_groupbox)
+        z_grid = QtWidgets.QGridLayout(z_groupbox)
         z_grid.addWidget(
-            QtGui.QLabel("Non-integrated Gaussian fitting is recommend!"),
+            QtWidgets.QLabel("Non-integrated Gaussian fitting is recommend!"),
             0,
             0,
             1,
             2,
         )
-        load_z_calib = QtGui.QPushButton("Load calibration")
+        load_z_calib = QtWidgets.QPushButton("Load calibration")
         load_z_calib.setAutoDefault(False)
         load_z_calib.clicked.connect(self.load_z_calib)
         z_grid.addWidget(load_z_calib, 1, 1)
-        self.fit_z_checkbox = QtGui.QCheckBox("Fit Z")
+        self.fit_z_checkbox = QtWidgets.QCheckBox("Fit Z")
         self.fit_z_checkbox.setEnabled(False)
         z_grid.addWidget(self.fit_z_checkbox, 3, 1)
-        self.z_calib_label = QtGui.QLabel("-- no calibration loaded --")
+        self.z_calib_label = QtWidgets.QLabel("-- no calibration loaded --")
         self.z_calib_label.setAlignment(QtCore.Qt.AlignCenter)
         self.z_calib_label.setSizePolicy(
-            QtGui.QSizePolicy.Ignored, QtGui.QSizePolicy.Fixed
+            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed
         )
         z_grid.addWidget(self.z_calib_label, 1, 0)
-        z_grid.addWidget(QtGui.QLabel("Magnification factor:"), 2, 0)
-        self.magnification_factor = QtGui.QDoubleSpinBox()
+        z_grid.addWidget(QtWidgets.QLabel("Magnification factor:"), 2, 0)
+        self.magnification_factor = QtWidgets.QDoubleSpinBox()
         self.magnification_factor.setRange(0, 1e6)
         self.magnification_factor.setDecimals(4)
         self.magnification_factor.setValue(0.79)
@@ -563,7 +563,7 @@ class ParametersDialog(QtGui.QDialog):
             self.gpufit_checkbox.setDisabled(True)
 
     def load_z_calib(self):
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load 3d calibration", directory=None, filter="*.yaml"
         )
         if path:
@@ -717,29 +717,29 @@ class ParametersDialog(QtGui.QDialog):
                 self.sensitivity.setValue(sensitivity)
 
 
-class ContrastDialog(QtGui.QDialog):
+class ContrastDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Contrast")
         self.resize(200, 0)
         self.setModal(False)
-        grid = QtGui.QGridLayout(self)
-        black_label = QtGui.QLabel("Black:")
+        grid = QtWidgets.QGridLayout(self)
+        black_label = QtWidgets.QLabel("Black:")
         grid.addWidget(black_label, 0, 0)
-        self.black_spinbox = QtGui.QSpinBox()
+        self.black_spinbox = QtWidgets.QSpinBox()
         self.black_spinbox.setKeyboardTracking(False)
         self.black_spinbox.setRange(0, 999999)
         self.black_spinbox.valueChanged.connect(self.on_contrast_changed)
         grid.addWidget(self.black_spinbox, 0, 1)
-        white_label = QtGui.QLabel("White:")
+        white_label = QtWidgets.QLabel("White:")
         grid.addWidget(white_label, 1, 0)
-        self.white_spinbox = QtGui.QSpinBox()
+        self.white_spinbox = QtWidgets.QSpinBox()
         self.white_spinbox.setKeyboardTracking(False)
         self.white_spinbox.setRange(0, 999999)
         self.white_spinbox.valueChanged.connect(self.on_contrast_changed)
         grid.addWidget(self.white_spinbox, 1, 1)
-        self.auto_checkbox = QtGui.QCheckBox("Auto")
+        self.auto_checkbox = QtWidgets.QCheckBox("Auto")
         self.auto_checkbox.setTristate(False)
         self.auto_checkbox.setChecked(True)
         self.auto_checkbox.stateChanged.connect(self.on_auto_changed)
@@ -766,7 +766,7 @@ class ContrastDialog(QtGui.QDialog):
             self.window.draw_frame()
 
 
-class Window(QtGui.QMainWindow):
+class Window(QtWidgets.QMainWindow):
     """ The main window """
 
     def __init__(self):
@@ -786,7 +786,7 @@ class Window(QtGui.QMainWindow):
         self.scene = Scene(self)
         self.view.setScene(self.scene)
         self.status_bar = self.statusBar()
-        self.status_bar_frame_indicator = QtGui.QLabel()
+        self.status_bar_frame_indicator = QtWidgets.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
 
         #: Holds the curr movie as a numpy
@@ -840,7 +840,7 @@ class Window(QtGui.QMainWindow):
                 "gradient"
             ] = self.parameters_dialog.mng_slider.value()
         io.save_user_settings(settings)
-        QtGui.qApp.closeAllWindows()
+        QtWidgets.qApp.closeAllWindows()
 
     def init_menu_bar(self):
         menu_bar = self.menuBar()
@@ -958,7 +958,7 @@ class Window(QtGui.QMainWindow):
         else:
             dir = self.pwd
 
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open image sequence", directory=dir, filter="*.raw; *.tif"
         )
         if path:
@@ -987,7 +987,7 @@ class Window(QtGui.QMainWindow):
             dir = os.path.dirname(self.movie_path)
         else:
             dir = None
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open picks", directory=dir, filter="*.yaml"
         )
         if path:
@@ -1000,7 +1000,7 @@ class Window(QtGui.QMainWindow):
             self._picks = regions["Centers"]
             maxframes = int(self.info[0]["Frames"])
             # ask for drift correction
-            driftpath = QtGui.QFileDialog.getOpenFileName(
+            driftpath, exe = QtWidgets.QFileDialog.getOpenFileName(
                 self,
                 "Open drift file",
                 directory=os.path.dirname(path),
@@ -1064,7 +1064,7 @@ class Window(QtGui.QMainWindow):
             dir = os.path.dirname(self.movie_path)
         else:
             dir = None
-        path = QtGui.QFileDialog.getOpenFileName(
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open locs", directory=dir, filter="*.hdf5"
         )
         if path:
@@ -1077,14 +1077,14 @@ class Window(QtGui.QMainWindow):
             print(locs)
             print(info)
             max_frames = int(self.info[0]["Frames"])
-            n_frames, ok = QtGui.QInputDialog.getInteger(
+            n_frames, ok = QtWidgets.QInputDialog.getInteger(
                 self,
                 "Input Dialog",
                 "Enter number of frames around localization event:",
                 100,
             )
 
-            # driftpath = QtGui.QFileDialog.getOpenFileName(self,
+            # driftpath, exe = QtWidgets.QFileDialog.getOpenFileName(self,
             # 'Open drift file', filter='*.txt')
             # if driftpath:
             #    drift = np.genfromtxt(driftpath)
@@ -1172,7 +1172,7 @@ class Window(QtGui.QMainWindow):
     def to_frame(self):
         if self.movie is not None:
             frames = self.info[0]["Frames"]
-            number, ok = QtGui.QInputDialog.getInt(
+            number, ok = QtWidgets.QInputDialog.getInt(
                 self,
                 "Go to frame",
                 "Frame number:",
@@ -1261,11 +1261,11 @@ class Window(QtGui.QMainWindow):
 
     def open_parameters(self):
         if self.pwd == []:
-            path = QtGui.QFileDialog.getOpenFileName(
+            path, exe = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Open parameters", filter="*.yaml"
             )
         else:
-            path = QtGui.QFileDialog.getOpenFileName(
+            path, exe = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Open parameters", directory=self.pwd, filter="*.yaml"
             )
         if path:
@@ -1283,7 +1283,7 @@ class Window(QtGui.QMainWindow):
             )
 
     def save_parameters(self):
-        path = QtGui.QFileDialog.getSaveFileName(
+        path, exe = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save parameters", filter="*.yaml"
         )
         if path:
@@ -1405,7 +1405,7 @@ class Window(QtGui.QMainWindow):
         self.draw_frame()
         base, ext = os.path.splitext(self.movie_path)
         if calibrate_z:
-            step, ok = QtGui.QInputDialog.getDouble(
+            step, ok = QtWidgets.QInputDialog.getDouble(
                 self,
                 "3D Calibration",
                 "Calibration step size (nm):",
@@ -1415,7 +1415,7 @@ class Window(QtGui.QMainWindow):
             if ok:
                 base, ext = os.path.splitext(self.movie_path)
                 out_path = base + "_3d_calib.yaml"
-                path = QtGui.QFileDialog.getSaveFileName(
+                path, exe = QtWidgets.QFileDialog.getSaveFileName(
                     self, "Save 3D calibration", out_path, filter="*.yaml"
                 )
                 if path:
@@ -1469,7 +1469,7 @@ class Window(QtGui.QMainWindow):
         else:
             base, ext = os.path.splitext(self.movie_path)
             path = base + "_spots.hdf5"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, exe = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save spots", path, filter="*.hdf5"
             )
             if path:
@@ -1495,7 +1495,7 @@ class Window(QtGui.QMainWindow):
         else:
             base, ext = os.path.splitext(self.movie_path)
             locs_path = base + "_locs.hdf5"
-            path = QtGui.QFileDialog.getSaveFileName(
+            path, exe = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save localizations", locs_path, filter="*.hdf5"
             )
             if path:
@@ -1673,14 +1673,14 @@ class FitZWorker(QtCore.QThread):
 
 
 def main():
-    app = QtGui.QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     window = Window()
     window.show()
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(
+        errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()

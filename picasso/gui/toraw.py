@@ -12,12 +12,12 @@
 import sys
 import os
 import os.path
-from PyQt4 import QtCore, QtGui
+from PyQt5 import QtCore, QtGui, QtWidgets
 import traceback
 from .. import io, lib
 
 
-class TextEdit(QtGui.QTextEdit):
+class TextEdit(QtWidgets.QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
         # self.setAcceptDrops(True)
@@ -54,7 +54,7 @@ class TextEdit(QtGui.QTextEdit):
             self.append(path)
 
 
-class Window(QtGui.QWidget):
+class Window(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         # Init GUI
@@ -64,23 +64,23 @@ class Window(QtGui.QWidget):
         icon_path = os.path.join(this_directory, "icons", "toraw.ico")
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
-        vbox = QtGui.QVBoxLayout()
+        vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
-        vbox.addWidget(QtGui.QLabel("Files:"))
+        vbox.addWidget(QtWidgets.QLabel("Files:"))
         self.path_edit = TextEdit()
         vbox.addWidget(self.path_edit)
-        hbox = QtGui.QHBoxLayout()
+        hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
-        self.browse_button = QtGui.QPushButton("Browse")
+        self.browse_button = QtWidgets.QPushButton("Browse")
         self.browse_button.clicked.connect(self.browse)
         hbox.addWidget(self.browse_button)
         hbox.addStretch(1)
-        to_raw_button = QtGui.QPushButton("To raw")
+        to_raw_button = QtWidgets.QPushButton("To raw")
         to_raw_button.clicked.connect(self.to_raw)
         hbox.addWidget(to_raw_button)
 
     def browse(self):
-        paths = QtGui.QFileDialog.getOpenFileNames(
+        paths, exts = QtWidgets.QFileDialog.getOpenFileNames(
             self, "Open files to convert", filter="*.tif; **.tiff"
         )
         self.path_edit.set_paths(paths)
@@ -94,10 +94,10 @@ class Window(QtGui.QWidget):
             text = "Converting 1 movie..."
         else:
             text = "Converting {} movies...".format(n_movies)
-        self.progress_dialog = QtGui.QProgressDialog(
+        self.progress_dialog = QtWidgets.QProgressDialog(
             text, "Cancel", 0, n_movies, self
         )
-        progress_bar = QtGui.QProgressBar(self.progress_dialog)
+        progress_bar = QtWidgets.QProgressBar(self.progress_dialog)
         progress_bar.setTextVisible(False)
         self.progress_dialog.setBar(progress_bar)
         self.progress_dialog.setMaximum(n_movies)
@@ -119,7 +119,7 @@ class Window(QtGui.QWidget):
 
     def on_finished(self, done):
         self.progress_dialog.close()
-        QtGui.QMessageBox.information(
+        QtWidgets.QMessageBox.information(
             self, "Picasso: ToRaw", "Conversion complete."
         )
 
@@ -142,14 +142,14 @@ class Worker(QtCore.QThread):
 
 
 def main():
-    app = QtGui.QApplication(sys.argv)
+    app = QtWidgets.QApplication(sys.argv)
     window = Window()
     window.show()
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtGui.QMessageBox.critical(
+        errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
         errorbox.exec_()
