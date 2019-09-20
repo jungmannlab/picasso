@@ -5,7 +5,7 @@ matplotlib==3.1.1
 numba==0.45.1
 scipy==1.3.1
 pyyaml==5.1.2
-scikit-learn
+scikit-learn==0.21.3
 colorama
 tqdm
 lmfit
