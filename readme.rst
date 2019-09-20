@@ -3,7 +3,11 @@ Picasso
 .. image:: https://readthedocs.org/projects/picassosr/badge/?version=latest
    :target: https://picassosr.readthedocs.io/en/latest/?badge=latest
    :alt: Documentation Status
-                
+
+.. image:: https://pyup.io/repos/github/jungmannlab/picasso/shield.svg
+    :target: https://pyup.io/repos/github/jungmannlab/picasso/
+    :alt: Updates
+
 .. image:: main_render.png
    :scale: 100 %
    :alt: UML Render view
@@ -63,7 +67,7 @@ Using Picasso as a module
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The individual modules of picasso can be started as follows:
-1. Open the console, activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows. 
+1. Open the console, activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
 2. Start the picasso modules via ``python -m picasso ..``, e.g. ``python -m picasso render`` for the render module
 
 Using GPU for Fitting
@@ -87,10 +91,10 @@ Contributions & Copyright
 Citing Picasso
 --------------
 
-If you use picasso in your research, please cite our Nature Protocols publication describing the software. 
+If you use picasso in your research, please cite our Nature Protocols publication describing the software.
 
-| J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann 
-| Super-Resolution Microscopy with DNA-PAINT 
+| J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann
+| Super-Resolution Microscopy with DNA-PAINT
 | Nature Protocols (2017). 12: 1198-1228 DOI: `https://doi.org/10.1038/nprot.2017.024 <https://doi.org/10.1038/nprot.2017.024>`__
 
 Credits
