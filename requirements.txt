@@ -2,7 +2,7 @@ PyQt5
 numpy==1.17.2
 h5py==2.10.0
 matplotlib==3.1.1
-numba
+numba==0.45.1
 scipy
 pyyaml
 scikit-learn
