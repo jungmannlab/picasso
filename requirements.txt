@@ -1,5 +1,5 @@
 PyQt5
-numpy
+numpy==1.17.2
 h5py
 matplotlib
 numba
