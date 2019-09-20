@@ -95,7 +95,7 @@ def load_info(path, qt_parent=None):
     filename = path_base + ".yaml"
     try:
         with open(filename, "r") as info_file:
-            info = list(_yaml.load_all(info_file))
+            info = list(_yaml.load_all(info_file, Loader=_yaml.FullLoader))
     except FileNotFoundError as e:
         print(
             "\nAn error occured. Could not find metadata file:\n{}".format(
@@ -120,7 +120,7 @@ def load_user_settings():
     except FileNotFoundError:
         return _lib.AutoDict()
     try:
-        settings = _yaml.load(settings_file)
+        settings = _yaml.load(settings_file, Loader=_yaml.FullLoader)
         settings_file.close()
     except Exception as e:
         print(e)
