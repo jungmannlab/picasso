@@ -58,43 +58,49 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
         x_max_ - fit_X: x_max_ + fit_X + 1,
     ]
 
-    # The fit model
-    def flat_2d_gaussian(a, xc, yc, s, b):
-        A = a * _np.exp(-0.5 * ((x - xc) ** 2 + (y - yc) ** 2) / s ** 2) + b
-        return A.flatten()
+    dimensions = FitROI.shape
 
-    gaussian2d = _lmfit.Model(
-        flat_2d_gaussian, name="2D Gaussian", independent_vars=[]
-    )
+    if 0 in dimensions or dimensions[0] != dimensions[1]:
+        xc, yc = 0, 0
+    else:
+        # The fit model
+        def flat_2d_gaussian(a, xc, yc, s, b):
+            A = a * _np.exp(-0.5 * ((x - xc) ** 2 + (y - yc) ** 2) / s ** 2) + b
+            return A.flatten()
 
-    # Set up initial parameters and fit
-    params = _lmfit.Parameters()
-    params.add("a", value=FitROI.max(), vary=True, min=0)
-    params.add("xc", value=0, vary=True)
-    params.add("yc", value=0, vary=True)
-    params.add("s", value=1, vary=True, min=0)
-    params.add("b", value=FitROI.min(), vary=True, min=0)
-    results = gaussian2d.fit(FitROI.flatten(), params)
+        gaussian2d = _lmfit.Model(
+            flat_2d_gaussian, name="2D Gaussian", independent_vars=[]
+        )
 
-    # Get maximum coordinates and add offsets
-    xc = results.best_values["xc"]
-    yc = results.best_values["yc"]
-    xc += X_ + x_max_
-    yc += Y_ + y_max_
+        # Set up initial parameters and fit
+        params = _lmfit.Parameters()
+        params.add("a", value=FitROI.max(), vary=True, min=0)
+        params.add("xc", value=0, vary=True)
+        params.add("yc", value=0, vary=True)
+        params.add("s", value=1, vary=True, min=0)
+        params.add("b", value=FitROI.min(), vary=True, min=0)
+        results = gaussian2d.fit(FitROI.flatten(), params)
 
-    if display:
-        _plt.figure(figsize=(17, 10))
-        _plt.subplot(1, 3, 1)
-        _plt.imshow(imageA, interpolation="none")
-        _plt.subplot(1, 3, 2)
-        _plt.imshow(imageB, interpolation="none")
-        _plt.subplot(1, 3, 3)
-        _plt.imshow(XCorr, interpolation="none")
-        _plt.plot(xc, yc, "x")
-        _plt.show()
+        # Get maximum coordinates and add offsets
+        xc = results.best_values["xc"]
+        yc = results.best_values["yc"]
+        xc += X_ + x_max_
+        yc += Y_ + y_max_
 
-    xc -= _np.floor(X / 2)
-    yc -= _np.floor(Y / 2)
+        if display:
+            _plt.figure(figsize=(17, 10))
+            _plt.subplot(1, 3, 1)
+            _plt.imshow(imageA, interpolation="none")
+            _plt.subplot(1, 3, 2)
+            _plt.imshow(imageB, interpolation="none")
+            _plt.subplot(1, 3, 3)
+            _plt.imshow(XCorr, interpolation="none")
+            _plt.plot(xc, yc, "x")
+            _plt.show()
+
+        xc -= _np.floor(X / 2)
+        yc -= _np.floor(Y / 2)
+
     return -yc, -xc
 
 
