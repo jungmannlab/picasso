@@ -115,7 +115,7 @@ class View(QtWidgets.QGraphicsView):
 
     def wheelEvent(self, event):
         """ Implements zoooming with the mouse wheel """
-        scale = 1.008 ** (-event.delta())
+        scale = 1.008 ** (-event.angleDelta().y())
         self.scale(scale, scale)
 
 
