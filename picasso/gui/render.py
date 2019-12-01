@@ -21,10 +21,11 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 import yaml
-from matplotlib.backends.backend_qt4agg import (
-    FigureCanvasQTAgg,
-    NavigationToolbar2QT,
-)
+
+from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+
+
 from scipy.ndimage.filters import gaussian_filter
 from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -152,11 +153,11 @@ class PickHistWindow(QtWidgets.QTabWidget):
         self.setWindowIcon(icon)
         self.resize(1000, 500)
         self.figure = plt.Figure()
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
         vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+        vbox.addWidget((NavigationToolbar(self.canvas, self)))
 
     def plot(self, pooled_locs, fit_result_len, fit_result_dark):
         self.figure.clear()
@@ -381,7 +382,7 @@ class PlotDialog(QtWidgets.QDialog):
         layout_grid = QtWidgets.QGridLayout(self)
 
         self.figure = plt.figure()
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
         layout_grid.addWidget(self.label, 0, 0, 1, 3)
@@ -503,7 +504,7 @@ class PlotDialogIso(QtWidgets.QDialog):
         layout_grid = QtWidgets.QGridLayout(self)
 
         self.figure = plt.figure()
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
         layout_grid.addWidget(self.label, 0, 0, 1, 3)
@@ -724,7 +725,7 @@ class ClsDlg(QtWidgets.QDialog):
         self.layout_grid = QtWidgets.QGridLayout(self)
 
         self.figure = plt.figure()
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
         self.layout_grid.addWidget(self.label, 0, 0, 1, 5)
@@ -925,7 +926,7 @@ class ClsDlg2D(QtWidgets.QDialog):
         self.layout_grid = QtWidgets.QGridLayout(self)
 
         self.figure = plt.figure()
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
         self.layout_grid.addWidget(self.label, 0, 0, 1, 5)
@@ -1287,7 +1288,10 @@ class InfoDialog(QtWidgets.QDialog):
             self.movie_grid.addWidget(
                 show_plot_button, self.movie_grid.rowCount() - 1, 2
             )
-            show_plot_button.clicked.connect(self.show_nena_plot)
+            #Nena
+            self.nena_window = NenaPlotWindow(self)
+            self.nena_window.plot(self.nena_result)
+            show_plot_button.clicked.connect(self.nena_window.show)
 
     def calibrate_influx(self):
         influx = (
@@ -1305,16 +1309,37 @@ class InfoDialog(QtWidgets.QDialog):
         self.n_units_mean.setText("{:,.2f}".format(np.mean(n_units)))
         self.n_units_std.setText("{:,.2f}".format(np.std(n_units)))
 
-    def show_nena_plot(self):
-        d = self.nena_result.userkws["d"]
-        fig1 = plt.figure()
-        plt.title("Next frame neighbor distance histogram")
-        plt.plot(d, self.nena_result.data, label="Data")
-        plt.plot(d, self.nena_result.best_fit, label="Fit")
-        plt.xlabel("Distance (Px)")
-        plt.ylabel("Counts")
-        plt.legend(loc="best")
-        fig1.show()
+class NenaPlotWindow(QtWidgets.QTabWidget):
+    def __init__(self, info_dialog):
+        super().__init__()
+        self.setWindowTitle("Nena Plot")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(1000, 500)
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvas(self.figure)
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar(self.canvas, self)))
+
+
+    def plot(self, nena_result):
+        self.figure.clear()
+        axes = self.figure.add_subplot(111)
+
+        d = nena_result.userkws["d"]
+        ax = self.figure.add_subplot(111)
+        ax.set_title("Next frame neighbor distance histogram")
+        ax.plot(d, nena_result.data, label="Data")
+        ax.plot(d, nena_result.best_fit, label="Fit")
+        ax.set_xlabel("Distance (Px)")
+        ax.set_ylabel("Counts")
+        ax.legend(loc="best")
+
+        self.canvas.draw()
 
 
 class MaskSettingsDialog(QtWidgets.QDialog):
@@ -1361,7 +1386,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         mask_grid.addWidget(self.mask_tresh, 2, 1)
 
         self.figure = plt.figure(figsize=(12, 3))
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = FigureCanvas(self.figure)
         mask_grid.addWidget(self.canvas, 3, 0, 1, 2)
 
         self.maskButton = QtWidgets.QPushButton("Mask")
@@ -2029,7 +2054,7 @@ class SlicerDialog(QtWidgets.QDialog):
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
 
         self.figure = plt.figure(figsize=(3, 3))
-        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas = FigureCanvas(self.figure)
 
         self.slicerRadioButton = QtWidgets.QCheckBox("Slice Dataset")
         self.slicerRadioButton.stateChanged.connect(self.toggle_slicer)
