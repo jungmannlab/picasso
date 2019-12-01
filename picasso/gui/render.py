@@ -143,6 +143,24 @@ class FloatEdit(QtWidgets.QLineEdit):
         return value
 
 
+class GenericPlotWindow(QtWidgets.QTabWidget):
+    def __init__(self, window_title):
+        super().__init__()
+        self.setWindowTitle(window_title)
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(1000, 500)
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvas(self.figure)
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+
+        self.toolbar = NavigationToolbar(self.canvas, self)
+        vbox.addWidget(self.toolbar)
+
 class PickHistWindow(QtWidgets.QTabWidget):
     def __init__(self, info_dialog):
         super().__init__()
@@ -3376,9 +3394,13 @@ class View(QtWidgets.QLabel):
             self.current_trace_x = xvec
             self.current_trace_y = yvec
             self.channel = channel
+
+            canvas = GenericPlotWindow("Trace")
+
+            canvas.figure.clear()
             # Three subplots sharing both x/y axes
-            f, (ax1, ax2, ax3) = plt.subplots(3, sharex=True)
-            f.canvas.set_window_title("Trace")
+            ax1, ax2, ax3 = canvas.figure.subplots(3, sharex=True)
+
             ax1.scatter(locs["frame"], locs["x"])
             ax1.set_title("X-pos vs frame")
             ax2.scatter(locs["frame"], locs["y"])
@@ -3395,11 +3417,12 @@ class View(QtWidgets.QLabel):
             ax3.set_ylabel("ON")
             ax3.set_ylim([-0.1, 1.1])
 
-            toolbar = f.canvas.toolbar
-            self.exportTraceButton = QtWidgets.QPushButton("Export")
-            toolbar.addWidget(self.exportTraceButton)
+            self.exportTraceButton = QtWidgets.QPushButton("Export (*.csv)")
+            canvas.toolbar.addWidget(self.exportTraceButton)
             self.exportTraceButton.clicked.connect(self.exportTrace)
-            f.show()
+
+            canvas.canvas.draw()
+            canvas.show()
 
     def exportTrace(self):
         trace = np.array([self.current_trace_x, self.current_trace_y])
@@ -5184,7 +5207,7 @@ class View(QtWidgets.QLabel):
                         locs,
                         info,
                         segmentation,
-                        True,
+                        False,
                         seg_progress.set_value,
                         rcc_progress.set_value,
                     )
