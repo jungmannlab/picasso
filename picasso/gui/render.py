@@ -3486,8 +3486,6 @@ class View(QtWidgets.QLabel):
         channel_acceptor = self.get_channel(title="Select acceptor channel")
         channel_donor = self.get_channel(title="Select donor channel")
 
-        fig = plt.figure(figsize=(5, 5))
-        fig.canvas.set_window_title("Scatterplot of Pick")
         removelist = []
 
         n_channels = len(self.locs_paths)
@@ -3503,6 +3501,7 @@ class View(QtWidgets.QLabel):
             params["t0"] = time.time()
             i = 0
             while i < len(self._picks):
+
                 pick = self._picks[i]
 
                 fret_dict, fret_locs = postprocess.calculate_fret(
@@ -3651,8 +3650,7 @@ class View(QtWidgets.QLabel):
 
     def select_traces(self):
         print("Showing  traces")
-        fig = plt.figure(figsize=(5, 5))
-        fig.canvas.set_window_title("Trace")
+
         removelist = []
 
         channel = self.get_channel("Undrift from picked")
@@ -3663,11 +3661,12 @@ class View(QtWidgets.QLabel):
                 all_picked_locs = self.picked_locs(channel)
                 i = 0
                 while i < len(self._picks):
+                    fig = plt.figure(figsize=(5, 5))
+                    fig.canvas.set_window_title("Trace")
                     pick = self._picks[i]
                     locs = all_picked_locs[i]
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
-                    fig.clf()
                     ax1 = fig.add_subplot(311)
                     ax2 = fig.add_subplot(312, sharex=ax1)
                     ax3 = fig.add_subplot(313, sharex=ax1)
@@ -3760,8 +3759,7 @@ class View(QtWidgets.QLabel):
     def show_pick(self):
         print("Showing picks...")
         channel = self.get_channel3d("Select Channel")
-        fig = plt.figure(figsize=(5, 5))
-        fig.canvas.set_window_title("Scatterplot of Pick")
+
         removelist = []
 
         if channel is not None:
@@ -3777,8 +3775,10 @@ class View(QtWidgets.QLabel):
                     params["t0"] = time.time()
                     i = 0
                     while i < len(self._picks):
+                        fig = plt.figure(figsize=(5, 5))
+                        fig.canvas.set_window_title("Scatterplot of Pick")
                         pick = self._picks[i]
-                        fig.clf()
+
                         ax = fig.add_subplot(111)
                         ax.set_title(
                             "Scatterplot of Pick "
@@ -3848,7 +3848,8 @@ class View(QtWidgets.QLabel):
                     i = 0
                     while i < len(self._picks):
                         pick = self._picks[i]
-                        fig.clf()
+                        fig = plt.figure(figsize=(5, 5))
+                        fig.canvas.set_window_title("Scatterplot of Pick")
                         ax = fig.add_subplot(111)
                         ax.set_title(
                             "Scatterplot of Pick "
