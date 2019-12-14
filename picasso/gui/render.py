@@ -22,6 +22,7 @@ import matplotlib.patches as patches
 import numpy as np
 import yaml
 
+
 from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
@@ -461,7 +462,7 @@ class PlotDialog(QtWidgets.QDialog):
             colors[
                 colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
             ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
-            ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet")
+            ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
             ax.set_zlabel("Z [nm]")
@@ -486,7 +487,7 @@ class PlotDialog(QtWidgets.QDialog):
             for l in range(len(all_picked_locs)):
                 locs = all_picked_locs[l][current]
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[l])
+                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[l], s=2)
 
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -589,7 +590,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
             ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
 
-            ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet")
+            ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
             ax.set_zlabel("Z [nm]")
@@ -612,7 +613,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
 
             # AXES 2
-            ax2.scatter(locs["x"], locs["y"], c=colors, cmap="jet")
+            ax2.scatter(locs["x"], locs["y"], c=colors, cmap="jet", s=2)
             ax2.set_xlabel("X [Px]")
             ax2.set_ylabel("Y [Px]")
             ax2.set_xlim(
@@ -627,7 +628,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax2.set_axis_bgcolor("black")
 
             # AXES 3
-            ax3.scatter(locs["x"], locs["z"], c=colors, cmap="jet")
+            ax3.scatter(locs["x"], locs["z"], c=colors, cmap="jet", s=2)
             ax3.set_xlabel("X [Px]")
             ax3.set_ylabel("Z [Px]")
             ax3.set_xlim(
@@ -642,7 +643,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax3.set_axis_bgcolor("black")
 
             # AXES 4
-            ax4.scatter(locs["y"], locs["z"], c=colors, cmap="jet")
+            ax4.scatter(locs["y"], locs["z"], c=colors, cmap="jet", s=2)
             ax4.set_xlabel("Y [Px]")
             ax4.set_ylabel("Z [Px]")
             ax4.set_xlim(
@@ -661,10 +662,10 @@ class PlotDialogIso(QtWidgets.QDialog):
             for l in range(len(all_picked_locs)):
                 locs = all_picked_locs[l][current]
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[l])
-                ax2.scatter(locs["x"], locs["y"], c=colors[l])
-                ax3.scatter(locs["x"], locs["z"], c=colors[l])
-                ax4.scatter(locs["y"], locs["z"], c=colors[l])
+                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[l], s=2)
+                ax2.scatter(locs["x"], locs["y"], c=colors[l], s=2)
+                ax3.scatter(locs["x"], locs["z"], c=colors[l], s=2)
+                ax4.scatter(locs["y"], locs["z"], c=colors[l], s=2)
 
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -872,7 +873,7 @@ class ClsDlg(QtWidgets.QDialog):
         counts = list(Counter(labels).items())
         # l_locs = lib.append_to_rec(l_locs,labels,'cluster')
 
-        ax1.scatter(locs["x"], locs["y"], locs["z"], c=labels.astype(np.float))
+        ax1.scatter(locs["x"], locs["y"], locs["z"], c=labels.astype(np.float), s=2)
 
         ax1.set_xlabel("X")
         ax1.set_ylabel("Y")
@@ -881,7 +882,7 @@ class ClsDlg(QtWidgets.QDialog):
         counts = list(Counter(labels).items())
         cent = est.cluster_centers_
 
-        ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2])
+        ax2.scatter(cent[:, 0], cent[:, 1], cent[:, 2], s=2)
         for element in counts:
             x_mean = cent[element[0], 0]
             y_mean = cent[element[0], 1]
@@ -1061,7 +1062,7 @@ class ClsDlg2D(QtWidgets.QDialog):
         counts = list(Counter(labels).items())
         # l_locs = lib.append_to_rec(l_locs,labels,'cluster')
 
-        ax1.scatter(locs["x"], locs["y"], c=labels.astype(np.float))
+        ax1.scatter(locs["x"], locs["y"], c=labels.astype(np.float), s=2)
 
         ax1.set_xlabel("X")
         ax1.set_ylabel("Y")
@@ -1069,7 +1070,7 @@ class ClsDlg2D(QtWidgets.QDialog):
         counts = list(Counter(labels).items())
         cent = est.cluster_centers_
 
-        ax2.scatter(cent[:, 0], cent[:, 1])
+        ax2.scatter(cent[:, 0], cent[:, 1], s=2)
         for element in counts:
             x_mean = cent[element[0], 0]
             y_mean = cent[element[0], 1]
@@ -2482,7 +2483,7 @@ class View(QtWidgets.QLabel):
             shift_x = []
             shift_y = []
             shift_z = []
-            display = True
+            display = False
 
             progress = lib.ProgressDialog(
                 "Aligning images..", 0, max_iterations, self
@@ -3141,11 +3142,10 @@ class View(QtWidgets.QLabel):
             if output:
                 fig1 = plt.figure()
                 plt.title("Old picks and new picks")
-                plt.scatter(x_cord, -y_cord, c="r", label="Newpicks")
-                plt.scatter(x_cord_old, -y_cord_old, c="b", label="Oldpicks")
+                plt.scatter(x_cord, -y_cord, c="r", label="Newpicks", s=2)
+                plt.scatter(x_cord_old, -y_cord_old, c="b", label="Oldpicks", s=2)
                 plt.scatter(
-                    x_cord_new, -y_cord_new, c="g", label="Picks to keep"
-                )
+                    x_cord_new, -y_cord_new, c="g", label="Picks to keep", s=2)
                 fig1.show()
             self._picks = filtered_list
 
@@ -3325,7 +3325,7 @@ class View(QtWidgets.QLabel):
                 for i in range(len(self.locs_paths)):
                     locs = self.picked_locs(i)
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                    ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[i])
+                    ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[i], s=2)
 
                 ax.set_xlim(
                     np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -3352,8 +3352,7 @@ class View(QtWidgets.QLabel):
                     colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
                 ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
                 ax.scatter(
-                    locs["x"], locs["y"], locs["z"], c=colors, cmap="jet"
-                )
+                    locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
 
                 ax.set_xlim(
                     np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -3401,11 +3400,11 @@ class View(QtWidgets.QLabel):
             # Three subplots sharing both x/y axes
             ax1, ax2, ax3 = canvas.figure.subplots(3, sharex=True)
 
-            ax1.scatter(locs["frame"], locs["x"])
+            ax1.scatter(locs["frame"], locs["x"], s=2)
             ax1.set_title("X-pos vs frame")
-            ax2.scatter(locs["frame"], locs["y"])
+            ax2.scatter(locs["frame"], locs["y"], s=2)
             ax2.set_title("Y-pos vs frame")
-            ax3.plot(xvec, yvec)
+            ax3.plot(xvec, yvec, linewidth=1)
             ax3.fill_between(xvec, 0, yvec, facecolor="red")
             ax3.set_title("Localizations")
 
@@ -3517,8 +3516,7 @@ class View(QtWidgets.QLabel):
                 ax2.plot(fret_dict["frames"], fret_dict["don_trace"])
                 ax2.set_title("Donor intensity vs frame")
                 ax3.scatter(
-                    fret_dict["fret_timepoints"], fret_dict["fret_events"]
-                )
+                    fret_dict["fret_timepoints"], fret_dict["fret_events"], s=2)
                 ax3.set_title(r"$\frac{I_A}{I_D+I_A}$")
 
                 ax1.set_xlim(0, (fret_dict["maxframes"] + 1))
@@ -3529,8 +3527,8 @@ class View(QtWidgets.QLabel):
                 ax3.set_ylabel("Ratio")
 
                 fig.canvas.draw()
-                size = fig.canvas.size()
-                width, height = size.width(), size.height()
+                width, height = fig.canvas.get_width_height()
+
                 im = QtGui.QImage(
                     fig.canvas.buffer_rgba(),
                     width,
@@ -3691,14 +3689,14 @@ class View(QtWidgets.QLabel):
                         + str(len(self._picks))
                         + "."
                     )
-                    ax1.scatter(locs["frame"], locs["x"])
+                    ax1.scatter(locs["frame"], locs["x"], s=2)
                     ax1.set_ylabel("X-pos [Px]")
                     ax1.set_title("X-pos vs frame")
 
                     ax1.set_xlim(0, (max(locs["frame"]) + 1))
                     plt.setp(ax1.get_xticklabels(), visible=False)
 
-                    ax2.scatter(locs["frame"], locs["y"])
+                    ax2.scatter(locs["frame"], locs["y"], s=2)
                     ax2.set_title("Y-pos vs frame")
                     ax2.set_ylabel("Y-pos [Px]")
                     plt.setp(ax2.get_xticklabels(), visible=False)
@@ -3709,8 +3707,8 @@ class View(QtWidgets.QLabel):
                     ax3.set_ylabel("ON")
 
                     fig.canvas.draw()
-                    size = fig.canvas.size()
-                    width, height = size.width(), size.height()
+                    width, height = fig.canvas.get_width_height()
+
                     im = QtGui.QImage(
                         fig.canvas.buffer_rgba(),
                         width,
@@ -3794,15 +3792,16 @@ class View(QtWidgets.QLabel):
                             locs = stack_arrays(
                                 locs, asrecarray=True, usemask=False
                             )
-                            ax.scatter(locs["x"], locs["y"], c=colors[l])
+                            ax.scatter(locs["x"], locs["y"], c=colors[l], s=2)
 
                         ax.set_xlabel("X [Px]")
                         ax.set_ylabel("Y [Px]")
                         plt.axis("equal")
 
                         fig.canvas.draw()
-                        size = fig.canvas.size()
-                        width, height = size.width(), size.height()
+
+                        width, height = fig.canvas.get_width_height()
+
                         im = QtGui.QImage(
                             fig.canvas.buffer_rgba(),
                             width,
@@ -3869,14 +3868,14 @@ class View(QtWidgets.QLabel):
                         locs = stack_arrays(
                             locs, asrecarray=True, usemask=False
                         )
-                        ax.scatter(locs["x"], locs["y"], c=colors[channel])
+                        ax.scatter(locs["x"], locs["y"], c=colors[channel], s=2)
                         ax.set_xlabel("X [Px]")
                         ax.set_ylabel("Y [Px]")
                         plt.axis("equal")
 
                         fig.canvas.draw()
-                        size = fig.canvas.size()
-                        width, height = size.width(), size.height()
+                        width, height = fig.canvas.get_width_height()
+
                         im = QtGui.QImage(
                             fig.canvas.buffer_rgba(),
                             width,
@@ -4085,7 +4084,7 @@ class View(QtWidgets.QLabel):
             else:
                 all_picked_locs = self.picked_locs(channel)
                 if self._picks:
-                    n_clusters, ok = QtWidgets.QInputDialog.getInteger(
+                    n_clusters, ok = QtWidgets.QInputDialog.getInt(
                         self,
                         "Input Dialog",
                         "Enter inital number of clusters:",
@@ -4150,7 +4149,7 @@ class View(QtWidgets.QLabel):
                 self.infos[channel][0]["Height"],
                 self.infos[channel][0]["Width"],
             )
-            max_dark, ok = QtWidgets.QInputDialog.getInteger(
+            max_dark, ok = QtWidgets.QInputDialog.getInt(
                 self, "Input Dialog", "Enter gap size:", 3
             )
             out_locs = []
@@ -4240,8 +4239,7 @@ class View(QtWidgets.QLabel):
                 ax.set_ylabel("Counts")
                 fig.canvas.draw()
 
-                size = fig.canvas.size()
-                width, height = size.width(), size.height()
+                width, height = fig.canvas.get_width_height()
 
                 im = QtGui.QImage(
                     fig.canvas.buffer_rgba(),
@@ -4253,13 +4251,13 @@ class View(QtWidgets.QLabel):
                 self.setPixmap((QtGui.QPixmap(im)))
                 self.setAlignment(QtCore.Qt.AlignCenter)
 
-                minlocs, ok = QtWidgets.QInputDialog.getInteger(
+                minlocs, ok = QtWidgets.QInputDialog.getInt(
                     self,
                     "Input Dialog",
                     "Enter minimum number of localizations:",
                 )
                 if ok:
-                    maxlocs, ok2 = QtWidgets.QInputDialog.getInteger(
+                    maxlocs, ok2 = QtWidgets.QInputDialog.getInt(
                         self,
                         "Input Dialog",
                         "Enter maximum number of localizations:",
@@ -5434,7 +5432,7 @@ class View(QtWidgets.QLabel):
             self.clear_picks()
 
     def unfold_groups_square(self):
-        n_square, ok = QtWidgets.QInputDialog.getInteger(
+        n_square, ok = QtWidgets.QInputDialog.getInt(
             self,
             "Input Dialog",
             "Set number of elements per row and column:",
