@@ -1159,6 +1159,75 @@ class LinkDialog(QtWidgets.QDialog):
         )
 
 
+
+
+class DriftPlotWindow(QtWidgets.QTabWidget):
+    def __init__(self, info_dialog):
+        super().__init__()
+        self.setWindowTitle("Drift Plot")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(1000, 500)
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvas(self.figure)
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar(self.canvas, self)))
+
+
+    def plot_3d(self, drift):
+        self.figure.clear()
+
+        ax1 = self.figure.add_subplot(131)
+        ax1.plot(drift.x, label="x")
+        ax1.plot(drift.y, label="y")
+        ax1.legend(loc="best")
+        ax1.set_xlabel("Frame")
+        ax1.set_ylabel("Drift (pixel)")
+        ax2 = self.figure.add_subplot(132)
+        ax2.plot(
+          drift.x,
+          drift.y,
+          color=list(plt.rcParams["axes.prop_cycle"])[2][
+              "color"
+          ],
+        )
+
+        ax2.set_xlabel("x")
+        ax2.set_ylabel("y")
+        ax3 = self.figure.add_subplot(133)
+        ax3.plot(drift.z, label="z")
+        ax3.legend(loc="best")
+        ax3.set_xlabel("Frame")
+        ax3.set_ylabel("Drift (nm)")
+        self.canvas.draw()
+
+    def plot_2d(self, drift):
+        self.figure.clear()
+
+        ax1 = self.figure.add_subplot(121)
+        ax1.plot(drift.x, label="x")
+        ax1.plot(drift.y, label="y")
+        ax1.legend(loc="best")
+        ax1.set_xlabel("Frame")
+        ax1.set_ylabel("Drift (pixel)")
+        ax2 = self.figure.add_subplot(122)
+        ax2.plot(
+          drift.x,
+          drift.y,
+          color=list(plt.rcParams["axes.prop_cycle"])[2][
+              "color"
+          ],
+        )
+
+        ax2.set_xlabel("x")
+        ax2.set_ylabel("y")
+
+        self.canvas.draw()
+
 class InfoDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
@@ -1347,8 +1416,6 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
 
     def plot(self, nena_result):
         self.figure.clear()
-        axes = self.figure.add_subplot(111)
-
         d = nena_result.userkws["d"]
         ax = self.figure.add_subplot(111)
         ax.set_title("Next frame neighbor distance histogram")
@@ -3311,7 +3378,7 @@ class View(QtWidgets.QLabel):
         self.update_scene(viewport)
 
     def plot3d(self):
-        channel = self.get_channel3d("Undrift from picked")
+        channel = self.get_channel3d("Plot 3D")
         if channel is not None:
             fig = plt.figure()
             fig.canvas.set_window_title("3D - Trace")
@@ -5110,6 +5177,9 @@ class View(QtWidgets.QLabel):
     def to_down(self):
         self.pan_relative(-0.8, 0)
 
+
+
+
     def show_drift(self):
         # Todo: Implement a check if there is drift already loaded and load
         channel = self.get_channel("Show drift")
@@ -5127,54 +5197,16 @@ class View(QtWidgets.QLabel):
                     ),
                 )
             else:
+                print('Showing Drift')
+                self.plot_window = DriftPlotWindow(self)
                 if hasattr(self._drift[channel], "z"):
-                    fig1 = plt.figure(figsize=(25.5, 6))
-                    plt.suptitle("Corrected drift")
-                    plt.subplot(1, 3, 1)
-                    plt.plot(drift.x, label="x")
-                    plt.plot(drift.y, label="y")
-                    plt.legend(loc="best")
-                    plt.xlabel("Frame")
-                    plt.ylabel("Drift (pixel)")
-                    plt.subplot(1, 3, 2)
-                    plt.plot(
-                        drift.x,
-                        drift.y,
-                        color=list(plt.rcParams["axes.prop_cycle"])[2][
-                            "color"
-                        ],
-                    )
-                    plt.axis("equal")
-                    plt.xlabel("x")
-                    plt.ylabel("y")
-                    plt.subplot(1, 3, 3)
-                    plt.plot(drift.z, label="z")
-                    plt.legend(loc="best")
-                    plt.xlabel("Frame")
-                    plt.ylabel("Drift (nm)")
-                    fig1.show()
+                    self.plot_window.plot_3d(drift)
 
                 else:
-                    fig1 = plt.figure(figsize=(17, 6))
-                    plt.suptitle("Corrected drift")
-                    plt.subplot(1, 2, 1)
-                    plt.plot(drift.x, label="x")
-                    plt.plot(drift.y, label="y")
-                    plt.legend(loc="best")
-                    plt.xlabel("Frame")
-                    plt.ylabel("Drift (pixel)")
-                    plt.subplot(1, 2, 2)
-                    plt.plot(
-                        drift.x,
-                        drift.y,
-                        color=list(plt.rcParams["axes.prop_cycle"])[2][
-                            "color"
-                        ],
-                    )
-                    plt.axis("equal")
-                    plt.xlabel("x")
-                    plt.ylabel("y")
-                    fig1.show()
+                    self.plot_window.plot_2d(drift)
+
+                self.plot_window.show()
+
 
     def undrift(self):
         """ Undrifts with rcc. """
@@ -5214,6 +5246,8 @@ class View(QtWidgets.QLabel):
                     self.index_blocks[channel] = None
                     self.add_drift(channel, drift)
                     self.update_scene()
+                    self.show_drift()
+
                 except Exception as e:
                     QtWidgets.QMessageBox.information(
                         self,
