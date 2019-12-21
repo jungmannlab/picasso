@@ -8,4 +8,4 @@ pyyaml==5.2
 scikit-learn==0.22
 colorama==0.4.3
 tqdm==4.40.2
-lmfit==0.9.14
+lmfit==1.0.0
