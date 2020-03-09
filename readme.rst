@@ -4,10 +4,6 @@ Picasso
    :target: https://picassosr.readthedocs.io/en/latest/?badge=latest
    :alt: Documentation Status
 
-.. image:: https://pyup.io/repos/github/jungmannlab/picasso/shield.svg
-    :target: https://pyup.io/repos/github/jungmannlab/picasso/
-    :alt: Updates
-
 .. image:: main_render.png
    :scale: 100 %
    :alt: UML Render view
