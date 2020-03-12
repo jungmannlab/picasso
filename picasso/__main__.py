@@ -589,6 +589,32 @@ def _pair_correlation(files, bin_size, r_max):
             )
             show()
 
+def _nanotron(args):
+    from glob import glob
+    from .io import load_locs, NoMetadataFileError
+    from picasso.gui import nanotron
+
+    files = args.files
+    model = args.model_path
+    kwargs = {"model": args.model_pth}
+
+    if isdir(files):
+        print("Analyzing folder")
+        paths = glob(path + "/*.hdf5")
+        print("A total of {} files detected".format(len(paths)))
+    else:
+        paths = glob(path)
+
+    if paths:
+        for path in paths:
+            print("nanoTRON predicting {}".format(path))
+            try:
+                locs, info = load_locs(path)
+            except NoMetadataFileError:
+                continue
+
+            predict(locs, info, **kwargs)
+
 
 def _localize(args):
     files = args.files
@@ -1299,6 +1325,24 @@ def main():
         "simulate", help="simulate single molecule fluorescence data"
     )
 
+        # nanotron
+    nanotron_parser = subparsers.add_parser(
+        "nanotron", help="segmentation with deep learning"
+    )
+    nanotron_parser.add_argument(
+        "-m",
+        "--model",
+        nargs="?",
+        help="a model file for prediction",
+    )
+
+    nanotron_parser.add_argument(
+        "files",
+        nargs="?",
+        help="one localization file or a folder containing localization files"
+        " specified by a unix style path pattern",
+    )
+
     # average
     average_parser = subparsers.add_parser(
         "average", help="particle averaging"
@@ -1367,6 +1411,13 @@ def main():
                 from .gui import average
 
                 average.main()
+        elif args.command == "nanotron":
+            if args.files:
+                _nanotron(args)
+            else:
+                from .gui import nanotron
+
+                nanotron.main()
         elif args.command == "average3":
             from .gui import average3
 
