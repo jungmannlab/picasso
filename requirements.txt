@@ -1,5 +1,5 @@
 PyQt5
-numpy==1.18.1
+numpy==1.18.2
 h5py==2.10.0
 matplotlib==3.2.0
 numba==0.48.0
