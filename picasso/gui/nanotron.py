@@ -433,7 +433,7 @@ class train_dialog(QtWidgets.QDialog):
         self.train_btn.setDisabled(True)
         self.train_label = QtWidgets.QLabel("")
         self.train_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.learning_curve_btn = QtWidgets.QPushButton("Show Learning Curve")
+        self.learning_curve_btn = QtWidgets.QPushButton("Show Learning History")
         self.learning_curve_btn.clicked.connect(self.show_learning_stats)
         self.learning_curve_btn.setVisible(False)
 
