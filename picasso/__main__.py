@@ -591,6 +591,7 @@ def _pair_correlation(files, bin_size, r_max):
 
 def _nanotron(args):
     from glob import glob
+    from os.path import isdir
     from .io import load_locs, NoMetadataFileError
     from picasso.gui import nanotron
 
@@ -600,10 +601,10 @@ def _nanotron(args):
 
     if isdir(files):
         print("Analyzing folder")
-        paths = glob(path + "/*.hdf5")
+        paths = glob(files + "/*.hdf5")
         print("A total of {} files detected".format(len(paths)))
     else:
-        paths = glob(path)
+        paths = glob(files)
 
     if paths:
         for path in paths:
@@ -612,8 +613,8 @@ def _nanotron(args):
                 locs, info = load_locs(path)
             except NoMetadataFileError:
                 continue
-
-            predict(locs, info, **kwargs)
+            raise NotImplementedError #Todo: Include call to proper prediction routine
+            #predict(locs, info, **kwargs)
 
 
 def _localize(args):
