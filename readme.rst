@@ -3,7 +3,11 @@ Picasso
 .. image:: https://readthedocs.org/projects/picassosr/badge/?version=latest
    :target: https://picassosr.readthedocs.io/en/latest/?badge=latest
    :alt: Documentation Status
-
+   
+.. image:: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
+   :target: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
+   :alt: CI
+   
 .. image:: main_render.png
    :scale: 100 %
    :alt: UML Render view
