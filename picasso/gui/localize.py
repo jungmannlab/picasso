@@ -1707,7 +1707,7 @@ def main():
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 
-    sys.excepthook = None #excepthook
+    sys.excepthook = excepthook# #excepthook
 
     sys.exit(app.exec_())
 
