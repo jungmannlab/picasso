@@ -33,25 +33,6 @@ def rotate_img(img, angle):
 
     return rot_img
 
-
-def rotate_locs(locs, angle):
-
-    rot_locs = locs.copy()
-    a = angle/360 * 2 * pi
-    x_mean = np.mean(rot_locs.x)
-    y_mean = np.mean(rot_locs.y)
-    rot_locs.x -= x_mean
-    rot_locs.y -= y_mean
-    x_ = rot_locs.x.copy()
-    y_ = rot_locs.y.copy()
-    rot_locs.x[:] = x_*cos(a) - y_*sin(a)
-    rot_locs.y[:] = x_*sin(a) + y_*cos(a)
-    rot_locs.x += x_mean
-    rot_locs.y += y_mean
-
-    return rot_locs
-
-
 def roi_to_img(locs, pick, radius, oversampling):
 
     # Isolate locs from pick
