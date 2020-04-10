@@ -1010,6 +1010,8 @@ class Window(QtWidgets.QMainWindow):
                 drift = np.genfromtxt(driftpath)
             data = []
             n_id = 0
+
+
             for element in self._picks:
                 # drifted:
                 xloc = np.ones((maxframes,), dtype=np.float) * element[0]
@@ -1019,6 +1021,7 @@ class Window(QtWidgets.QMainWindow):
                     yloc += drift[:, 0]
                 else:
                     pass
+
                 frames = np.arange(maxframes)
                 gradient = np.ones(maxframes) + 100
                 n_id_all = np.ones(maxframes) + n_id
@@ -1031,8 +1034,8 @@ class Window(QtWidgets.QMainWindow):
                 data,
                 dtype=[
                     ("frame", int),
-                    ("x", float),
-                    ("y", float),
+                    ("x", int),
+                    ("y", int),
                     ("net_gradient", float),
                     ("n_id", int),
                 ],
@@ -1040,6 +1043,14 @@ class Window(QtWidgets.QMainWindow):
 
             self.identifications = identifications.view(np.recarray)
             self.identifications.sort(kind="mergesort", order="frame")
+
+            # remove all identifications that are oob
+            box = self.parameters["Box Size"]
+            m_size = self.movie.shape
+            r = int(box / 2)
+
+            self.identifications = self.identifications[(self.identifications.y-r>0) & (self.identifications.x-r>0) & (self.identifications.x+r<m_size[0]) & (self.identifications.y+r<m_size[1])]
+
             self.locs = None
 
             self.loaded_picks = True
@@ -1119,14 +1130,22 @@ class Window(QtWidgets.QMainWindow):
                 data,
                 dtype=[
                     ("frame", int),
-                    ("x", float),
-                    ("y", float),
+                    ("x", int),
+                    ("y", int),
                     ("net_gradient", float),
                     ("n_id", int),
                 ],
             )
             self.identifications = identifications.view(np.recarray)
             self.identifications.sort(kind="mergesort", order="frame")
+
+            # remove all identifications that are oob
+            box = self.parameters["Box Size"]
+            m_size = self.movie.shape
+            r = int(box / 2)
+
+            self.identifications = self.identifications[(self.identifications.y-r>0) & (self.identifications.x-r>0) & (self.identifications.x+r<m_size[0]) & (self.identifications.y+r<m_size[1])]
+
             self.locs = None
 
             self.loaded_picks = True
@@ -1142,6 +1161,8 @@ class Window(QtWidgets.QMainWindow):
                     len(self.identifications)
                 )
             )
+
+
 
         except io.NoMetadataFileError:
             return
@@ -1686,7 +1707,7 @@ def main():
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 
-    sys.excepthook = excepthook
+    sys.excepthook = None #excepthook
 
     sys.exit(app.exec_())
 
