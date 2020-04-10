@@ -22,6 +22,7 @@ This documentation is based on the `Nature Protocols publication <https://www.na
    files
    cmd
    postprocessing
+   nanotron
    faq
 
 Indices and tables
