@@ -1224,7 +1224,7 @@ class Window(QtWidgets.QMainWindow):
                     "Width": imagesize,
                 }
 
-                if conrounds is not 1:
+                if conrounds != 1:
                     app = QtCore.QCoreApplication.instance()
                     for runner in range(0, frames):
                         movie[runner, :, :] = simulate.convertMovie(
@@ -2105,11 +2105,10 @@ class CalibrationDialog(QtWidgets.QDialog):
         self.loadTifButton.clicked.connect(self.loadTif)
         self.evalTifButton.clicked.connect(self.evalTif)
 
-        self.buttons = QDialogButtonBox(
-            QDialogButtonBox.ActionRole
-            | QDialogButtonBox.Ok
-            | QDialogButtonBox.Cancel,
-            Qt.Horizontal,
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.ActionRole
+            | QtWidgets.QDialogButtonBox.Ok
+            | QtWidgets.QDialogButtonBox.Cancel,
             self,
         )
 
@@ -2322,7 +2321,7 @@ class CalibrationDialog(QtWidgets.QDialog):
         dialog = CalibrationDialog(parent)
         result = dialog.exec_()
         bg, bgstd, las, time, conc = dialog.evalTable()
-        return (bg, bgstd, las, time, conc, result == QDialog.Accepted)
+        return (bg, bgstd, las, time, conc, result == QtWidgets.QDialog.Accepted)
 
 
 def main():
@@ -2334,7 +2333,7 @@ def main():
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
-        message = "".join(traceback.format_exception(type, value, tback))
+        message = "".join(tback.format_exception(type, value, tback))
         errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
