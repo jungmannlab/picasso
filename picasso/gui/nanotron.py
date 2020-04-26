@@ -1003,8 +1003,14 @@ class Window(QtWidgets.QMainWindow):
                 canvas = GenericPlotWindow("Probabilities")
                 canvas.figure.clear()
 
+                probabilities_per_pick = np.zeros(len(np.unique(self.locs.group)))
+                for c, group_number in enumerate(np.unique(self.locs.group)):
+                    pick = self.locs[self.locs.group == group_number]
+                    pick_score = np.unique(pick.score)[0]
+                    probabilities_per_pick[c] = pick_score
+
                 ax1 = canvas.figure.subplots(1, 1)
-                ax1.hist(self.locs["score"],
+                ax1.hist(probabilities_per_pick,
                          bins=100,
                          range=(0,1.0),
                          align="mid",
