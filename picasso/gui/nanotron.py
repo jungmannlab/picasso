@@ -422,10 +422,10 @@ class train_dialog(QtWidgets.QDialog):
         train_parameter_grid.addWidget(QtWidgets.QLabel("Learning Rate:"), 1, 0)
         self.learing_rate = QtWidgets.QDoubleSpinBox()
         self.learing_rate.resize(200, 50)
-        self.learing_rate.setRange(0.001, 10)
+        self.learing_rate.setRange(0.00001, 10)
+        self.learing_rate.setSingleStep(0.00001)
+        self.learing_rate.setDecimals(5)
         self.learing_rate.setValue(0.001)
-        self.learing_rate.setSingleStep(0.001)
-        self.learing_rate.setDecimals(4)
         train_parameter_grid.addWidget(self.learing_rate, 1, 1)
 
         self.train_btn = QtWidgets.QPushButton("Train Model")
