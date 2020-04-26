@@ -76,15 +76,15 @@ Using GPU for Fitting
 To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
 
-Bug Reports and Feature Requests
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Contributing
+------------
 
-If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. I will gladly guide you through the codebase and credit you accordingly. You can also contact me via picasso@jungmannlab.org.
+If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. You can find more guidelines for contributing `here <https://github.com/jungmannlab/picasso/blob/master/CONTRIBUTING.rst>`__. I will gladly guide you through the codebase and credit you accordingly. Additionally, you can check out the ``Projects``-page on GitHub.  You can also contact me via picasso@jungmannlab.org.
 
 Contributions & Copyright
 -------------------------
 
-| Contributors: Joerg Schnitzbauer, Maximilian Strauss, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer
+| Contributors: Joerg Schnitzbauer, Maximilian Strauss, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of
   Biochemistry
 
