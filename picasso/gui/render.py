@@ -1158,7 +1158,87 @@ class LinkDialog(QtWidgets.QDialog):
             result == QtWidgets.QDialog.Accepted,
         )
 
+class DbscanDialog(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
+        self.radius = QtWidgets.QDoubleSpinBox()
+        self.radius.setRange(0, 1e6)
+        self.radius.setValue(1)
+        grid.addWidget(self.radius, 0, 1)
+        grid.addWidget(QtWidgets.QLabel("Density:"), 1, 0)
+        self.density = QtWidgets.QDoubleSpinBox()
+        self.density.setRange(0, 1e6)
+        self.density.setValue(4)
+        grid.addWidget(self.density, 1, 1)
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
 
+    # static method to create the dialog and return input
+    @staticmethod
+    def getParams(parent=None):
+        dialog = DbscanDialog(parent)
+        result = dialog.exec_()
+        return (
+            dialog.radius.value(),
+            dialog.density.value(),
+            result == QtWidgets.QDialog.Accepted,
+        )
+
+class HdbscanDialog(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Min. samples:"), 0, 0)
+        self.min_samples = QtWidgets.QDoubleSpinBox()
+        self.min_samples.setRange(0, 1e6)
+        self.min_samples.setValue(10)
+        grid.addWidget(self.radius, 0, 1)
+        grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 1, 0)
+        self.min_cluster = QtWidgets.QDoubleSpinBox()
+        self.min_cluster.setRange(0, 1e6)
+        self.min_cluster.setValue(10)
+        grid.addWidget(self.min_cluster, 1, 1)
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    # static method to create the dialog and return input
+    @staticmethod
+    def getParams(parent=None):
+        dialog = HdbscanDialog(parent)
+        result = dialog.exec_()
+        return (
+            dialog.min_samples.value(),
+            dialog.min_cluster.value(),
+            result == QtWidgets.QDialog.Accepted,
+        )
 
 
 class DriftPlotWindow(QtWidgets.QTabWidget):
@@ -2674,6 +2754,17 @@ class View(QtWidgets.QLabel):
                     groups %= N_GROUP_COLORS
                     self.group_color = groups[self.locs[channel].group]
                 self.update_scene()
+
+    def dbscan(self):
+        radius, density, ok = DbscanDialog.getParams()
+        if ok:
+            print("Hurray")
+            # postprocessing -> dbscan(locs, radius, min_density)
+
+    def hdbscan(self):
+        min_samples, min_cluster, ok = HdbscanDialog.getParams()
+        if ok:
+            print("Hurray")
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
         """
@@ -5959,6 +6050,12 @@ class Window(QtWidgets.QMainWindow):
         )
         apply_action.setShortcut("Ctrl+A")
         apply_action.triggered.connect(self.open_apply_dialog)
+
+        dbscan_action = postprocess_menu.addAction("DBSCAN")
+        dbscan_action.triggered.connect(self.view.dbscan)
+
+        hdbscan_action = postprocess_menu.addAction("HDBSCAN")
+        dbscan_action.triggered.connect(self.view.hdbscan)
 
         self.load_user_settings()
 
