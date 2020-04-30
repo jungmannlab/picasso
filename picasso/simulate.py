@@ -365,7 +365,7 @@ def generatePositions(number, imagesize, frame, arrangement):
     Generate a set of positions where structures will be placed
     """
     if arrangement == 0:
-        spacing = _np.ceil((number ** 0.5))
+        spacing = int(_np.ceil((number ** 0.5)))
         linpos = _np.linspace(frame, imagesize - frame, spacing)
         [xxgridpos, yygridpos] = _np.meshgrid(linpos, linpos)
         xxgridpos = _np.ravel(xxgridpos)
