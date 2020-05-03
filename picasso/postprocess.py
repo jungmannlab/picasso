@@ -444,7 +444,7 @@ def dbscan(locs, radius, min_density):
         )
     return clusters, locs
 
-def hdbscan(locs, min_samples, min_cluster_size):
+def hdbscan(locs, min_cluster_size, min_samples):
     print("Identifying clusters...")
     if hasattr(locs, "z"):
         print("z-coordinates detected")
@@ -453,10 +453,10 @@ def hdbscan(locs, min_samples, min_cluster_size):
             _np.isfinite(locs.x) & _np.isfinite(locs.y) & _np.isfinite(locs.z)
         ]
         X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
-        db = _HDBSCAN(
+        hdb = _HDBSCAN(
             min_samples=min_samples, min_cluster_size=min_cluster_size
         ).fit(X)
-        group = _np.int32(db.labels_)  # int32 for Origin compatiblity
+        group = _np.int32(hdb.labels_)  # int32 for Origin compatiblity
         locs = _lib.append_to_rec(locs, group, "group")
         locs = locs[locs.group != -1]
         print("Generating cluster information...")
@@ -534,10 +534,10 @@ def hdbscan(locs, min_samples, min_cluster_size):
     else:
         locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
         X = _np.vstack((locs.x, locs.y)).T
-        db = _HDBSCAN(
+        hdb = _HDBSCAN(
             min_samples=min_samples, min_cluster_size=min_cluster_size
         ).fit(X)
-        group = _np.int32(db.labels_)  # int32 for Origin compatiblity
+        group = _np.int32(hdb.labels_)  # int32 for Origin compatiblity
         locs = _lib.append_to_rec(locs, group, "group")
         locs = locs[locs.group != -1]
         print("Generating cluster information...")
