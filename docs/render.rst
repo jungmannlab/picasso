@@ -353,6 +353,14 @@ Apply expressions to localizations
 
 This tool allows you to apply expressions to localizations.
 
+dbscan
+^^^^^^
+Cluster localizations with the dbscan clustering algorithm.
+
+hdbscan
+^^^^^^^
+Cluster localizations with the hdbscan clustering algorithm.
+
 Examples
 ++++++++
 - ``x +=1`` will shift all localization by one to the right
