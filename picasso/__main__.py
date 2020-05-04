@@ -458,6 +458,8 @@ def _dbscan(files, radius, min_density):
             io.save_locs(base + "_dbscan.hdf5", locs, info)
             with File(base + "_dbclusters.hdf5", "w") as clusters_file:
                 clusters_file.create_dataset("clusters", data=clusters)
+            print("Clustering executed. Results are saved in: \n" + base + "_dbscan.hdf5" +
+                  "\n" + base + "_dbclusters.hdf5")
 
 def _hdbscan(files, min_cluster, min_samples):
     import glob
@@ -480,6 +482,8 @@ def _hdbscan(files, min_cluster, min_samples):
             io.save_locs(base + "_hdbscan.hdf5", locs, info)
             with File(base + "_hdbclusters.hdf5", "w") as clusters_file:
                 clusters_file.create_dataset("clusters", data=clusters)
+            print("Clustering executed. Results are saved in: \n" + base + "_hdbscan.hdf5" +
+                  "\n" + base + "_hdbclusters.hdf5")
 
 
 def _nneighbor(files):

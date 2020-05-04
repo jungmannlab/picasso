@@ -2771,6 +2771,12 @@ class View(QtWidgets.QLabel):
                 io.save_locs(base + "_dbscan.hdf5", locs, locs_info)
                 with File(base + "_dbclusters.hdf5", "w") as clusters_file:
                     clusters_file.create_dataset("clusters", data=clusters)
+                print("Clustering executed. Results are saved in: \n" + base + "_dbscan.hdf5" +
+                      "\n" + base + "_dbclusters.hdf5")
+                QtWidgets.QMessageBox.information(
+                    self, "DBSCAN", "Clustering executed. Results are saved in: \n" + base + "_dbscan.hdf5" +
+                      "\n" + base + "_dbclusters.hdf5"
+                )
 
     def hdbscan(self):
         min_cluster, min_samples, ok = HdbscanDialog.getParams()
@@ -2788,6 +2794,12 @@ class View(QtWidgets.QLabel):
                 io.save_locs(base + "_hdbscan.hdf5", locs, locs_info)
                 with File(base + "_hdbclusters.hdf5", "w") as clusters_file:
                     clusters_file.create_dataset("clusters", data=clusters)
+                print("Clustering executed. Results are saved in: \n" + base + "_hdbscan.hdf5" +
+                      "\n" + base + "_hdbclusters.hdf5")
+                QtWidgets.QMessageBox.information(
+                    self, "HDBSCAN", "Clustering executed. Results are saved in: \n" + base + "_hdbscan.hdf5" +
+                      "\n" + base + "_hdbclusters.hdf5"
+                )
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
         """
