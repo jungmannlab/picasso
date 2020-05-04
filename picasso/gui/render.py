@@ -6086,10 +6086,11 @@ class Window(QtWidgets.QMainWindow):
         apply_action.setShortcut("Ctrl+A")
         apply_action.triggered.connect(self.open_apply_dialog)
 
-        dbscan_action = postprocess_menu.addAction("DBSCAN")
+        postprocess_menu.addSeparator()
+        clustering_menu = postprocess_menu.addMenu("Clustering")
+        dbscan_action = clustering_menu.addAction("DBSCAN")
         dbscan_action.triggered.connect(self.view.dbscan)
-
-        hdbscan_action = postprocess_menu.addAction("HDBSCAN")
+        hdbscan_action = clustering_menu.addAction("HDBSCAN")
         hdbscan_action.triggered.connect(self.view.hdbscan)
 
         self.load_user_settings()
