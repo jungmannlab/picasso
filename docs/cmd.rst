@@ -85,6 +85,10 @@ dbscan
 ------
 Cluster localizations with the dbscan clustering algorithm.
 
+hdbscan
+-------
+Cluster localizations with the hdbscan clustering algorithm.
+
 dark
 ----
 Compute the dark time for grouped localizations.
