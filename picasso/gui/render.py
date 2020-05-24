@@ -5004,6 +5004,9 @@ class View(QtWidgets.QLabel):
             "Calculating pick properties", 0, n_groups, self
         )
         pick_props = postprocess.groupprops(out_locs)
+
+        progress.set_value(n_groups)
+        progress.close()
         n_units = self.window.info_dialog.calculate_n_units(dark)
         pick_props = lib.append_to_rec(pick_props, n_units, "n_units")
         pick_props = lib.append_to_rec(pick_props, no_locs, "locs")
