@@ -12,7 +12,7 @@ import numpy as _np
 import numba as _numba
 
 from sklearn.cluster import DBSCAN as _DBSCAN
-from hdbscan import HDBSCAN as _HDBSCAN
+
 from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
 from scipy.spatial import distance
@@ -445,6 +445,9 @@ def dbscan(locs, radius, min_density):
     return clusters, locs
 
 def hdbscan(locs, min_cluster_size, min_samples):
+
+    from hdbscan import HDBSCAN as _HDBSCAN
+
     print("Identifying clusters...")
     if hasattr(locs, "z"):
         print("z-coordinates detected")
