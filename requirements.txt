@@ -9,5 +9,3 @@ scikit-learn==0.23.1
 colorama==0.4.3
 tqdm==4.46.1
 lmfit==1.0.1
-hdbscan==0.8.26
-
