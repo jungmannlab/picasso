@@ -3,11 +3,11 @@ Picasso
 .. image:: https://readthedocs.org/projects/picassosr/badge/?version=latest
    :target: https://picassosr.readthedocs.io/en/latest/?badge=latest
    :alt: Documentation Status
-   
+
 .. image:: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
    :target: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
    :alt: CI
-   
+
 .. image:: main_render.png
    :scale: 100 %
    :alt: UML Render view
@@ -18,8 +18,7 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 Installation
 ------------
 
-Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows. Here you will also find the Nature Protocols legacy version. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X) please follow the advanced installation instructions.
-
+Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows. Here you will also find the Nature Protocols legacy version. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X), please follow the advanced installation instructions.
 Advanced installation for Python programmers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -28,24 +27,24 @@ As an alternative to the stand-alone program for end-users, Picasso can be insta
 Requirements
 ^^^^^^^^^^^^
 
-Python 3.\* (currently tested with 3.7)
+Python 3.8 (Tested on Windows 10)
 '''''''''''''''''''''''''''''''''''''''
 
 We highly recommend the `Anaconda or Miniconda <https://www.continuum.io/downloads>`__ Python distribution which comes with a powerful package manager.
 
-Setting up environment with conda
+Setting up the environment with conda
 '''''''''''''''''''''''''''''''''
 
 Sample instructions to create an environment and installation of packages with conda are as follows:
 
-1. Open the console and create a new conda environment: ``conda create --name picasso python=3.7``
+1. Open the console and create a new conda environment: ``conda create --name picasso python=3.8``
 2. Activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
-3. Install the necessary packages with conda: ``conda install h5py matplotlib numba numpy scipy pyqt pyyaml scikit-learn colorama tqdm``
-4. Additionally install the lmfit package with pip: ``pip install lmfit``
-5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
-6. Continue with the installation of Picasso
+3. Install using the requirements.txt: ``pip install -r requirements.txt``
+4. (Optional) If you want to use hdbscan install using conda: ``conda install hdbscan``.
+4. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
+5. Continue with the installation of Picasso
 
-Note that sometimes outdated packages can cause problems. As of version 0.3.0, Picasso switched from PyQt4 to PyQt5 so make sure to update PyQt. If you experience errors, please check whether your packages have the right version (e.g. see issue #4). Additionally, make sure that you have the default package channel (e.g., see issue #30). Also, note that there is also a requirements.txt which you can use to install all packages with pip (``pip install -r requirements.txt``). In the past, not relying on conda caused troubles with creating the one-click installer. It is therefore recommended installing all packages with conda.
+Note that sometimes outdated packages can cause problems. As of version 0.3.0, Picasso switched from PyQt4 to PyQt5, so make sure to update PyQt. If you experience errors, please check whether your packages have the correct version (e.g., see issue #4). When using conda, make sure that you have the default package channel (e.g., see issue #30).
 
 .. _installation-1:
 
@@ -56,6 +55,14 @@ Installation
 2. Change to the downloaded directory ``cd picasso``
 3. Run installation ``python setup.py install``.
 
+Updating
+^^^^^^^^
+To update Picasso from GitHub use the following commands:
+
+1. Move to the Picasso folder with the terminal, activate environment.
+2. Update with git: ``git pull``.
+3. Update the environment: ``pip install --upgrade -r requirements.txt``.
+4. Run installation ``python setup.py install``.
 
 Optional for windows users
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -87,6 +94,7 @@ Contributions & Copyright
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of
   Biochemistry
+| Copyright (c) 2020 Maximilian Strauss
 
 Citing Picasso
 --------------
