@@ -3,7 +3,7 @@ numpy==1.19.2
 h5py==2.10.0
 matplotlib==3.3.2
 numba==0.51.2
-scipy==1.5.3
+scipy==1.5.4
 pyyaml==5.3.1
 scikit-learn==0.23.2
 colorama==0.4.4
