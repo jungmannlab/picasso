@@ -959,7 +959,7 @@ class Window(QtWidgets.QMainWindow):
             dir = self.pwd
 
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open image sequence", directory=dir, filter="*.raw; *.tif"
+            self, "Open image sequence", directory=dir, filter="All supported formats (*.raw *.tif *.tiff);;Raw files (*.raw);;Tiff iimages (*.tif *.tiff)"
         )
         if path:
             self.pwd = path
