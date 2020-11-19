@@ -883,7 +883,8 @@ def _render(args):
     from .render import render
     from os.path import splitext
     from matplotlib.pyplot import imsave
-    from os import startfile
+    from webbrowser import open
+    # from os import startfile
     from os.path import isdir
     from .io import load_user_settings, save_user_settings
     from tqdm import tqdm
@@ -925,7 +926,7 @@ def _render(args):
                 out_path, image, vmin=vmin, vmax=vmax, cmap=cmap
             )
         if not silent:
-            startfile(out_path)
+            open(out_path)
 
     settings = load_user_settings()
     cmap = args.cmap

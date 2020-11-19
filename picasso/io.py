@@ -17,7 +17,7 @@ import struct as _struct
 import json as _json
 import os as _os
 import threading as _threading
-from PyQt5.QtWidgets import QMessageBox as _QMessageBox
+# from PyQt5.QtWidgets import QMessageBox as _QMessageBox
 from . import lib as _lib
 
 
@@ -180,9 +180,11 @@ class TiffMap:
         # Read info from first IFD
         self.file.seek(self.first_ifd_offset)
         n_entries = self.read("H")
+
         for i in range(n_entries):
             self.file.seek(self.first_ifd_offset + 2 + i * 12)
             tag = self.read("H")
+
             type = self.TIFF_TYPES[self.read("H")]
             count = self.read("L")
             if tag == 256:
