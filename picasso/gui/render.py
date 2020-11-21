@@ -5835,11 +5835,15 @@ class View(QtWidgets.QLabel):
             viewport = self.viewport
         return viewport[1][1] - viewport[0][1]
 
-    def zoom(self, factor):
+    def zoom(self, factor, custom_center = None):
         viewport_height, viewport_width = self.viewport_size()
         new_viewport_height_half = 0.5 * viewport_height * factor
         new_viewport_width_half = 0.5 * viewport_width * factor
-        viewport_center_y, viewport_center_x = self.viewport_center()
+
+        if custom_center:
+            viewport_center_x, viewport_center_y = custom_center
+        else:
+            viewport_center_y, viewport_center_x = self.viewport_center()
         new_viewport = [
             (
                 viewport_center_y - new_viewport_height_half,
@@ -5858,6 +5862,15 @@ class View(QtWidgets.QLabel):
     def zoom_out(self):
         self.zoom(ZOOM)
 
+    def wheelEvent(self, QWheelEvent):
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+        if modifiers == QtCore.Qt.ControlModifier:
+            direction = QWheelEvent.angleDelta().y()
+            position = self.map_to_movie(QWheelEvent.pos())
+            if direction < 0:
+                self.zoom(1 / ZOOM, custom_center = position)
+            else:
+                self.zoom(ZOOM, custom_center = position)
 
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
