@@ -547,7 +547,7 @@ def _align(files, display):
         save_locs(base + "_align.hdf5", locs_, info)
 
 
-def _join(files, nosum=True):
+def _join(files, keep_index=True):
     from .io import load_locs, save_locs
     from os.path import splitext
     from numpy import append
@@ -561,7 +561,7 @@ def _join(files, nosum=True):
         try:
             n_frames = info[0]['Frames']
             total_frames += n_frames
-            if not nosum:
+            if not keep_index:
                 locs_['frame'] += total_frames-n_frames
             locs = append(locs, locs_)
             join_info["Files"].append(path)
@@ -571,7 +571,7 @@ def _join(files, nosum=True):
                   " Make sure they have the same columns.")
     base, ext = splitext(files[0])
     info.append(join_info)
-    if not nosum:
+    if not keep_index:
         info[0]['Frames'] = total_frames
     locs.sort(kind="mergesort", order="frame")
     locs = locs.view(np.recarray)
@@ -1214,13 +1214,13 @@ def main():
 
     # join
     join_parser = subparsers.add_parser(
-        "join", help="join hdf5 localization lists. frame numbers of consecutive files will be added up."
+        "join", help="join hdf5 localization lists. frame numbers of consecutive files will be reindexed."
     )
     join_parser.add_argument(
         "file", nargs="+", help="the hdf5 localization files to be joined"
     )
     join_parser.add_argument(
-        "-n", "--nosum", help="do not change frame numbers", action="store_true"
+        "-k", "--keepindex", help="do not change frame numbers", action="store_true"
     )
 
     # group properties
@@ -1516,7 +1516,7 @@ def main():
         elif args.command == "align":
             _align(args.file, args.display)
         elif args.command == "join":
-            _join(args.file, args.nosum)
+            _join(args.file, args.keepindex)
         elif args.command == "groupprops":
             _groupprops(args.files)
         elif args.command == "pc":
