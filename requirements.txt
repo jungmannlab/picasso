@@ -7,5 +7,5 @@ scipy==1.5.3
 pyyaml==5.3.1
 scikit-learn==0.23.2
 colorama==0.4.4
-tqdm==4.50.2
+tqdm==4.54.0
 lmfit==1.0.1
