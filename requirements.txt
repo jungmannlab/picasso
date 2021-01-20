@@ -4,7 +4,7 @@ h5py==2.10.0
 matplotlib==3.3.2
 numba==0.51.2
 scipy==1.5.3
-pyyaml==5.3.1
+pyyaml==5.4
 scikit-learn==0.23.2
 colorama==0.4.4
 tqdm==4.50.2
