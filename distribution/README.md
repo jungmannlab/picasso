@@ -13,3 +13,14 @@ This document describes the procedure to generate a Windows installer for Picass
 3. Run `create_installer.bat`
 
 You will now find the installer executable in the folder `Output`, ready for distribution.
+
+# Creating shortcuts for Linux
+The script `create_linux_shortcuts.py` creates application menu entries (`*.desktop` files following the desktop entry specification by freedesktop.org) and an executable that can be called from the terminal without explicitly activating the picasso environment.
+
+1. Clone/download picasso, set up the picasso environment using `python -m venv path/to/environment`, activate the environment, install the requirements and run `python setup.py install`.
+2. With the picasso environment activated, run the script `create_linux_shortcuts.py`.
+
+When `create_linux_shortcuts.py` is run as root, the picasso script is created as `/usr/bin/picasso` and the desktop files are created in `/usr/share/applications`.
+For non-root users, the picasso script is created as `~/bin/picasso`, assuming that `~/bin` is on your `$PATH`, and the desktop files are created in `~/.local/share/applications`.
+The picasso script can then be run without explicitly activating the picasso environment.
+Note that this setup was only tested with environments created using venv; it may not work with conda environments.
