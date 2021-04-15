@@ -6838,11 +6838,7 @@ class Window(QtWidgets.QMainWindow):
             )
         if path:
             self.pwd = path
-            if len(self.view.locs) == 0:
-                self.view.add(path)
-            else:
-                self.view.add(path, render=False)
-                self.view.update_scene()
+            self.view.add_multiple([path])
 
     def resizeEvent(self, event):
         self.update_info()
