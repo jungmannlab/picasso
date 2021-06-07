@@ -625,7 +625,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["y"]) + 3 * np.std(locs["y"]),
             )
             ax2.set_title("XY")
-            ax2.set_axis_bgcolor("black")
+            ax2.set_facecolor("black")
 
             # AXES 3
             ax3.scatter(locs["x"], locs["z"], c=colors, cmap="jet", s=2)
@@ -640,7 +640,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax3.set_title("XZ")
-            ax3.set_axis_bgcolor("black")
+            ax3.set_facecolor("black")
 
             # AXES 4
             ax4.scatter(locs["y"], locs["z"], c=colors, cmap="jet", s=2)
@@ -655,7 +655,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax4.set_title("YZ")
-            ax4.set_axis_bgcolor("black")
+            ax4.set_facecolor("black")
 
         else:
             colors = color_sys
@@ -700,7 +700,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["y"]) + 3 * np.std(locs["y"]),
             )
             ax2.set_title("XY")
-            ax2.set_axis_bgcolor("black")
+            ax2.set_facecolor("black")
 
             # AXES 3
             ax3.set_xlabel("X [Px]")
@@ -714,7 +714,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax3.set_title("XZ")
-            ax3.set_axis_bgcolor("black")
+            ax3.set_facecolor("black")
 
             # AXES 4
             ax4.set_xlabel("Y [Px]")
@@ -728,7 +728,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax4.set_title("YZ")
-            ax4.set_axis_bgcolor("black")
+            ax4.set_facecolor_bgcolor("black")
 
         result = dialog.exec_()
 
@@ -2246,7 +2246,6 @@ class SlicerDialog(QtWidgets.QDialog):
     def calculate_histogram(self):
         slice = self.pick_slice.value()
         ax = self.figure.add_subplot(111)
-        ax.hold(False)
         plt.cla()
         n_channels = len(self.zcoord)
 
@@ -2258,12 +2257,11 @@ class SlicerDialog(QtWidgets.QDialog):
             slice,
         )
         self.patches = []
-        ax.hold(True)
         for i in range(len(self.zcoord)):
             n, bins, patches = plt.hist(
                 self.zcoord[i],
                 self.bins,
-                normed=1,
+                density=1,
                 facecolor=self.colors[i],
                 alpha=0.5,
             )
