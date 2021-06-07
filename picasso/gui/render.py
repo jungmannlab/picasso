@@ -4893,13 +4893,13 @@ class View(QtWidgets.QLabel):
         if self.x_render_state:
             locs = self.x_locs
             return self.render_multi_channel(
-                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache
+                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache 
             )
 
         if hasattr(locs, "group"):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
-                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache
+                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache, plot_channels=True
             )
 
         if hasattr(locs, "z"):
