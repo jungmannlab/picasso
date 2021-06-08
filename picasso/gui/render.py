@@ -3531,32 +3531,70 @@ class View(QtWidgets.QLabel):
                     np.mean(locs["z"]) + 3 * np.std(locs["z"]),
                 )
 
+
             else:
-                locs = self.picked_locs(channel)
-                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                method = "no"
+                if hasattr(self.locs[channel], "group") and len(self.locs_paths)<=1:
+                    options = ["yes", "no"]
+                    index, ok = QtWidgets.QInputDialog.getItem(
+                        self, "Select 3D Rendering", "Show groups?", options, editable=False
+                    )
+                    if ok:
+                        method = index
+                    else:
+                        method = None
 
-                colors = locs["z"][:]
-                colors[
-                    colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])
-                ] = np.mean(locs["z"]) + 3 * np.std(locs["z"])
-                colors[
-                    colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
-                ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
-                ax.scatter(
-                    locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
+                if method == "yes":
+                    locs = self.picked_locs(channel, add_group=False, keep_group_color=True)
+                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                    group_color = locs["group_color"]
+                    colors = get_colors(N_GROUP_COLORS)
+                    dict_colors = dict(zip(range(N_GROUP_COLORS), colors))
+                    u,inv = np.unique(group_color, return_inverse = True)
+                    colors = np.array([dict_colors[x] for x in u])[inv]
 
-                ax.set_xlim(
-                    np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                    np.mean(locs["x"]) + 3 * np.std(locs["x"]),
-                )
-                ax.set_ylim(
-                    np.mean(locs["y"]) - 3 * np.std(locs["y"]),
-                    np.mean(locs["y"]) + 3 * np.std(locs["y"]),
-                )
-                ax.set_zlim(
-                    np.mean(locs["z"]) - 3 * np.std(locs["z"]),
-                    np.mean(locs["z"]) + 3 * np.std(locs["z"]),
-                )
+                    ax.scatter(
+                        locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
+    
+                    ax.set_xlim(
+                        np.mean(locs["x"]) - 3 * np.std(locs["x"]),
+                        np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                    )
+                    ax.set_ylim(
+                        np.mean(locs["y"]) - 3 * np.std(locs["y"]),
+                        np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                    )
+                    ax.set_zlim(
+                        np.mean(locs["z"]) - 3 * np.std(locs["z"]),
+                        np.mean(locs["z"]) + 3 * np.std(locs["z"]),
+                    )                    
+
+                if method == "no":
+                    locs = self.picked_locs(channel)
+                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
+
+                    colors = locs["z"][:]
+                    colors[
+                        colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])
+                    ] = np.mean(locs["z"]) + 3 * np.std(locs["z"])
+                    colors[
+                        colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
+                    ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
+                    ax.scatter(
+                        locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
+
+                    ax.set_xlim(
+                        np.mean(locs["x"]) - 3 * np.std(locs["x"]),
+                        np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                    )
+                    ax.set_ylim(
+                        np.mean(locs["y"]) - 3 * np.std(locs["y"]),
+                        np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                    )
+                    ax.set_zlim(
+                        np.mean(locs["z"]) - 3 * np.std(locs["z"]),
+                        np.mean(locs["z"]) + 3 * np.std(locs["z"]),
+                    )
 
             plt.gca().patch.set_facecolor("black")
             ax.set_xlabel("X [Px]")
@@ -4605,7 +4643,7 @@ class View(QtWidgets.QLabel):
             self._picks = []
             self.add_picks(similar)
 
-    def picked_locs(self, channel, add_group=True):
+    def picked_locs(self, channel, add_group=True, keep_group_color=False):
         """ Returns picked localizations in the specified channel """
 
         if len(self._picks):
@@ -4617,6 +4655,10 @@ class View(QtWidgets.QLabel):
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
                 r = d / 2
+
+                if keep_group_color:
+                    self.locs[0] = lib.append_to_rec(self.locs[0], self.group_color, "group_color")
+
                 index_blocks = self.get_index_blocks(channel)
                 for i, pick in enumerate(self._picks):
                     x, y = pick
@@ -4893,7 +4935,7 @@ class View(QtWidgets.QLabel):
         if self.x_render_state:
             locs = self.x_locs
             return self.render_multi_channel(
-                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache 
+                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache
             )
 
         if hasattr(locs, "group"):
