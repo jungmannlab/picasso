@@ -3533,19 +3533,26 @@ class View(QtWidgets.QLabel):
 
 
             else:
-                method = "no"
-                if hasattr(self.locs[channel], "group") and len(self.locs_paths)<=1:
-                    options = ["yes", "no"]
+                show_group = "no"
+                if (hasattr(self.locs[channel], "group") and 
+                    len(self.locs_paths) <= 1):
                     index, ok = QtWidgets.QInputDialog.getItem(
-                        self, "Select 3D Rendering", "Show groups?", options, editable=False
+                        self, 
+                        "Select 3D Rendering", 
+                        "Show groups?", 
+                        ["yes", "no"], 
+                        editable=False,
                     )
                     if ok:
-                        method = index
+                        show_group = index
                     else:
-                        method = None
+                        show_group = None
 
-                if method == "yes":
-                    locs = self.picked_locs(channel, add_group=False, keep_group_color=True)
+                if show_group == "yes":
+                    locs = self.picked_locs(channel, 
+                                            add_group=False,
+                                            keep_group_color=True,
+                    )
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
                     group_color = locs["group_color"]
                     colors = get_colors(N_GROUP_COLORS)
@@ -3569,7 +3576,7 @@ class View(QtWidgets.QLabel):
                         np.mean(locs["z"]) + 3 * np.std(locs["z"]),
                     )                    
 
-                if method == "no":
+                if show_group == "no":
                     locs = self.picked_locs(channel)
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
