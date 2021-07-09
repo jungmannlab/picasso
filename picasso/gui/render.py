@@ -3512,24 +3512,57 @@ class View(QtWidgets.QLabel):
             if channel is (len(self.locs_paths)):
                 n_channels = len(self.locs_paths)
                 colors = get_colors(n_channels)
-
+                
+                x_means = np.zeros(len(self.locs_paths))
+                y_means = np.zeros(len(self.locs_paths))
+                z_means = np.zeros(len(self.locs_paths))
+                x_ranges = np.zeros(len(self.locs_paths))
+                y_ranges = np.zeros(len(self.locs_paths))
+                z_ranges = np.zeros(len(self.locs_paths))
                 for i in range(len(self.locs_paths)):
                     locs = self.picked_locs(i)
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
                     ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[i], s=2)
+                    
+                    x_means[i] = np.mean(locs["x"])
+                    y_means[i] = np.mean(locs["y"])
+                    z_means[i] = np.mean(locs["z"])
+                    x_ranges[i] = 3 * np.std(locs["x"])
+                    y_ranges[i] = 3 * np.std(locs["y"])
+                    z_ranges[i] = 3 * np.std(locs["z"])
+                
+                x_mean = np.mean(x_means)
+                y_mean = np.mean(y_means)
+                z_mean = np.mean(z_means)
+                x_range = np.amax(x_ranges)
+                y_range = np.amax(y_ranges)
+                z_range = np.amax(z_ranges)
+                xy_range = max(x_range, y_range)
 
                 ax.set_xlim(
-                    np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                    np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                    x_mean - xy_range,
+                    x_mean + xy_range,
                 )
                 ax.set_ylim(
-                    np.mean(locs["y"]) - 3 * np.std(locs["y"]),
-                    np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                    y_mean - xy_range,
+                    y_mean + xy_range,
                 )
+                
+                
                 ax.set_zlim(
-                    np.mean(locs["z"]) - 3 * np.std(locs["z"]),
-                    np.mean(locs["z"]) + 3 * np.std(locs["z"]),
+                    z_mean - z_range,
+                    z_mean + z_range,
                 )
+                
+                plt.gca().patch.set_facecolor("black")
+                ax.set_xlabel("X [Px]")
+                ax.set_ylabel("Y [Px]")
+                ax.set_zlabel("Z [nm]")
+                ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+                ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+                ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+                fig.canvas.draw()
+                fig.show()
 
 
             else:
@@ -3548,6 +3581,7 @@ class View(QtWidgets.QLabel):
                     else:
                         show_group = None
 
+                    
                 if show_group == "yes":
                     locs = self.picked_locs(channel, 
                                             add_group=False,
@@ -3563,18 +3597,22 @@ class View(QtWidgets.QLabel):
                     ax.scatter(
                         locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
     
+                    x_range = 3 * np.std(locs["x"])
+                    y_range = 3 * np.std(locs["y"])
+                    xy_range = max(x_range, y_range)
+    
                     ax.set_xlim(
-                        np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                        np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                        np.mean(locs["x"]) - xy_range,
+                        np.mean(locs["x"]) + xy_range,
                     )
                     ax.set_ylim(
-                        np.mean(locs["y"]) - 3 * np.std(locs["y"]),
-                        np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                        np.mean(locs["y"]) - xy_range,
+                        np.mean(locs["y"]) + xy_range,
                     )
                     ax.set_zlim(
                         np.mean(locs["z"]) - 3 * np.std(locs["z"]),
                         np.mean(locs["z"]) + 3 * np.std(locs["z"]),
-                    )                    
+                    )                
 
                 if show_group == "no":
                     locs = self.picked_locs(channel)
@@ -3590,28 +3628,34 @@ class View(QtWidgets.QLabel):
                     ax.scatter(
                         locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
 
+                    x_range = 3 * np.std(locs["x"])
+                    y_range = 3 * np.std(locs["y"])
+                    xy_range = max(x_range, y_range)
+    
                     ax.set_xlim(
-                        np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                        np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                        np.mean(locs["x"]) - xy_range,
+                        np.mean(locs["x"]) + xy_range,
                     )
                     ax.set_ylim(
-                        np.mean(locs["y"]) - 3 * np.std(locs["y"]),
-                        np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                        np.mean(locs["y"]) - xy_range,
+                        np.mean(locs["y"]) + xy_range,
                     )
                     ax.set_zlim(
                         np.mean(locs["z"]) - 3 * np.std(locs["z"]),
                         np.mean(locs["z"]) + 3 * np.std(locs["z"]),
-                    )
-
-            plt.gca().patch.set_facecolor("black")
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [nm]")
-            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
-            fig.canvas.draw()
-            fig.show()
+                    )       
+                    
+                if show_group != None:
+                    plt.gca().patch.set_facecolor("black")
+                    ax.set_xlabel("X [Px]")
+                    ax.set_ylabel("Y [Px]")
+                    ax.set_zlabel("Z [nm]")
+                    ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
+                    ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
+                    ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+                    fig.canvas.draw()
+                    fig.show()
+    
 
     @check_pick
     def show_trace(self):
