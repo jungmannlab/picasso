@@ -7,11 +7,15 @@ Picasso
 .. image:: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
    :target: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
    :alt: CI
+   
+.. image:: http://img.shields.io/badge/DOI-10.1038/nprot.2017.024-52c92e.svg
+   :target: https://doi.org/10.1038/nprot.2017.024
+   :alt: CI
 
 .. image:: main_render.png
    :scale: 100 %
    :alt: UML Render view
-
+   
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
@@ -19,6 +23,7 @@ Installation
 ------------
 
 Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows. Here you will also find the Nature Protocols legacy version. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X), please follow the advanced installation instructions.
+
 Advanced installation for Python programmers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
