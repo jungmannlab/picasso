@@ -144,7 +144,7 @@ def _identify_worker(movie, current, minimum_ng, box, roi, lock):
 
 def identifications_from_futures(futures):
     ids_list_of_lists = [_.result() for _ in futures]
-    ids_list = _chain(*ids_list_of_lists)
+    ids_list = list(_chain(*ids_list_of_lists))
     ids = _np.hstack(ids_list).view(_np.recarray)
     ids.sort(kind="mergesort", order="frame")
     return ids
