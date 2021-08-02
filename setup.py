@@ -2,7 +2,7 @@ from setuptools import setup
 
 setup(
     name="picasso",
-    version="0.3.1",
+    version="0.3.2",
     author="Joerg Schnitzbauer, Maximilian T. Strauss",
     author_email=(
         "joschnitzbauer (at) gmail.com, straussmaximilian (at) gmail.com"
