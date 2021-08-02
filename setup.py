@@ -19,8 +19,6 @@ setup(
         "picasso": [
             "gui/icons/*.ico",
             "config_template.yaml",
-            "base_sequences.csv",
-            "paint_sequences.csv",
         ]
     },
 )
