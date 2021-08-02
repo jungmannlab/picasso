@@ -23,14 +23,11 @@ from matplotlib.backends.backend_pdf import PdfPages
 from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
 from .. import io as _io
-from .. import design
+from .. import design, design_sequences
 from .. import lib
 
-_this_file = os.path.abspath(__file__)
-_this_directory = os.path.dirname(_this_file)
-BaseSequencesFile = os.path.join(_this_directory, "..", "base_sequences.csv")
-PaintSequencesFile = os.path.join(_this_directory, "..", "paint_sequences.csv")
-
+BASE_SEQUENCES = design_sequences.base_sequences
+PAINT_SEQUENCES = design_sequences.paint_sequences
 
 def plotPlate(selection, selectioncolors, platename):
     inch = 25.4
@@ -126,8 +123,8 @@ def plotPlate(selection, selectioncolors, platename):
     return fig
 
 
-BasePlate = design.readPlate(BaseSequencesFile)
-PaintHandles = design.readPlate(PaintSequencesFile)
+BasePlate = BASE_SEQUENCES.copy()
+PaintHandles = PAINT_SEQUENCES.copy()
 
 # list of standard paint sequences
 allSeqShort = "None"
@@ -1020,7 +1017,7 @@ class Scene(QtWidgets.QGraphicsScene):
     def readCanvas(self):
         allplates = dict()
         canvascolors = self.evaluateCanvas()[::-1]
-        ExportPlate = design.readPlate(BaseSequencesFile)
+        ExportPlate = BASE_SEQUENCES.copy()
 
         ExportPlate[0] = ["Position", "Name", "Sequence", "Color"]
         for i in range(0, len(canvascolors)):
@@ -1065,10 +1062,10 @@ class Scene(QtWidgets.QGraphicsScene):
             for j in range(0, noplates):
                 if colors[j] == 0:
                     allplates[j] = design.convertPlateIndex(
-                        design.readPlate(BaseSequencesFile), "BLK"
+                        BASE_SEQUENCES.copy(), "BLK"
                     )
                 else:
-                    ExportPlate = design.readPlate(BaseSequencesFile)
+                    ExportPlate = BASE_SEQUENCES.copy()
                     for i in range(0, len(canvascolors)):
                         ExportPlate[1 + i][2] = (
                             ExportPlate[1 + i][2]
@@ -1084,7 +1081,7 @@ class Scene(QtWidgets.QGraphicsScene):
                     )
 
         elif mode == 1:  # only one plate with the modifications
-            ExportPlate = design.readPlate(BaseSequencesFile)
+            ExportPlate = BASE_SEQUENCES.copy()
             for i in range(0, len(canvascolors)):
                 if canvascolors[i] == 0:
                     pass
@@ -1111,9 +1108,7 @@ class Window(QtWidgets.QMainWindow):
         self.view = QtWidgets.QGraphicsView(self.mainscene)
         self.view.setRenderHint(QtGui.QPainter.Antialiasing)
         self.setCentralWidget(self.view)
-        self.statusBar().showMessage(
-            "Ready. Sequences loaded from " + BaseSequencesFile + "."
-        )
+        self.statusBar().showMessage("Ready.")#. . Sequences loaded from " + BaseSequencesFile + ".")
 
     def openDialog(self):
         if hasattr(self, "pwd"):

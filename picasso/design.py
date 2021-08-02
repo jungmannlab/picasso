@@ -10,7 +10,6 @@
 import csv
 from . import io as _io
 
-
 def saveInfo(filename, info):
     _io.save_info(filename, [info], default_flow_style=True)
 
