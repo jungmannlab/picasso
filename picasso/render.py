@@ -317,7 +317,6 @@ def render_convolve(
 ):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max)
-
     if ang is not None:
         x, y, _ = locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang) 
 

@@ -736,7 +736,6 @@ class PlotDialogIso(QtWidgets.QDialog):
 
         return dialog.result
 
-
 class ClsDlg(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
@@ -3074,7 +3073,6 @@ class View(QtWidgets.QLabel):
             qimage = self.render_scene(
                 autoscale=autoscale, use_cache=use_cache
             )
-            start_image_trans = time.time()
             qimage = qimage.scaled(
                 self.width(),
                 self.height(),
@@ -3130,6 +3128,16 @@ class View(QtWidgets.QLabel):
         movie_height, movie_width = self.movie_size()
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
+
+    def fit_in_view_rotated(self):
+        locs = self.locs
+        x_min = np.min(locs[0].x)
+        x_max = np.max(locs[0].x)
+        y_min = np.min(locs[0].y)
+        y_max = np.max(locs[0].y)
+        viewport = [(y_min-1, x_min-1), (y_max+1, x_max+1)]
+        self.update_scene(viewport=viewport)
+
 
     def get_channel(self, title="Choose a channel"):
         n_channels = len(self.locs_paths)
@@ -4810,13 +4818,13 @@ class View(QtWidgets.QLabel):
         self.update_scene()
 
     def render_scene(
-        self, autoscale=False, use_cache=False, cache=True, viewport=None
+        self, autoscale=False, use_cache=False, cache=True, viewport=None, infos=None
     ):
         kwargs = self.get_render_kwargs(viewport=viewport)
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(
-                kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache
+                kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache, infos=infos
             )
         else:
             self.render_multi_channel(
@@ -4989,7 +4997,7 @@ class View(QtWidgets.QLabel):
         return self._bgra
 
     def render_single_channel(
-        self, kwargs, autoscale=False, use_cache=False, cache=True
+        self, kwargs, autoscale=False, use_cache=False, cache=True, infos=None
     ):
         locs = self.locs[0]
 
@@ -5011,6 +5019,9 @@ class View(QtWidgets.QLabel):
                 z_max = self.window.slicer_dialog.slicermax
                 in_view = (locs.z > z_min) & (locs.z <= z_max)
                 locs = locs[in_view]
+
+        if infos is not None:
+            self.infos = infos
 
         if use_cache:
             n_locs = self.n_locs
@@ -5037,7 +5048,7 @@ class View(QtWidgets.QLabel):
     def resizeEvent(self, event):
         self.update_scene()
 
-    def rotation_input(self):
+    def rotation_input(self): 
         # asks for rotation angles (3D only)
         angx, ok = QtWidgets.QInputDialog.getDouble(
                 self, "Rotation angle x", "Angle x (degrees):", 0, decimals=2
@@ -6159,13 +6170,10 @@ class Window(QtWidgets.QMainWindow):
 
         slicer_action = view_menu.addAction("Slice")
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
-        rotation_action = view_menu.addAction("Rotate by angle")
-        rotation_action.triggered.connect(self.view.rotation_input)
-        rotation_action.setShortcut("Ctrl+Shift+R")
 
-        delete_rotation_action = view_menu.addAction("Delete rotation")
-        delete_rotation_action.triggered.connect(self.view.delete_rotation)
-        delete_rotation_action.setShortcut("Ctrl+Shift+W")
+        rot_win_action = view_menu.addAction("Rotation window")
+        rot_win_action.setShortcut("Ctrl+Shift+R")
+        rot_win_action.triggered.connect(self.rot_win)
 
         view_menu.addAction(info_action)
         tools_menu = self.menu_bar.addMenu("Tools")
@@ -6187,12 +6195,6 @@ class Window(QtWidgets.QMainWindow):
         measure_tool_action.setShortcut("Ctrl+M")
         tools_menu.addAction(measure_tool_action)
         tools_actiongroup.triggered.connect(self.view.set_mode)
-
-        rotate_tool_action = tools_actiongroup.addAction(
-            QtWidgets.QAction("Rotate", tools_menu, checkable=True)
-        )
-        rotate_tool_action.setShortcut("Ctrl+Q")
-        tools_menu.addAction(rotate_tool_action)
 
         tools_menu.addSeparator()
         tools_settings_action = tools_menu.addAction("Tools settings")
@@ -6325,8 +6327,7 @@ class Window(QtWidgets.QMainWindow):
             plotpick3d_iso_action,
             slicer_action,
             undrift_from_picked2d_action,
-            rotation_action,
-            delete_rotation_action
+            rot_win_action
         ]
 
         for action in self.actions_3d:
@@ -7228,6 +7229,115 @@ class Window(QtWidgets.QMainWindow):
             )
         except AttributeError:
             pass
+
+    def rot_win(self):
+        channel = self.view.get_channel()
+        blur = self.display_settings_dlg.blur_buttongroup.checkedId()
+        color = self.display_settings_dlg.colormap.currentText()
+        if channel is not None:
+            locs = self.view.picked_locs(channel, add_group=False)
+        else:
+            raise ValueError("Could not find a channel.")
+
+        window = RotateDialog(self.view._picks, locs, self.view.infos, blur, color)
+        window.show()
+
+class RotateDialog(Window):
+        #todo: make sure that this works for merged data and clustered data
+        #todo: allow for shifting of the roi
+        #todo: add save rotated localizations
+    def __init__(self, picks, locs, infos, blur, color):
+        super().__init__()
+        self.view._mode = "Rotate"
+
+        self.display_settings_dlg.blur_buttongroup.button(blur).setChecked(True)
+        self.display_settings_dlg.colormap.setCurrentText(color)
+
+        self.setWindowTitle("Rotation window")
+        self.menu_bar.clear()
+        self.menu_bar = self.menuBar()
+        file_menu = self.menu_bar.addMenu("File")
+
+        view_menu = self.menu_bar.addMenu("View")
+        display_settings_action = view_menu.addAction("Display settings")
+        display_settings_action.setShortcut("Ctrl+D")
+        display_settings_action.triggered.connect(
+            self.display_settings_dlg.show
+        )
+        view_menu.addAction(display_settings_action)
+        rotation_action = view_menu.addAction("Rotate by angle")
+        rotation_action.triggered.connect(self.view.rotation_input)
+        rotation_action.setShortcut("Ctrl+Shift+R")
+
+        delete_rotation_action = view_menu.addAction("Remove rotation")
+        delete_rotation_action.triggered.connect(self.view.delete_rotation)
+        delete_rotation_action.setShortcut("Ctrl+Shift+W")
+
+        fit_in_view_action = view_menu.addAction("Fit image to window")
+        fit_in_view_action.setShortcut("Ctrl+W")
+        fit_in_view_action.triggered.connect(self.view.fit_in_view_rotated)
+
+        tools_menu = self.menu_bar.addMenu("Tools")
+        tools_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
+        zoom_tool_action = tools_actiongroup.addAction(
+            QtWidgets.QAction("Zoom", tools_menu, checkable=True)
+        )
+        zoom_tool_action.setShortcut("Ctrl+Z")
+        tools_menu.addAction(zoom_tool_action)
+
+        measure_tool_action = tools_actiongroup.addAction(
+            QtWidgets.QAction("Measure", tools_menu, checkable=True)
+        )
+        measure_tool_action.setShortcut("Ctrl+M")
+        tools_menu.addAction(measure_tool_action)
+        tools_actiongroup.triggered.connect(self.view.set_mode)
+
+        rotate_tool_action = tools_actiongroup.addAction(
+            QtWidgets.QAction("Rotate", tools_menu, checkable=True)
+        )
+        rotate_tool_action.setShortcut("Ctrl+Q")
+        tools_menu.addAction(rotate_tool_action)
+
+        if picks:
+            if len(picks) == 1:
+                self.view.locs = locs
+                x_min = np.min(locs[0].x)
+                x_max = np.max(locs[0].x)
+                y_min = np.min(locs[0].y)
+                y_max = np.max(locs[0].y)
+                self.view.viewport = [(y_min-1, x_min-1), (y_max+1, x_max+1)]
+                # self.view._size_hint = (100,100)
+                # self.view.setMaximumSize(400,400)
+                self.setMaximumSize(400,400)
+                self.move(20,20)
+                qimage = self.view.render_scene(infos=infos)
+                qimage = qimage.scaled(
+                    self.view.width(),
+                    self.view.height(),
+                    QtCore.Qt.KeepAspectRatioByExpanding,
+                )
+                self.qimage_no_picks = self.view.draw_scalebar(qimage)
+                self.qimage_no_picks = self.view.draw_minimap(self.qimage_no_picks)
+                # dppvp = self.view.display_pixels_per_viewport_pixels()
+                # self.window.display_settings_dlg.set_zoom_silently(dppvp)
+                self.qimage = self.view.draw_picks(self.qimage_no_picks)
+                self.qimage = self.view.draw_points(self.qimage)
+                # if self._rectangle_pick_ongoing:
+                #     self.qimage = self.draw_rectangle_pick_ongoing(self.qimage)
+                self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
+                self.view.setPixmap(self.pixmap)
+
+                max_den = self.display_settings_dlg.maximum.value()
+                self.display_settings_dlg.maximum.setValue(max_den * 10)
+
+            else:
+                raise ValueError("Pick only one region.")
+        else:
+            raise ValueError("Pick a region to rotate.")
+
+
+    def closeEvent(self, event):
+        QtWidgets.QMainWindow.closeEvent(self, event)
 
 
 def main():
