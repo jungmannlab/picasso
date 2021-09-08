@@ -12,7 +12,6 @@ def cfill_gaussian_rot(np.ndarray[double, ndim=1] x, np.ndarray[double, ndim=1] 
     cdef float _DRAW_MAX_SIGMA = 3.0
     cdef np.ndarray[DTYPE_t, ndim=2] image = _np.zeros((n_pixel_y, n_pixel_x))
     cdef float x_, y_, z_, sx_, sy_, sz_ 
-    cdef int count = 0
 
     cdef float max_y, max_x, max_z
     cdef int i_min, i_max, j_min, j_max, k_min, k_max
@@ -51,9 +50,6 @@ def cfill_gaussian_rot(np.ndarray[double, ndim=1] x, np.ndarray[double, ndim=1] 
         cov_matrix = _np.array([[sx_**2, 0, 0], [0, sy_**2, 0], [0, 0, sz_**2]]) #covariance matrix 
         cov_rot = mat_mul(rot_matrixT, mat_mul(cov_matrix, rot_matrix))
         cri = inverse(cov_rot) #stands for covariance rotated inverse
-        count += 1
-        if count % 50 == 0:
-            print(count)
 
         for i in range(i_min, i_max):
             for j in range(j_min, j_max):
