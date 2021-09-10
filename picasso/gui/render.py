@@ -4927,7 +4927,6 @@ class View(QtWidgets.QLabel):
                 n_locs = self.n_locs
                 image = self.image
             else:
-
                 pb = lib.ProgressDialog("Rendering.. ", 0, n_channels, self)
                 pb.set_value(0)
                 renderings = []
@@ -5426,12 +5425,6 @@ class View(QtWidgets.QLabel):
 
     def set_mode(self, action):
         self._mode = action.text()
-        # if self._mode == "Rotate":
-            # if not self._picks:
-            #     self._picks = [(self.window.pick_coord[0][0], self.window.pick_coord[0][1])]
-            #     channel = 0 #todo:cheating
-            #     self.locs = self.picked_locs(channel, add_group=False, all_locs=True, d=self.window.d)
-            #     self.update_scene(viewport=self.viewport, draw_picks=False)
         self.update_cursor()
 
     def on_pick_shape_changed(self, pick_shape_index):
@@ -5529,11 +5522,10 @@ class View(QtWidgets.QLabel):
         (y_min, x_min), (y_max, x_max) = self.viewport
         new_viewport = [(y_min+dy, x_min+dx), (y_max+dy, x_max+dx)]
         # check if there are new locs and assign them a color
+        group_color = None
         if hasattr(self.locs[0], "group"):
             if len_old_locs != len(self.locs[0]):
                 group_color = self.get_group_color(self.locs)
-            else:
-                group_color = None
         self.update_scene(viewport=new_viewport, draw_picks=False, group_color=group_color)
 
 
@@ -7377,8 +7369,9 @@ class Window(QtWidgets.QMainWindow):
         else:
             locs = []
             for i in range(n_channels):
-                locs.append(self.view.picked_locs(i, add_group=False, keep_group_color=True))
-
+                temp = self.view.picked_locs(i, add_group=False, keep_group_color=False)
+                locs.append(temp[0])
+                #todo: I gues that I would like to keep the group color
         if hasattr(locs[0], "group"):
             group_color = self.view.get_group_color(locs)
         else:
@@ -7473,6 +7466,8 @@ class RotateDialog(Window):
         # move_tool_action.setShortcut("Ctrl+C")
         # tools_menu.addAction(move_tool_action)
 
+        # ic(locs[0])
+
         if len(paths) == 1:
             x_min = np.min(locs[0].x)
             x_max = np.max(locs[0].x)
@@ -7519,10 +7514,9 @@ class RotateDialog(Window):
         max_den = self.display_settings_dlg.maximum.value()
         self.display_settings_dlg.maximum.setValue(max_den * 10)
 
-        self.pick_coord = picks
         self.view.index_blocks = index_blocks
         self.d = d
-        self.view._picks = [(self.pick_coord[0][0], self.pick_coord[0][1])]
+        self.view._picks = [(picks[0][0], picks[0][1])]
         
     def move_picks(self, dx, dy):
         self.move_picks_draw(dx, dy)

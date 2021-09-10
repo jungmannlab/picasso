@@ -18,7 +18,7 @@ import pyximport
 pyximport.install(setup_args={"include_dirs":_np.get_include()},
                   reload_support=True)
 import sys
-sys.path.append(sys.path[0] + "\\picasso")
+sys.path.append(sys.path[0] + "/picasso")
 from cfill_gaussian import cfill_gaussian_rot
 
 
