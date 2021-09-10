@@ -4427,7 +4427,7 @@ class View(QtWidgets.QLabel):
                 ax = fig.add_subplot(111)
                 ax.set_title("Localizations in Picks ")
                 n, bins, patches = ax.hist(
-                    loccount, 20, normed=1, facecolor="green", alpha=0.75
+                    loccount, 20, density=True, facecolor="green", alpha=0.75
                 )
                 ax.set_xlabel("Number of localizations")
                 ax.set_ylabel("Counts")
