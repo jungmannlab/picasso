@@ -212,7 +212,8 @@ def render_gaussian(
         x, y, in_view, z = locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize, get_z=True)
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
-        blur_depth = oversampling * _np.maximum(locs.d_zcalib, min_blur_width)
+        # for now, let lpz be twice the mean of lpx and lpy
+        blur_depth = oversampling * _np.maximum(locs.lpx+locs.lpy, min_blur_width)
 
         sy = blur_height[in_view]
         sx = blur_width[in_view]
@@ -242,7 +243,8 @@ def render_gaussian_iso(
         x, y, in_view, z = locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize, get_z=True)
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
-        blur_depth = oversampling * _np.maximum(locs.d_zcalib, min_blur_width)
+        # for now, let lpz be twice the mean of lpx and lpy
+        blur_depth = oversampling * _np.maximum(locs.lpx+locs.lpy, min_blur_width)
 
         sy = (blur_height[in_view] + blur_width[in_view]) / 2
         sx = sy

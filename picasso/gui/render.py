@@ -5033,6 +5033,7 @@ class View(QtWidgets.QLabel):
 
         if group_color is not None:
             self.group_color = group_color
+            
 
         if hasattr(locs, "group"):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
@@ -5523,26 +5524,17 @@ class View(QtWidgets.QLabel):
         self._picks = [(x+dx,y+dy)]
         channel = 0 #todo: what about multichannel
         if hasattr(self.locs[0], "group"):
-            old_locs = self.locs[0].copy()
+            len_old_locs = len(self.locs[0])
         self.locs = self.picked_locs(channel, add_group=False, all_locs=True, d=self.window.d)
         (y_min, x_min), (y_max, x_max) = self.viewport
         new_viewport = [(y_min+dy, x_min+dx), (y_max+dy, x_max+dx)]
         # check if there are new locs and assign them a color
         if hasattr(self.locs[0], "group"):
-            if len(old_locs) != len(self.locs[0]):
-                print('error would occur here')
-                new_locs = self.locs[0]
-                group = np.zeros(len(new_locs))
-                for i in range(len(self.locs[0])):
-                    
-                    if (old_locs.x[i] != new_locs.x[i] and old_locs.y[i] !=new_locs.y[i]):
-                        index = np.where(self.all_locs[0].x == new_locs.x[i])
-                        group[i] = self.all_locs[0].group[index]
-                    else:
-                        group[i] = new_locs.group[i]
-                self.window.group_color = group
-        self.update_scene(viewport=new_viewport, draw_picks=False,
-                            group_color=self.window.group_color)
+            if len_old_locs != len(self.locs[0]):
+                group_color = self.get_group_color(self.locs)
+            else:
+                group_color = None
+        self.update_scene(viewport=new_viewport, draw_picks=False, group_color=group_color)
 
 
     def show_drift(self):
@@ -6171,6 +6163,17 @@ class View(QtWidgets.QLabel):
             self.zoom(1 / ZOOM, cursor_position = position)
         else:
             self.zoom(ZOOM, cursor_position = position)
+
+    def get_group_color(self, locs):
+        groups = np.unique(locs[0].group)
+        groupcopy = locs[0].group.copy()
+        for i in range(len(groups)):
+            groupcopy[locs[0].group == groups[i]] = i
+        np.random.shuffle(groups)
+        groups %= N_GROUP_COLORS
+        group_color = groups[groupcopy]
+        return group_color
+
 
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
@@ -7377,27 +7380,12 @@ class Window(QtWidgets.QMainWindow):
                 locs.append(self.view.picked_locs(i, add_group=False, keep_group_color=True))
 
         if hasattr(locs[0], "group"):
-            groups = np.unique(locs[0].group)
-            groupcopy = locs[0].group.copy()
-            for i in range(len(groups)):
-                groupcopy[locs[0].group == groups[i]] = i
-            np.random.shuffle(groups)
-            groups %= N_GROUP_COLORS
-            group_color = groups[groupcopy]
-
-            groups = np.unique(self.view.all_locs[0].group)
-            groupcopy = self.view.all_locs[0].group.copy()
-            for i in range(len(groups)):
-                groupcopy[self.view.all_locs[0].group == groups[i]] = i
-            np.random.shuffle(groups)
-            groups %= N_GROUP_COLORS
-            group_all_color = groups[groupcopy]
+            group_color = self.view.get_group_color(locs)
         else:
             group_color = None
-            group_all_color = None
 
         window = RotateDialog(locs, self.view.infos, blur, color, group_color, 
-            paths, self.view._picks, d, self.view.index_blocks, group_all_color,
+            paths, self.view._picks, d, self.view.index_blocks,
             self.view.all_locs)
         window.show()
 
@@ -7406,11 +7394,11 @@ class RotateDialog(Window):
         #todo: allow for shifting of the roi
         #todo: add save rotated localizations
     def __init__(self, locs, infos, blur, color, group_color, 
-        paths, picks, d, index_blocks, group_all_color, all_locs):
+        paths, picks, d, index_blocks, all_locs):
         super().__init__()
         self.group_color = group_color
-        self.group_all_color = group_all_color
         self.view._mode = "Rotate"
+        self.view.locs = locs
         self.view.all_locs = all_locs
 
         self.display_settings_dlg.blur_buttongroup.button(blur).setChecked(True)
@@ -7485,18 +7473,22 @@ class RotateDialog(Window):
         # move_tool_action.setShortcut("Ctrl+C")
         # tools_menu.addAction(move_tool_action)
 
-        self.view.locs = locs
-
-        x_min = np.zeros(len(paths))
-        y_min = np.zeros(len(paths))
-        x_max = np.zeros(len(paths))
-        y_max = np.zeros(len(paths))
-
-        for i in range(len(paths)):
-            x_min[i] = np.min(locs[i].x)
-            y_min[i] = np.min(locs[i].y)
-            x_max[i] = np.max(locs[i].x)
-            y_max[i] = np.max(locs[i].y)
+        if len(paths) == 1:
+            x_min = np.min(locs[0].x)
+            x_max = np.max(locs[0].x)
+            y_min = np.min(locs[0].y)
+            y_max = np.max(locs[0].y)
+        else:
+            x_min = np.zeros(len(paths))
+            y_min = np.zeros(len(paths))
+            x_max = np.zeros(len(paths))
+            y_max = np.zeros(len(paths))
+            #todo: check if this [0] index is normal for other multichannel data
+            for i in range(len(paths)):
+                x_min[i] = np.min(locs[i][0].x)
+                y_min[i] = np.min(locs[i][0].y)
+                x_max[i] = np.max(locs[i][0].x)
+                y_max[i] = np.max(locs[i][0].y)
 
         x_min = np.min(x_min)
         y_min = np.min(y_min)
