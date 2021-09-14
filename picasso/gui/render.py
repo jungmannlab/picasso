@@ -1943,11 +1943,9 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
     def update_scene_with_cache(self, *args):
         self.window.view.update_scene(use_cache=True)
 
-
 class DisplaySettingsDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
-        self.ilp_warning = False
         self.window = window
         self.setWindowTitle("Display Settings")
         self.resize(200, 0)
@@ -2184,19 +2182,28 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
     def render_scene(self, *args, **kwargs):
         # check if ind loc prec button is checked
-        warning = "Rotating with individual localization precision is very time consuming. Therefore, we recommend to firstly rotate the object using a different blur method and then to apply individual localization precision."
-        if self.blur_buttongroup.checkedId() == -5 or self.blur_buttongroup.checkedId() == -6:
-            if self.ilp_warning:
-                self.ilp_warning = False
-                raise Exception(warning)
-        self.window.view.update_scene()
+        if self.rotation:
+            if self.blur_buttongroup.checkedId() == -5 or self.blur_buttongroup.checkedId() == -6:
+                if self.ilp_warning:
+                    self.ilp_warning = False
+                    warning = ("Rotating with individual localization precision is very time consuming." 
+                               "Therefore, we recommend to firstly rotate the object using a different "
+                               "blur method and then to apply individual localization precision.")
+                    QtWidgets.QMessageBox.information(self, "Warning", warning)
+            
+            self.window.view_rot.update_scene()
+        else:
+            self.window.view.update_scene()
 
     def set_dynamic_oversampling(self, state):
         if state:
             self.window.view.update_scene()
 
     def update_scene(self, *args, **kwargs):
-        self.window.view.update_scene(use_cache=True)
+        if self.rotation:
+            self.window.view_rot.update_scene()
+        else:
+            self.window.view.update_scene(use_cache=True)
 
 
 class SlicerDialog(QtWidgets.QDialog):
@@ -2437,9 +2444,6 @@ class View(QtWidgets.QLabel):
         self.currentdrift = []
         self.x_render_cache = []
         self.x_render_state = False
-        self._rotation = []
-        self.angx = None
-        self.angy = None
 
     def is_consecutive(l):
         setl = set(l)
@@ -2575,7 +2579,7 @@ class View(QtWidgets.QLabel):
 
     def add_pick(self, position, update_scene=True):
         self._picks.append(position)
-        self.update_pick_info_short()
+        self.update_pick_info_short() #this updates the number of picks in the info dialog
         if update_scene:
             self.update_scene(picks_only=True)
 
@@ -3025,7 +3029,8 @@ class View(QtWidgets.QLabel):
             length_displaypxl = int(
                 round(self.width() * length_camerapxl / self.viewport_width())
             )
-            height = max(int(round(0.15 * length_displaypxl)), 1)
+            # height = max(int(round(0.15 * length_displaypxl)), 1)
+            height = 10 #todo: I think it looks better this way
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
             painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
@@ -3143,16 +3148,6 @@ class View(QtWidgets.QLabel):
         movie_height, movie_width = self.movie_size()
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
-
-    def fit_in_view_rotated(self): #todo: multiplex
-        locs = self.locs
-        x_min = np.min(locs[0].x)
-        x_max = np.max(locs[0].x)
-        y_min = np.min(locs[0].y)
-        y_max = np.max(locs[0].y)
-        viewport = [(y_min-1, x_min-1), (y_max+1, x_max+1)]
-        self.update_scene(viewport=viewport, draw_picks=False)
-
 
     def get_channel(self, title="Choose a channel"):
         n_channels = len(self.locs_paths)
@@ -3416,39 +3411,6 @@ class View(QtWidgets.QLabel):
                     self.rectangle_pick_current_y = event.y()
                     self.update_scene(picks_only=True)
 
-        elif self._mode == "Rotate":
-            height, width = self.viewport_size()
-            pos = self.map_to_movie(event.pos())
-
-            if self._pan:
-                rel_x_move = (event.x() - self.pan_start_x) / self.width()
-                rel_y_move = (event.y() - self.pan_start_y) / self.height()
-                if self.angx is not None:
-                    rel_y_move /= np.cos(self.angx)
-                if self.angy is not None:
-                    rel_x_move /= np.cos(self.angy)
-
-                self.pan_relative(rel_y_move, rel_x_move)
-                self.pan_start_x = event.x()
-                self.pan_start_y = event.y()
-
-            else:
-                self._rotation.append([pos[0], pos[1]])
-
-                # calculate the angle of rotation
-                rel_pos_x = self._rotation[-1][0] - self._rotation[-2][0]
-                rel_pos_y = self._rotation[-1][1] - self._rotation[-2][1]
-
-                if self.angx is None:
-                    self.angx = 0
-                if self.angy is None:
-                    self.angy = 0
-
-                self.angx += 2 * np.pi * rel_pos_y/height
-                self.angy += 2 * np.pi * rel_pos_x/width
-
-                self.update_scene(draw_picks=False)
-
     def mousePressEvent(self, event):
         if self._mode == "Zoom":
             if event.button() == QtCore.Qt.LeftButton:
@@ -3473,18 +3435,6 @@ class View(QtWidgets.QLabel):
                     self.rectangle_pick_start_x = event.x()
                     self.rectangle_pick_start_y = event.y()
                     self.rectangle_pick_start = self.map_to_movie(event.pos())
-
-        elif self._mode == "Rotate":
-            if event.button() == QtCore.Qt.LeftButton:
-                pos = self.map_to_movie(event.pos())
-                self._rotation.append([pos[0], pos[1]])
-
-            elif event.button() == QtCore.Qt.RightButton:
-                self._pan = True
-                self.pan_start_x = event.x()
-                self.pan_start_y = event.y()
-                self.setCursor(QtCore.Qt.ClosedHandCursor)
-                event.accept()
 
     def mouseReleaseEvent(self, event):
         if self._mode == "Zoom":
@@ -3553,15 +3503,6 @@ class View(QtWidgets.QLabel):
                 event.accept()
             else:
                 event.ignore()
-
-        elif self._mode == "Rotate":
-            if event.button() == QtCore.Qt.LeftButton:
-                self._rotation = []
-
-            elif event.button() == QtCore.Qt.RightButton:
-                self._pan = False
-                self.setCursor(QtCore.Qt.ArrowCursor)
-                event.accept()
 
     def movie_size(self):
         movie_height = self.max_movie_height()
@@ -4731,7 +4672,8 @@ class View(QtWidgets.QLabel):
             self._picks = []
             self.add_picks(similar)
 
-    def picked_locs(self, channel, add_group=True, keep_group_color=False, all_locs=False, d=None):
+    def picked_locs(self, channel, add_group=True, keep_group_color=False, 
+        all_locs=False, d=None, w=None):
         """ Returns picked localizations in the specified channel """
 
         if len(self._picks):
@@ -4764,8 +4706,12 @@ class View(QtWidgets.QLabel):
                     picked_locs.append(group_locs)
                     progress.set_value(i + 1)
             elif self._pick_shape == "Rectangle":
-                w = self.window.tools_settings_dialog.pick_width.value()
-                channel_locs = self.locs[channel]
+                if w is None:
+                    w = self.window.tools_settings_dialog.pick_width.value()
+                if all_locs:
+                    channel_locs = self.all_locs[channel]
+                else:
+                    channel_locs = self.locs[channel]
                 for i, pick in enumerate(self._picks):
                     (xs, ys), (xe, ye) = pick
                     X, Y = self.get_pick_rectangle_corners(xs, ys, xe, ye, w)
@@ -4913,11 +4859,7 @@ class View(QtWidgets.QLabel):
                     # We render all images first
                     # and later decide to keep them or not
                     renderings.append(render.render(locsall[i], **kwargs))
-                if self.angx or self.angy:
-                    pixelsize = self.window.display_settings_dlg.pixelsize.value()
-                    renderings = [render.render(_, **kwargs, ang=(self.angx, self.angy), pixelsize=pixelsize) for _ in locsall]
-                else:
-                    renderings = [render.render(_, **kwargs) for _ in locsall]
+                renderings = [render.render(_, **kwargs) for _ in locsall]
                 n_locs = sum([_[0] for _ in renderings])
                 image = np.array([_[1] for _ in renderings])
         else:
@@ -5054,11 +4996,7 @@ class View(QtWidgets.QLabel):
             n_locs = self.n_locs
             image = self.image
         else:
-            if self.angx or self.angy:
-                pixelsize = self.window.display_settings_dlg.pixelsize.value()
-                n_locs, image = render.render(locs, **kwargs, info=self.infos[0], ang=(self.angx, self.angy), pixelsize=pixelsize)
-            else:
-                n_locs, image = render.render(locs, **kwargs, info=self.infos[0])
+            n_locs, image = render.render(locs, **kwargs, info=self.infos[0])
         if cache:
             self.n_locs = n_locs
             self.image = image
@@ -5074,36 +5012,6 @@ class View(QtWidgets.QLabel):
         return self._bgra
 
     def resizeEvent(self, event):
-        self.update_scene()
-
-    def rotation_input(self): 
-        # asks for rotation angles (3D only)
-        angx, ok = QtWidgets.QInputDialog.getDouble(
-                self, "Rotation angle x", "Angle x (degrees):", 0, decimals=2
-            )
-        if ok:
-            angy, _ = QtWidgets.QInputDialog.getDouble(
-                    self, "Rotation angle y", "Angle y (degrees):", 0, decimals=2
-                )
-        if self.angx is None:
-            self.angx = 0
-            self.angy = 0
-        
-        self.angx += np.pi * angx/180
-        self.angy += np.pi * angy/180
-
-        # This is to avoid dividing by zero, when the angles are 90 deg 
-        # and something is divided by cosines
-        if self.angx == np.pi / 2:
-            self.angx += 0.00001
-        if self.angy == np.pi / 2:
-            self.angy += 0.00001
-
-        self.update_scene()
-
-    def delete_rotation(self):
-        self.angx = 0
-        self.angy = 0
         self.update_scene()
 
     def save_picked_locs(self, path, channel):
@@ -5478,56 +5386,6 @@ class View(QtWidgets.QLabel):
 
     def to_down(self):
         self.pan_relative(-0.8, 0)
-
-    def to_left_rot(self):
-        height, width = self.viewport_size()
-        dx = -0.05 * width
-        if self.angy is not None:
-             dx /= np.cos(self.angy)
-        self.move_rot_window(dx, 0)
-        # self.window.move_picks(dx, 0)
-
-    def to_right_rot(self):
-        height, width = self.viewport_size()
-        dx = 0.05 * width
-        if self.angy is not None:
-             dx /= np.cos(self.angy)
-        self.move_rot_window(dx, 0)
-        # self.window.move_picks(dx, 0)
-
-    def to_up_rot(self):
-        height, width = self.viewport_size()
-        dy = -0.05 * height
-        if self.angx is not None:
-             dy /= np.cos(self.angx)
-        self.move_rot_window(0, dy)
-        # self.window.move_picks(0, dy)
-
-    def to_down_rot(self):
-        height, width = self.viewport_size()
-        dy = 0.05 * height
-        if self.angx is not None:
-             dy /= np.cos(self.angx)
-        self.move_rot_window(0, dy)
-        # self.window.move_picks(0, dy)
-
-    def move_rot_window(self, dx, dy):
-        x = self._picks[0][0]
-        y = self._picks[0][1]
-        self._picks = [(x+dx,y+dy)]
-        channel = 0 #todo: what about multichannel
-        if hasattr(self.locs[0], "group"):
-            len_old_locs = len(self.locs[0])
-        self.locs = self.picked_locs(channel, add_group=False, all_locs=True, d=self.window.d)
-        (y_min, x_min), (y_max, x_max) = self.viewport
-        new_viewport = [(y_min+dy, x_min+dx), (y_max+dy, x_max+dx)]
-        # check if there are new locs and assign them a color
-        group_color = None
-        if hasattr(self.locs[0], "group"):
-            if len_old_locs != len(self.locs[0]):
-                group_color = self.get_group_color(self.locs)
-        self.update_scene(viewport=new_viewport, draw_picks=False, group_color=group_color)
-
 
     def show_drift(self):
         # Todo: Implement a check if there is drift already loaded and load
@@ -6166,10 +6024,367 @@ class View(QtWidgets.QLabel):
         group_color = groups[groupcopy]
         return group_color
 
+class View_Rotation(View):
+    def __init__(self, window):
+        super().__init__(window)
+        self.angx = 0
+        self.angy = 0
+        self._rotation = []
+        self.setMaximumSize(400,400)
+
+    def render_scene(
+        self, autoscale=False, viewport=None, group_color=None
+    ):
+        kwargs = self.get_render_kwargs(viewport=viewport)
+        n_channels = len(self.locs)
+        if n_channels == 1:
+            self.render_single_channel(
+                kwargs, autoscale=autoscale, group_color=group_color
+            )
+        else:
+            self.render_multi_channel(kwargs)
+        self._bgra[:, :, 3].fill(255)
+        Y, X = self._bgra.shape[:2]
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        return qimage
+
+    def render_multi_channel(
+        self,
+        kwargs,
+        autoscale=False,
+        locs=None,
+    ):
+        if locs is None:
+            locs = self.locs
+        # Plot each channel
+        locsall = locs.copy()
+        for i in range(len(locs)):
+            if hasattr(locs[i], "z"):
+                if self.window.slicer_dialog.slicerRadioButton.isChecked():
+                    z_min = self.window.slicer_dialog.slicermin
+                    z_max = self.window.slicer_dialog.slicermax
+                    in_view = (locsall[i].z > z_min) & (
+                        locsall[i].z <= z_max
+                    )
+                    locsall[i] = locsall[i][in_view]
+        n_channels = len(locs)
+        colors = get_colors(n_channels)
+        renderings = []
+        for i in range(len(self.locs)):
+            # We render all images first
+            # and later decide to keep them or not
+            renderings.append(render.render(locsall[i], **kwargs))
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        renderings = [render.render(_, **kwargs, ang=(self.angx, self.angy), pixelsize=pixelsize) for _ in locsall]
+        n_locs = sum([_[0] for _ in renderings])
+        image = np.array([_[1] for _ in renderings])
+        self.n_locs = n_locs
+        self.image = image
+        image = self.scale_contrast(image)
+        Y, X = image.shape[1:]
+        bgra = np.zeros((Y, X, 4), dtype=np.float32)
+        for i in range(len(self.locs)):
+            if (self.window.dataset_dialog.colorselection[i].currentText()=="red"):
+                colors[i] = (1, 0, 0)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="green"):
+                colors[i] = (0, 1, 0)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="blue"):
+                colors[i] = (0, 0, 1)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="gray"):
+                colors[i] = (1, 1, 1)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="cyan"):
+                colors[i] = (0, 1, 1)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="magenta"):
+                colors[i] = (1, 0, 1)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="yellow"):
+                colors[i] = (1, 1, 0)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()!="auto"):
+                colorstring = (
+                    self.window.dataset_dialog.colorselection[i]
+                    .currentText()
+                    .lstrip("#")
+                )
+                rgbval = tuple(int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4))
+                colors[i] = rgbval
+            if self.window.dataset_dialog.wbackground.isChecked():
+                tempcolor = colors[i]
+                inverted = tuple([1 - _ for _ in tempcolor])
+                colors[i] = inverted
+            iscale = self.window.dataset_dialog.intensitysettings[i].value()
+            image[i] = iscale * image[i]
+            if not self.window.dataset_dialog.checks[i].isChecked():
+                image[i] = 0 * image[i]
+        for color, image in zip(colors, image):
+            bgra[:, :, 0] += color[2] * image
+            bgra[:, :, 1] += color[1] * image
+            bgra[:, :, 2] += color[0] * image
+        bgra = np.minimum(bgra, 1)
+        if self.window.dataset_dialog.wbackground.isChecked():
+            bgra = -(bgra - 1)
+        self._bgra = self.to_8bit(bgra)
+        return self._bgra
+
+    def render_single_channel(
+        self, kwargs, autoscale=False, group_color=None
+    ):
+        locs = self.locs[0]
+        if self.x_render_state:
+            locs = self.x_locs
+            return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs)
+        if group_color is not None:
+            self.group_color = group_color
+        if hasattr(locs, "group"):
+            locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
+            return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs)
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        n_locs, image = render.render(locs, **kwargs, info=self.infos[0], 
+            ang=(self.angx, self.angy), pixelsize=pixelsize)
+        self.n_locs = n_locs
+        self.image = image
+        image = self.scale_contrast(image, autoscale=autoscale)
+        image = self.to_8bit(image)
+        Y, X = image.shape
+        cmap = self.window.display_settings_dlg.colormap.currentText()
+        cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
+        self._bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
+        self._bgra[..., 0] = cmap[:, 2][image]
+        self._bgra[..., 1] = cmap[:, 1][image]
+        self._bgra[..., 2] = cmap[:, 0][image]
+        return self._bgra
+
+    def update_scene(
+        self,
+        viewport=None,
+        autoscale=False,
+        group_color=None,
+        points_only=False,
+    ):
+        self.window.slicer_dialog.slicer_cache = {}
+        n_channels = len(self.locs)
+        if n_channels:
+            viewport = viewport or self.viewport
+            self.draw_scene(
+                viewport,
+                autoscale=autoscale,
+                group_color=group_color,
+                points_only=points_only
+            )
+            self.update_cursor()
+
+    def draw_scene(
+        self,
+        viewport,
+        autoscale=False,
+        group_color=None,
+        points_only=False
+    ):
+        self.viewport = self.adjust_viewport_to_view(viewport)
+        qimage = self.render_scene(
+            autoscale=autoscale, group_color=group_color
+        )
+        qimage = qimage.scaled(
+            self.width(),
+            self.height(),
+            QtCore.Qt.KeepAspectRatioByExpanding,
+        )
+        self.qimage_no_picks = self.draw_scalebar(qimage)
+        self.qimage_no_picks = self.draw_minimap(self.qimage_no_picks)
+        self.qimage = self.draw_points(self.qimage_no_picks)
+        self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
+        self.setPixmap(self.pixmap)
+
+    def rotation_input(self, opening=False, ang=None): 
+        # asks for rotation angles (3D only)
+        if opening:
+            self.angx = ang[0]
+            self.angy = ang[1]
+        else:
+            angx, ok = QtWidgets.QInputDialog.getDouble(
+                    self, "Rotation angle x", "Angle x (degrees):", 0, decimals=2
+                )
+            if ok:
+                angy, _ = QtWidgets.QInputDialog.getDouble(
+                        self, "Rotation angle y", "Angle y (degrees):", 0, decimals=2
+                    )
+            
+            self.angx += np.pi * angx/180
+            self.angy += np.pi * angy/180
+
+        # This is to avoid dividing by zero, when the angles are 90 deg 
+        # and something is divided by cosines
+        if self.angx == np.pi / 2:
+            self.angx += 0.00001
+        if self.angy == np.pi / 2:
+            self.angy += 0.00001
+
+        self.update_scene()
+
+    def delete_rotation(self):
+        self.angx = 0
+        self.angy = 0
+        self.update_scene()
+
+    def fit_in_view_rotated(self, get_viewport=False):
+        locs = self.locs
+        if len(locs) == 1:
+            x_min = np.min(locs[0].x)
+            x_max = np.max(locs[0].x)
+            y_min = np.min(locs[0].y)
+            y_max = np.max(locs[0].y)
+        else:
+            x_min = np.zeros(len(locs))
+            x_max = np.zeros(len(locs))
+            y_min = np.zeros(len(locs))
+            y_max = np.zeros(len(locs))
+
+            for i in range(len(locs)):
+                x_min[i] = np.min(locs[i].x)
+                x_max[i] = np.max(locs[i].x)
+                y_min[i] = np.min(locs[i].y)
+                y_max[i] = np.max(locs[i].y)
+
+            x_min = np.min(x_min)
+            x_max = np.max(x_max)
+            y_min = np.min(y_min)
+            y_max = np.max(y_max)
+
+        viewport = [(y_min-1, x_min-1), (y_max+1, x_max+1)]
+        if get_viewport:
+            return viewport
+        else:
+            self.update_scene(viewport=viewport)
+
+    def to_left_rot(self):
+        height, width = self.viewport_size()
+        dx = -0.05 * width
+        dx /= np.cos(self.angy)
+        self.move_rot_window(dx, 0)
+        self.window.move_picks(dx, 0)
+
+    def to_right_rot(self):
+        height, width = self.viewport_size()
+        dx = 0.05 * width
+        dx /= np.cos(self.angy)
+        self.move_rot_window(dx, 0)
+        self.window.move_picks(dx, 0)
+
+    def to_up_rot(self):
+        height, width = self.viewport_size()
+        dy = -0.05 * height
+        dy /= np.cos(self.angx)
+        self.move_rot_window(0, dy)
+        self.window.move_picks(0, dy)
+
+    def to_down_rot(self):
+        height, width = self.viewport_size()
+        dy = 0.05 * height
+        dy /= np.cos(self.angx)
+        self.move_rot_window(0, dy)
+        self.window.move_picks(0, dy)
+
+    def move_rot_window(self, dx, dy):
+        if self._pick_shape == "Circle":
+            x = self._picks[0][0]
+            y = self._picks[0][1]
+            self._picks = [(x+dx,y+dy)]
+        elif self._pick_shape == "Rectangle":
+            (xs, ys), (xe, ye) = self._picks[0]
+            self._picks = [((xs+dx, ys+dy), (xe+dx, ye+dy))]
+
+        if hasattr(self.locs[0], "group"):
+            len_old_locs = len(self.locs[0])
+
+        n_channels = len(self.locs)
+        if n_channels == 1:
+            self.locs = self.picked_locs(0, add_group=False, all_locs=True, 
+                d=self.window.d, w=self.window.w)
+        elif n_channels > 1:
+            locs = []
+            for i in range(n_channels):
+                temp = self.picked_locs(i, add_group=False, keep_group_color=False, 
+                    all_locs=True, d=self.window.d, w=self.window.w)
+                locs.append(temp[0])
+            self.locs = locs
+
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        new_viewport = [(y_min+dy, x_min+dx), (y_max+dy, x_max+dx)]
+        # check if there are new locs and assign them a color
+        group_color = None
+        if hasattr(self.locs[0], "group"):
+            if len_old_locs != len(self.locs[0]):
+                group_color = self.get_group_color(self.locs)
+        self.update_scene(viewport=new_viewport, group_color=group_color)
+
+    def mouseMoveEvent(self, event):
+        if self._mode == "Rotate":
+            height, width = self.viewport_size()
+            pos = self.map_to_movie(event.pos())
+
+            if self._pan:
+                rel_x_move = (event.x() - self.pan_start_x) / self.width()
+                rel_y_move = (event.y() - self.pan_start_y) / self.height()
+                rel_y_move /= np.cos(self.angx)
+                rel_x_move /= np.cos(self.angy)
+
+                self.pan_relative(rel_y_move, rel_x_move)
+                self.pan_start_x = event.x()
+                self.pan_start_y = event.y()
+
+            else:
+                self._rotation.append([pos[0], pos[1]])
+
+                # calculate the angle of rotation
+                rel_pos_x = self._rotation[-1][0] - self._rotation[-2][0]
+                rel_pos_y = self._rotation[-1][1] - self._rotation[-2][1]
+
+                self.angx += float(2 * np.pi * rel_pos_y/height)
+                self.angy += float(2 * np.pi * rel_pos_x/width)
+
+                self.update_scene()
+
+    def mousePressEvent(self, event):
+        if self._mode == "Rotate":
+            if event.button() == QtCore.Qt.LeftButton:
+                pos = self.map_to_movie(event.pos())
+                self._rotation.append([pos[0], pos[1]])
+                event.accept()
+
+            elif event.button() == QtCore.Qt.RightButton:
+                self._pan = True
+                self.pan_start_x = event.x()
+                self.pan_start_y = event.y()
+                self.setCursor(QtCore.Qt.ClosedHandCursor)
+                event.accept()
+
+    def mouseReleaseEvent(self, event):
+        if self._mode == "Measure":
+            if event.button() == QtCore.Qt.LeftButton:
+                x, y = self.map_to_movie(event.pos())
+                self.add_point((x, y))
+                event.accept()
+            elif event.button() == QtCore.Qt.RightButton:
+                x, y = self.map_to_movie(event.pos())
+                self.remove_points((x, y))
+                event.accept()
+            else:
+                event.ignore()
+
+        elif self._mode == "Rotate":
+            if event.button() == QtCore.Qt.LeftButton:
+                self._rotation = []
+                event.accept()
+
+            elif event.button() == QtCore.Qt.RightButton:
+                self._pan = False
+                self.setCursor(QtCore.Qt.ArrowCursor)
+                event.accept()
 
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
+        self.initUI()
+
+    def initUI(self):
         self.setWindowTitle("Picasso: Render")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
@@ -6180,6 +6395,8 @@ class Window(QtWidgets.QMainWindow):
         self.view.setMinimumSize(1, 1)
         self.setCentralWidget(self.view)
         self.display_settings_dlg = DisplaySettingsDialog(self)
+        self.display_settings_dlg.ilp_warning = False
+        self.display_settings_dlg.rotation = False
         self.tools_settings_dialog = ToolsSettingsDialog(self)
         self.view._pick_shape = (
             self.tools_settings_dialog.pick_shape.currentText()
@@ -6196,6 +6413,7 @@ class Window(QtWidgets.QMainWindow):
         open_action.setShortcut(QtGui.QKeySequence.Open)
         open_action.triggered.connect(self.open_file_dialog)
         open_rot_action = file_menu.addAction("Open rotated localizations")
+        open_rot_action.setShortcut("Ctrl+Shift+O")
         open_rot_action.triggered.connect(self.open_rotated_locs)
         save_action = file_menu.addAction("Save localizations")
         save_action.setShortcut("Ctrl+S")
@@ -6224,6 +6442,10 @@ class Window(QtWidgets.QMainWindow):
 
         export_multi_action = file_menu.addAction("Export localizations")
         export_multi_action.triggered.connect(self.export_multi)
+
+        file_menu.addSeparator()
+        delete_action = file_menu.addAction("Remove localizations")
+        delete_action.triggered.connect(self.remove_locs)
 
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings")
@@ -6436,6 +6658,7 @@ class Window(QtWidgets.QMainWindow):
         self.menus = [view_menu, postprocess_menu, tools_menu]
         for menu in self.menus:
             menu.setDisabled(True)
+
 
     def closeEvent(self, event):
         settings = io.load_user_settings()
@@ -7148,6 +7371,28 @@ class Window(QtWidgets.QMainWindow):
             self.pwd = path
             self.view.add_multiple([path])
 
+    def open_rotated_locs(self):
+        if self.pwd == []:
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Add localizations", filter="*.hdf5" 
+            )
+        else:
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Add localizations", directory=self.pwd, filter="*.hdf5"
+            )
+        if path:
+            self.pwd = path
+            self.view.add_multiple([path])
+            if "Pick" in self.view.infos[0][-1]:
+                self.view._picks = self.view.infos[0][-1]["Pick"]
+                self.view._pick_shape = self.view.infos[0][-1]["Pick shape"]
+                d = self.view.infos[0][-1]["d"]
+                w = self.view.infos[0][-1]["w"]
+                angx = self.view.infos[0][-1]["angx"]
+                angy = self.view.infos[0][-1]["angy"]
+            self.rot_win(opening=True, d=d, w=w, angx=angx, angy=angy)
+            self.remove_locs()
+
     def resizeEvent(self, event):
         self.update_info()
 
@@ -7329,28 +7574,26 @@ class Window(QtWidgets.QMainWindow):
         except AttributeError:
             pass
 
-    def open_rotated_locs(self):
-        if self.pwd == []:
-            path, ext = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Add localizations", filter="*.hdf5" #todo: change filter I think
-            )
-        else:
-            path, ext = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Add localizations", directory=self.pwd, filter="*.hdf5" #todo: change filter I think
-            )
-        if path:
-            self.pwd = path
-            self.view.add_multiple([path])
+    def remove_locs(self):
+        self.initUI()
 
-    def move_picks_draw(self, dx, dy):
-        x = self.view._picks[0][0]
-        y = self.view._picks[0][1]
-        self.view._picks = [(x+dx, y+dy)]
-        self.view.qimage = self.view.draw_picks(self.view.qimage)
-        self.view.pixmap = QtGui.QPixmap.fromImage(self.view.qimage)
-        self.view.setPixmap(self.view.pixmap)
+    def rotate_locs(self, locs, angx, angy):
+        x_min = 0
+        y_min = 0
+        x_max = self.view.infos[0][0]["Width"]
+        y_max = self.view.infos[0][0]["Height"]
+        ang = (angx, angy)
+        pixelsize = self.display_settings_dlg.pixelsize.value()
+        x, y, z = render.locs_rotation(locs, x_min, x_max, 
+            y_min, y_max, 1, ang, pixelsize, saving=True) 
 
-    def rot_win(self):
+        locs.x = x
+        locs.y = y
+        locs.z = z
+
+        return locs
+
+    def rot_win(self, opening=False, d=None, w=None, angx=None, angy=None):
         if len(self.view._picks) == 0:
             raise ValueError("Pick a region to rotate.")
         elif len(self.view._picks) > 1:
@@ -7359,44 +7602,55 @@ class Window(QtWidgets.QMainWindow):
         blur = self.display_settings_dlg.blur_buttongroup.checkedId()
         color = self.display_settings_dlg.colormap.currentText()
         paths = self.view.locs_paths
-        d = self.tools_settings_dialog.pick_diameter.value()
+
+        if not opening:
+            d = self.tools_settings_dialog.pick_diameter.value()
+            w = self.tools_settings_dialog.pick_width.value()
+        else:
+            self.tools_settings_dialog.pick_diameter.setValue(d)
+            self.tools_settings_dialog.pick_width.setValue(w)
 
         n_channels = len(self.view.locs_paths)
-        if n_channels == 0:
-            raise ValueError("No channel detected.")
-        elif n_channels == 1:
+        if n_channels == 1:
             locs = self.view.picked_locs(0, add_group=False) 
-        else:
+        elif n_channels > 1:
             locs = []
             for i in range(n_channels):
                 temp = self.view.picked_locs(i, add_group=False, keep_group_color=False)
                 locs.append(temp[0])
-                #todo: I gues that I would like to keep the group color
+                #todo: I guess that I would like to keep the group color
+
         if hasattr(locs[0], "group"):
             group_color = self.view.get_group_color(locs)
         else:
             group_color = None
 
-        window = RotateDialog(locs, self.view.infos, blur, color, group_color, 
-            paths, self.view._picks, d, self.view.index_blocks,
-            self.view.all_locs)
+        window = RotateDialog(locs, blur, color, group_color, 
+            paths, d, w, self.view, opening=opening, ang=(angx,angy))
         window.show()
 
 class RotateDialog(Window):
-        #todo: make sure that this works for merged data and clustered data
-        #todo: allow for shifting of the roi
-        #todo: add save rotated localizations
-    def __init__(self, locs, infos, blur, color, group_color, 
-        paths, picks, d, index_blocks, all_locs):
+    def __init__(self, locs, blur, color, group_color, 
+        paths, d, w, view, opening=False, ang=None):
         super().__init__()
+        self.view_rot = View_Rotation(self)
+        self.setCentralWidget(self.view_rot)
+        self.view = view
+        self.view_rot._pick_shape = self.view._pick_shape
         self.group_color = group_color
-        self.view._mode = "Rotate"
-        self.view.locs = locs
-        self.view.all_locs = all_locs
+        self.view_rot._mode = "Rotate"
+        self.view_rot.locs = locs
+        self.view_rot.all_locs = copy.deepcopy(locs)
+        self.view_rot.index_blocks = self.view.index_blocks
+        self.d = d
+        self.w = w
+        self.view_rot._picks = [(self.view._picks[0][0], self.view._picks[0][1])]
+        self.view_rot.infos = self.view.infos
 
         self.display_settings_dlg.blur_buttongroup.button(blur).setChecked(True)
         self.display_settings_dlg.colormap.setCurrentText(color)
         self.display_settings_dlg.ilp_warning = True
+        self.display_settings_dlg.rotation = True
 
         self.setWindowTitle("Rotation window")
         self.menu_bar.clear()
@@ -7414,84 +7668,50 @@ class RotateDialog(Window):
         )
         view_menu.addAction(display_settings_action)
         rotation_action = view_menu.addAction("Rotate by angle")
-        rotation_action.triggered.connect(self.view.rotation_input)
+        rotation_action.triggered.connect(self.view_rot.rotation_input)
         rotation_action.setShortcut("Ctrl+Shift+R")
 
         delete_rotation_action = view_menu.addAction("Remove rotation")
-        delete_rotation_action.triggered.connect(self.view.delete_rotation)
+        delete_rotation_action.triggered.connect(self.view_rot.delete_rotation)
         delete_rotation_action.setShortcut("Ctrl+Shift+W")
 
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcut("Ctrl+W")
-        fit_in_view_action.triggered.connect(self.view.fit_in_view_rotated)
+        fit_in_view_action.triggered.connect(self.view_rot.fit_in_view_rotated)
 
         view_menu.addSeparator()
         to_left_action = view_menu.addAction("Left")
         to_left_action.setShortcut("Left")
-        to_left_action.triggered.connect(self.view.to_left_rot)
+        to_left_action.triggered.connect(self.view_rot.to_left_rot)
         to_right_action = view_menu.addAction("Right")
         to_right_action.setShortcut("Right")
-        to_right_action.triggered.connect(self.view.to_right_rot)
+        to_right_action.triggered.connect(self.view_rot.to_right_rot)
         to_up_action = view_menu.addAction("Up")
         to_up_action.setShortcut("Up")
-        to_up_action.triggered.connect(self.view.to_up_rot)
+        to_up_action.triggered.connect(self.view_rot.to_up_rot)
         to_down_action = view_menu.addAction("Down")
         to_down_action.setShortcut("Down")
-        to_down_action.triggered.connect(self.view.to_down_rot)
+        to_down_action.triggered.connect(self.view_rot.to_down_rot)
 
         tools_menu = self.menu_bar.addMenu("Tools")
         tools_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
-        # zoom_tool_action = tools_actiongroup.addAction(
-        #     QtWidgets.QAction("Zoom", tools_menu, checkable=True)
-        # )
-        # zoom_tool_action.setShortcut("Ctrl+Z")
-        # tools_menu.addAction(zoom_tool_action)
 
         measure_tool_action = tools_actiongroup.addAction(
             QtWidgets.QAction("Measure", tools_menu, checkable=True)
         )
         measure_tool_action.setShortcut("Ctrl+M")
         tools_menu.addAction(measure_tool_action)
-        tools_actiongroup.triggered.connect(self.view.set_mode)
+        tools_actiongroup.triggered.connect(self.view_rot.set_mode)
 
         rotate_tool_action = tools_actiongroup.addAction(
             QtWidgets.QAction("Rotate", tools_menu, checkable=True)
         )
-        rotate_tool_action.setShortcut("Ctrl+Q")
+        rotate_tool_action.setShortcut("Ctrl+R")
         tools_menu.addAction(rotate_tool_action)
 
-        # move_tool_action = tools_actiongroup.addAction(
-        #     QtWidgets.QAction("Move", tools_menu, checkable=True)
-        # )
-        # move_tool_action.setShortcut("Ctrl+C")
-        # tools_menu.addAction(move_tool_action)
+        self.view_rot.viewport = self.view_rot.fit_in_view_rotated(get_viewport=True)
 
-        # ic(locs[0])
-
-        if len(paths) == 1:
-            x_min = np.min(locs[0].x)
-            x_max = np.max(locs[0].x)
-            y_min = np.min(locs[0].y)
-            y_max = np.max(locs[0].y)
-        else:
-            x_min = np.zeros(len(paths))
-            y_min = np.zeros(len(paths))
-            x_max = np.zeros(len(paths))
-            y_max = np.zeros(len(paths))
-            #todo: check if this [0] index is normal for other multichannel data
-            for i in range(len(paths)):
-                x_min[i] = np.min(locs[i][0].x)
-                y_min[i] = np.min(locs[i][0].y)
-                x_max[i] = np.max(locs[i][0].x)
-                y_max[i] = np.max(locs[i][0].y)
-
-        x_min = np.min(x_min)
-        y_min = np.min(y_min)
-        x_max = np.max(x_max)
-        y_max = np.max(y_max)
-        self.view.viewport = [(y_min-1, x_min-1), (y_max+1, x_max+1)]
-
-        self.setMaximumSize(400,400)
+        self.setMaximumSize(400, 400)
         self.move(20,20)
 
         self.dataset_dialog = DatasetDialog(self)
@@ -7499,114 +7719,147 @@ class RotateDialog(Window):
         for path in paths:
             self.dataset_dialog.add_entry(path)
 
-        qimage = self.view.render_scene(infos=infos, group_color=group_color)
+        qimage = self.view_rot.render_scene(viewport=self.view_rot.viewport,
+          group_color=group_color)
         qimage = qimage.scaled(
-            self.view.width(),
-            self.view.height(),
+            self.view_rot.width(),
+            self.view_rot.height(),
             QtCore.Qt.KeepAspectRatioByExpanding,
         )
-        self.qimage_no_picks = self.view.draw_scalebar(qimage)
-        self.qimage_no_picks = self.view.draw_minimap(self.qimage_no_picks)
-        self.qimage = self.view.draw_points(self.qimage_no_picks)
+        self.qimage_no_picks = self.view_rot.draw_scalebar(qimage)
+        self.qimage_no_picks = self.view_rot.draw_minimap(self.qimage_no_picks)
+        self.qimage = self.view_rot.draw_points(self.qimage_no_picks)
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
-        self.view.setPixmap(pixmap)
+        self.view_rot.setPixmap(pixmap)
 
         max_den = self.display_settings_dlg.maximum.value()
-        self.display_settings_dlg.maximum.setValue(max_den * 10)
+        if hasattr(locs[0], "group"):
+            self.display_settings_dlg.maximum.setValue(max_den)
+        else:
+            self.display_settings_dlg.maximum.setValue(max_den * 10)
 
-        self.view.index_blocks = index_blocks
-        self.d = d
-        self.view._picks = [(picks[0][0], picks[0][1])]
-        
+        if opening:
+            self.view_rot.rotation_input(opening=True, ang=ang)
+
     def move_picks(self, dx, dy):
-        self.move_picks_draw(dx, dy)
+        if self.view._pick_shape == "Circle":
+            x = self.view._picks[0][0]
+            y = self.view._picks[0][1]
+            self.view._picks = [(x+dx, y+dy)]
+        else:
+            (xs, ys), (xe, ye) = self.view._picks[0]
+            self.view._picks = [((xs+dx, ys+dy), (xe+dx, ye+dy))]
+        self.view.update_scene()
 
     def save_locs_rotated(self):
         # channel = self.view.save_channel_multi("Save rotated localizations")
-        # ic(channel)
         # if channel is not None:
         #     if channel is (len(self.view.locs_paths)):
         #         print("Save all at once.")
-        #         if self.view.angx is None:
-        #             self.view.angx = 0
-        #         if self.view.angy is None:
-        #             self.view.angy = 0
-        #         suffix, ok = QtWidgets.QInputDialog.getText(
-        #             self,
-        #             "Input Dialog",
-        #             "Enter suffix",
-        #             QtWidgets.QLineEdit.Normal,
-        #             "_arotated_{}_{}".format(int(self.view.angx),int(self.view.angy)),
-        #         )
-        #         if ok:
-        #             for i in tqdm(range(len(self.view.locs_paths))):
-        #                 channel = i
-        #                 base, ext = os.path.splitext(
-        #                     self.view.locs_paths[channel]
-        #                 )
-        #                 out_path = base + suffix + ".hdf5"
-        #                 info = self.view.infos[channel] + [
-        #                     {
-        #                         "Generated by": "Picasso Render",
-        #                         "Last driftfile": self.view._driftfiles[
-        #                             channel
-        #                         ],
-        #                     }
-        #                 ]
-        #                 if self.view.angx or self.view.angy: #todo: repeat it for single channel
-        #                     (y_min, x_min), (y_max, x_max) = self.view.viewport
-        #                     ang = (self.view.angx, self.view.angy)
-        #                     kwargs = self.view.get_render_kwargs(self, self.view.viewport)
-        #                     oversampling = kwargs["oversampling"]
-        #                     x, y, _, z = render.locs_rotation(self.view.locs[channel], x_min, x_max, 
-        #                         y_min, y_max, oversampling, ang, get_z=True) 
-        #                     locscopy = self.view.locs[channel].deepcopy()
-        #                     locscopy.x = x
-        #                     locscopy.y = y
-        #                     locscopy.z = z
-        #                     io.save_locs(out_path, locscopy, info)
-        #                 else:
-        #                     io.save_locs(out_path, self.view.locs[channel], info)
-        channel = 0
-            # else:
-        base, ext = os.path.splitext(self.paths[channel])
-        if self.view.angx is None:
-            self.view.angx = 0
-        if self.view.angy is None:
-            self.view.angy = 0
-        angx = self.view.angx * 180 / np.pi
-        angy = self.view.angy * 180 / np.pi
-        out_path = base + "_rotated_{}_{}.hdf5".format(int(angx), int(angy))
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save localizations", out_path, filter="*.hdf5"
+        #         for i in tqdm(range(len(self.view.locs_paths))):
+        #             channel = i
+        #             base, ext = os.path.splitext(
+        #                 self.view.locs_paths[channel]
+        #             )
+        #             out_path = base + suffix + ".hdf5"
+        #             info = self.view.infos[channel] + [
+        #                 {
+        #                     "Generated by": "Picasso Render",
+        #                     "Last driftfile": self.view._driftfiles[
+        #                         channel
+        #                     ],
+        #                 }
+        #             ]
+        #             if self.view.angx or self.view.angy: #todo: repeat it for single channel
+        #                 (y_min, x_min), (y_max, x_max) = self.view.viewport
+        #                 ang = (self.view.angx, self.view.angy)
+        #                 kwargs = self.view.get_render_kwargs(self, self.view.viewport)
+        #                 oversampling = kwargs["oversampling"]
+        #                 x, y, _, z = render.locs_rotation(self.view.locs[channel], x_min, x_max, 
+        #                     y_min, y_max, oversampling, ang, get_z=True) 
+        #                 locscopy = self.view.locs[channel].deepcopy()
+        #                 locscopy.x = x
+        #                 locscopy.y = y
+        #                 locscopy.z = z
+        #                 io.save_locs(out_path, locscopy, info)
+        #             else:
+        #                 io.save_locs(out_path, self.view.locs[channel], info)
+        
+        n_channels = len(self.view.locs_paths)
+        if n_channels == 1:
+            channel = 0
+            base, ext = os.path.splitext(self.paths[channel])
+            angx = self.view_rot.angx * 180 / np.pi
+            angy = self.view_rot.angy * 180 / np.pi
+            out_path = base + "_rotated_{}_{}.hdf5".format(int(angx), int(angy))
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Save localizations", out_path, filter="*.hdf5"
+            )
+            if path:
+                x, y = self.view._picks[0]
+                picks = ([float(x), float(y)])
+                new_info = [
+                    {
+                        "Generated by": "Picasso Render",
+                        "Last driftfile": None,
+                        "Pick": self.view._picks,
+                        "Pick shape": self.view._pick_shape,
+                        "d": self.d,
+                        "w": self.w,
+                        "angx": self.view_rot.angx,
+                        "angy": self.view_rot.angy,
+                    }
+                ]
+                info = self.view.infos[channel] + new_info
+                io.save_locs(out_path, self.view_rot.locs[channel], info)
+                print('The file has been saved.')
+        else:
+            # for i in range(n_channels):
+            #     base, ext = os.path.splitext(self.paths[channel])
+            #     angx = self.view_rot.angx * 180 / np.pi
+            #     angy = self.view_rot.angy * 180 / np.pi
+            #     out_path = base + "_rotated_{}_{}.hdf5".format(int(angx), int(angy))
+            #     path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            #         self, "Save localizations", out_path, filter="*.hdf5"
+            #     )
+            #     if path:
+            #         info = self.view.infos[channel] + [
+            #             {
+            #                 "Generated by": "Picasso Render",
+            #                 "Last driftfile": None,
+            #                 "Pick": self.view._picks,
+            #                 "Pick shape": self.view._pick_shape,
+            #                 "d": self.d,
+            #                 "w": self.w,
+            #                 "angx": self.view_rot.angx,
+            #                 "angy": self.view_rot.angy
+            #             }
+            #         ]
+            #         io.save_locs(out_path, self.view_rot.all_locs[channel], info)
+            #         print('The file has been saved.')
+            pass
+
+    def update_info(self):
+        self.info_dialog.width_label.setText(
+            "{} pixel".format((self.view_rot.width()))
         )
-        if path:
-            info = self.view.infos[channel] + [
-                {
-                    "Generated by": "Picasso Render",
-                    "Last driftfile": None, #todo: it was self.view._driftfiles[channel]
-                }
-            ]
-            if self.view.angx or self.view.angy: #todo: repeat it for multi channel
-                (y_min, x_min), (y_max, x_max) = self.view.viewport
-                ang = (self.view.angx, self.view.angy)
-                kwargs = self.view.get_render_kwargs(viewport=self.view.viewport)
-                oversampling = kwargs["oversampling"]
-                pixelsize = self.display_settings_dlg.pixelsize.value()
-                x, y, _, z = render.locs_rotation(self.view.locs[channel], x_min, x_max, 
-                    y_min, y_max, oversampling, ang, pixelsize, get_z=True) 
-                locscopy = copy.deepcopy(self.view.locs[channel])
-                ic(np.max(locscopy.z), np.min(locscopy.z))
-                ic(np.max(z), np.min(z))
-                ic(np.max(locscopy.x), np.min(locscopy.x))
-                ic(np.max(x), np.min(x))
-                locscopy.x = x
-                locscopy.y = y
-                locscopy.z = z
-                io.save_locs(out_path, locscopy, info)
-                print('the file has been saved')
-            else:
-                io.save_locs(out_path, self.view.locs[channel], info)
+        self.info_dialog.height_label.setText(
+            "{} pixel".format((self.view_rot.height()))
+        )
+        self.info_dialog.locs_label.setText("{:,}".format(self.view_rot.n_locs))
+        try:
+            self.info_dialog.xy_label.setText(
+                "{:.2f} / {:.2f} ".format(
+                    self.view_rot.viewport[0][1], self.view_rot.viewport[0][0]
+                )
+            )
+            self.info_dialog.wh_label.setText(
+                "{:.2f} / {:.2f} pixel".format(
+                    self.view_rot.viewport_width(), self.view_rot.viewport_height()
+                )
+            )
+        except AttributeError:
+            pass
 
     def closeEvent(self, event):
         QtWidgets.QMainWindow.closeEvent(self, event)

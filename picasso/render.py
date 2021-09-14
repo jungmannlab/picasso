@@ -12,13 +12,14 @@ import numba as _numba
 import scipy.signal as _signal
 from scipy.spatial.transform import Rotation
 from tqdm import trange as _trange
-from icecream import ic
+# from icecream import ic
 import time
 import pyximport
+import os
 pyximport.install(setup_args={"include_dirs":_np.get_include()},
                   reload_support=True)
 import sys
-sys.path.append(sys.path[0] + "/picasso")
+sys.path.append(os.path.dirname(os.path.realpath(__file__)))
 from cfill_gaussian import cfill_gaussian_rot
 
 
@@ -119,8 +120,8 @@ def _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
 
 @_numba.jit(nopython=True, nogil=True)
 def _fill(image, x, y):
-    x = x.astype(_np.int16)
-    y = y.astype(_np.int16)
+    x = x.astype(_np.int32)
+    y = y.astype(_np.int32)
     for i, j in zip(x, y):
         image[j, i] += 1
 
@@ -337,7 +338,8 @@ def rotation_matrix(angx, angy, raw=False):
     else:
         return rotation
 
-def locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize, get_z=False):
+def locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling,
+    ang, pixelsize, get_z=False, saving=False):
 
     locs_coord = _np.stack((locs.x ,locs.y, locs.z/pixelsize)).T
 
@@ -350,19 +352,26 @@ def locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize
     locs_coord[:,0] += x_min + (x_max-x_min)/2
     locs_coord[:,1] += y_min + (y_max-y_min)/2
 
-    x = locs_coord[:,0]
-    y = locs_coord[:,1]
-    in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
-    x = x[in_view]        
-    y = y[in_view]
-    x = oversampling * (x - x_min)
-    y = oversampling * (y - y_min)
+    if saving:
+        x = locs_coord[:,0]
+        y = locs_coord[:,1]
+        z = locs_coord[:,2] * pixelsize
+        return x,y,z
 
-    if get_z:
-        z = locs_coord[:,2]
-        z = z[in_view] 
-        # z = oversampling * (z - _np.min(z))
-        z *= 2*oversampling
-        return x, y, in_view, z
     else:
-        return x, y, in_view
+        x = locs_coord[:,0]
+        y = locs_coord[:,1]
+        in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
+        x = x[in_view]        
+        y = y[in_view]
+        x = oversampling * (x - x_min)
+        y = oversampling * (y - y_min)
+
+        if get_z:
+            z = locs_coord[:,2]
+            z = z[in_view] 
+            # z = oversampling * (z - _np.min(z))
+            z *= oversampling
+            return x, y, in_view, z
+        else:
+            return x, y, in_view
