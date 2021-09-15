@@ -6346,7 +6346,7 @@ class View_Rotation(View):
         if self._mode == "Rotate":
             if event.button() == QtCore.Qt.LeftButton:
                 pos = self.map_to_movie(event.pos())
-                self._rotation.append([pos[0], pos[1]])
+                self._rotation.append([float(pos[0]), float(pos[1])])
                 event.accept()
 
             elif event.button() == QtCore.Qt.RightButton:
@@ -7575,6 +7575,7 @@ class Window(QtWidgets.QMainWindow):
             pass
 
     def remove_locs(self):
+        self.menu_bar.clear() #otherwise the menu bar is doubled
         self.initUI()
 
     def rotate_locs(self, locs, angx, angy):
