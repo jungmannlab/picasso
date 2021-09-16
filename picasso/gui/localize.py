@@ -470,7 +470,7 @@ class ParametersDialog(QtWidgets.QDialog):
         fit_grid.addWidget(QtWidgets.QLabel("Method:"), 1, 0)
         self.fit_method = QtWidgets.QComboBox()
         self.fit_method.addItems(
-            ["MLE, integrated Gaussian", "LQ, Gaussian", "Average of ROI"]
+            ["LQ, Gaussian", "MLE, integrated Gaussian", "Average of ROI"]
         )
         fit_grid.addWidget(self.fit_method, 1, 1)
         fit_stack = QtWidgets.QStackedWidget()
