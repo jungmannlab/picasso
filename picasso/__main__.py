@@ -10,6 +10,14 @@
 """
 import os.path
 
+def picasso_logo():
+    print("    ____  _____________   __________ ____ ")
+    print("   / __ \\/  _/ ____/   | / ___/ ___// __ \\")
+    print("  / /_/ // // /   / /| | \\__ \\\\__ \\/ / / /")
+    print(" / _____/ // /___/ ___ |___/ ___/ / /_/ / ")
+    print("/_/   /___/\\____/_/  |_/____/____/\\____/  ")
+    print("                                          ")
+
 
 def _average(args):
     from glob import glob
@@ -668,12 +676,6 @@ def _localize(args):
     import os as _os
     import yaml as yaml
 
-    print("    ____  _____________   __________ ____ ")
-    print("   / __ \\/  _/ ____/   | / ___/ ___// __ \\")
-    print("  / /_/ // // /   / /| | \\__ \\\\__ \\/ / / /")
-    print(" / _____/ // /___/ ___ |___/ ___/ / /_/ / ")
-    print("/_/   /___/\\____/_/  |_/____/____/\\____/  ")
-    print("                                          ")
     print("------------------------------------------")
     print("Localize - Parameters:")
     print("{:<8} {:<15} {:<10}".format("No", "Label", "Value"))
@@ -983,6 +985,7 @@ def _render(args):
 
 
 def main():
+    picasso_logo()
     import argparse
 
     # Main parser
