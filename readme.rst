@@ -56,10 +56,12 @@ Note that sometimes outdated packages can cause problems. As of version 0.3.0, P
 Installation
 ^^^^^^^^^^^^
 Via PyPI:
+
 1. Install using pip: ``pip install picassosr``.
 2. Launch via calling one of the modules, e.g. ``picasso localize``.
 
 Via GitHub:
+
 1. Open the console, ``cd`` to the directory where you want to install and run ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
 2. Change to the downloaded directory ``cd picasso``
 3. Run installation ``python setup.py install``.
@@ -104,7 +106,7 @@ Contributions & Copyright
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of
   Biochemistry
-| Copyright (c) 2020 Maximilian Strauss
+| Copyright (c) 2020-2021 Maximilian Strauss
 
 Citing Picasso
 --------------
