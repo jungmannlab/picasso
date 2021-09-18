@@ -1,5 +1,18 @@
 from setuptools import setup
 
+
+long_description = """
+A collection of tools for painting super-resolution images (processing of Single-molecule localization microscopy (SMLM) data).
+Taylored for DNA-PAINT, supercharged with Numba.
+
+Features include:    
+    - Design: Design rectangular DNA origami
+    - Simulate: Simulate DNA-PAINT image acquistions
+    - Localize: Localize allows performing super-resolution reconstruction of image stacks.
+    - Render: Rendering of the super-resolution images and post-processing
+    - Average: Particle averaging
+"""
+
 setup(
     name="picassosr",
     version="0.3.3",
@@ -8,6 +21,7 @@ setup(
         "joschnitzbauer@gmail.com, straussmaximilian@gmail.com"
     ),
     url="https://github.com/jungmannlab/picasso",
+    long_description = long_description,
     packages=["picasso", "picasso.gui"],
     classifiers=[
         "Programming Language :: Python",
