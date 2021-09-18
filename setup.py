@@ -13,6 +13,9 @@ Features include:
     - Average: Particle averaging
 """
 
+with open("requirements.txt") as requirements_file:
+    requirements = [line for line in requirements_file]
+
 setup(
     name="picassosr",
     version="0.3.4",
@@ -23,6 +26,10 @@ setup(
     url="https://github.com/jungmannlab/picasso",
     long_description = long_description,
     packages=["picasso", "picasso.gui"],
+    entry_points={
+        "console_scripts": ["picasso=picasso.__main__:main"],
+    },
+    install_requires=requirements,
     classifiers=[
         "Programming Language :: Python",
         "Programming Language :: Python :: 3.7",
