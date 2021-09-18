@@ -33,12 +33,12 @@ Requirements
 ^^^^^^^^^^^^
 
 Python 3.8 (Tested on Windows 10)
-'''''''''''''''''''''''''''''''''''''''
+'''''''''''''''''''''''''''''''''
 
 We highly recommend the `Anaconda or Miniconda <https://www.continuum.io/downloads>`__ Python distribution which comes with a powerful package manager.
 
 Setting up the environment with conda
-'''''''''''''''''''''''''''''''''
+'''''''''''''''''''''''''''''''''''''
 
 Sample instructions to create an environment and installation of packages with conda are as follows:
 
@@ -94,11 +94,36 @@ Using GPU for Fitting
 
 To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
+Example Usage
+-------------
+Besides using the GUI, you can use picasso like any other Python module. Consider the following example:
+::
+   from picasso import io, postprocess
+   
+   path = 'testdata_locs.hdf5'
+   locs, info = io.load_locs(path)
+   # Link localizations and calcualte dark times
+   linked_locs = postprocess.link(picked_locs, info, r_max=0.05, max_dark_time=1)
+   linked_locs_dark = postprocess.compute_dark_times(linked_locs)
+
+   print('Average bright time {:.2f} frames'.format(np.mean(linked_locs_dark.n)))
+   print('Average dark time {:.2f} frames'.format(np.mean(linked_locs_dark.dark)))
+
+This codeblock loads data from testdata_locs and uses the postprocess functions programmatically.
+
+Jupyter Notebooks
+-----------------
+
+Check picasso/samples/ for Jupyter Notebooks that show how to interact with the Picasso codebase.
+
 
 Contributing
 ------------
 
 If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. You can find more guidelines for contributing `here <https://github.com/jungmannlab/picasso/blob/master/CONTRIBUTING.rst>`__. I will gladly guide you through the codebase and credit you accordingly. Additionally, you can check out the ``Projects``-page on GitHub.  You can also contact me via picasso@jungmannlab.org.
+
+
+
 
 Contributions & Copyright
 -------------------------
