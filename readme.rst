@@ -44,10 +44,10 @@ Sample instructions to create an environment and installation of packages with c
 
 1. Open the console and create a new conda environment: ``conda create --name picasso python=3.8``
 2. Activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
-3. Install using the requirements.txt: ``pip install -r requirements.txt``
+3. Install using pip: ``pip install picassosr``.
 4. (Optional) If you want to use hdbscan install using conda: ``conda install hdbscan``.
-4. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
-5. Continue with the installation of Picasso
+5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
+6. Continue with the installation of Picasso
 
 Note that sometimes outdated packages can cause problems. As of version 0.3.0, Picasso switched from PyQt4 to PyQt5, so make sure to update PyQt. If you experience errors, please check whether your packages have the correct version (e.g., see issue #4). When using conda, make sure that you have the default package channel (e.g., see issue #30).
 
@@ -55,10 +55,15 @@ Note that sometimes outdated packages can cause problems. As of version 0.3.0, P
 
 Installation
 ^^^^^^^^^^^^
+Via PyPI:
+1. Install using pip: ``pip install picassosr``.
+2. Launch via calling one of the modules, e.g. ``picasso localize``.
 
+Via GitHub:
 1. Open the console, ``cd`` to the directory where you want to install and run ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
 2. Change to the downloaded directory ``cd picasso``
 3. Run installation ``python setup.py install``.
+4. Launch via calling one of the modules, e.g. ``picasso localize``.
 
 Updating
 ^^^^^^^^
