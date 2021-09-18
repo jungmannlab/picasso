@@ -18,7 +18,7 @@ with open("requirements.txt") as requirements_file:
 
 setup(
     name="picassosr",
-    version="0.3.4",
+    version="0.3.5",
     author="Joerg Schnitzbauer, Maximilian T. Strauss",
     author_email=(
         "joschnitzbauer@gmail.com, straussmaximilian@gmail.com"
