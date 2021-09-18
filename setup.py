@@ -15,7 +15,7 @@ Features include:
 
 setup(
     name="picassosr",
-    version="0.3.3",
+    version="0.3.4",
     author="Joerg Schnitzbauer, Maximilian T. Strauss",
     author_email=(
         "joschnitzbauer@gmail.com, straussmaximilian@gmail.com"
