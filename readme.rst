@@ -11,6 +11,9 @@ Picasso
 .. image:: http://img.shields.io/badge/DOI-10.1038/nprot.2017.024-52c92e.svg
    :target: https://doi.org/10.1038/nprot.2017.024
    :alt: CI
+   
+.. image:: https://static.pepy.tech/personalized-badge/picassosr?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads
+ :target: https://pepy.tech/project/picassosr
 
 .. image:: main_render.png
    :scale: 100 %
