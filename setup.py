@@ -1,20 +1,10 @@
 from setuptools import setup
 
-
-long_description = """
-A collection of tools for painting super-resolution images (processing of Single-molecule localization microscopy (SMLM) data).
-Taylored for DNA-PAINT, supercharged with Numba.
-
-Features include:    
-    - Design: Design rectangular DNA origami
-    - Simulate: Simulate DNA-PAINT image acquistions
-    - Localize: Localize allows performing super-resolution reconstruction of image stacks.
-    - Render: Rendering of the super-resolution images and post-processing
-    - Average: Particle averaging
-"""
-
 with open("requirements.txt") as requirements_file:
     requirements = [line for line in requirements_file]
+
+with open("README.rst") as readme_file:
+    long_description = readme_file.read()
 
 setup(
     name="picassosr",
