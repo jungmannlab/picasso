@@ -15,6 +15,7 @@ setup(
     ),
     url="https://github.com/jungmannlab/picasso",
     long_description = long_description,
+    long_description_content_type='text/x-rst',
     packages=["picasso", "picasso.gui"],
     entry_points={
         "console_scripts": ["picasso=picasso.__main__:main"],
