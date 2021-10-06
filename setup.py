@@ -3,7 +3,7 @@ from setuptools import setup
 with open("requirements.txt") as requirements_file:
     requirements = [line for line in requirements_file]
 
-with open("README.rst") as readme_file:
+with open("readme.rst") as readme_file:
     long_description = readme_file.read()
 
 setup(
