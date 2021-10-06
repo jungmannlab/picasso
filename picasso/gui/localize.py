@@ -480,7 +480,6 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # MLE
         mle_widget = QtWidgets.QWidget()
-        fit_stack.addWidget(mle_widget)
         mle_grid = QtWidgets.QGridLayout(mle_widget)
         mle_grid.addWidget(QtWidgets.QLabel("Convergence criterion:"), 0, 0)
         self.convergence_criterion = QtWidgets.QDoubleSpinBox()
@@ -509,6 +508,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         fit_stack.addWidget(lq_widget)
         # lq_grid = QtWidgets.QGridLayout(lq_widget)
+        fit_stack.addWidget(mle_widget)
 
         avg_widget = QtWidgets.QWidget()
         fit_stack.addWidget(avg_widget)
