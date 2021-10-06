@@ -7,18 +7,18 @@ Picasso
 .. image:: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
    :target: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
    :alt: CI
-   
+
 .. image:: http://img.shields.io/badge/DOI-10.1038/nprot.2017.024-52c92e.svg
    :target: https://doi.org/10.1038/nprot.2017.024
    :alt: CI
-   
+
 .. image:: https://static.pepy.tech/personalized-badge/picassosr?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads
  :target: https://pepy.tech/project/picassosr
 
 .. image:: main_render.png
    :scale: 100 %
    :alt: UML Render view
-   
+
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
@@ -99,18 +99,18 @@ To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit
 
 Example Usage
 -------------
-Besides using the GUI, you can use picasso like any other Python module. Consider the following example:
-::
-   from picasso import io, postprocess
-   
-   path = 'testdata_locs.hdf5'
-   locs, info = io.load_locs(path)
-   # Link localizations and calcualte dark times
-   linked_locs = postprocess.link(picked_locs, info, r_max=0.05, max_dark_time=1)
-   linked_locs_dark = postprocess.compute_dark_times(linked_locs)
+Besides using the GUI, you can use picasso like any other Python module. Consider the following example:::
 
-   print('Average bright time {:.2f} frames'.format(np.mean(linked_locs_dark.n)))
-   print('Average dark time {:.2f} frames'.format(np.mean(linked_locs_dark.dark)))
+  from picasso import io, postprocess
+
+  path = 'testdata_locs.hdf5'
+  locs, info = io.load_locs(path)
+  # Link localizations and calcualte dark times
+  linked_locs = postprocess.link(picked_locs, info, r_max=0.05, max_dark_time=1)
+  linked_locs_dark = postprocess.compute_dark_times(linked_locs)
+
+  print('Average bright time {:.2f} frames'.format(np.mean(linked_locs_dark.n)))
+  print('Average dark time {:.2f} frames'.format(np.mean(linked_locs_dark.dark)))
 
 This codeblock loads data from testdata_locs and uses the postprocess functions programmatically.
 
