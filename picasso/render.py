@@ -370,7 +370,6 @@ def locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling,
         if get_z:
             z = locs_coord[:,2]
             z = z[in_view] 
-            # z = oversampling * (z - _np.min(z))
             z *= oversampling
             return x, y, in_view, z
         else:

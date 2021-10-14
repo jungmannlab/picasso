@@ -12,8 +12,9 @@ import traceback
 from math import ceil
 import copy
 import time
-# from icecream import ic
+from icecream import ic
 import copy
+from functools import partial
 
 import lmfit
 import matplotlib
@@ -277,64 +278,128 @@ class DatasetDialog(QtWidgets.QDialog):
     Tick and Untick, set colors and set relative intensity in display
     """
 
-    def __init__(self, window):
+    def __init__(self, window, rotation=False):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Datasets")
         self.setModal(False)
         self.layout = QtWidgets.QGridLayout()
+        self.count = 0
+        self.warning = True
         self.checks = []
+        self.title = []
         self.closebuttons = []
         self.colorselection = []
         self.colordisp_all = []
         self.intensitysettings = []
         self.setLayout(self.layout)
+        self.legend = QtWidgets.QCheckBox("Show legend")
         self.wbackground = QtWidgets.QCheckBox("White background")
-        self.layout.addWidget(self.wbackground, 0, 3)
-        self.layout.addWidget(QtWidgets.QLabel("Path"), 1, 0)
-        self.layout.addWidget(QtWidgets.QLabel("Color"), 1, 1)
-        self.layout.addWidget(QtWidgets.QLabel("#"), 1, 2)
-        self.layout.addWidget(QtWidgets.QLabel("Rel. Intensity"), 1, 3)
-        self.layout.addWidget(QtWidgets.QLabel("Close"), 1, 4)
+        self.auto_display = QtWidgets.QCheckBox("Automatic display update")
+        self.auto_display.setChecked(True)
+        self.layout.addWidget(self.legend, 0, 0)
+        self.layout.addWidget(self.auto_display, 1, 0)
+        self.layout.addWidget(self.wbackground, 2, 0)
+        self.layout.addWidget(QtWidgets.QLabel("Files"), 3, 0)
+        self.layout.addWidget(QtWidgets.QLabel("Change title"), 3, 1)
+        self.layout.addWidget(QtWidgets.QLabel("Color"), 3, 2)
+        self.layout.addWidget(QtWidgets.QLabel(""), 3, 3)
+        self.layout.addWidget(QtWidgets.QLabel("Rel. Intensity"), 3, 4)
+        self.layout.addWidget(QtWidgets.QLabel("Close"), 3, 5)
+        self.legend.stateChanged.connect(self.update_viewport)
         self.wbackground.stateChanged.connect(self.update_viewport)
+        self.auto_display.stateChanged.connect(self.update_viewport)
+
+        self.default_colors = [ 
+            "red",
+            "cyan",
+            "green",
+            "yellow",
+            "blue",
+            "magenta",
+            "orange",
+            "amethyst",
+            "forestgreen",
+            "carmine",
+            "purple",
+            "sage",
+            "jade",
+            "azure",
+        ]
+        self.rgbf = [
+            [1, 0, 0],
+            [0, 1, 1],
+            [0, 1, 0],
+            [1, 1, 0],
+            [0, 0, 1],
+            [1, 0, 1],
+            [1, 0.5, 0],
+            [0.5, 0.5, 1],
+            [0, 0.5, 0],
+            [0.5, 0, 0],
+            [0.5, 0, 1],
+            [0.5, 0.5, 0],
+            [0, 0.5, 0.5],
+            [0, 0.5, 1],
+        ]
 
     def add_entry(self, path):
+        if len(path) > 40:
+            path = "..." + path[-40:]
         c = QtWidgets.QCheckBox(path)
-        p = QtWidgets.QPushButton("x")
         currentline = len(self.layout)
+        t = QtWidgets.QPushButton("#")
+        t.setObjectName(str(currentline))
+        p = QtWidgets.QPushButton("x")
         p.setObjectName(str(currentline))
+
+        index = len(self.checks)
+        if index >= len(self.rgbf):
+            index = len(self.rgbf) - 1
+
+        self.title.append(t)
+        t.setAutoDefault(False)
+        t.clicked.connect(partial(self.change_title, t.objectName()))
 
         colordrop = QtWidgets.QComboBox(self)
         colordrop.setEditable(True)
-        colordrop.lineEdit().setMaxLength(7)
+        colordrop.lineEdit().setMaxLength(12)
 
-        # Add default colors
-        for default_color in [
-            "auto",
-            "red",
-            "green",
-            "blue",
-            "gray",
-            "cyan",
-            "magenta",
-            "yellow",
-        ]:
+        for default_color in self.default_colors:
             colordrop.addItem(default_color)
-
+        colordrop.setCurrentText(self.default_colors[index])
+        
         intensity = QtWidgets.QSpinBox(self)
         intensity.setValue(1)
         colordisp = QtWidgets.QLabel("      ")
 
         palette = colordisp.palette()
-        palette.setColor(QtGui.QPalette.Window, QtGui.QColor("black"))
+        palette.setColor(QtGui.QPalette.Window, 
+            QtGui.QColor.fromRgbF(
+                self.rgbf[index][0], 
+                self.rgbf[index][1], 
+                self.rgbf[index][2], 1))
         colordisp.setAutoFillBackground(True)
         colordisp.setPalette(palette)
 
+        if self.count != len(self.default_colors)-1:
+            self.count += 1
+        else:
+            if self.warning:
+                text = ("The number of channels passed the number of default colors. " 
+                        "  In case you would like "
+                        "to use your own color,  please insert the color's hexadecimal "
+                        "name,  starting with '#',  e.g.  '#ffcdff' for pink.")
+                QtWidgets.QMessageBox.information(self, "Warning", text)
+                self.warning = False
+        colordrop.activated.connect(self.update_viewport)
+
         self.layout.addWidget(c, currentline, 0)
-        self.layout.addWidget(colordrop, currentline, 1)
-        self.layout.addWidget(colordisp, currentline, 2)
-        self.layout.addWidget(intensity, currentline, 3)
-        self.layout.addWidget(p, currentline, 4)
+        self.layout.addWidget(t, currentline, 1)
+        self.layout.addWidget(colordrop, currentline, 2)
+        self.layout.addWidget(colordisp, currentline, 3)
+        self.layout.addWidget(intensity, currentline, 4)
+        self.layout.addWidget(p, currentline, 5)
 
         self.intensitysettings.append(intensity)
         self.colorselection.append(colordrop)
@@ -348,53 +413,110 @@ class DatasetDialog(QtWidgets.QDialog):
         )
         index = len(self.colorselection)
         self.colorselection[-1].currentIndexChanged.connect(
-            lambda: self.set_color(index - 1)
+            partial(self.set_color, t.objectName())
         )
         self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
 
-        # update auto colors
-        n_channels = len(self.checks)
-        colors = get_colors(n_channels)
-        for n in range(n_channels):
-            palette = self.colordisp_all[n].palette()
-            palette.setColor(
-                QtGui.QPalette.Window,
-                QtGui.QColor.fromRgbF(
-                    colors[n][0], colors[n][1], colors[n][2], 1
-                ),
-            )
-            self.colordisp_all[n].setPalette(palette)
-
         self.closebuttons.append(p)
-        p.clicked.connect(self.close_file)
+        p.setAutoDefault(False)
+        p.clicked.connect(partial(self.close_file, p.objectName()))
 
-    def close_file(self):
-        # TODO call close routine
-        raise NotImplementedError("Closing not implemented yet.")
-        # print(self.sender.objectName())
+    def change_title(self, button_name):
+        for i in range(len(self.title)):
+            if button_name == self.title[i].objectName():
+                new_title, ok = QtWidgets.QInputDialog.getText(
+                    self, "Set the new title", 'Type "reset" to get the original title.')
+                if ok:
+                    if new_title == "Reset" or new_title == "reset":
+                        path = self.window.view.locs_paths[i]
+                        if len(path) > 40:
+                            path = "..." + path[-40:]
+                        self.checks[i].setText(path)
+                    else:
+                        self.checks[i].setText(new_title)
+                    self.update_viewport()
+                    self.adjustSize()
+                break
+
+    def close_file(self, button_name):
+        #todo: adding a new file after having deleting another one does not work properly
+        for i in range(len(self.closebuttons)):
+            if button_name == self.closebuttons[i].objectName():
+                if len(self.window.view.locs) == 1:
+                    self.close()
+                    self.window.menu_bar.clear()
+                    self.window.initUI()
+                else:
+                    self.layout.removeWidget(self.checks[i])
+                    self.layout.removeWidget(self.title[i])
+                    self.layout.removeWidget(self.colorselection[i])
+                    self.layout.removeWidget(self.colordisp_all[i])
+                    self.layout.removeWidget(self.intensitysettings[i])
+                    self.layout.removeWidget(self.closebuttons[i])
+                    del self.window.view.locs[i]
+                    del self.window.view.locs_paths[i]
+                    del self.window.view.infos[i]
+                    del self.window.view.index_blocks[i]
+                    try:
+                        del self.window.view.group_color[i]
+                    except:
+                        pass
+                    try:
+                        del self._drift[i]
+                        del self._driftfiles[i]
+                        del self.currentdrift[i]
+                    except:
+                        pass
+                    del self.checks[i]
+                    del self.title[i]
+                    del self.colorselection[i]
+                    del self.colordisp_all[i]
+                    del self.intensitysettings[i]
+                    del self.closebuttons[i]
+                    self.update_viewport()
+                    self.adjustSize()
+                break
 
     def update_viewport(self):
-        if self.window.view.viewport:
-            self.window.view.update_scene()
+        if self.auto_display.isChecked():
+            if self.window.view.viewport:
+                self.window.view.update_scene()
 
-    def set_color(self, n):
+    def set_color(self, title_button_name):
+        for n in range(len(self.title)):
+            if title_button_name == self.title[n].objectName():
+                break
         palette = self.colordisp_all[n].palette()
         selectedcolor = self.colorselection[n].currentText()
-        if selectedcolor == "auto":
-            n_channels = len(self.checks)
-            colors = get_colors(n_channels)
+        # if selectedcolor == "auto":
+        #     n_channels = len(self.checks)
+        #     colors = get_colors(n_channels)
+        #     palette.setColor(
+        #         QtGui.QPalette.Window,
+        #         QtGui.QColor.fromRgbF(
+        #             colors[n][0], colors[n][1], colors[n][2], 1
+        #         ),
+        #     )
+        if self.window.view.isHexadecimal(selectedcolor):
+            r = int(selectedcolor[1:3], 16) / 255.
+            g = int(selectedcolor[3:5], 16) / 255.
+            b = int(selectedcolor[5:], 16) / 255.
             palette.setColor(
-                QtGui.QPalette.Window,
-                QtGui.QColor.fromRgbF(
-                    colors[n][0], colors[n][1], colors[n][2], 1
-                ),
-            )
+                QtGui.QPalette.Window, QtGui.QColor.fromRgbF(r, g, b, 1))
         else:
-            palette.setColor(
-                QtGui.QPalette.Window, QtGui.QColor(selectedcolor)
-            )
+            good_color = False
+            for i in range(len(self.default_colors)):
+                if selectedcolor == self.default_colors[i]:
+                    good_color = True
+                    break
+            if good_color:
+                palette.setColor(
+                    QtGui.QPalette.Window, QtGui.QColor.fromRgbF(
+                        self.rgbf[i][0], 
+                        self.rgbf[i][1], 
+                        self.rgbf[i][2], 1)
+                )
         self.colordisp_all[n].setPalette(palette)
-
 
 class PlotDialog(QtWidgets.QDialog):
     def __init__(self, window):
@@ -2431,6 +2553,7 @@ class View(QtWidgets.QLabel):
         self.locs = []
         self.infos = []
         self.locs_paths = []
+        self.group_color = []
         self._mode = "Zoom"
         self._pan = False
         self._rectangle_pick_ongoing = False
@@ -2502,47 +2625,45 @@ class View(QtWidgets.QLabel):
             self.median_lp = np.mean(
                 [np.median(locs.lpx), np.median(locs.lpy)]
             )
-            if hasattr(locs, "group"):
-                groups = np.unique(locs.group)
+        if hasattr(locs, "group"):
+            groups = np.unique(locs.group)
+            groupcopy = locs.group.copy()
+            # check if groups are consecutive
+            if set(groups) == set(range(min(groups), max(groups) + 1)):
                 groupcopy = locs.group.copy()
-                # check if groups are consecutive
-                if set(groups) == set(range(min(groups), max(groups) + 1)):
-                    groupcopy = locs.group.copy()
-                    if len(groups) > 5000:
-                        choice = QtWidgets.QMessageBox.question(
-                            self,
-                            "Group question",
-                            (
-                                "Groups are not consecutive"
-                                " and more than 5000 groups detected."
-                                " Re-Index groups? This may take a while."
-                            ),
-                            QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                if len(groups) > 5000:
+                    choice = QtWidgets.QMessageBox.question(
+                        self,
+                        "Group question",
+                        (
+                            "Groups are not consecutive"
+                            " and more than 5000 groups detected."
+                            " Re-Index groups? This may take a while."
+                        ),
+                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    )
+                    if choice == QtWidgets.QMessageBox.Yes:
+                        pb = lib.ProgressDialog(
+                            "Re-Indexing groups", 0, len(groups), self
                         )
-                        if choice == QtWidgets.QMessageBox.Yes:
-                            pb = lib.ProgressDialog(
-                                "Re-Indexing groups", 0, len(groups), self
-                            )
-                            pb.set_value(0)
-                            for i in tqdm(range(len(groups))):
-                                groupcopy[locs.group == groups[i]] = i
-                                pb.set_value(i)
-                            pb.close()
-                    else:
+                        pb.set_value(0)
                         for i in tqdm(range(len(groups))):
                             groupcopy[locs.group == groups[i]] = i
+                            pb.set_value(i)
+                        pb.close()
                 else:
-                    groupcopy = locs.group.copy()
-                    for i in range(len(groups)):
+                    for i in tqdm(range(len(groups))):
                         groupcopy[locs.group == groups[i]] = i
-                np.random.shuffle(groups)
-                groups %= N_GROUP_COLORS
-                self.group_color = groups[groupcopy]
-            if render:
-                self.fit_in_view(autoscale=True)
-        else:
-            if render:
-                self.update_scene()
+            else:
+                groupcopy = locs.group.copy()
+                for i in range(len(groups)):
+                    groupcopy[locs.group == groups[i]] = i
+            np.random.shuffle(groups)
+            groups %= N_GROUP_COLORS
+            self.group_color.append(groups[groupcopy])
+        if render:
+            self.fit_in_view(autoscale=True)
+            self.update_scene()
 
         self.window.display_settings_dlg.parameter.addItems(locs.dtype.names)
 
@@ -3030,7 +3151,7 @@ class View(QtWidgets.QLabel):
                 round(self.width() * length_camerapxl / self.viewport_width())
             )
             # height = max(int(round(0.15 * length_displaypxl)), 1)
-            height = 10 #todo: I think it looks better this way
+            height = 10
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
             painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
@@ -3053,6 +3174,44 @@ class View(QtWidgets.QLabel):
                     QtCore.Qt.AlignHCenter,
                     str(scalebar) + " nm",
                 )
+        return image
+
+    def draw_legend(self, image, rotation=False):
+        if self.window.dataset_dialog.legend.isChecked() or rotation:
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            n_channels = len(self.locs_paths)
+            if rotation:
+                n_channels = len(self.locs)
+            painter = QtGui.QPainter(image)
+            width = 15
+            height = 15
+            x = 20
+            y = -5
+            dy = 25
+            for i in range(n_channels):
+                if self.window.dataset_dialog.checks[i].isChecked():
+                    painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
+                    palette = self.window.dataset_dialog.colordisp_all[i].palette()
+                    color = palette.color(QtGui.QPalette.Window)
+                    painter.setBrush(QtGui.QBrush(color))
+                    y += dy
+                    painter.drawRect(x, y, height, height)
+                    font = painter.font()
+                    font.setPixelSize(12)
+                    painter.setFont(font)
+                    painter.setPen(QtGui.QColor("white"))
+                    text_spacer = 25
+                    text_width = 1000
+                    text_height = 15
+                    text = self.window.dataset_dialog.checks[i].text()
+                    painter.drawText(
+                        x + text_spacer,
+                        y,
+                        text_width,
+                        text_height,
+                        QtCore.Qt.AlignLeft,
+                        text,
+                    )
         return image
 
     def draw_minimap(self, image):
@@ -3082,12 +3241,11 @@ class View(QtWidgets.QLabel):
         picks_only=False,
         points_only=False,
         draw_picks=True,
-        group_color=None,
     ):
         if not picks_only:
             self.viewport = self.adjust_viewport_to_view(viewport)
             qimage = self.render_scene(
-                autoscale=autoscale, use_cache=use_cache, group_color=group_color
+                autoscale=autoscale, use_cache=use_cache
             )
             qimage = qimage.scaled(
                 self.width(),
@@ -3096,6 +3254,7 @@ class View(QtWidgets.QLabel):
             )
             self.qimage_no_picks = self.draw_scalebar(qimage)
             self.qimage_no_picks = self.draw_minimap(self.qimage_no_picks)
+            self.qimage_no_picks = self.draw_legend(self.qimage_no_picks)
             dppvp = self.display_pixels_per_viewport_pixels()
             self.window.display_settings_dlg.set_zoom_silently(dppvp)
         if draw_picks:
@@ -4841,13 +5000,13 @@ class View(QtWidgets.QLabel):
         self.update_scene()
 
     def render_scene(
-        self, autoscale=False, use_cache=False, cache=True, viewport=None, infos=None, group_color=None
+        self, autoscale=False, use_cache=False, cache=True, viewport=None
     ):
         kwargs = self.get_render_kwargs(viewport=viewport)
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(
-                kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache, infos=infos, group_color=group_color
+                kwargs, autoscale=autoscale, use_cache=use_cache, cache=cache
             )
         else:
             self.render_multi_channel(
@@ -4982,8 +5141,56 @@ class View(QtWidgets.QLabel):
                 colors[i] = (1, 1, 0)
             elif (
                 self.window.dataset_dialog.colorselection[i].currentText()
-                != "auto"
+                == "azure"
             ):
+                colors[i] = (0, 0.5, 1)
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "jade"
+            ):
+                colors[i] = (0, 0.5, 0.5)
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "sage"
+            ):
+                colors[i] = (0.5, 0.5, 0)
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "purple"
+            ):
+                colors[i] = (0.5, 0, 1)
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "carmine"
+            ):
+                colors[i] = (0.5, 0, 0)
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "forestgreen"
+            ):
+                colors[i] = (0, 0.5, 0)
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "amethyst"
+            ):
+                colors[i] = (0.5, 0.5, 1)
+            elif (
+                self.window.dataset_dialog.colorselection[i].currentText()
+                == "orange"
+            ):
+                colors[i] = (1, 0.5, 0)
+            else:
+                # self.window.dataset_dialog.colorselection[i].currentText()
+                # != "auto"
+                if not self.isHexadecimal(self.window.dataset_dialog.colorselection[i].currentText()):
+                    warning = ("The color selection not recognnised in the channel {}.  Please "
+                               "choose one of the options provided or type the hexadecimal"
+                               " code for your color of choice,  starting with '#', e.g. "
+                               "'#ffcdff' for pink.".format(
+                                self.window.dataset_dialog.checks[i].text())
+                               )
+                    QtWidgets.QMessageBox.information(self, "Warning", warning)
+                    break
                 colorstring = (
                     self.window.dataset_dialog.colorselection[i]
                     .currentText()
@@ -5015,8 +5222,30 @@ class View(QtWidgets.QLabel):
         self._bgra = self.to_8bit(bgra)
         return self._bgra
 
+    def isHexadecimal(self, text):
+        allowed_characters = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+                              'a', 'b', 'c', 'd', 'e', 'f',
+                              'A', 'B', 'C', 'D', 'E', 'F']
+        sum_char = 0
+        if type(text) == str:
+            if text[0] == '#':
+                if len(text) == 7:
+                    for char in text[1:]:
+                        if char in allowed_characters:
+                            sum_char += 1
+                    if sum_char == 6:
+                        return True
+                    else:
+                        return False
+                else:
+                    return False
+            else:
+                return False
+        else:
+            return False
+
     def render_single_channel(
-        self, kwargs, autoscale=False, use_cache=False, cache=True, infos=None, group_color=None
+        self, kwargs, autoscale=False, use_cache=False, cache=True,
     ):
         locs = self.locs[0]
 
@@ -5024,27 +5253,27 @@ class View(QtWidgets.QLabel):
             locs = self.x_locs
             return self.render_multi_channel(
                 kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache
-            )
-
-        if group_color is not None:
-            self.group_color = group_color
-            
+            )            
 
         if hasattr(locs, "group"):
-            locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
-            return self.render_multi_channel(
-                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache, plot_channels=True
-            )
-
+            if np.sum(self.group_color[0]) == 0: # i.e. if the group color is from the add group function
+                locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
+                return self.render_multi_channel(
+                    kwargs, autoscale=autoscale, locs=None, use_cache=use_cache, plot_channels=True
+                )
+            else: #i.e. for clustered data
+                if len(self.group_color) == 1:
+                    self.group_color = self.group_color[0]
+                locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
+                return self.render_multi_channel(
+                    kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache, plot_channels=True
+                )
         if hasattr(locs, "z"):
             if self.window.slicer_dialog.slicerRadioButton.isChecked():
                 z_min = self.window.slicer_dialog.slicermin
                 z_max = self.window.slicer_dialog.slicermax
                 in_view = (locs.z > z_min) & (locs.z <= z_max)
                 locs = locs[in_view]
-
-        if infos is not None:
-            self.infos = infos
 
         if use_cache:
             n_locs = self.n_locs
@@ -5958,7 +6187,6 @@ class View(QtWidgets.QLabel):
         picks_only=False,
         points_only=False,
         draw_picks=True,
-        group_color=None,
     ):
         # Clear slicer cache
         self.window.slicer_dialog.slicer_cache = {}
@@ -5972,7 +6200,6 @@ class View(QtWidgets.QLabel):
                 picks_only=picks_only,
                 points_only=points_only,
                 draw_picks=draw_picks,
-                group_color=group_color
             )
             self.update_cursor()
 
@@ -6059,14 +6286,14 @@ class View(QtWidgets.QLabel):
         self.zoom(ZOOM)
 
     def wheelEvent(self, QWheelEvent):
-        # modifiers = QtWidgets.QApplication.keyboardModifiers()
-        # if modifiers == QtCore.Qt.ControlModifier:
-        direction = QWheelEvent.angleDelta().y()
-        position = self.map_to_movie(QWheelEvent.pos())
-        if direction > 0:
-            self.zoom(1 / ZOOM, cursor_position = position)
-        else:
-            self.zoom(ZOOM, cursor_position = position)
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+        if modifiers == QtCore.Qt.ControlModifier:
+            direction = QWheelEvent.angleDelta().y()
+            position = self.map_to_movie(QWheelEvent.pos())
+            if direction > 0:
+                self.zoom(1 / ZOOM, cursor_position = position)
+            else:
+                self.zoom(ZOOM, cursor_position = position)
 
     def get_group_color(self, locs):
         groups = np.unique(locs[0].group)
@@ -6078,12 +6305,16 @@ class View(QtWidgets.QLabel):
         group_color = groups[groupcopy]
         return group_color
 
+    def show_legend_files(self, state):
+        print(state)
+
 class View_Rotation(View):
     def __init__(self, window):
         super().__init__(window)
         self.angx = 0
         self.angy = 0
         self._rotation = []
+        self.display_legend = False
         self.setMaximumSize(400,400)
 
     def render_scene(
@@ -6144,15 +6375,30 @@ class View_Rotation(View):
                 colors[i] = (0, 1, 0)
             elif (self.window.dataset_dialog.colorselection[i].currentText()=="blue"):
                 colors[i] = (0, 0, 1)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="gray"):
-                colors[i] = (1, 1, 1)
             elif (self.window.dataset_dialog.colorselection[i].currentText()=="cyan"):
                 colors[i] = (0, 1, 1)
             elif (self.window.dataset_dialog.colorselection[i].currentText()=="magenta"):
                 colors[i] = (1, 0, 1)
             elif (self.window.dataset_dialog.colorselection[i].currentText()=="yellow"):
                 colors[i] = (1, 1, 0)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()!="auto"):
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="azure"):
+                colors[i] = (0, 0.5, 1)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="jade"):
+                colors[i] = (0, 0.5, 0.5)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="sage"):
+                colors[i] = (0.5, 0.5, 0)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="purple"):
+                colors[i] = (0.5, 0, 1)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="carmine"):
+                colors[i] = (0.5, 0, 0)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="forestgreen"):
+                colors[i] = (0, 0.5, 0)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="amethyst"):
+                colors[i] = (0.5, 0.5, 1)
+            elif (self.window.dataset_dialog.colorselection[i].currentText()=="orange"):
+                colors[i] = (1, 0.5, 0)
+            # elif (self.window.dataset_dialog.colorselection[i].currentText()!="auto"):
+            else:
                 colorstring = (
                     self.window.dataset_dialog.colorselection[i]
                     .currentText()
@@ -6188,8 +6434,14 @@ class View_Rotation(View):
         if group_color is not None:
             self.group_color = group_color
         if hasattr(locs, "group"):
-            locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
-            return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs)
+            if np.sum(self.group_color[0] == 0):
+                locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
+                return self.render_multi_channel(kwargs, autoscale=autoscale, locs=None)
+            else:
+                if len(self.group_color) == 1:
+                    self.group_color = self.group_color[0]
+                locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
+                return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs)
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
         n_locs, image = render.render(locs, **kwargs, info=self.infos[0], 
             ang=(self.angx, self.angy), pixelsize=pixelsize)
@@ -6221,7 +6473,7 @@ class View_Rotation(View):
                 viewport,
                 autoscale=autoscale,
                 group_color=group_color,
-                points_only=points_only
+                points_only=points_only,
             )
             self.update_cursor()
 
@@ -6230,7 +6482,7 @@ class View_Rotation(View):
         viewport,
         autoscale=False,
         group_color=None,
-        points_only=False
+        points_only=False,
     ):
         self.viewport = self.adjust_viewport_to_view(viewport)
         qimage = self.render_scene(
@@ -6243,9 +6495,18 @@ class View_Rotation(View):
         )
         self.qimage_no_picks = self.draw_scalebar(qimage)
         self.qimage_no_picks = self.draw_minimap(self.qimage_no_picks)
+        if self.display_legend:
+            self.qimage_no_picks = self.draw_legend(self.qimage_no_picks, rotation=True)
         self.qimage = self.draw_points(self.qimage_no_picks)
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
+
+    def add_legend(self):
+        if self.display_legend:
+            self.display_legend = False
+        else:
+            self.display_legend = True
+        self.update_scene()
 
     def rotation_input(self, opening=False, ang=None): 
         # asks for rotation angles (3D only)
@@ -6257,12 +6518,12 @@ class View_Rotation(View):
                     self, "Rotation angle x", "Angle x (degrees):", 0, decimals=2
                 )
             if ok:
-                angy, _ = QtWidgets.QInputDialog.getDouble(
+                angy, ok2 = QtWidgets.QInputDialog.getDouble(
                         self, "Rotation angle y", "Angle y (degrees):", 0, decimals=2
                     )
-            
-            self.angx += np.pi * angx/180
-            self.angy += np.pi * angy/180
+                if ok2:
+                    self.angx += np.pi * angx/180
+                    self.angy += np.pi * angy/180
 
         # This is to avoid dividing by zero, when the angles are 90 deg 
         # and something is divided by cosines
@@ -7681,12 +7942,12 @@ class Window(QtWidgets.QMainWindow):
             group_color = None
 
         window = RotateDialog(locs, blur, color, group_color, 
-            paths, d, w, self.view, opening=opening, ang=(angx,angy))
+            paths, d, w, self.view, self.dataset_dialog, opening=opening, ang=(angx,angy))
         window.show()
 
 class RotateDialog(Window):
     def __init__(self, locs, blur, color, group_color, 
-        paths, d, w, view, opening=False, ang=None):
+        paths, d, w, view, dataset, opening=False, ang=None):
         super().__init__()
         self.view_rot = View_Rotation(self)
         self.setCentralWidget(self.view_rot)
@@ -7707,6 +7968,11 @@ class RotateDialog(Window):
         self.display_settings_dlg.ilp_warning = True
         self.display_settings_dlg.rotation = True
 
+        self.dataset_dialog = dataset
+        self.paths = paths
+        # for path in paths:
+        #     self.dataset_dialog.add_entry(path)
+
         self.setWindowTitle("Rotation window")
         self.menu_bar.clear()
         self.menu_bar = self.menuBar()
@@ -7722,6 +7988,11 @@ class RotateDialog(Window):
             self.display_settings_dlg.show
         )
         view_menu.addAction(display_settings_action)
+        legend_action = view_menu.addAction("Show/hide legend")
+        legend_action.setShortcut("Ctrl+L")
+        legend_action.triggered.connect(self.view_rot.add_legend)
+        view_menu.addSeparator()
+
         rotation_action = view_menu.addAction("Rotate by angle")
         rotation_action.triggered.connect(self.view_rot.rotation_input)
         rotation_action.setShortcut("Ctrl+Shift+R")
@@ -7768,11 +8039,6 @@ class RotateDialog(Window):
 
         self.setMaximumSize(400, 400)
         self.move(20,20)
-
-        self.dataset_dialog = DatasetDialog(self)
-        self.paths = paths
-        for path in paths:
-            self.dataset_dialog.add_entry(path)
 
         qimage = self.view_rot.render_scene(viewport=self.view_rot.viewport,
           group_color=group_color)
