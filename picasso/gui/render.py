@@ -12,7 +12,7 @@ import traceback
 from math import ceil
 import copy
 import time
-# from icecream import ic
+from icecream import ic
 import copy
 from functools import partial
 
@@ -272,6 +272,21 @@ class ApplyDialog(QtWidgets.QDialog):
         self.label.setText(str(vars))
 
 
+class ScalebarDialog(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Scalebar")
+        self.setModal(False)
+        self.layout = QtWidgets.QGridLayout()
+        self.scalebar = QtWidgets.QDoubleSpinBox()
+        self.scalebar.setRange(0, 999999)
+        self.scalebar.setValue(100)
+        self.scalebar.setSingleStep(1)
+        self.scalebar.setDecimals(1)
+        self.scalebar.setKeyboardTracking(False)
+
+
 class DatasetDialog(QtWidgets.QDialog):
     """
     A class to handle the Dataset Dialog:
@@ -442,7 +457,7 @@ class DatasetDialog(QtWidgets.QDialog):
         #todo: adding a new file after having deleting another one does not work properly
         for i in range(len(self.closebuttons)):
             if button_name == self.closebuttons[i].objectName():
-                if len(self.window.view.locs) == 1:
+                if len(self.closebuttons) == 1:
                     self.close()
                     self.window.menu_bar.clear()
                     self.window.initUI()
@@ -2178,7 +2193,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
             gaussian_button: "gaussian",
             gaussian_iso_button: "gaussian_iso",
         }
-        # Scale bar
         # Camera_parameters
         camera_groupbox = QtWidgets.QGroupBox("Camera")
         self.camera_grid = QtWidgets.QGridLayout(camera_groupbox)
@@ -2190,6 +2204,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.pixelsize.valueChanged.connect(self.update_scene)
         self.camera_grid.addWidget(self.pixelsize, 0, 1)
         vbox.addWidget(camera_groupbox)
+
+        # Scalebar
         self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
@@ -2303,30 +2319,198 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.maximum.blockSignals(False)
 
     def render_scene(self, *args, **kwargs):
-        # check if ind loc prec button is checked
-        if self.rotation:
-            if self.blur_buttongroup.checkedId() == -5 or self.blur_buttongroup.checkedId() == -6:
-                if self.ilp_warning:
-                    self.ilp_warning = False
-                    warning = ("Rotating with individual localization precision is very time consuming." 
-                               "Therefore, we recommend to firstly rotate the object using a different "
-                               "blur method and then to apply individual localization precision.")
-                    QtWidgets.QMessageBox.information(self, "Warning", warning)
-            
-            self.window.view_rot.update_scene()
-        else:
-            self.window.view.update_scene()
+        self.window.view.update_scene()
 
     def set_dynamic_oversampling(self, state):
         if state:
             self.window.view.update_scene()
 
     def update_scene(self, *args, **kwargs):
-        if self.rotation:
-            self.window.view_rot.update_scene()
-        else:
-            self.window.view.update_scene(use_cache=True)
+        self.window.view.update_scene(use_cache=True)
 
+class DisplaySettingsRotationDialog(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.first_update = True
+        self.window = window
+        self.setWindowTitle("Display Settings - Rotation Window")
+        self.resize(200, 0)
+        self.setModal(False)
+        vbox = QtWidgets.QVBoxLayout(self)
+        # General
+        general_groupbox = QtWidgets.QGroupBox("General")
+        vbox.addWidget(general_groupbox)
+        general_grid = QtWidgets.QGridLayout(general_groupbox)
+        general_grid.addWidget(QtWidgets.QLabel("Oversampling:"), 1, 0)
+        self._oversampling = DEFAULT_OVERSAMPLING
+        self.oversampling = QtWidgets.QDoubleSpinBox()
+        self.oversampling.setRange(0.001, 1000)
+        self.oversampling.setSingleStep(5)
+        self.oversampling.setValue(self._oversampling)
+        self.oversampling.setKeyboardTracking(False)
+        self.oversampling.valueChanged.connect(self.on_oversampling_changed)
+        general_grid.addWidget(self.oversampling, 1, 1)
+        self.dynamic_oversampling = QtWidgets.QCheckBox("dynamic")
+        self.dynamic_oversampling.setChecked(True)
+        self.dynamic_oversampling.toggled.connect(
+            self.set_dynamic_oversampling
+        )
+        general_grid.addWidget(self.dynamic_oversampling, 2, 1)
+        self.minimap = QtWidgets.QCheckBox("show minimap")
+        general_grid.addWidget(self.minimap, 3, 1)
+        self.minimap.stateChanged.connect(self.update_scene)
+        # Contrast
+        contrast_groupbox = QtWidgets.QGroupBox("Contrast")
+        vbox.addWidget(contrast_groupbox)
+        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
+        minimum_label = QtWidgets.QLabel("Min. Density:")
+        contrast_grid.addWidget(minimum_label, 0, 0)
+        self.minimum = QtWidgets.QDoubleSpinBox()
+        self.minimum.setRange(0, 999999)
+        self.minimum.setSingleStep(5)
+        self.minimum.setValue(0)
+        self.minimum.setDecimals(6)
+        self.minimum.setKeyboardTracking(False)
+        self.minimum.valueChanged.connect(self.update_scene)
+        contrast_grid.addWidget(self.minimum, 0, 1)
+        maximum_label = QtWidgets.QLabel("Max. Density:")
+        contrast_grid.addWidget(maximum_label, 1, 0)
+        self.maximum = QtWidgets.QDoubleSpinBox()
+        self.maximum.setRange(0, 999999)
+        self.maximum.setSingleStep(5)
+        self.maximum.setValue(100)
+        self.maximum.setDecimals(6)
+        self.maximum.setKeyboardTracking(False)
+        self.maximum.valueChanged.connect(self.update_scene)
+        contrast_grid.addWidget(self.maximum, 1, 1)
+        contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
+        self.colormap = QtWidgets.QComboBox()
+        self.colormap.addItems(
+            sorted(["hot", "viridis", "inferno", "plasma", "magma", "gray"])
+        )
+        contrast_grid.addWidget(self.colormap, 2, 1)
+        self.colormap.currentIndexChanged.connect(self.update_scene)
+        # Blur
+        blur_groupbox = QtWidgets.QGroupBox("Blur")
+        blur_grid = QtWidgets.QGridLayout(blur_groupbox)
+        self.blur_buttongroup = QtWidgets.QButtonGroup()
+        points_button = QtWidgets.QRadioButton("None")
+        self.blur_buttongroup.addButton(points_button)
+        smooth_button = QtWidgets.QRadioButton("One-Pixel-Blur")
+        self.blur_buttongroup.addButton(smooth_button)
+        convolve_button = QtWidgets.QRadioButton("Global Localization Precision")
+        self.blur_buttongroup.addButton(convolve_button)
+        gaussian_button = QtWidgets.QRadioButton(
+            "Individual Localization Precision"
+        )
+        self.blur_buttongroup.addButton(gaussian_button)
+        gaussian_iso_button = QtWidgets.QRadioButton(
+            "Individual Localization Precision, iso"
+        )
+        self.blur_buttongroup.addButton(gaussian_iso_button)
+
+        blur_grid.addWidget(points_button, 0, 0, 1, 2)
+        blur_grid.addWidget(smooth_button, 1, 0, 1, 2)
+        blur_grid.addWidget(convolve_button, 2, 0, 1, 2)
+        blur_grid.addWidget(gaussian_button, 3, 0, 1, 2)
+        blur_grid.addWidget(gaussian_iso_button, 4, 0, 1, 2)
+        convolve_button.setChecked(True)
+        self.blur_buttongroup.buttonReleased.connect(self.render_scene)
+        blur_grid.addWidget(
+            QtWidgets.QLabel("Min. Blur (cam. pixel):"), 5, 0, 1, 1
+        )
+        self.min_blur_width = QtWidgets.QDoubleSpinBox()
+        self.min_blur_width.setRange(0, 999999)
+        self.min_blur_width.setSingleStep(0.01)
+        self.min_blur_width.setValue(0)
+        self.min_blur_width.setDecimals(3)
+        self.min_blur_width.setKeyboardTracking(False)
+        self.min_blur_width.valueChanged.connect(self.render_scene)
+        blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
+
+        vbox.addWidget(blur_groupbox)
+        self.blur_methods = {
+            points_button: None,
+            smooth_button: "smooth",
+            convolve_button: "convolve",
+            gaussian_button: "gaussian",
+            gaussian_iso_button: "gaussian_iso",
+        }
+
+        #Camera
+        self.pixelsize = QtWidgets.QDoubleSpinBox()
+        self.pixelsize.setValue(130)
+        
+        #Scalebar
+        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
+        self.scalebar_groupbox.setCheckable(True)
+        self.scalebar_groupbox.setChecked(False)
+        self.scalebar_groupbox.toggled.connect(self.update_scene)
+        vbox.addWidget(self.scalebar_groupbox)
+        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
+        scalebar_grid.addWidget(QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0)
+        self.scalebar = QtWidgets.QDoubleSpinBox()
+        self.scalebar.setRange(0.0001, 10000000000)
+        self.scalebar.setValue(500)
+        self.scalebar.setKeyboardTracking(False)
+        self.scalebar.valueChanged.connect(self.update_scene)
+        scalebar_grid.addWidget(self.scalebar, 0, 1)
+        self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
+        self.scalebar_text.stateChanged.connect(self.update_scene)
+        scalebar_grid.addWidget(self.scalebar_text, 1, 0)
+        self._silent_oversampling_update = False
+
+    def on_oversampling_changed(self, value):
+        contrast_factor = (self._oversampling / value) ** 2
+        self._oversampling = value
+        self.silent_minimum_update(contrast_factor * self.minimum.value())
+        self.silent_maximum_update(contrast_factor * self.maximum.value())
+        if not self._silent_oversampling_update:
+            self.dynamic_oversampling.setChecked(False)
+            self.window.view.update_scene()
+
+    def set_oversampling_silently(self, oversampling):
+        self._silent_oversampling_update = True
+        self.oversampling.setValue(oversampling)
+        self._silent_oversampling_update = False
+
+    def set_zoom_silently(self, zoom):
+        self.zoom.blockSignals(True)
+        self.zoom.setValue(zoom)
+        self.zoom.blockSignals(False)
+
+    def silent_minimum_update(self, value):
+        self.minimum.blockSignals(True)
+        self.minimum.setValue(value)
+        self.minimum.blockSignals(False)
+
+    def silent_maximum_update(self, value):
+        self.maximum.blockSignals(True)
+        self.maximum.setValue(value)
+        self.maximum.blockSignals(False)
+
+    def render_scene(self, *args, **kwargs):
+        # check if ind loc prec button is checked
+        if self.blur_buttongroup.checkedId() == -5 or self.blur_buttongroup.checkedId() == -6:
+            if self.ilp_warning:
+                self.ilp_warning = False
+                warning = ("Rotating with individual localization precision is very time consuming." 
+                           "Therefore, we recommend to firstly rotate the object using a different "
+                           "blur method and then to apply individual localization precision.")
+                QtWidgets.QMessageBox.information(self, "Warning", warning)
+        
+        self.window.view_rot.update_scene()
+
+    def set_dynamic_oversampling(self, state):
+        if state:
+            self.window.view.update_scene()
+
+    def update_scene(self, *args, **kwargs):
+        if self.first_update:
+            self.window.view.update_scene()
+            self.first_update = False
+        else:
+            self.window.view_rot.update_scene()
 
 class SlicerDialog(QtWidgets.QDialog):
     def __init__(self, window):
@@ -3178,7 +3362,6 @@ class View(QtWidgets.QLabel):
 
     def draw_legend(self, image, rotation=False):
         if self.window.dataset_dialog.legend.isChecked() or rotation:
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
             n_channels = len(self.locs_paths)
             if rotation:
                 n_channels = len(self.locs)
@@ -4767,7 +4950,7 @@ class View(QtWidgets.QLabel):
         if d is None:
             d = self.window.tools_settings_dialog.pick_diameter.value()
         size = d / 2
-        K, L = postprocess.index_blocks_shape(info, size)
+        K, L = postprocess.index_blocks_shape(info, size) # not really needed?
         progress = lib.ProgressDialog("Indexing localizations", 0, K, self)
         progress.show()
         progress.set_value(0)
@@ -6315,6 +6498,7 @@ class View_Rotation(View):
         self.angy = 0
         self._rotation = []
         self.display_legend = False
+        self.display_rotation = True
         self.setMaximumSize(400,400)
 
     def render_scene(
@@ -6488,24 +6672,82 @@ class View_Rotation(View):
         qimage = self.render_scene(
             autoscale=autoscale, group_color=group_color
         )
-        qimage = qimage.scaled(
+        self.qimage_no_picks = qimage.scaled(
             self.width(),
             self.height(),
             QtCore.Qt.KeepAspectRatioByExpanding,
         )
-        self.qimage_no_picks = self.draw_scalebar(qimage)
-        self.qimage_no_picks = self.draw_minimap(self.qimage_no_picks)
+        self.qimage_no_picks = self.draw_scalebar(self.qimage_no_picks)
         if self.display_legend:
             self.qimage_no_picks = self.draw_legend(self.qimage_no_picks, rotation=True)
+        if self.display_rotation:
+            self.qimage_no_picks = self.draw_rotation(self.qimage_no_picks)
         self.qimage = self.draw_points(self.qimage_no_picks)
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
+
+    def draw_rotation(self, image):
+        painter = QtGui.QPainter(image)
+        length = 30
+        width = 2
+        x = 50
+        y = self.height() - 50
+        center = QtCore.QPoint(x, y)
+        #set the ends of the x line
+        xx = length
+        xy = 0
+        xz = 0
+        #set the ends of the y line
+        yx = 0
+        yy = length
+        yz = 0
+        #set the ends of the z line
+        zx = 0
+        zy = 0
+        zz = length
+        #rotate these points
+        coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
+        R = render.rotation_matrix(self.angx, self.angy)
+        coordinates = R.apply(coordinates)
+        (xx, xy, xz) = coordinates[0]
+        (yx, yy, yz) = coordinates[1]
+        (zx, zy, zz) = coordinates[2]
+
+        # translate the x and y coordinates of the end points towards bottom right edge of the window
+        xx += x
+        xy += y
+        yx += x
+        yy += y
+        zx += x
+        zy += y
+
+        #set the points at the ends of the lines
+        point_x = QtCore.QPoint(xx, xy)
+        point_y = QtCore.QPoint(yx, yy)
+        point_z = QtCore.QPoint(zx, zy)
+        line_x = QtCore.QLine(center, point_x)
+        line_y = QtCore.QLine(center, point_y)
+        line_z = QtCore.QLine(center, point_z)
+        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(1, 0, 0, 1)))
+        painter.drawLine(line_x)
+        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 1, 1)))
+        painter.drawLine(line_y)
+        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 0, 1)))
+        painter.drawLine(line_z)
+        return image
 
     def add_legend(self):
         if self.display_legend:
             self.display_legend = False
         else:
             self.display_legend = True
+        self.update_scene()
+
+    def add_rotation_view(self):
+        if self.display_rotation:
+            self.display_rotation = False
+        else:
+            self.display_rotation = True
         self.update_scene()
 
     def rotation_input(self, opening=False, ang=None): 
@@ -6710,8 +6952,6 @@ class Window(QtWidgets.QMainWindow):
         self.view.setMinimumSize(1, 1)
         self.setCentralWidget(self.view)
         self.display_settings_dlg = DisplaySettingsDialog(self)
-        self.display_settings_dlg.ilp_warning = False
-        self.display_settings_dlg.rotation = False
         self.tools_settings_dialog = ToolsSettingsDialog(self)
         self.view._pick_shape = (
             self.tools_settings_dialog.pick_shape.currentText()
@@ -7963,15 +8203,13 @@ class RotateDialog(Window):
         self.view_rot._picks = [(self.view._picks[0][0], self.view._picks[0][1])]
         self.view_rot.infos = self.view.infos
 
+        self.display_settings_dlg = DisplaySettingsRotationDialog(self)
         self.display_settings_dlg.blur_buttongroup.button(blur).setChecked(True)
         self.display_settings_dlg.colormap.setCurrentText(color)
         self.display_settings_dlg.ilp_warning = True
-        self.display_settings_dlg.rotation = True
 
         self.dataset_dialog = dataset
         self.paths = paths
-        # for path in paths:
-        #     self.dataset_dialog.add_entry(path)
 
         self.setWindowTitle("Rotation window")
         self.menu_bar.clear()
@@ -7991,6 +8229,9 @@ class RotateDialog(Window):
         legend_action = view_menu.addAction("Show/hide legend")
         legend_action.setShortcut("Ctrl+L")
         legend_action.triggered.connect(self.view_rot.add_legend)
+        rotation_view_action = view_menu.addAction("Show/hide rotation")
+        rotation_view_action.setShortcut("Ctrl+P")
+        rotation_view_action.triggered.connect(self.view_rot.add_rotation_view)
         view_menu.addSeparator()
 
         rotation_action = view_menu.addAction("Rotate by angle")
@@ -8018,6 +8259,16 @@ class RotateDialog(Window):
         to_down_action = view_menu.addAction("Down")
         to_down_action.setShortcut("Down")
         to_down_action.triggered.connect(self.view_rot.to_down_rot)
+
+        view_menu.addSeparator()
+        zoom_in_action = view_menu.addAction("Zoom in")
+        zoom_in_action.setShortcuts(["Ctrl++", "Ctrl+="])
+        zoom_in_action.triggered.connect(self.view_rot.zoom_in)
+        view_menu.addAction(zoom_in_action)
+        zoom_out_action = view_menu.addAction("Zoom out")
+        zoom_out_action.setShortcut("Ctrl+-")
+        zoom_out_action.triggered.connect(self.view_rot.zoom_out)
+        view_menu.addAction(zoom_out_action)
 
         tools_menu = self.menu_bar.addMenu("Tools")
         tools_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
