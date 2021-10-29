@@ -45,4 +45,3 @@ $s.TargetPath="pythonw"
 $s.Arguments="-m picasso average3"
 $s.IconLocation="$PSScriptRoot/icons/average.ico"
 $s.Save()
-

@@ -14,17 +14,10 @@ from scipy.spatial.transform import Rotation
 from tqdm import trange as _trange
 # from icecream import ic
 import time
-import pyximport
 import os
-pyximport.install(setup_args={"include_dirs":_np.get_include()},
-                  reload_support=True)
 import sys
-sys.path.append(os.path.dirname(os.path.realpath(__file__)))
-from cfill_gaussian import cfill_gaussian_rot
-
 
 _DRAW_MAX_SIGMA = 3
-
 
 def render(
     locs,
@@ -164,6 +157,75 @@ def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
                     )
                 ) / (2 * _np.pi * sx_ * sy_)
 
+@_numba.jit(nopython=True, nogil=True)
+def _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang):
+
+    (angx, angy) = ang
+
+    rot_mat_x = _np.array([[1.0,0.0,0.0],[0.0,_np.cos(angx),_np.sin(angx)],[0.0,-_np.sin(angx), _np.cos(angx)]])
+    rot_mat_y = _np.array([[_np.cos(angy),0.0,_np.sin(angy)],[0.0,1.0,0.0],[-_np.sin(angy),0.0,_np.cos(angy)]])
+    rot_matrix = rot_mat_x @ rot_mat_y
+    rot_matrixT = _np.transpose(rot_matrix)
+
+    for x_, y_, z_, sx_, sy_, sz_ in zip(x, y, z, sx, sy, sz):
+        max_y = _DRAW_MAX_SIGMA * sy_
+        i_min = int(y_ - max_y)
+        if i_min < 0:
+            i_min = 0
+        i_max = int(y_ + max_y + 1)
+        if i_max > n_pixel_y:
+            i_max = n_pixel_y
+        max_x = _DRAW_MAX_SIGMA * sx_
+        j_min = int(x_ - max_x)
+        if j_min < 0:
+            j_min = 0
+        j_max = int(x_ + max_x + 1)
+        if j_max > n_pixel_x:
+            j_max = n_pixel_x
+
+        max_z = _DRAW_MAX_SIGMA * sz_
+        k_min = int(z_ - max_z)
+        k_max = int(z_ + max_z + 1)
+
+        cov_matrix = _np.array([[sx_**2, 0, 0], [0, sy_**2, 0], [0, 0, sz_**2]]) #covariance matrix 
+        cov_rot = rot_matrixT @ cov_matrix @ rot_matrix
+        cri = inverse(cov_rot) #covariance rotated inverse
+
+        for i in range(i_min, i_max):
+            for j in range(j_min, j_max):
+                a = j + 0.5 - x_
+                b = i + 0.5 - y_
+                for k in range(k_min, k_max):   
+                    c = k + 0.5 - z_
+                    exponent = a*a * cri[0,0] + a*b * cri[0,1] + a*c * cri[0,2] + \
+                               a*b * cri[1,0] + b*b * cri[1,1] + b*c * cri[1,2] + \
+                               a*c * cri[2,0] + b*c * cri[2,1] + c*c * cri[2,2]
+                    image[i,j] += 2.71828 ** (-0.5 * exponent) / ((6.28319**3 * determinant(cov_rot)) ** 0.5)
+
+@_numba.jit(nopython=True, nogil=True)
+def inverse(a):
+    c = _np.zeros((3,3))
+    det = determinant(a)
+
+    c[0,0] = (a[1,1] * a[2,2] - a[1,2] * a[2,1]) / det
+    c[0,1] = (a[0,2] * a[2,1] - a[0,1] * a[2,2]) / det
+    c[0,2] = (a[0,1] * a[1,2] - a[0,2] * a[1,1]) / det
+
+    c[1,0] = (a[1,2] * a[2,0] - a[1,0] * a[2,2]) / det
+    c[1,1] = (a[0,0] * a[2,2] - a[0,2] * a[2,0]) / det
+    c[1,2] = (a[0,2] * a[1,0] - a[0,0] * a[1,2]) / det
+
+    c[2,0] = (a[1,0] * a[2,1] - a[1,1] * a[2,0]) / det
+    c[2,1] = (a[0,1] * a[2,0] - a[0,0] * a[2,1]) / det
+    c[2,2] = (a[0,0] * a[1,1] - a[0,1] * a[1,0]) / det
+
+    return c    
+
+@_numba.jit(nopython=True, nogil=True)
+def determinant(s):
+    return s[0,0] * (s[1,1] * s[2,2] - s[1,2] * s[2,1]) - \
+        s[0,1] * (s[1,0] * s[2,2] - s[2,0] * s[1,2]) + \
+        s[0,2] * (s[1,0] * s[2,1] - s[2,0] * s[1,1])
 
 def render_hist(locs, oversampling, y_min, x_min, y_max, x_max, ang=None, pixelsize=None):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -220,7 +282,7 @@ def render_gaussian(
         sx = blur_width[in_view]
         sz = blur_depth[in_view]
 
-        image = cfill_gaussian_rot(x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
+        _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
 
     return len(x), image
 
@@ -251,7 +313,7 @@ def render_gaussian_iso(
         sx = sy
         sz = blur_depth[in_view]
 
-        image = cfill_gaussian_rot(x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
+        _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
 
     return len(x), image
 
@@ -370,7 +432,6 @@ def locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling,
         if get_z:
             z = locs_coord[:,2]
             z = z[in_view] 
-            # z = oversampling * (z - _np.min(z))
             z *= oversampling
             return x, y, in_view, z
         else:
