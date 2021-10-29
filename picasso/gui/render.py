@@ -12,7 +12,7 @@ import traceback
 from math import ceil
 import copy
 import time
-from icecream import ic
+# from icecream import ic
 import copy
 from functools import partial
 
@@ -40,10 +40,6 @@ from h5py import File
 from tqdm import tqdm
 
 import colorsys
-
-# sys.path.append(sys.path[0] + "\\picasso\\gui\\dme") # for DME drift correction
-# 
-# import dme
 
 from .. import imageprocess, io, lib, postprocess, render
 
@@ -270,22 +266,6 @@ class ApplyDialog(QtWidgets.QDialog):
     def update_vars(self, index):
         vars = self.window.view.locs[index].dtype.names
         self.label.setText(str(vars))
-
-
-class ScalebarDialog(QtWidgets.QDialog):
-    def __init__(self, window):
-        super().__init__(window)
-        self.window = window
-        self.setWindowTitle("Scalebar")
-        self.setModal(False)
-        self.layout = QtWidgets.QGridLayout()
-        self.scalebar = QtWidgets.QDoubleSpinBox()
-        self.scalebar.setRange(0, 999999)
-        self.scalebar.setValue(100)
-        self.scalebar.setSingleStep(1)
-        self.scalebar.setDecimals(1)
-        self.scalebar.setKeyboardTracking(False)
-
 
 class DatasetDialog(QtWidgets.QDialog):
     """
@@ -5937,51 +5917,6 @@ class View(QtWidgets.QLabel):
                     rcc_progress.set_value(n_pairs)
                     self.update_scene()
 
-    # def undrift_DME(self):
-    #     #TODO: play with optional inputs, especially estimatePrecision
-    #     #TODO: what about 3d? probably for now I just will do 2d
-    #     #TODO: is crlb just lpx? ask max
-    #     #TODO: maybe imgshape should be (Y,X) and not (X,Y)
-    #     #TODO: how to choose framesperbin?
-    #     #TODO: show progress of the calculations
-    #     channel = self.get_channel("Undrift by DME")
-    #     if channel is not None:
-    #         info = self.infos[channel]
-
-    #         locs = self.locs[channel]
-    #         locs_array = np.stack((locs.x, locs.y)).T
-
-    #         crlb = np.stack((locs.lpx**2, locs.lpy**2)).T
-
-    #         info = self.infos[channel]
-    #         Y = info[0]["Height"]
-    #         X = info[0]["Width"]
-
-    #         n_frames = info[0]["Frames"]
-    #         if n_frames < 1000:
-    #             default_segmentation = int(n_frames / 4)
-    #         else:
-    #             default_segmentation = 1000
-    #         segmentation, ok = QtWidgets.QInputDialog.getInt(
-    #             self, "Undrift by DME", "Segmentation:", default_segmentation)
-
-    #         if ok:
-    #             start_time = time.time()
-    #             drift = dme.dme_estimate(locs_array, locs.frame, crlb, segmentation, [X,Y], initialEstimate=np.load("drift_rcc_original.npy").T,
-    #                                      custom_format=True, estimatePrecision=False)
-    #             finish_time = time.time()
-    #             print("DME drift estimate running time: ", np.round(finish_time-start_time, 1))
-
-    #             drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
-
-    #             self.locs[channel] = lib.ensure_sanity(locs, info)
-    #             self.index_blocks[channel] = None
-    #             self.add_drift(channel, drift)
-    #             self.update_scene()
-    #             self.show_drift()
-    #     return
-
-
     @check_picks
     def undrift_from_picked(self):
         channel = self.get_channel("Undrift from picked")
@@ -7135,9 +7070,6 @@ class Window(QtWidgets.QMainWindow):
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.setShortcut("Ctrl+U")
         undrift_action.triggered.connect(self.view.undrift)
-
-        # undrift_DME_action = postprocess_menu.addAction("Undrift by DME")
-        # undrift_DME_action.triggered.connect(self.view.undrift_DME)
 
         undrift_from_picked_action = postprocess_menu.addAction(
             "Undrift from picked"
