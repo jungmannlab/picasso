@@ -625,7 +625,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["y"]) + 3 * np.std(locs["y"]),
             )
             ax2.set_title("XY")
-            ax2.set_axis_bgcolor("black")
+            ax2.set_facecolor("black")
 
             # AXES 3
             ax3.scatter(locs["x"], locs["z"], c=colors, cmap="jet", s=2)
@@ -640,7 +640,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax3.set_title("XZ")
-            ax3.set_axis_bgcolor("black")
+            ax3.set_facecolor("black")
 
             # AXES 4
             ax4.scatter(locs["y"], locs["z"], c=colors, cmap="jet", s=2)
@@ -655,7 +655,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax4.set_title("YZ")
-            ax4.set_axis_bgcolor("black")
+            ax4.set_facecolor("black")
 
         else:
             colors = color_sys
@@ -700,7 +700,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["y"]) + 3 * np.std(locs["y"]),
             )
             ax2.set_title("XY")
-            ax2.set_axis_bgcolor("black")
+            ax2.set_facecolor("black")
 
             # AXES 3
             ax3.set_xlabel("X [Px]")
@@ -714,7 +714,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax3.set_title("XZ")
-            ax3.set_axis_bgcolor("black")
+            ax3.set_facecolor("black")
 
             # AXES 4
             ax4.set_xlabel("Y [Px]")
@@ -728,7 +728,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax4.set_title("YZ")
-            ax4.set_axis_bgcolor("black")
+            ax4.set_facecolor("black")
 
         result = dialog.exec_()
 
@@ -840,7 +840,6 @@ class ClsDlg(QtWidgets.QDialog):
         fig = dialog.figure
         ax1 = fig.add_subplot(121, projection="3d")
         ax2 = fig.add_subplot(122, projection="3d")
-        plt.axis("equal")
         dialog.label.setText(
             "3D Scatterplot of Pick "
             + str(current + 1)
@@ -1707,7 +1706,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax1.imshow(
             self.H,
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -1722,7 +1721,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax2.imshow(
             self.H_blur,
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -1737,7 +1736,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax3.imshow(
             self.mask,
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -1752,7 +1751,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax4.imshow(
             np.zeros_like(self.H),
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -1801,7 +1800,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax4.imshow(
             self.H_new,
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -2246,7 +2245,6 @@ class SlicerDialog(QtWidgets.QDialog):
     def calculate_histogram(self):
         slice = self.pick_slice.value()
         ax = self.figure.add_subplot(111)
-        ax.hold(False)
         plt.cla()
         n_channels = len(self.zcoord)
 
@@ -2258,12 +2256,11 @@ class SlicerDialog(QtWidgets.QDialog):
             slice,
         )
         self.patches = []
-        ax.hold(True)
         for i in range(len(self.zcoord)):
             n, bins, patches = plt.hist(
                 self.zcoord[i],
                 self.bins,
-                normed=1,
+                density=True,
                 facecolor=self.colors[i],
                 alpha=0.5,
             )
@@ -2758,6 +2755,8 @@ class View(QtWidgets.QLabel):
     def dbscan(self):
         radius, min_density, ok = DbscanDialog.getParams()
         if ok:
+            status = lib.StatusDialog("Applying DBSCAN. This may take a while..", self)
+
             for locs_path in (self.locs_paths):
                 locs, locs_info = io.load_locs(locs_path)
                 clusters, locs = postprocess.dbscan(locs, radius, min_density)
@@ -2778,9 +2777,12 @@ class View(QtWidgets.QLabel):
                       "\n" + base + "_dbclusters.hdf5"
                 )
 
+            status.close()
+
     def hdbscan(self):
         min_cluster, min_samples, ok = HdbscanDialog.getParams()
         if ok:
+            status = lib.StatusDialog("Applying HDBSCAN. This may take a while..", self)
             for locs_path in (self.locs_paths):
                 locs, locs_info = io.load_locs(locs_path)
                 clusters, locs = postprocess.hdbscan(locs, min_cluster, min_samples)
@@ -2800,6 +2802,8 @@ class View(QtWidgets.QLabel):
                     self, "HDBSCAN", "Clustering executed. Results are saved in: \n" + base + "_hdbscan.hdf5" +
                       "\n" + base + "_hdbclusters.hdf5"
                 )
+
+            status.close()
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
         """
@@ -3587,11 +3591,11 @@ class View(QtWidgets.QLabel):
             self.current_trace_y = yvec
             self.channel = channel
 
-            canvas = GenericPlotWindow("Trace")
+            self.canvas = GenericPlotWindow("Trace")
 
-            canvas.figure.clear()
+            self.canvas.figure.clear()
             # Three subplots sharing both x/y axes
-            ax1, ax2, ax3 = canvas.figure.subplots(3, sharex=True)
+            ax1, ax2, ax3 = self.canvas.figure.subplots(3, sharex=True)
 
             ax1.scatter(locs["frame"], locs["x"], s=2)
             ax1.set_title("X-pos vs frame")
@@ -3610,11 +3614,11 @@ class View(QtWidgets.QLabel):
             ax3.set_ylim([-0.1, 1.1])
 
             self.exportTraceButton = QtWidgets.QPushButton("Export (*.csv)")
-            canvas.toolbar.addWidget(self.exportTraceButton)
+            self.canvas.toolbar.addWidget(self.exportTraceButton)
             self.exportTraceButton.clicked.connect(self.exportTrace)
 
-            canvas.canvas.draw()
-            canvas.show()
+            self.canvas.canvas.draw()
+            self.canvas.show()
 
     def exportTrace(self):
         trace = np.array([self.current_trace_x, self.current_trace_y])
