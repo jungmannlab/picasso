@@ -12,7 +12,7 @@ import traceback
 from math import ceil
 import copy
 import time
-# from icecream import ic
+from icecream import ic
 import copy
 from functools import partial
 
@@ -2051,6 +2051,10 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
         self.pick_annotation.stateChanged.connect(self.update_scene_with_cache)
         pick_grid.addWidget(self.pick_annotation, 3, 0)
 
+        self.point_picks = QtWidgets.QCheckBox("Display circular picks as points")
+        self.point_picks.stateChanged.connect(self.update_scene_with_cache)
+        pick_grid.addWidget(self.point_picks, 4, 0)
+
     def on_pick_dimension_changed(self, *args):
         self.window.view.index_blocks = [
             None for _ in self.window.view.index_blocks
@@ -3206,17 +3210,28 @@ class View(QtWidgets.QLabel):
         image = image.copy()
         t_dialog = self.window.tools_settings_dialog
         if self._pick_shape == "Circle":
-            d = t_dialog.pick_diameter.value()
-            d *= self.width() / self.viewport_width()
-            # d = int(round(d))
-            painter = QtGui.QPainter(image)
-            painter.setPen(QtGui.QColor("yellow"))
-            for i, pick in enumerate(self._picks):
-                cx, cy = self.map_to_view(*pick)
-                painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
-                if t_dialog.pick_annotation.isChecked():
-                    painter.drawText(cx + d / 2, cy + d / 2, str(i))
-            painter.end()
+            if t_dialog.point_picks.isChecked():
+                painter = QtGui.QPainter(image)
+                painter.setBrush(QtGui.QBrush(QtGui.QColor("yellow")))
+                for i, pick in enumerate(self._picks):
+                    cx, cy = self.map_to_view(*pick)
+                    painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
+                    if t_dialog.pick_annotation.isChecked():
+                        painter.drawText(cx + 2, cy + 2, str(i))
+                painter.end()
+
+            else:
+                d = t_dialog.pick_diameter.value()
+                d *= self.width() / self.viewport_width()
+                # d = int(round(d))
+                painter = QtGui.QPainter(image)
+                painter.setPen(QtGui.QColor("yellow"))
+                for i, pick in enumerate(self._picks):
+                    cx, cy = self.map_to_view(*pick)
+                    painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
+                    if t_dialog.pick_annotation.isChecked():
+                        painter.drawText(cx + d / 2, cy + d / 2, str(i))
+                painter.end()
         elif self._pick_shape == "Rectangle":
             w = t_dialog.pick_width.value()
             w *= self.width() / self.viewport_width()
@@ -5461,7 +5476,7 @@ class View(QtWidgets.QLabel):
         self.update_scene()
 
     def save_picked_locs(self, path, channel):
-        locs = self.picked_locs(channel, add_group=False)
+        locs = self.picked_locs(channel, add_group=True)
         locs = stack_arrays(locs, asrecarray=True, usemask=False)
         if locs is not None:
             pick_info = {
@@ -6432,8 +6447,11 @@ class View_Rotation(View):
         self.angx = 0
         self.angy = 0
         self._rotation = []
+        self._centers = []
+        self._centers_color = ""
         self.display_legend = False
         self.display_rotation = True
+        self.point_color_warning = True
         self.setMaximumSize(400,400)
 
     def render_scene(
@@ -6617,6 +6635,8 @@ class View_Rotation(View):
             self.qimage_no_picks = self.draw_legend(self.qimage_no_picks, rotation=True)
         if self.display_rotation:
             self.qimage_no_picks = self.draw_rotation(self.qimage_no_picks)
+        if len(self._centers) > 0:
+            self.qimage_no_picks = self.draw_points_rotation(self.qimage_no_picks)
         self.qimage = self.draw_points(self.qimage_no_picks)
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
@@ -6670,6 +6690,60 @@ class View_Rotation(View):
         painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 0, 1)))
         painter.drawLine(line_z)
         return image
+
+    def draw_points_rotation(self, image):
+        painter = QtGui.QPainter(image)
+        # delete the error with getting rid of the group color while saving picked locs
+        # add the other colors
+
+        if type(self._centers_color) == str:
+            if len(self._centers_color) > 0:
+                if self.isHexadecimal(self._centers_color):
+                    r = int(self._centers_color[1:3], 16) / 255.
+                    g = int(self._centers_color[3:5], 16) / 255.
+                    b = int(self._centers_color[5:], 16) / 255.
+                    painter.setBrush(QtGui.QBrush(QtGui.QColor.fromRgbF(r, g, b, 1)))
+                elif self._centers_color in ["red", "yellow", "blue", "green",
+                                             "white", "black", "cyan", 
+                                             "magenta", "gray"]:
+                    painter.setBrush(QtGui.QBrush(QtGui.QColor(self._centers_color)))
+                else:
+                    self.print_points_warning()
+                    painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
+            else:
+                self.print_points_warning()
+                painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
+        else:
+            self.print_points_warning()
+            painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
+
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        centers = self._centers.copy()
+        centers[:,0] -= x_min + (x_max-x_min)/2
+        centers[:,1] -= y_min + (y_max-y_min)/2
+        centers[:,2] /= self.window.display_settings_dlg.pixelsize.value()
+        R = render.rotation_matrix(self.angx, self.angy)
+        centers = R.apply(centers)
+        centers[:,0] += x_min + (x_max-x_min)/2
+        centers[:,1] += y_min + (y_max-y_min)/2
+        centers[:,2] *= self.window.display_settings_dlg.pixelsize.value()
+
+        #translate the x and y values from centers to the pixels of the display
+        centers[:,0] = (centers[:,0] - x_min) * (self.width() / (x_max - x_min))
+        centers[:,1] = (centers[:,1] - y_min) * (self.height() / (y_max - y_min))
+
+        for coord in centers:
+            x = coord[0]
+            y = coord[1]
+            painter.drawEllipse(QtCore.QPoint(x, y), 3, 3)
+        return image
+
+    def print_points_warning(self):
+        if self.point_color_warning:
+            message = ("Unrecognized color of the points.  The default color"
+                      " will be used.")
+            self.point_color_warning = False
+            QtWidgets.QMessageBox.information(self, "Warning", message)
 
     def add_legend(self):
         if self.display_legend:
@@ -6806,6 +6880,20 @@ class View_Rotation(View):
             if len_old_locs != len(self.locs[0]):
                 group_color = self.get_group_color(self.locs)
         self.update_scene(viewport=new_viewport, group_color=group_color)
+
+    def open_points(self, path):
+        with open(path, "r") as f:
+            points = yaml.load(f)
+        if not "Centers" in points:
+            raise ValueError("Unrecognized points file")
+        self._centers = np.asarray(points["Centers"])
+        try: 
+            self._centers_color = points["Color"]
+            if self._centers_color == "grey":
+                self._centers_color = "gray" #something for the British users :)
+        except:
+            pass
+        self.update_scene()
 
     def mouseMoveEvent(self, event):
         if self._mode == "Rotate":
@@ -8150,6 +8238,8 @@ class RotateDialog(Window):
         save_action = file_menu.addAction("Save rotated localizations")
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.save_locs_rotated)
+        open_points_action = file_menu.addAction("Load points")
+        open_points_action.triggered.connect(self.open_points)
 
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings")
@@ -8244,6 +8334,13 @@ class RotateDialog(Window):
 
         if opening:
             self.view_rot.rotation_input(opening=True, ang=ang)
+
+    def open_points(self):
+        path, ext = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load points", filter="*.yaml"
+        )
+        if path:
+            self.view_rot.open_points(path)
 
     def move_picks(self, dx, dy):
         if self.view._pick_shape == "Circle":
