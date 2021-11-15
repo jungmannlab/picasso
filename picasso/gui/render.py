@@ -2702,6 +2702,76 @@ class SlicerDialog(QtWidgets.QDialog):
                     progress.set_value(i)
                 progress.close()
 
+class Filter_MLP_Dialog(QtWidgets.QDialog):
+    def __init__(self, window, model, model_info):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Filter picks with an MLP")
+        self.setModal(False)
+        self.model = model
+        # self.model_info = model_info
+        self.all_picks = self.window.view._picks
+        self.classes = model_info["Classes"]
+        self.pick_radius = model_info["Pick Diameter"] / 2
+        self.oversampling = model_info["Oversampling"]
+        self.predictions = []
+        self.probabilites = []
+        self.to_keep = []
+
+        self.layout = QtWidgets.QGridLayout()
+        self.setLayout(self.layout)
+        self.classes_box = QtWidgets.QComboBox(self)
+        for value in self.classes.values():
+            self.classes_box.addItem(value)
+
+        self.prob_thresh = QtWidgets.QDoubleSpinBox()
+        self.prob_thresh.setDecimals(5)
+        self.prob_thresh.setRange(0.0, 1.0)
+        self.prob_thresh.setValue(0.995)
+
+        self.predict_button = QtWidgets.QPushButton("Predict")
+        self.predict_button.clicked.connect(self.update_scene)
+
+        self.layout.addWidget(QtWidgets.QLabel("Choose class:"), 0, 0)
+        self.layout.addWidget(self.classes_box, 0, 1)
+        self.layout.addWidget(QtWidgets.QLabel("Filter probabilities:"), 1, 0)
+        self.layout.addWidget(self.prob_thresh, 1, 1)
+        self.layout.addWidget(self.predict_button, 2, 1)
+
+    def update_scene(self):
+        # if not predicted, run nanotron
+        if len(self.predictions) == 0:
+            self.predict()
+        self.update_picks()
+        self.window.view.update_scene()
+        self.window.info_dialog.n_picks.setText(str(len(self.to_keep)))
+        self.to_keep = []
+
+    def predict(self):
+        for channel in range(len(self.window.view.locs)): #todo: fix the multichannel thing
+            for i, pick in enumerate(self.all_picks):
+                pred, prob = nanotron.predict_structure(self.model,
+                self.window.view.locs[channel], i, self.pick_radius, self.oversampling, 
+                picks=pick
+                )
+                self.predictions.append(pred[0])
+                self.probabilites.append(prob[0])
+
+    def update_picks(self):
+        # get the index of the currently chosen class
+        # this is used later for indexing the probabilities of predicitions
+        classes_names = np.array(list(self.classes.values()))
+        idx = np.where(classes_names == self.classes_box.currentText())
+        idx = idx[0][0]
+        # find which picks are to be kept
+        for i in range(len(self.all_picks)):
+            check_prob = self.probabilites[i][idx] >= self.prob_thresh.value()
+            check_class = self.classes[self.predictions[i]] == self.classes_box.currentText()
+            if check_prob and check_class:
+                self.to_keep.append(i)
+        self.window.view._picks = []
+        for i in self.to_keep:
+            self.window.view._picks.append(self.all_picks[i])
 
 class View(QtWidgets.QLabel):
     def __init__(self, window):
@@ -3163,6 +3233,7 @@ class View(QtWidgets.QLabel):
     @check_pick
     def clear_picks(self):
         self._picks = []
+        self.window.info_dialog.n_picks.setText(str(len(self._picks)))
         self.update_scene(picks_only=True)
 
     def dragEnterEvent(self, event):
@@ -5179,69 +5250,24 @@ class View(QtWidgets.QLabel):
 
     def nanotron_filter(self):
         # load the model 
+        if self._pick_shape != "Circle":
+            raise ValueError("The tool is compatible with circular picks only.")
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load model file", filter="*.sav", directory=None)
         if path:
             try:
-                self.model = joblib.load(path)
-                self.nanotron_log["Model Path"] = path
+                model = joblib.load(path)
             except Exception:
                 raise ValueError("No model file loaded.")
             try:
                 base, ext = os.path.splitext(path)
                 with open(base + ".yml", "r") as f:
-                    self.model_info = yaml.load(f, Loader=yaml.FullLoader)
-                    self.classes = self.model_info["Classes"]
-                    self.model_loaded = True
-                # if self.locs_loaded is True:
-                #     self.predict_btn.setDisabled(False)
+                    model_info = yaml.load(f, Loader=yaml.FullLoader)
             except io.NoMetadataFileError:
                 return
-
-        # open a new window (similar to choose segmentation with undrifting)
-        # where you choose which class should be filtered and also filter the 
-        # probabilities (that will be changed later)
-
-        #todo: apply this filter probability later so that it is saved and one
-        #can verify interactively which probabilty works best
-        #todo: assert that the picks are circular and say that recnatuglar are not supported
-
-            class_item, ok = QtWidgets.QInputDialog.getItem(
-                self, "Class", "Choose class to be filtered:", self.classes.values()
-            )
-            if ok:
-                prob_thresh, ok = QtWidgets.QInputDialog.getDouble(
-                    self, "Filter probability", "Choose filter probability:", 
-                    0.995, 0.0, 1.0, 5
-                )
-                if ok:
-
-        # run the prediciton using nanotron.predict_structure (what inputs?)
-                    pick_radius = self.model_info["Pick Diameter"] / 2
-                    oversampling = self.model_info["Oversampling"]
-                    to_delete = []
-                    for channel in range(len(self.locs)): #fix the multichannel thing
-                        # picked_locs = self.picked_locs(channel, add_group=False)
-                        for i, pick in enumerate(self._picks):
-                            pred, prob = nanotron.predict_structure(self.model,
-                            self.locs[channel], i, pick_radius, oversampling, picks=pick) #todo: get the inputs right
-
-                            #find the index of the class of interest
-                            ic(prob)
-                            values = np.array(list(self.classes.values()))
-                            idx = np.where(values==class_item)
-                            idx = idx[0][0]
-
-                            #todo: what is the value of pred? and add the if statement for that!
-                            if prob[0][idx] < prob_thresh or self.classes[pred[0]] != class_item: #indexing probabilities does not work
-                                to_delete.append(i)
-                    
-                    # delete the picks that were filtered out and update the scene
-                    to_delete = np.array(to_delete)
-                    for i in to_delete:
-                        self.remove_picks(self._picks[i])
-                        to_delete -= 1
-                    self.update_scene()
+            self.filter_dialog = Filter_MLP_Dialog(self.window, model, 
+                model_info)
+            self.filter_dialog.show()
 
     def render_scene(
         self, autoscale=False, use_cache=False, cache=True, viewport=None
