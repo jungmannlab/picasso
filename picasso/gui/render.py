@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 import yaml
-
+import joblib
 
 from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -41,7 +41,7 @@ from tqdm import tqdm
 
 import colorsys
 
-from .. import imageprocess, io, lib, postprocess, render
+from .. import imageprocess, io, lib, postprocess, render, nanotron
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -2735,6 +2735,7 @@ class View(QtWidgets.QLabel):
         self.currentdrift = []
         self.x_render_cache = []
         self.x_render_state = False
+        self.nanotron_log = {}
 
     def is_consecutive(l):
         setl = set(l)
@@ -5079,7 +5080,6 @@ class View(QtWidgets.QLabel):
                 if keep_group_color:
                     self.locs[0] = lib.append_to_rec(self.locs[0], self.group_color, "group_color")
 
-
                 index_blocks = self.get_index_blocks(channel, all_locs=all_locs, d=d)
 
                 for i, pick in enumerate(self._picks):
@@ -5176,6 +5176,72 @@ class View(QtWidgets.QLabel):
     def remove_points(self, position):
         self._points = []
         self.update_scene()
+
+    def nanotron_filter(self):
+        # load the model 
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load model file", filter="*.sav", directory=None)
+        if path:
+            try:
+                self.model = joblib.load(path)
+                self.nanotron_log["Model Path"] = path
+            except Exception:
+                raise ValueError("No model file loaded.")
+            try:
+                base, ext = os.path.splitext(path)
+                with open(base + ".yml", "r") as f:
+                    self.model_info = yaml.load(f, Loader=yaml.FullLoader)
+                    self.classes = self.model_info["Classes"]
+                    self.model_loaded = True
+                # if self.locs_loaded is True:
+                #     self.predict_btn.setDisabled(False)
+            except io.NoMetadataFileError:
+                return
+
+        # open a new window (similar to choose segmentation with undrifting)
+        # where you choose which class should be filtered and also filter the 
+        # probabilities (that will be changed later)
+
+        #todo: apply this filter probability later so that it is saved and one
+        #can verify interactively which probabilty works best
+        #todo: assert that the picks are circular and say that recnatuglar are not supported
+
+            class_item, ok = QtWidgets.QInputDialog.getItem(
+                self, "Class", "Choose class to be filtered:", self.classes.values()
+            )
+            if ok:
+                prob_thresh, ok = QtWidgets.QInputDialog.getDouble(
+                    self, "Filter probability", "Choose filter probability:", 
+                    0.995, 0.0, 1.0, 5
+                )
+                if ok:
+
+        # run the prediciton using nanotron.predict_structure (what inputs?)
+                    pick_radius = self.model_info["Pick Diameter"] / 2
+                    oversampling = self.model_info["Oversampling"]
+                    to_delete = []
+                    for channel in range(len(self.locs)): #fix the multichannel thing
+                        # picked_locs = self.picked_locs(channel, add_group=False)
+                        for i, pick in enumerate(self._picks):
+                            pred, prob = nanotron.predict_structure(self.model,
+                            self.locs[channel], i, pick_radius, oversampling, picks=pick) #todo: get the inputs right
+
+                            #find the index of the class of interest
+                            ic(prob)
+                            values = np.array(list(self.classes.values()))
+                            idx = np.where(values==class_item)
+                            idx = idx[0][0]
+
+                            #todo: what is the value of pred? and add the if statement for that!
+                            if prob[0][idx] < prob_thresh or self.classes[pred[0]] != class_item: #indexing probabilities does not work
+                                to_delete.append(i)
+                    
+                    # delete the picks that were filtered out and update the scene
+                    to_delete = np.array(to_delete)
+                    for i in to_delete:
+                        self.remove_picks(self._picks[i])
+                        to_delete -= 1
+                    self.update_scene()
 
     def render_scene(
         self, autoscale=False, use_cache=False, cache=True, viewport=None
@@ -7105,6 +7171,8 @@ class Window(QtWidgets.QMainWindow):
         pick_similar_action = tools_menu.addAction("Pick similar")
         pick_similar_action.setShortcut("Ctrl+Shift+P")
         pick_similar_action.triggered.connect(self.view.pick_similar)
+        nanotron_filter_action = tools_menu.addAction("Filter picks with an MLP")
+        nanotron_filter_action.triggered.connect(self.view.nanotron_filter)
         tools_menu.addSeparator()
         show_trace_action = tools_menu.addAction("Show trace")
         show_trace_action.setShortcut("Ctrl+R")
