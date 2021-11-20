@@ -2478,8 +2478,8 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         if self.blur_buttongroup.checkedId() == -5 or self.blur_buttongroup.checkedId() == -6:
             if self.ilp_warning:
                 self.ilp_warning = False
-                warning = ("Rotating with individual localization precision is very time consuming." 
-                           "Therefore, we recommend to firstly rotate the object using a different "
+                warning = ("Rotating with individual localization precision may be quite time consuming." 
+                           " Therefore, we recommend to firstly rotate the object using a different "
                            "blur method and then to apply individual localization precision.")
                 QtWidgets.QMessageBox.information(self, "Warning", warning)
         
@@ -5136,7 +5136,6 @@ class View(QtWidgets.QLabel):
     def picked_locs(self, channel, add_group=True, keep_group_color=False, 
         all_locs=False, d=None, w=None):
         """ Returns picked localizations in the specified channel """
-
         if len(self._picks):
             picked_locs = []
             progress = lib.ProgressDialog(
@@ -5941,7 +5940,6 @@ class View(QtWidgets.QLabel):
         self.pan_relative(-0.8, 0)
 
     def show_drift(self):
-        # Todo: Implement a check if there is drift already loaded and load
         channel = self.get_channel("Show drift")
         if channel is not None:
             drift = self._drift[channel]
@@ -6004,7 +6002,8 @@ class View(QtWidgets.QLabel):
                         rcc_progress.set_value,
                     )
                     finish_time = time.time()
-                    print("RCC drift estimate running time: ", np.round(finish_time-start_time, 1))
+                    print("RCC drift estimate running time [seconds]: ", 
+                        np.round(finish_time-start_time, 1))
                     self.locs[channel] = lib.ensure_sanity(locs, info)
                     self.index_blocks[channel] = None
                     self.add_drift(channel, drift)
@@ -6182,16 +6181,40 @@ class View(QtWidgets.QLabel):
             np.savetxt(
                 driftfile,
                 self._drift[channel],
-                header="dx\tdy\tdz",
+                # header="dx\tdy\tdz",
                 newline="\r\n",
             )
         else:
             np.savetxt(
                 driftfile,
                 self._drift[channel],
-                header="dx\tdy",
+                # header="dx\tdy",
                 newline="\r\n",
             )
+
+    def apply_drift(self):
+        # channel = self.get_channel("Undrift")
+        # if channel is not None:
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load drift file", filter="*.txt", directory=None)
+        if path:
+            drift = np.loadtxt(path, delimiter=' ')
+            if hasattr(self.locs[0], "z"):
+                drift = (drift[:,0], drift[:,1], drift[:,2])
+                drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f"), ("z", "f")])
+                self.locs[0].x -= drift.x[self.locs[0].frame]
+                self.locs[0].y -= drift.y[self.locs[0].frame]
+                self.locs[0].z -= drift.z[self.locs[0].frame]
+            else:
+                drift = (drift[:,0], drift[:,1])
+                drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
+                self.locs[0].x -= drift.x[self.locs[0].frame]
+                self.locs[0].y -= drift.y[self.locs[0].frame]
+            self._drift = [drift]
+            self._driftfiles = [path]
+            self.currentdrift = [copy.copy(drift)]
+            self.index_blocks[0] = None
+            self.update_scene()
 
     def unfold_groups(self):
         if not hasattr(self, "unfold_status"):
@@ -6533,7 +6556,7 @@ class View(QtWidgets.QLabel):
     def show_legend_files(self, state):
         print(state)
 
-class View_Rotation(View):
+class ViewRotation(View):
     def __init__(self, window):
         super().__init__(window)
         self.angx = 0
@@ -7212,7 +7235,6 @@ class Window(QtWidgets.QMainWindow):
         select_traces_action = tools_menu.addAction("Select picks (trace)")
         select_traces_action.triggered.connect(self.view.select_traces)
 
-        postprocess_menu = self.menu_bar.addMenu("Postprocess")
         plotpick_action = tools_menu.addAction("Select picks (XY scatter)")
         plotpick_action.triggered.connect(self.view.show_pick)
         plotpick3d_action = tools_menu.addAction("Select picks (XYZ scatter)")
@@ -7249,6 +7271,7 @@ class Window(QtWidgets.QMainWindow):
         mask_action = tools_menu.addAction("Mask image")
         mask_action.triggered.connect(self.mask_settings_dialog.init_dialog)
         # Drift oeprations
+        postprocess_menu = self.menu_bar.addMenu("Postprocess")
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.setShortcut("Ctrl+U")
         undrift_action.triggered.connect(self.view.undrift)
@@ -7271,6 +7294,9 @@ class Window(QtWidgets.QMainWindow):
 
         drift_action = postprocess_menu.addAction("Show drift")
         drift_action.triggered.connect(self.view.show_drift)
+
+        apply_drift_action = postprocess_menu.addAction("Apply drift from an external file")
+        apply_drift_action.triggered.connect(self.view.apply_drift)
 
         # Group related
         postprocess_menu.addSeparator()
@@ -8303,14 +8329,14 @@ class RotateDialog(Window):
     def __init__(self, locs, blur, color, group_color, 
         paths, d, w, view, dataset, opening=False, ang=None):
         super().__init__()
-        self.view_rot = View_Rotation(self)
+        self.view_rot = ViewRotation(self)
         self.setCentralWidget(self.view_rot)
         self.view = view
         self.view_rot._pick_shape = self.view._pick_shape
         self.group_color = group_color
         self.view_rot._mode = "Rotate"
         self.view_rot.locs = locs
-        self.view_rot.all_locs = copy.deepcopy(locs)
+        self.view_rot.all_locs = self.view.all_locs
         self.view_rot.index_blocks = self.view.index_blocks
         self.d = d
         self.w = w
