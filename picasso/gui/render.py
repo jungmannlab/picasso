@@ -1427,12 +1427,61 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
 
         self.canvas.draw()
 
+class ChangeFOV(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Change field of view")
+        self.setModal(False)
+        self.layout = QtWidgets.QGridLayout()
+        self.setLayout(self.layout)
+        self.layout.addWidget(QtWidgets.QLabel("X:"), 0, 0)
+        self.x_box = QtWidgets.QDoubleSpinBox()
+        self.x_box.setKeyboardTracking(False)
+        self.x_box.setRange(-100, 1e6)
+        self.layout.addWidget(self.x_box, 0, 1)
+        self.layout.addWidget(QtWidgets.QLabel("Y :"), 1, 0)
+        self.y_box = QtWidgets.QDoubleSpinBox()
+        self.y_box.setKeyboardTracking(False)
+        self.y_box.setRange(-100, 1e6)
+        self.layout.addWidget(self.y_box, 1, 1)
+        self.layout.addWidget(QtWidgets.QLabel("Width:"), 2, 0)
+        self.w_box = QtWidgets.QDoubleSpinBox()
+        self.w_box.setKeyboardTracking(False)
+        self.w_box.setRange(0, 1e3)
+        self.layout.addWidget(self.w_box, 2, 1)
+        self.layout.addWidget(QtWidgets.QLabel("Height:"), 3, 0)
+        self.h_box = QtWidgets.QDoubleSpinBox()
+        self.h_box.setKeyboardTracking(False)
+        self.h_box.setRange(0, 1e3)
+        self.layout.addWidget(self.h_box, 3, 1)
+        self.apply = QtWidgets.QPushButton("Apply")
+        self.layout.addWidget(self.apply, 4, 0)
+        self.apply.clicked.connect(self.update_scene)
+
+    def update_scene(self):
+        x_min = self.x_box.value()
+        y_min = self.y_box.value()
+        x_max = self.x_box.value() + self.w_box.value()
+        y_max = self.y_box.value() + self.h_box.value()
+        viewport = [(y_min, x_min), (y_max, x_max)]
+        self.window.view.update_scene(viewport=viewport)
+        self.window.info_dialog.xy_label.setText(
+            "{:.2f} / {:.2f} ".format(x_min, y_min)
+        )
+        self.window.info_dialog.wh_label.setText(
+            "{:.2f} / {:.2f} pixel".format(
+            self.w_box.value(), self.h_box.value()
+            )
+        )
+
 class InfoDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Info")
         self.setModal(False)
+        self.change_fov = ChangeFOV(self.window)
         vbox = QtWidgets.QVBoxLayout(self)
         # Display
         display_groupbox = QtWidgets.QGroupBox("Display")
@@ -1452,6 +1501,10 @@ class InfoDialog(QtWidgets.QDialog):
         display_grid.addWidget(QtWidgets.QLabel("View width / height:"), 3, 0)
         self.wh_label = QtWidgets.QLabel()
         display_grid.addWidget(self.wh_label, 3, 1)
+
+        self.change_display = QtWidgets.QPushButton("Change field of view")
+        display_grid.addWidget(self.change_display, 4, 0)
+        self.change_display.clicked.connect(self.change_fov.show)
 
         # Movie
         movie_groupbox = QtWidgets.QGroupBox("Movie")
