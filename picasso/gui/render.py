@@ -364,8 +364,10 @@ class DatasetDialog(QtWidgets.QDialog):
             colordrop.addItem(default_color)
         colordrop.setCurrentText(self.default_colors[index])
         
-        intensity = QtWidgets.QSpinBox(self)
-        intensity.setValue(1)
+        intensity = QtWidgets.QDoubleSpinBox(self)
+        intensity.setKeyboardTracking(False)
+        intensity.setDecimals(2)
+        intensity.setValue(1.00)
         colordisp = QtWidgets.QLabel("      ")
 
         palette = colordisp.palette()
@@ -2393,9 +2395,6 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
             self.set_dynamic_oversampling
         )
         general_grid.addWidget(self.dynamic_oversampling, 2, 1)
-        self.minimap = QtWidgets.QCheckBox("show minimap")
-        general_grid.addWidget(self.minimap, 3, 1)
-        self.minimap.stateChanged.connect(self.update_scene)
         # Contrast
         contrast_groupbox = QtWidgets.QGroupBox("Contrast")
         vbox.addWidget(contrast_groupbox)
@@ -3338,6 +3337,8 @@ class View(QtWidgets.QLabel):
             if t_dialog.point_picks.isChecked():
                 painter = QtGui.QPainter(image)
                 painter.setBrush(QtGui.QBrush(QtGui.QColor("yellow")))
+                if self.window.dataset_dialog.wbackground.isChecked():
+                    painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
                 for i, pick in enumerate(self._picks):
                     cx, cy = self.map_to_view(*pick)
                     painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
@@ -3351,6 +3352,8 @@ class View(QtWidgets.QLabel):
                 # d = int(round(d))
                 painter = QtGui.QPainter(image)
                 painter.setPen(QtGui.QColor("yellow"))
+                if self.window.dataset_dialog.wbackground.isChecked():
+                    painter.setPen(QtGui.QColor("red"))
                 for i, pick in enumerate(self._picks):
                     cx, cy = self.map_to_view(*pick)
                     painter.drawEllipse(cx - d / 2, cy - d / 2, d, d)
@@ -3362,6 +3365,8 @@ class View(QtWidgets.QLabel):
             w *= self.width() / self.viewport_width()
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QColor("yellow"))
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setPen(QtGui.QColor("red"))
             for i, pick in enumerate(self._picks):
                 start_x, start_y = self.map_to_view(*pick[0])
                 end_x, end_y = self.map_to_view(*pick[1])
@@ -3404,6 +3409,8 @@ class View(QtWidgets.QLabel):
         d = 20
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor("yellow"))
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("red"))
         cx = []
         cy = []
         ox = []
@@ -3459,6 +3466,8 @@ class View(QtWidgets.QLabel):
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
             painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setBrush(QtGui.QBrush(QtGui.QColor("black")))
             x = self.width() - length_displaypxl - 35
             y = self.height() - height - 20
             painter.drawRect(x, y, length_displaypxl + 0, height + 0)
@@ -3467,6 +3476,8 @@ class View(QtWidgets.QLabel):
                 font.setPixelSize(20)
                 painter.setFont(font)
                 painter.setPen(QtGui.QColor("white"))
+                if self.window.dataset_dialog.wbackground.isChecked():
+                    painter.setPen(QtGui.QColor("black"))
                 text_spacer = 40
                 text_width = length_displaypxl + 2 * text_spacer
                 text_height = text_spacer
@@ -3503,6 +3514,8 @@ class View(QtWidgets.QLabel):
                     font.setPixelSize(12)
                     painter.setFont(font)
                     painter.setPen(QtGui.QColor("white"))
+                    if self.window.dataset_dialog.wbackground.isChecked():
+                        painter.setPen(QtGui.QColor("black"))
                     text_spacer = 25
                     text_width = 1000
                     text_height = 15
@@ -3527,8 +3540,12 @@ class View(QtWidgets.QLabel):
             y = 20
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QColor("white"))
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setPen(QtGui.QColor("black"))
             painter.drawRect(x, y, length_minimap + 0, height_minimap + 0)
             painter.setPen(QtGui.QColor("yellow"))
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setPen(QtGui.QColor("red"))
             length = self.viewport_width() / movie_width * length_minimap
             height = self.viewport_height() / movie_height * height_minimap
             x_vp = self.viewport[0][1] / movie_width * length_minimap
@@ -6379,6 +6396,8 @@ class View(QtWidgets.QLabel):
                     pixmap.fill(QtCore.Qt.transparent)
                     painter = QtGui.QPainter(pixmap)
                     painter.setPen(QtGui.QColor("white"))
+                    if self.window.dataset_dialog.wbackground.isChecked():
+                        painter.setPen(QtGui.QColor("black"))
                     offset = (pixmap_size - diameter) / 2
                     painter.drawEllipse(offset, offset, diameter, diameter)
                     painter.end()
@@ -6614,13 +6633,14 @@ class ViewRotation(View):
         super().__init__(window)
         self.angx = 0
         self.angy = 0
+        self.angz = 0
         self._rotation = []
         self._centers = []
         self._centers_color = ""
         self.display_legend = False
         self.display_rotation = True
         self.point_color_warning = True
-        self.setMaximumSize(400,400)
+        self.setMaximumSize(500,500)
 
     def render_scene(
         self, autoscale=False, viewport=None, group_color=None
@@ -6665,7 +6685,7 @@ class ViewRotation(View):
             # and later decide to keep them or not
             renderings.append(render.render(locsall[i], **kwargs))
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        renderings = [render.render(_, **kwargs, ang=(self.angx, self.angy), pixelsize=pixelsize) for _ in locsall]
+        renderings = [render.render(_, **kwargs, ang=(self.angx, self.angy, self.angz), pixelsize=pixelsize) for _ in locsall]
         n_locs = sum([_[0] for _ in renderings])
         image = np.array([_[1] for _ in renderings])
         self.n_locs = n_locs
@@ -6749,7 +6769,7 @@ class ViewRotation(View):
                 return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs)
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
         n_locs, image = render.render(locs, **kwargs, info=self.infos[0], 
-            ang=(self.angx, self.angy), pixelsize=pixelsize)
+            ang=(self.angx, self.angy, self.angz), pixelsize=pixelsize)
         self.n_locs = n_locs
         self.image = image
         image = self.scale_contrast(image, autoscale=autoscale)
@@ -6830,7 +6850,7 @@ class ViewRotation(View):
         zz = length
         #rotate these points
         coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
-        R = render.rotation_matrix(self.angx, self.angy)
+        R = render.rotation_matrix(self.angx, self.angy, self.angz)
         coordinates = R.apply(coordinates)
         (xx, xy, xz) = coordinates[0]
         (yx, yy, yz) = coordinates[1]
@@ -6890,7 +6910,7 @@ class ViewRotation(View):
         centers[:,0] -= x_min + (x_max-x_min)/2
         centers[:,1] -= y_min + (y_max-y_min)/2
         centers[:,2] /= self.window.display_settings_dlg.pixelsize.value()
-        R = render.rotation_matrix(self.angx, self.angy)
+        R = render.rotation_matrix(self.angx, self.angy, self.angz)
         centers = R.apply(centers)
         centers[:,0] += x_min + (x_max-x_min)/2
         centers[:,1] += y_min + (y_max-y_min)/2
@@ -6932,6 +6952,7 @@ class ViewRotation(View):
         if opening:
             self.angx = ang[0]
             self.angy = ang[1]
+            self.angz = ang[2]
         else:
             angx, ok = QtWidgets.QInputDialog.getDouble(
                     self, "Rotation angle x", "Angle x (degrees):", 0, decimals=2
@@ -6941,8 +6962,13 @@ class ViewRotation(View):
                         self, "Rotation angle y", "Angle y (degrees):", 0, decimals=2
                     )
                 if ok2:
-                    self.angx += np.pi * angx/180
-                    self.angy += np.pi * angy/180
+                    angz, ok3 = QtWidgets.QInputDialog.getDouble(
+                            self, "Rotation angle z", "Angle z (degrees):", 0, decimals=2
+                            )
+                    if ok3:
+                        self.angx += np.pi * angx/180
+                        self.angy += np.pi * angy/180
+                        self.angz += np.pi * angz/180
 
         # This is to avoid dividing by zero, when the angles are 90 deg 
         # and something is divided by cosines
@@ -6950,12 +6976,15 @@ class ViewRotation(View):
             self.angx += 0.00001
         if self.angy == np.pi / 2:
             self.angy += 0.00001
+        if self.angz == np.pi / 2:
+            self.angz += 0.00001
 
         self.update_scene()
 
     def delete_rotation(self):
         self.angx = 0
         self.angy = 0
+        self.angz = 0
         self.update_scene()
 
     def fit_in_view_rotated(self, get_viewport=False):
@@ -7085,8 +7114,13 @@ class ViewRotation(View):
                 rel_pos_x = self._rotation[-1][0] - self._rotation[-2][0]
                 rel_pos_y = self._rotation[-1][1] - self._rotation[-2][1]
 
-                self.angx += float(2 * np.pi * rel_pos_y/height)
-                self.angy += float(2 * np.pi * rel_pos_x/width)
+                modifiers = QtWidgets.QApplication.keyboardModifiers()
+                if modifiers == QtCore.Qt.ControlModifier:
+                    self.angy += float(2 * np.pi * rel_pos_x/width)
+                    self.angz += float(2 * np.pi * rel_pos_y/height)
+                else:
+                    self.angx += float(2 * np.pi * rel_pos_y/height)
+                    self.angy += float(2 * np.pi * rel_pos_x/width)
 
                 self.update_scene()
 
@@ -8138,7 +8172,8 @@ class Window(QtWidgets.QMainWindow):
                 w = self.view.infos[0][-1]["w"]
                 angx = self.view.infos[0][-1]["angx"]
                 angy = self.view.infos[0][-1]["angy"]
-            self.rot_win(opening=True, d=d, w=w, angx=angx, angy=angy)
+                angz = self.view.infos[0][-1]["angz"]
+            self.rot_win(opening=True, d=d, w=w, angx=angx, angy=angy, angz=angz)
             self.remove_locs()
 
     def resizeEvent(self, event):
@@ -8326,12 +8361,12 @@ class Window(QtWidgets.QMainWindow):
         self.menu_bar.clear() #otherwise the menu bar is doubled
         self.initUI()
 
-    def rotate_locs(self, locs, angx, angy):
+    def rotate_locs(self, locs, angx, angy, angz):
         x_min = 0
         y_min = 0
         x_max = self.view.infos[0][0]["Width"]
         y_max = self.view.infos[0][0]["Height"]
-        ang = (angx, angy)
+        ang = (angx, angy, angz)
         pixelsize = self.display_settings_dlg.pixelsize.value()
         x, y, z = render.locs_rotation(locs, x_min, x_max, 
             y_min, y_max, 1, ang, pixelsize, saving=True) 
@@ -8342,7 +8377,7 @@ class Window(QtWidgets.QMainWindow):
 
         return locs
 
-    def rot_win(self, opening=False, d=None, w=None, angx=None, angy=None):
+    def rot_win(self, opening=False, d=None, w=None, angx=None, angy=None, angz=None):
         if len(self.view._picks) == 0:
             raise ValueError("Pick a region to rotate.")
         elif len(self.view._picks) > 1:
@@ -8374,11 +8409,13 @@ class Window(QtWidgets.QMainWindow):
         else:
             group_color = None
 
-        window = RotateDialog(locs, blur, color, group_color, 
-            paths, d, w, self.view, self.dataset_dialog, opening=opening, ang=(angx,angy))
+        window = RotateWindow(locs, blur, color, group_color, 
+            paths, d, w, self.view, self.dataset_dialog, opening=opening, 
+            ang=(angx, angy, angz),
+        )
         window.show()
 
-class RotateDialog(Window):
+class RotateWindow(Window):
     def __init__(self, locs, blur, color, group_color, 
         paths, d, w, view, dataset, opening=False, ang=None):
         super().__init__()
@@ -8494,7 +8531,6 @@ class RotateDialog(Window):
             QtCore.Qt.KeepAspectRatioByExpanding,
         )
         self.qimage_no_picks = self.view_rot.draw_scalebar(qimage)
-        self.qimage_no_picks = self.view_rot.draw_minimap(self.qimage_no_picks)
         self.qimage = self.view_rot.draw_points(self.qimage_no_picks)
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.view_rot.setPixmap(pixmap)
@@ -8565,7 +8601,8 @@ class RotateDialog(Window):
             base, ext = os.path.splitext(self.paths[channel])
             angx = self.view_rot.angx * 180 / np.pi
             angy = self.view_rot.angy * 180 / np.pi
-            out_path = base + "_rotated_{}_{}.hdf5".format(int(angx), int(angy))
+            angz = self.view_rot.angz * 180 / np.pi
+            out_path = base + "_rotated_{}_{}_{}.hdf5".format(int(angx), int(angy), int(angz))
             path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save localizations", out_path, filter="*.hdf5"
             )
@@ -8582,6 +8619,7 @@ class RotateDialog(Window):
                         "w": self.w,
                         "angx": self.view_rot.angx,
                         "angy": self.view_rot.angy,
+                        "angz": self.view_rot.angz,
                     }
                 ]
                 info = self.view.infos[channel] + new_info

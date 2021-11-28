@@ -160,11 +160,12 @@ def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
 @_numba.jit(nopython=True, nogil=True)
 def _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang):
 
-    (angx, angy) = ang
+    (angx, angy, angz) = ang
 
-    rot_mat_x = _np.array([[1.0,0.0,0.0],[0.0,_np.cos(angx),_np.sin(angx)],[0.0,-_np.sin(angx), _np.cos(angx)]])
+    rot_mat_x = _np.array([[1.0,0.0,0.0],[0.0,_np.cos(angx),_np.sin(angx)],[0.0,-_np.sin(angx),_np.cos(angx)]])
     rot_mat_y = _np.array([[_np.cos(angy),0.0,_np.sin(angy)],[0.0,1.0,0.0],[-_np.sin(angy),0.0,_np.cos(angy)]])
-    rot_matrix = rot_mat_x @ rot_mat_y
+    rot_mat_z = _np.array([[_np.cos(angz),-_np.sin(angz),0.0],[_np.sin(angz),_np.cos(angz),0.0],[0.0,0.0,1.0]])
+    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z
     rot_matrixT = _np.transpose(rot_matrix)
 
     for x_, y_, z_, sx_, sy_, sz_ in zip(x, y, z, sx, sy, sz):
@@ -390,13 +391,14 @@ def n_segments(info, segmentation):
     n_frames = info[0]["Frames"]
     return int(_np.round(n_frames / segmentation))
 
-def rotation_matrix(angx, angy, raw=False):
+def rotation_matrix(angx, angy, angz, raw=False):
     #gives the rotation matrix which then can be applied to a (N,3) localization array
     rot_mat_x = _np.array([[1,0,0],[0,_np.cos(angx),_np.sin(angx)],[0,-_np.sin(angx), _np.cos(angx)]])
     rot_mat_y = _np.array([[_np.cos(angy),0,_np.sin(angy)],[0,1,0],[-_np.sin(angy),0,_np.cos(angy)]])
-    rotation = Rotation.from_matrix(rot_mat_x @ rot_mat_y)
+    rot_mat_z = _np.array([[_np.cos(angz),-_np.sin(angz),0.0],[_np.sin(angz),_np.cos(angz),0.0],[0.0,0.0,1.0]])
+    rotation = Rotation.from_matrix(rot_mat_x @ rot_mat_y @ rot_mat_z)
     if raw:
-        return rot_mat_x @ rot_mat_y
+        return rot_mat_x @ rot_mat_y @ rot_mat_z
     else:
         return rotation
 
@@ -408,7 +410,7 @@ def locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling,
     locs_coord[:,0] -= x_min + (x_max-x_min)/2
     locs_coord[:,1] -= y_min + (y_max-y_min)/2
 
-    R = rotation_matrix(ang[0], ang[1])
+    R = rotation_matrix(ang[0], ang[1], ang[2])
     locs_coord = R.apply(locs_coord)
 
     locs_coord[:,0] += x_min + (x_max-x_min)/2
