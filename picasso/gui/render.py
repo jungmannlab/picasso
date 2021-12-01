@@ -2755,7 +2755,7 @@ class SlicerDialog(QtWidgets.QDialog):
                 progress.close()
 
 class Filter_MLP_Dialog(QtWidgets.QDialog):
-    def __init__(self, window, model, model_info):
+    def __init__(self, window, model, model_info, channel):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Filter picks with an MLP")
@@ -2800,14 +2800,12 @@ class Filter_MLP_Dialog(QtWidgets.QDialog):
         self.to_keep = []
 
     def predict(self):
-        for channel in range(len(self.window.view.locs)): #todo: fix the multichannel thing
-            for i, pick in enumerate(self.all_picks):
-                pred, prob = nanotron.predict_structure(self.model,
-                self.window.view.locs[channel], i, self.pick_radius, self.oversampling, 
-                picks=pick
-                )
-                self.predictions.append(pred[0])
-                self.probabilites.append(prob[0])
+        for i, pick in enumerate(self.all_picks):
+            pred, prob = nanotron.predict_structure(self.model,
+            self.window.view.locs[channel], i, self.pick_radius, self.oversampling, 
+            picks=pick)
+            self.predictions.append(pred[0])
+            self.probabilites.append(prob[0])
 
     def update_picks(self):
         # get the index of the currently chosen class
@@ -5321,22 +5319,24 @@ class View(QtWidgets.QLabel):
         # load the model 
         if self._pick_shape != "Circle":
             raise ValueError("The tool is compatible with circular picks only.")
-        path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load model file", filter="*.sav", directory=None)
-        if path:
-            try:
-                model = joblib.load(path)
-            except Exception:
-                raise ValueError("No model file loaded.")
-            try:
-                base, ext = os.path.splitext(path)
-                with open(base + ".yml", "r") as f:
-                    model_info = yaml.load(f, Loader=yaml.FullLoader)
-            except io.NoMetadataFileError:
-                return
-            self.filter_dialog = Filter_MLP_Dialog(self.window, model, 
-                model_info)
-            self.filter_dialog.show()
+        channel = self.get_channel("Choose channel to filter")
+        if channel is not None:
+            path, exe = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load model file", filter="*.sav", directory=None)
+            if path:
+                try:
+                    model = joblib.load(path)
+                except Exception:
+                    raise ValueError("No model file loaded.")
+                try:
+                    base, ext = os.path.splitext(path)
+                    with open(base + ".yml", "r") as f:
+                        model_info = yaml.load(f, Loader=yaml.FullLoader)
+                except io.NoMetadataFileError:
+                    return
+                self.filter_dialog = Filter_MLP_Dialog(self.window, model, 
+                    model_info, channel)
+                self.filter_dialog.show()
 
     def render_scene(
         self, autoscale=False, use_cache=False, cache=True, viewport=None
