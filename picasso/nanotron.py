@@ -66,10 +66,12 @@ def roi_to_img(locs, pick, radius, oversampling, picks=None):
         print('viewport: {}'.format(viewport))
 
     # Render locs with Picasso render function
-    len_x, pick_img = render.render(pick_locs, viewport=viewport,
-                                    oversampling=oversampling,
-                                    blur_method='smooth')
-
+    try: 
+        len_x, pick_img = render.render(pick_locs, viewport=viewport,
+                                        oversampling=oversampling,
+                                        blur_method='smooth')
+    except:
+        pass
     return pick_img
 
 

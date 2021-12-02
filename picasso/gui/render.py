@@ -2761,11 +2761,11 @@ class Filter_MLP_Dialog(QtWidgets.QDialog):
         self.setWindowTitle("Filter picks with an MLP")
         self.setModal(False)
         self.model = model
-        # self.model_info = model_info
         self.all_picks = self.window.view._picks
         self.classes = model_info["Classes"]
         self.pick_radius = model_info["Pick Diameter"] / 2
         self.oversampling = model_info["Oversampling"]
+        self.channel = channel
         self.predictions = []
         self.probabilites = []
         self.to_keep = []
@@ -2800,12 +2800,25 @@ class Filter_MLP_Dialog(QtWidgets.QDialog):
         self.to_keep = []
 
     def predict(self):
-        for i, pick in enumerate(self.all_picks):
-            pred, prob = nanotron.predict_structure(self.model,
-            self.window.view.locs[channel], i, self.pick_radius, self.oversampling, 
-            picks=pick)
-            self.predictions.append(pred[0])
-            self.probabilites.append(prob[0])
+        l = lib.ProgressDialog(
+            "Predicting structures...", 0, len(self.all_picks), self
+        )
+        l.set_value(0)
+        to_delete = []
+        for i in tqdm(range(len(self.all_picks))):
+            l.set_value(i)
+            try:
+                pred, prob = nanotron.predict_structure(self.model,
+                    self.window.view.locs[self.channel], i, self.pick_radius, 
+                    self.oversampling, picks=self.all_picks[i])
+                self.predictions.append(pred[0])
+                self.probabilites.append(prob[0])
+            except:
+                to_delete.append(i)
+        l.close()
+        if len(to_delete) != 0:
+            for i in sorted(to_delete, reverse=True):
+                del self.all_picks[i]
 
     def update_picks(self):
         # get the index of the currently chosen class
@@ -5319,8 +5332,21 @@ class View(QtWidgets.QLabel):
         # load the model 
         if self._pick_shape != "Circle":
             raise ValueError("The tool is compatible with circular picks only.")
+        if self._picks == []:
+            raise ValueError("No picks chosen. Please pick first.")
         channel = self.get_channel("Choose channel to filter")
         if channel is not None:
+            # delete empty and almost empty picks
+            # picked_locs = self.picked_locs(channel, add_group=False)
+            # i = 0
+            # for pick in picked_locs:
+            #     if len(pick) < 10:
+            #         del self._picks[i]
+            #     else:
+            #         i += 1
+            self.update_scene()
+            self.window.info_dialog.n_picks.setText(str(len(self._picks)))
+
             path, exe = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load model file", filter="*.sav", directory=None)
             if path:
@@ -5330,7 +5356,7 @@ class View(QtWidgets.QLabel):
                     raise ValueError("No model file loaded.")
                 try:
                     base, ext = os.path.splitext(path)
-                    with open(base + ".yml", "r") as f:
+                    with open(base + ".yaml", "r") as f:
                         model_info = yaml.load(f, Loader=yaml.FullLoader)
                 except io.NoMetadataFileError:
                     return
