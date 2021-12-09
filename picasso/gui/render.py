@@ -340,7 +340,10 @@ class DatasetDialog(QtWidgets.QDialog):
 
     def add_entry(self, path):
         if len(path) > 40:
-            path = "..." + path[-40:]
+            # display only the characters after the last '/'
+            idx = [i for i, char in enumerate(path) if char == '/']
+            idx = idx[-1]
+            path = '...' + path[idx:]
         c = QtWidgets.QCheckBox(path)
         currentline = len(self.layout)
         t = QtWidgets.QPushButton("#")
