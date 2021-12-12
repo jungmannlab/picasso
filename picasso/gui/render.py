@@ -17,7 +17,7 @@ import copy
 from functools import partial
 
 import lmfit
-import matplotlib
+import matplotlib; matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
@@ -4593,8 +4593,14 @@ class View(QtWidgets.QLabel):
                             )
                             ax.scatter(locs["x"], locs["y"], c=colors[l], s=2)
 
+                        x_min = pick[0] - r
+                        x_max = pick[0] + r
+                        y_min = pick[1] - r
+                        y_max = pick[1] + r
                         ax.set_xlabel("X [Px]")
                         ax.set_ylabel("Y [Px]")
+                        ax.set_xlim([x_min, x_max])
+                        ax.set_ylim([y_min, y_max])
                         plt.axis("equal")
 
                         fig.canvas.draw()
@@ -4657,21 +4663,21 @@ class View(QtWidgets.QLabel):
                             + str(len(self._picks))
                             + "."
                         )
-                        ax.set_title(
-                            "Scatterplot of Pick "
-                            + str(i + 1)
-                            + "  of: "
-                            + str(len(self._picks))
-                            + "."
-                        )
                         locs = all_picked_locs[i]
                         locs = stack_arrays(
                             locs, asrecarray=True, usemask=False
                         )
+                        r = self.window.tools_settings_dialog.pick_diameter.value() / 2
+                        x_min = pick[0] - r
+                        x_max = pick[0] + r
+                        y_min = pick[1] - r
+                        y_max = pick[1] + r
                         ax.scatter(locs["x"], locs["y"], c=colors[channel], s=2)
                         ax.set_xlabel("X [Px]")
                         ax.set_ylabel("Y [Px]")
-                        plt.axis("equal")
+                        ax.set_xlim([x_min, x_max])
+                        ax.set_ylim([y_min, y_max])
+                        # plt.axis("equal")
 
                         fig.canvas.draw()
                         width, height = fig.canvas.get_width_height()
@@ -6276,20 +6282,20 @@ class View(QtWidgets.QLabel):
 
         self.currentdrift[channel] = copy.copy(drift)
 
-        if hasattr(drift, "z"):
-            np.savetxt(
-                driftfile,
-                self._drift[channel],
-                # header="dx\tdy\tdz",
-                newline="\r\n",
-            )
-        else:
-            np.savetxt(
-                driftfile,
-                self._drift[channel],
-                # header="dx\tdy",
-                newline="\r\n",
-            )
+        # if hasattr(drift, "z"):
+        np.savetxt(
+            driftfile,
+            self._drift[channel],
+            # header="dx\tdy\tdz",
+            newline="\r\n",
+        )
+        # else:
+        #     np.savetxt(
+        #         driftfile,
+        #         self._drift[channel],
+        #         # header="dx\tdy",
+        #         newline="\r\n",
+        #     )
 
     def apply_drift(self):
         # channel = self.get_channel("Undrift")
