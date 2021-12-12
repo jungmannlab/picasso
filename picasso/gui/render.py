@@ -23,6 +23,7 @@ import matplotlib.patches as patches
 import numpy as np
 import yaml
 import joblib
+import re
 
 from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
@@ -40,6 +41,7 @@ from h5py import File
 from tqdm import tqdm
 
 import colorsys
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
 from .. import imageprocess, io, lib, postprocess, render, nanotron
 
@@ -51,6 +53,10 @@ N_Z_COLORS = 32
 
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
+def atoi(text):
+    return int(text) if text.isdigit() else text
+def natural_keys(text):
+    return [ atoi(c) for c in re.split('([0-9]+)', text) ]
 
 def get_colors(n_channels):
     hues = np.arange(0, 1, 1 / n_channels)
@@ -6663,6 +6669,138 @@ class View(QtWidgets.QLabel):
     def show_legend_files(self, state):
         print(state)
 
+class AnimationDialog(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Build an animation")
+        self.setModal(False)
+        self.layout = QtWidgets.QGridLayout()
+        self.setLayout(self.layout)
+        self.positions = []
+        self.positions_labels = []
+        self.durations = []
+        self.delete = []
+        self.count = 0
+
+        for i in range(10):
+            self.layout.addWidget(QtWidgets.QLabel("- Position {}: ".format(i+1)), i, 0)
+            if i > 0:
+                self.layout.addWidget(QtWidgets.QLabel("Duration [s]: "), i, 2)
+                duration = QtWidgets.QDoubleSpinBox()
+                duration.setRange(0.01, 10)
+                duration.setValue(1)
+                duration.setDecimals(2)
+                duration.setKeyboardTracking(False)
+                self.durations.append(duration)
+                self.layout.addWidget(duration, i, 3)
+
+        self.layout.addWidget(QtWidgets.QLabel("FPS :"), 10, 0)
+
+        self.fps = QtWidgets.QSpinBox()
+        self.fps.setValue(10)
+        self.fps.setRange(1, 60)
+        self.layout.addWidget(self.fps, 11, 0)
+
+        self.add = QtWidgets.QPushButton("+")
+        self.add.clicked.connect(self.add_position)
+        self.layout.addWidget(self.add, 10, 2)
+
+        self.delete = QtWidgets.QPushButton("-")
+        self.delete.clicked.connect(self.delete_position)
+        self.layout.addWidget(self.delete, 11, 2)
+        
+        self.build = QtWidgets.QPushButton("Build\nanimation")
+        self.build.clicked.connect(self.build_animation)
+        self.layout.addWidget(self.build, 10, 3)
+
+    def add_position(self):
+        if self.count == 10:
+            raise ValueError("More positions are not supported")
+        if self.count > 0:
+            cond1 = self.window.view_rot.angx == self.positions[-1][0]
+            cond2 = self.window.view_rot.angy == self.positions[-1][1]
+            cond3 = self.window.view_rot.angz == self.positions[-1][2]
+            if (cond1 and cond2) and cond3:
+                return
+
+        angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
+        angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
+        angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
+        self.positions.append([
+                self.window.view_rot.angx,
+                self.window.view_rot.angy,
+                self.window.view_rot.angz,
+            ])
+        self.positions_labels.append(QtWidgets.QLabel("{}, {}, {}".format(
+                angx, angy, angz)))
+        self.layout.addWidget(self.positions_labels[-1], self.count, 1)
+        self.count += 1
+
+    def delete_position(self):
+        if self.count > 0:
+            del self.positions[-1]
+            self.layout.removeWidget(self.positions_labels[-1])
+            del self.positions_labels[-1]
+            self.count -= 1
+
+    def build_animation(self):
+        # get the coordinates for animation
+        n_frames = [0]
+        for i in range(len(self.positions) - 1):
+            n_frames.append(int(self.fps.value() * self.durations[i].value()))
+
+        angx = np.zeros(np.sum(n_frames))
+        angy = np.zeros(np.sum(n_frames))
+        angz = np.zeros(np.sum(n_frames))
+
+        for i in range(len(self.positions) - 1):
+            x1 = self.positions[i][0]
+            x2 = self.positions[i+1][0]
+            y1 = self.positions[i][1]
+            y2 = self.positions[i+1][1]
+            z1 = self.positions[i][2]
+            z2 = self.positions[i+1][2]
+            idx_low = np.sum(n_frames[:i+1])
+            idx_high = np.sum(n_frames[:i+2])
+            angx[idx_low:idx_high] = np.linspace(x1, x2, n_frames[i+1])
+            angy[idx_low:idx_high] = np.linspace(y1, y2, n_frames[i+1])
+            angz[idx_low:idx_high] = np.linspace(z1, z2, n_frames[i+1])
+
+        # save the images
+        base, ext = os.path.splitext(self.window.paths[0])
+        idx = [i for i, char in enumerate(base) if char == '/'][-1]
+        path = base[:idx] + "/animation_frames"
+        os.mkdir(path)
+        for i in range(len(angx)):
+                qimage = self.window.view_rot.render_scene(
+                    viewport=self.window.view_rot.viewport,
+                    ang=(angx[i], angy[i], angz[i]),
+                )
+                qimage.save(path + "/frame_{}.png".format(i+1))
+
+        # build a video
+        image_files = [os.path.join(path,img)
+                       for img in os.listdir(path)
+                       if img.endswith(".png")]
+        image_files.sort(key=natural_keys)
+        video = ImageSequenceClip(image_files, fps=self.fps.value())
+        video.write_videofile('my_video.mp4')
+
+        #delete animaiton frames
+        for file in os.listdir(path):
+            os.remove(os.path.join(path, file))
+        os.rmdir(path)
+        
+#TODO: get the video working on other video players
+#TODO: is it always horizozontally mirrored?
+#TODO: am i recondring audio?
+#TODO: what if the animation frames folder already exists?
+#TODO: delete the animation frmes?
+#TODO: get the name for the video
+#TODO: check how it performs on multidata
+#TODO: check how it performs with weird rotations, such as 360 or 500 degrees
+
 class ViewRotation(View):
     def __init__(self, window):
         super().__init__(window)
@@ -6678,16 +6816,16 @@ class ViewRotation(View):
         self.setMaximumSize(500,500)
 
     def render_scene(
-        self, autoscale=False, viewport=None, group_color=None
+        self, autoscale=False, viewport=None, group_color=None, ang=None
     ):
         kwargs = self.get_render_kwargs(viewport=viewport)
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(
-                kwargs, autoscale=autoscale, group_color=group_color
+                kwargs, autoscale=autoscale, group_color=group_color, ang=ang
             )
         else:
-            self.render_multi_channel(kwargs)
+            self.render_multi_channel(kwargs, ang=ang)
         self._bgra[:, :, 3].fill(255)
         Y, X = self._bgra.shape[:2]
         qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
@@ -6698,6 +6836,7 @@ class ViewRotation(View):
         kwargs,
         autoscale=False,
         locs=None,
+        ang=None,
     ):
         if locs is None:
             locs = self.locs
@@ -6720,7 +6859,10 @@ class ViewRotation(View):
             # and later decide to keep them or not
             renderings.append(render.render(locsall[i], **kwargs))
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        renderings = [render.render(_, **kwargs, ang=(self.angx, self.angy, self.angz), pixelsize=pixelsize) for _ in locsall]
+        if ang is None:
+            renderings = [render.render(_, **kwargs, ang=(self.angx, self.angy, self.angz), pixelsize=pixelsize) for _ in locsall]
+        else:
+            renderings = [render.render(_, **kwargs, ang=ang, pixelsize=pixelsize) for _ in locsall]
         n_locs = sum([_[0] for _ in renderings])
         image = np.array([_[1] for _ in renderings])
         self.n_locs = n_locs
@@ -6785,7 +6927,7 @@ class ViewRotation(View):
         return self._bgra
 
     def render_single_channel(
-        self, kwargs, autoscale=False, group_color=None
+        self, kwargs, autoscale=False, group_color=None, ang=None
     ):
         locs = self.locs[0]
         if self.x_render_state:
@@ -6803,8 +6945,12 @@ class ViewRotation(View):
                 locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
                 return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs)
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        n_locs, image = render.render(locs, **kwargs, info=self.infos[0], 
-            ang=(self.angx, self.angy, self.angz), pixelsize=pixelsize)
+        if ang is None:
+            n_locs, image = render.render(locs, **kwargs, info=self.infos[0], 
+                ang=(self.angx, self.angy, self.angz), pixelsize=pixelsize)
+        else:
+            n_locs, image = render.render(locs, **kwargs, info=self.infos[0], 
+                ang=ang, pixelsize=pixelsize)
         self.n_locs = n_locs
         self.image = image
         image = self.scale_contrast(image, autoscale=autoscale)
@@ -7232,7 +7378,6 @@ class ViewRotation(View):
         )
         if path:
             self.qimage.save(path)
-        # self.view.setMinimumSize(1, 1)
 
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
@@ -8526,10 +8671,13 @@ class RotateWindow(Window):
         open_points_action.triggered.connect(self.open_points)
 
         file_menu.addSeparator()
-
         export_view = file_menu.addAction("Export current view")
         export_view.setShortcut("Ctrl+E")
         export_view.triggered.connect(self.view_rot.export_current_view)
+        animation = file_menu.addAction("Build an animation")
+        animation.setShortcut("Ctrl+Shift+E")
+        self.animation_dialog = AnimationDialog(self)
+        animation.triggered.connect(self.animation_dialog.show)
 
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings")
