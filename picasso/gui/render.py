@@ -7217,6 +7217,23 @@ class ViewRotation(View):
             else:
                 return None
 
+    def export_current_view(self):
+        try:
+            base, ext = os.path.splitext(self.window.paths[0])
+        except AttributeError:
+            return
+        out_path = base + "_rotated_{}_{}_{}.png".format(
+                int(self.angx * 180 / np.pi), 
+                int(self.angy * 180 / np.pi), 
+                int(self.angz * 180 / np.pi)
+            )
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save image", out_path, filter="*.png;;*.tif"
+        )
+        if path:
+            self.qimage.save(path)
+        # self.view.setMinimumSize(1, 1)
+
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -8507,6 +8524,12 @@ class RotateWindow(Window):
         save_action.triggered.connect(self.save_locs_rotated)
         open_points_action = file_menu.addAction("Load points")
         open_points_action.triggered.connect(self.open_points)
+
+        file_menu.addSeparator()
+
+        export_view = file_menu.addAction("Export current view")
+        export_view.setShortcut("Ctrl+E")
+        export_view.triggered.connect(self.view_rot.export_current_view)
 
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings")
