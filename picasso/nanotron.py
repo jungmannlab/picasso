@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm as tqdm
 from scipy import ndimage
 
-from . import render
+from . import render, lib
 
 
 def prepare_img(img, img_shape, alpha=1, bg=0):
@@ -33,11 +33,16 @@ def rotate_img(img, angle):
 
     return rot_img
 
-def roi_to_img(locs, pick, radius, oversampling):
+def roi_to_img(locs, pick, radius, oversampling, picks=None):
 
     # Isolate locs from pick
     pick_locs = []
-    pick_locs = locs[(locs["group"] == pick)]
+    if picks is None:
+        pick_locs = locs[(locs["group"] == pick)]
+    else:
+        x, y = picks
+        pick_locs = lib.locs_at(x, y, locs, radius)
+        pick_locs.sort(kind="mergesort", order="frame")
     # dirty method to avoid floating point errors with render
     radius -= 0.001
 
@@ -61,10 +66,12 @@ def roi_to_img(locs, pick, radius, oversampling):
         print('viewport: {}'.format(viewport))
 
     # Render locs with Picasso render function
-    len_x, pick_img = render.render(pick_locs, viewport=viewport,
-                                    oversampling=oversampling,
-                                    blur_method='smooth')
-
+    try: 
+        len_x, pick_img = render.render(pick_locs, viewport=viewport,
+                                        oversampling=oversampling,
+                                        blur_method='smooth')
+    except:
+        pass
     return pick_img
 
 
@@ -94,10 +101,10 @@ def prepare_data(locs, label, pick_radius,
     return data, label
 
 
-def predict_structure(mlp, locs, pick, pick_radius, oversampling):
+def predict_structure(mlp, locs, pick, pick_radius, oversampling, picks=None):
 
     img_shape = int(2 * pick_radius * oversampling)
-    img = roi_to_img(locs, pick=pick, radius=pick_radius, oversampling=oversampling)
+    img = roi_to_img(locs, pick=pick, radius=pick_radius, oversampling=oversampling, picks=picks)
     img = prepare_img(img, img_shape=img_shape, alpha=10, bg=1)
     img = img.reshape(1, img_shape**2)
 
