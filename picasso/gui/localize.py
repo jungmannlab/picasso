@@ -17,7 +17,7 @@ import time
 import numpy as np
 import traceback
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
-from icecream import ic
+# from icecream import ic
 
 try:
     from pygpufit import gpufit as gf
