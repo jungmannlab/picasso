@@ -6891,13 +6891,10 @@ class AnimationDialog(QtWidgets.QDialog):
         video.write_videofile(name)
 
         # delete animaiton frames
-        # for file in os.listdir(path):
-        #     os.remove(os.path.join(path, file))
-        # os.rmdir(path)
+        for file in os.listdir(path):
+            os.remove(os.path.join(path, file))
+        os.rmdir(path)
         
-#TODO: the quality is quite poor, how do frames compare to the movie? maybe it's the oversampling?
-#TODO: video has some ugly flickering probably due to scaling with the odd width and height
-
 class ViewRotation(View):
     def __init__(self, window):
         super().__init__(window)
