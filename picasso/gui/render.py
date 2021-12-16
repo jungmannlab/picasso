@@ -12,7 +12,7 @@ import traceback
 from math import ceil
 import copy
 import time
-from icecream import ic
+# from icecream import ic
 import copy
 from functools import partial
 
@@ -6682,6 +6682,7 @@ class AnimationDialog(QtWidgets.QDialog):
         self.durations = []
         self.delete = []
         self.count = 0
+        self.frames_ready = False
 
         for i in range(10):
             self.layout.addWidget(QtWidgets.QLabel("- Position {}: ".format(i+1)), i, 0)
@@ -6698,7 +6699,7 @@ class AnimationDialog(QtWidgets.QDialog):
         self.layout.addWidget(QtWidgets.QLabel("FPS :"), 10, 0)
 
         self.fps = QtWidgets.QSpinBox()
-        self.fps.setValue(10)
+        self.fps.setValue(30)
         self.fps.setRange(1, 60)
         self.layout.addWidget(self.fps, 11, 0)
 
@@ -6771,35 +6772,56 @@ class AnimationDialog(QtWidgets.QDialog):
         base, ext = os.path.splitext(self.window.paths[0])
         idx = [i for i, char in enumerate(base) if char == '/'][-1]
         path = base[:idx] + "/animation_frames"
-        os.mkdir(path)
-        for i in range(len(angx)):
-                qimage = self.window.view_rot.render_scene(
-                    viewport=self.window.view_rot.viewport,
-                    ang=(angx[i], angy[i], angz[i]),
-                )
-                qimage.save(path + "/frame_{}.png".format(i+1))
+        try:
+            os.mkdir(path)
+        except:
+            m = QtWidgets.QMessageBox()
+            m.setWindowTitle("Frames already exist")
+            ret = m.question(
+                self,
+                "",
+                "Delete the existing frames folder?",
+                m.Yes | m.No,
+            )
+            if ret == m.Yes:
+                for file in os.listdir(path):
+                    os.remove(os.path.join(path, file))
+            elif ret == m.No:
+                self.frames_ready = True
+
+        if not self.frames_ready:
+            for i in range(len(angx)):
+                    qimage = self.window.view_rot.render_scene(
+                        viewport=self.window.view_rot.viewport,
+                        ang=(angx[i], angy[i], angz[i]),
+                    )
+                    if qimage.width() % 2 == 1:
+                        qimage = qimage.scaled(qimage.width()-1, qimage.height())
+                    if qimage.height() % 2 == 1:
+                        qimage = qimage.scaled(qimage.width(), qimage.height()-1)
+                    qimage.save(path + "/frame_{}.png".format(i+1))
 
         # build a video
         image_files = [os.path.join(path,img)
                        for img in os.listdir(path)
                        if img.endswith(".png")]
         image_files.sort(key=natural_keys)
-        video = ImageSequenceClip(image_files, fps=self.fps.value())
-        video.write_videofile('my_video.mp4')
 
-        #delete animaiton frames
+        out_path = self.window.paths[0] + "_video.mp4"
+        name, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save animation", out_path, filter="*.mp4"
+        )
+
+        video = ImageSequenceClip(image_files, fps=self.fps.value())
+        video.write_videofile(name)
+
+        # delete animaiton frames
         for file in os.listdir(path):
             os.remove(os.path.join(path, file))
         os.rmdir(path)
         
-#TODO: get the video working on other video players
-#TODO: is it always horizozontally mirrored?
-#TODO: am i recondring audio?
-#TODO: what if the animation frames folder already exists?
-#TODO: delete the animation frmes?
-#TODO: get the name for the video
-#TODO: check how it performs on multidata
-#TODO: check how it performs with weird rotations, such as 360 or 500 degrees
+#TODO: get the calculator for durations
+#TODO: add zooming in and out, plus padding (all with viewport I guess?)
 
 class ViewRotation(View):
     def __init__(self, window):
@@ -6938,12 +6960,20 @@ class ViewRotation(View):
         if hasattr(locs, "group"):
             if np.sum(self.group_color[0] == 0):
                 locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
-                return self.render_multi_channel(kwargs, autoscale=autoscale, locs=None)
+                if ang is None:
+                    return self.render_multi_channel(kwargs, autoscale=autoscale, locs=None)
+                else:
+                    return self.render_multi_channel(kwargs, autoscale=autoscale, 
+                        locs=None, ang=ang)
             else:
                 if len(self.group_color) == 1:
                     self.group_color = self.group_color[0]
                 locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
-                return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs)
+                if ang is None:
+                    return self.render_multi_channel(kwargs, autoscale=autoscale, locs=locs)
+                else:
+                    return self.render_multi_channel(kwargs, autoscale=autoscale, 
+                        locs=locs, ang=ang)
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if ang is None:
             n_locs, image = render.render(locs, **kwargs, info=self.infos[0], 
