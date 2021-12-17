@@ -3745,7 +3745,7 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def get_render_kwargs(self, viewport=None):
+    def get_render_kwargs(self, viewport=None, animation=False):
         """
         Returns a dictionary to be used for the
         keyword arguments of render.
@@ -3753,7 +3753,11 @@ class View(QtWidgets.QLabel):
         blur_button = (
             self.window.display_settings_dlg.blur_buttongroup.checkedButton()
         )
-        optimal_oversampling = self.display_pixels_per_viewport_pixels()
+        optimal_oversampling = (
+            self.display_pixels_per_viewport_pixels(
+                viewport=viewport, animation=animation
+            )
+        )
         if self.window.display_settings_dlg.dynamic_oversampling.isChecked():
             oversampling = optimal_oversampling
             self.window.display_settings_dlg.set_oversampling_silently(
@@ -3778,6 +3782,8 @@ class View(QtWidgets.QLabel):
                 )
         if viewport is None:
             viewport = self.viewport
+        if animation:
+            oversampling = optimal_oversampling
         return {
             "oversampling": oversampling,
             "viewport": viewport,
@@ -4008,9 +4014,12 @@ class View(QtWidgets.QLabel):
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
 
-    def display_pixels_per_viewport_pixels(self):
+    def display_pixels_per_viewport_pixels(self, viewport=None, animation=False):
         os_horizontal = self.width() / self.viewport_width()
         os_vertical = self.height() / self.viewport_height()
+        if animation:
+            os_horizontal = 500 / self.viewport_width(viewport)
+            os_vertical = 500 / self.viewport_height(viewport)
         # The values should be identical, but just in case, we choose the max:
         return max(os_horizontal, os_vertical)
 
@@ -6680,62 +6689,99 @@ class AnimationDialog(QtWidgets.QDialog):
         self.positions = []
         self.positions_labels = []
         self.durations = []
+        self.show_positions = []
         self.delete = []
         self.count = 0
         self.frames_ready = False
 
         for i in range(10):
             self.layout.addWidget(QtWidgets.QLabel("- Position {}: ".format(i+1)), i, 0)
+
+            show_position = QtWidgets.QPushButton("Show position")
+            show_position.setFocusPolicy(QtCore.Qt.NoFocus)
+            show_position.clicked.connect(partial(self.retrieve_position, i))
+            self.show_positions.append(show_position)
+            self.layout.addWidget(show_position, i, 2)
             if i > 0:
-                self.layout.addWidget(QtWidgets.QLabel("Duration [s]: "), i, 2)
+                self.layout.addWidget(QtWidgets.QLabel("Duration [s]: "), i, 3)
                 duration = QtWidgets.QDoubleSpinBox()
                 duration.setRange(0.01, 10)
                 duration.setValue(1)
                 duration.setDecimals(2)
-                duration.setKeyboardTracking(False)
                 self.durations.append(duration)
-                self.layout.addWidget(duration, i, 3)
+                self.layout.addWidget(duration, i, 4)
 
-        self.layout.addWidget(QtWidgets.QLabel("FPS :"), 10, 0)
-
+        self.layout.addWidget(QtWidgets.QLabel("FPS: "), 10, 0)
         self.fps = QtWidgets.QSpinBox()
         self.fps.setValue(30)
         self.fps.setRange(1, 60)
         self.layout.addWidget(self.fps, 11, 0)
 
+        self.layout.addWidget(QtWidgets.QLabel("Rotation speed [deg/s]: "), 10, 1)
+        self.rot_speed = QtWidgets.QDoubleSpinBox()
+        self.rot_speed.setValue(90)
+        self.rot_speed.setDecimals(1)
+        self.rot_speed.setRange(0.1, 1000)
+        self.layout.addWidget(self.rot_speed, 11, 1)
+
         self.add = QtWidgets.QPushButton("+")
+        self.add.setFocusPolicy(QtCore.Qt.NoFocus)
         self.add.clicked.connect(self.add_position)
         self.layout.addWidget(self.add, 10, 2)
 
         self.delete = QtWidgets.QPushButton("-")
+        self.delete.setFocusPolicy(QtCore.Qt.NoFocus)
         self.delete.clicked.connect(self.delete_position)
         self.layout.addWidget(self.delete, 11, 2)
-        
+
         self.build = QtWidgets.QPushButton("Build\nanimation")
+        self.build.setFocusPolicy(QtCore.Qt.NoFocus)
         self.build.clicked.connect(self.build_animation)
         self.layout.addWidget(self.build, 10, 3)
 
-    def add_position(self):
+        self.stay = QtWidgets.QPushButton("Stay in the\n position")
+        self.stay.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.stay.clicked.connect(partial(self.add_position, True))
+        self.layout.addWidget(self.stay, 11, 3)
+    
+    def add_position(self, freeze=False):
         if self.count == 10:
             raise ValueError("More positions are not supported")
-        if self.count > 0:
-            cond1 = self.window.view_rot.angx == self.positions[-1][0]
-            cond2 = self.window.view_rot.angy == self.positions[-1][1]
-            cond3 = self.window.view_rot.angz == self.positions[-1][2]
-            if (cond1 and cond2) and cond3:
-                return
+        if not freeze:
+            if self.count > 0:
+                cond1 = self.window.view_rot.angx == self.positions[-1][0]
+                cond2 = self.window.view_rot.angy == self.positions[-1][1]
+                cond3 = self.window.view_rot.angz == self.positions[-1][2]
+                cond4 = self.window.view_rot.viewport == self.positions[-1][3]
+                if ((cond1 and cond2) and cond3) and cond4:
+                    return
 
-        angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
-        angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
-        angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
         self.positions.append([
                 self.window.view_rot.angx,
                 self.window.view_rot.angy,
                 self.window.view_rot.angz,
+                self.window.view_rot.viewport
             ])
+
+        angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
+        angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
+        angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
         self.positions_labels.append(QtWidgets.QLabel("{}, {}, {}".format(
                 angx, angy, angz)))
         self.layout.addWidget(self.positions_labels[-1], self.count, 1)
+
+        # calculate recommended duration
+        if self.count > 0:
+            if not freeze:
+                if not ((cond1 and cond2) and cond3):
+                    dx = self.positions[-1][0] - self.positions[-2][0]
+                    dy = self.positions[-1][1] - self.positions[-2][1]
+                    dz = self.positions[-1][2] - self.positions[-2][2]
+                    dmax = np.max(np.abs([dx, dy, dz]))
+                    rot_speed = self.rot_speed.value() * np.pi / 180
+                    dur = dmax / rot_speed
+                    self.durations[self.count-1].setValue(dur)
+
         self.count += 1
 
     def delete_position(self):
@@ -6744,6 +6790,13 @@ class AnimationDialog(QtWidgets.QDialog):
             self.layout.removeWidget(self.positions_labels[-1])
             del self.positions_labels[-1]
             self.count -= 1
+
+    def retrieve_position(self, i):
+        if i <= len(self.positions) - 1:
+            self.window.view_rot.angx = self.positions[i][0]
+            self.window.view_rot.angy = self.positions[i][1]
+            self.window.view_rot.angz = self.positions[i][2]
+            self.window.view_rot.update_scene(viewport=self.positions[i][3])
 
     def build_animation(self):
         # get the coordinates for animation
@@ -6754,19 +6807,38 @@ class AnimationDialog(QtWidgets.QDialog):
         angx = np.zeros(np.sum(n_frames))
         angy = np.zeros(np.sum(n_frames))
         angz = np.zeros(np.sum(n_frames))
+        ymin = np.zeros(np.sum(n_frames))
+        xmin = np.zeros(np.sum(n_frames))
+        ymax = np.zeros(np.sum(n_frames))
+        xmax = np.zeros(np.sum(n_frames))
 
         for i in range(len(self.positions) - 1):
+            idx_low = np.sum(n_frames[:i+1])
+            idx_high = np.sum(n_frames[:i+2])
+
+            #angles:
             x1 = self.positions[i][0]
             x2 = self.positions[i+1][0]
             y1 = self.positions[i][1]
             y2 = self.positions[i+1][1]
             z1 = self.positions[i][2]
             z2 = self.positions[i+1][2]
-            idx_low = np.sum(n_frames[:i+1])
-            idx_high = np.sum(n_frames[:i+2])
             angx[idx_low:idx_high] = np.linspace(x1, x2, n_frames[i+1])
             angy[idx_low:idx_high] = np.linspace(y1, y2, n_frames[i+1])
             angz[idx_low:idx_high] = np.linspace(z1, z2, n_frames[i+1])
+
+            #viewport:
+            vp1 = self.positions[i][3]
+            vp2 = self.positions[i+1][3]
+            ymin[idx_low:idx_high] = np.linspace(vp1[0][0], vp2[0][0], n_frames[i+1])
+            xmin[idx_low:idx_high] = np.linspace(vp1[0][1], vp2[0][1], n_frames[i+1])
+            ymax[idx_low:idx_high] = np.linspace(vp1[1][0], vp2[1][0], n_frames[i+1])
+            xmax[idx_low:idx_high] = np.linspace(vp1[1][1], vp2[1][1], n_frames[i+1])
+
+        out_path = self.window.paths[0] + "_video.mp4"
+        name, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save animation", out_path, filter="*.mp4"
+        )
 
         # save the images
         base, ext = os.path.splitext(self.window.paths[0])
@@ -6790,15 +6862,23 @@ class AnimationDialog(QtWidgets.QDialog):
                 self.frames_ready = True
 
         if not self.frames_ready:
+            qimage1 = self.window.view_rot.render_scene(
+                viewport=[(ymin[0], xmin[0]), (ymax[0], xmax[0])],
+                ang=(angx[0], angy[0], angz[0]),
+            )
+            if qimage1.width() % 2 == 1:
+                qimage1 = qimage1.scaled(qimage1.width()-1, qimage1.height())
+            if qimage1.height() % 2 == 1:
+                qimage1 = qimage1.scaled(qimage1.width(), qimage1.height()-1)
+            width = qimage1.width()
+            height = qimage1.height()
             for i in range(len(angx)):
                     qimage = self.window.view_rot.render_scene(
-                        viewport=self.window.view_rot.viewport,
+                        viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
                         ang=(angx[i], angy[i], angz[i]),
+                        animation=True,
                     )
-                    if qimage.width() % 2 == 1:
-                        qimage = qimage.scaled(qimage.width()-1, qimage.height())
-                    if qimage.height() % 2 == 1:
-                        qimage = qimage.scaled(qimage.width(), qimage.height()-1)
+                    qimage = qimage.scaled(500, 500)
                     qimage.save(path + "/frame_{}.png".format(i+1))
 
         # build a video
@@ -6806,11 +6886,6 @@ class AnimationDialog(QtWidgets.QDialog):
                        for img in os.listdir(path)
                        if img.endswith(".png")]
         image_files.sort(key=natural_keys)
-
-        out_path = self.window.paths[0] + "_video.mp4"
-        name, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save animation", out_path, filter="*.mp4"
-        )
 
         video = ImageSequenceClip(image_files, fps=self.fps.value())
         video.write_videofile(name)
@@ -6820,9 +6895,6 @@ class AnimationDialog(QtWidgets.QDialog):
             os.remove(os.path.join(path, file))
         os.rmdir(path)
         
-#TODO: get the calculator for durations
-#TODO: add zooming in and out, plus padding (all with viewport I guess?)
-
 class ViewRotation(View):
     def __init__(self, window):
         super().__init__(window)
@@ -6838,9 +6910,14 @@ class ViewRotation(View):
         self.setMaximumSize(500,500)
 
     def render_scene(
-        self, autoscale=False, viewport=None, group_color=None, ang=None
+        self, 
+        autoscale=False, 
+        viewport=None, 
+        group_color=None, 
+        ang=None, 
+        animation=False,
     ):
-        kwargs = self.get_render_kwargs(viewport=viewport)
+        kwargs = self.get_render_kwargs(viewport=viewport, animation=animation)
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(
