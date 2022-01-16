@@ -50,25 +50,12 @@ def get_index_blocks(locs, info, size, callback=None):
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     K, L = block_starts.shape
     # Fill in block starts and ends
-    # We are running this in a thread with a nogil numba function.
-    # This helps updating a potential GUI with the callback.
-    # if callback is not None:
-    #     callback(0)
-    #     counter = [0]
-    # else:
-    #     counter = None
     thread = _Thread(
         target=_fill_index_blocks,
         args=(block_starts, block_ends, x_index, y_index),
     )
     thread.start()
-    # if callback is not None:
-    #     while counter[0] < K:
-    #         callback(counter[0])
-    #         _time.sleep(0.1)
     thread.join()
-    # if callback is not None:
-    #     callback(counter[0])
     return locs, size, x_index, y_index, block_starts, block_ends, K, L
 
 

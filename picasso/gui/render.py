@@ -23,7 +23,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as Navigatio
 
 from scipy.ndimage.filters import gaussian_filter
 from scipy.interpolate import interp1d
-# from scipy.spatial import distance_matrix as dm
+from scipy.spatial import distance_matrix
 from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -1379,18 +1379,18 @@ class RipleyPlotWindow(QtWidgets.QTabWidget):
 
     def plot(self, locs):
         self.figure.clear()
-        pl = self.view.window.display_settings_dlg.pixelsize.value()
+        p = self.view.window.display_settings_dlg.pixelsize.value()
 
         # calculate ripley h function
         x = locs.x
         y = locs.y
-        A = (np.max(x) - np.min(x)) * (np.max(y) - np.min(y)) * (pl ** 2)
+        A = (np.max(x) - np.min(x)) * (np.max(y) - np.min(y)) * (p ** 2)
         n = len(locs)
 
         radius = np.linspace(0, 50, 1000)
         L = np.zeros(len(radius))
         points = np.stack((x, y)).T
-        distance = dm(points, points) * pl
+        distance = distance_matrix(points, points) * p
         for i, r in enumerate(radius):
             L[i] = len(np.where(distance < r)[0])
         L = np.sqrt(A * L / (np.pi * n * (n-1)))
@@ -6053,18 +6053,12 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel("Ripley H function")
         if channel is not None:
             # extract the locs from all picks or the whole fov
-            if len(self._picks) == 0:
-                locs = self.locs[channel]
+            if len(self._picks) != 1:
+                message = ("Ripley H function works well only on small areas, "
+                           " please pick only one region.")
+                QtWidgets.QMessageBox.information(self, "Warning", message)
             else:
                 locs = self.picked_locs(channel)
-                locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                #todo: what is this usemask?
-
-            #todo: limit the number of locs
-            # if len(locs) > 1000:
-            #     print('taking only a subset of locs')
-            #     locs = locs[:1000]
-
             # show the plot
             self.ripley_window = RipleyPlotWindow(self)
             self.ripley_window.plot(locs)
@@ -8487,7 +8481,7 @@ class Window(QtWidgets.QMainWindow):
                 self, "Add localizations", directory=self.pwd, filter="*.hdf5"
             )
         if path:
-            self.pwd = path
+            self.pwd = path[0]
             self.view.add_multiple(path)
 
     def open_rotated_locs(self):
