@@ -10,6 +10,7 @@
 
 import numpy as _np
 import numba as _numba
+import math as _math
 
 from sklearn.cluster import DBSCAN as _DBSCAN
 
@@ -17,6 +18,7 @@ from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
 from scipy.spatial import distance
 from scipy.spatial import ConvexHull
+from icecream import ic
 
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
@@ -50,23 +52,23 @@ def get_index_blocks(locs, info, size, callback=None):
     # Fill in block starts and ends
     # We are running this in a thread with a nogil numba function.
     # This helps updating a potential GUI with the callback.
-    if callback is not None:
-        callback(0)
-        counter = [0]
-    else:
-        counter = None
+    # if callback is not None:
+    #     callback(0)
+    #     counter = [0]
+    # else:
+    #     counter = None
     thread = _Thread(
         target=_fill_index_blocks,
-        args=(block_starts, block_ends, x_index, y_index, counter),
+        args=(block_starts, block_ends, x_index, y_index),
     )
     thread.start()
-    if callback is not None:
-        while counter[0] < K:
-            callback(counter[0])
-            _time.sleep(0.1)
+    # if callback is not None:
+    #     while counter[0] < K:
+    #         callback(counter[0])
+    #         _time.sleep(0.1)
     thread.join()
-    if callback is not None:
-        callback(counter[0])
+    # if callback is not None:
+    #     callback(counter[0])
     return locs, size, x_index, y_index, block_starts, block_ends, K, L
 
 
@@ -81,12 +83,16 @@ def index_blocks_shape(info, size):
 def n_block_locs_at(x, y, size, K, L, block_starts, block_ends):
     x_index = _np.uint32(x / size)
     y_index = _np.uint32(y / size)
-    n_block_locs = 0
+    step = 0
     for k in range(y_index - 1, y_index + 2):
         if 0 < k < K:
             for l in range(x_index - 1, x_index + 2):
                 if 0 < l < L:
-                    n_block_locs += block_ends[k, l] - block_starts[k, l]
+                    if step == 0:
+                        n_block_locs = _np.uint32(block_ends[k][l] - block_starts[k][l])
+                        step = 1
+                    else:
+                        n_block_locs += _np.uint32(block_ends[k][l] - block_starts[k][l])
     return n_block_locs
 
 
@@ -105,22 +111,22 @@ def get_block_locs_at(x, y, index_blocks):
     indices = list(_itertools.chain(*indices))
     return locs[indices]
 
-
+@_numba.jit(nopython=True, nogil=True)
 def _fill_index_blocks(
-    block_starts, block_ends, x_index, y_index, counter=None
+    block_starts, block_ends, x_index, y_index
 ):
     Y, X = block_starts.shape
     N = len(x_index)
     k = 0
-    if counter is not None:
-        counter[0] = 0
+    # if counter is not None:
+    #     counter[0] = 0
     for i in range(Y):
         for j in range(X):
             k = _fill_index_block(
                 block_starts, block_ends, N, x_index, y_index, i, j, k
             )
-        if counter is not None:
-            counter[0] = i + 1
+        # if counter is not None:
+        #     counter[0] = i + 1
 
 
 @_numba.jit(nopython=True, nogil=True)
@@ -131,6 +137,124 @@ def _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k):
     block_ends[i, j] = k
     return k
 
+@_numba.jit(nopython=True, nogil=True)
+def pick_similar(
+        x, y_shift, y_base,
+        min_n_locs, max_n_locs, min_rmsd, max_rmsd, 
+        x_r, y_r1, y_r2,
+        locs_xy, block_starts, block_ends, K, L,
+        x_similar, y_similar, r, d2,
+    ):
+    for i, x_grid in enumerate(x):
+        x_range = x_r[i]
+        # y_grid is shifted for odd columns
+        if i % 2:
+            y = y_shift
+            y_r = y_r1
+        else:
+            y = y_base
+            y_r = y_r2
+        for j, y_grid in enumerate(y):
+            y_range = y_r[j]
+            n_block_locs = _n_block_locs_at(
+                x_range, y_range, K, L, block_starts, block_ends
+            )
+            n += 1
+            if n_block_locs > min_n_locs:
+                block_locs_xy = _get_block_locs_at(
+                    x_range, y_range, 
+                    locs_xy, block_starts, block_ends, K, L,
+                )
+                block += 1
+                picked_locs_xy = _locs_at(
+                    x_grid, y_grid, block_locs_xy, r
+                )
+                if picked_locs_xy.shape[1] > 1:
+                    # Move to COM peak
+                    x_test_old = x_grid
+                    y_test_old = y_grid
+                    x_test = _np.mean(picked_locs_xy[0])
+                    y_test = _np.mean(picked_locs_xy[1])
+                    while (
+                        _np.abs(x_test - x_test_old) > 1e-3
+                        or _np.abs(y_test - y_test_old) > 1e-3
+                    ):
+                        x_test_old = x_test
+                        y_test_old = y_test
+                        picked_locs_xy = _locs_at(
+                            x_test, y_test, block_locs_xy, r
+                        )
+                        x_test = _np.mean(picked_locs_xy[0])
+                        y_test = _np.mean(picked_locs_xy[1])
+                    if _np.all(
+                        (x_similar - x_test) ** 2
+                        + (y_similar - y_test) ** 2
+                        > d2
+                    ):
+                        if min_n_locs < picked_locs_xy.shape[1] < max_n_locs:
+                            if (
+                                min_rmsd
+                                < _rmsd_at_com(picked_locs_xy)
+                                < max_rmsd
+                            ):
+                                x_similar = _np.append(
+                                    x_similar, x_test
+                                )
+                                y_similar = _np.append(
+                                    y_similar, y_test
+                                )
+    return x_similar, y_similar
+
+@_numba.jit(nopython=True, nogil=True)
+def _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends):
+    step = 0
+    for k in range(y_range - 1, y_range + 2):
+        if 0 < k < K:
+            for l in range(x_range - 1, x_range + 2):
+                if 0 < l < L:
+                    if step == 0:
+                        n_block_locs = _np.uint32(block_ends[k][l] - block_starts[k][l])
+                        step = 1
+                    else:
+                        n_block_locs += _np.uint32(block_ends[k][l] - block_starts[k][l])
+    return n_block_locs
+
+@_numba.jit(nopython=True, nogil=True)
+def _get_block_locs_at(
+        x_range, y_range, locs_xy, 
+        block_starts, block_ends, K, L,
+    ):
+    step = 0
+    for k in range(y_range - 1, y_range + 2):
+        if 0 < k < K:
+            for l in range(x_range - 1, x_range + 2):
+                if 0 < l < L:
+                    if block_ends[k, l] - block_starts[k, l] > 0:
+                        # numba does not work if you attach arange to an empty list so the first step is different
+                        # this is because of dtype issues
+                        if step == 0:
+                            indices = _np.arange(float(block_starts[k, l]), float(block_ends[k, l]), 
+                                dtype=_np.uint32)
+                            step = 1
+                        else:
+                            indices = _np.concatenate((indices, 
+                                _np.arange(float(block_starts[k, l]), float(block_ends[k, l]), dtype=_np.uint32)
+                            ))
+    return locs_xy[:, indices]
+
+@_numba.jit(nopython=True, nogil=True)
+def _locs_at(x, y, locs_xy, r):
+    dx = locs_xy[0] - x
+    dy = locs_xy[1] - y
+    r2 = r ** 2
+    is_picked = dx ** 2 + dy ** 2 < r2
+    return locs_xy[:, is_picked]
+
+@_numba.jit(nopython=True, nogil=True)
+def _rmsd_at_com(locs_xy):
+    com_x = _np.mean(locs_xy[0])
+    com_y = _np.mean(locs_xy[1])
+    return _np.sqrt(_np.mean((locs_xy[0] - com_x) ** 2 + (locs_xy[1] - com_y) ** 2))
 
 @_numba.jit(nopython=True, nogil=True)
 def _distance_histogram(

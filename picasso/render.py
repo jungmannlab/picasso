@@ -52,8 +52,7 @@ def render(
     else:
         raise Exception("blur_method not understood.")
 
-
-@_numba.jit(nopython=True, nogil=True)
+@_numba.njit
 def _render_setup(locs, oversampling, y_min, x_min, y_max, x_max):
     n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
     n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
@@ -67,8 +66,7 @@ def _render_setup(locs, oversampling, y_min, x_min, y_max, x_max):
     image = _np.zeros((n_pixel_y, n_pixel_x), dtype=_np.float32)
     return image, n_pixel_y, n_pixel_x, x, y, in_view
 
-
-@_numba.jit(nopython=True, nogil=True)
+@_numba.njit
 def _render_setup3d(
     locs, oversampling, y_min, x_min, y_max, x_max, z_min, z_max, pixelsize
 ):
@@ -95,8 +93,7 @@ def _render_setup3d(
     image = _np.zeros((n_pixel_y, n_pixel_x, n_pixel_z), dtype=_np.float32)
     return image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view
 
-
-@_numba.jit(nopython=True, nogil=True)
+@_numba.njit
 def _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
     n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
     n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min) / pixelsize))
@@ -110,16 +107,14 @@ def _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
     image = _np.zeros((n_pixel_x, n_pixel_z), dtype=_np.float32)
     return image, n_pixel_z, n_pixel_x, x, z, in_view
 
-
-@_numba.jit(nopython=True, nogil=True)
+@_numba.njit
 def _fill(image, x, y):
     x = x.astype(_np.int32)
     y = y.astype(_np.int32)
     for i, j in zip(x, y):
         image[j, i] += 1
 
-
-@_numba.jit(nopython=True, nogil=True)
+@_numba.njit
 def _fill3d(image, x, y, z):
     x = x.astype(_np.int32)
     y = y.astype(_np.int32)
@@ -129,7 +124,7 @@ def _fill3d(image, x, y, z):
         image[j, i, k] += 1
     return image
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.njit
 def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
 
     for x_, y_, sx_, sy_ in zip(x, y, sx, sy):
@@ -157,7 +152,7 @@ def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
                     )
                 ) / (2 * _np.pi * sx_ * sy_)
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.njit
 def _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang):
 
     (angx, angy, angz) = ang
@@ -203,7 +198,8 @@ def _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang):
                                a*c * cri[2,0] + b*c * cri[2,1] + c*c * cri[2,2]
                     image[i,j] += 2.71828 ** (-0.5 * exponent) / ((6.28319**3 * determinant(cov_rot)) ** 0.5)
 
-@_numba.jit(nopython=True, nogil=True)
+# only for 3x3 matrix
+@_numba.njit
 def inverse(a):
     c = _np.zeros((3,3))
     det = determinant(a)
@@ -222,7 +218,8 @@ def inverse(a):
 
     return c    
 
-@_numba.jit(nopython=True, nogil=True)
+# only for 3x3 matrix
+@_numba.njit
 def determinant(s):
     return s[0,0] * (s[1,1] * s[2,2] - s[1,2] * s[2,1]) - \
         s[0,1] * (s[1,0] * s[2,2] - s[2,0] * s[1,2]) + \
@@ -236,7 +233,6 @@ def render_hist(locs, oversampling, y_min, x_min, y_max, x_max, ang=None, pixels
     _fill(image, x, y)
     return len(x), image
 
-
 @_numba.jit(nopython=True, nogil=True)
 def render_histz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
     image, n_pixel_z, n_pixel_x, x, z, in_view = _render_setupz(
@@ -244,7 +240,6 @@ def render_histz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
     )
     _fill(image, z, x)
     return len(x), image
-
 
 @_numba.jit(nopython=True, nogil=True)
 def render_hist3d(
@@ -255,7 +250,6 @@ def render_hist3d(
     )
     _fill3d(image, x, y, z)
     return len(x), image
-
 
 def render_gaussian(
     locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=None, pixelsize=None
@@ -287,7 +281,6 @@ def render_gaussian(
 
     return len(x), image
 
-
 def render_gaussian_iso(
     locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=None, pixelsize=None
 ):
@@ -318,7 +311,6 @@ def render_gaussian_iso(
 
     return len(x), image
 
-
 def render_convolve(
     locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=None, pixelsize=None
 ):
@@ -341,7 +333,6 @@ def render_convolve(
         )
         return n, _fftconvolve(image, blur_width, blur_height)
 
-
 def render_smooth(locs, oversampling, y_min, x_min, y_max, x_max, ang=None, pixelsize=None):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max
@@ -357,7 +348,6 @@ def render_smooth(locs, oversampling, y_min, x_min, y_max, x_max, ang=None, pixe
     else:
         return n, _fftconvolve(image, 1, 1)
 
-
 def _fftconvolve(image, blur_width, blur_height): 
     kernel_width = 10 * int(_np.round(blur_width)) + 1
     kernel_height = 10 * int(_np.round(blur_height)) + 1
@@ -366,7 +356,6 @@ def _fftconvolve(image, blur_width, blur_height):
     kernel = _np.outer(kernel_y, kernel_x)
     kernel /= kernel.sum()
     return _signal.fftconvolve(image, kernel, mode="same")
-
 
 def segment(locs, info, segmentation, kwargs={}, callback=None):
     Y = info[0]["Height"]
@@ -385,7 +374,6 @@ def segment(locs, info, segmentation, kwargs={}, callback=None):
         if callback is not None:
             callback(i + 1)
     return bounds, segments
-
 
 def n_segments(info, segmentation):
     n_frames = info[0]["Frames"]

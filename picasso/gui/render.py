@@ -5,15 +5,10 @@
     :author: Joerg Schnitzbauer & Maximilian Strauss, 2017-2018
     :copyright: Copyright (c) 2017 Jungmann Lab, MPI of Biochemistry
 """
-import os
+import os, sys, traceback, copy, time
 import os.path
-import sys
-import traceback
 from math import ceil
-import copy
-import time
-# from icecream import ic
-import copy
+from icecream import ic
 from functools import partial
 
 import lmfit
@@ -21,15 +16,14 @@ import matplotlib; matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
-import yaml
-import joblib
-import re
+import yaml, joblib, re
 
 from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 
-
 from scipy.ndimage.filters import gaussian_filter
+from scipy.interpolate import interp1d
+# from scipy.spatial import distance_matrix as dm
 from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -39,9 +33,9 @@ from mpl_toolkits.mplot3d import axes3d
 from collections import Counter
 from h5py import File
 from tqdm import tqdm
+from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
 import colorsys
-from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 
 from .. import imageprocess, io, lib, postprocess, render, nanotron
 
@@ -55,6 +49,7 @@ matplotlib.rcParams.update({"axes.titlesize": "large"})
 
 def atoi(text):
     return int(text) if text.isdigit() else text
+
 def natural_keys(text):
     return [ atoi(c) for c in re.split('([0-9]+)', text) ]
 
@@ -62,7 +57,6 @@ def get_colors(n_channels):
     hues = np.arange(0, 1, 1 / n_channels)
     colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
     return colors
-
 
 def fit_cum_exp(data):
     data.sort()
@@ -77,7 +71,6 @@ def fit_cum_exp(data):
     result = lib.CumulativeExponentialModel.fit(y, params, x=data)
     return result
 
-
 def kinetic_rate_from_fit(data):
     if len(data) > 2:
         if data.ptp() == 0:
@@ -89,9 +82,7 @@ def kinetic_rate_from_fit(data):
         rate = np.nanmean(data)
     return rate
 
-
 estimate_kinetic_rate = kinetic_rate_from_fit
-
 
 # One for plot pick etc
 def check_pick(f):
@@ -106,7 +97,6 @@ def check_pick(f):
             return f(args[0])
 
     return wrapper
-
 
 # At least twice for pick_similar etc
 def check_picks(f):
@@ -124,7 +114,6 @@ def check_picks(f):
             return f(args[0])
 
     return wrapper
-
 
 class FloatEdit(QtWidgets.QLineEdit):
 
@@ -1371,6 +1360,51 @@ class HdbscanDialog(QtWidgets.QDialog):
         )
 
 
+class RipleyPlotWindow(QtWidgets.QTabWidget):
+    def __init__(self, view):
+        super().__init__()
+        self.setWindowTitle("Ripley H Function Plot")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(600, 500)
+        self.view = view
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvas(self.figure)
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar(self.canvas, self)))
+
+    def plot(self, locs):
+        self.figure.clear()
+        pl = self.view.window.display_settings_dlg.pixelsize.value()
+
+        # calculate ripley h function
+        x = locs.x
+        y = locs.y
+        A = (np.max(x) - np.min(x)) * (np.max(y) - np.min(y)) * (pl ** 2)
+        n = len(locs)
+
+        radius = np.linspace(0, 50, 1000)
+        L = np.zeros(len(radius))
+        points = np.stack((x, y)).T
+        distance = dm(points, points) * pl
+        for i, r in enumerate(radius):
+            L[i] = len(np.where(distance < r)[0])
+        L = np.sqrt(A * L / (np.pi * n * (n-1)))
+        H = L - radius
+        print('calculations finished')
+
+        # plot
+        ax = self.figure.add_subplot(111)
+        ax.plot(radius, H, c='blue')
+        ax.set_xlabel("distance [nm]")
+        ax.set_ylabel("H function")
+
+        self.canvas.draw()
+
 class DriftPlotWindow(QtWidgets.QTabWidget):
     def __init__(self, info_dialog):
         super().__init__()
@@ -2539,7 +2573,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         if self.blur_buttongroup.checkedId() == -5 or self.blur_buttongroup.checkedId() == -6:
             if self.ilp_warning:
                 self.ilp_warning = False
-                warning = ("Rotating with individual localization precision may be quite time consuming." 
+                warning = ("Rotating with individual localization precision may be time consuming." 
                            " Therefore, we recommend to firstly rotate the object using a different "
                            "blur method and then to apply individual localization precision.")
                 QtWidgets.QMessageBox.information(self, "Warning", warning)
@@ -2781,6 +2815,7 @@ class Filter_MLP_Dialog(QtWidgets.QDialog):
 
         self.layout = QtWidgets.QGridLayout()
         self.setLayout(self.layout)
+
         self.classes_box = QtWidgets.QComboBox(self)
         for value in self.classes.values():
             self.classes_box.addItem(value)
@@ -2789,6 +2824,7 @@ class Filter_MLP_Dialog(QtWidgets.QDialog):
         self.prob_thresh.setDecimals(5)
         self.prob_thresh.setRange(0.0, 1.0)
         self.prob_thresh.setValue(0.995)
+        self.prob_thresh.setSingleStep(0.00001)
 
         self.predict_button = QtWidgets.QPushButton("Predict")
         self.predict_button.clicked.connect(self.update_scene)
@@ -2798,6 +2834,8 @@ class Filter_MLP_Dialog(QtWidgets.QDialog):
         self.layout.addWidget(QtWidgets.QLabel("Filter probabilities:"), 1, 0)
         self.layout.addWidget(self.prob_thresh, 1, 1)
         self.layout.addWidget(self.predict_button, 2, 1)
+
+        self.update_scene()
 
     def update_scene(self):
         # if not predicted, run nanotron
@@ -2833,8 +2871,7 @@ class Filter_MLP_Dialog(QtWidgets.QDialog):
         # get the index of the currently chosen class
         # this is used later for indexing the probabilities of predicitions
         classes_names = np.array(list(self.classes.values()))
-        idx = np.where(classes_names == self.classes_box.currentText())
-        idx = idx[0][0]
+        idx = np.where(classes_names == self.classes_box.currentText())[0][0]
         # find which picks are to be kept
         for i in range(len(self.all_picks)):
             check_prob = self.probabilites[i][idx] >= self.prob_thresh.value()
@@ -5122,13 +5159,14 @@ class View(QtWidgets.QLabel):
         if d is None:
             d = self.window.tools_settings_dialog.pick_diameter.value()
         size = d / 2
-        K, L = postprocess.index_blocks_shape(info, size) # not really needed?
-        progress = lib.ProgressDialog("Indexing localizations", 0, K, self)
+        # K, L = postprocess.index_blocks_shape(info, size) # not really needed?
+        progress = lib.ProgressDialog("Indexing localizations", 0, 1, self)
         progress.show()
         progress.set_value(0)
         index_blocks = postprocess.get_index_blocks(
-            locs, info, size, progress.set_value
+            locs, info, size
         )
+        progress.set_value(1)
         self.index_blocks[channel] = index_blocks
 
     def get_index_blocks(self, channel, all_locs=False, d=None):
@@ -5148,6 +5186,7 @@ class View(QtWidgets.QLabel):
             info = self.infos[channel]
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
+            d2 = d ** 2
             std_range = (
                 self.window.tools_settings_dialog.pick_similar_range.value()
             )
@@ -5160,6 +5199,7 @@ class View(QtWidgets.QLabel):
                 pick_locs = lib.locs_at(x, y, block_locs, r)
                 n_locs.append(len(pick_locs))
                 rmsd.append(self.rmsd_at_com(pick_locs))
+
             mean_n_locs = np.mean(n_locs)
             mean_rmsd = np.mean(rmsd)
             std_n_locs = np.std(n_locs)
@@ -5168,6 +5208,7 @@ class View(QtWidgets.QLabel):
             max_n_locs = mean_n_locs + std_range * std_n_locs
             min_rmsd = mean_rmsd - std_range * std_rmsd
             max_rmsd = mean_rmsd + std_range * std_rmsd
+
             # x, y coordinates of found similar regions:
             x_similar = np.array([_[0] for _ in self._picks])
             y_similar = np.array([_[1] for _ in self._picks])
@@ -5175,65 +5216,25 @@ class View(QtWidgets.QLabel):
             x_range = np.arange(d / 2, info[0]["Width"], np.sqrt(3) * d / 2)
             y_range_base = np.arange(d / 2, info[0]["Height"] - d / 2, d)
             y_range_shift = y_range_base + d / 2
-            d2 = d ** 2
-            nx = len(x_range)
-            locs, size, x_index, y_index, block_starts, block_ends, K, L = (
-                index_blocks
-            )
-            progress = lib.ProgressDialog("Pick similar", 0, nx, self)
+            
+            progress = lib.ProgressDialog("Pick similar", 0, 1, self)
+            progress.show()
             progress.set_value(0)
-            for i, x_grid in enumerate(x_range):
-                # y_grid is shifted for odd columns
-                if i % 2:
-                    y_range = y_range_shift
-                else:
-                    y_range = y_range_base
-                for y_grid in y_range:
-                    n_block_locs = postprocess.n_block_locs_at(
-                        x_grid, y_grid, size, K, L, block_starts, block_ends
-                    )
-                    if n_block_locs > min_n_locs:
-                        block_locs = postprocess.get_block_locs_at(
-                            x_grid, y_grid, index_blocks
-                        )
-                        picked_locs = lib.locs_at(
-                            x_grid, y_grid, block_locs, r
-                        )
-                        if len(picked_locs) > 1:
-                            # Move to COM peak
-                            x_test_old = x_grid
-                            y_test_old = y_grid
-                            x_test = picked_locs.x.mean()
-                            y_test = picked_locs.y.mean()
-                            while (
-                                np.abs(x_test - x_test_old) > 1e-3
-                                or np.abs(y_test - y_test_old) > 1e-3
-                            ):
-                                x_test_old = x_test
-                                y_test_old = y_test
-                                picked_locs = lib.locs_at(
-                                    x_test, y_test, block_locs, r
-                                )
-                                x_test = picked_locs.x.mean()
-                                y_test = picked_locs.y.mean()
-                            if np.all(
-                                (x_similar - x_test) ** 2
-                                + (y_similar - y_test) ** 2
-                                > d2
-                            ):
-                                if min_n_locs < len(picked_locs) < max_n_locs:
-                                    if (
-                                        min_rmsd
-                                        < self.rmsd_at_com(picked_locs)
-                                        < max_rmsd
-                                    ):
-                                        x_similar = np.append(
-                                            x_similar, x_test
-                                        )
-                                        y_similar = np.append(
-                                            y_similar, y_test
-                                        )
-                progress.set_value(i + 1)
+            locs_temp, size, _, _, block_starts, block_ends, K, L = index_blocks
+            locs_x = locs_temp.x
+            locs_y = locs_temp.y
+            locs_xy = np.stack((locs_x, locs_y))
+            x_r = np.uint64(x_range / size)
+            y_r1 = np.uint64(y_range_shift / size)
+            y_r2 = np.uint64(y_range_base / size)
+            x_similar, y_similar = postprocess.pick_similar(
+                    x_range, y_range_shift, y_range_base,
+                    min_n_locs, max_n_locs, min_rmsd, max_rmsd, 
+                    x_r, y_r1, y_r2,
+                    locs_xy, block_starts, block_ends, K, L,        
+                    x_similar, y_similar, r, d2,
+                )
+            progress.set_value(1)
             similar = list(zip(x_similar, y_similar))
             self._picks = []
             self.add_picks(similar)
@@ -5360,17 +5361,6 @@ class View(QtWidgets.QLabel):
             raise ValueError("No picks chosen. Please pick first.")
         channel = self.get_channel("Choose channel to filter")
         if channel is not None:
-            # delete empty and almost empty picks
-            # picked_locs = self.picked_locs(channel, add_group=False)
-            # i = 0
-            # for pick in picked_locs:
-            #     if len(pick) < 10:
-            #         del self._picks[i]
-            #     else:
-            #         i += 1
-            self.update_scene()
-            self.window.info_dialog.n_picks.setText(str(len(self._picks)))
-
             path, exe = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load model file", filter="*.sav", directory=None)
             if path:
@@ -6033,8 +6023,8 @@ class View(QtWidgets.QLabel):
                 return
         self._pick_shape = current_text
         self._picks = []
-        self.update_scene(picks_only=True)
         self.update_cursor()
+        self.update_scene(picks_only=True)
         self.update_pick_info_short()
 
     def set_zoom(self, zoom):
@@ -6058,6 +6048,27 @@ class View(QtWidgets.QLabel):
 
     def to_down(self):
         self.pan_relative(-0.8, 0)
+
+    def ripley(self):
+        channel = self.get_channel("Ripley H function")
+        if channel is not None:
+            # extract the locs from all picks or the whole fov
+            if len(self._picks) == 0:
+                locs = self.locs[channel]
+            else:
+                locs = self.picked_locs(channel)
+                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                #todo: what is this usemask?
+
+            #todo: limit the number of locs
+            # if len(locs) > 1000:
+            #     print('taking only a subset of locs')
+            #     locs = locs[:1000]
+
+            # show the plot
+            self.ripley_window = RipleyPlotWindow(self)
+            self.ripley_window.plot(locs)
+            self.ripley_window.show()
 
     def show_drift(self):
         channel = self.get_channel("Show drift")
@@ -6430,7 +6441,7 @@ class View(QtWidgets.QLabel):
         self.unfold_status == "folded"
 
     def update_cursor(self):
-        if self._mode == "Zoom":
+        if self._mode == "Zoom" or self._mode == "Measure":
             self.unsetCursor()
         elif self._mode == "Pick":
             if self._pick_shape == "Circle":
@@ -6438,9 +6449,7 @@ class View(QtWidgets.QLabel):
                     self.window.tools_settings_dialog.pick_diameter.value()
                 )
                 diameter = self.width() * diameter / self.viewport_width()
-                if (
-                    diameter < 100
-                ):  # remote desktop crashes if pick is larger than view
+                if diameter < self.width() / 2:
                     pixmap_size = ceil(diameter)
                     pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
                     pixmap.fill(QtCore.Qt.transparent)
@@ -6453,6 +6462,8 @@ class View(QtWidgets.QLabel):
                     painter.end()
                     cursor = QtGui.QCursor(pixmap)
                     self.setCursor(cursor)
+                else:
+                    self.unsetCursor()
             elif self._pick_shape == "Rectangle":
                 self.unsetCursor()
 
@@ -6862,16 +6873,16 @@ class AnimationDialog(QtWidgets.QDialog):
                 self.frames_ready = True
 
         if not self.frames_ready:
-            qimage1 = self.window.view_rot.render_scene(
-                viewport=[(ymin[0], xmin[0]), (ymax[0], xmax[0])],
-                ang=(angx[0], angy[0], angz[0]),
-            )
-            if qimage1.width() % 2 == 1:
-                qimage1 = qimage1.scaled(qimage1.width()-1, qimage1.height())
-            if qimage1.height() % 2 == 1:
-                qimage1 = qimage1.scaled(qimage1.width(), qimage1.height()-1)
-            width = qimage1.width()
-            height = qimage1.height()
+            # qimage1 = self.window.view_rot.render_scene(
+            #     viewport=[(ymin[0], xmin[0]), (ymax[0], xmax[0])],
+            #     ang=(angx[0], angy[0], angz[0]),
+            # )
+            # if qimage1.width() % 2 == 1:
+            #     qimage1 = qimage1.scaled(qimage1.width()-1, qimage1.height())
+            # if qimage1.height() % 2 == 1:
+            #     qimage1 = qimage1.scaled(qimage1.width(), qimage1.height()-1)
+            # width = qimage1.width()
+            # height = qimage1.height()
             for i in range(len(angx)):
                     qimage = self.window.view_rot.render_scene(
                         viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
@@ -7565,16 +7576,16 @@ class Window(QtWidgets.QMainWindow):
         dataset_action.triggered.connect(self.dataset_dialog.show)
         view_menu.addSeparator()
         to_left_action = view_menu.addAction("Left")
-        to_left_action.setShortcut("Left")
+        to_left_action.setShortcuts(["Left", "A"])
         to_left_action.triggered.connect(self.view.to_left)
         to_right_action = view_menu.addAction("Right")
-        to_right_action.setShortcut("Right")
+        to_right_action.setShortcuts(["Right", "D"])
         to_right_action.triggered.connect(self.view.to_right)
         to_up_action = view_menu.addAction("Up")
-        to_up_action.setShortcut("Up")
+        to_up_action.setShortcuts(["Up", "W"])
         to_up_action.triggered.connect(self.view.to_up)
         to_down_action = view_menu.addAction("Down")
-        to_down_action.setShortcut("Down")
+        to_down_action.setShortcuts(["Down", "S"])
         to_down_action.triggered.connect(self.view.to_down)
         view_menu.addSeparator()
         zoom_in_action = view_menu.addAction("Zoom in")
@@ -7682,7 +7693,7 @@ class Window(QtWidgets.QMainWindow):
 
         mask_action = tools_menu.addAction("Mask image")
         mask_action.triggered.connect(self.mask_settings_dialog.init_dialog)
-        # Drift oeprations
+        # Drift operations
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
         undrift_action = postprocess_menu.addAction("Undrift by RCC")
         undrift_action.setShortcut("Ctrl+U")
@@ -7744,6 +7755,8 @@ class Window(QtWidgets.QMainWindow):
         dbscan_action.triggered.connect(self.view.dbscan)
         hdbscan_action = clustering_menu.addAction("HDBSCAN")
         hdbscan_action.triggered.connect(self.view.hdbscan)
+        ripley_action = postprocess_menu.addAction("Ripley H function")
+        ripley_action.triggered.connect(self.view.ripley)
 
         self.load_user_settings()
 
@@ -7765,7 +7778,6 @@ class Window(QtWidgets.QMainWindow):
         self.menus = [view_menu, postprocess_menu, tools_menu]
         for menu in self.menus:
             menu.setDisabled(True)
-
 
     def closeEvent(self, event):
         settings = io.load_user_settings()
