@@ -124,7 +124,7 @@ def _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k):
     block_ends[i, j] = k
     return k
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def pick_similar(
         x, y_shift, y_base,
         min_n_locs, max_n_locs, min_rmsd, max_rmsd, 
@@ -193,7 +193,7 @@ def pick_similar(
     return x_similar, y_similar
 
 @_numba.jit(nopython=True, nogil=True)
-def _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends):
+def _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends, cache=True):
     step = 0
     for k in range(y_range - 1, y_range + 2):
         if 0 < k < K:
@@ -206,7 +206,7 @@ def _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends):
                         n_block_locs += _np.uint32(block_ends[k][l] - block_starts[k][l])
     return n_block_locs
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _get_block_locs_at(
         x_range, y_range, locs_xy, 
         block_starts, block_ends, K, L,
@@ -229,7 +229,7 @@ def _get_block_locs_at(
                             ))
     return locs_xy[:, indices]
 
-@_numba.jit(nopython=True, nogil=True)
+@_numba.jit(nopython=True, nogil=True, cache=True)
 def _locs_at(x, y, locs_xy, r):
     dx = locs_xy[0] - x
     dy = locs_xy[1] - y
