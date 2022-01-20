@@ -8,7 +8,7 @@
 import os, sys, traceback, copy, time
 import os.path
 from math import ceil
-# from icecream import ic
+from icecream import ic
 from functools import partial
 
 import lmfit
@@ -3684,6 +3684,26 @@ class View(QtWidgets.QLabel):
         movie_height, movie_width = self.movie_size()
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
+
+    def move_to_pick(self):
+        if len(self._picks) == 0:
+            raise ValueError("No picks detected")
+
+        pick_no, ok = QtWidgets.QInputDialog.getInt(
+                    self, "", "Input pick number: ", 0, 0
+                )
+        if ok:
+            if pick_no >= len(self._picks):
+                raise ValueError("Pick number provided too high")
+            else:
+                r = self.window.tools_settings_dialog.pick_diameter.value() / 2
+                x, y = self._picks[pick_no]
+                x_min = x - 1.4 * r
+                x_max = x + 1.4 * r
+                y_min = y - 1.4 * r
+                y_max = y + 1.4 * r
+                viewport = [(y_min, x_min), (y_max, x_max)]
+                self.update_scene(viewport=viewport)
 
     def get_channel(self, title="Choose a channel"):
         n_channels = len(self.locs_paths)
@@ -7639,6 +7659,9 @@ class Window(QtWidgets.QMainWindow):
         pick_similar_action.triggered.connect(self.view.pick_similar)
         nanotron_filter_action = tools_menu.addAction("Filter picks with an MLP")
         nanotron_filter_action.triggered.connect(self.view.nanotron_filter)
+
+        move_to_pick_action = tools_menu.addAction("Move to pick")
+        move_to_pick_action.triggered.connect(self.view.move_to_pick)
         tools_menu.addSeparator()
         show_trace_action = tools_menu.addAction("Show trace")
         show_trace_action.setShortcut("Ctrl+R")

@@ -188,9 +188,9 @@ def _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang):
         cri = inverse(cov_rot) #covariance rotated inverse
 
         for i in range(i_min, i_max):
+            b = i + 0.5 - y_
             for j in range(j_min, j_max):
                 a = j + 0.5 - x_
-                b = i + 0.5 - y_
                 for k in range(k_min, k_max):   
                     c = k + 0.5 - z_
                     exponent = a*a * cri[0,0] + a*b * cri[0,1] + a*c * cri[0,2] + \
