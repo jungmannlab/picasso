@@ -146,13 +146,11 @@ def pick_similar(
             n_block_locs = _n_block_locs_at(
                 x_range, y_range, K, L, block_starts, block_ends
             )
-            n += 1
             if n_block_locs > min_n_locs:
                 block_locs_xy = _get_block_locs_at(
                     x_range, y_range, 
                     locs_xy, block_starts, block_ends, K, L,
                 )
-                block += 1
                 picked_locs_xy = _locs_at(
                     x_grid, y_grid, block_locs_xy, r
                 )
