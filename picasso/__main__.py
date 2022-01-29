@@ -775,17 +775,25 @@ def _localize(args):
             from . import zfit
             print("------------------------------------------")
             print('Fitting 3D')
-            magnification_factor = float(input("Enter Magnification factor: "))
-            zpath = input("Path to *.yaml calibration file: ")
 
-            if zpath:
-                try:
-                    with open(zpath, "r") as f:
-                        z_calibration = yaml.load(f)
-                except Exception as e:
-                    print(e)
-                    print('Error loading calibration file.')
-                    raise
+            if not os.path.isfile(args.zc):
+                print('Given path for calibration file not found. Please enter manually:')
+                zpath = input("Path to *.yaml calibration file: ")
+            else:
+                zpath = args.zc
+
+            if args.mf == 0:
+                magnification_factor = float(input("Enter Magnification factor: "))
+            else:
+                magnification_factor = args.mf
+
+            try:
+                with open(zpath, "r") as f:
+                    z_calibration = yaml.load(f)
+            except Exception as e:
+                print(e)
+                print('Error loading calibration file.')
+                raise
 
         for i, path in enumerate(paths):
             print("------------------------------------------")
@@ -1306,6 +1314,12 @@ def main():
     )
     localize_parser.add_argument(
         "-qe", "--qe", type=float, default=1, help="camera quantum efficiency"
+    )
+    localize_parser.add_argument(
+        "-mf", "--mf", type=float, default=0, help="Magnification factor (only 3d)"
+    )
+    localize_parser.add_argument(
+        "-zc", "--zc", type=str, default='', help="Path to 3d calibration file (only 3d)"
     )
 
     # nneighbors
