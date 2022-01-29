@@ -12,7 +12,8 @@ from icecream import ic
 from functools import partial
 
 import lmfit
-import matplotlib; matplotlib.use('agg')
+import matplotlib 
+# matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
