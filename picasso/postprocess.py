@@ -1502,7 +1502,7 @@ def groupprops(locs, callback=None):
 
 def calculate_fret(acc_locs, don_locs):
     """
-    Calculate the FRET efficiceny in picked regions, this is for one trace
+    Calculate the FRET efficiency in picked regions, this is for one trace
     """
     fret_dict = {}
     if len(acc_locs) == 0:

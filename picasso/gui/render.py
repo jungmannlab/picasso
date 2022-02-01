@@ -288,18 +288,21 @@ class DatasetDialog(QtWidgets.QDialog):
         self.wbackground = QtWidgets.QCheckBox("White background")
         self.auto_display = QtWidgets.QCheckBox("Automatic display update")
         self.auto_display.setChecked(True)
+        self.auto_colors = QtWidgets.QCheckBox("Automatic coloring")
         self.layout.addWidget(self.legend, 0, 0)
         self.layout.addWidget(self.auto_display, 1, 0)
         self.layout.addWidget(self.wbackground, 2, 0)
-        self.layout.addWidget(QtWidgets.QLabel("Files"), 3, 0)
-        self.layout.addWidget(QtWidgets.QLabel("Change title"), 3, 1)
-        self.layout.addWidget(QtWidgets.QLabel("Color"), 3, 2)
-        self.layout.addWidget(QtWidgets.QLabel(""), 3, 3)
-        self.layout.addWidget(QtWidgets.QLabel("Rel. Intensity"), 3, 4)
-        self.layout.addWidget(QtWidgets.QLabel("Close"), 3, 5)
+        self.layout.addWidget(self.auto_colors, 3, 0)
+        self.layout.addWidget(QtWidgets.QLabel("Files"), 4, 0)
+        self.layout.addWidget(QtWidgets.QLabel("Change title"), 4, 1)
+        self.layout.addWidget(QtWidgets.QLabel("Color"), 4, 2)
+        self.layout.addWidget(QtWidgets.QLabel(""), 4, 3)
+        self.layout.addWidget(QtWidgets.QLabel("Rel. Intensity"), 4, 4)
+        self.layout.addWidget(QtWidgets.QLabel("Close"), 4, 5)
         self.legend.stateChanged.connect(self.update_viewport)
         self.wbackground.stateChanged.connect(self.update_viewport)
         self.auto_display.stateChanged.connect(self.update_viewport)
+        self.auto_colors.stateChanged.connect(self.update_colors)
 
         self.default_colors = [ 
             "red",
@@ -359,8 +362,8 @@ class DatasetDialog(QtWidgets.QDialog):
         colordrop.setEditable(True)
         colordrop.lineEdit().setMaxLength(12)
 
-        for default_color in self.default_colors:
-            colordrop.addItem(default_color)
+        for color in self.default_colors:
+            colordrop.addItem(color)
         colordrop.setCurrentText(self.default_colors[index])
         
         intensity = QtWidgets.QDoubleSpinBox(self)
@@ -370,25 +373,40 @@ class DatasetDialog(QtWidgets.QDialog):
         colordisp = QtWidgets.QLabel("      ")
 
         palette = colordisp.palette()
-        palette.setColor(QtGui.QPalette.Window, 
+        palette.setColor(
+            QtGui.QPalette.Window, 
             QtGui.QColor.fromRgbF(
                 self.rgbf[index][0], 
                 self.rgbf[index][1], 
-                self.rgbf[index][2], 1))
+                self.rgbf[index][2], 1
+                )
+            )
         colordisp.setAutoFillBackground(True)
         colordisp.setPalette(palette)
+
+        if self.auto_colors.isChecked():
+            colors = get_colors(len(self.checks) + 1)
+            r, g, b = colors[-1]
+            palette.setColor(
+                QtGui.QPalette.Window,
+                QtGui.QColor.fromRgbF(r, g, b, 1)
+            )
+            colordisp.setPalette(palette)
 
         if self.count != len(self.default_colors)-1:
             self.count += 1
         else:
             if self.warning:
-                text = ("The number of channels passed the number of default colors. " 
-                        "  In case you would like "
-                        "to use your own color,  please insert the color's hexadecimal "
-                        "name,  starting with '#',  e.g.  '#ffcdff' for pink.")
+                text = (
+                    "The number of channels passed the number of default colors. " 
+                    "  In case you would like "
+                    "to use your own color,  please insert the color's hexadecimal "
+                    "name,  starting with '#',  e.g.  '#ffcdff' for pink or choose "
+                    "the automatic coloring in the Files dialog."
+                )
                 QtWidgets.QMessageBox.information(self, "Warning", text)
                 self.warning = False
-        colordrop.activated.connect(self.update_viewport)
+        colordrop.activated.connect(self.update_colors)
 
         self.layout.addWidget(c, currentline, 0)
         self.layout.addWidget(t, currentline, 1)
@@ -407,15 +425,25 @@ class DatasetDialog(QtWidgets.QDialog):
         self.colorselection[-1].currentIndexChanged.connect(
             self.update_viewport
         )
-        index = len(self.colorselection)
+        index = len(self.colorselection) - 1
         self.colorselection[-1].currentIndexChanged.connect(
             partial(self.set_color, t.objectName())
         )
         self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
 
         self.closebuttons.append(p)
-        p.setAutoDefault(False)
-        p.clicked.connect(partial(self.close_file, p.objectName()))
+        self.closebuttons[-1].setAutoDefault(False)
+        self.closebuttons[-1].clicked.connect(
+            partial(self.close_file, p.objectName())
+        )
+
+    def update_colors(self):
+        # changes the colors in colordisp_all and then updates 
+        # the scene in the main window
+        n_channels = len(self.checks)
+        for i in range(n_channels):
+            self.set_color(i)
+        self.update_viewport()
 
     def change_title(self, button_name):
         for i in range(len(self.title)):
@@ -434,84 +462,81 @@ class DatasetDialog(QtWidgets.QDialog):
                     self.adjustSize()
                 break
 
-    def close_file(self, button_name):
-        #todo: adding a new file after having deleting another one does not work properly
-        for i in range(len(self.closebuttons)):
-            if button_name == self.closebuttons[i].objectName():
-                if len(self.closebuttons) == 1:
-                    self.close()
-                    self.window.menu_bar.clear()
-                    self.window.initUI()
-                else:
-                    self.layout.removeWidget(self.checks[i])
-                    self.layout.removeWidget(self.title[i])
-                    self.layout.removeWidget(self.colorselection[i])
-                    self.layout.removeWidget(self.colordisp_all[i])
-                    self.layout.removeWidget(self.intensitysettings[i])
-                    self.layout.removeWidget(self.closebuttons[i])
-                    del self.window.view.locs[i]
-                    del self.window.view.locs_paths[i]
-                    del self.window.view.infos[i]
-                    del self.window.view.index_blocks[i]
-                    try:
-                        del self.window.view.group_color[i]
-                    except:
-                        pass
-                    try:
-                        del self._drift[i]
-                        del self._driftfiles[i]
-                        del self.currentdrift[i]
-                    except:
-                        pass
-                    del self.checks[i]
-                    del self.title[i]
-                    del self.colorselection[i]
-                    del self.colordisp_all[i]
-                    del self.intensitysettings[i]
-                    del self.closebuttons[i]
-                    self.update_viewport()
-                    self.adjustSize()
-                break
+    def close_file(self, i):
+        if type(i) == str:
+            for j in range(len(self.closebuttons)):
+                if i == self.closebuttons[j].objectName():
+                    i = j
+        if len(self.closebuttons) == 1:
+            self.close()
+            self.window.menu_bar.clear()
+            self.window.initUI()
+        else:
+            self.layout.removeWidget(self.checks[i])
+            self.layout.removeWidget(self.title[i])
+            self.layout.removeWidget(self.colorselection[i])
+            self.layout.removeWidget(self.colordisp_all[i])
+            self.layout.removeWidget(self.intensitysettings[i])
+            self.layout.removeWidget(self.closebuttons[i])
+            del self.window.view.locs[i]
+            del self.window.view.locs_paths[i]
+            del self.window.view.infos[i]
+            del self.window.view.index_blocks[i]
+            try:
+                del self.window.view.group_color[i]
+            except:
+                pass
+            try:
+                del self._drift[i]
+                del self._driftfiles[i]
+                del self.currentdrift[i]
+            except:
+                pass
+            del self.checks[i]
+            del self.title[i]
+            del self.colorselection[i]
+            del self.colordisp_all[i]
+            del self.intensitysettings[i]
+            del self.closebuttons[i]
+            self.update_viewport()
+            self.adjustSize()
 
     def update_viewport(self):
         if self.auto_display.isChecked():
             if self.window.view.viewport:
                 self.window.view.update_scene()
 
-    def set_color(self, title_button_name):
-        for n in range(len(self.title)):
-            if title_button_name == self.title[n].objectName():
-                break
+    def set_color(self, n):
+        if type(n) == str:
+            for j in range(len(self.title)):
+                if n == self.title[j].objectName():
+                    n = j
         palette = self.colordisp_all[n].palette()
-        selectedcolor = self.colorselection[n].currentText()
-        # if selectedcolor == "auto":
-        #     n_channels = len(self.checks)
-        #     colors = get_colors(n_channels)
-        #     palette.setColor(
-        #         QtGui.QPalette.Window,
-        #         QtGui.QColor.fromRgbF(
-        #             colors[n][0], colors[n][1], colors[n][2], 1
-        #         ),
-        #     )
-        if self.window.view.isHexadecimal(selectedcolor):
-            r = int(selectedcolor[1:3], 16) / 255.
-            g = int(selectedcolor[3:5], 16) / 255.
-            b = int(selectedcolor[5:], 16) / 255.
+        color = self.colorselection[n].currentText()
+        if self.auto_colors.isChecked():
+            n_channels = len(self.checks)
+            r, g, b = get_colors(n_channels)[n]
+            palette.setColor(
+                QtGui.QPalette.Window, 
+                QtGui.QColor.fromRgbF(r, g, b, 1)
+            )
+        elif self.window.view.isHexadecimal(color):
+            color = color.lstrip("#")
+            r, g, b = tuple(
+                int(color[i: i + 2], 16) / 255 for i in (0, 2, 4)
+            )
             palette.setColor(
                 QtGui.QPalette.Window, QtGui.QColor.fromRgbF(r, g, b, 1))
-        else:
-            good_color = False
-            for i in range(len(self.default_colors)):
-                if selectedcolor == self.default_colors[i]:
-                    good_color = True
-                    break
-            if good_color:
-                palette.setColor(
-                    QtGui.QPalette.Window, QtGui.QColor.fromRgbF(
-                        self.rgbf[i][0], 
-                        self.rgbf[i][1], 
-                        self.rgbf[i][2], 1)
+        elif color in self.default_colors:
+            i = self.default_colors.index(color)
+            palette.setColor(
+                QtGui.QPalette.Window, 
+                QtGui.QColor.fromRgbF(
+                    self.rgbf[i][0], 
+                    self.rgbf[i][1], 
+                    self.rgbf[i][2], 1
                 )
+            )
         self.colordisp_all[n].setPalette(palette)
 
 class PlotDialog(QtWidgets.QDialog):
@@ -1290,7 +1315,7 @@ class DbscanDialog(QtWidgets.QDialog):
         self.radius.setRange(0, 1e6)
         self.radius.setValue(1)
         grid.addWidget(self.radius, 0, 1)
-        grid.addWidget(QtWidgets.QLabel("Min. density:"), 1, 0)
+        grid.addWidget(QtWidgets.QLabel("Min. locs:"), 1, 0)
         self.density = QtWidgets.QSpinBox()
         self.density.setRange(0, 1e6)
         self.density.setValue(4)
@@ -3887,7 +3912,7 @@ class View(QtWidgets.QLabel):
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
 
-    def substract_picks(self, path):
+    def subtract_picks(self, path):
         if self._pick_shape == "Rectangle":
             raise NotImplementedError(
                 "Subtracting picks not implemented for rectangle picks"
@@ -3915,16 +3940,14 @@ class View(QtWidgets.QLabel):
 
             x_cord_new = np.array([_[0] for _ in filtered_list])
             y_cord_new = np.array([_[1] for _ in filtered_list])
-            output = False
 
-            if output:
-                fig1 = plt.figure()
-                plt.title("Old picks and new picks")
-                plt.scatter(x_cord, -y_cord, c="r", label="Newpicks", s=2)
-                plt.scatter(x_cord_old, -y_cord_old, c="b", label="Oldpicks", s=2)
-                plt.scatter(
-                    x_cord_new, -y_cord_new, c="g", label="Picks to keep", s=2)
-                fig1.show()
+            # fig1 = plt.figure()
+            # plt.title("Old picks and new picks")
+            # plt.scatter(x_cord, -y_cord, c="r", label="Newpicks", s=2)
+            # plt.scatter(x_cord_old, -y_cord_old, c="b", label="Oldpicks", s=2)
+            # plt.scatter(
+            #     x_cord_new, -y_cord_new, c="g", label="Picks to keep", s=2)
+            # fig1.show()
             self._picks = filtered_list
 
             self.update_pick_info_short()
@@ -5504,102 +5527,32 @@ class View(QtWidgets.QLabel):
 
         # Color images
         for i in range(len(self.locs)):
-            if (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "red"
-            ):
-                colors[i] = (1, 0, 0)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "green"
-            ):
-                colors[i] = (0, 1, 0)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "blue"
-            ):
-                colors[i] = (0, 0, 1)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "gray"
-            ):
-                colors[i] = (1, 1, 1)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "cyan"
-            ):
-                colors[i] = (0, 1, 1)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "magenta"
-            ):
-                colors[i] = (1, 0, 1)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "yellow"
-            ):
-                colors[i] = (1, 1, 0)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "azure"
-            ):
-                colors[i] = (0, 0.5, 1)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "jade"
-            ):
-                colors[i] = (0, 0.5, 0.5)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "sage"
-            ):
-                colors[i] = (0.5, 0.5, 0)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "purple"
-            ):
-                colors[i] = (0.5, 0, 1)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "carmine"
-            ):
-                colors[i] = (0.5, 0, 0)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "forestgreen"
-            ):
-                colors[i] = (0, 0.5, 0)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "amethyst"
-            ):
-                colors[i] = (0.5, 0.5, 1)
-            elif (
-                self.window.dataset_dialog.colorselection[i].currentText()
-                == "orange"
-            ):
-                colors[i] = (1, 0.5, 0)
-            else:
-                # self.window.dataset_dialog.colorselection[i].currentText()
-                # != "auto"
-                if not self.isHexadecimal(self.window.dataset_dialog.colorselection[i].currentText()):
-                    warning = ("The color selection not recognnised in the channel {}.  Please "
-                               "choose one of the options provided or type the hexadecimal"
-                               " code for your color of choice,  starting with '#', e.g. "
-                               "'#ffcdff' for pink.".format(
-                                self.window.dataset_dialog.checks[i].text())
-                               )
+            if not self.window.dataset_dialog.auto_colors.isChecked():
+                color = self.window.dataset_dialog.colorselection[i].currentText()
+                if color in self.window.dataset_dialog.default_colors:
+                    colors_array = np.array(
+                        self.window.dataset_dialog.default_colors, 
+                        dtype=object
+                    )
+                    index = np.where(colors_array == color)[0][0]
+                    colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
+                elif self.isHexadecimal(color):
+                    colorstring = color.lstrip("#")
+                    rgbval = tuple(
+                        int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
+                    )
+                    colors[i] = rgbval
+                else:
+                    warning = (
+                        "The color selection not recognnised in the channel {}.  Please "
+                        "choose one of the options provided or type the hexadecimal"
+                        " code for your color of choice,  starting with '#', e.g. "
+                        "'#ffcdff' for pink.".format(
+                            self.window.dataset_dialog.checks[i].text()
+                        )
+                    )
                     QtWidgets.QMessageBox.information(self, "Warning", warning)
                     break
-                colorstring = (
-                    self.window.dataset_dialog.colorselection[i]
-                    .currentText()
-                    .lstrip("#")
-                )
-                rgbval = tuple(
-                    int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
-                )
-                colors[i] = rgbval
 
             if self.window.dataset_dialog.wbackground.isChecked():
                 tempcolor = colors[i]
@@ -6996,43 +6949,28 @@ class ViewRotation(View):
         Y, X = image.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
         for i in range(len(self.locs)):
-            if (self.window.dataset_dialog.colorselection[i].currentText()=="red"):
-                colors[i] = (1, 0, 0)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="green"):
-                colors[i] = (0, 1, 0)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="blue"):
-                colors[i] = (0, 0, 1)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="cyan"):
-                colors[i] = (0, 1, 1)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="magenta"):
-                colors[i] = (1, 0, 1)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="yellow"):
-                colors[i] = (1, 1, 0)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="azure"):
-                colors[i] = (0, 0.5, 1)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="jade"):
-                colors[i] = (0, 0.5, 0.5)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="sage"):
-                colors[i] = (0.5, 0.5, 0)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="purple"):
-                colors[i] = (0.5, 0, 1)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="carmine"):
-                colors[i] = (0.5, 0, 0)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="forestgreen"):
-                colors[i] = (0, 0.5, 0)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="amethyst"):
-                colors[i] = (0.5, 0.5, 1)
-            elif (self.window.dataset_dialog.colorselection[i].currentText()=="orange"):
-                colors[i] = (1, 0.5, 0)
-            # elif (self.window.dataset_dialog.colorselection[i].currentText()!="auto"):
-            else:
-                colorstring = (
-                    self.window.dataset_dialog.colorselection[i]
-                    .currentText()
-                    .lstrip("#")
-                )
-                rgbval = tuple(int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4))
-                colors[i] = rgbval
+            if not self.window.dataset_dialog.auto_colors.isChecked():
+                color = self.window.dataset_dialog.colorselection[i].currentText()
+                if color in self.window.dataset_dialog.default_colors:
+                    index = self.window.dataset_dialog.default_colors.index(color)
+                    colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
+                elif self.isHexadecimal(color):
+                    colorstring = color.lstrip("#")
+                    rgbval = tuple(
+                        int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
+                    )
+                    colors[i] = rgbval
+                else:
+                    warning = (
+                        "The color selection not recognnised in the channel {}.  Please "
+                        "choose one of the options provided or type the hexadecimal"
+                        " code for your color of choice,  starting with '#', e.g. "
+                        "'#ffcdff' for pink.".format(
+                            self.window.dataset_dialog.checks[i].text()
+                        )
+                    )
+                    QtWidgets.QMessageBox.information(self, "Warning", warning)
+                    break
             if self.window.dataset_dialog.wbackground.isChecked():
                 tempcolor = colors[i]
                 inverted = tuple([1 - _ for _ in tempcolor])
@@ -7575,7 +7513,7 @@ class Window(QtWidgets.QMainWindow):
         export_multi_action.triggered.connect(self.export_multi)
 
         file_menu.addSeparator()
-        delete_action = file_menu.addAction("Remove localizations")
+        delete_action = file_menu.addAction("Remove all localizations")
         delete_action.triggered.connect(self.remove_locs)
 
         view_menu = self.menu_bar.addMenu("View")
@@ -7692,8 +7630,8 @@ class Window(QtWidgets.QMainWindow):
         clear_picks_action.triggered.connect(self.view.clear_picks)
         clear_picks_action.setShortcut("Ctrl+C")
 
-        pickadd_action = tools_menu.addAction("Substract pick regions")
-        pickadd_action.triggered.connect(self.substract_picks)
+        pickadd_action = tools_menu.addAction("Subtract pick regions")
+        pickadd_action.triggered.connect(self.subtract_picks)
 
         tools_menu.addSeparator()
         self.fret_traces_action = tools_menu.addAction("Show FRET traces")
@@ -8399,13 +8337,13 @@ class Window(QtWidgets.QMainWindow):
         if path:
             self.view.load_picks(path)
 
-    def substract_picks(self):
+    def subtract_picks(self):
         if self.view._picks:
             path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load pick regions", filter="*.yaml"
             )
             if path:
-                self.view.substract_picks(path)
+                self.view.subtract_picks(path)
 
     def load_user_settings(self):
         settings = io.load_user_settings()
