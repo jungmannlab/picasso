@@ -13,7 +13,6 @@ from functools import partial
 
 import lmfit
 import matplotlib 
-# matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
@@ -4074,10 +4073,6 @@ class View(QtWidgets.QLabel):
                     event.accept()
                 else:
                     event.ignore()
-            else:
-                raise ValueError(
-                    "`self._pick_shape` must be of ('Circle', 'Rectangle')."
-                )
         elif self._mode == "Measure":
             if event.button() == QtCore.Qt.LeftButton:
                 x, y = self.map_to_movie(event.pos())
@@ -4277,7 +4272,7 @@ class View(QtWidgets.QLabel):
         self.current_trace_x = 0
         self.current_trace_y = 0
 
-        channel = self.get_channel("Undrift from picked")
+        channel = self.get_channel("Show trace")
         if channel is not None:
             locs = self.picked_locs(channel)
             locs = stack_arrays(locs, asrecarray=True, usemask=False)
@@ -4311,14 +4306,14 @@ class View(QtWidgets.QLabel):
             ax3.set_ylabel("ON")
             ax3.set_ylim([-0.1, 1.1])
 
-            self.exportTraceButton = QtWidgets.QPushButton("Export (*.csv)")
-            canvas.toolbar.addWidget(self.exportTraceButton)
-            self.exportTraceButton.clicked.connect(self.exportTrace)
+            self.export_trace_button = QtWidgets.QPushButton("Export (*.csv)")
+            canvas.toolbar.addWidget(self.export_trace_button)
+            self.export_trace_button.clicked.connect(self.export_trace)
 
             canvas.canvas.draw()
             canvas.show()
 
-    def exportTrace(self):
+    def export_trace(self):
         trace = np.array([self.current_trace_x, self.current_trace_y])
         base, ext = os.path.splitext(self.locs_paths[self.channel])
         out_path = base + ".trace.txt"
@@ -5204,13 +5199,11 @@ class View(QtWidgets.QLabel):
             d = self.window.tools_settings_dialog.pick_diameter.value()
         size = d / 2
         # K, L = postprocess.index_blocks_shape(info, size) # not really needed?
-        progress = lib.ProgressDialog("Indexing localizations", 0, 1, self)
-        progress.show()
-        progress.set_value(0)
+        status = lib.StatusDialog("Indexing localizations...", self.window)
         index_blocks = postprocess.get_index_blocks(
             locs, info, size
         )
-        progress.set_value(1)
+        status.close()
         self.index_blocks[channel] = index_blocks
 
     def get_index_blocks(self, channel, all_locs=False, d=None):
@@ -5261,9 +5254,6 @@ class View(QtWidgets.QLabel):
             y_range_base = np.arange(d / 2, info[0]["Height"] - d / 2, d)
             y_range_shift = y_range_base + d / 2
             
-            progress = lib.ProgressDialog("Pick similar", 0, 1, self)
-            progress.show()
-            progress.set_value(0)
             locs_temp, size, _, _, block_starts, block_ends, K, L = index_blocks
             locs_x = locs_temp.x
             locs_y = locs_temp.y
@@ -5271,6 +5261,7 @@ class View(QtWidgets.QLabel):
             x_r = np.uint64(x_range / size)
             y_r1 = np.uint64(y_range_shift / size)
             y_r2 = np.uint64(y_range_base / size)
+            status = lib.StatusDialog("Picking similar...", self.window)
             x_similar, y_similar = postprocess.pick_similar(
                     x_range, y_range_shift, y_range_base,
                     min_n_locs, max_n_locs, min_rmsd, max_rmsd, 
@@ -5278,10 +5269,10 @@ class View(QtWidgets.QLabel):
                     locs_xy, block_starts, block_ends, K, L,        
                     x_similar, y_similar, r, d2,
                 )
-            progress.set_value(1)
             similar = list(zip(x_similar, y_similar))
             self._picks = []
             self.add_picks(similar)
+            status.close()
 
     def picked_locs(self, channel, add_group=True, keep_group_color=False, 
         all_locs=False, d=None, w=None):
@@ -5391,7 +5382,11 @@ class View(QtWidgets.QLabel):
                     )[0]:
                         new_picks.append(pick)
         self._picks = []
-        self.add_picks(new_picks)
+        if len(new_picks) == 0:
+            self.update_pick_info_short()
+            self.update_scene(picks_only=True)
+        else:
+            self.add_picks(new_picks)
 
     def remove_points(self, position):
         self._points = []
@@ -6417,7 +6412,7 @@ class View(QtWidgets.QLabel):
                     self.window.tools_settings_dialog.pick_diameter.value()
                 )
                 diameter = self.width() * diameter / self.viewport_width()
-                if diameter < self.width() / 2:
+                if diameter < self.width() / 1.3:
                     pixmap_size = ceil(diameter)
                     pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
                     pixmap.fill(QtCore.Qt.transparent)
@@ -6437,6 +6432,11 @@ class View(QtWidgets.QLabel):
 
     def update_pick_info_long(self, info):
         """ Gets called when "Show info below" """
+        if len(self._picks) == 0:
+            warning = "No picks found.  Please pick first."
+            QtWidgets.QMessageBox.information(self, "Warning", warning)
+            return
+
         channel = self.get_channel("Calculate pick info")
         if channel is not None:
             d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -6458,25 +6458,27 @@ class View(QtWidgets.QLabel):
             )
             progress.set_value(0)
             for i, locs in enumerate(picked_locs):
-                N[i] = len(locs)
-                com_x = np.mean(locs.x)
-                com_y = np.mean(locs.y)
-                rmsd[i] = np.sqrt(
-                    np.mean((locs.x - com_x) ** 2 + (locs.y - com_y) ** 2)
-                )
-                if has_z:
-                    rmsd_z[i] = np.sqrt(
-                        np.mean((locs.z - np.mean(locs.z)) ** 2)
+                if len(locs) > 0:
+                    N[i] = len(locs)
+                    com_x = np.mean(locs.x)
+                    com_y = np.mean(locs.y)
+                    rmsd[i] = np.sqrt(
+                        np.mean((locs.x - com_x) ** 2 + (locs.y - com_y) ** 2)
                     )
-                if not hasattr(locs, "len"):
-                    locs = postprocess.link(
-                        locs, info, r_max=r_max, max_dark_time=t
-                    )
-                locs = postprocess.compute_dark_times(locs)
-                length[i] = estimate_kinetic_rate(locs.len)
-                dark[i] = estimate_kinetic_rate(locs.dark)
-                if N[i] > 0:
+                    if has_z:
+                        rmsd_z[i] = np.sqrt(
+                            np.mean((locs.z - np.mean(locs.z)) ** 2)
+                        )
+                    if not hasattr(locs, "len"):
+                        locs = postprocess.link(
+                            locs, info, r_max=r_max, max_dark_time=t
+                        )
+                    locs = postprocess.compute_dark_times(locs)
+                    length[i] = estimate_kinetic_rate(locs.len)
+                    dark[i] = estimate_kinetic_rate(locs.dark)
                     new_locs.append(locs)
+                else:
+                    self.remove_picks(self._picks[i])
                 progress.set_value(i + 1)
 
             self.window.info_dialog.n_localizations_mean.setText(
@@ -6672,16 +6674,22 @@ class AnimationDialog(QtWidgets.QDialog):
         self.delete = []
         self.count = 0
         self.frames_ready = False
+        self.layout.addWidget(QtWidgets.QLabel("Current position: "), 0, 0)
+        angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
+        angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
+        angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
+        self.current_pos = QtWidgets.QLabel("{}, {}, {}".format(angx, angy, angz))
+        self.layout.addWidget(self.current_pos, 0, 1)
 
-        for i in range(10):
-            self.layout.addWidget(QtWidgets.QLabel("- Position {}: ".format(i+1)), i, 0)
+        for i in range(1, 11):
+            self.layout.addWidget(QtWidgets.QLabel("- Position {}: ".format(i)), i, 0)
 
             show_position = QtWidgets.QPushButton("Show position")
             show_position.setFocusPolicy(QtCore.Qt.NoFocus)
-            show_position.clicked.connect(partial(self.retrieve_position, i))
+            show_position.clicked.connect(partial(self.retrieve_position, i-1))
             self.show_positions.append(show_position)
             self.layout.addWidget(show_position, i, 2)
-            if i > 0:
+            if i > 1:
                 self.layout.addWidget(QtWidgets.QLabel("Duration [s]: "), i, 3)
                 duration = QtWidgets.QDoubleSpinBox()
                 duration.setRange(0.01, 10)
@@ -6690,38 +6698,38 @@ class AnimationDialog(QtWidgets.QDialog):
                 self.durations.append(duration)
                 self.layout.addWidget(duration, i, 4)
 
-        self.layout.addWidget(QtWidgets.QLabel("FPS: "), 10, 0)
+        self.layout.addWidget(QtWidgets.QLabel("FPS: "), 11, 0)
         self.fps = QtWidgets.QSpinBox()
         self.fps.setValue(30)
         self.fps.setRange(1, 60)
-        self.layout.addWidget(self.fps, 11, 0)
+        self.layout.addWidget(self.fps, 12, 0)
 
-        self.layout.addWidget(QtWidgets.QLabel("Rotation speed [deg/s]: "), 10, 1)
+        self.layout.addWidget(QtWidgets.QLabel("Rotation speed [deg/s]: "), 11, 1)
         self.rot_speed = QtWidgets.QDoubleSpinBox()
         self.rot_speed.setValue(90)
         self.rot_speed.setDecimals(1)
         self.rot_speed.setRange(0.1, 1000)
-        self.layout.addWidget(self.rot_speed, 11, 1)
+        self.layout.addWidget(self.rot_speed, 12, 1)
 
         self.add = QtWidgets.QPushButton("+")
         self.add.setFocusPolicy(QtCore.Qt.NoFocus)
         self.add.clicked.connect(self.add_position)
-        self.layout.addWidget(self.add, 10, 2)
+        self.layout.addWidget(self.add, 11, 2)
 
         self.delete = QtWidgets.QPushButton("-")
         self.delete.setFocusPolicy(QtCore.Qt.NoFocus)
         self.delete.clicked.connect(self.delete_position)
-        self.layout.addWidget(self.delete, 11, 2)
+        self.layout.addWidget(self.delete, 12, 2)
 
         self.build = QtWidgets.QPushButton("Build\nanimation")
         self.build.setFocusPolicy(QtCore.Qt.NoFocus)
         self.build.clicked.connect(self.build_animation)
-        self.layout.addWidget(self.build, 10, 3)
+        self.layout.addWidget(self.build, 11, 3)
 
         self.stay = QtWidgets.QPushButton("Stay in the\n position")
         self.stay.setFocusPolicy(QtCore.Qt.NoFocus)
         self.stay.clicked.connect(partial(self.add_position, True))
-        self.layout.addWidget(self.stay, 11, 3)
+        self.layout.addWidget(self.stay, 12, 3)
     
     def add_position(self, freeze=False):
         if self.count == 10:
@@ -6747,7 +6755,7 @@ class AnimationDialog(QtWidgets.QDialog):
         angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
         self.positions_labels.append(QtWidgets.QLabel("{}, {}, {}".format(
                 angx, angy, angz)))
-        self.layout.addWidget(self.positions_labels[-1], self.count, 1)
+        self.layout.addWidget(self.positions_labels[-1], self.count + 1, 1)
 
         # calculate recommended duration
         if self.count > 0:
@@ -6818,62 +6826,52 @@ class AnimationDialog(QtWidgets.QDialog):
         name, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save animation", out_path, filter="*.mp4"
         )
+        if name:
+            # save the images
+            base, ext = os.path.splitext(self.window.paths[0])
+            idx = [i for i, char in enumerate(base) if char == '/'][-1]
+            path = base[:idx] + "/animation_frames"
+            try:
+                os.mkdir(path)
+            except:
+                m = QtWidgets.QMessageBox()
+                m.setWindowTitle("Frames already exist")
+                ret = m.question(
+                    self,
+                    "",
+                    "Delete the existing frames folder?",
+                    m.Yes | m.No,
+                )
+                if ret == m.Yes:
+                    for file in os.listdir(path):
+                        os.remove(os.path.join(path, file))
+                elif ret == m.No:
+                    self.frames_ready = True
 
-        # save the images
-        base, ext = os.path.splitext(self.window.paths[0])
-        idx = [i for i, char in enumerate(base) if char == '/'][-1]
-        path = base[:idx] + "/animation_frames"
-        try:
-            os.mkdir(path)
-        except:
-            m = QtWidgets.QMessageBox()
-            m.setWindowTitle("Frames already exist")
-            ret = m.question(
-                self,
-                "",
-                "Delete the existing frames folder?",
-                m.Yes | m.No,
-            )
-            if ret == m.Yes:
-                for file in os.listdir(path):
-                    os.remove(os.path.join(path, file))
-            elif ret == m.No:
-                self.frames_ready = True
+            if not self.frames_ready:
+                for i in range(len(angx)):
+                        qimage = self.window.view_rot.render_scene(
+                            viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
+                            ang=(angx[i], angy[i], angz[i]),
+                            animation=True,
+                        )
+                        qimage = qimage.scaled(500, 500)
+                        qimage.save(path + "/frame_{}.png".format(i+1))
 
-        if not self.frames_ready:
-            # qimage1 = self.window.view_rot.render_scene(
-            #     viewport=[(ymin[0], xmin[0]), (ymax[0], xmax[0])],
-            #     ang=(angx[0], angy[0], angz[0]),
-            # )
-            # if qimage1.width() % 2 == 1:
-            #     qimage1 = qimage1.scaled(qimage1.width()-1, qimage1.height())
-            # if qimage1.height() % 2 == 1:
-            #     qimage1 = qimage1.scaled(qimage1.width(), qimage1.height()-1)
-            # width = qimage1.width()
-            # height = qimage1.height()
-            for i in range(len(angx)):
-                    qimage = self.window.view_rot.render_scene(
-                        viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
-                        ang=(angx[i], angy[i], angz[i]),
-                        animation=True,
-                    )
-                    qimage = qimage.scaled(500, 500)
-                    qimage.save(path + "/frame_{}.png".format(i+1))
+            # build a video
+            image_files = [os.path.join(path,img)
+                           for img in os.listdir(path)
+                           if img.endswith(".png")]
+            image_files.sort(key=natural_keys)
 
-        # build a video
-        image_files = [os.path.join(path,img)
-                       for img in os.listdir(path)
-                       if img.endswith(".png")]
-        image_files.sort(key=natural_keys)
+            video = ImageSequenceClip(image_files, fps=self.fps.value())
+            video.write_videofile(name)
 
-        video = ImageSequenceClip(image_files, fps=self.fps.value())
-        video.write_videofile(name)
-
-        # delete animaiton frames
-        for file in os.listdir(path):
-            os.remove(os.path.join(path, file))
-        os.rmdir(path)
-        
+            # delete animaiton frames
+            for file in os.listdir(path):
+                os.remove(os.path.join(path, file))
+            os.rmdir(path)
+            
 class ViewRotation(View):
     def __init__(self, window):
         super().__init__(window)
@@ -7053,6 +7051,14 @@ class ViewRotation(View):
                 points_only=points_only,
             )
             self.update_cursor()
+
+        # update current position in the animation dialog
+        angx = np.round(self.angx * 180 / np.pi, 1)
+        angy = np.round(self.angy * 180 / np.pi, 1)
+        angz = np.round(self.angz * 180 / np.pi, 1)
+        self.window.animation_dialog.current_pos.setText(
+            "{}, {}, {}".format(angx, angy, angz)
+        )
 
     def draw_scene(
         self,
@@ -7339,7 +7345,7 @@ class ViewRotation(View):
         try: 
             self._centers_color = points["Color"]
             if self._centers_color == "grey":
-                self._centers_color = "gray" #something for the British users :)
+                self._centers_color = "gray"
         except:
             pass
         self.update_scene()
@@ -8344,6 +8350,9 @@ class Window(QtWidgets.QMainWindow):
             )
             if path:
                 self.view.subtract_picks(path)
+        else:
+            warning = "No picks found.  Please pick first."
+            QtWidgets.QMessageBox.information(self, "Warning", warning)
 
     def load_user_settings(self):
         settings = io.load_user_settings()
@@ -8478,9 +8487,7 @@ class Window(QtWidgets.QMainWindow):
         self.view.locs[channel] = lib.remove_from_rec(
             self.view.locs[channel], "group"
         )
-        self.view.update_scene
-        self.view.zoom_in()
-        self.view.zoom_out()
+        self.view.update_scene()
 
     def combine_channels(self):
         print("Combine Channels")
@@ -8732,6 +8739,8 @@ class RotateWindow(Window):
         self.display_settings_dlg.colormap.setCurrentText(color)
         self.display_settings_dlg.ilp_warning = True
 
+        self.animation_dialog = AnimationDialog(self)
+
         self.dataset_dialog = dataset
         self.paths = paths
 
@@ -8751,7 +8760,6 @@ class RotateWindow(Window):
         export_view.triggered.connect(self.view_rot.export_current_view)
         animation = file_menu.addAction("Build an animation")
         animation.setShortcut("Ctrl+Shift+E")
-        self.animation_dialog = AnimationDialog(self)
         animation.triggered.connect(self.animation_dialog.show)
 
         view_menu = self.menu_bar.addMenu("View")
