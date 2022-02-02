@@ -146,13 +146,11 @@ def pick_similar(
             n_block_locs = _n_block_locs_at(
                 x_range, y_range, K, L, block_starts, block_ends
             )
-            n += 1
-            if n_block_locs > min_n_locs:
+            if n_block_locs >= min_n_locs:
                 block_locs_xy = _get_block_locs_at(
                     x_range, y_range, 
                     locs_xy, block_starts, block_ends, K, L,
                 )
-                block += 1
                 picked_locs_xy = _locs_at(
                     x_grid, y_grid, block_locs_xy, r
                 )
@@ -178,11 +176,11 @@ def pick_similar(
                         + (y_similar - y_test) ** 2
                         > d2
                     ):
-                        if min_n_locs < picked_locs_xy.shape[1] < max_n_locs:
+                        if min_n_locs <= picked_locs_xy.shape[1] <= max_n_locs:
                             if (
                                 min_rmsd
-                                < _rmsd_at_com(picked_locs_xy)
-                                < max_rmsd
+                                <= _rmsd_at_com(picked_locs_xy)
+                                <= max_rmsd
                             ):
                                 x_similar = _np.append(
                                     x_similar, x_test
@@ -1504,7 +1502,7 @@ def groupprops(locs, callback=None):
 
 def calculate_fret(acc_locs, don_locs):
     """
-    Calculate the FRET efficiceny in picked regions, this is for one trace
+    Calculate the FRET efficiency in picked regions, this is for one trace
     """
     fret_dict = {}
     if len(acc_locs) == 0:
