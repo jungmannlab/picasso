@@ -4284,11 +4284,11 @@ class View(QtWidgets.QLabel):
             self.current_trace_y = yvec
             self.channel = channel
 
-            canvas = GenericPlotWindow("Trace")
+            self.canvas = GenericPlotWindow("Trace")
 
-            canvas.figure.clear()
+            self.canvas.figure.clear()
             # Three subplots sharing both x/y axes
-            ax1, ax2, ax3 = canvas.figure.subplots(3, sharex=True)
+            ax1, ax2, ax3 = self.canvas.figure.subplots(3, sharex=True)
 
             ax1.scatter(locs["frame"], locs["x"], s=2)
             ax1.set_title("X-pos vs frame")
@@ -4307,11 +4307,11 @@ class View(QtWidgets.QLabel):
             ax3.set_ylim([-0.1, 1.1])
 
             self.export_trace_button = QtWidgets.QPushButton("Export (*.csv)")
-            canvas.toolbar.addWidget(self.export_trace_button)
+            self.canvas.toolbar.addWidget(self.export_trace_button)
             self.export_trace_button.clicked.connect(self.export_trace)
 
-            canvas.canvas.draw()
-            canvas.show()
+            self.canvas.canvas.draw()
+            self.canvas.show()
 
     def export_trace(self):
         trace = np.array([self.current_trace_x, self.current_trace_y])
