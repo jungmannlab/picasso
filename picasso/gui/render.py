@@ -343,7 +343,7 @@ class DatasetDialog(QtWidgets.QDialog):
             idx = idx[-1]
             path = '...' + path[idx:]
         c = QtWidgets.QCheckBox(path)
-        currentline = len(self.layout)
+        currentline = self.layout.rowCount()
         t = QtWidgets.QPushButton("#")
         t.setObjectName(str(currentline))
         p = QtWidgets.QPushButton("x")
