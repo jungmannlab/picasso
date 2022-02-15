@@ -1534,6 +1534,38 @@ class ChangeFOV(QtWidgets.QDialog):
         self.apply = QtWidgets.QPushButton("Apply")
         self.layout.addWidget(self.apply, 4, 0)
         self.apply.clicked.connect(self.update_scene)
+        self.savefov = QtWidgets.QPushButton("Save FOV")
+        self.layout.addWidget(self.savefov, 5, 0)
+        self.savefov.clicked.connect(self.save_fov)
+        self.loadfov = QtWidgets.QPushButton("Load FOV")
+        self.layout.addWidget(self.loadfov, 6, 0)
+        self.loadfov.clicked.connect(self.load_fov)
+
+    def save_fov(self):
+        path = self.window.view.locs_paths[0]
+        base, ext = os.path.splitext(path)
+        out_path = base + "_fov.txt"
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save FOV to", out_path, filter="*.txt"
+        )
+        fov = np.array([
+            self.x_box.value(),
+            self.y_box.value(),
+            self.w_box.value(),
+            self.h_box.value(),
+        ])
+        np.savetxt(path, fov)
+
+    def load_fov(self):
+        path, ext = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load FOV from", filter="*.txt"
+        )
+        [x, y, w, h] = np.loadtxt(path)
+        self.x_box.setValue(x)
+        self.y_box.setValue(y)
+        self.w_box.setValue(w)
+        self.h_box.setValue(h)
+        self.update_scene()
 
     def update_scene(self):
         x_min = self.x_box.value()
@@ -3009,7 +3041,6 @@ class View(QtWidgets.QLabel):
             groupcopy = locs.group.copy()
             # check if groups are consecutive
             if set(groups) == set(range(min(groups), max(groups) + 1)):
-                groupcopy = locs.group.copy()
                 if len(groups) > 5000:
                     choice = QtWidgets.QMessageBox.question(
                         self,
@@ -3034,12 +3065,14 @@ class View(QtWidgets.QLabel):
                     for i in tqdm(range(len(groups))):
                         groupcopy[locs.group == groups[i]] = i
             else:
-                groupcopy = locs.group.copy()
                 for i in range(len(groups)):
                     groupcopy[locs.group == groups[i]] = i
             np.random.shuffle(groups)
             groups %= N_GROUP_COLORS
-            self.group_color.append(groups[groupcopy])
+            # self.group_color.append(groups[groupcopy])
+            self.group_color = np.concatenate(
+                (self.group_color, groups[groupcopy])
+            )
         if render:
             self.fit_in_view(autoscale=True)
             self.update_scene()
@@ -3075,7 +3108,8 @@ class View(QtWidgets.QLabel):
                 self.fit_in_view(autoscale=True)
             else:
                 self.update_scene()
-        self.all_locs = copy.deepcopy(self.locs) # this is used in the rotation window to move
+        # this is used in the rotation window to move the pick:
+        self.all_locs = copy.deepcopy(self.locs) 
 
     def add_pick(self, position, update_scene=True):
         self._picks.append(position)
@@ -3893,7 +3927,7 @@ class View(QtWidgets.QLabel):
     def load_picks(self, path):
         """ Loads picks from yaml file. """
         with open(path, "r") as f:
-            regions = yaml.load(f)
+            regions = yaml.full_load(f)
 
         # Backwards compatibility for old picked region files
         if "Shape" in regions:
@@ -3931,7 +3965,7 @@ class View(QtWidgets.QLabel):
             )
         oldpicks = self._picks.copy()
         with open(path, "r") as f:
-            regions = yaml.load(f)
+            regions = yaml.full_load(f)
             self._picks = regions["Centers"]
             diameter = regions["Diameter"]
 
@@ -4122,163 +4156,6 @@ class View(QtWidgets.QLabel):
         y_max = self.viewport[1][0] - y_move
         viewport = [(y_min, x_min), (y_max, x_max)]
         self.update_scene(viewport)
-
-    def plot3d(self):
-        channel = self.get_channel3d("Plot 3D")
-        if channel is not None:
-            fig = plt.figure()
-            fig.canvas.set_window_title("3D - Trace")
-            ax = fig.add_subplot(111, projection="3d")
-            ax.set_title("3d view of pick")
-
-            if channel is (len(self.locs_paths)):
-                n_channels = len(self.locs_paths)
-                colors = get_colors(n_channels)
-                
-                x_means = np.zeros(len(self.locs_paths))
-                y_means = np.zeros(len(self.locs_paths))
-                z_means = np.zeros(len(self.locs_paths))
-                x_ranges = np.zeros(len(self.locs_paths))
-                y_ranges = np.zeros(len(self.locs_paths))
-                z_ranges = np.zeros(len(self.locs_paths))
-                for i in range(len(self.locs_paths)):
-                    locs = self.picked_locs(i)
-                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                    ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[i], s=2)
-                    
-                    x_means[i] = np.mean(locs["x"])
-                    y_means[i] = np.mean(locs["y"])
-                    z_means[i] = np.mean(locs["z"])
-                    x_ranges[i] = 3 * np.std(locs["x"])
-                    y_ranges[i] = 3 * np.std(locs["y"])
-                    z_ranges[i] = 3 * np.std(locs["z"])
-                
-                x_mean = np.mean(x_means)
-                y_mean = np.mean(y_means)
-                z_mean = np.mean(z_means)
-                x_range = np.amax(x_ranges)
-                y_range = np.amax(y_ranges)
-                z_range = np.amax(z_ranges)
-                xy_range = max(x_range, y_range)
-
-                ax.set_xlim(
-                    x_mean - xy_range,
-                    x_mean + xy_range,
-                )
-                ax.set_ylim(
-                    y_mean - xy_range,
-                    y_mean + xy_range,
-                )
-                
-                
-                ax.set_zlim(
-                    z_mean - z_range,
-                    z_mean + z_range,
-                )
-                
-                plt.gca().patch.set_facecolor("black")
-                ax.set_xlabel("X [Px]")
-                ax.set_ylabel("Y [Px]")
-                ax.set_zlabel("Z [nm]")
-                ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-                ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-                ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
-                fig.canvas.draw()
-                fig.show()
-
-
-
-            else:
-                show_group = "no"
-                if (hasattr(self.locs[channel], "group") and 
-                    len(self.locs_paths) <= 1):
-                    index, ok = QtWidgets.QInputDialog.getItem(
-                        self, 
-                        "Select 3D Rendering", 
-                        "Show groups?", 
-                        ["yes", "no"], 
-                        editable=False,
-                    )
-                    if ok:
-                        show_group = index
-                    else:
-                        show_group = None
-
-                    
-                if show_group == "yes":
-                    locs = self.picked_locs(channel, 
-                                            add_group=False,
-                                            keep_group_color=True,
-                    )
-                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
-                    group_color = locs["group_color"]
-                    colors = get_colors(N_GROUP_COLORS)
-                    dict_colors = dict(zip(range(N_GROUP_COLORS), colors))
-                    u,inv = np.unique(group_color, return_inverse = True)
-                    colors = np.array([dict_colors[x] for x in u])[inv]
-
-                    ax.scatter(
-                        locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
-    
-                    x_range = 3 * np.std(locs["x"])
-                    y_range = 3 * np.std(locs["y"])
-                    xy_range = max(x_range, y_range)
-    
-                    ax.set_xlim(
-                        np.mean(locs["x"]) - xy_range,
-                        np.mean(locs["x"]) + xy_range,
-                    )
-                    ax.set_ylim(
-                        np.mean(locs["y"]) - xy_range,
-                        np.mean(locs["y"]) + xy_range,
-                    )
-                    ax.set_zlim(
-                        np.mean(locs["z"]) - 3 * np.std(locs["z"]),
-                        np.mean(locs["z"]) + 3 * np.std(locs["z"]),
-                    )                
-
-                if show_group == "no":
-                    locs = self.picked_locs(channel)
-                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
-
-                    colors = locs["z"][:]
-                    colors[
-                        colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])
-                    ] = np.mean(locs["z"]) + 3 * np.std(locs["z"])
-                    colors[
-                        colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
-                    ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
-                    ax.scatter(
-                        locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
-
-                    x_range = 3 * np.std(locs["x"])
-                    y_range = 3 * np.std(locs["y"])
-                    xy_range = max(x_range, y_range)
-    
-                    ax.set_xlim(
-                        np.mean(locs["x"]) - xy_range,
-                        np.mean(locs["x"]) + xy_range,
-                    )
-                    ax.set_ylim(
-                        np.mean(locs["y"]) - xy_range,
-                        np.mean(locs["y"]) + xy_range,
-                    )
-                    ax.set_zlim(
-                        np.mean(locs["z"]) - 3 * np.std(locs["z"]),
-                        np.mean(locs["z"]) + 3 * np.std(locs["z"]),
-                    )       
-                    
-                if show_group != None:
-                    plt.gca().patch.set_facecolor("black")
-                    ax.set_xlabel("X [Px]")
-                    ax.set_ylabel("Y [Px]")
-                    ax.set_zlabel("Z [nm]")
-                    ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-                    ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-                    ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
-                    fig.canvas.draw()
-                    fig.show()
-    
 
     @check_pick
     def show_trace(self):
@@ -5423,7 +5300,7 @@ class View(QtWidgets.QLabel):
                 try:
                     base, ext = os.path.splitext(path)
                     with open(base + ".yaml", "r") as f:
-                        model_info = yaml.load(f, Loader=yaml.FullLoader)
+                        model_info = yaml.full_load(f)
                 except io.NoMetadataFileError:
                     return
                 self.filter_dialog = Filter_MLP_Dialog(self.window, model, 
@@ -7351,7 +7228,7 @@ class ViewRotation(View):
 
     def open_points(self, path):
         with open(path, "r") as f:
-            points = yaml.load(f)
+            points = yaml.full_load(f)
         if not "Centers" in points:
             raise ValueError("Unrecognized points file")
         self._centers = np.asarray(points["Centers"])
@@ -7624,11 +7501,6 @@ class Window(QtWidgets.QMainWindow):
         show_trace_action = tools_menu.addAction("Show trace")
         show_trace_action.setShortcut("Ctrl+R")
         show_trace_action.triggered.connect(self.view.show_trace)
-        plotpick3dsingle_action = tools_menu.addAction(
-            "Plot pick (XYZ scatter)"
-        )
-        plotpick3dsingle_action.triggered.connect(self.view.plot3d)
-        plotpick3dsingle_action.setShortcut("Ctrl+3")
         tools_menu.addSeparator()
         select_traces_action = tools_menu.addAction("Select picks (trace)")
         select_traces_action.triggered.connect(self.view.select_traces)
@@ -7738,7 +7610,6 @@ class Window(QtWidgets.QMainWindow):
         # Define 3D entries
 
         self.actions_3d = [
-            plotpick3dsingle_action,
             plotpick3d_action,
             plotpick3d_iso_action,
             slicer_action,
@@ -8665,6 +8536,21 @@ class Window(QtWidgets.QMainWindow):
         except AttributeError:
             pass
         try:
+            self.info_dialog.change_fov.x_box.setValue(
+                self.view.viewport[0][1]
+            )
+            self.info_dialog.change_fov.y_box.setValue(
+                self.view.viewport[0][0]
+            )
+            self.info_dialog.change_fov.w_box.setValue(
+                self.view.viewport_width()
+            )
+            self.info_dialog.change_fov.h_box.setValue(
+                self.view.viewport_height()
+            )
+        except AttributeError:
+            pass
+        try:
             self.info_dialog.fit_precision.setText(
                 "{:.3} nm".format(self.view.median_lp * self.display_settings_dlg.pixelsize.value())
             )
@@ -8672,6 +8558,18 @@ class Window(QtWidgets.QMainWindow):
             pass
 
     def remove_locs(self):
+        for dialog in [
+            self.display_settings_dlg,
+            self.dataset_dialog,
+            self.info_dialog,
+            self.mask_settings_dialog,
+            self.tools_settings_dialog,
+        ]:
+            dialog.close()
+        try:
+            self.slicer_dialog.close()
+        except:
+            pass
         self.menu_bar.clear() #otherwise the menu bar is doubled
         self.initUI()
 
@@ -8953,6 +8851,8 @@ class RotateWindow(Window):
             pass
 
     def closeEvent(self, event):
+        self.display_settings_dlg.close()
+        self.animation_dialog.close()
         QtWidgets.QMainWindow.closeEvent(self, event)
 
 def main():

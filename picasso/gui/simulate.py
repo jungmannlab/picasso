@@ -749,7 +749,7 @@ class Window(QtWidgets.QMainWindow):
         )
         if path:
             with open(path, "r") as f:
-                z_calibration = yaml.load(f)
+                z_calibration = yaml.full_load(f)
                 self.cx = _np.array(z_calibration["X Coefficients"])
                 self.cy = _np.array(z_calibration["Y Coefficients"])
                 self.statusBar().showMessage("Caliration loaded from: " + path)
