@@ -122,7 +122,7 @@ class View(QtWidgets.QGraphicsView):
 
 class Scene(QtWidgets.QGraphicsScene):
     """
-    Scenes render indivdual frames and can be displayed in a `View` widget
+    Scenes render individual frames and can be displayed in a `View` widget
     """
 
     def __init__(self, window, parent=None):
