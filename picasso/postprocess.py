@@ -404,11 +404,10 @@ def pair_correlation(locs, info, bin_size, r_max):
     return bins_lower, dh / area
 
 
-def dbscan(locs, radius, min_density):
+def dbscan(locs, radius, min_density, pixelsize):
     print("Identifying clusters...")
     if hasattr(locs, "z"):
         print("z-coordinates detected")
-        pixelsize = int(input("Enter the pixelsize in nm/px:"))
         locs = locs[
             _np.isfinite(locs.x) & _np.isfinite(locs.y) & _np.isfinite(locs.z)
         ]
@@ -553,20 +552,21 @@ def dbscan(locs, radius, min_density):
         )
     return clusters, locs
 
-def hdbscan(locs, min_cluster_size, min_samples):
+def hdbscan(locs, min_cluster_size, min_samples, cluster_eps, pixelsize):
 
     from hdbscan import HDBSCAN as _HDBSCAN
 
     print("Identifying clusters...")
     if hasattr(locs, "z"):
         print("z-coordinates detected")
-        pixelsize = int(input("Enter the pixelsize in nm/px:"))
         locs = locs[
             _np.isfinite(locs.x) & _np.isfinite(locs.y) & _np.isfinite(locs.z)
         ]
         X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
         hdb = _HDBSCAN(
-            min_samples=min_samples, min_cluster_size=min_cluster_size
+            min_samples=min_samples, 
+            min_cluster_size=min_cluster_size,
+            cluster_selection_epsilon=cluster_eps,
         ).fit(X)
         group = _np.int32(hdb.labels_)  # int32 for Origin compatiblity
         locs = _lib.append_to_rec(locs, group, "group")
@@ -647,7 +647,9 @@ def hdbscan(locs, min_cluster_size, min_samples):
         locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
         X = _np.vstack((locs.x, locs.y)).T
         hdb = _HDBSCAN(
-            min_samples=min_samples, min_cluster_size=min_cluster_size
+            min_samples=min_samples, 
+            min_cluster_size=min_cluster_size,
+            cluster_selection_epsilon=cluster_eps,
         ).fit(X)
         group = _np.int32(hdb.labels_)  # int32 for Origin compatiblity
         locs = _lib.append_to_rec(locs, group, "group")
@@ -1014,7 +1016,7 @@ def cluster_combine_dist(locs):
 
     if hasattr(locs, "z"):
         print("XYZ")
-        pixelsize = int(input("Enter the pixelsize in nm/px:"))
+        pixelsize = float(input("Enter the pixelsize in nm/px:"))
 
         combined_locs = []
         for group in _tqdm(_np.unique(locs["group"])):

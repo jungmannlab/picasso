@@ -122,7 +122,7 @@ class View(QtWidgets.QGraphicsView):
 
 class Scene(QtWidgets.QGraphicsScene):
     """
-    Scenes render indivdual frames and can be displayed in a `View` widget
+    Scenes render individual frames and can be displayed in a `View` widget
     """
 
     def __init__(self, window, parent=None):
@@ -570,7 +570,7 @@ class ParametersDialog(QtWidgets.QDialog):
         )
         if path:
             with open(path, "r") as f:
-                self.z_calibration = yaml.load(f)
+                self.z_calibration = yaml.full_load(f)
                 self.z_calibration_path = path
             self.z_calib_label.setAlignment(QtCore.Qt.AlignRight)
             self.z_calib_label.setText(os.path.basename(path))
@@ -998,7 +998,7 @@ class Window(QtWidgets.QMainWindow):
     def load_picks(self, path):
         try:
             with open(path, "r") as f:
-                regions = yaml.load(f)
+                regions = yaml.full_load(f)
             self._picks = regions["Centers"]
             maxframes = int(self.info[0]["Frames"])
             # ask for drift correction
@@ -1296,7 +1296,7 @@ class Window(QtWidgets.QMainWindow):
 
     def load_parameters(self, path):
         with open(path, "r") as file:
-            parameters = yaml.load(file)
+            parameters = yaml.full_load(file)
             self.parameters_dialog.box_spinbox.setValue(parameters["Box Size"])
             self.parameters_dialog.mng_spinbox.setValue(
                 parameters["Min. Net Gradient"]
