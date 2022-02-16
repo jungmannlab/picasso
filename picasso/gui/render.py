@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 """
     gui/render
     ~~~~~~~~~~~~~~~~~~~~
@@ -873,7 +874,7 @@ class PlotDialogIso(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             ax4.set_title("YZ")
-            ax4.set_facecolor_bgcolor("black")
+            ax4.set_facecolor("black")
 
         result = dialog.exec_()
 
@@ -984,7 +985,6 @@ class ClsDlg(QtWidgets.QDialog):
         fig = dialog.figure
         ax1 = fig.add_subplot(121, projection="3d")
         ax2 = fig.add_subplot(122, projection="3d")
-        plt.axis("equal")
         dialog.label.setText(
             "3D Scatterplot of Pick "
             + str(current + 1)
@@ -1988,7 +1988,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax1.imshow(
             self.H,
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -2003,7 +2003,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax2.imshow(
             self.H_blur,
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -2018,7 +2018,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax3.imshow(
             self.mask,
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -2033,7 +2033,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax4.imshow(
             np.zeros_like(self.H),
             interpolation="nearest",
-            origin="low",
+            origin="lower",
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -2726,7 +2726,7 @@ class SlicerDialog(QtWidgets.QDialog):
             n, bins, patches = plt.hist(
                 self.zcoord[i],
                 self.bins,
-                density=1,
+                density=True,
                 facecolor=self.colors[i],
                 alpha=0.5,
             )
@@ -3307,6 +3307,8 @@ class View(QtWidgets.QLabel):
     def dbscan(self):
         radius, min_density, ok = DbscanDialog.getParams()
         if ok:
+            status = lib.StatusDialog("Applying DBSCAN. This may take a while..", self)
+
             for locs_path in (self.locs_paths):
                 locs, locs_info = io.load_locs(locs_path)
                 pixelsize = self.window.display_settings_dlg.pixelsize.value()
@@ -3330,9 +3332,12 @@ class View(QtWidgets.QLabel):
                       "\n" + base + "_dbclusters.hdf5"
                 )
 
+            status.close()
+
     def hdbscan(self):
         min_cluster, min_samples, cluster_eps, ok = HdbscanDialog.getParams()
         if ok:
+            status = lib.StatusDialog("Applying HDBSCAN. This may take a while..", self)
             for locs_path in (self.locs_paths):
                 locs, locs_info = io.load_locs(locs_path)
                 pixelsize = self.window.display_settings_dlg.pixelsize.value()
@@ -3356,6 +3361,7 @@ class View(QtWidgets.QLabel):
                     self, "HDBSCAN", "Clustering executed. Results are saved in: \n" + base + "_hdbscan.hdf5" +
                       "\n" + base + "_hdbclusters.hdf5"
                 )
+            status.close()
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
         """
@@ -4197,7 +4203,7 @@ class View(QtWidgets.QLabel):
             ax3.set_ylim([-0.1, 1.1])
 
             self.export_trace_button = QtWidgets.QPushButton("Export (*.csv)")
-            self.canvas.toolbar.addWidget(self.export_trace_button)
+            self.canvas.toolbar.addWidget(self.exportTraceButton)
             self.export_trace_button.clicked.connect(self.export_trace)
 
             self.canvas.canvas.draw()

@@ -482,7 +482,6 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # MLE
         mle_widget = QtWidgets.QWidget()
-        fit_stack.addWidget(mle_widget)
         mle_grid = QtWidgets.QGridLayout(mle_widget)
         mle_grid.addWidget(QtWidgets.QLabel("Convergence criterion:"), 0, 0)
         self.convergence_criterion = QtWidgets.QDoubleSpinBox()
@@ -502,15 +501,18 @@ class ParametersDialog(QtWidgets.QDialog):
 
         self.gpufit_checkbox = QtWidgets.QCheckBox("Use GPUfit")
         self.gpufit_checkbox.setTristate(False)
-        self.gpufit_checkbox.setDisabled(True)
+        if not gpufit_installed:
+            self.gpufit_checkbox.setDisabled(True)
         self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
 
         if not gpufit_installed:
             self.gpufit_checkbox.hide()
+
         lq_grid.addWidget(self.gpufit_checkbox)
 
         fit_stack.addWidget(lq_widget)
         # lq_grid = QtWidgets.QGridLayout(lq_widget)
+        fit_stack.addWidget(mle_widget)
 
         avg_widget = QtWidgets.QWidget()
         fit_stack.addWidget(avg_widget)
@@ -1375,8 +1377,8 @@ class Window(QtWidgets.QMainWindow):
             self.status_bar.showMessage("Preparing fit...")
             method = self.parameters_dialog.fit_method.currentText()
             method = {
-                "MLE, integrated Gaussian": "mle",
                 "LQ, Gaussian": "lq",
+                "MLE, integrated Gaussian": "mle",
                 "Average of ROI": "avg",
             }[method]
             eps = self.parameters_dialog.convergence_criterion.value()
