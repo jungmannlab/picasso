@@ -6559,6 +6559,7 @@ class AnimationDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
+        self.d = 42
         self.setWindowTitle("Build an animation")
         self.setModal(False)
         self.layout = QtWidgets.QGridLayout()
