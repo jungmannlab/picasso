@@ -2153,7 +2153,7 @@ class PickToolCircleSettings(QtWidgets.QWidget):
         self.pick_similar_range.setRange(0, 100000)
         self.pick_similar_range.setValue(2)
         self.pick_similar_range.setSingleStep(0.1)
-        self.pick_similar_range.setDecimals(1)
+        self.pick_similar_range.setDecimals(2)
         self.grid.addWidget(self.pick_similar_range, 1, 1)
 
 
