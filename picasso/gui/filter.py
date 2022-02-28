@@ -9,8 +9,7 @@
 """
 
 
-import sys
-import traceback
+import sys, traceback, importlib, pkgutil
 from PyQt5 import QtCore, QtGui, QtWidgets
 from matplotlib.backends.backend_qt4agg import (
     FigureCanvasQTAgg,
@@ -378,6 +377,23 @@ class Window(QtWidgets.QMainWindow):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "filter":
+            p.execute()
+            
     window.show()
 
     def excepthook(type, value, tback):

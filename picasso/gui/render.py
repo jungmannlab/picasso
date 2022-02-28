@@ -7,6 +7,8 @@
 """
 import os, sys, traceback, copy, time
 import os.path
+import importlib, pkgutil
+from glob import glob
 from math import ceil
 from icecream import ic
 from functools import partial
@@ -469,7 +471,7 @@ class DatasetDialog(QtWidgets.QDialog):
         if len(self.closebuttons) == 1:
             self.close()
             self.window.menu_bar.clear()
-            self.window.initUI()
+            self.window.initUI(plugins_loaded=True)
         else:
             self.layout.removeWidget(self.checks[i])
             self.layout.removeWidget(self.title[i])
@@ -4267,172 +4269,6 @@ class View(QtWidgets.QLabel):
 
         return msgBox
 
-    def show_fret(self):
-        channel_acceptor = self.get_channel(title="Select acceptor channel")
-        channel_donor = self.get_channel(title="Select donor channel")
-
-        removelist = []
-
-        n_channels = len(self.locs_paths)
-        acc_picks = self.picked_locs(channel_acceptor)
-        don_picks = self.picked_locs(channel_donor)
-
-        if self._picks:
-            if self._pick_shape == "Rectangle":
-                raise NotImplementedError(
-                    "Not implemented for rectangle picks"
-                )
-            params = {}
-            params["t0"] = time.time()
-            i = 0
-            while i < len(self._picks):
-
-                pick = self._picks[i]
-
-                fret_dict, fret_locs = postprocess.calculate_fret(
-                    acc_picks[i], don_picks[i]
-                )
-
-                fig, (ax1, ax2, ax3) = plt.subplots(3, sharex=True)
-                fig.canvas.set_window_title("FRET-trace")
-                ax1.plot(fret_dict["frames"], fret_dict["acc_trace"])
-                ax1.set_title("Acceptor intensity vs frame")
-                ax2.plot(fret_dict["frames"], fret_dict["don_trace"])
-                ax2.set_title("Donor intensity vs frame")
-                ax3.scatter(
-                    fret_dict["fret_timepoints"], fret_dict["fret_events"], s=2)
-                ax3.set_title(r"$\frac{I_A}{I_D+I_A}$")
-
-                ax1.set_xlim(0, (fret_dict["maxframes"] + 1))
-                ax3.set_xlabel("Frame")
-
-                ax1.set_ylabel("Photons")
-                ax2.set_ylabel("Photons")
-                ax3.set_ylabel("Ratio")
-
-                fig.canvas.draw()
-                width, height = fig.canvas.get_width_height()
-
-                im = QtGui.QImage(
-                    fig.canvas.buffer_rgba(),
-                    width,
-                    height,
-                    QtGui.QImage.Format_ARGB32,
-                )
-
-                self.setPixmap((QtGui.QPixmap(im)))
-                self.setAlignment(QtCore.Qt.AlignCenter)
-
-                params["n_removed"] = len(removelist)
-                params["n_kept"] = i - params["n_removed"]
-                params["n_total"] = len(self._picks)
-                params["i"] = i
-
-                msgBox = self.pick_message_box(params)
-
-                reply = msgBox.exec()
-
-                if reply == 0:
-                    # Accepted
-                    if pick in removelist:
-                        removelist.remove(pick)
-                elif reply == 3:
-                    # Cancel
-                    break
-                elif reply == 2:
-                    # Back
-                    if i >= 2:
-                        i -= 2
-                    else:
-                        i = -1
-                else:
-                    # Discard
-                    removelist.append(pick)
-
-                i += 1
-                plt.close()
-
-        for pick in removelist:
-            self._picks.remove(pick)
-
-        self.n_picks = len(self._picks)
-
-        self.update_pick_info_short()
-        self.update_scene()
-
-    def calculate_fret_dialog(self):
-        if self._pick_shape == "Rectangle":
-            raise NotImplementedError("Not implemented for rectangle picks")
-        print("Calculating FRET")
-        fret_events = []
-
-        channel_acceptor = self.get_channel(title="Select acceptor channel")
-        channel_donor = self.get_channel(title="Select donor channel")
-
-        acc_picks = self.picked_locs(channel_acceptor)
-        don_picks = self.picked_locs(channel_donor)
-
-        K = len(self._picks)
-        progress = lib.ProgressDialog(
-            "Calculating fret in Picks...", 0, K, self
-        )
-        progress.show()
-
-        all_fret_locs = []
-
-        for i in range(K):
-            fret_dict, fret_locs = postprocess.calculate_fret(
-                acc_picks[i], don_picks[i]
-            )
-            if fret_dict["fret_events"] != []:
-                fret_events.append(fret_dict["fret_events"])
-            if fret_locs != []:
-                all_fret_locs.append(fret_locs)
-            progress.set_value(i + 1)
-
-        progress.close()
-
-        if fret_events == []:
-            raise ValueError(
-                "No FRET events detected. "
-                "Inspect picks with Show FRET Traces "
-                "and make sure to have FRET events.")
-
-        fig1 = plt.figure()
-        plt.hist(np.hstack(fret_events), bins=np.arange(0, 1, 0.02))
-        plt.title(r"Distribution of $\frac{I_A}{I_D+I_A}$")
-        plt.xlabel("Ratio")
-        plt.ylabel("Counts")
-        fig1.show()
-
-        base, ext = os.path.splitext(self.locs_paths[channel_acceptor])
-        out_path = base + ".fret.txt"
-
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            "Save FRET values as txt and picked locs",
-            out_path,
-            filter="*.fret.txt",
-        )
-
-        if path:
-            np.savetxt(
-                path,
-                np.hstack(fret_events),
-                fmt="%1.5f",
-                newline="\r\n",
-                delimiter="   ",
-            )
-
-            locs = stack_arrays(all_fret_locs, asrecarray=True, usemask=False)
-            if locs is not None:
-                base, ext = os.path.splitext(path)
-                out_path = base + ".hdf5"
-                pick_info = {"Generated by:": "Picasso Render FRET"}
-                io.save_locs(
-                    out_path, locs, self.infos[channel_acceptor] + [pick_info]
-                )
-
     def select_traces(self):
         print("Showing  traces")
 
@@ -5169,8 +5005,14 @@ class View(QtWidgets.QLabel):
             self.add_picks(similar)
             status.close()
 
-    def picked_locs(self, channel, add_group=True, keep_group_color=False, 
-        all_locs=False, d=None, w=None):
+    def picked_locs(
+        self, 
+        channel, 
+        add_group=True,
+        all_locs=False, 
+        d=None, 
+        w=None
+    ):
         """ Returns picked localizations in the specified channel """
         if len(self._picks):
             picked_locs = []
@@ -5182,9 +5024,6 @@ class View(QtWidgets.QLabel):
                 if d is None:
                     d = self.window.tools_settings_dialog.pick_diameter.value()
                 r = d / 2
-
-                if keep_group_color:
-                    self.locs[0] = lib.append_to_rec(self.locs[0], self.group_color, "group_color")
 
                 index_blocks = self.get_index_blocks(channel, all_locs=all_locs, d=d)
 
@@ -5500,7 +5339,7 @@ class View(QtWidgets.QLabel):
 
         if hasattr(locs, "group"):
             if np.sum(self.group_color[0]) == 0: # i.e. if the group color is from the add group function
-                locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
+                # locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
                 return self.render_multi_channel(
                     kwargs, autoscale=autoscale, locs=None, use_cache=use_cache, plot_channels=True
                 )
@@ -7218,7 +7057,7 @@ class ViewRotation(View):
         elif n_channels > 1:
             locs = []
             for i in range(n_channels):
-                temp = self.picked_locs(i, add_group=False, keep_group_color=False, 
+                temp = self.picked_locs(i, add_group=False, 
                     all_locs=True, d=self.window.d, w=self.window.w)
                 locs.append(temp[0])
             self.locs = locs
@@ -7353,11 +7192,11 @@ class ViewRotation(View):
             self.qimage.save(path)
 
 class Window(QtWidgets.QMainWindow):
-    def __init__(self):
+    def __init__(self, plugins_loaded=False):
         super().__init__()
-        self.initUI()
+        self.initUI(plugins_loaded)
 
-    def initUI(self):
+    def initUI(self, plugins_loaded):
         self.setWindowTitle("Picasso: Render")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
@@ -7530,16 +7369,7 @@ class Window(QtWidgets.QMainWindow):
         pickadd_action = tools_menu.addAction("Subtract pick regions")
         pickadd_action.triggered.connect(self.subtract_picks)
 
-        tools_menu.addSeparator()
-        self.fret_traces_action = tools_menu.addAction("Show FRET traces")
-        self.fret_traces_action.triggered.connect(self.view.show_fret)
-
-        self.calculate_fret_action = tools_menu.addAction(
-            "Calculate FRET in picks"
-        )
-        self.calculate_fret_action.triggered.connect(
-            self.view.calculate_fret_dialog
-        )
+       
         tools_menu.addSeparator()
         cluster_action = tools_menu.addAction("Cluster in pick (k-means)")
         cluster_action.triggered.connect(self.view.analyze_cluster)
@@ -7630,6 +7460,13 @@ class Window(QtWidgets.QMainWindow):
         self.menus = [view_menu, postprocess_menu, tools_menu]
         for menu in self.menus:
             menu.setDisabled(True)
+
+        if plugins_loaded:
+            try:
+                for plugin in self.plugins:
+                    plugin.execute()    
+            except:
+                pass        
 
     def closeEvent(self, event):
         settings = io.load_user_settings()
@@ -8577,7 +8414,7 @@ class Window(QtWidgets.QMainWindow):
         except:
             pass
         self.menu_bar.clear() #otherwise the menu bar is doubled
-        self.initUI()
+        self.initUI(plugins_loaded=True)
 
     def rotate_locs(self, locs, angx, angy, angz):
         x_min = 0
@@ -8595,7 +8432,15 @@ class Window(QtWidgets.QMainWindow):
 
         return locs
 
-    def rot_win(self, opening=False, d=None, w=None, angx=None, angy=None, angz=None):
+    def rot_win(
+        self, 
+        opening=False, 
+        d=None, 
+        w=None, 
+        angx=None, 
+        angy=None, 
+        angz=None
+    ):
         if len(self.view._picks) == 0:
             raise ValueError("Pick a region to rotate.")
         elif len(self.view._picks) > 1:
@@ -8618,7 +8463,7 @@ class Window(QtWidgets.QMainWindow):
         elif n_channels > 1:
             locs = []
             for i in range(n_channels):
-                temp = self.view.picked_locs(i, add_group=False, keep_group_color=False)
+                temp = self.view.picked_locs(i, add_group=False)
                 locs.append(temp[0])
                 #todo: I guess that I would like to keep the group color
 
@@ -8864,6 +8709,25 @@ class RotateWindow(Window):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
+    window.plugins = []
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "render":
+            p.execute()
+            window.plugins.append(p)
+
     window.show()
 
     def excepthook(type, value, tback):

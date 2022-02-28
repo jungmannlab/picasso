@@ -9,11 +9,8 @@
     :copyright: Copyright (c) 2016 Jungmann Lab,  MPI of Biochemistry
 """
 
-import glob
-import os
+import glob, os, sys, traceback, importlib, pkgutil
 import os.path as _ospath
-import sys
-import traceback
 from math import sqrt
 
 import matplotlib.patches as patches
@@ -1539,6 +1536,23 @@ class MainWindow(QtWidgets.QWidget):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "design":
+            p.execute()
+
     window.show()
     sys.exit(app.exec_())
 

@@ -16,6 +16,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 import time
 import numpy as np
 import traceback
+import importlib, pkgutil
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
 # from icecream import ic
 
@@ -1700,6 +1701,23 @@ class FitZWorker(QtCore.QThread):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "localize":
+            p.execute()
+
     window.show()
 
     def excepthook(type, value, tback):
