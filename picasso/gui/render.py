@@ -49,6 +49,7 @@ N_Z_COLORS = 32
 
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
+
 def atoi(text):
     return int(text) if text.isdigit() else text
 
@@ -469,9 +470,7 @@ class DatasetDialog(QtWidgets.QDialog):
                 if i == self.closebuttons[j].objectName():
                     i = j
         if len(self.closebuttons) == 1:
-            self.close()
-            self.window.menu_bar.clear()
-            self.window.initUI(plugins_loaded=True)
+            self.window.remove_locs()
         else:
             self.layout.removeWidget(self.checks[i])
             self.layout.removeWidget(self.title[i])
@@ -521,7 +520,7 @@ class DatasetDialog(QtWidgets.QDialog):
                 QtGui.QPalette.Window, 
                 QtGui.QColor.fromRgbF(r, g, b, 1)
             )
-        elif self.window.view.isHexadecimal(color):
+        elif self.window.view.is_hexadecimal(color):
             color = color.lstrip("#")
             r, g, b = tuple(
                 int(color[i: i + 2], 16) / 255 for i in (0, 2, 4)
@@ -2288,9 +2287,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         contrast_grid.addWidget(self.maximum, 1, 1)
         contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
         self.colormap = QtWidgets.QComboBox()
-        self.colormap.addItems(
-            sorted(["hot", "viridis", "inferno", "plasma", "magma", "gray"])
-        )
+        self.colormap.addItems(plt.colormaps())
         contrast_grid.addWidget(self.colormap, 2, 1)
         self.colormap.currentIndexChanged.connect(self.update_scene)
         # Blur
@@ -5265,7 +5262,7 @@ class View(QtWidgets.QLabel):
                     )
                     index = np.where(colors_array == color)[0][0]
                     colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
-                elif self.isHexadecimal(color):
+                elif self.is_hexadecimal(color):
                     colorstring = color.lstrip("#")
                     rgbval = tuple(
                         int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
@@ -5304,10 +5301,12 @@ class View(QtWidgets.QLabel):
         self._bgra = self.to_8bit(bgra)
         return self._bgra
 
-    def isHexadecimal(self, text):
-        allowed_characters = ['0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-                              'a', 'b', 'c', 'd', 'e', 'f',
-                              'A', 'B', 'C', 'D', 'E', 'F']
+    def is_hexadecimal(self, text):
+        allowed_characters = [
+            '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+            'a', 'b', 'c', 'd', 'e', 'f',
+            'A', 'B', 'C', 'D', 'E', 'F'
+        ]
         sum_char = 0
         if type(text) == str:
             if text[0] == '#':
@@ -5317,14 +5316,7 @@ class View(QtWidgets.QLabel):
                             sum_char += 1
                     if sum_char == 6:
                         return True
-                    else:
-                        return False
-                else:
-                    return False
-            else:
-                return False
-        else:
-            return False
+        return False
 
     def render_single_channel(
         self, kwargs, autoscale=False, use_cache=False, cache=True,
@@ -6687,7 +6679,7 @@ class ViewRotation(View):
                 if color in self.window.dataset_dialog.default_colors:
                     index = self.window.dataset_dialog.default_colors.index(color)
                     colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
-                elif self.isHexadecimal(color):
+                elif self.is_hexadecimal(color):
                     colorstring = color.lstrip("#")
                     rgbval = tuple(
                         int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
@@ -6879,7 +6871,7 @@ class ViewRotation(View):
 
         if type(self._centers_color) == str:
             if len(self._centers_color) > 0:
-                if self.isHexadecimal(self._centers_color):
+                if self.is_hexadecimal(self._centers_color):
                     r = int(self._centers_color[1:3], 16) / 255.
                     g = int(self._centers_color[3:5], 16) / 255.
                     b = int(self._centers_color[5:], 16) / 255.
@@ -8411,6 +8403,10 @@ class Window(QtWidgets.QMainWindow):
             dialog.close()
         try:
             self.slicer_dialog.close()
+        except:
+            pass
+        try:
+            self.view.filter_dialog.close()
         except:
             pass
         self.menu_bar.clear() #otherwise the menu bar is doubled
