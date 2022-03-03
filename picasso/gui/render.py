@@ -6973,11 +6973,15 @@ class ViewRotation(View):
         self.update_scene()
 
     def fit_in_view_rotated(self, get_viewport=False):
-        locs = self.locs
-        x_min = np.min([np.min(locs[_].x) for _ in range(len(locs))])
-        x_max = np.max([np.max(locs[_].x) for _ in range(len(locs))])
-        y_min = np.min([np.min(locs[_].y) for _ in range(len(locs))])
-        y_max = np.max([np.max(locs[_].y) for _ in range(len(locs))])
+        # x_min = np.min([np.min(locs[_].x) for _ in range(len(locs))])
+        # x_max = np.max([np.max(locs[_].x) for _ in range(len(locs))])
+        # y_min = np.min([np.min(locs[_].y) for _ in range(len(locs))])
+        # y_max = np.max([np.max(locs[_].y) for _ in range(len(locs))])
+        locs = stack_arrays(self.locs, asrecarray=True, usemask=False)
+        x_min = np.min(locs.x)
+        x_max = np.max(locs.x)
+        y_min = np.min(locs.y)
+        y_max = np.max(locs.y)
         viewport = [(y_min-1, x_min-1), (y_max+1, x_max+1)]
         if get_viewport:
             return viewport
@@ -8442,9 +8446,8 @@ class Window(QtWidgets.QMainWindow):
             locs = []
             for i in range(n_channels):
                 temp = self.view.picked_locs(i, add_group=False)
-                if len(temp[0]) > 0:
-                    locs.append(temp[0])
-                    #todo: I guess that I would like to keep the group color
+                locs.append(temp[0])
+                #todo: I guess that I would like to keep the group color
 
         if hasattr(locs[0], "group"):
             group_color = self.view.get_group_color(locs)
