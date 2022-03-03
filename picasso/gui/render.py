@@ -287,7 +287,7 @@ class DatasetDialog(QtWidgets.QDialog):
         self.intensitysettings = []
         self.setLayout(self.layout)
         self.legend = QtWidgets.QCheckBox("Show legend")
-        self.wbackground = QtWidgets.QCheckBox("White background")
+        self.wbackground = QtWidgets.QCheckBox("Invert colors / white background")
         self.auto_display = QtWidgets.QCheckBox("Automatic display update")
         self.auto_display.setChecked(True)
         self.auto_colors = QtWidgets.QCheckBox("Automatic coloring")
@@ -1314,7 +1314,7 @@ class DbscanDialog(QtWidgets.QDialog):
         self.radius.setRange(0, 1e6)
         self.radius.setValue(1)
         grid.addWidget(self.radius, 0, 1)
-        grid.addWidget(QtWidgets.QLabel("Min. locs:"), 1, 0)
+        grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
         self.density = QtWidgets.QSpinBox()
         self.density.setRange(0, 1e6)
         self.density.setValue(4)
@@ -2525,9 +2525,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         contrast_grid.addWidget(self.maximum, 1, 1)
         contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
         self.colormap = QtWidgets.QComboBox()
-        self.colormap.addItems(
-            sorted(["hot", "viridis", "inferno", "plasma", "magma", "gray"])
-        )
+        self.colormap.addItems(plt.colormaps())
         contrast_grid.addWidget(self.colormap, 2, 1)
         self.colormap.currentIndexChanged.connect(self.update_scene)
         # Blur
@@ -3305,7 +3303,7 @@ class View(QtWidgets.QLabel):
     def dbscan(self):
         radius, min_density, ok = DbscanDialog.getParams()
         if ok:
-            status = lib.StatusDialog("Applying DBSCAN. This may take a while..", self)
+            status = lib.StatusDialog("Applying DBSCAN. This may take a while...", self)
 
             for locs_path in (self.locs_paths):
                 locs, locs_info = io.load_locs(locs_path)
@@ -3335,7 +3333,7 @@ class View(QtWidgets.QLabel):
     def hdbscan(self):
         min_cluster, min_samples, cluster_eps, ok = HdbscanDialog.getParams()
         if ok:
-            status = lib.StatusDialog("Applying HDBSCAN. This may take a while..", self)
+            status = lib.StatusDialog("Applying HDBSCAN. This may take a while...", self)
             for locs_path in (self.locs_paths):
                 locs, locs_info = io.load_locs(locs_path)
                 pixelsize = self.window.display_settings_dlg.pixelsize.value()
@@ -5258,7 +5256,7 @@ class View(QtWidgets.QLabel):
                 if color in self.window.dataset_dialog.default_colors:
                     colors_array = np.array(
                         self.window.dataset_dialog.default_colors, 
-                        dtype=object
+                        dtype=object,
                     )
                     index = np.where(colors_array == color)[0][0]
                     colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
@@ -5305,7 +5303,7 @@ class View(QtWidgets.QLabel):
         allowed_characters = [
             '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
             'a', 'b', 'c', 'd', 'e', 'f',
-            'A', 'B', 'C', 'D', 'E', 'F'
+            'A', 'B', 'C', 'D', 'E', 'F',
         ]
         sum_char = 0
         if type(text) == str:
@@ -5366,6 +5364,8 @@ class View(QtWidgets.QLabel):
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
+        if self.window.dataset_dialog.wbackground.isChecked():
+            self._bgra = -(self._bgra - 255)
         return self._bgra
 
     def resizeEvent(self, event):
@@ -6974,28 +6974,10 @@ class ViewRotation(View):
 
     def fit_in_view_rotated(self, get_viewport=False):
         locs = self.locs
-        if len(locs) == 1:
-            x_min = np.min(locs[0].x)
-            x_max = np.max(locs[0].x)
-            y_min = np.min(locs[0].y)
-            y_max = np.max(locs[0].y)
-        else:
-            x_min = np.zeros(len(locs))
-            x_max = np.zeros(len(locs))
-            y_min = np.zeros(len(locs))
-            y_max = np.zeros(len(locs))
-
-            for i in range(len(locs)):
-                x_min[i] = np.min(locs[i].x)
-                x_max[i] = np.max(locs[i].x)
-                y_min[i] = np.min(locs[i].y)
-                y_max[i] = np.max(locs[i].y)
-
-            x_min = np.min(x_min)
-            x_max = np.max(x_max)
-            y_min = np.min(y_min)
-            y_max = np.max(y_max)
-
+        x_min = np.min([np.min(locs[_].x) for _ in range(len(locs))])
+        x_max = np.max([np.max(locs[_].x) for _ in range(len(locs))])
+        y_min = np.min([np.min(locs[_].y) for _ in range(len(locs))])
+        y_max = np.max([np.max(locs[_].y) for _ in range(len(locs))])
         viewport = [(y_min-1, x_min-1), (y_max+1, x_max+1)]
         if get_viewport:
             return viewport
@@ -8435,7 +8417,7 @@ class Window(QtWidgets.QMainWindow):
         w=None, 
         angx=None, 
         angy=None, 
-        angz=None
+        angz=None,
     ):
         if len(self.view._picks) == 0:
             raise ValueError("Pick a region to rotate.")
@@ -8460,8 +8442,9 @@ class Window(QtWidgets.QMainWindow):
             locs = []
             for i in range(n_channels):
                 temp = self.view.picked_locs(i, add_group=False)
-                locs.append(temp[0])
-                #todo: I guess that I would like to keep the group color
+                if len(temp[0]) > 0:
+                    locs.append(temp[0])
+                    #todo: I guess that I would like to keep the group color
 
         if hasattr(locs[0], "group"):
             group_color = self.view.get_group_color(locs)
@@ -8489,7 +8472,10 @@ class RotateWindow(Window):
         self.view_rot.index_blocks = self.view.index_blocks
         self.d = d
         self.w = w
-        self.view_rot._picks = [(self.view._picks[0][0], self.view._picks[0][1])]
+        self.view_rot._picks = [(
+            self.view._picks[0][0], 
+            self.view._picks[0][1],
+        )]
         self.view_rot.infos = self.view.infos
 
         self.display_settings_dlg = DisplaySettingsRotationDialog(self)
@@ -8603,12 +8589,6 @@ class RotateWindow(Window):
         self.qimage = self.view_rot.draw_points(self.qimage_no_picks)
         pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.view_rot.setPixmap(pixmap)
-
-        max_den = self.display_settings_dlg.maximum.value()
-        if hasattr(locs[0], "group"):
-            self.display_settings_dlg.maximum.setValue(max_den)
-        else:
-            self.display_settings_dlg.maximum.setValue(max_den * 10)
 
         if opening:
             self.view_rot.rotation_input(opening=True, ang=ang)
