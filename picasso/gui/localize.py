@@ -18,7 +18,7 @@ import numpy as np
 import traceback
 import importlib, pkgutil
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
-# from icecream import ic
+from icecream import ic
 
 try:
     from pygpufit import gpufit as gf
@@ -501,7 +501,6 @@ class ParametersDialog(QtWidgets.QDialog):
         lq_grid = QtWidgets.QGridLayout(lq_widget)
 
         self.gpufit_checkbox = QtWidgets.QCheckBox("Use GPUfit")
-        self.gpufit_checkbox.setTristate(False)
         if not gpufit_installed:
             self.gpufit_checkbox.setDisabled(True)
         self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
