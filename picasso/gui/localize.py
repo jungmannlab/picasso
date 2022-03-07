@@ -474,7 +474,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.fit_method.addItems(
             ["LQ, Gaussian", "MLE, integrated Gaussian", "Average of ROI"]
         )
-        self.fit_method.setCurrentIndex(1)
+        self.fit_method.setCurrentIndex(0)
         fit_grid.addWidget(self.fit_method, 1, 1)
         fit_stack = QtWidgets.QStackedWidget()
         fit_grid.addWidget(fit_stack, 2, 0, 1, 2)
