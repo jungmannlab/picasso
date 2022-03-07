@@ -498,7 +498,6 @@ class ViewRotation(QtWidgets.QLabel):
         self._pan = False
         self.display_legend = False
         self.display_rotation = True
-        self.point_color_warning = True
         self.setMaximumSize(500, 500)
 
     def load_locs(self, show_window=False):
@@ -678,8 +677,6 @@ class ViewRotation(QtWidgets.QLabel):
             self.qimage = self.draw_legend(self.qimage)
         if self.display_rotation:
             self.qimage = self.draw_rotation(self.qimage)
-        if len(self._centers) > 0:
-            self.qimage = self.draw_points_rotation(self.qimage)
         self.qimage = self.draw_points(self.qimage)
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
@@ -862,68 +859,6 @@ class ViewRotation(QtWidgets.QLabel):
         painter.end()
         return image
 
-    def draw_points_rotation(self, image):
-        painter = QtGui.QPainter(image)
-        if type(self._centers_color) == str:
-            if len(self._centers_color) > 0:
-                if is_hexadecimal(self._centers_color):
-                    r = int(self._centers_color[1:3], 16) / 255.
-                    g = int(self._centers_color[3:5], 16) / 255.
-                    b = int(self._centers_color[5:], 16) / 255.
-                    painter.setBrush(
-                        QtGui.QBrush(QtGui.QColor.fromRgbF(r, g, b, 1))
-                    )
-                elif self._centers_color in [
-                    "red", "yellow", "blue", "green", "white", "black", 
-                    "cyan", "magenta", "gray",
-                ]:
-                    painter.setBrush(
-                        QtGui.QBrush(QtGui.QColor(self._centers_color))
-                    )
-                else:
-                    self.print_points_warning()
-                    painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
-            else:
-                self.print_points_warning()
-                painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
-        else:
-            self.print_points_warning()
-            painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
-
-        (y_min, x_min), (y_max, x_max) = self.viewport
-        centers = self._centers.copy()
-        centers[:,0] -= x_min + (x_max-x_min)/2
-        centers[:,1] -= y_min + (y_max-y_min)/2
-        centers[:,2] /= self.window.display_settings_dlg.pixelsize.value()
-        R = render.rotation_matrix(self.angx, self.angy, self.angz)
-        centers = R.apply(centers)
-        centers[:,0] += x_min + (x_max-x_min)/2
-        centers[:,1] += y_min + (y_max-y_min)/2
-        centers[:,2] *= self.window.display_settings_dlg.pixelsize.value()
-
-        #translate x and y from centers to the pixels of the display
-        centers[:,0] = (
-            (centers[:,0] - x_min) * (self.width() / (x_max - x_min))
-        )
-        centers[:,1] = (
-            (centers[:,1] - y_min) * (self.height() / (y_max - y_min))
-        )
-
-        for coord in centers:
-            x = coord[0]
-            y = coord[1]
-            painter.drawEllipse(QtCore.QPoint(x, y), 3, 3)
-        return image
-
-    def print_points_warning(self):
-        if self.point_color_warning:
-            message = (
-                "Unrecognized color of the points.  The default color"
-                " will be used."
-            )
-            self.point_color_warning = False
-            QtWidgets.QMessageBox.information(self, "Warning", message)
-
     def add_legend(self):
         if self.display_legend:
             self.display_legend = False
@@ -1026,20 +961,6 @@ class ViewRotation(QtWidgets.QLabel):
         (y_min, x_min), (y_max, x_max) = self.viewport
         new_viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
         self.update_scene(viewport=new_viewport)
-
-    def open_points(self, path):
-        with open(path, "r") as f:
-            points = yaml.full_load(f)
-        if not "Centers" in points:
-            raise ValueError("Unrecognized points file")
-        self._centers = np.asarray(points["Centers"])
-        try: 
-            self._centers_color = points["Color"]
-            if self._centers_color == "grey":
-                self._centers_color = "gray"
-        except:
-            pass
-        self.update_scene()
 
     def mouseMoveEvent(self, event):
         if self._mode == "Rotate":
@@ -1355,8 +1276,6 @@ class RotationWindow(QtWidgets.QMainWindow):
         save_action = file_menu.addAction("Save rotated localizations")
         save_action.setShortcut("Ctrl+S")
         save_action.triggered.connect(self.save_locs_rotated)
-        open_points_action = file_menu.addAction("Load points")
-        open_points_action.triggered.connect(self.open_points)
 
         file_menu.addSeparator()
         export_view = file_menu.addAction("Export current view")
@@ -1433,15 +1352,10 @@ class RotationWindow(QtWidgets.QMainWindow):
         rotate_tool_action.setShortcut("Ctrl+R")
         tools_menu.addAction(rotate_tool_action)
 
+        self.menus = [file_menu, view_menu, tools_menu]
+
         self.setMaximumSize(400, 400)
         self.move(20,20)
-
-    def open_points(self):
-        path, ext = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load points", filter="*.yaml"
-        )
-        if path:
-            self.view_rot.open_points(path)
 
     def move_pick(self, dx, dy):
         """ moves the pick in the main window """

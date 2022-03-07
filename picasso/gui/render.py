@@ -25,12 +25,12 @@ import numpy as np
 import yaml
 import joblib
 
-from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
+from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT \
+    as NavigationToolbar
 
 from scipy.ndimage.filters import gaussian_filter
 from scipy.interpolate import interp1d
-from scipy.spatial import distance_matrix
 from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -43,8 +43,10 @@ from tqdm import tqdm
 
 import colorsys
 
-from .. import imageprocess, io, lib, postprocess, render, nanotron
+from .. import imageprocess, io, lib, postprocess, render
 from .rotation import RotationWindow
+
+matplotlib.rcParams.update({"axes.titlesize": "large"})
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -1422,52 +1424,6 @@ class HdbscanDialog(QtWidgets.QDialog):
         )
 
 
-class RipleyPlotWindow(QtWidgets.QTabWidget):
-    def __init__(self, view):
-        super().__init__()
-        self.setWindowTitle("Ripley H Function Plot")
-        this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, "icons", "render.ico")
-        icon = QtGui.QIcon(icon_path)
-        self.setWindowIcon(icon)
-        self.resize(600, 500)
-        self.view = view
-        self.figure = plt.Figure()
-        self.canvas = FigureCanvas(self.figure)
-        vbox = QtWidgets.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(self.canvas)
-        vbox.addWidget((NavigationToolbar(self.canvas, self)))
-
-    def plot(self, locs):
-        self.figure.clear()
-        p = self.view.window.display_settings_dlg.pixelsize.value()
-
-        # calculate ripley h function
-        x = locs.x
-        y = locs.y
-        A = (np.max(x) - np.min(x)) * (np.max(y) - np.min(y)) * (p ** 2)
-        n = len(locs)
-
-        radius = np.linspace(0, 50, 1000)
-        L = np.zeros(len(radius))
-        points = np.stack((x, y)).T
-        distance = distance_matrix(points, points) * p
-        for i, r in enumerate(radius):
-            L[i] = len(np.where(distance < r)[0])
-        L = np.sqrt(A * L / (np.pi * n * (n-1)))
-        H = L - radius
-        print('calculations finished')
-
-        # plot
-        ax = self.figure.add_subplot(111)
-        ax.plot(radius, H, c='blue')
-        ax.set_xlabel("distance [nm]")
-        ax.set_ylabel("H function")
-
-        self.canvas.draw()
-
-
 class DriftPlotWindow(QtWidgets.QTabWidget):
     def __init__(self, info_dialog):
         super().__init__()
@@ -2714,93 +2670,6 @@ class SlicerDialog(QtWidgets.QDialog):
                 progress.close()
 
 
-class Filter_MLP_Dialog(QtWidgets.QDialog):
-    def __init__(self, window, model, model_info, channel):
-        super().__init__(window)
-        self.window = window
-        self.setWindowTitle("Filter picks with an MLP")
-        self.setModal(False)
-        self.model = model
-        self.all_picks = self.window.view._picks
-        self.classes = model_info["Classes"]
-        self.pick_radius = model_info["Pick Diameter"] / 2
-        self.oversampling = model_info["Oversampling"]
-        self.channel = channel
-        self.predictions = []
-        self.probabilites = []
-        self.to_keep = []
-
-        self.layout = QtWidgets.QGridLayout()
-        self.setLayout(self.layout)
-
-        self.classes_box = QtWidgets.QComboBox(self)
-        for value in self.classes.values():
-            self.classes_box.addItem(value)
-
-        self.prob_thresh = QtWidgets.QDoubleSpinBox()
-        self.prob_thresh.setDecimals(5)
-        self.prob_thresh.setRange(0.0, 1.0)
-        self.prob_thresh.setValue(0.995)
-        self.prob_thresh.setSingleStep(0.00001)
-
-        self.predict_button = QtWidgets.QPushButton("Predict")
-        self.predict_button.clicked.connect(self.update_scene)
-
-        self.layout.addWidget(QtWidgets.QLabel("Choose class:"), 0, 0)
-        self.layout.addWidget(self.classes_box, 0, 1)
-        self.layout.addWidget(QtWidgets.QLabel("Filter probabilities:"), 1, 0)
-        self.layout.addWidget(self.prob_thresh, 1, 1)
-        self.layout.addWidget(self.predict_button, 2, 1)
-
-        self.update_scene()
-
-    def update_scene(self):
-        # if not predicted, run nanotron
-        if len(self.predictions) == 0:
-            self.predict()
-        self.update_picks()
-        self.window.view.update_scene()
-        self.window.info_dialog.n_picks.setText(str(len(self.to_keep)))
-        self.to_keep = []
-
-    def predict(self):
-        l = lib.ProgressDialog(
-            "Predicting structures...", 0, len(self.all_picks), self
-        )
-        l.set_value(0)
-        to_delete = []
-        for i in tqdm(range(len(self.all_picks))):
-            l.set_value(i)
-            try:
-                pred, prob = nanotron.predict_structure(self.model,
-                    self.window.view.locs[self.channel], i, self.pick_radius, 
-                    self.oversampling, picks=self.all_picks[i])
-                self.predictions.append(pred[0])
-                self.probabilites.append(prob[0])
-            except:
-                to_delete.append(i)
-        l.close()
-        if len(to_delete) != 0:
-            for i in sorted(to_delete, reverse=True):
-                del self.all_picks[i]
-
-    def update_picks(self):
-        # get the index of the currently chosen class
-        # this is used later for indexing the probabilities of predicitions
-        classes_names = np.array(list(self.classes.values()))
-        idx = np.where(classes_names == self.classes_box.currentText())[0][0]
-
-        # find which picks are to be kept
-        for i in range(len(self.all_picks)):
-            check_prob = self.probabilites[i][idx] >= self.prob_thresh.value()
-            check_class = self.classes[self.predictions[i]] == self.classes_box.currentText()
-            if check_prob and check_class:
-                self.to_keep.append(i)
-        self.window.view._picks = []
-        for i in self.to_keep:
-            self.window.view._picks.append(self.all_picks[i])
-
-
 class View(QtWidgets.QLabel):
     def __init__(self, window):
         super().__init__()
@@ -2833,7 +2702,6 @@ class View(QtWidgets.QLabel):
         self.currentdrift = []
         self.x_render_cache = []
         self.x_render_state = False
-        self.nanotron_log = {}
 
     def is_consecutive(l):
         setl = set(l)
@@ -3577,7 +3445,6 @@ class View(QtWidgets.QLabel):
         autoscale=False,
         use_cache=False,
         picks_only=False,
-        points_only=False,
     ):
         slicerposition = self.window.slicer_dialog.slicerposition
         pixmap = self.window.slicer_dialog.slicer_cache.get(slicerposition)
@@ -3588,7 +3455,6 @@ class View(QtWidgets.QLabel):
                 autoscale=autoscale,
                 use_cache=use_cache,
                 picks_only=picks_only,
-                points_only=points_only,
             )
             self.window.slicer_dialog.slicer_cache[
                 slicerposition
@@ -4941,31 +4807,6 @@ class View(QtWidgets.QLabel):
         self._points = []
         self.update_scene()
 
-    def nanotron_filter(self):
-        # load the model 
-        if self._pick_shape != "Circle":
-            raise ValueError("The tool is compatible with circular picks only.")
-        if self._picks == []:
-            raise ValueError("No picks chosen. Please pick first.")
-        channel = self.get_channel("Choose channel to filter")
-        if channel is not None:
-            path, exe = QtWidgets.QFileDialog.getOpenFileName(
-                self, "Load model file", filter="*.sav", directory=None)
-            if path:
-                try:
-                    model = joblib.load(path)
-                except Exception:
-                    raise ValueError("No model file loaded.")
-                try:
-                    base, ext = os.path.splitext(path)
-                    with open(base + ".yaml", "r") as f:
-                        model_info = yaml.full_load(f)
-                except io.NoMetadataFileError:
-                    return
-                self.filter_dialog = Filter_MLP_Dialog(self.window, model, 
-                    model_info, channel)
-                self.filter_dialog.show()
-
     def render_scene(
         self, autoscale=False, use_cache=False, cache=True, viewport=None
     ):
@@ -4985,7 +4826,9 @@ class View(QtWidgets.QLabel):
             )
         self._bgra[:, :, 3].fill(255)
         Y, X = self._bgra.shape[:2]
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format_RGB32
+        )
         return qimage
 
     def render_multi_channel(
@@ -5511,21 +5354,6 @@ class View(QtWidgets.QLabel):
     def to_down(self):
         self.pan_relative(-0.8, 0)
 
-    def ripley(self):
-        channel = self.get_channel("Ripley H function")
-        if channel is not None:
-            # extract the locs from all picks or the whole fov
-            if len(self._picks) != 1:
-                message = ("Ripley H function works well only on small areas, "
-                           " please pick only one region.")
-                QtWidgets.QMessageBox.information(self, "Warning", message)
-            else:
-                locs = self.picked_locs(channel)
-            # show the plot
-            self.ripley_window = RipleyPlotWindow(self)
-            self.ripley_window.plot(locs)
-            self.ripley_window.show()
-
     def show_drift(self):
         channel = self.get_channel("Show drift")
         if channel is not None:
@@ -6050,7 +5878,6 @@ class View(QtWidgets.QLabel):
         autoscale=False,
         use_cache=False,
         picks_only=False,
-        points_only=False,
     ):
         n_channels = len(self.locs)
         if n_channels:
@@ -6060,7 +5887,6 @@ class View(QtWidgets.QLabel):
                 autoscale=autoscale,
                 use_cache=use_cache,
                 picks_only=picks_only,
-                points_only=points_only,
             )
             self.update_cursor()
 
@@ -6293,10 +6119,6 @@ class Window(QtWidgets.QMainWindow):
         pick_similar_action = tools_menu.addAction("Pick similar")
         pick_similar_action.setShortcut("Ctrl+Shift+P")
         pick_similar_action.triggered.connect(self.view.pick_similar)
-        nanotron_filter_action = tools_menu.addAction(
-            "Filter picks with an MLP"
-        )
-        nanotron_filter_action.triggered.connect(self.view.nanotron_filter)
 
         move_to_pick_action = tools_menu.addAction("Move to pick")
         move_to_pick_action.triggered.connect(self.view.move_to_pick)
@@ -6397,10 +6219,18 @@ class Window(QtWidgets.QMainWindow):
         dbscan_action.triggered.connect(self.view.dbscan)
         hdbscan_action = clustering_menu.addAction("HDBSCAN")
         hdbscan_action.triggered.connect(self.view.hdbscan)
-        ripley_action = postprocess_menu.addAction("Ripley H function")
-        ripley_action.triggered.connect(self.view.ripley)
 
         self.load_user_settings()
+
+        self.dialogs = [
+            self.display_settings_dlg,
+            self.dataset_dialog,
+            self.info_dialog,
+            self.mask_settings_dialog,
+            self.tools_settings_dialog,
+            self.slicer_dialog,
+            self.window_rot,
+        ]
 
         # Define 3D entries
 
@@ -7370,23 +7200,8 @@ class Window(QtWidgets.QMainWindow):
             pass
 
     def remove_locs(self):
-        for dialog in [
-            self.display_settings_dlg,
-            self.dataset_dialog,
-            self.info_dialog,
-            self.mask_settings_dialog,
-            self.tools_settings_dialog,
-        ]:
+        for dialog in self.dialogs:
             dialog.close()
-        try:
-            self.slicer_dialog.close()
-            self.window_rot.close()
-        except:
-            pass
-        try:
-            self.view.filter_dialog.close()
-        except:
-            pass
         self.menu_bar.clear() #otherwise the menu bar is doubled
         self.initUI(plugins_loaded=True)
 
