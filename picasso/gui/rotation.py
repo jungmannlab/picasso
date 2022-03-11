@@ -500,10 +500,33 @@ class ViewRotation(QtWidgets.QLabel):
         self.display_rotation = True
         self.setMaximumSize(500, 500)
 
-    def load_locs(self, show_window=False):
-        self.window.dataset_dialog = self.window.window.dataset_dialog
-        self.paths = self.window.window.view.locs_paths
-        n_channels = len(self.window.window.view.locs_paths)
+    def load_locs(self, update_window=False):
+        if update_window:
+            blur = (
+                self.window.window.display_settings_dlg.blur_buttongroup. \
+                    checkedId()
+            )
+            color = (
+                self.window.window.display_settings_dlg.colormap.currentText()
+            )
+            self.window.display_settings_dlg.blur_buttongroup.button(
+                blur
+            ).setChecked(True)
+            self.window.display_settings_dlg.colormap.setCurrentText(color)
+
+            # save the pick information
+            self.pick = self.window.window.view._picks[0]
+            self.pick_shape = self.window.window.view._pick_shape
+            if self.pick_shape == "Circle":
+                self.pick_size = self.window.window. \
+                    tools_settings_dialog.pick_diameter.value()
+            else:
+                self.pick_size = self.window.window. \
+                    tools_settings_dialog.pick_width.value()
+            self.viewport = self.fit_in_view_rotated(get_viewport=True)
+            self.window.dataset_dialog = self.window.window.dataset_dialog
+            self.paths = self.window.window.view.locs_paths
+        n_channels = len(self.paths)
         self.locs = []
         self.infos = []
         for i in range(n_channels):
@@ -515,18 +538,6 @@ class ViewRotation(QtWidgets.QLabel):
             self.group_color = self.window.window.view.get_group_color(
                 self.locs[0]
             )
-        if show_window:
-            self.viewport = self.fit_in_view_rotated(get_viewport=True)
-            blur = (
-                self.window.window.display_settings_dlg.blur_buttongroup.checkedId()
-            )
-            color = (
-                self.window.window.display_settings_dlg.colormap.currentText()
-            )
-            self.window.display_settings_dlg.blur_buttongroup.button(
-                blur
-            ).setChecked(True)
-            self.window.display_settings_dlg.colormap.setCurrentText(color)
         self.update_scene()
 
     def render_scene(self, viewport=None, ang=None, animation=False):
@@ -917,16 +928,31 @@ class ViewRotation(QtWidgets.QLabel):
         self.update_scene()
 
     def fit_in_view_rotated(self, get_viewport=False):
-        locs = stack_arrays(self.locs, asrecarray=True, usemask=False)
-        x_min = np.min(locs.x)
-        x_max = np.max(locs.x)
-        y_min = np.min(locs.y)
-        y_max = np.max(locs.y)
-        viewport = [(y_min-1, x_min-1), (y_max+1, x_max+1)]
+        if self.pick_shape == "Circle":
+            d = self.pick_size
+            r = d / 2
+            x, y = self.pick
+            x_min = x - r
+            x_max = x + r
+            y_min = y - r
+            y_max = y + r
+        else:
+            w = self.pick_size
+            (xs, ys), (xe, ye) = self.pick
+            X, Y = self.window.window.view.get_pick_rectangle_corners(
+                xs, ys, xe, ye, w
+            )
+            x_min = min(X)
+            x_max = max(X)
+            y_min = min(Y)
+            y_max = max(Y)
+
+        viewport = [(y_min, x_min), (y_max, x_max)]
         if get_viewport:
             return viewport
         else:
-            self.update_scene(viewport=viewport)
+            self.viewport = viewport
+            self.update_scene()
 
     def to_left_rot(self):
         height, width = self.viewport_size()
@@ -1360,7 +1386,7 @@ class RotationWindow(QtWidgets.QMainWindow):
 
     def move_pick(self, dx, dy):
         """ moves the pick in the main window """
-        if self.window.view._pick_shape == "Circle":
+        if self.view_rot.pick_shape == "Circle":
             x = self.window.view._picks[0][0]
             y = self.window.view._picks[0][1]
             self.window.view._picks = [(x + dx, y + dy)]
@@ -1403,20 +1429,20 @@ class RotationWindow(QtWidgets.QMainWindow):
             angx = self.view_rot.angx * 180 / np.pi
             angy = self.view_rot.angy * 180 / np.pi
             angz = self.view_rot.angz * 180 / np.pi
-            if self.window.view._pick_shape == "Circle":
-                x, y = self.window.view._picks[0]
+            if self.view_rot.pick_shape == "Circle":
+                x, y = self.pick
                 pick = [float(x), float(y)]
-                size = self.window.tools_settings_dialog.pick_diameter.value()
+                size = self.pick_size
             else:
-                (ys, xs), (ye, xe) = self.window.view._picks[0]
+                (ys, xs), (ye, xe) = self.pick
                 pick = [[float(ys), float(xs)], [float(ye), float(xe)]]
-                size = self.window.tools_settings_dialog.pick_width.value()
+                size = self.pick_size
 
             new_info = [{
                 "Generated by": "Picasso Render 3D",
                 # "Last driftfile": None,
                 "Pick": pick,
-                "Pick shape": self.window.view._pick_shape,
+                "Pick shape": self.view_rot.pick_shape,
                 "Pick size": size,
                 "angx": self.view_rot.angx,
                 "angy": self.view_rot.angy,

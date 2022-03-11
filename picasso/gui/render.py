@@ -4113,6 +4113,7 @@ class View(QtWidgets.QLabel):
                             )
                             ax.scatter(locs["x"], locs["y"], c=colors[l], s=2)
 
+                        r = self.window.tools_settings_dialog.pick_diameter.value() / 2
                         x_min = pick[0] - r
                         x_max = pick[0] + r
                         y_min = pick[1] - r
@@ -7194,7 +7195,7 @@ class Window(QtWidgets.QMainWindow):
             raise ValueError("Pick a region to rotate.")
         elif len(self.view._picks) > 1:
             raise ValueError("Pick only one region.")
-        self.window_rot.view_rot.load_locs(show_window=True)
+        self.window_rot.view_rot.load_locs(update_window=True)
         self.window_rot.show()
 
 
