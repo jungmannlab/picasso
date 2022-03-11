@@ -13,6 +13,7 @@
 import os
 import colorsys
 import re
+from time import sleep
 from functools import partial
 
 import yaml
@@ -538,7 +539,6 @@ class ViewRotation(QtWidgets.QLabel):
             self.group_color = self.window.window.view.get_group_color(
                 self.locs[0]
             )
-        self.update_scene()
 
     def render_scene(self, viewport=None, ang=None, animation=False):
         kwargs = self.get_render_kwargs(viewport=viewport, animation=animation)
@@ -983,9 +983,9 @@ class ViewRotation(QtWidgets.QLabel):
         self.shift_viewport(0, dy)
 
     def shift_viewport(self, dx, dy):
-        self.load_locs()
         (y_min, x_min), (y_max, x_max) = self.viewport
         new_viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
+        self.load_locs()
         self.update_scene(viewport=new_viewport)
 
     def mouseMoveEvent(self, event):
@@ -1079,8 +1079,8 @@ class ViewRotation(QtWidgets.QLabel):
         x_max = self.viewport[1][1] - x_move
         y_min = self.viewport[0][0] - y_move
         y_max = self.viewport[1][0] - y_move
-        viewport = [(y_min, x_min), (y_max, x_max)]
-        self.update_scene(viewport)
+        self.viewport = [(y_min, x_min), (y_max, x_max)]
+        self.update_scene()
 
     def add_point(self, position, update_scene=True):
         self._points.append(position)
@@ -1390,12 +1390,17 @@ class RotationWindow(QtWidgets.QMainWindow):
             x = self.window.view._picks[0][0]
             y = self.window.view._picks[0][1]
             self.window.view._picks = [(x + dx, y + dy)]
+            self.view_rot.pick = (x + dx, y + dy)
         else:
             (xs, ys), (xe, ye) = self.window.view._picks[0]
             self.window.view._picks = [(
                 (xs + dx, ys + dy), 
                 (xe + dx, ye + dy),
             )]
+            self.view_rot.pick = (
+                (xs + dx, ys + dy), 
+                (xe + dx, ye + dy),
+            )
         self.window.view.update_scene()
 
     def save_channel_multi(self, title="Choose a channel"):
@@ -1420,8 +1425,6 @@ class RotationWindow(QtWidgets.QMainWindow):
                 return None
 
     def save_locs_rotated(self):
-        # make sure that the locs in the main window are shown in the 3D window
-        self.view_rot.load_locs()
 
         # save
         channel = self.save_channel_multi("Save rotated localizations")
