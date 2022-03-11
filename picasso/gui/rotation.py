@@ -1354,7 +1354,8 @@ class RotationWindow(QtWidgets.QMainWindow):
 
         self.menus = [file_menu, view_menu, tools_menu]
 
-        self.setMaximumSize(400, 400)
+        self.setMinimumSize(500, 500)
+        self.setMaximumSize(500, 500)
         self.move(20,20)
 
     def move_pick(self, dx, dy):

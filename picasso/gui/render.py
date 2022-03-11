@@ -4822,7 +4822,6 @@ class View(QtWidgets.QLabel):
                 autoscale=autoscale,
                 use_cache=use_cache,
                 cache=cache,
-                plot_channels=True,
             )
         self._bgra[:, :, 3].fill(255)
         Y, X = self._bgra.shape[:2]
@@ -4838,43 +4837,28 @@ class View(QtWidgets.QLabel):
         locs=None,
         use_cache=False,
         cache=True,
-        plot_channels=False,
     ):
         if locs is None:
             locs = self.locs
         # Plot each channel
-        if plot_channels:
-            locsall = locs.copy()
-            for i in range(len(locs)):
-                if hasattr(locs[i], "z"):
-                    if self.window.slicer_dialog.slicerRadioButton.isChecked():
-                        z_min = self.window.slicer_dialog.slicermin
-                        z_max = self.window.slicer_dialog.slicermax
-                        in_view = (locsall[i].z > z_min) & (
-                            locsall[i].z <= z_max
-                        )
-                        locsall[i] = locsall[i][in_view]
-            n_channels = len(locs)
-            colors = get_colors(n_channels)
-            if use_cache:
-                n_locs = self.n_locs
-                image = self.image
-            else:
-                renderings = [render.render(_, **kwargs) for _ in locsall]
-                n_locs = sum([_[0] for _ in renderings])
-                image = np.array([_[1] for _ in renderings])
+        for i in range(len(locs)):
+            if hasattr(locs[i], "z"):
+                if self.window.slicer_dialog.slicerRadioButton.isChecked():
+                    z_min = self.window.slicer_dialog.slicermin
+                    z_max = self.window.slicer_dialog.slicermax
+                    in_view = (locs[i].z > z_min) & (
+                        locs[i].z <= z_max
+                    )
+                    locs[i] = locs[i][in_view]
+        n_channels = len(locs)
+        colors = get_colors(n_channels)
+        if use_cache:
+            n_locs = self.n_locs
+            image = self.image
         else:
-            n_channels = len(locs)
-            colors = get_colors(n_channels)
-            if use_cache:
-                n_locs = self.n_locs
-                image = self.image
-            else:
-                renderings = []
-                for i in tqdm(range(n_channels)):
-                    renderings.append(render.render(locs[i], **kwargs))
-                n_locs = sum([_[0] for _ in renderings])
-                image = np.array([_[1] for _ in renderings])
+            renderings = [render.render(_, **kwargs) for _ in locs]
+            n_locs = sum([_[0] for _ in renderings])
+            image = np.array([_[1] for _ in renderings])
 
         if cache:
             self.n_locs = n_locs
