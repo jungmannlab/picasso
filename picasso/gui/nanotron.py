@@ -12,6 +12,7 @@ import os.path as _ospath
 import os
 import sys
 import traceback
+import importlib, pkgutil
 from tqdm import tqdm
 import datetime
 from time import sleep
@@ -1260,6 +1261,23 @@ def main():
     icon_path = os.path.join(this_directory, "icons", "nanotron.ico")
     app.setWindowIcon(QIcon(icon_path))
     window = Window()
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "nanotron":
+            p.execute()
+            
     window.show()
 
     def excepthook(type, value, tback):

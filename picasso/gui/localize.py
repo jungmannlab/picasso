@@ -16,8 +16,9 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 import time
 import numpy as np
 import traceback
+import importlib, pkgutil
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
-# from icecream import ic
+from icecream import ic
 
 try:
     from pygpufit import gpufit as gf
@@ -473,7 +474,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.fit_method.addItems(
             ["LQ, Gaussian", "MLE, integrated Gaussian", "Average of ROI"]
         )
-        self.fit_method.setCurrentIndex(1)
+        self.fit_method.setCurrentIndex(0)
         fit_grid.addWidget(self.fit_method, 1, 1)
         fit_stack = QtWidgets.QStackedWidget()
         fit_grid.addWidget(fit_stack, 2, 0, 1, 2)
@@ -500,7 +501,6 @@ class ParametersDialog(QtWidgets.QDialog):
         lq_grid = QtWidgets.QGridLayout(lq_widget)
 
         self.gpufit_checkbox = QtWidgets.QCheckBox("Use GPUfit")
-        self.gpufit_checkbox.setTristate(False)
         if not gpufit_installed:
             self.gpufit_checkbox.setDisabled(True)
         self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
@@ -1700,6 +1700,23 @@ class FitZWorker(QtCore.QThread):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "localize":
+            p.execute()
+
     window.show()
 
     def excepthook(type, value, tback):
