@@ -500,7 +500,6 @@ class ViewRotation(QtWidgets.QLabel):
         self.display_legend = False
         self.display_rotation = True
         self.setMaximumSize(500, 500)
-        self.first_loading = True
 
     def load_locs(self, update_window=False):
         if update_window:
@@ -666,11 +665,6 @@ class ViewRotation(QtWidgets.QLabel):
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
-            if first_loading:
-                self.angx += 1
-                self.draw_scene(viewport)
-                self.angx -= 1
-                self.first_loading
             self.draw_scene(viewport)
 
         # update current position in the animation dialog

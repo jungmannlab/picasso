@@ -7196,8 +7196,9 @@ class Window(QtWidgets.QMainWindow):
         elif len(self.view._picks) > 1:
             raise ValueError("Pick only one region.")
         self.window_rot.view_rot.load_locs(update_window=True)
-        self.window_rot.view_rot.update_scene()
         self.window_rot.show()
+        self.window_rot.view_rot.update_scene()
+
 
 
 def main():
