@@ -3902,7 +3902,7 @@ class View(QtWidgets.QLabel):
             ax3.set_ylim([-0.1, 1.1])
 
             self.export_trace_button = QtWidgets.QPushButton("Export (*.csv)")
-            self.canvas.toolbar.addWidget(self.exportTraceButton)
+            self.canvas.toolbar.addWidget(self.export_trace_button)
             self.export_trace_button.clicked.connect(self.export_trace)
 
             self.canvas.canvas.draw()
@@ -4841,6 +4841,7 @@ class View(QtWidgets.QLabel):
     ):
         if locs is None:
             locs = self.locs
+
         # Plot each channel
         for i in range(len(locs)):
             if hasattr(locs[i], "z"):
@@ -4872,7 +4873,8 @@ class View(QtWidgets.QLabel):
         # Color images
         for i in range(len(self.locs)):
             if not self.window.dataset_dialog.auto_colors.isChecked():
-                color = self.window.dataset_dialog.colorselection[i].currentText()
+                color = self.window.dataset_dialog.colorselection[i]
+                color = color.currentText()
                 if color in self.window.dataset_dialog.default_colors:
                     colors_array = np.array(
                         self.window.dataset_dialog.default_colors, 
@@ -7198,7 +7200,6 @@ class Window(QtWidgets.QMainWindow):
         self.window_rot.view_rot.load_locs(update_window=True)
         self.window_rot.show()
         self.window_rot.view_rot.update_scene()
-
 
 
 def main():

@@ -181,7 +181,9 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.scalebar_groupbox.toggled.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
-        scalebar_grid.addWidget(QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0)
+        scalebar_grid.addWidget(
+            QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
+        )
         self.scalebar = QtWidgets.QDoubleSpinBox()
         self.scalebar.setRange(0.0001, 10000000000)
         self.scalebar.setValue(500)
@@ -541,7 +543,9 @@ class ViewRotation(QtWidgets.QLabel):
             )
 
     def render_scene(self, viewport=None, ang=None, animation=False):
-        kwargs = self.get_render_kwargs(viewport=viewport, animation=animation)
+        kwargs = self.get_render_kwargs(
+            viewport=viewport, animation=animation
+        )
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(kwargs, ang=ang)
@@ -588,9 +592,12 @@ class ViewRotation(QtWidgets.QLabel):
         # coloring
         for i in range(len(self.locs)):
             if not self.window.dataset_dialog.auto_colors.isChecked():
-                color = self.window.dataset_dialog.colorselection[i].currentText()
+                color = self.window.dataset_dialog.colorselection[i]
+                color = color.currentText()
                 if color in self.window.dataset_dialog.default_colors:
-                    index = self.window.dataset_dialog.default_colors.index(color)
+                    index = self.window.dataset_dialog.default_colors.index(
+                        color
+                    )
                     colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
                 elif is_hexadecimal(color):
                     colorstring = color.lstrip("#")

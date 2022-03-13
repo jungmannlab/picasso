@@ -7,15 +7,16 @@
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
-import numpy as _np
-import numba as _numba
-import scipy.signal as _signal
-from scipy.spatial.transform import Rotation
-from tqdm import trange as _trange
-# from icecream import ic
 import time
 import os
 import sys
+
+import numpy as _np
+import numba as _numba
+import scipy.signal as _signal
+from scipy.spatial.transform import Rotation as _Rotation
+from tqdm import trange as _trange
+# from icecream import ic
 
 _DRAW_MAX_SIGMA = 3
 
@@ -37,18 +38,30 @@ def render(
             raise ValueError("Need info if no viewport is provided.")
     (y_min, x_min), (y_max, x_max) = viewport
     if blur_method is None:
-        return render_hist(locs, oversampling, y_min, x_min, y_max, x_max, ang=ang, pixelsize=pixelsize)
+        return render_hist(
+            locs, oversampling, y_min, x_min, y_max, x_max, 
+            ang=ang, pixelsize=pixelsize,
+        )
     elif blur_method == "gaussian":
         return render_gaussian(
-            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=ang, pixelsize=pixelsize)
+            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, 
+            ang=ang, pixelsize=pixelsize,
+        )
     elif blur_method == "gaussian_iso":
         return render_gaussian_iso(
-            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=ang, pixelsize=pixelsize)
+            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, 
+            ang=ang, pixelsize=pixelsize,
+        )
     elif blur_method == "smooth":
-        return render_smooth(locs, oversampling, y_min, x_min, y_max, x_max, ang=ang, pixelsize=pixelsize)
+        return render_smooth(
+            locs, oversampling, y_min, x_min, y_max, x_max, 
+            ang=ang, pixelsize=pixelsize,
+        )
     elif blur_method == "convolve":
         return render_convolve(
-            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=ang, pixelsize=pixelsize)
+            locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, 
+            ang=ang, pixelsize=pixelsize,
+        )
     else:
         raise Exception("blur_method not understood.")
 
@@ -94,7 +107,9 @@ def _render_setup3d(
     return image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view
 
 @_numba.njit
-def _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
+def _render_setupz(
+    locs, oversampling, x_min, z_min, x_max, z_max, pixelsize
+):
     n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
     n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min) / pixelsize))
     x = locs.x
@@ -153,13 +168,33 @@ def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
                 ) / (2 * _np.pi * sx_ * sy_)
 
 @_numba.njit
-def _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang):
+def _fill_gaussian_rot(
+    image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
+):
 
     (angx, angy, angz) = ang
 
-    rot_mat_x = _np.array([[1.0,0.0,0.0],[0.0,_np.cos(angx),_np.sin(angx)],[0.0,-_np.sin(angx),_np.cos(angx)]])
-    rot_mat_y = _np.array([[_np.cos(angy),0.0,_np.sin(angy)],[0.0,1.0,0.0],[-_np.sin(angy),0.0,_np.cos(angy)]])
-    rot_mat_z = _np.array([[_np.cos(angz),-_np.sin(angz),0.0],[_np.sin(angz),_np.cos(angz),0.0],[0.0,0.0,1.0]])
+    rot_mat_x = _np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, _np.cos(angx), _np.sin(angx)],
+            [0.0, -_np.sin(angx), _np.cos(angx)],
+        ]
+    )
+    rot_mat_y = _np.array(
+        [
+            [_np.cos(angy), 0.0, _np.sin(angy)],
+            [0.0, 1.0, 0.0],
+            [-_np.sin(angy), 0.0, _np.cos(angy)],
+        ]
+    )
+    rot_mat_z = _np.array(
+        [
+            [_np.cos(angz), -_np.sin(angz), 0.0],
+            [_np.sin(angz), _np.cos(angz), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
     rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z
     rot_matrixT = _np.transpose(rot_matrix)
 
@@ -183,7 +218,13 @@ def _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang):
         k_min = int(z_ - max_z)
         k_max = int(z_ + max_z + 1)
 
-        cov_matrix = _np.array([[sx_**2, 0, 0], [0, sy_**2, 0], [0, 0, sz_**2]]) #covariance matrix 
+        cov_matrix = _np.array(
+            [
+                [sx_**2, 0, 0], 
+                [0, sy_**2, 0], 
+                [0, 0, sz_**2],
+            ]
+        ) #covariance matrix 
         cov_rot = rot_matrixT @ cov_matrix @ rot_matrix
         cri = inverse(cov_rot) #covariance rotated inverse
 
@@ -193,10 +234,15 @@ def _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang):
                 a = j + 0.5 - x_
                 for k in range(k_min, k_max):   
                     c = k + 0.5 - z_
-                    exponent = a*a * cri[0,0] + a*b * cri[0,1] + a*c * cri[0,2] + \
-                               a*b * cri[1,0] + b*b * cri[1,1] + b*c * cri[1,2] + \
-                               a*c * cri[2,0] + b*c * cri[2,1] + c*c * cri[2,2]
-                    image[i,j] += 2.71828 ** (-0.5 * exponent) / ((6.28319**3 * determinant(cov_rot)) ** 0.5)
+                    exponent = (
+                        a*a * cri[0,0] + a*b * cri[0,1] + a*c * cri[0,2] 
+                        + a*b * cri[1,0] + b*b * cri[1,1] + b*c * cri[1,2]
+                        + a*c * cri[2,0] + b*c * cri[2,1] + c*c * cri[2,2]
+                    )
+                    image[i,j] += (
+                        2.71828 ** (-0.5 * exponent)
+                        / ((6.28319**3 * determinant(cov_rot)) ** 0.5)
+                    )
 
 # only for 3x3 matrix
 @_numba.njit
@@ -221,15 +267,21 @@ def inverse(a):
 # only for 3x3 matrix
 @_numba.njit
 def determinant(s):
-    return s[0,0] * (s[1,1] * s[2,2] - s[1,2] * s[2,1]) - \
-        s[0,1] * (s[1,0] * s[2,2] - s[2,0] * s[1,2]) + \
-        s[0,2] * (s[1,0] * s[2,1] - s[2,0] * s[1,1])
+    return (
+        s[0,0] * (s[1,1] * s[2,2] - s[1,2] * s[2,1]) 
+        - s[0,1] * (s[1,0] * s[2,2] - s[2,0] * s[1,2]) 
+        + s[0,2] * (s[1,0] * s[2,1] - s[2,0] * s[1,1])
+    )
 
-def render_hist(locs, oversampling, y_min, x_min, y_max, x_max, ang=None, pixelsize=None):
+def render_hist(
+    locs, oversampling, y_min, x_min, y_max, x_max, ang=None, pixelsize=None
+):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max)
     if ang is not None:
-        x, y, _ = locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize)
+        x, y, _ = locs_rotation(
+            locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize
+        )
     _fill(image, x, y)
     return len(x), image
 
@@ -252,7 +304,8 @@ def render_hist3d(
     return len(x), image
 
 def render_gaussian(
-    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=None, pixelsize=None
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, 
+    ang=None, pixelsize=None,
 ):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max
@@ -267,22 +320,30 @@ def render_gaussian(
         _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y)
 
     else:
-        x, y, in_view, z = locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize, get_z=True)
+        x, y, in_view, z = locs_rotation(
+            locs, x_min, x_max, y_min, y_max, oversampling, 
+            ang, pixelsize, get_z=True,
+        )
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
-        # for now, let lpz be twice the mean of lpx and lpy
-        blur_depth = oversampling * _np.maximum(locs.lpx+locs.lpy, min_blur_width)
+        # for now, let lpz be twice the mean of lpx and lpy:
+        blur_depth = oversampling * _np.maximum(
+            locs.lpx+locs.lpy, min_blur_width
+        )
 
         sy = blur_height[in_view]
         sx = blur_width[in_view]
         sz = blur_depth[in_view]
 
-        _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
+        _fill_gaussian_rot(
+            image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
+        )
 
     return len(x), image
 
 def render_gaussian_iso(
-    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=None, pixelsize=None
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, 
+    ang=None, pixelsize=None,
 ):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max
@@ -297,27 +358,37 @@ def render_gaussian_iso(
         _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y)
 
     else:
-        x, y, in_view, z = locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize, get_z=True)
+        x, y, in_view, z = locs_rotation(
+            locs, x_min, x_max, y_min, y_max, oversampling, 
+            ang, pixelsize, get_z=True,
+        )
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
         # for now, let lpz be twice the mean of lpx and lpy
-        blur_depth = oversampling * _np.maximum(locs.lpx+locs.lpy, min_blur_width)
+        blur_depth = oversampling * _np.maximum(
+            locs.lpx+locs.lpy, min_blur_width
+        )
 
         sy = (blur_height[in_view] + blur_width[in_view]) / 2
         sx = sy
         sz = blur_depth[in_view]
 
-        _fill_gaussian_rot(image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang)
+        _fill_gaussian_rot(
+            image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
+        )
 
     return len(x), image
 
 def render_convolve(
-    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, ang=None, pixelsize=None
+    locs, oversampling, y_min, x_min, y_max, x_max, min_blur_width, 
+    ang=None, pixelsize=None,
 ):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max)
     if ang is not None:
-        x, y, in_view = locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize) 
+        x, y, in_view = locs_rotation(
+            locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize
+        ) 
 
     _fill(image, x, y)
 
@@ -333,13 +404,18 @@ def render_convolve(
         )
         return n, _fftconvolve(image, blur_width, blur_height)
 
-def render_smooth(locs, oversampling, y_min, x_min, y_max, x_max, ang=None, pixelsize=None):
+def render_smooth(
+    locs, oversampling, y_min, x_min, y_max, x_max, 
+    ang=None, pixelsize=None,
+):
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, oversampling, y_min, x_min, y_max, x_max
     )
 
     if ang is not None:
-        x, y, _= locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize)
+        x, y, _= locs_rotation(
+            locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize
+        )
 
     _fill(image, x, y)
     n = len(x)
@@ -380,18 +456,38 @@ def n_segments(info, segmentation):
     return int(_np.round(n_frames / segmentation))
 
 def rotation_matrix(angx, angy, angz, raw=False):
-    #gives the rotation matrix which then can be applied to a (N,3) localization array
-    rot_mat_x = _np.array([[1,0,0],[0,_np.cos(angx),_np.sin(angx)],[0,-_np.sin(angx), _np.cos(angx)]])
-    rot_mat_y = _np.array([[_np.cos(angy),0,_np.sin(angy)],[0,1,0],[-_np.sin(angy),0,_np.cos(angy)]])
-    rot_mat_z = _np.array([[_np.cos(angz),-_np.sin(angz),0.0],[_np.sin(angz),_np.cos(angz),0.0],[0.0,0.0,1.0]])
-    rotation = Rotation.from_matrix(rot_mat_x @ rot_mat_y @ rot_mat_z)
+    # gives the Rotation method which then can be applied to a
+    # (N,3) localization array
+    rot_mat_x = _np.array(
+        [
+            [1.0, 0.0, 0.0],
+            [0.0, _np.cos(angx), _np.sin(angx)],
+            [0.0,-_np.sin(angx), _np.cos(angx)],
+        ]
+    )
+    rot_mat_y = _np.array(
+        [
+            [_np.cos(angy), 0.0, _np.sin(angy)],
+            [0.0, 1.0, 0.0],
+            [-_np.sin(angy), 0.0, _np.cos(angy)],
+        ]
+    )
+    rot_mat_z = _np.array(
+        [
+            [_np.cos(angz), -_np.sin(angz), 0.0],
+            [_np.sin(angz), _np.cos(angz), 0.0],
+            [0.0, 0.0, 1.0],
+        ]
+    )
     if raw:
         return rot_mat_x @ rot_mat_y @ rot_mat_z
     else:
-        return rotation
+        return _Rotation.from_matrix(rot_mat_x @ rot_mat_y @ rot_mat_z)
 
-def locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling,
-    ang, pixelsize, get_z=False, saving=False):
+def locs_rotation(
+    locs, x_min, x_max, y_min, y_max, oversampling, ang, pixelsize, 
+    get_z=False, saving=False,
+):
 
     locs_coord = _np.stack((locs.x ,locs.y, locs.z/pixelsize)).T
 
@@ -408,7 +504,7 @@ def locs_rotation(locs, x_min, x_max, y_min, y_max, oversampling,
         x = locs_coord[:,0]
         y = locs_coord[:,1]
         z = locs_coord[:,2] * pixelsize
-        return x,y,z
+        return x, y, z
 
     else:
         x = locs_coord[:,0]
