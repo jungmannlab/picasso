@@ -160,10 +160,15 @@ def pick_similar(
                     y_test_old = y_grid
                     x_test = _np.mean(picked_locs_xy[0])
                     y_test = _np.mean(picked_locs_xy[1])
+                    count = 0
                     while (
                         _np.abs(x_test - x_test_old) > 1e-3
                         or _np.abs(y_test - y_test_old) > 1e-3
                     ):
+                        count += 1
+                        # skip the locs if the loop is too long
+                        if count > 500:
+                            break
                         x_test_old = x_test
                         y_test_old = y_test
                         picked_locs_xy = _locs_at(
