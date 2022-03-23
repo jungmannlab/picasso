@@ -84,9 +84,9 @@ def n_block_locs_at(x, y, size, K, L, block_starts, block_ends):
 
 
 def get_block_locs_at(x, y, index_blocks):
-    locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
-    x_index = _np.uint32(x / size)  # is this really necessary?
-    y_index = _np.uint32(y / size)  # is this really necessary?
+    locs, size, _, _, block_starts, block_ends, K, L = index_blocks
+    x_index = _np.uint32(x / size)
+    y_index = _np.uint32(y / size) 
     indices = []
     for k in range(y_index - 1, y_index + 2):
         if 0 < k < K:
@@ -1383,7 +1383,7 @@ def link_loc_groups(locs, info, link_group, remove_ambiguous_lengths=True):
 
 def localization_precision(photons, s, bg, em):
     """
-    Calculates the theoretical localization preicision
+    Calculates the theoretical localization precision
     according to Mortensen et al., Nat Meth, 2010
     """
     s2 = s ** 2
