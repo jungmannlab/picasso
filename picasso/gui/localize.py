@@ -345,6 +345,12 @@ class ParametersDialog(QtWidgets.QDialog):
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
+        #Database addition
+
+        self.database_checkbox = QtWidgets.QCheckBox("Add to Database")
+        self.database_checkbox.setChecked(True)
+        identification_grid.addWidget(self.database_checkbox, 4, 1)
+
         # Camera:
         if "Cameras" in CONFIG:
             # Experiment settings
@@ -483,6 +489,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # MLE
         mle_widget = QtWidgets.QWidget()
+
         mle_grid = QtWidgets.QGridLayout(mle_widget)
         mle_grid.addWidget(QtWidgets.QLabel("Convergence criterion:"), 0, 0)
         self.convergence_criterion = QtWidgets.QDoubleSpinBox()
@@ -507,12 +514,11 @@ class ParametersDialog(QtWidgets.QDialog):
 
         if not gpufit_installed:
             self.gpufit_checkbox.hide()
-
         lq_grid.addWidget(self.gpufit_checkbox)
 
         fit_stack.addWidget(lq_widget)
-        # lq_grid = QtWidgets.QGridLayout(lq_widget)
         fit_stack.addWidget(mle_widget)
+        # lq_grid = QtWidgets.QGridLayout(lq_widget)
 
         avg_widget = QtWidgets.QWidget()
         fit_stack.addWidget(avg_widget)
@@ -522,7 +528,7 @@ class ParametersDialog(QtWidgets.QDialog):
         vbox.addWidget(z_groupbox)
         z_grid = QtWidgets.QGridLayout(z_groupbox)
         z_grid.addWidget(
-            QtWidgets.QLabel("Non-integrated Gaussian fitting is recommend!"),
+            QtWidgets.QLabel("Non-integrated Gaussian fitting is recommend! (LQ)"),
             0,
             0,
             1,
@@ -1455,8 +1461,8 @@ class Window(QtWidgets.QMainWindow):
             if fit_z:
                 self.fit_z()
             else:
-                locs_path = base + "_locs.hdf5"
-                self.save_locs(locs_path)
+                self.save_locs_after_fit()
+
 
     def on_fit_z_progress(self, curr, total):
         message = "Fitting z coordinate {:,} / {:,} ...".format(curr, total)
@@ -1469,8 +1475,17 @@ class Window(QtWidgets.QMainWindow):
             )
         )
         self.locs = locs
+        self.save_locs_after_fit()
+
+    def save_locs_after_fit(self):
         base, ext = os.path.splitext(self.movie_path)
         self.save_locs(base + "_locs.hdf5")
+
+        if self.parameters_dialog.database_checkbox:
+
+            self.status_bar.showMessage('Adding to database.')
+            localize.add_file_to_db(self.movie_path)
+            self.status_bar.showMessage('Done.')
 
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
