@@ -158,3 +158,4 @@ Credits
    Project”
 -  Average icon based on “Layers by Creative Stall from the Noun
    Project”
+-  Server icon based on “Database by Nimal Raj from NounProject.com”
