@@ -32,6 +32,7 @@ from . import imageprocess as _imageprocess
 from threading import Thread as _Thread
 import time as _time
 from tqdm import tqdm as _tqdm
+from tqdm import trange as _trange
 from numpy.lib.recfunctions import stack_arrays
 
 
@@ -1394,6 +1395,27 @@ def localization_precision(photons, s, bg, em):
     with _np.errstate(invalid="ignore"):
         return _np.sqrt(v)
 
+def n_segments(info, segmentation):
+    n_frames = info[0]["Frames"]
+    return int(_np.round(n_frames / segmentation))
+
+def segment(locs, info, segmentation, kwargs={}, callback=None):
+    Y = info[0]["Height"]
+    X = info[0]["Width"]
+    n_frames = info[0]["Frames"]
+    n_seg = n_segments(info, segmentation)
+    bounds = _np.linspace(0, n_frames - 1, n_seg + 1, dtype=_np.uint32)
+    segments = _np.zeros((n_seg, Y, X))
+    if callback is not None:
+        callback(0)
+    for i in _trange(n_seg, desc="Generating segments", unit="segments"):
+        segment_locs = locs[
+            (locs.frame >= bounds[i]) & (locs.frame < bounds[i + 1])
+        ]
+        _, segments[i] = _render.render(segment_locs, info, **kwargs)
+        if callback is not None:
+            callback(i + 1)
+    return bounds, segments
 
 def undrift(
     locs,
@@ -1403,7 +1425,7 @@ def undrift(
     segmentation_callback=None,
     rcc_callback=None,
 ):
-    bounds, segments = _render.segment(
+    bounds, segments = segment(
         locs,
         info,
         segmentation,

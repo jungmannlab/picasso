@@ -57,8 +57,18 @@ N_Z_COLORS = 32
 
 def get_colors(n_channels):
     """ 
-    Creates a tuple with rgb channels for each locs channel.
+    Creates a list with rgb channels for each locs channel.
     Colors go from red to green, blue, pink and red again.
+
+    Parameters
+    ----------
+    n_channels : int
+        Number of locs channels
+
+    Returns
+    -------
+    list
+        Contains tuples with rgb channels
     """
 
     hues = np.arange(0, 1, 1 / n_channels)
@@ -67,8 +77,17 @@ def get_colors(n_channels):
 
 def is_hexadecimal(text):
     """ 
-    True when text is a hexadecimal rgb expression, e.g. #ff02d4,
-    False otherwise. 
+    Checks if text represents a hexadecimal code for rgb, e.g. #ff02d4.
+    
+    Parameters
+    ----------
+    text : str
+        String to be checked
+
+    Returns
+    -------
+    boolean
+        True if text represents rgb, False otherwise
     """
 
     allowed_characters = [
@@ -2837,7 +2856,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         general_grid.addWidget(QtWidgets.QLabel("Oversampling:"), 1, 0)
         self._oversampling = DEFAULT_OVERSAMPLING
         self.oversampling = QtWidgets.QDoubleSpinBox()
-        self.oversampling.setRange(0.001, 1000)
+        self.oversampling.setRange(0.001, 10000)
         self.oversampling.setSingleStep(5)
         self.oversampling.setValue(self._oversampling)
         self.oversampling.setKeyboardTracking(False)
@@ -4780,7 +4799,7 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Viewport defining the current FOV
+            Viewport defining the rendered FOV
         autoscale : boolean (default=False)
             True if contrast should be optimally adjusted
         use_cache : boolean (default=False)
@@ -4796,7 +4815,7 @@ class View(QtWidgets.QLabel):
             qimage = self.render_scene(
                 autoscale=autoscale, use_cache=use_cache
             )
-            # scale image to the window
+            # scale image's size to the window
             qimage = qimage.scaled(
                 self.width(),
                 self.height(),
@@ -4814,6 +4833,8 @@ class View(QtWidgets.QLabel):
         self.qimage = self.draw_points(self.qimage)
         if self._rectangle_pick_ongoing:
             self.qimage = self.draw_rectangle_pick_ongoing(self.qimage)
+
+        # convert to pixmap
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
         self.window.update_info()
@@ -6505,7 +6526,7 @@ class View(QtWidgets.QLabel):
             self.add_picks(new_picks)
 
     def remove_points(self):
-        """ Removes all distance measurement pointss. """
+        """ Removes all distance measurement points. """
 
         self._points = []
         self.update_scene()
@@ -6548,7 +6569,6 @@ class View(QtWidgets.QLabel):
         else:
             self.render_multi_channel(
                 kwargs,
-                autoscale=autoscale,
                 use_cache=use_cache,
                 cache=cache,
             )
@@ -6564,7 +6584,6 @@ class View(QtWidgets.QLabel):
     def render_multi_channel(
         self,
         kwargs,
-        autoscale=False,
         locs=None,
         use_cache=False,
         cache=True,
@@ -6579,8 +6598,6 @@ class View(QtWidgets.QLabel):
         ----------
         kwargs : dict
             Contains blur method, etc. See self.get_render_kwargs
-        autoscale : boolean (default=False)
-            True if optimally adjust contrast
         locs : np.recarray (default=None)
             Locs to be rendered. If None, self.locs is used
         use_cache : boolean (default=False)
@@ -6632,6 +6649,7 @@ class View(QtWidgets.QLabel):
         colors = get_colors(n_channels) # automatic colors
         # color each channel one by one
         for i in range(len(self.locs)):
+            # change colors if not automatic coloring
             if not self.window.dataset_dialog.auto_colors.isChecked():
                 # get color from Dataset Dialog
                 color = self.window.dataset_dialog.colorselection[i]
@@ -6679,7 +6697,7 @@ class View(QtWidgets.QLabel):
             if not self.window.dataset_dialog.checks[i].isChecked():
                 image[i] = 0 * image[i]
 
-        # color each channel and store in bgra
+        # color rgb channels and store in bgra
         for color, image in zip(colors, image):
             bgra[:, :, 0] += color[2] * image
             bgra[:, :, 1] += color[1] * image
@@ -6724,14 +6742,14 @@ class View(QtWidgets.QLabel):
         if self.x_render_state:
             locs = self.x_locs
             return self.render_multi_channel(
-                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache
+                kwargs, locs=locs, use_cache=use_cache
             )            
 
         # if clustered or picked locs
         if hasattr(locs, "group"):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
-                kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache
+                kwargs, locs=locs, use_cache=use_cache
             )
 
         # if slicing, show only the current slice
@@ -6757,11 +6775,11 @@ class View(QtWidgets.QLabel):
 
         # paint locs using the colormap of choice (Display Settings
         # Dialog)
-        Y, X = image.shape
         cmap = self.window.display_settings_dlg.colormap.currentText()
         cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
 
         # return a 4 channel (rgb and alpha) array
+        Y, X = image.shape
         self._bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
@@ -7302,7 +7320,7 @@ class View(QtWidgets.QLabel):
             if ok:
                 locs = self.locs[channel]
                 info = self.infos[channel]
-                n_segments = render.n_segments(info, segmentation)
+                n_segments = postprocess.n_segments(info, segmentation)
                 seg_progress = lib.ProgressDialog(
                     "Generating segments", 0, n_segments, self
                 )
@@ -7977,7 +7995,6 @@ class View(QtWidgets.QLabel):
         return self.viewport_height(viewport), self.viewport_width(viewport)
 
     def viewport_width(self, viewport=None):
-
         """
         Finds viewport's width.
 
@@ -9465,7 +9482,7 @@ class Window(QtWidgets.QMainWindow):
             raise ValueError("Pick only one region.")
         self.window_rot.view_rot.load_locs(update_window=True)
         self.window_rot.show()
-        self.window_rot.view_rot.update_scene()
+        self.window_rot.view_rot.update_scene(autoscale=True)
 
     def update_info(self):
         """
