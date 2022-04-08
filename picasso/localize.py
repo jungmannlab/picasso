@@ -17,7 +17,12 @@ from itertools import chain as _chain
 import matplotlib.pyplot as _plt
 from . import gaussmle as _gaussmle
 from . import io as _io
-
+from . import postprocess as _postprocess
+from . import __main__ as main
+import os
+from datetime import datetime
+from sqlalchemy import create_engine
+import pandas as pd
 
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
 LOCS_DTYPE = [
@@ -35,6 +40,10 @@ LOCS_DTYPE = [
     ("iterations", "i4"),
 ]
 
+MEAN_COLS = ['frame', 'x', 'y', 'photons', 'sx', 'sy', 'bg', 'lpx', 'lpy',
+           'ellipticity', 'net_gradient', 'z', 'd_zcalib']
+SET_COLS = ['Frames', 'Height', 'Width', 'Box Size', 'Min. Net Gradient', 'Pixelsize']
+DRIFT_COLS = ['Drift X', 'Drift Y']
 
 _plt.style.use("ggplot")
 
@@ -319,3 +328,87 @@ def localize(movie, info, parameters):
     print("localizing")
     identifications = identify(movie, parameters)
     return fit(movie, info, identifications, parameters["Box Size"])
+
+def get_file_summary(file):
+
+    base, ext = os.path.splitext(file)
+
+    file_hdf = base + '_locs.hdf5'
+
+    locs, info = _io.load_locs(file_hdf)
+
+    summary = {}
+
+    for col in MEAN_COLS:
+        try:
+            summary[col+'_mean'] = locs[col].mean()
+            summary[col+'_std'] = locs[col].std()
+        except ValueError:
+            summary[col+'_mean'] = float('nan')
+            summary[col+'_std'] = float('nan')
+
+    for col in SET_COLS:
+        col_ = col.lower()
+        for inf in info:
+            if col in inf:
+                summary[col_] = inf[col]
+
+    for col in SET_COLS:
+        col_ = col.lower()
+        if col_ not in summary:
+            summary[col_] = float('nan')
+
+    #Nena
+    try:
+        result, best_result = _postprocess.nena(locs, info)
+        summary['nena_px'] = best_result
+    except Exception as e:
+        print(e)
+        summary['nena_px'] = float('nan')
+
+    summary['n_locs'] = len(locs)
+    summary['locs_frame'] = len(locs)/summary['frames']
+
+    drift_path = os.path.join(base + '_locs_undrift.hdf5')
+    if os.path.isfile(drift_path):
+        locs, info = _io.load_locs(drift_path)
+        for col in DRIFT_COLS:
+            col_ = col.lower()
+            col_ = col_.replace(' ', '_')
+            for inf in info:
+                if col in inf:
+                    summary[col_] = inf[col]
+
+    for col in DRIFT_COLS:
+        col_ = col.lower()
+        col_ = col_.replace(' ', '_')
+        if col_ not in summary:
+            summary[col_] = float('nan')
+
+    summary['filename'] = file
+    summary['file_created'] = datetime.fromtimestamp(os.path.getmtime(file))
+    summary['entry_created'] = datetime.now()
+
+    return summary
+
+def _db_filename():
+    home = os.path.expanduser("~")
+    return os.path.abspath(os.path.join(home, ".picasso", "app.db"))
+
+def save_file_summary(summary):
+    engine = create_engine("sqlite:///"+_db_filename(), echo=False)
+    s  = pd.Series(summary, index=summary.keys()).to_frame().T
+    s.to_sql("files", con=engine, if_exists="append", index=False)
+
+def add_file_to_db(file):
+    base, ext = os.path.splitext(file)
+    out_path = base + "_locs.hdf5"
+
+    try:
+        main._undrift(out_path, 1000, display=False, fromfile=None)
+    except Exception as e:
+        print(e)
+        print("Drift correction failed for {}".format(out_path))
+
+    summary = get_file_summary(file)
+    save_file_summary(summary)

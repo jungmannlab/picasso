@@ -22,6 +22,11 @@ Picasso
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
+Picasso 0.4.0
+-------------
+Picasso now has a server-based workflow management-system. Check out `here <https://picassosr.readthedocs.io/en/latest/server.html>`__.
+
+
 Installation
 ------------
 
@@ -52,7 +57,7 @@ Sample instructions to create an environment and installation of packages with c
 5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
 6. Continue with the installation of Picasso
 
-Note that sometimes outdated packages can cause problems. As of version 0.3.0, Picasso switched from PyQt4 to PyQt5, so make sure to update PyQt. If you experience errors, please check whether your packages have the correct version (e.g., see issue #4). When using conda, make sure that you have the default package channel (e.g., see issue #30).
+Note that sometimes outdated packages can cause problems. As of version 0.3.0, Picasso switched from PyQt4 to PyQt5, so make sure to update PyQt. If you experience errors, please check whether your packages have the correct version (e.g., see issue #4). When using conda, make sure that you have the default package channel (e.g., see issue #30).
 
 .. _installation-1:
 
@@ -158,3 +163,4 @@ Credits
    Project”
 -  Average icon based on “Layers by Creative Stall from the Noun
    Project”
+-  Server icon based on “Database by Nimal Raj from NounProject.com”

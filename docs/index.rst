@@ -15,9 +15,10 @@ This documentation is based on the `Nature Protocols publication <https://www.na
    readme
    design
    simulate
+   server
    localize
    filter
-   render 
+   render
    average
    files
    cmd

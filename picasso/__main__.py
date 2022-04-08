@@ -19,6 +19,7 @@ def picasso_logo():
     print("                                          ")
 
 
+
 def _average(args):
     from glob import glob
     from .io import load_locs, NoMetadataFileError
@@ -389,7 +390,6 @@ def _undrift(files, segmentation, display=True, fromfile=None):
             locs, info = io.load_locs(path)
         except io.NoMetadataFileError:
             continue
-        info.append(undrift_info)
         if fromfile is not None:
             # this works for mingjies drift files but not for the own ones
             locs.x -= drift[:, 1][locs.frame]
@@ -421,6 +421,11 @@ def _undrift(files, segmentation, display=True, fromfile=None):
             drift, locs = postprocess.undrift(
                 locs, info, segmentation, display=display
             )
+
+            undrift_info["Drift X"] = float(drift['x'].mean())
+            undrift_info["Drift Y"] = float(drift['y'].mean())
+
+        info.append(undrift_info)
         base, ext = os.path.splitext(path)
         io.save_locs(base + "_undrift.hdf5", locs, info)
         savetxt(base + "_drift.txt", drift, header="dx\tdy", newline="\r\n")
@@ -629,6 +634,55 @@ def _pair_correlation(files, bin_size, r_max):
             )
             show()
 
+
+def _start_server():
+    import streamlit as st
+    import os
+    print("                                          ")
+    picasso_logo()
+    print("                 server")
+    print("                                          ")
+
+    HOME = os.path.expanduser("~")
+
+    ST_PATH = os.path.join(HOME, ".streamlit")
+
+    for folder in [ST_PATH]:
+        if not os.path.isdir(folder):
+            os.mkdir(folder)
+
+    _this_file = os.path.abspath(__file__)
+    _this_dir = os.path.dirname(_this_file)
+
+    file_path = os.path.join(_this_dir, 'server', 'app.py')
+
+    #Check if streamlit credentials exists
+    ST_CREDENTIALS = os.path.join(ST_PATH, 'credentials.toml')
+    if not os.path.isfile(ST_CREDENTIALS):
+        with open(ST_CREDENTIALS, 'w') as file:
+            file.write("[general]\n")
+            file.write('\nemail = ""')
+
+
+    import sys
+    from streamlit import cli as stcli
+
+    theme = []
+
+    theme.append("--theme.backgroundColor=#FFFFFF")
+    theme.append("--theme.secondaryBackgroundColor=#f0f2f6")
+    theme.append("--theme.textColor=#262730")
+    theme.append("--theme.font=sans serif")
+    theme.append("--theme.primaryColor=#18212b")
+
+    args = ["streamlit", "run", file_path, "--global.developmentMode=false", "--server.port=8501", "--browser.gatherUsageStats=False"]
+
+    #args.extend(theme)
+
+    sys.argv = args
+
+    sys.exit(stcli.main())
+
 def _nanotron(args):
     from glob import glob
     from os.path import isdir
@@ -667,7 +721,9 @@ def _localize(args):
         identifications_from_futures,
         fit_async,
         locs_from_fits,
+        add_file_to_db,
     )
+
     from os.path import splitext, isdir
     from time import sleep
     from . import gausslq, avgroi
@@ -676,7 +732,7 @@ def _localize(args):
     import os as _os
     import yaml as yaml
 
-    print("------------------------------------------")
+    picasso_logo()
     print("Localize - Parameters:")
     print("{:<8} {:<15} {:<10}".format("No", "Label", "Value"))
 
@@ -993,7 +1049,6 @@ def _render(args):
 
 
 def main():
-    picasso_logo()
     import argparse
 
     # Main parser
@@ -1459,6 +1514,11 @@ def main():
     hdf2csv_parser = subparsers.add_parser("hdf2csv")
     hdf2csv_parser.add_argument("files")
 
+
+    server_parser = subparsers.add_parser(
+        "server", help="picasso server workflow management system"
+    )
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -1552,8 +1612,13 @@ def main():
             _csv2hdf(args.files, args.pixelsize)
         elif args.command == "hdf2csv":
             _hdf2csv(args.files)
+        elif args.command == "server":
+            _start_server()
     else:
         parser.print_help()
+
+
+
 
 
 if __name__ == "__main__":
