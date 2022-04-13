@@ -19,6 +19,8 @@ import os as _os
 import threading as _threading
 from PyQt5.QtWidgets import QMessageBox as _QMessageBox
 from . import lib as _lib
+import abc
+import nd2
 
 
 class NoMetadataFileError(FileNotFoundError):
@@ -201,7 +203,7 @@ class AbstractMovie(abc.ABC):
         pass
 
 
-class ND2PicassoWrapper(AbstractMovie):
+class ND2Movie(AbstractMovie):
     def __init__(self, path, verbose=False):
         if verbose:
             print("Reading info from {}".format(path))
@@ -214,7 +216,7 @@ class ND2PicassoWrapper(AbstractMovie):
                 raise KeyError(
                     'Required dimension {:s} not in file {:s}'.format(
                         dim, self.path))
-        if self.nd2file.ndims != len(required_dims):
+        if self.nd2file.ndim != len(required_dims):
             raise KeyError(
                 'File {:s} has dimensions {:s} '.format(
                     self.path, str(self.nd2file.sizes.keys())) +
@@ -232,7 +234,8 @@ class ND2PicassoWrapper(AbstractMovie):
         info['Acquisition Comments'] = ''
 
         mm_info = self.metadata_to_mmstyle()
-        info["Micro-Manager Metadata"] = mm_info
+        info["Micro-Manager Metadata"] = 'None'
+        info["nd2 Metadata"] = mm_info
         if "Camera" in mm_info.keys():
             info["Camera"] = mm_info["Camera"]
         else:
@@ -240,13 +243,76 @@ class ND2PicassoWrapper(AbstractMovie):
         return info
 
     def metadata_to_mmstyle(self):
-        metadata = self.nd2file.metadata
-        custom_data = self.nd2file.custom_data
-        attributes = self.nd2file.attributes
-        text_info = self.nd2file.text_info
         mmmeta = {}
-        # TODO: put code here
+
+        text_info = self.nd2file.text_info
+        mmmeta['capturing'] = self.nikontext_to_dict(text_info('capturing'))
+        mmmeta['AcquisitionDate'] = text_info['date']
+        mmmeta['description'] = self.nikontext_to_dict(text_info('description'))
+        mmmeta['optics'] = self.nikontext_to_dict(text_info('optics'))
+
+        mmmeta['custom_data'] = self.nd2file.custom_data
+        mmmeta['attributes'] = self.nd2file.attributes._asdict()
+        mmmeta['metadata'] = self.nd2metadata_to_dict(self.nd2file.metadata)
+
         return mmmeta
+
+    @classmethod
+    def nikontext_to_dict(cls, text):
+        out = {}
+        curr_keys = []
+        for i, item in enumerate(text_info['capturing'].split('\r\n')):
+            itparts = item.split(':')
+            itparts = [it.strip() for it in itparts if it.strip()!='']
+            if len(itparts)==1:
+                curr_keys.append(itparts[0])
+                self.set_nested_dict_entry(out, curr_keys, {})
+            elif len(itparts)==2:
+                self.set_nested_dict_entry(
+                    out, curr_keys+[itparts[0]], itparts[1])
+            elif len(itparts)==3:
+                curr_keys.append(itparts[0])
+                self.set_nested_dict_entry(out, curr_keys, {})
+                self.set_nested_dict_entry(
+                    out, curr_keys+[itparts[1]], itparts[2])
+            else:
+                raise KeyError(
+                    'Cannot parse three or more colons between newlines: ' +
+                    item)
+        return out
+
+    @classmethod
+    def nd2metadata_to_dict(cls, meta):
+        out = {}
+        out['contents'] = meta['contents'].__dict__
+        chans = [{}] * len(meta['channels'])
+        for i, chan in enumerate(meta['channels']):
+            chans[i] = chan.__dict__
+            chans[i]['loops'] = chans[i]['loops'].__dict__
+            chans[i]['microscope'] = chans[i]['microscope'].__dict__
+            chans[i]['volume'] = chans[i]['volume'].__dict__
+        out['channels'] = chans
+        return out
+
+    @classmethod
+    def set_nested_dict_entry(cls, dict, keys, val):
+        """Set a value (deep) in a nested dict.
+        Args:
+            dict : dict
+                the nested dict
+            keys : list
+                the keys leading to the entry to set
+            val : anything
+                the value to set
+        """
+        currlvl = dict
+        for i, key in enuemrate(keys[:-1]):
+            try:
+                currlvl = currlvl[key]
+            except KeyError:
+                currlvl[key] = {}
+                currlvl = currlvl[key]
+        currlvl[key] = val
 
     def __enter__(self):
         return self.nd2file
