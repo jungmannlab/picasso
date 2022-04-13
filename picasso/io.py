@@ -83,7 +83,7 @@ def load_tif(path):
     return movie, [info]
 
 def load_nd2(path):
-    movie = ND2PicassoWrapper(path)
+    movie = ND2Movie(path)
     info = movie.info()
     return movie, [info]
 
@@ -288,13 +288,13 @@ class ND2Movie(AbstractMovie):
     @classmethod
     def nd2metadata_to_dict(cls, meta):
         out = {}
-        out['contents'] = meta['contents'].__dict__
-        chans = [{}] * len(meta['channels'])
+        out['contents'] = meta.contents.__dict__
+        chans = [{}] * len(meta.channels)
         for i, chan in enumerate(meta['channels']):
             chans[i] = chan.__dict__
-            chans[i]['loops'] = chans[i]['loops'].__dict__
-            chans[i]['microscope'] = chans[i]['microscope'].__dict__
-            chans[i]['volume'] = chans[i]['volume'].__dict__
+            chans[i]['loops'] = chan.__dict__['loops'].__dict__
+            chans[i]['microscope'] = chan.__dict__['microscope'].__dict__
+            chans[i]['volume'] = chan.__dict__['volume'].__dict__
         out['channels'] = chans
         return out
 

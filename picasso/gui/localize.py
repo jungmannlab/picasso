@@ -141,7 +141,7 @@ class Scene(QtWidgets.QGraphicsScene):
         if not event.mimeData().hasUrls():
             return False
         path, extension = self.path_from_drop(event)
-        if extension.lower() not in [".raw", ".tif"]:
+        if extension.lower() not in [".raw", ".tif", ".nd2"]:
             return False
         return True
 
