@@ -234,12 +234,37 @@ class ND2Movie(AbstractMovie):
         info['Acquisition Comments'] = ''
 
         mm_info = self.metadata_to_mmstyle()
-        info["Micro-Manager Metadata"] = 'None'
+        camera_name = mm_info.get(
+            'nd2 Metadata', {}).get('description', {}).get(
+                'Metadata', {}).get('Camera Name', 'None')
+        info['Camera'] = camera_name
+
+        # simulate micro manager camera data for loading config values
+        # see picasso/gui/localize:680ff
+        # put into camera config
+        # 'Sensitivity Categories': ['PixelReadoutRate']
+        # 'Sensitivity':
+        #     '540 MHz':
+        #         '16 bit': sensitivityvalue  # or sensival directly behind 540 MHz?
+        # 'Channel Device':
+        #     'Name': 'Filter'
+        #     'Emission Wavelengths':
+        #         '2 (560)': 560
+        readout_rate = mm_info.get('nd2 Metadata', {}).get(
+                'description', {}).get('Metadata', {}).get(
+                'Camera Settings', {}).get('Readout Rate', 'None')
+        filter = mm_info.get('nd2 Metadata', {}).get(
+                'description', {}).get('Metadata', {}).get(
+                'Camera Settings', {}).get('Microscope Settings', {}).get(
+                'Nikon Ti2, FilterChanger(Turret-Lo)', 'None')
+
+        sensitivity_category = 'PixelReadoutRate'
+        info["Micro-Manager Metadata"] = {
+            camera_name+'-'+sensitivity_category: readout_rate,
+            'Filter': filter,
+            }
         info["nd2 Metadata"] = mm_info
-        if "Camera" in mm_info.keys():
-            info["Camera"] = mm_info["Camera"]
-        else:
-            info["Camera"] = "None"
+
         return info
 
     def metadata_to_mmstyle(self):
@@ -290,7 +315,7 @@ class ND2Movie(AbstractMovie):
         out = {}
         out['contents'] = meta.contents.__dict__
         chans = [{}] * len(meta.channels)
-        for i, chan in enumerate(meta['channels']):
+        for i, chan in enumerate(meta.channels):
             chans[i] = chan.__dict__
             chans[i]['loops'] = chan.__dict__['loops'].__dict__
             chans[i]['microscope'] = chan.__dict__['microscope'].__dict__
