@@ -246,10 +246,10 @@ class ND2Movie(AbstractMovie):
         mmmeta = {}
 
         text_info = self.nd2file.text_info
-        mmmeta['capturing'] = self.nikontext_to_dict(text_info('capturing'))
+        mmmeta['capturing'] = self.nikontext_to_dict(text_info['capturing'])
         mmmeta['AcquisitionDate'] = text_info['date']
-        mmmeta['description'] = self.nikontext_to_dict(text_info('description'))
-        mmmeta['optics'] = self.nikontext_to_dict(text_info('optics'))
+        mmmeta['description'] = self.nikontext_to_dict(text_info['description'])
+        mmmeta['optics'] = self.nikontext_to_dict(text_info['optics'])
 
         mmmeta['custom_data'] = self.nd2file.custom_data
         mmmeta['attributes'] = self.nd2file.attributes._asdict()
@@ -261,24 +261,28 @@ class ND2Movie(AbstractMovie):
     def nikontext_to_dict(cls, text):
         out = {}
         curr_keys = []
-        for i, item in enumerate(text_info['capturing'].split('\r\n')):
+        for i, item in enumerate(text.split('\r\n')):
             itparts = item.split(':')
             itparts = [it.strip() for it in itparts if it.strip()!='']
             if len(itparts)==1:
                 curr_keys.append(itparts[0])
-                self.set_nested_dict_entry(out, curr_keys, {})
+                cls.set_nested_dict_entry(out, curr_keys, {})
             elif len(itparts)==2:
-                self.set_nested_dict_entry(
+                cls.set_nested_dict_entry(
                     out, curr_keys+[itparts[0]], itparts[1])
             elif len(itparts)==3:
                 curr_keys.append(itparts[0])
-                self.set_nested_dict_entry(out, curr_keys, {})
-                self.set_nested_dict_entry(
+                cls.set_nested_dict_entry(out, curr_keys, {})
+                cls.set_nested_dict_entry(
                     out, curr_keys+[itparts[1]], itparts[2])
-            else:
-                raise KeyError(
-                    'Cannot parse three or more colons between newlines: ' +
-                    item)
+            elif len(itparts) > 3:
+                curr_keys.append(itparts[0])
+                cls.set_nested_dict_entry(out, curr_keys, {})
+                cls.set_nested_dict_entry(
+                    out, curr_keys+[itparts[1]], item)
+                # raise KeyError(
+                #     'Cannot parse three or more colons between newlines: ' +
+                #     item)
         return out
 
     @classmethod
@@ -306,13 +310,13 @@ class ND2Movie(AbstractMovie):
                 the value to set
         """
         currlvl = dict
-        for i, key in enuemrate(keys[:-1]):
+        for i, key in enumerate(keys[:-1]):
             try:
                 currlvl = currlvl[key]
             except KeyError:
                 currlvl[key] = {}
                 currlvl = currlvl[key]
-        currlvl[key] = val
+        currlvl[keys[-1]] = val
 
     def __enter__(self):
         return self.nd2file
