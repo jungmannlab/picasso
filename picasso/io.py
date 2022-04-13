@@ -209,6 +209,7 @@ class ND2Movie(AbstractMovie):
             print("Reading info from {}".format(path))
         self.path = _ospath.abspath(path)
         self.nd2file = nd2.ND2File(path)
+        self.dask = self.nd2file.to_dask()
 
         required_dims = ['T', 'Y', 'X']  # exactly these, not more
         for dim in required_dims:
@@ -363,7 +364,8 @@ class ND2Movie(AbstractMovie):
         self.nd2file.close()
 
     def get_frame(self, index):
-        return self.nd2file.asarray()[index, ...]
+        # return self.nd2file.asarray()[index, ...]
+        return self.dask[index, ...].compute()
 
     def tofile(self, file_handle, byte_order=None):
         raise NotImplementedError('Cannot write .nd2 file.')
