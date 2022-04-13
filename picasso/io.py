@@ -80,6 +80,10 @@ def load_tif(path):
     info = movie.info()
     return movie, [info]
 
+def load_nd2(path):
+    movie = ND2PicassoWrapper(path)
+    info = movie.info()
+    return movie, [info]
 
 def load_movie(path, prompt_info=None):
     base, ext = _ospath.splitext(path)
@@ -88,6 +92,8 @@ def load_movie(path, prompt_info=None):
         return load_raw(path, prompt_info=prompt_info)
     elif ext == ".tif":
         return load_tif(path)
+    elif ext == '.nd2':
+        return load_nd2(path)
 
 
 def load_info(path, qt_parent=None):
@@ -152,6 +158,120 @@ def save_user_settings(settings):
     _os.makedirs(_ospath.dirname(settings_filename), exist_ok=True)
     with open(settings_filename, "w") as settings_file:
         _yaml.dump(dict(settings), settings_file, default_flow_style=False)
+
+
+class AbstractMovie(abc.ABC):
+    @abc.abstractmethod
+    def __init__(self):
+        pass
+
+    @abc.abstractmethod
+    def __enter__(self):
+        pass
+
+    @abc.abstractmethod
+    def __exit__(self, exc_type, exc_value, traceback):
+        pass
+
+    @abc.abstractmethod
+    def info(self):
+        pass
+
+    @abc.abstractmethod
+    def __getitem__(self, it):
+        pass
+
+    @abc.abstractmethod
+    def __iter__(self):
+        pass
+
+    @abc.abstractmethod
+    def __len__(self):
+        return self.n_frames
+
+    def close(self):
+        pass
+
+    @abc.abstractmethod
+    def get_frame(self, index):
+        pass
+
+    @abc.abstractmethod
+    def tofile(self, file_handle, byte_order=None):
+        pass
+
+
+class ND2PicassoWrapper(AbstractMovie):
+    def __init__(self, path, verbose=False):
+        if verbose:
+            print("Reading info from {}".format(path))
+        self.path = _ospath.abspath(path)
+        self.nd2file = nd2.ND2File(path)
+
+        required_dims = ['T', 'Y', 'X']  # exactly these, not more
+        for dim in required_dims:
+            if dim not in self.nd2file.sizes.keys():
+                raise KeyError(
+                    'Required dimension {:s} not in file {:s}'.format(
+                        dim, self.path))
+        if self.nd2file.ndims != len(required_dims):
+            raise KeyError(
+                'File {:s} has dimensions {:s} '.format(
+                    self.path, str(self.nd2file.sizes.keys())) +
+                'but should have exactly {:s}.'.format(str(required_dims)))
+
+    def info(self):
+        info = {
+            # "Byte Order": self._tif_byte_order,
+            "File": self.path,
+            "Height": self.nd2file.sizes['Y'],
+            "Width": self.nd2file.sizes['X'],
+            "Data Type": self.nd2file.dtype.name,
+            "Frames": self.nd2file.sizes['T'],
+        }
+        info['Acquisition Comments'] = ''
+
+        mm_info = self.metadata_to_mmstyle()
+        info["Micro-Manager Metadata"] = mm_info
+        if "Camera" in mm_info.keys():
+            info["Camera"] = mm_info["Camera"]
+        else:
+            info["Camera"] = "None"
+        return info
+
+    def metadata_to_mmstyle(self):
+        metadata = self.nd2file.metadata
+        custom_data = self.nd2file.custom_data
+        attributes = self.nd2file.attributes
+        text_info = self.nd2file.text_info
+        mmmeta = {}
+        # TODO: put code here
+        return mmmeta
+
+    def __enter__(self):
+        return self.nd2file
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+
+    def __getitem__(self, it):
+        return self.get_frame(it)
+
+    def __iter__(self):
+        for i in range(self.nd2file.sizes['T']):
+            yield self[i]
+
+    def __len__(self):
+        return self.nd2file.sizes['T']
+
+    def close(self):
+        self.nd2file.close()
+
+    def get_frame(self, index):
+        return self.nd2file.asarray()[index, ...]
+
+    def tofile(self, file_handle, byte_order=None):
+        raise NotImplementedError('Cannot write .nd2 file.')
 
 
 class TiffMap:
@@ -383,7 +503,7 @@ class TiffMap:
             image.tofile(file_handle)
 
 
-class TiffMultiMap:
+class TiffMultiMap(AbstractMovie):
     def __init__(self, path, memmap_frames=False, verbose=False):
         self.path = _ospath.abspath(path)
         self.dir = _ospath.dirname(self.path)
