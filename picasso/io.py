@@ -180,6 +180,27 @@ class AbstractMovie(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def camera_parameters(self, config):
+        """get the camera specific parameters:
+            * gain
+            * quantum efficiency
+            * wavelength
+        These parameters depend on camera settings (as described in metadata)
+        but the values themselves are given in the config.yaml file.
+        Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
+        which needs to be matched in the config.yaml description, as detailed
+        in the specific child classes.
+
+        Args:
+            config : dict
+                description of camera parameters (for all possible settings)
+        Returns:
+            parameters : dict of lists of str
+                keys: gain, qe, wavelength
+        """
+        return {'gain': [1], 'qe': [1], 'wavelength': [0]}
+
+    @abc.abstractmethod
     def __getitem__(self, it):
         pass
 
@@ -264,7 +285,13 @@ class ND2Movie(AbstractMovie):
             camera_name+'-'+sensitivity_category: readout_rate,
             'Filter': filter,
             }
+        info["Picasso Metadata"] = {
+            'Camera': camera_name,
+            'PixelReadoutRate': readout_rate,
+            'Filter': filter,
+        }
         info["nd2 Metadata"] = mm_info
+        self.info = info
 
         return info
 
@@ -369,6 +396,113 @@ class ND2Movie(AbstractMovie):
 
     def tofile(self, file_handle, byte_order=None):
         raise NotImplementedError('Cannot write .nd2 file.')
+
+    def camera_parameters(self, config):
+        """get the camera specific parameters:
+            * gain
+            * quantum efficiency
+            * wavelength
+        These parameters depend on camera settings (as described in metadata)
+        but the values themselves are given in the config.yaml file.
+        Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
+        which needs to be matched in the config.yaml description, as detailed
+        in the specific child classes.
+
+        The config file for the corresponding camera should look like this:
+          Zyla 4.2:
+            Pixelsize: 130
+            Baseline: 100
+            Quantum Efficiency:
+              525: 0.7
+              595: 0.72
+              700: 0.64
+            Sensitivity Categories:
+              - PixelReadoutRate
+            Sensitivity:
+              540 MHz: 7.18
+              200 MHz: 0.45
+            Filter Wavelengths:
+                1-R640: 700
+                2-G561: 595
+                3-B489: 525
+
+        Args:
+            config : dict
+                description of camera parameters (for all possible settings)
+        Returns:
+            parameters : dict of lists of str
+                keys: gain, qe, wavelength
+        """
+        return {'gain': [1], 'qe': [1], 'wavelength': [0], cam_index: 0}
+        info["Picasso Metadata"] = {
+            'Camera': camera_name,
+            'PixelReadoutRate': readout_rate,
+            'Filter': filter,
+        }
+        parameters = {}
+        info = self.info
+
+        try:
+            assert "Cameras" in config and "Camera" in info
+        except:
+            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            # raise KeyError("'camera' key not found in metadata or config.")
+
+        cameras = config['Cameras']
+        camera = info["Camera"]
+
+        try:
+            assert camera in cameras
+        except:
+            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            # KeyError('camera from metadata not found in config.')
+
+        index = cameras.index(camera)
+        parameters['cam_index'] = index
+
+        try:
+            assert "Picasso Metadata" in info
+        except:
+            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+
+        pm_info = info["Picasso Metadata"]
+        cam_config = config["Cameras"][camera]
+        if "Gain Property Name" in cam_config:
+            raise NotImplementedError('extracting Gain from nd2 files is not implemented yet.')
+            gain_property_name = cam_config["Gain Property Name"]
+            gain = pm_info['gain']
+            if "EM Switch Property" in cam_config:
+                switch_property_name = cam_config[
+                    "EM Switch Property"
+                ]["Name"]
+                switch_property_value = mm_info[
+                    camera + "-" + switch_property_name
+                ]
+                if (
+                    switch_property_value
+                    == cam_config["EM Switch Property"][True]
+                ):
+                    parameters['gain'] = int(gain)
+                else:
+                    parameters['gain'] = 1
+        if "Sensitivity Categories" in cam_config:
+            categories = cam_config["Sensitivity Categories"]
+            parameters['Sensitivity'] = {}
+            for i, category in enumerate(categories):
+                if category == 'PixelReadoutRate':
+                    exp_setting = pm_info['Sensitivity'][category]
+                    parameters['Sensitivity'][category] = exp_setting
+                else:
+                    NotImplementedError('Tretrieving {:s} from nd2 files is not implemented yet.'.format(category))
+        if "Quantum Efficiency" in cam_config:
+            if "Filter Wavelengths" in cam_config:
+                channel = pm_info['Filter']
+                channels = cam_config["Filter Wavelengths"]
+                if channel in channels:
+                    parameters['wavelength'] = str(channels[channel])
+                    parameters['qe'] = cam_config["Quantum Efficiency"][
+                        parameters['wavelength']]
+        return parameters
 
 
 class TiffMap:
@@ -690,7 +824,95 @@ class TiffMultiMap(AbstractMovie):
     def info(self):
         info = self.maps[0].info()
         info["Frames"] = self.n_frames
+        self.info = info
         return info
+
+    def camera_parameters(self, config):
+        """get the camera specific parameters:
+            * gain
+            * quantum efficiency
+            * wavelength
+        These parameters depend on camera settings (as described in metadata)
+        but the values themselves are given in the config.yaml file.
+        Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
+        which needs to be matched in the config.yaml description, as detailed
+        in the specific child classes.
+
+        Args:
+            config : dict
+                description of camera parameters (for all possible settings)
+        Returns:
+            parameters : dict of lists of str
+                keys: gain, qe, wavelength
+        """
+        # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+        parameters = {}
+        info = self.info
+
+        try:
+            assert "Cameras" in config and "Camera" in info
+        except:
+            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            # raise KeyError("'camera' key not found in metadata or config.")
+
+        cameras = config['Cameras']
+        camera = info["Camera"]
+
+        try:
+            assert camera in cameras
+        except:
+            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            # KeyError('camera from metadata not found in config.')
+
+        index = cameras.index(camera)
+        parameters['cam_index'] = index
+
+        try:
+            assert "Micro-Manager Metadata" in info
+        except:
+            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+
+        mm_info = info["Micro-Manager Metadata"]
+        cam_config = config["Cameras"][camera]
+        if "Gain Property Name" in cam_config:
+            gain_property_name = cam_config["Gain Property Name"]
+            gain = mm_info[camera + "-" + gain_property_name]
+            if "EM Switch Property" in cam_config:
+                switch_property_name = cam_config[
+                    "EM Switch Property"
+                ]["Name"]
+                switch_property_value = mm_info[
+                    camera + "-" + switch_property_name
+                ]
+                if (
+                    switch_property_value
+                    == cam_config["EM Switch Property"][True]
+                ):
+                    parameters['gain'] = int(gain)
+                else:
+                    parameters['gain'] = 1
+        if "Sensitivity Categories" in cam_config:
+            categories = cam_config["Sensitivity Categories"]
+            parameters['Sensitivity'] = {}
+            for i, category in enumerate(categories):
+                property_name = camera + "-" + category
+                if property_name in mm_info:
+                    exp_setting = mm_info[camera + "-" + category]
+                    parameters['Sensitivity'][category] = exp_setting
+        if "Quantum Efficiency" in cam_config:
+            if "Channel Device" in cam_config:
+                channel_device_name = cam_config["Channel Device"][
+                    "Name"
+                ]
+                channel = mm_info[channel_device_name]
+                channels = cam_config["Channel Device"][
+                    "Emission Wavelengths"
+                ]
+                if channel in channels:
+                    parameters['wavelength'] = str(channels[channel])
+                    parameters['qe'] = cam_config["Quantum Efficiency"][
+                        parameters['wavelength']]
+        return parameters
 
     def tofile(self, file_handle, byte_order=None):
         for map in self.maps:
