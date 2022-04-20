@@ -250,7 +250,7 @@ class CamSettingComboBoxDict(UserDict):
                 the value to set
         """
         cat_idx = self.sensitivity_categories[cam].index(category)
-        cam_combo = self.mapping[cam][cat_idx]
+        cam_combo = self.data[cam][cat_idx]
         for index in range(cam_combo.count()):
             if cam_combo.itemText(index) == value:
                 cam_combo.setCurrentIndex(index)
@@ -268,7 +268,7 @@ class CamSettingComboBoxDict(UserDict):
         """
         for i, cat in enumerate(self.sensitivity_categories[cam]):
             if cat in values:
-                cam_combo = self.mapping[cam][i]
+                cam_combo = self.data[cam][i]
                 for index in range(cam_combo.count()):
                     if cam_combo.itemText(index) == values[cat]:
                         cam_combo.setCurrentIndex(index)
@@ -293,7 +293,7 @@ class EmissionComboBoxDict(UserDict):
             wavelength : str
                 the value to set
         """
-        em_combo = self.mapping[cam]
+        em_combo = self.data[cam]
         for index in range(em_combo.count()):
             if cam_combo.itemText(index) == wavelength:
                 cam_combo.setCurrentIndex(index)

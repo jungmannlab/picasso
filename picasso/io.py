@@ -891,7 +891,7 @@ class TiffMultiMap(AbstractMovie):
                 ):
                     parameters['gain'] = int(gain)
         if 'gain' not in parameters.keys():
-            parameters['gain'] = 1
+            parameters['gain'] = [1]
         parameters['Sensitivity'] = {}
         if "Sensitivity Categories" in cam_config:
             categories = cam_config["Sensitivity Categories"]
@@ -911,13 +911,13 @@ class TiffMultiMap(AbstractMovie):
                 ]
                 if channel in channels:
                     wavelength = channels[channel]
-                    parameters['wavelength'] = str(wavelength)
-                    parameters['qe'] = cam_config["Quantum Efficiency"][
-                        wavelength]
+                    parameters['wavelength'] = [str(wavelength)]
+                    parameters['qe'] = [cam_config["Quantum Efficiency"][
+                        wavelength]]
         if 'qe' not in parameters.keys():
-            parameters['qe'] = 1
+            parameters['qe'] = [1]
         if 'wavelength' not in parameters.keys():
-            parameters['wavelength'] = 0
+            parameters['wavelength'] = [0]
         return parameters
 
     def tofile(self, file_handle, byte_order=None):
