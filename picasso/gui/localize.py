@@ -19,7 +19,7 @@ import traceback
 import importlib, pkgutil
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
 from icecream import ic
-from collections.abc import MutableMapping
+from collections import UserDict
 
 try:
     from pygpufit import gpufit as gf
@@ -218,7 +218,7 @@ class CamSettingComboBox(QtWidgets.QComboBox):
         target.addItems(sorted(list(sensitivity.keys())))
 
 
-class CamSettingComboBoxDict(MutableMapping):
+class CamSettingComboBoxDict(UserDict):
     """Dictionary holding CamSettingComboBoxes for different cameras and
     sensitivity categories.
     keys: str
@@ -275,7 +275,7 @@ class CamSettingComboBoxDict(MutableMapping):
                         break
 
 
-class EmissionComboBoxDict(MutableMapping):
+class EmissionComboBoxDict(UserDict):
     """Dictionary holding ComboBoxes for different emission wavelenghts.
     keys: str
         cameras
@@ -747,10 +747,13 @@ class ParametersDialog(QtWidgets.QDialog):
         file, and set the combo boxes accordingly.
         """
         parameters = movie.camera_parameters(CONFIG)
+        ic(parameters)
         self.camera.setCurrentIndex(parameters['cam_index'])
-        self.gain.setValue(parameters['gain'])
-        self.cam_combos.set_camcombo_values(camera, parameters['Sensitivity'])
-        self.emission_combos.set_emcombo_value(camera, parameters['wavelength'])
+        self.gain.setValue(parameters['gain'][0])
+        self.cam_combos.set_camcombo_values(
+            parameters['camera'], parameters['Sensitivity'])
+        self.emission_combos.set_emcombo_value(
+            parameters['camera'], parameters['wavelength'])
 
     def update_sensitivity(self, index=None):
         camera = self.camera.currentText()

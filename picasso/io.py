@@ -859,13 +859,14 @@ class TiffMultiMap(AbstractMovie):
         camera = info["Camera"]
 
         try:
-            assert camera in cameras
+            assert camera in list(cameras.keys())
         except:
             return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
-            # KeyError('camera from metadata not found in config.')
+            # raise KeyError('camera from metadata not found in config.')
 
-        index = cameras.index(camera)
+        index = list(cameras.keys()).index(camera)
         parameters['cam_index'] = index
+        parameters['camera'] = camera
 
         try:
             assert "Micro-Manager Metadata" in info
