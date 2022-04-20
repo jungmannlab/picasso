@@ -491,11 +491,7 @@ class ND2Movie(AbstractMovie):
         if "Sensitivity Categories" in cam_config:
             categories = cam_config["Sensitivity Categories"]
             for i, category in enumerate(categories):
-                if category == 'PixelReadoutRate':
-                    exp_setting = pm_info['Sensitivity'][category]
-                    parameters['Sensitivity'][category] = exp_setting
-                else:
-                    NotImplementedError('Tretrieving {:s} from nd2 files is not implemented yet.'.format(category))
+                parameters['Sensitivity'][category] = pm_info[category]
         if "Quantum Efficiency" in cam_config:
             if "Filter Wavelengths" in cam_config:
                 channel = pm_info['Filter']

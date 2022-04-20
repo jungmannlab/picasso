@@ -180,6 +180,7 @@ Cameras:
         2-G561: 595
         1-TIRF 488: 525
   Andor Zyla VSC-15253:
+    Comment: This is an example configuration for reading nd2 files
     Pixelsize: 130
     Baseline: 100
     Quantum Efficiency:
@@ -191,11 +192,11 @@ Cameras:
       - ReadoutMode
     Sensitivity:
       540 MHz:
-        Global Shutter at 12-bit: 0.29
-        Rolling Shutter at 16-bit: 0.46
+        Global shutter at 12-bit: 0.29
+        Rolling shutter at 16-bit: 0.46
       200 MHz:
-        Global Shutter at 12-bit: 0.29
-        Rolling Shutter at 16-bit: 0.46
+        Global shutter at 12-bit: 0.29
+        Rolling shutter at 16-bit: 0.46
     Filter Wavelengths:
       # This information is used to automatically set the emission wavelength based on MicroManager metadata
       2 (560): 595

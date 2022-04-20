@@ -743,11 +743,14 @@ class ParametersDialog(QtWidgets.QDialog):
         self.window.draw_frame()
 
     def set_camera_parameters(self, movie):
-        """retrieve the camera parameters from the image metadata and config
+        """Retrieve the camera parameters from the image metadata and config
         file, and set the combo boxes accordingly.
+
+        Args:
+            movie : PicassoMovie subclass
+                an implementation of PicassoMovie (e.g. TiffMultiMap, ND2Movie)
         """
         parameters = movie.camera_parameters(CONFIG)
-        ic(parameters)
         self.camera.setCurrentIndex(parameters['cam_index'])
         self.gain.setValue(parameters['gain'][0])
         self.cam_combos.set_camcombo_values(
