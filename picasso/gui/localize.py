@@ -295,8 +295,8 @@ class EmissionComboBoxDict(UserDict):
         """
         em_combo = self.data[cam]
         for index in range(em_combo.count()):
-            if cam_combo.itemText(index) == wavelength:
-                cam_combo.setCurrentIndex(index)
+            if em_combo.itemText(index) == wavelength:
+                em_combo.setCurrentIndex(index)
                 break
 
 

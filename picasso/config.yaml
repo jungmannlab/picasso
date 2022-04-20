@@ -179,6 +179,26 @@ Cameras:
         1-R640: 700
         2-G561: 595
         1-TIRF 488: 525
+  Andor Zyla VSC-15253:
+    Pixelsize: 130
+    Baseline: 100
+    Quantum Efficiency:
+      525: 0.7
+      595: 0.72
+      700: 0.64
+    Sensitivity Categories:
+      - PixelReadoutRate
+      - ReadoutMode
+    Sensitivity:
+      540 MHz:
+        Global Shutter at 12-bit: 0.29
+        Rolling Shutter at 16-bit: 0.46
+      200 MHz:
+        Global Shutter at 12-bit: 0.29
+        Rolling Shutter at 16-bit: 0.46
+    Filter Wavelengths:
+      # This information is used to automatically set the emission wavelength based on MicroManager metadata
+      2 (560): 595
   Zyla 4.2 Plus:
     Pixelsize: 130
     Baseline: 100

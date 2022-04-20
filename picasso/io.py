@@ -256,26 +256,28 @@ class ND2Movie(AbstractMovie):
         info['Acquisition Comments'] = ''
 
         mm_info = self.metadata_to_mmstyle()
-        camera_name = mm_info.get(
-            'nd2 Metadata', {}).get('description', {}).get(
+        camera_name = mm_info.get('description', {}).get(
                 'Metadata', {}).get('Camera Name', 'None')
         info['Camera'] = camera_name
 
         # simulate micro manager camera data for loading config values
         # see picasso/gui/localize:680ff
         # put into camera config
-        # 'Sensitivity Categories': ['PixelReadoutRate']
+        # 'Sensitivity Categories': ['PixelReadoutRate', 'ReadoutMode']
         # 'Sensitivity':
         #     '540 MHz':
-        #         '16 bit': sensitivityvalue  # or sensival directly behind 540 MHz?
+        #         'Rolling Shutter at 16-bit': sensitivityvalue  # or sensival directly behind 540 MHz?
         # 'Channel Device':
         #     'Name': 'Filter'
         #     'Emission Wavelengths':
         #         '2 (560)': 560
-        readout_rate = mm_info.get('nd2 Metadata', {}).get(
+        readout_rate = mm_info.get(
                 'description', {}).get('Metadata', {}).get(
                 'Camera Settings', {}).get('Readout Rate', 'None')
-        filter = mm_info.get('nd2 Metadata', {}).get(
+        readout_mode = mm_info.get(
+                'description', {}).get('Metadata', {}).get(
+                'Camera Settings', {}).get('Readout Mode', 'None')
+        filter = mm_info.get(
                 'description', {}).get('Metadata', {}).get(
                 'Camera Settings', {}).get('Microscope Settings', {}).get(
                 'Nikon Ti2, FilterChanger(Turret-Lo)', 'None')
@@ -288,6 +290,7 @@ class ND2Movie(AbstractMovie):
         info["Picasso Metadata"] = {
             'Camera': camera_name,
             'PixelReadoutRate': readout_rate,
+            'ReadoutMode': readout_mode,
             'Filter': filter,
         }
         info["nd2 Metadata"] = mm_info
@@ -418,9 +421,12 @@ class ND2Movie(AbstractMovie):
               700: 0.64
             Sensitivity Categories:
               - PixelReadoutRate
+              - ReadoutMode
             Sensitivity:
-              540 MHz: 7.18
-              200 MHz: 0.45
+              540 MHz:
+                Rolling Shutter at 16-bit: 7.18
+              200 MHz:
+                Rolling Shutter at 16-bit: 0.45
             Filter Wavelengths:
                 1-R640: 700
                 2-G561: 595
@@ -433,32 +439,27 @@ class ND2Movie(AbstractMovie):
             parameters : dict of lists of str
                 keys: gain, qe, wavelength
         """
-        return {'gain': [1], 'qe': [1], 'wavelength': [0], cam_index: 0}
-        info["Picasso Metadata"] = {
-            'Camera': camera_name,
-            'PixelReadoutRate': readout_rate,
-            'Filter': filter,
-        }
         parameters = {}
         info = self.info
 
         try:
-            assert "Cameras" in config and "Camera" in info
+            assert "Cameras" in config.keys() and "Camera" in info.keys()
         except:
-            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
-            # raise KeyError("'camera' key not found in metadata or config.")
+            # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            raise KeyError("'camera' key not found in metadata or config.")
 
         cameras = config['Cameras']
         camera = info["Camera"]
 
         try:
-            assert camera in cameras
+            assert camera in cameras.keys()
         except:
-            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
-            # KeyError('camera from metadata not found in config.')
+            # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            raise KeyError('camera from metadata not found in config.')
 
-        index = cameras.index(camera)
+        index = sorted(list(cameras.keys())).index(camera)
         parameters['cam_index'] = index
+        parameters['camera'] = camera
 
         try:
             assert "Picasso Metadata" in info
@@ -483,11 +484,12 @@ class ND2Movie(AbstractMovie):
                     == cam_config["EM Switch Property"][True]
                 ):
                     parameters['gain'] = int(gain)
-                else:
-                    parameters['gain'] = 1
+        if 'gain' not in parameters.keys():
+            parameters['gain'] = [1]
+
+        parameters['Sensitivity'] = {}
         if "Sensitivity Categories" in cam_config:
             categories = cam_config["Sensitivity Categories"]
-            parameters['Sensitivity'] = {}
             for i, category in enumerate(categories):
                 if category == 'PixelReadoutRate':
                     exp_setting = pm_info['Sensitivity'][category]
@@ -499,9 +501,14 @@ class ND2Movie(AbstractMovie):
                 channel = pm_info['Filter']
                 channels = cam_config["Filter Wavelengths"]
                 if channel in channels:
-                    parameters['wavelength'] = str(channels[channel])
+                    wavelength = channels[channel]
+                    parameters['wavelength'] = str(wavelength)
                     parameters['qe'] = cam_config["Quantum Efficiency"][
-                        parameters['wavelength']]
+                        wavelength]
+        if 'qe' not in parameters.keys():
+            parameters['qe'] = [1]
+        if 'wavelength' not in parameters.keys():
+            parameters['wavelength'] = [0]
         return parameters
 
 
@@ -864,7 +871,7 @@ class TiffMultiMap(AbstractMovie):
             return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
             # raise KeyError('camera from metadata not found in config.')
 
-        index = list(cameras.keys()).index(camera)
+        index = sorted(list(cameras.keys())).index(camera)
         parameters['cam_index'] = index
         parameters['camera'] = camera
 
