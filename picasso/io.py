@@ -162,7 +162,10 @@ def save_user_settings(settings):
         _yaml.dump(dict(settings), settings_file, default_flow_style=False)
 
 
-class AbstractMovie(abc.ABC):
+class AbstractPicassoMovie(abc.ABC):
+    """An abstract class defining the minimal interfaces of a PicassoMovie
+    used throughout picasso.
+    """
     @abc.abstractmethod
     def __init__(self):
         pass
@@ -181,7 +184,7 @@ class AbstractMovie(abc.ABC):
 
     @abc.abstractmethod
     def camera_parameters(self, config):
-        """get the camera specific parameters:
+        """Get the camera specific parameters:
             * gain
             * quantum efficiency
             * wavelength
@@ -194,11 +197,13 @@ class AbstractMovie(abc.ABC):
         Args:
             config : dict
                 description of camera parameters (for all possible settings)
+                comes from the config.yaml file
         Returns:
             parameters : dict of lists of str
-                keys: gain, qe, wavelength
+                keys: gain, qe, wavelength, cam_index, camera
         """
-        return {'gain': [1], 'qe': [1], 'wavelength': [0]}
+        return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0,
+                'camera': 'None'}
 
     @abc.abstractmethod
     def __getitem__(self, it):
@@ -224,7 +229,10 @@ class AbstractMovie(abc.ABC):
         pass
 
 
-class ND2Movie(AbstractMovie):
+class ND2Movie(AbstractPicassoMovie):
+    """Subclass of the AbstractPicassoMovie to implement reading Nikon nd2
+    files.
+    """
     def __init__(self, path, verbose=False):
         if verbose:
             print("Reading info from {}".format(path))
@@ -245,6 +253,13 @@ class ND2Movie(AbstractMovie):
                 'but should have exactly {:s}.'.format(str(required_dims)))
 
     def info(self):
+        """Brings the file metadata in a readable form, and preprocesses it
+        for easier downstream use.
+
+        Returns:
+            info : dict
+                the metadata
+        """
         info = {
             # "Byte Order": self._tif_byte_order,
             "File": self.path,
@@ -255,7 +270,7 @@ class ND2Movie(AbstractMovie):
         }
         info['Acquisition Comments'] = ''
 
-        mm_info = self.metadata_to_mmstyle()
+        mm_info = self.metadata_to_dict()
         camera_name = mm_info.get('description', {}).get(
                 'Metadata', {}).get('Camera Name', 'None')
         info['Camera'] = camera_name
@@ -298,7 +313,13 @@ class ND2Movie(AbstractMovie):
 
         return info
 
-    def metadata_to_mmstyle(self):
+    def metadata_to_dict(self):
+        """Extracts all types of metadata in the file and returns it in a dict.
+
+        Returns:
+            mmmeta : dict
+                all metadata
+        """
         mmmeta = {}
 
         text_info = self.nd2file.text_info
@@ -315,6 +336,17 @@ class ND2Movie(AbstractMovie):
 
     @classmethod
     def nikontext_to_dict(cls, text):
+        """Some kinds of Nikon metadata are described with text, using
+        newlines and colons. This function restructures the text into
+        a dict.
+
+        Args:
+            text : str
+                nikon-style metadata description text
+        Returns:
+            out : dict
+                restructured text
+        """
         out = {}
         curr_keys = []
         for i, item in enumerate(text.split('\r\n')):
@@ -343,6 +375,17 @@ class ND2Movie(AbstractMovie):
 
     @classmethod
     def nd2metadata_to_dict(cls, meta):
+        """Restructure the 'metadata' field from the package nd2 into a dict
+        for independent use.
+        https://github.com/tlambert03/nd2/blob/main/src/nd2/structures.py
+
+        Args:
+            meta : nd2 metadata structure
+                the 'metadata' part of nd2 metadata
+        Returns:
+            out : dict
+                the content as a dict.
+        """
         out = {}
         out['contents'] = meta.contents.__dict__
         chans = [{}] * len(meta.channels)
@@ -394,6 +437,14 @@ class ND2Movie(AbstractMovie):
         self.nd2file.close()
 
     def get_frame(self, index):
+        """Load one frame of the movie
+        Args:
+            index : int
+                the frame index to retrieve.
+        Returns:
+            frame : 2D array
+                the image data of the frame
+        """
         # return self.nd2file.asarray()[index, ...]
         return self.dask[index, ...].compute()
 
@@ -737,7 +788,12 @@ class TiffMap:
             image.tofile(file_handle)
 
 
-class TiffMultiMap(AbstractMovie):
+class TiffMultiMap(AbstractPicassoMovie):
+    """Implments a subclass of AbstractPicassoMovie for reading
+    ome tiff files created by MicroManager. Single files are
+    maxed out at 4GB, so this class orchestrates reading from single files,
+    accessed by TiffMap.
+    """
     def __init__(self, path, memmap_frames=False, verbose=False):
         self.path = _ospath.abspath(path)
         self.dir = _ospath.dirname(self.path)
@@ -831,7 +887,7 @@ class TiffMultiMap(AbstractMovie):
         return info
 
     def camera_parameters(self, config):
-        """get the camera specific parameters:
+        """Get the camera specific parameters:
             * gain
             * quantum efficiency
             * wavelength
@@ -840,6 +896,8 @@ class TiffMultiMap(AbstractMovie):
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
         which needs to be matched in the config.yaml description, as detailed
         in the specific child classes.
+        This code has been moved from localize to here, as it is file type
+        specific (HG, April 2022).
 
         Args:
             config : dict

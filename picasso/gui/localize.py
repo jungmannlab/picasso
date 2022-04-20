@@ -236,6 +236,9 @@ class CamSettingComboBoxDict(UserDict):
         self.sensitivity_categories = {}
 
     def add_categories(self, cam, categories):
+        """Call this when setting combo boxes for a new camera, to accompany
+        it with the corresponding sensitivity categories.
+        """
         self.sensitivity_categories[cam] = categories
 
     def set_camcombo_value(self, cam, category, value):
