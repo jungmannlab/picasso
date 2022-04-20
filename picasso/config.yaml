@@ -174,11 +174,11 @@ Cameras:
         16-bit (low noise & high well capacity): 0.45
     Channel Device:
       # This information is used to automatically set the emission wavelength based on MicroManager metadata
-      Name: TIFilterBlock1-Label
+      Name: FilterTurret1-Label
       Emission Wavelengths:
         1-R640: 700
         2-G561: 595
-        3-B489: 525
+        1-TIRF 488: 525
   Zyla 4.2 Plus:
     Pixelsize: 130
     Baseline: 100
