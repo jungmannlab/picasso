@@ -228,6 +228,11 @@ class AbstractPicassoMovie(abc.ABC):
     def tofile(self, file_handle, byte_order=None):
         pass
 
+    @property
+    @abc.abstractmethod
+    def dtype(self):
+        return 'u16'
+
 
 class ND2Movie(AbstractPicassoMovie):
     """Subclass of the AbstractPicassoMovie to implement reading Nikon nd2
@@ -252,7 +257,12 @@ class ND2Movie(AbstractPicassoMovie):
                     self.path, str(self.nd2file.sizes.keys())) +
                 'but should have exactly {:s}.'.format(str(required_dims)))
 
+        self.meta = self.get_metadata()
+
     def info(self):
+        return self.meta
+
+    def get_metadata(self):
         """Brings the file metadata in a readable form, and preprocesses it
         for easier downstream use.
 
@@ -309,7 +319,6 @@ class ND2Movie(AbstractPicassoMovie):
             'Filter': filter,
         }
         info["nd2 Metadata"] = mm_info
-        self.info = info
 
         return info
 
@@ -391,9 +400,19 @@ class ND2Movie(AbstractPicassoMovie):
         chans = [{}] * len(meta.channels)
         for i, chan in enumerate(meta.channels):
             chans[i] = chan.__dict__
+            metachan = chan.__dict__['channel'].__dict__
+            chans[i]['channel'] = {}
+            for k, v in metachan.items():
+                chans[i]['channel'][str(k)] = str(v)
             chans[i]['loops'] = chan.__dict__['loops'].__dict__
             chans[i]['microscope'] = chan.__dict__['microscope'].__dict__
             chans[i]['volume'] = chan.__dict__['volume'].__dict__
+            axints = chans[i]['volume']['axesInterpretation']
+            chans[i]['volume']['axesInterpretation'] = [None]*len(axints)
+            for j, axes_inter in enumerate(axints):
+                chans[i]['volume']['axesInterpretation'][j] = {}
+                for k, v in axes_inter.__dict__.items():
+                    chans[i]['volume']['axesInterpretation'][j][str(k)] = str(v)
         out['channels'] = chans
         return out
 
@@ -491,7 +510,7 @@ class ND2Movie(AbstractPicassoMovie):
                 keys: gain, qe, wavelength
         """
         parameters = {}
-        info = self.info
+        info = self.meta
 
         try:
             assert "Cameras" in config.keys() and "Camera" in info.keys()
@@ -557,6 +576,10 @@ class ND2Movie(AbstractPicassoMovie):
         if 'wavelength' not in parameters.keys():
             parameters['wavelength'] = [0]
         return parameters
+
+    @property
+    def dtype(self):
+        return self.meta['Data Type']
 
 
 class TiffMap:
@@ -871,6 +894,10 @@ class TiffMultiMap(AbstractPicassoMovie):
         for map in self.maps:
             map.close()
 
+    @property
+    def dtype(self):
+        return self._dtype
+
     def get_frame(self, index):
         # TODO deal with negative numbers
         for i in range(self.n_maps):
@@ -883,7 +910,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     def info(self):
         info = self.maps[0].info()
         info["Frames"] = self.n_frames
-        self.info = info
+        self.meta = info
         return info
 
     def camera_parameters(self, config):
@@ -908,7 +935,7 @@ class TiffMultiMap(AbstractPicassoMovie):
         """
         # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
         parameters = {}
-        info = self.info
+        info = self.meta
 
         try:
             assert "Cameras" in config and "Camera" in info
