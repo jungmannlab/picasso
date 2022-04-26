@@ -2762,7 +2762,7 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
 
 class DisplaySettingsDialog(QtWidgets.QDialog):
     """
-    A class to change display settings, e.g.: zoom, oversampling, 
+    A class to change display settings, e.g.: zoom, display pixel size, 
     contrast and blur.
 
     ...
@@ -2775,7 +2775,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         contains strings with available colormaps (single channel only)
     color_step : QSpinBox
         defines how many colors are to be rendered
-    dynamic_oversampling : QCheckBox
+    disp_px_size : QDoubleSpinBox
+        contains the size of super-resolution pixels in nm
+    dynamic_disp_px : QCheckBox
         tick to automatically adjust to current window size when zooming.
     maximum : QDoubleSpinBox
         defines at which number of localizations per super-resolution
@@ -2791,8 +2793,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         pixel the minimum color of the colormap should be applied
     minimum_render : QDoubleSpinBox
         contains the minimum value of the parameter to be rendered
-    oversampling : QDoubleSpinBox
-        contains the number of super-resolution pixels per camera pixel
     parameter : QComboBox
         defines what property should be rendered, e.g.: z, photons
     pixelsize : QDoubleSpinBox
@@ -2807,24 +2807,24 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         tick to display scale bar's length (nm)
     show_legend : QPushButton
         click to display parameter rendering's legend
-    _silent_oversampling_update : boolean
-        True if update oversampling in background
+    _silent_disp_px_update : boolean
+        True if update display pixel size in background
     zoom : QDoubleSpinBox
         contains zoom's magnitude
 
     Methods
     -------
-    on_oversampling_changed(value)
-        Sets new oversampling, updates contrast and updates scene in
-        the main window
+    on_disp_px_changed(value)
+        Sets new display pixel size, updates contrast and updates scene 
+        in the main window
     on_zoom_changed(value)
         Zooms the image in the main window
     render_scene(*args, **kwargs)
         Updates scene in the main window
-    set_dynamic_oversampling(state)
-        Updates scene if dynamic oversampling is checked
-    set_oversampling_silently(oversampling)
-        Changes the value of oversampling in the background
+    set_dynamic_disp_px(state)
+        Updates scene if dynamic display pixel size is checked
+    set_disp_px_silently(disp_px_size)
+        Changes the value of display pixel size in background
     set_zoom_silently(zoom)
         Changes the value of zoom in the background
     silent_maximum_update(value)
@@ -2853,21 +2853,24 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.zoom.setRange(10 ** (-self.zoom.decimals()), 1e6)
         self.zoom.valueChanged.connect(self.on_zoom_changed)
         general_grid.addWidget(self.zoom, 0, 1)
-        general_grid.addWidget(QtWidgets.QLabel("Oversampling:"), 1, 0)
-        self._oversampling = DEFAULT_OVERSAMPLING
-        self.oversampling = QtWidgets.QDoubleSpinBox()
-        self.oversampling.setRange(0.001, 10000)
-        self.oversampling.setSingleStep(5)
-        self.oversampling.setValue(self._oversampling)
-        self.oversampling.setKeyboardTracking(False)
-        self.oversampling.valueChanged.connect(self.on_oversampling_changed)
-        general_grid.addWidget(self.oversampling, 1, 1)
-        self.dynamic_oversampling = QtWidgets.QCheckBox("dynamic")
-        self.dynamic_oversampling.setChecked(True)
-        self.dynamic_oversampling.toggled.connect(
-            self.set_dynamic_oversampling
+        general_grid.addWidget(
+            QtWidgets.QLabel("Display pixel size [nm]:"), 1, 0
         )
-        general_grid.addWidget(self.dynamic_oversampling, 2, 1)
+        self._disp_px_size = 130 / DEFAULT_OVERSAMPLING 
+        self.disp_px_size = QtWidgets.QDoubleSpinBox()
+        self.disp_px_size.setRange(0.00001, 100000)
+        self.disp_px_size.setSingleStep(0.1)
+        self.disp_px_size.setDecimals(5)
+        self.disp_px_size.setValue(self._disp_px_size)
+        self.disp_px_size.setKeyboardTracking(False)
+        self.disp_px_size.valueChanged.connect(self.on_disp_px_changed)
+        general_grid.addWidget(self.disp_px_size, 1, 1)
+        self.dynamic_disp_px = QtWidgets.QCheckBox("dynamic")
+        self.dynamic_disp_px.setChecked(True)
+        self.dynamic_disp_px.toggled.connect(
+            self.set_dynamic_disp_px
+        )
+        general_grid.addWidget(self.dynamic_disp_px, 2, 1)
         self.minimap = QtWidgets.QCheckBox("show minimap")
         general_grid.addWidget(self.minimap, 3, 1)
         self.minimap.stateChanged.connect(self.update_scene)
@@ -2954,7 +2957,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.camera_grid = QtWidgets.QGridLayout(camera_groupbox)
         self.camera_grid.addWidget(QtWidgets.QLabel("Pixel Size:"), 0, 0)
         self.pixelsize = QtWidgets.QDoubleSpinBox()
-        self.pixelsize.setRange(1, 1000000000)
+        self.pixelsize.setRange(1, 100000)
         self.pixelsize.setValue(130)
         self.pixelsize.setKeyboardTracking(False)
         self.pixelsize.valueChanged.connect(self.update_scene)
@@ -2970,7 +2973,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
         scalebar_grid.addWidget(QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0)
         self.scalebar = QtWidgets.QDoubleSpinBox()
-        self.scalebar.setRange(0.0001, 10000000000)
+        self.scalebar.setRange(0.0001, 100000)
         self.scalebar.setValue(500)
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.update_scene)
@@ -2978,7 +2981,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
         self.scalebar_text.stateChanged.connect(self.update_scene)
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
-        self._silent_oversampling_update = False
+        self._silent_disp_px_update = False
 
         # Render
         self.render_groupbox = QtWidgets.QGroupBox("Render properties")
@@ -3042,18 +3045,18 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
 
-    def on_oversampling_changed(self, value):
+    def on_disp_px_changed(self, value):
         """
-        Sets new oversampling, updates contrast and updates scene in
-        the main window.
+        Sets new display pixel size, updates contrast and updates scene
+        in the main window.
         """
 
-        contrast_factor = (self._oversampling / value) ** 2
-        self._oversampling = value
+        contrast_factor = (value / self._disp_px_size) ** 2
+        self._disp_px_size = value
         self.silent_minimum_update(contrast_factor * self.minimum.value())
         self.silent_maximum_update(contrast_factor * self.maximum.value())
-        if not self._silent_oversampling_update:
-            self.dynamic_oversampling.setChecked(False)
+        if not self._silent_disp_px_update:
+            self.dynamic_disp_px.setChecked(False)
             self.window.view.update_scene()
 
     def on_zoom_changed(self, value):
@@ -3061,12 +3064,12 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         self.window.view.set_zoom(value)
 
-    def set_oversampling_silently(self, oversampling):
-        """ Changes the value of oversampling in the background. """
+    def set_disp_px_silently(self, disp_px_size):
+        """ Changes the value of self.disp_px_size in the background. """
 
-        self._silent_oversampling_update = True
-        self.oversampling.setValue(oversampling)
-        self._silent_oversampling_update = False
+        self._silent_disp_px_update = True
+        self.disp_px_size.setValue(disp_px_size)
+        self._silent_disp_px_update = False
 
     def set_zoom_silently(self, zoom):
         """ Changes the value of zoom in the background. """
@@ -3094,8 +3097,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         self.window.view.update_scene()
 
-    def set_dynamic_oversampling(self, state):
-        """ Updates scene if dynamic oversampling is checked. """
+    def set_dynamic_disp_px(self, state):
+        """ Updates scene if dynamic display pixel size is checked. """
 
         if state:
             self.window.view.update_scene()
@@ -4915,15 +4918,28 @@ class View(QtWidgets.QLabel):
             # raise error when pick id too high
             if pick_no >= len(self._picks):
                 raise ValueError("Pick number provided too high")
-            else:
-                # calculate new viewport
-                r = self.window.tools_settings_dialog.pick_diameter.value() / 2
-                x, y = self._picks[pick_no]
-                x_min = x - 1.4 * r
-                x_max = x + 1.4 * r
-                y_min = y - 1.4 * r
-                y_max = y + 1.4 * r
-                viewport = [(y_min, x_min), (y_max, x_max)]
+            else: # calculate new viewport
+                if self._pick_shape == "Circle":
+                    r = (
+                        self.window.tools_settings_dialog.pick_diameter.value()
+                        / 2
+                    )
+                    x, y = self._picks[pick_no]
+                    x_min = x - 1.4 * r
+                    x_max = x + 1.4 * r
+                    y_min = y - 1.4 * r
+                    y_max = y + 1.4 * r
+                else:
+                    (xs, ys), (xe, ye) = self._picks[pick_no]
+                    xc = np.mean([xs, xe])
+                    yc = np.mean([ys, ye])
+                    w = self.window.tools_settings_dialog.pick_width.value()
+                    X, Y = self.get_pick_rectangle_corners(xs, ys, xe, ye, w)
+                    x_min = min(X) - (0.2 * (xc - min(X)))
+                    x_max = max(X) + (0.2 * (max(X) - xc))
+                    y_min = min(Y) - (0.2 * (yc - min(Y)))
+                    y_max = max(Y) + (0.2 * (max(Y) - yc))
+                viewport = [(y_min, x_min), (y_max, x_max)] 
                 self.update_scene(viewport=viewport)
 
     def get_channel(self, title="Choose a channel"):
@@ -5095,27 +5111,30 @@ class View(QtWidgets.QLabel):
         optimal_oversampling = (
             self.display_pixels_per_viewport_pixels()
         )
-        if self.window.display_settings_dlg.dynamic_oversampling.isChecked():
+        if self.window.display_settings_dlg.dynamic_disp_px.isChecked():
             oversampling = optimal_oversampling
-            self.window.display_settings_dlg.set_oversampling_silently(
-                optimal_oversampling
+            self.window.display_settings_dlg.set_disp_px_silently(
+                self.window.display_settings_dlg.pixelsize.value()
+                / optimal_oversampling 
             )
         else:
             oversampling = float(
-                self.window.display_settings_dlg.oversampling.value()
+                self.window.display_settings_dlg.pixelsize.value()
+                / self.window.display_settings_dlg.disp_px_size.value()
             )
             if oversampling > optimal_oversampling:
                 QtWidgets.QMessageBox.information(
                     self,
-                    "Oversampling too high",
+                    "Display pixel length too low",
                     (
                         "Oversampling will be adjusted to"
                         " match the display pixel density."
                     ),
                 )
                 oversampling = optimal_oversampling
-                self.window.display_settings_dlg.set_oversampling_silently(
-                    optimal_oversampling
+                self.window.display_settings_dlg.set_disp_px_silently(
+                    self.window.display_settings_dlg.pixelsize.value()
+                    / optimal_oversampling
                 )
 
         # viewport
