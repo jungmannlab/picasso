@@ -19,6 +19,7 @@ import traceback
 import importlib, pkgutil
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
 from icecream import ic
+from collections import UserDict
 
 try:
     from pygpufit import gpufit as gf
@@ -141,7 +142,7 @@ class Scene(QtWidgets.QGraphicsScene):
         if not event.mimeData().hasUrls():
             return False
         path, extension = self.path_from_drop(event)
-        if extension.lower() not in [".raw", ".tif"]:
+        if extension.lower() not in [".raw", ".tif", ".nd2"]:
             return False
         return True
 
@@ -184,11 +185,26 @@ class OddSpinBox(QtWidgets.QSpinBox):
 
 
 class CamSettingComboBox(QtWidgets.QComboBox):
-    def __init__(self, cam_combos, camera, index):
+    """
+    Attributes:
+        cam_combos : dict
+            keys: possible cameras
+            values: list of CamSettingComboBoxes; one for each
+                sensitivity category, described in the CONFIG entry for the
+                respective camera.
+        camera : str
+            camera name this CamSettingComboBox belongs to
+        categories : list of str
+            the sensitivity categories of the camera
+        index : int
+            the index of sensitivity category this CamSettingComboBox belongs to
+    """
+    def __init__(self, cam_combos, camera, index, sensitivity_categories=[]):
         super().__init__()
         self.cam_combos = cam_combos
         self.camera = camera
         self.index = index
+        self.categories = sensitivity_categories
 
     def change_target_choices(self, index):
         cam_combos = self.cam_combos[self.camera]
@@ -200,6 +216,91 @@ class CamSettingComboBox(QtWidgets.QComboBox):
         target.clear()
         target.blockSignals(False)
         target.addItems(sorted(list(sensitivity.keys())))
+
+
+class CamSettingComboBoxDict(UserDict):
+    """Dictionary holding CamSettingComboBoxes for different cameras and
+    sensitivity categories.
+    keys: str
+        cameras
+    values: List of CamSettingComboBoxes, one for each sensitivity category
+        of this camera
+
+    further attributes:
+        sensitivity_categories : dict
+            keys: cameras
+            values: list of str: the categories
+    """
+    def __init__(self):
+        super().__init__()
+        self.sensitivity_categories = {}
+
+    def add_categories(self, cam, categories):
+        """Call this when setting combo boxes for a new camera, to accompany
+        it with the corresponding sensitivity categories.
+        """
+        self.sensitivity_categories[cam] = categories
+
+    def set_camcombo_value(self, cam, category, value):
+        """Sets the value of one combo box
+
+        Args:
+            cam : str
+                the camera to set
+            category : str
+                the category combo box to set
+            value : str
+                the value to set
+        """
+        cat_idx = self.sensitivity_categories[cam].index(category)
+        cam_combo = self.data[cam][cat_idx]
+        for index in range(cam_combo.count()):
+            if cam_combo.itemText(index) == value:
+                cam_combo.setCurrentIndex(index)
+                break
+
+    def set_camcombo_values(self, cam, values):
+        """Sets the values of all combo boxes of a camera
+
+        Args:
+            cam : str
+                the camera to set
+            values : dict
+                keys: sensitivity categories
+                values: the values to set
+        """
+        for i, cat in enumerate(self.sensitivity_categories[cam]):
+            if cat in values:
+                cam_combo = self.data[cam][i]
+                for index in range(cam_combo.count()):
+                    if cam_combo.itemText(index) == values[cat]:
+                        cam_combo.setCurrentIndex(index)
+                        break
+
+
+class EmissionComboBoxDict(UserDict):
+    """Dictionary holding ComboBoxes for different emission wavelenghts.
+    keys: str
+        cameras
+    values: ComboBoxes with wavelengths
+    """
+    def __init__(self):
+        super().__init__()
+
+    def set_emcombo_value(self, cam, wavelength):
+        """Sets the value of one combo box
+
+        Args:
+            cam : str
+                the camera to set
+            wavelength : str
+                the value to set
+        """
+        em_combo = self.data[cam]
+        for index in range(em_combo.count()):
+            if em_combo.itemText(index) == wavelength:
+                em_combo.setCurrentIndex(index)
+                break
 
 
 class PromptInfoDialog(QtWidgets.QDialog):
@@ -366,8 +467,8 @@ class ParametersDialog(QtWidgets.QDialog):
 
             self.cam_settings = QtWidgets.QStackedWidget()
             exp_grid.addWidget(self.cam_settings, 1, 0, 1, 2)
-            self.cam_combos = {}
-            self.emission_combos = {}
+            self.cam_combos = CamSettingComboBoxDict()
+            self.emission_combos = EmissionComboBoxDict()
             for cam in cameras:
                 cam_widget = QtWidgets.QWidget()
                 cam_grid = QtWidgets.QGridLayout(cam_widget)
@@ -378,6 +479,7 @@ class ParametersDialog(QtWidgets.QDialog):
                     if "Sensitivity Categories" in cam_config:
                         self.cam_combos[cam] = []
                         categories = cam_config["Sensitivity Categories"]
+                        self.cam_combos.add_categories(cam, categories)
                         for i, category in enumerate(categories):
                             row_count = cam_grid.rowCount()
                             cam_grid.addWidget(
@@ -643,73 +745,21 @@ class ParametersDialog(QtWidgets.QDialog):
     def on_gpufit_changed(self, state):
         self.window.draw_frame()
 
-    def set_camera_parameters(self, info):
-        if "Cameras" in CONFIG and "Camera" in info:
-            cameras = [
-                self.camera.itemText(_) for _ in range(self.camera.count())
-            ]
-            camera = info["Camera"]
-            if camera in cameras:
-                index = cameras.index(camera)
-                self.camera.setCurrentIndex(index)
-                if "Micro-Manager Metadata" in info:
-                    mm_info = info["Micro-Manager Metadata"]
-                    cam_config = CONFIG["Cameras"][camera]
-                    if "Gain Property Name" in cam_config:
-                        gain_property_name = cam_config["Gain Property Name"]
-                        gain = mm_info[camera + "-" + gain_property_name]
-                        if "EM Switch Property" in cam_config:
-                            switch_property_name = cam_config[
-                                "EM Switch Property"
-                            ]["Name"]
-                            switch_property_value = mm_info[
-                                camera + "-" + switch_property_name
-                            ]
-                            if (
-                                switch_property_value
-                                == cam_config["EM Switch Property"][True]
-                            ):
-                                self.gain.setValue(int(gain))
-                            else:
-                                self.gain.setValue(1)
-                    if "Sensitivity Categories" in cam_config:
-                        cam_combos = self.cam_combos[camera]
-                        categories = cam_config["Sensitivity Categories"]
-                        for i, category in enumerate(categories):
-                            property_name = camera + "-" + category
-                            if property_name in mm_info:
-                                exp_setting = mm_info[camera + "-" + category]
-                                cam_combo = cam_combos[i]
-                                for index in range(cam_combo.count()):
-                                    if (
-                                        cam_combo.itemText(index)
-                                        == exp_setting
-                                    ):
-                                        cam_combo.setCurrentIndex(index)
-                                        break
-                    if "Quantum Efficiency" in cam_config:
-                        if "Channel Device" in cam_config:
-                            channel_device_name = cam_config["Channel Device"][
-                                "Name"
-                            ]
-                            channel = mm_info[channel_device_name]
-                            channels = cam_config["Channel Device"][
-                                "Emission Wavelengths"
-                            ]
-                            if channel in channels:
-                                wavelength = str(channels[channel])
-                                em_combo = self.emission_combos[camera]
-                                for index in range(em_combo.count()):
-                                    if em_combo.itemText(index) == wavelength:
-                                        em_combo.setCurrentIndex(index)
-                                        break
-                                else:
-                                    raise ValueError(
-                                        (
-                                            "No quantum efficiency found"
-                                            " for wavelength " + wavelength
-                                        )
-                                    )
+    def set_camera_parameters(self, movie):
+        """Retrieve the camera parameters from the image metadata and config
+        file, and set the combo boxes accordingly.
+
+        Args:
+            movie : PicassoMovie subclass
+                an implementation of PicassoMovie (e.g. TiffMultiMap, ND2Movie)
+        """
+        parameters = movie.camera_parameters(CONFIG)
+        self.camera.setCurrentIndex(parameters['cam_index'])
+        self.gain.setValue(parameters['gain'][0])
+        self.cam_combos.set_camcombo_values(
+            parameters['camera'], parameters['Sensitivity'])
+        self.emission_combos.set_emcombo_value(
+            parameters['camera'], parameters['wavelength'])
 
     def update_sensitivity(self, index=None):
         camera = self.camera.currentText()
@@ -987,7 +1037,7 @@ class Window(QtWidgets.QMainWindow):
             self.ready_for_fit = False
             self.set_frame(0)
             self.fit_in_view()
-            self.parameters_dialog.set_camera_parameters(self.info[0])
+            self.parameters_dialog.set_camera_parameters(self.movie)
             self.status_bar.showMessage(
                 "Opened movie in {:.2f} seconds.".format(dt)
             )
