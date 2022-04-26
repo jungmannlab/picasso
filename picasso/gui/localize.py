@@ -610,8 +610,8 @@ class ParametersDialog(QtWidgets.QDialog):
         lq_grid = QtWidgets.QGridLayout(lq_widget)
 
         self.gpufit_checkbox = QtWidgets.QCheckBox("Use GPUfit")
-        if not gpufit_installed:
-            self.gpufit_checkbox.setDisabled(True)
+        self.gpufit_checkbox.setTristate(False)
+        self.gpufit_checkbox.setDisabled(True)
         self.gpufit_checkbox.stateChanged.connect(self.on_gpufit_changed)
 
         if not gpufit_installed:
