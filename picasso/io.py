@@ -839,7 +839,7 @@ class TiffMultiMap(AbstractPicassoMovie):
         self.n_frames_per_map = [_.n_frames for _ in self.maps]
         self.n_frames = sum(self.n_frames_per_map)
         self.cum_n_frames = _np.insert(_np.cumsum(self.n_frames_per_map), 0, 0)
-        self.dtype = self.maps[0].dtype
+        self._dtype = self.maps[0].dtype
         self.height = self.maps[0].height
         self.width = self.maps[0].width
         self.shape = (self.n_frames, self.height, self.width)
