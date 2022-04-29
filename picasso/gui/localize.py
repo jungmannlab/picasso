@@ -448,7 +448,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Database addition
         self.database_checkbox = QtWidgets.QCheckBox("Add to Database")
-        self.database_checkbox.setChecked(True)
+        self.database_checkbox.setChecked(False)
         identification_grid.addWidget(self.database_checkbox, 4, 1)
 
         # Camera:
