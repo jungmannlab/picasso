@@ -5125,7 +5125,7 @@ class View(QtWidgets.QLabel):
             if oversampling > optimal_oversampling:
                 QtWidgets.QMessageBox.information(
                     self,
-                    "Display pixel length too low",
+                    "Display pixel size too low",
                     (
                         "Oversampling will be adjusted to"
                         " match the display pixel density."
@@ -5327,12 +5327,13 @@ class View(QtWidgets.QLabel):
         if self._mode == "Zoom":
             # start drawing a zoom-in rectangle
             if event.button() == QtCore.Qt.LeftButton:
-                if not self.rubberband.isVisible():
-                    self.origin = QtCore.QPoint(event.pos())
-                    self.rubberband.setGeometry(
-                        QtCore.QRect(self.origin, QtCore.QSize())
-                    )
-                    self.rubberband.show()
+                if len(self.locs) > 0: # locs are loaded already
+                    if not self.rubberband.isVisible():
+                        self.origin = QtCore.QPoint(event.pos())
+                        self.rubberband.setGeometry(
+                            QtCore.QRect(self.origin, QtCore.QSize())
+                        )
+                        self.rubberband.show()
             # start panning
             elif event.button() == QtCore.Qt.RightButton:
                 self._pan = True

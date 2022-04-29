@@ -446,8 +446,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
-        #Database addition
-
+        # Database addition
         self.database_checkbox = QtWidgets.QCheckBox("Add to Database")
         self.database_checkbox.setChecked(True)
         identification_grid.addWidget(self.database_checkbox, 4, 1)
@@ -1019,7 +1018,15 @@ class Window(QtWidgets.QMainWindow):
             dir = self.pwd
 
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open image sequence", directory=dir, filter="All supported formats (*.raw *.tif *.tiff);;Raw files (*.raw);;Tiff iimages (*.tif *.tiff)"
+            self, 
+            "Open image sequence", 
+            directory=dir, 
+            filter=(
+                "All supported formats (*.raw *.tif *.tiff *.nd2)"
+                ";;Raw files (*.raw)"
+                ";;Tiff images (*.tif *.tiff)"
+                ";;Nd2 files (*.nd2)"
+            )
         )
         if path:
             self.pwd = path

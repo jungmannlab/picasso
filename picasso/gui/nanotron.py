@@ -148,10 +148,9 @@ class Trainer(QtCore.QThread):
         self.iterations = parameter["iterations"]
         self.learning_rate = parameter["learning_rate"]
         self.solver = parameter["solver"]
-        self.X_train, self.X_test, self.Y_train, self.Y_test = train_test_split(X_train,
-                                                                                Y_train,
-                                                                                test_size=0.30,
-                                                                                random_state=42)
+        self.X_train, self.X_test, self.Y_train, self.Y_test = train_test_split(
+            X_train, Y_train, test_size=0.30, random_state=42
+        )
         self.mlp_list = []  # container to carry mlp class
         self.cm_list = []  # container to carry confusion_matrix
 
