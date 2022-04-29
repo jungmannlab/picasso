@@ -21,10 +21,8 @@ import yaml
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
-from matplotlib.backends.backend_qt4agg import (
-    FigureCanvasQTAgg as FigureCanvas,
-)
-from matplotlib.backends.backend_qt4agg import (
+from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.backends.backend_qt5agg import (
     NavigationToolbar2QT as NavigationToolbar,
 )
 from PyQt5 import QtCore, QtGui, QtWidgets
