@@ -1471,6 +1471,7 @@ class Window(QtWidgets.QMainWindow):
             self.info,
             self.parameters_dialog.z_calibration,
             self.parameters_dialog.magnification_factor.value(),
+            self.parameters_dialog.pixelsize.value(),
         )
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
@@ -1538,7 +1539,7 @@ class Window(QtWidgets.QMainWindow):
         base, ext = os.path.splitext(self.movie_path)
         self.save_locs(base + "_locs.hdf5")
 
-        if self.parameters_dialog.database_checkbox:
+        if self.parameters_dialog.database_checkbox.isChecked():
 
             self.status_bar.showMessage('Adding to database.')
             localize.add_file_to_db(self.movie_path)
@@ -1740,12 +1741,20 @@ class FitZWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float)
 
-    def __init__(self, locs, info, calibration, magnification_factor):
+    def __init__(
+        self, 
+        locs, 
+        info, 
+        calibration, 
+        magnification_factor,
+        pixelsize,
+    ):
         super().__init__()
         self.locs = locs
         self.info = info
         self.calibration = calibration
         self.magnification_factor = magnification_factor
+        self.pixelsize = pixelsize
 
     def run(self):
         t0 = time.time()
@@ -1755,6 +1764,7 @@ class FitZWorker(QtCore.QThread):
             self.info,
             self.calibration,
             self.magnification_factor,
+            self.pixelsize,
             filter=0,
             asynch=True,
         )
