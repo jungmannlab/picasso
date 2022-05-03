@@ -5707,6 +5707,10 @@ class View(QtWidgets.QLabel):
         Opens self.pick_message_box to display information.
         """
 
+        if self._pick_shape == "Rectangle":
+            raise NotImplementedError(
+                "Not implemented for rectangular picks"
+            )
         print("Showing picks...")
         channel = self.get_channel3d("Select Channel")
 
@@ -5741,9 +5745,9 @@ class View(QtWidgets.QLabel):
                         )
                         for l in range(len(self.locs_paths)):
                             locs = all_picked_locs[l][i]
-                            locs = stack_arrays(
-                                locs, asrecarray=True, usemask=False
-                            )
+                            # locs = stack_arrays(
+                            #     locs, asrecarray=True, usemask=False
+                            # )
                             ax.scatter(locs["x"], locs["y"], c=colors[l], s=2)
 
                         # adjust x and y lim
