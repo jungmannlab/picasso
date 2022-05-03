@@ -1000,14 +1000,12 @@ class ViewRotation(QtWidgets.QLabel):
         # other parameters for rendering
         n_channels = len(locs)
         colors = get_colors(n_channels) # automatic colors
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         if ang is None: # no build animation
             renderings = [
                 render.render(
                     _, **kwargs, 
                     ang=(self.angx, self.angy, self.angz), 
-                    pixelsize=pixelsize,
                 ) for _ in locs
             ]
         else: # build animation
@@ -1015,7 +1013,6 @@ class ViewRotation(QtWidgets.QLabel):
                 render.render(
                     _, **kwargs, 
                     ang=ang, 
-                    pixelsize=pixelsize,
                 ) for _ in locs
             ]
         n_locs = sum([_[0] for _ in renderings])
@@ -1122,14 +1119,12 @@ class ViewRotation(QtWidgets.QLabel):
                 kwargs, locs=locs, ang=ang, autoscale=autoscale
             )
 
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if ang is None: # if build animation
             n_locs, image = render.render(
                 locs, 
                 **kwargs, 
                 info=self.infos[0], 
                 ang=(self.angx, self.angy, self.angz), 
-                pixelsize=pixelsize,
             )
         else: # if not build animation
             n_locs, image = render.render(
@@ -1137,7 +1132,6 @@ class ViewRotation(QtWidgets.QLabel):
                 **kwargs, 
                 info=self.infos[0], 
                 ang=ang, 
-                pixelsize=pixelsize,
             )
         self.n_locs = n_locs
         self.image = image
