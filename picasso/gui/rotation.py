@@ -365,7 +365,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
                     " rotate the object using a different blur method and "
                     " then to apply individual localization precision."
                 )
-                QtWidgets.QMessageBox.information(self, "Warning", warning)
+                # QtWidgets.QMessageBox.information(self, "Warning", warning)
         # update scene
         self.window.view_rot.update_scene()
 
@@ -711,6 +711,8 @@ class ViewRotation(QtWidgets.QLabel):
         current rotation angle around y axis
     angz : float
         current rotation angle around z axis
+    display_angles : boolean
+        True if current rotation angles are to be displayed
     display_legend : boolean
         True if legend is to be displayed
     display_rotation : boolean
@@ -748,6 +750,8 @@ class ViewRotation(QtWidgets.QLabel):
 
     Methods
     -------
+    add_angles_view()
+        Shows/Hides current rotation in angles.
     add_legend()
         Shows/Hides legend
     add_rotation_view()
@@ -766,6 +770,8 @@ class ViewRotation(QtWidgets.QLabel):
         Draws points and lines and distances between them onto image
     draw_rotation(image)
         Draws a small 3 axes icon that rotates with locs
+    draw_rotation_angles(image)
+        Draws text displaying current rotation angles in degrees 
     draw_scalebar(image)
         Draws a scalebar
     draw_scene(viewport)
@@ -853,6 +859,7 @@ class ViewRotation(QtWidgets.QLabel):
         self._pan = False
         self.display_legend = False
         self.display_rotation = True
+        self.display_angles = False
         self.setMaximumSize(500, 500)
 
     def load_locs(self, update_window=False):
@@ -1201,12 +1208,14 @@ class ViewRotation(QtWidgets.QLabel):
             self.height(),
             QtCore.Qt.KeepAspectRatioByExpanding,
         )
-        # draw scalebar, legend and rotation and measuring points
+        # draw scalebar, legend, rotation and measuring points
         self.qimage = self.draw_scalebar(self.qimage)
         if self.display_legend:
             self.qimage = self.draw_legend(self.qimage)
         if self.display_rotation:
             self.qimage = self.draw_rotation(self.qimage)
+        if self.display_angles:
+            self.qimage = self.draw_rotation_angles(self.qimage)
         self.qimage = self.draw_points(self.qimage)
 
         # convert to pixmap
@@ -1388,6 +1397,30 @@ class ViewRotation(QtWidgets.QLabel):
         painter.drawLine(line_z)
         return image
 
+    def draw_rotation_angles(self, image):
+        """ 
+        Draws text displaying current rotation angles in degrees. 
+        """
+        
+        image = image.copy()
+        [angx, angy, angz] = [
+            int(np.round(_ * 180 / np.pi, 0)) 
+            for _ in [self.angx, self.angy, self.angz]
+        ]
+        text = f"{angx} {angy} {angz}"
+        x = self.width() - len(text) * 7.5 - 10
+        y = self.height() - 20      
+        painter = QtGui.QPainter(image)
+        font = painter.font()
+        font.setPixelSize(12)
+        painter.setFont(font)
+        painter.setPen(QtGui.QColor("white"))
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("black"))
+        painter.drawText(QtCore.QPoint(x, y), text)
+        return image
+
+
     def draw_points(self, image):
         """
         Draws points and lines and distances between them onto image.
@@ -1467,6 +1500,15 @@ class ViewRotation(QtWidgets.QLabel):
             self.display_rotation = False
         else:
             self.display_rotation = True
+        self.update_scene()
+
+    def add_angles_view(self):
+        """ Shows/Hides current rotation in angles. """
+
+        if self.display_angles:
+            self.display_angles = False
+        else:
+            self.display_angles = True
         self.update_scene()
 
     def rotation_input(self): 
@@ -2160,6 +2202,10 @@ class RotationWindow(QtWidgets.QMainWindow):
         rotation_view_action = view_menu.addAction("Show/hide rotation")
         rotation_view_action.setShortcut("Ctrl+P")
         rotation_view_action.triggered.connect(self.view_rot.add_rotation_view)
+        angles_display_action = view_menu.addAction(
+            "Show/hide rotation angles"
+        )
+        angles_display_action.triggered.connect(self.view_rot.add_angles_view)
         
         view_menu.addSeparator()
         rotation_action = view_menu.addAction("Rotate by angle")

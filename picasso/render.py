@@ -403,23 +403,28 @@ def _fill_gaussian_rot(
             [1.0, 0.0, 0.0],
             [0.0, _np.cos(angx), _np.sin(angx)],
             [0.0, -_np.sin(angx), _np.cos(angx)],
-        ]
+        ], dtype=_np.float32
     ) # rotation matrix around x axis
     rot_mat_y = _np.array(
         [
             [_np.cos(angy), 0.0, _np.sin(angy)],
             [0.0, 1.0, 0.0],
             [-_np.sin(angy), 0.0, _np.cos(angy)],
-        ]
+        ], dtype=_np.float32
     ) # rotation matrix around y axis
     rot_mat_z = _np.array(
         [
             [_np.cos(angz), -_np.sin(angz), 0.0],
             [_np.sin(angz), _np.cos(angz), 0.0],
             [0.0, 0.0, 1.0],
-        ]
+        ], dtype=_np.float32
     ) # rotation matrix around z axis
-    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z # rotation matrix...
+    # rot_matrix = _np.matmul(
+    #     _np.matmul(
+    #         rot_mat_x, rot_mat_y, dtype=_np.float32
+    #     ), rot_mat_z, dtype=_np.float32
+    # )
+    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z # rotation matrix
     rot_matrixT = _np.transpose(rot_matrix) # ...and its transpose
 
     # draw each localization separately
@@ -440,7 +445,7 @@ def _fill_gaussian_rot(
         j_max = int(x_ + max_x + 1)
         if j_max > n_pixel_x:
             j_max = n_pixel_x
-        max_z = (_DRAW_MAX_SIGMA * 2.5) * sz_ # loc precision is lower in z
+        max_z = (_DRAW_MAX_SIGMA * 3) * sz_ # loc precision is lower in z
         k_min = int(z_ - max_z)
         k_max = int(z_ + max_z + 1)
 
@@ -450,7 +455,7 @@ def _fill_gaussian_rot(
                 [sx_**2, 0, 0], 
                 [0, sy_**2, 0], 
                 [0, 0, sz_**2],
-            ]
+            ], dtype=_np.float32
         ) # covariance matrix (CM)
         cov_rot = rot_matrixT @ cov_matrix @ rot_matrix # rotated CM
         cri = inverse_3x3(cov_rot) # inverse of rotated CM
@@ -460,11 +465,11 @@ def _fill_gaussian_rot(
         # PDF of a rotated gaussian in 3D is calculated and 
         # image is summed over z axis
         for i in range(i_min, i_max):
-            b = i + 0.5 - y_
+            b = _np.float32(i + 0.5 - y_)
             for j in range(j_min, j_max):
-                a = j + 0.5 - x_
+                a = _np.float32(j + 0.5 - x_)
                 for k in range(k_min, k_max):   
-                    c = k + 0.5 - z_
+                    c = _np.float32(k + 0.5 - z_)
                     exponent = (
                         a*a * cri[0,0] + a*b * cri[0,1] + a*c * cri[0,2] 
                         + a*b * cri[1,0] + b*b * cri[1,1] + b*c * cri[1,2]
@@ -493,7 +498,7 @@ def inverse_3x3(a):
         Inverse of a
     """
 
-    c = _np.zeros((3,3))
+    c = _np.zeros((3,3), dtype=_np.float32)
     det = determinant_3x3(a)
 
     c[0,0] = (a[1,1] * a[2,2] - a[1,2] * a[2,1]) / det
@@ -528,7 +533,7 @@ def determinant_3x3(a):
         Determinant of a
     """
 
-    return (
+    return _np.float32(
         a[0,0] * (a[1,1] * a[2,2] - a[1,2] * a[2,1]) 
         - a[0,1] * (a[1,0] * a[2,2] - a[2,0] * a[1,2]) 
         + a[0,2] * (a[1,0] * a[2,1] - a[2,0] * a[1,1])
@@ -698,7 +703,7 @@ def render_gaussian(
         )
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
-        # for now, let lpz be twice the mean of lpx and lpy:
+        # for now, let lpz be twice the mean of lpx and lpy (todo):
         lpz = 2 * _np.mean(_np.stack((locs.lpx, locs.lpy)), axis=0)
         blur_depth = oversampling * _np.maximum(lpz, min_blur_width)
 

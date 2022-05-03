@@ -6771,7 +6771,6 @@ class View(QtWidgets.QLabel):
             return self.render_multi_channel(
                 kwargs, locs=locs, use_cache=use_cache
             )
-
         # if slicing, show only the current slice
         if hasattr(locs, "z"):
             if self.window.slicer_dialog.slicer_radio_button.isChecked():
@@ -9348,7 +9347,7 @@ class Window(QtWidgets.QMainWindow):
         """ Displayed locs will have no group information. """
 
         channel = self.view.get_channel("Remove group")
-        if channel:
+        if channel is not None:
             self.view.locs[channel] = lib.remove_from_rec(
                 self.view.locs[channel], "group"
             )
