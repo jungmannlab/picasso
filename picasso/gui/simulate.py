@@ -21,10 +21,8 @@ import yaml
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
-from matplotlib.backends.backend_qt4agg import (
-    FigureCanvasQTAgg as FigureCanvas,
-)
-from matplotlib.backends.backend_qt4agg import (
+from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.backends.backend_qt5agg import (
     NavigationToolbar2QT as NavigationToolbar,
 )
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -751,8 +749,8 @@ class Window(QtWidgets.QMainWindow):
         if path:
             with open(path, "r") as f:
                 z_calibration = yaml.full_load(f)
-                self.cx = _np.array(z_calibration["X Coefficients"])
-                self.cy = _np.array(z_calibration["Y Coefficients"])
+                self.cx = [_ for _ in z_calibration["X Coefficients"]]
+                self.cy = [_ for _ in z_calibration["Y Coefficients"]]
                 self.statusBar().showMessage("Caliration loaded from: " + path)
 
     def changeTime(self):

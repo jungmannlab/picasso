@@ -32,6 +32,7 @@ from . import imageprocess as _imageprocess
 from threading import Thread as _Thread
 import time as _time
 from tqdm import tqdm as _tqdm
+from tqdm import trange as _trange
 from numpy.lib.recfunctions import stack_arrays
 
 
@@ -84,9 +85,9 @@ def n_block_locs_at(x, y, size, K, L, block_starts, block_ends):
 
 
 def get_block_locs_at(x, y, index_blocks):
-    locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
-    x_index = _np.uint32(x / size)  # is this really necessary?
-    y_index = _np.uint32(y / size)  # is this really necessary?
+    locs, size, _, _, block_starts, block_ends, K, L = index_blocks
+    x_index = _np.uint32(x / size)
+    y_index = _np.uint32(y / size) 
     indices = []
     for k in range(y_index - 1, y_index + 2):
         if 0 < k < K:
@@ -160,10 +161,15 @@ def pick_similar(
                     y_test_old = y_grid
                     x_test = _np.mean(picked_locs_xy[0])
                     y_test = _np.mean(picked_locs_xy[1])
+                    count = 0
                     while (
                         _np.abs(x_test - x_test_old) > 1e-3
                         or _np.abs(y_test - y_test_old) > 1e-3
                     ):
+                        count += 1
+                        # skip the locs if the loop is too long
+                        if count > 500:
+                            break
                         x_test_old = x_test
                         y_test_old = y_test
                         picked_locs_xy = _locs_at(
@@ -1378,7 +1384,7 @@ def link_loc_groups(locs, info, link_group, remove_ambiguous_lengths=True):
 
 def localization_precision(photons, s, bg, em):
     """
-    Calculates the theoretical localization preicision
+    Calculates the theoretical localization precision
     according to Mortensen et al., Nat Meth, 2010
     """
     s2 = s ** 2
@@ -1389,6 +1395,27 @@ def localization_precision(photons, s, bg, em):
     with _np.errstate(invalid="ignore"):
         return _np.sqrt(v)
 
+def n_segments(info, segmentation):
+    n_frames = info[0]["Frames"]
+    return int(_np.round(n_frames / segmentation))
+
+def segment(locs, info, segmentation, kwargs={}, callback=None):
+    Y = info[0]["Height"]
+    X = info[0]["Width"]
+    n_frames = info[0]["Frames"]
+    n_seg = n_segments(info, segmentation)
+    bounds = _np.linspace(0, n_frames - 1, n_seg + 1, dtype=_np.uint32)
+    segments = _np.zeros((n_seg, Y, X))
+    if callback is not None:
+        callback(0)
+    for i in _trange(n_seg, desc="Generating segments", unit="segments"):
+        segment_locs = locs[
+            (locs.frame >= bounds[i]) & (locs.frame < bounds[i + 1])
+        ]
+        _, segments[i] = _render.render(segment_locs, info, **kwargs)
+        if callback is not None:
+            callback(i + 1)
+    return bounds, segments
 
 def undrift(
     locs,
@@ -1398,7 +1425,7 @@ def undrift(
     segmentation_callback=None,
     rcc_callback=None,
 ):
-    bounds, segments = _render.segment(
+    bounds, segments = segment(
         locs,
         info,
         segmentation,

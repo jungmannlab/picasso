@@ -8,7 +8,7 @@ with open("readme.rst", encoding='utf-8') as readme_file:
 
 setup(
     name="picassosr",
-    version="0.3.9",
+    version="0.4.1",
     author="Joerg Schnitzbauer, Maximilian T. Strauss",
     author_email=(
         "joschnitzbauer@gmail.com, straussmaximilian@gmail.com"
@@ -16,7 +16,7 @@ setup(
     url="https://github.com/jungmannlab/picasso",
     long_description = long_description,
     long_description_content_type='text/x-rst',
-    packages=["picasso", "picasso.gui"],
+    packages=["picasso", "picasso.gui", "picasso.server"],
     entry_points={
         "console_scripts": ["picasso=picasso.__main__:main"],
     },
@@ -30,6 +30,7 @@ setup(
     package_data={
         "picasso": [
             "gui/icons/*.ico",
+            "gui/icons/*.png",
             "config_template.yaml",
         ]
     },

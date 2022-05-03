@@ -30,23 +30,85 @@ from .. import io, render
 from icecream import ic
 
 DEFAULT_OVERSAMPLING = 1.0
-ZOOM = 9 / 7
+INITIAL_REL_MAXIMUM = 0.5
 N_GROUP_COLORS = 8
 SHIFT = 0.1
-
+ZOOM = 9 / 7
 
 def atoi(text):
+    """ 
+    Converts string to digit if it represents an integer.
+
+    Parameters
+    ----------
+    text : str
+        String to be converted
+
+    Returns
+    -------
+    int or str
+        int if text represents a digit, text otherwise
+    """
+
     return int(text) if text.isdigit() else text
 
 def natural_keys(text):
+    """
+    Splits text into three parts:
+        * str ending with "/frame_"
+        * int with frame index
+        * ".png"
+    Using this key, frames' paths can be sorted by their index
+    
+    Parameters
+    ----------
+    text : str
+        String to be split and converted
+
+    Returns
+    -------
+    list
+        Text split into several parts, where strings representing
+        digits are converted to int
+    """
+
     return [ atoi(c) for c in re.split('([0-9]+)', text) ]
 
 def get_colors(n_channels):
+    """ 
+    Creates a list with rgb channels for each locs channel.
+    Colors go from red to green, blue, pink and red again.
+
+    Parameters
+    ----------
+    n_channels : int
+        Number of locs channels
+
+    Returns
+    -------
+    list
+        Contains tuples with rgb channels
+    """
+
     hues = np.arange(0, 1, 1 / n_channels)
     colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
     return colors
 
 def is_hexadecimal(text):
+    """ 
+    Checks if text represents a hexadecimal code for rgb, e.g. #ff02d4.
+    
+    Parameters
+    ----------
+    text : str
+        String to be checked
+
+    Returns
+    -------
+    boolean
+        True if text represents rgb, False otherwise
+    """
+
     allowed_characters = [
         '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
         'a', 'b', 'c', 'd', 'e', 'f',
@@ -64,6 +126,60 @@ def is_hexadecimal(text):
     return False
 
 class DisplaySettingsRotationDialog(QtWidgets.QDialog):
+    """
+    A class to change display settings, e.g., oversampling, contrast,
+    and blur.
+
+    Very similar to its counterpart in gui/render.py but some functions
+    were deleted.
+
+    ...
+
+    Attributes
+    ----------
+    blur_buttongroup : QButtonGroup
+        contains available localization blur methods
+    colormap : QComboBox
+        contains strings with available colormaps (single channel only)
+    dynamic_oversampling : QCheckBox
+        tick to automatically adjust to current window size when zooming.
+    maximum : QDoubleSpinBox
+        defines at which number of localizations per super-resolution
+        pixel the maximum color of the colormap should be applied
+    min_blur_width : QDoubleSpinBox
+        contains the minimum blur for each localization (pixels)
+    minimum : QDoubleSpinBox
+        defines at which number of localizations per super-resolution
+        pixel the minimum color of the colormap should be applied
+    oversampling : QDoubleSpinBox
+        contains the number of super-resolution pixels per camera pixel
+    scalebar : QDoubleSpinBox
+        contains the scale bar's length (nm)
+    scalebar_groupbox : QGroupBox
+        group with options for customizing scale bar, tick to display
+    scalebar_text : QCheckBox
+        tick to display scale bar's length (nm)
+    _silent_oversampling_update : boolean
+        True if update oversampling in background
+
+    Methods
+    -------
+    on_oversampling_changed(value)
+        Sets new oversampling, updates contrast and updates scene in
+        the main window
+    render_scene(*args, **kwargs)
+        Updates scene in the rotation window and gives warning if 
+        needed
+    set_dynamic_oversampling(state)
+        Updates scene if dynamic oversampling is checked
+    set_oversampling_silently(oversampling)
+        Changes the value of oversampling in the background
+    silent_maximum_update(value)
+        Changes the value of self.maximum in the background
+    silent_minimum_update(value)
+        Changes the value of self.minimum in the background 
+    """
+
     def __init__(self, window):
         super().__init__(window)
         self.first_update = True
@@ -72,7 +188,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.resize(200, 0)
         self.setModal(False)
         vbox = QtWidgets.QVBoxLayout(self)
-        # General
+        # general
         general_groupbox = QtWidgets.QGroupBox("General")
         vbox.addWidget(general_groupbox)
         general_grid = QtWidgets.QGridLayout(general_groupbox)
@@ -92,7 +208,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         )
         general_grid.addWidget(self.dynamic_oversampling, 2, 1)
 
-        # Contrast
+        # contrast
         contrast_groupbox = QtWidgets.QGroupBox("Contrast")
         vbox.addWidget(contrast_groupbox)
         contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
@@ -104,7 +220,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.minimum.setValue(0)
         self.minimum.setDecimals(6)
         self.minimum.setKeyboardTracking(False)
-        self.minimum.valueChanged.connect(self.update_scene)
+        self.minimum.valueChanged.connect(self.render_scene)
         contrast_grid.addWidget(self.minimum, 0, 1)
         maximum_label = QtWidgets.QLabel("Max. Density:")
         contrast_grid.addWidget(maximum_label, 1, 0)
@@ -114,14 +230,15 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.maximum.setValue(100)
         self.maximum.setDecimals(6)
         self.maximum.setKeyboardTracking(False)
-        self.maximum.valueChanged.connect(self.update_scene)
+        self.maximum.valueChanged.connect(self.render_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
         contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
         self.colormap = QtWidgets.QComboBox()
         self.colormap.addItems(plt.colormaps())
         contrast_grid.addWidget(self.colormap, 2, 1)
-        self.colormap.currentIndexChanged.connect(self.update_scene)
-        # Blur
+        self.colormap.currentIndexChanged.connect(self.render_scene)
+        
+        # blur
         blur_groupbox = QtWidgets.QGroupBox("Blur")
         blur_grid = QtWidgets.QGridLayout(blur_groupbox)
         self.blur_buttongroup = QtWidgets.QButtonGroup()
@@ -170,30 +287,38 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
             gaussian_iso_button: "gaussian_iso",
         }
 
-        #Camera
+        # camera
         self.pixelsize = QtWidgets.QDoubleSpinBox()
         self.pixelsize.setValue(130)
         
-        #Scalebar
+        # scalebar
         self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
-        self.scalebar_groupbox.toggled.connect(self.update_scene)
+        self.scalebar_groupbox.toggled.connect(self.render_scene)
         vbox.addWidget(self.scalebar_groupbox)
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
-        scalebar_grid.addWidget(QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0)
+        scalebar_grid.addWidget(
+            QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
+        )
         self.scalebar = QtWidgets.QDoubleSpinBox()
         self.scalebar.setRange(0.0001, 10000000000)
         self.scalebar.setValue(500)
         self.scalebar.setKeyboardTracking(False)
-        self.scalebar.valueChanged.connect(self.update_scene)
+        self.scalebar.valueChanged.connect(self.render_scene)
         scalebar_grid.addWidget(self.scalebar, 0, 1)
         self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
-        self.scalebar_text.stateChanged.connect(self.update_scene)
+        self.scalebar_text.stateChanged.connect(self.render_scene)
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
+
         self._silent_oversampling_update = False
 
     def on_oversampling_changed(self, value):
+        """
+        Sets new oversampling, updates contrast and updates scene in
+        the main window.
+        """
+
         contrast_factor = (self._oversampling / value) ** 2
         self._oversampling = value
         self.silent_minimum_update(contrast_factor * self.minimum.value())
@@ -203,26 +328,32 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
             self.window.view_rot.update_scene()
 
     def set_oversampling_silently(self, oversampling):
+        """ Changes the value of oversampling in the background. """
+
         self._silent_oversampling_update = True
         self.oversampling.setValue(oversampling)
         self._silent_oversampling_update = False
 
-    def set_zoom_silently(self, zoom):
-        self.zoom.blockSignals(True)
-        self.zoom.setValue(zoom)
-        self.zoom.blockSignals(False)
-
     def silent_minimum_update(self, value):
+        """ Changes the value of self.minimum in the background. """
+
         self.minimum.blockSignals(True)
         self.minimum.setValue(value)
         self.minimum.blockSignals(False)
 
     def silent_maximum_update(self, value):
+        """ Changes the value of self.maximum in the background. """
+
         self.maximum.blockSignals(True)
         self.maximum.setValue(value)
         self.maximum.blockSignals(False)
 
     def render_scene(self, *args, **kwargs):
+        """
+        Updates scene in the rotation window and gives warning if 
+        needed.
+        """
+
         # check if ind loc prec button is checked
         if (self.blur_buttongroup.checkedId() == -5 
             or self.blur_buttongroup.checkedId() == -6):
@@ -235,18 +366,70 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
                     " then to apply individual localization precision."
                 )
                 QtWidgets.QMessageBox.information(self, "Warning", warning)
-        
+        # update scene
         self.window.view_rot.update_scene()
 
     def set_dynamic_oversampling(self, state):
+        """ Updates scene if dynamic oversampling is checked. """
+
         if state:
             self.window.view_rot.update_scene()
 
-    def update_scene(self, *args, **kwargs):
-        self.window.view_rot.update_scene()
-
-
 class AnimationDialog(QtWidgets.QDialog):
+    """
+    A class with a dialog to prepare 3D animations.
+
+    ...
+
+    Attributes
+    ----------
+    add : QPushButton
+        click to add the current view to the animation sequence
+    build : QPushButton
+        click to create an animation
+    count : int
+        counts how many positions are currently saved
+    current_pos : QLabel
+        shows rotation angles around x, y and z axes in degrees
+    delete : QPushButton
+        click to delete the last saved position
+    durations : list
+        contains QDoubleSpinBoxes with durations (seconds) of each
+        step in the animation sequence
+    fps : QSpinBox
+        contains frames per second used in the animation
+    layout : QGridLayout
+        widget storing positions of other widgets in the Dialog
+    positions : list
+        contains all positions in the animation sequence; each includes
+        3 rotations angles and viewport
+    positions_labels : list
+        displays rotation angles for each saved position in the 
+        animation sequence
+    show_positions : boolean
+        contains buttons to display a given position that has been
+        saved in the animation sequence
+    stay : QPushButton
+        click to copy the exact same position (so that locs do not
+        move)
+    rot_speed : QDoublesSpinBox
+        contains the default rotation speed calculated when adding a
+        position with different angles
+    window : QMainWindow
+        instance of the rotation window
+    
+    Methods
+    -------
+    add_position()
+        Adds a new position to the animation sequence
+    build_animation()
+        Creates an animation as an.mp4 file
+    delete_position()
+        Deletes the last position from the animation sequence
+    retrieve_position(i)
+        Moves the view to the i'th position
+    """
+
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -258,9 +441,7 @@ class AnimationDialog(QtWidgets.QDialog):
         self.positions_labels = []
         self.durations = []
         self.show_positions = []
-        self.delete = []
         self.count = 0
-        self.frames_ready = False
         self.layout.addWidget(QtWidgets.QLabel("Current position: "), 0, 0)
         angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
         angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
@@ -329,17 +510,31 @@ class AnimationDialog(QtWidgets.QDialog):
         self.layout.addWidget(self.stay, 12, 3)
     
     def add_position(self, freeze=False):
+        """
+        Adds a new position to the animation sequence.
+
+        Parameters
+        ----------
+        freeze : boolean
+            True when the new position is the same as the last one
+            (i.e. when self.stay is clicked)
+        """
+
+        # more than 10 positions are not allowed
         if self.count == 10:
             raise ValueError("More positions are not supported")
+
+        # check that the viewport or angle(s) have changed
         if not freeze:
             if self.count > 0:
                 cond1 = self.window.view_rot.angx == self.positions[-1][0]
                 cond2 = self.window.view_rot.angy == self.positions[-1][1]
                 cond3 = self.window.view_rot.angz == self.positions[-1][2]
                 cond4 = self.window.view_rot.viewport == self.positions[-1][3]
-                if ((cond1 and cond2) and cond3) and cond4:
+                if all([cond1, cond2, cond3, cond4]):
                     return
 
+        # add a new position to the attribute
         self.positions.append([
                 self.window.view_rot.angx,
                 self.window.view_rot.angy,
@@ -347,17 +542,19 @@ class AnimationDialog(QtWidgets.QDialog):
                 self.window.view_rot.viewport,
             ])
 
+        # display the new position
         angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
         angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
         angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
-        self.positions_labels.append(QtWidgets.QLabel("{}, {}, {}".format(
-                angx, angy, angz)))
+        self.positions_labels.append(QtWidgets.QLabel(
+            "{}, {}, {}".format(angx, angy, angz)
+        ))
         self.layout.addWidget(self.positions_labels[-1], self.count + 1, 1)
 
         # calculate recommended duration
-        if self.count > 0:
+        if self.count > 0: # only if it's at least the second position
             if not freeze:
-                if not ((cond1 and cond2) and cond3):
+                if not all([cond1, cond2, cond3]):
                     dx = self.positions[-1][0] - self.positions[-2][0]
                     dy = self.positions[-1][1] - self.positions[-2][1]
                     dz = self.positions[-1][2] - self.positions[-2][2]
@@ -369,6 +566,8 @@ class AnimationDialog(QtWidgets.QDialog):
         self.count += 1
 
     def delete_position(self):
+        """ Deletes the last position from the animation sequence. """
+
         if self.count > 0:
             del self.positions[-1]
             self.layout.removeWidget(self.positions_labels[-1])
@@ -376,6 +575,15 @@ class AnimationDialog(QtWidgets.QDialog):
             self.count -= 1
 
     def retrieve_position(self, i):
+        """
+        Moves the view to the specified position.
+
+        Parameters
+        ----------
+        i : idx
+            Index of the position to be displayed
+        """
+
         if i <= len(self.positions) - 1:
             self.window.view_rot.angx = self.positions[i][0]
             self.window.view_rot.angy = self.positions[i][1]
@@ -383,11 +591,17 @@ class AnimationDialog(QtWidgets.QDialog):
             self.window.view_rot.update_scene(viewport=self.positions[i][3])
 
     def build_animation(self):
-        # get the coordinates for animation
+        """
+        Creates an animation as an .mp4 file using the positions from
+        the animation sequence.
+        """
+
+        # find the number of frames between each position
         n_frames = [0]
         for i in range(len(self.positions) - 1):
             n_frames.append(int(self.fps.value() * self.durations[i].value()))
 
+        # find rotation angles and viewport for each frame
         angx = np.zeros(np.sum(n_frames))
         angy = np.zeros(np.sum(n_frames))
         angz = np.zeros(np.sum(n_frames))
@@ -400,7 +614,7 @@ class AnimationDialog(QtWidgets.QDialog):
             idx_low = np.sum(n_frames[:i+1])
             idx_high = np.sum(n_frames[:i+2])
 
-            #angles:
+            # angles
             x1 = self.positions[i][0]
             x2 = self.positions[i+1][0]
             y1 = self.positions[i][1]
@@ -411,7 +625,7 @@ class AnimationDialog(QtWidgets.QDialog):
             angy[idx_low:idx_high] = np.linspace(y1, y2, n_frames[i+1])
             angz[idx_low:idx_high] = np.linspace(z1, z2, n_frames[i+1])
 
-            #viewport:
+            # viewport
             vp1 = self.positions[i][3]
             vp2 = self.positions[i+1][3]
             ymin[idx_low:idx_high] = np.linspace(
@@ -427,34 +641,33 @@ class AnimationDialog(QtWidgets.QDialog):
                 vp1[1][1], vp2[1][1], n_frames[i+1]
             )
 
+        # get save file name
         out_path = self.window.view_rot.paths[0] + "_video.mp4"
         name, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save animation", out_path, filter="*.mp4"
         )
         if name:
-            # save the images
+            # create temporary folder to store all frames
             base, ext = os.path.splitext(self.window.view_rot.paths[0])
             idx = [i for i, char in enumerate(base) if char == '/'][-1]
             path = base[:idx] + "/animation_frames"
             try:
                 os.mkdir(path)
             except:
+                # if folder exists, ask if it should be used or deleted
                 m = QtWidgets.QMessageBox()
                 m.setWindowTitle("Frames already exist")
                 ret = m.question(
                     self,
                     "",
-                    "Delete the existing frames folder?",
+                    "Use the existing frames folder?",
                     m.Yes | m.No,
                 )
-                if ret == m.Yes:
+                if ret == m.No:
+                    # use new frames (render each one) and save
                     for file in os.listdir(path):
                         os.remove(os.path.join(path, file))
-                elif ret == m.No:
-                    self.frames_ready = True
-
-            if not self.frames_ready:
-                for i in range(len(angx)):
+                    for i in range(len(angx)):
                         qimage = self.window.view_rot.render_scene(
                             viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
                             ang=(angx[i], angy[i], angz[i]),
@@ -462,25 +675,168 @@ class AnimationDialog(QtWidgets.QDialog):
                         )
                         qimage = qimage.scaled(500, 500)
                         qimage.save(path + "/frame_{}.png".format(i+1))
-
-            # build a video
+                elif ret == m.Yes:
+                    # use old frames
+                    pass
+                
+            # build a video and save it
             image_files = [
-                os.path.join(path,img)
+                os.path.join(path, img)
                 for img in os.listdir(path)
                 if img.endswith(".png")
-            ]
-            image_files.sort(key=natural_keys)
-
+            ] # paths to each frame
+            image_files.sort(key=natural_keys) # sort frames
             video = ImageSequenceClip(image_files, fps=self.fps.value())
             video.write_videofile(name)
 
-            # delete animaiton frames
+            # delete animation frames
             for file in os.listdir(path):
                 os.remove(os.path.join(path, file))
             os.rmdir(path)
             
 
 class ViewRotation(QtWidgets.QLabel):
+    """
+    A class to displayed rotated super-resolution datasets.
+
+    Most functions were taken from picass/gui/render.py's View class.
+
+    ...
+
+    Attributes
+    ----------
+    angx : float
+        current rotation angle around x axis
+    angy : float
+        current rotation angle around y axis
+    angz : float
+        current rotation angle around z axis
+    display_legend : boolean
+        True if legend is to be displayed
+    display_rotation : boolean
+        True if reference axes is to be displayed
+    group_color : np.array
+        important for single channel data with group info (picked or
+        clustered locs); contains an integer index for each loc 
+        defining its color
+    infos : list
+        contains a dictionary with metadata for each channel
+    locs : list
+        contains a np.recarray with localizations for each channel
+    _mode : str
+        defines current mode (zoom, pick or measure); important for 
+        mouseEvents
+    _pan : boolean
+        indicates if image is currently panned
+    pan_start_x : float
+        x coordinate of panning's starting position
+    pan_start_y : float
+        y coordinate of panning's starting position
+    pixmap : QPixmap
+        Pixmap currently displayed
+    _points : list
+        contains the coordinates of points to measure distances
+        between them
+    qimage : QImage
+        current image of rendered locs, picks and other drawings
+    _rotation : list
+        contains mouse's positions on the screen while rotating
+    viewport : tuple
+        defines current field of view
+    window : QMainWindow
+        instance of the rotation window
+
+    Methods
+    -------
+    add_legend()
+        Shows/Hides legend
+    add_rotation_view()
+        Shows/Hides rotation axes icon
+    add_point()
+        Adds a point at a given position for measuring distances
+    adjust_viewport_view(viewport)
+        Adds space to viewport to match self.window's aspect ratio
+    delete_rotation()
+        Resets rotation angles
+    display_pixels_per_viewport_pixels()
+        Returns optimal oversampling
+    draw_legend(image)
+        Draws a legend for multichannel data
+    draw_points(image)
+        Draws points and lines and distances between them onto image
+    draw_rotation(image)
+        Draws a small 3 axes icon that rotates with locs
+    draw_scalebar(image)
+        Draws a scalebar
+    draw_scene(viewport)
+        Renders localizations in the given viewport and draws legend,
+        rotation, etc
+    export_current_view()
+        Exports current view as .png or .tif
+    fit_in_view_rotated()
+        Updates viewport to reflect the pick from main window
+    get_render_kwargs()
+        Returns a dictionary to be used for the keyword arguments of 
+        render.render
+    load_locs()
+        Loads localizations from a pick in the main window
+    map_to_movie()
+        Converts coordinates from display units to camera units
+    map_to_view()
+        Converts coordinates from camera units to display units
+    mouseMoveEvent(event)
+        Defines actions taken when moving mouse
+    mousePressEvent(event)
+        Defines actions taken when pressing mouse buttons
+    mouseReleaseEvent(event)
+        Defines actions taken when releasing mouse buttons
+    pan_relative(dy, dx)
+        Moves viewport by a given relative distance
+    remove_points(position)
+        Removes all distance measurement pointss
+    render_multi_channel()
+        Renders and paints multichannel localizations
+    render_scene()
+        Returns QImage with rendered localizations
+    render_single_channel()
+        Renders single channel localizations
+    rotation_input()
+        Asks user to input 3 rotation angles numerically
+    scale_contrast(image)
+        Scales image based on contrast values from Display Settings
+        Dialog
+    set_mode(action)
+        Sets self._mode for QMouseEvents
+    shift_viewport(dx, dy)
+        Moves viewport by dx and dy
+    to_down_rot()
+        Called on pressing down arrow; shifts pick in the main window
+    to_left_rot()
+        Called on pressing left arrow; shifts pick in the main window
+    to_right_rot()
+        Called on pressing right arrow; shifts pick in the main window
+    to_up_rot()
+        Called on pressing up arrow; shifts pick in the main window
+    to_8bit(image)
+        Converts image to 8 bit ready to convert to QImage
+    update_scene()
+        Updates the view of rendered locs
+    viewport_center()
+        Finds viewport's center (pixels)
+    viewport_height()
+        Finds viewport's height (pixels)
+    viewport_size()
+        Finds viewport's height and width (pixels)
+    viewport_width()
+        Finds viewport's width (pixels)
+    zoom(factor)
+        Changes zoom by factor by changing viewport
+    zoom_in()
+        Zooms in by a constant factor
+    zoom_out()
+        Zooms out by a constant factor
+    """
+
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -493,16 +849,28 @@ class ViewRotation(QtWidgets.QLabel):
         self.group_color = []
         self._mode = "Rotate"
         self._rotation = []
-        self._centers = []
         self._points = []
-        self._centers_color = ""
         self._pan = False
         self.display_legend = False
         self.display_rotation = True
         self.setMaximumSize(500, 500)
 
     def load_locs(self, update_window=False):
+        """
+        Loads localizations from a pick in the main window.
+
+        Called when updating rotation window from there or when 
+        shifting the pick from rotation window.
+
+        Parameters
+        ----------
+        update_window : boolean (default=False)
+            If True, load attributes, such as blur method, from the 
+            main window
+        """
+
         if update_window:
+            # update blur and colormap
             blur = (
                 self.window.window.display_settings_dlg.blur_buttongroup. \
                     checkedId()
@@ -524,9 +892,14 @@ class ViewRotation(QtWidgets.QLabel):
             else:
                 self.pick_size = self.window.window. \
                     tools_settings_dialog.pick_width.value()
+
+            # update view, dataset_dialog for multichannel data and 
+            # paths
             self.viewport = self.fit_in_view_rotated(get_viewport=True)
             self.window.dataset_dialog = self.window.window.dataset_dialog
             self.paths = self.window.window.view.locs_paths
+
+        # load locs in the pick and their metadata
         n_channels = len(self.paths)
         self.locs = []
         self.infos = []
@@ -535,33 +908,101 @@ class ViewRotation(QtWidgets.QLabel):
             self.locs.append(temp[0])
             self.infos.append(self.window.window.view.infos[i])
 
+        # assign self.group_color if single channel and group info
+        # present
         if len(self.locs) == 1 and hasattr(self.locs[0], "group"):
             self.group_color = self.window.window.view.get_group_color(
                 self.locs[0]
             )
 
-    def render_scene(self, viewport=None, ang=None, animation=False):
-        kwargs = self.get_render_kwargs(viewport=viewport, animation=animation)
+    def render_scene(
+        self, 
+        viewport=None, 
+        ang=None, 
+        animation=False,
+        autoscale=False,
+    ):
+        """
+        Returns QImage with rendered localizations.
+
+        Parameters
+        ----------
+        viewport : tuple (default=None)
+            Viewport to be rendered. If None, takes current viewport
+        ang : tuple (default=None)
+            Rotation angles to be rendered. If None, takes the current
+            angles
+        animation : boolean (default=False)
+            If True, scenes are rendered for building an animation
+        autoscale : boolean
+            If True, optimally adjust contrast
+
+        Returns
+        -------
+        QImage
+            Shows rendered locs; 8 bit, scaled
+        """
+
+        # get oversampling, blur method, etc
+        kwargs = self.get_render_kwargs(
+            viewport=viewport, animation=animation
+        )
+        # render single or multi channel data
         n_channels = len(self.locs)
         if n_channels == 1:
-            self.render_single_channel(kwargs, ang=ang)
+            self.render_single_channel(kwargs, ang=ang, autoscale=autoscale)
         else:
-            self.render_multi_channel(kwargs, ang=ang)
+            self.render_multi_channel(kwargs, ang=ang, autoscale=autoscale)
+        # add alpha channel (no transparency)
         self._bgra[:, :, 3].fill(255)
+        # build QImage
         Y, X = self._bgra.shape[:2]
         qimage = QtGui.QImage(
             self._bgra.data, X, Y, QtGui.QImage.Format_RGB32
         )
         return qimage
 
-    def render_multi_channel(self, kwargs, locs=None, ang=None):
-        # rendering all channels
+    def render_multi_channel(
+        self, 
+        kwargs, 
+        locs=None, 
+        ang=None, 
+        autoscale=False,
+    ):
+        """
+        Renders and paints multichannel localizations. 
+
+        Also used when other multi-color data is used (clustered or 
+        picked locs)
+
+        Parameters
+        ----------
+        kwargs : dict
+            Contains blur method, etc. See self.get_render_kwargs
+        locs : np.recarray (default=None)
+            Locs to be rendered. If None, self.locs is used
+        ang : tuple (default=None)
+            Rotation angles to be rendered. If None, takes the current
+            angles 
+        autoscale : boolean
+            If True, optimally adjust contrast
+
+        Returns
+        -------
+        np.array
+            8 bit array with 4 channels (rgb and alpha)
+        """
+
+        # get locs to render
         if locs is None:
             locs = self.locs
+
+        # other parameters for rendering
         n_channels = len(locs)
-        colors = get_colors(n_channels)
+        colors = get_colors(n_channels) # automatic colors
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        if ang is None:
+
+        if ang is None: # no build animation
             renderings = [
                 render.render(
                     _, **kwargs, 
@@ -569,7 +1010,7 @@ class ViewRotation(QtWidgets.QLabel):
                     pixelsize=pixelsize,
                 ) for _ in locs
             ]
-        else:
+        else: # build animation
             renderings = [
                 render.render(
                     _, **kwargs, 
@@ -581,17 +1022,28 @@ class ViewRotation(QtWidgets.QLabel):
         image = np.array([_[1] for _ in renderings])
         self.n_locs = n_locs
         self.image = image
-        image = self.scale_contrast(image)
+
+        # adjust contrast
+        image = self.scale_contrast(image, autoscale=autoscale)
+
+        # set up four channel output
         Y, X = image.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
 
-        # coloring
+        # color each channel one by one
         for i in range(len(self.locs)):
+            # change colors if not automatic coloring
             if not self.window.dataset_dialog.auto_colors.isChecked():
-                color = self.window.dataset_dialog.colorselection[i].currentText()
+                # get color from Dataset Dialog
+                color = self.window.dataset_dialog.colorselection[i]
+                color = color.currentText()
+                # if default color
                 if color in self.window.dataset_dialog.default_colors:
-                    index = self.window.dataset_dialog.default_colors.index(color)
+                    index = self.window.dataset_dialog.default_colors.index(
+                        color
+                        )
                     colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
+                # if hexadecimal is given
                 elif is_hexadecimal(color):
                     colorstring = color.lstrip("#")
                     rgbval = tuple(
@@ -608,64 +1060,121 @@ class ViewRotation(QtWidgets.QLabel):
                     )
                     QtWidgets.QMessageBox.information(self, "Warning", warning)
                     break
+
+            # reverse colors if white background
             if self.window.dataset_dialog.wbackground.isChecked():
                 tempcolor = colors[i]
                 inverted = tuple([1 - _ for _ in tempcolor])
                 colors[i] = inverted
+            
+            # adjust for relative intensity from Dataset Dialog
             iscale = self.window.dataset_dialog.intensitysettings[i].value()
             image[i] = iscale * image[i]
+
+            # don't display if channel unchecked in Dataset Dialog
             if not self.window.dataset_dialog.checks[i].isChecked():
                 image[i] = 0 * image[i]
+
+        # color rgb channels and store in bgra
         for color, image in zip(colors, image):
             bgra[:, :, 0] += color[2] * image
             bgra[:, :, 1] += color[1] * image
             bgra[:, :, 2] += color[0] * image
-        bgra = np.minimum(bgra, 1)
+
+        bgra = np.minimum(bgra, 1) # minimum value of each pixel is 1
         if self.window.dataset_dialog.wbackground.isChecked():
             bgra = -(bgra - 1)
-        self._bgra = self.to_8bit(bgra)
+        self._bgra = self.to_8bit(bgra) # convert to 8 bit 
         return self._bgra
 
-    def render_single_channel(self, kwargs, ang=None):
+    def render_single_channel(self, kwargs, ang=None, autoscale=False):
+        """
+        Renders single channel localizations. 
+
+        Calls render_multi_channel in case of clustered or picked locs,
+        rendering by property)
+
+        Parameters
+        ----------
+        kwargs : dict
+            Contains blur method, etc. See self.get_render_kwargs
+        ang : tuple (default=None)
+            Rotation angles to be rendered. If None, takes the current
+            angles 
+        autoscale : boolean (default=False)
+            True if optimally adjust contrast    
+
+        Returns
+        -------
+        np.array
+            8 bit array with 4 channels (rgb and alpha)
+        """
+
+        # get np.recarray
         locs = self.locs[0]
+
+        # if clustered or picked locs
         if hasattr(locs, "group"):
-            locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
+            locs = [
+                locs[self.group_color == _] for _ in range(N_GROUP_COLORS)
+            ]
             return self.render_multi_channel(
-                kwargs, locs=locs, ang=ang
+                kwargs, locs=locs, ang=ang, autoscale=autoscale
             )
+
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        if ang is None:
+        if ang is None: # if build animation
             n_locs, image = render.render(
-                locs, **kwargs, 
+                locs, 
+                **kwargs, 
                 info=self.infos[0], 
                 ang=(self.angx, self.angy, self.angz), 
                 pixelsize=pixelsize,
             )
-        else:
+        else: # if not build animation
             n_locs, image = render.render(
-                locs, **kwargs, 
+                locs, 
+                **kwargs, 
                 info=self.infos[0], 
                 ang=ang, 
-                pixelsize=pixelsize
+                pixelsize=pixelsize,
             )
         self.n_locs = n_locs
         self.image = image
-        image = self.scale_contrast(image)
+
+        # adjust contrast and convert to 8 bits
+        image = self.scale_contrast(image, autoscale=autoscale)
         image = self.to_8bit(image)
-        Y, X = image.shape
+        
+        # paint locs using the colormap of choice (Display Settings
+        # Dialog)
         cmap = self.window.display_settings_dlg.colormap.currentText()
         cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
+        
+        # return a 4 channel (rgb and alpha) array
+        Y, X = image.shape
         self._bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
         return self._bgra
 
-    def update_scene(self, viewport=None):
+    def update_scene(self, viewport=None, autoscale=False):
+        """
+        Updates the view of rendered locs.
+
+        Parameters
+        ----------
+        viewport : tuple (default=None)
+            Viewport to be rendered. If None self.viewport is taken
+        autoscale : boolean (default=False)
+            True if optimally adjust contrast
+        """
+
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
-            self.draw_scene(viewport)
+            self.draw_scene(viewport, autoscale=autoscale)
 
         # update current position in the animation dialog
         angx = np.round(self.angx * 180 / np.pi, 1)
@@ -675,24 +1184,56 @@ class ViewRotation(QtWidgets.QLabel):
             "{}, {}, {}".format(angx, angy, angz)
         )
 
-    def draw_scene(self, viewport):
+    def draw_scene(self, viewport, autoscale=False):
+        """
+        Renders localizations in the given viewport and draws legend,
+        rotation, etc.
+
+        Parameters
+        ----------
+        viewport : tuple
+            Viewport defining the rendered FOV
+        autoscale : boolean (default=False)
+            True if contrast should be optimally adjusted
+        """
+
+        # make sure viewport has the same shape as the main window
         self.viewport = self.adjust_viewport_to_view(viewport)
-        qimage = self.render_scene()
+        # render locs
+        qimage = self.render_scene(autoscale=autoscale)
+        # scale image's size to the window
         self.qimage = qimage.scaled(
             self.width(),
             self.height(),
             QtCore.Qt.KeepAspectRatioByExpanding,
         )
+        # draw scalebar, legend and rotation and measuring points
         self.qimage = self.draw_scalebar(self.qimage)
         if self.display_legend:
             self.qimage = self.draw_legend(self.qimage)
         if self.display_rotation:
             self.qimage = self.draw_rotation(self.qimage)
         self.qimage = self.draw_points(self.qimage)
+
+        # convert to pixmap
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
         self.setPixmap(self.pixmap)
 
     def draw_scalebar(self, image):
+        """
+        Draws a scalebar.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations
+
+        Returns
+        -------
+        QImage
+            Image with the drawn scalebar        
+        """
+
         if self.window.display_settings_dlg.scalebar_groupbox.isChecked():
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
             scalebar = self.window.display_settings_dlg.scalebar.value()
@@ -731,6 +1272,22 @@ class ViewRotation(QtWidgets.QLabel):
         return image
 
     def draw_legend(self, image):
+        """
+        Draws a legend for multichannel data. 
+        Displayed in the top left corner, shows the color and the name 
+        of each channel.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations
+
+        Returns
+        -------
+        QImage
+            Image with the drawn legend
+        """
+
         n_channels = len(self.locs)
         painter = QtGui.QPainter(image)
         width = 15
@@ -767,6 +1324,22 @@ class ViewRotation(QtWidgets.QLabel):
         return image
 
     def draw_rotation(self, image):
+        """
+        Draws a small 3 axes icon that rotates with locs.
+
+        Displayed in the bottom left corner.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations
+
+        Returns
+        -------
+        QImage
+            Image with the drawn legend
+        """
+
         painter = QtGui.QPainter(image)
         length = 30
         width = 2
@@ -822,6 +1395,20 @@ class ViewRotation(QtWidgets.QLabel):
         return image
 
     def draw_points(self, image):
+        """
+        Draws points and lines and distances between them onto image.
+        
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations
+
+        Returns
+        -------
+        QImage
+            Image with the drawn points
+        """
+
         image = image.copy()
         d = 20
         painter = QtGui.QPainter(image)
@@ -871,6 +1458,8 @@ class ViewRotation(QtWidgets.QLabel):
         return image
 
     def add_legend(self):
+        """ Shows/Hides legend. """
+
         if self.display_legend:
             self.display_legend = False
         else:
@@ -878,40 +1467,37 @@ class ViewRotation(QtWidgets.QLabel):
         self.update_scene()
 
     def add_rotation_view(self):
+        """ Shows/Hides rotation axes icon. """
+
         if self.display_rotation:
             self.display_rotation = False
         else:
             self.display_rotation = True
         self.update_scene()
 
-    def rotation_input(self, opening=False, ang=None): 
-        # asks for rotation angles (3D only)
-        if opening:
-            self.angx = ang[0]
-            self.angy = ang[1]
-            self.angz = ang[2]
-        else:
-            angx, ok = QtWidgets.QInputDialog.getDouble(
-                    self, "Rotation angle x", "Angle x (degrees):",
+    def rotation_input(self): 
+        """ Asks user to input 3 rotation angles numerically. """
+
+        angx, ok = QtWidgets.QInputDialog.getDouble(
+                self, "Rotation angle x", "Angle x (degrees):",
+                0, decimals=2,
+            )
+        if ok:
+            angy, ok2 = QtWidgets.QInputDialog.getDouble(
+                    self, "Rotation angle y", "Angle y (degrees):", 
                     0, decimals=2,
                 )
-            if ok:
-                angy, ok2 = QtWidgets.QInputDialog.getDouble(
-                        self, "Rotation angle y", "Angle y (degrees):", 
+            if ok2:
+                angz, ok3 = QtWidgets.QInputDialog.getDouble(
+                        self, "Rotation angle z", "Angle z (degrees):", 
                         0, decimals=2,
-                    )
-                if ok2:
-                    angz, ok3 = QtWidgets.QInputDialog.getDouble(
-                            self, "Rotation angle z", "Angle z (degrees):", 
-                            0, decimals=2,
-                            )
-                    if ok3:
-                        self.angx += np.pi * angx/180
-                        self.angy += np.pi * angy/180
-                        self.angz += np.pi * angz/180
+                        )
+                if ok3:
+                    self.angx += np.pi * angx/180
+                    self.angy += np.pi * angy/180
+                    self.angz += np.pi * angz/180
 
-        # This is to avoid dividing by zero, when the angles are 90 deg 
-        # and something is divided by cosines
+        # This is to avoid dividing by zero, cos(90) = 0
         if self.angx == np.pi / 2:
             self.angx += 0.00001
         if self.angy == np.pi / 2:
@@ -922,12 +1508,24 @@ class ViewRotation(QtWidgets.QLabel):
         self.update_scene()
 
     def delete_rotation(self):
+        """ Resets rotation angles. """
+
         self.angx = 0
         self.angy = 0
         self.angz = 0
         self.update_scene()
 
     def fit_in_view_rotated(self, get_viewport=False):
+        """ 
+        Updates viewport to reflect the pick from main window. 
+
+        Parameters
+        ----------
+        get_viewport : boolean
+            If True, returns the found viewport. Otherwise updates
+            scene with the found viewport
+        """
+
         if self.pick_shape == "Circle":
             d = self.pick_size
             r = d / 2
@@ -955,6 +1553,10 @@ class ViewRotation(QtWidgets.QLabel):
             self.update_scene()
 
     def to_left_rot(self):
+        """ 
+        Called on pressing left arrow; shifts pick in the main window.
+        """
+
         height, width = self.viewport_size()
         dx = -SHIFT * width
         dx /= np.cos(self.angy)
@@ -962,6 +1564,10 @@ class ViewRotation(QtWidgets.QLabel):
         self.shift_viewport(dx, 0)
 
     def to_right_rot(self):
+        """ 
+        Called on pressing right arrow; shifts pick in the main window.
+        """
+        
         height, width = self.viewport_size()
         dx = SHIFT * width
         dx /= np.cos(self.angy)
@@ -969,6 +1575,10 @@ class ViewRotation(QtWidgets.QLabel):
         self.shift_viewport(dx, 0)
 
     def to_up_rot(self):
+        """ 
+        Called on pressing up arrow; shifts pick in the main window.
+        """
+        
         height, width = self.viewport_size()
         dy = -SHIFT * height
         dy /= np.cos(self.angx)
@@ -976,6 +1586,10 @@ class ViewRotation(QtWidgets.QLabel):
         self.shift_viewport(0, dy)
 
     def to_down_rot(self):
+        """ 
+        Called on pressing down arrow; shifts pick in the main window.
+        """
+        
         height, width = self.viewport_size()
         dy = SHIFT * height
         dy /= np.cos(self.angx)
@@ -983,19 +1597,39 @@ class ViewRotation(QtWidgets.QLabel):
         self.shift_viewport(0, dy)
 
     def shift_viewport(self, dx, dy):
+        """ 
+        Moves viewport by a given amount.
+
+        Parameters
+        ----------
+        dx : float
+            shift in x (pixels)
+        dy : float
+            shift in y (pixels)
+        """
+
         (y_min, x_min), (y_max, x_max) = self.viewport
         new_viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
-        self.load_locs()
+        self.load_locs() # pick locs in the new viewport
         self.update_scene(viewport=new_viewport)
 
     def mouseMoveEvent(self, event):
-        if self._mode == "Rotate":
-            height, width = self.viewport_size()
-            pos = self.map_to_movie(event.pos())
+        """
+        Defines actions taken when moving mouse.
 
-            if self._pan:
+        Rotating locs, panning.
+
+        Parameters
+        ----------
+        event : QMouseEvent
+        """
+
+        if self._mode == "Rotate":
+            if self._pan: # panning
                 rel_x_move = (event.x() - self.pan_start_x) / self.width()
                 rel_y_move = (event.y() - self.pan_start_y) / self.height()
+
+                # this partially accounts for rotation of locs
                 rel_y_move /= np.cos(self.angx)
                 rel_x_move /= np.cos(self.angy)
 
@@ -1003,13 +1637,18 @@ class ViewRotation(QtWidgets.QLabel):
                 self.pan_start_x = event.x()
                 self.pan_start_y = event.y()
 
-            else:
+            else: # rotating
+                height, width = self.viewport_size()
+                pos = self.map_to_movie(event.pos())
+
                 self._rotation.append([pos[0], pos[1]])
 
                 # calculate the angle of rotation
                 rel_pos_x = self._rotation[-1][0] - self._rotation[-2][0]
                 rel_pos_y = self._rotation[-1][1] - self._rotation[-2][1]
 
+                # rotate around x and y or y and z axes, depending on
+                # whether Ctrl/Command is pressed
                 modifiers = QtWidgets.QApplication.keyboardModifiers()
                 if modifiers == QtCore.Qt.ControlModifier:
                     self.angy += float(2 * np.pi * rel_pos_x/width)
@@ -1021,12 +1660,24 @@ class ViewRotation(QtWidgets.QLabel):
                 self.update_scene()
 
     def mousePressEvent(self, event):
+        """
+        Defines actions taken when pressing mouse buttons.
+
+        Starting rotating locs or panning.
+
+        Parameters
+        ----------
+        event : QMouseEvent
+        """
+
         if self._mode == "Rotate":
+            # start rotation
             if event.button() == QtCore.Qt.LeftButton:
                 pos = self.map_to_movie(event.pos())
                 self._rotation.append([float(pos[0]), float(pos[1])])
                 event.accept()
 
+            # start panning
             elif event.button() == QtCore.Qt.RightButton:
                 self._pan = True
                 self.pan_start_x = event.x()
@@ -1035,11 +1686,24 @@ class ViewRotation(QtWidgets.QLabel):
                 event.accept()
 
     def mouseReleaseEvent(self, event):
+        """
+        Defines actions taken when releasing mouse buttons.
+
+        Stopping rotating locs or panning, add or delete a measure
+        point.
+
+        Parameters
+        ----------
+        event : QMouseEvent
+        """
+
         if self._mode == "Measure":
+            # add point
             if event.button() == QtCore.Qt.LeftButton:
                 x, y = self.map_to_movie(event.pos())
                 self.add_point((x, y))
                 event.accept()
+            # remove point
             elif event.button() == QtCore.Qt.RightButton:
                 x, y = self.map_to_movie(event.pos())
                 self.remove_points((x, y))
@@ -1048,17 +1712,18 @@ class ViewRotation(QtWidgets.QLabel):
                 event.ignore()
 
         elif self._mode == "Rotate":
+            # stop rotation
             if event.button() == QtCore.Qt.LeftButton:
                 self._rotation = []
                 event.accept()
-
+            # stop panning
             elif event.button() == QtCore.Qt.RightButton:
                 self._pan = False
-                self.setCursor(QtCore.Qt.ArrowCursor)
                 event.accept()
 
     def map_to_movie(self, position):
         """ Converts coordinates from display units to camera units. """
+
         x_rel = position.x() / self.width()
         x_movie = x_rel * self.viewport_width() + self.viewport[0][1]
         y_rel = position.y() / self.height()
@@ -1067,11 +1732,23 @@ class ViewRotation(QtWidgets.QLabel):
 
     def map_to_view(self, x, y):
         """ Converts coordinates from camera units to display units. """
+
         cx = self.width() * (x - self.viewport[0][1]) / self.viewport_width()
         cy = self.height() * (y - self.viewport[0][0]) / self.viewport_height()
         return cx, cy
 
     def pan_relative(self, dy, dx):
+        """ 
+        Moves viewport by a given relative distance.
+
+        Parameters
+        ----------
+        dy : float
+            Relative displacement of the viewport in y axis
+        dx : float
+            Relative displacement of the viewport in x axis
+        """
+
         viewport_height, viewport_width = self.viewport_size()
         x_move = dx * viewport_width
         y_move = dy * viewport_height
@@ -1083,15 +1760,23 @@ class ViewRotation(QtWidgets.QLabel):
         self.update_scene()
 
     def add_point(self, position, update_scene=True):
+        """ 
+        Adds a point at a given position for measuring distances.
+        """
+
         self._points.append(position)
         if update_scene:
             self.update_scene()
 
     def remove_points(self, position):
+        """ Removes all distance measurement points. """
+
         self._points = []
         self.update_scene()
 
     def export_current_view(self):
+        """ Exports current view as .png or .tif. """
+
         try:
             base, ext = os.path.splitext(self.paths[0])
         except AttributeError:
@@ -1108,29 +1793,30 @@ class ViewRotation(QtWidgets.QLabel):
             self.qimage.save(path)
 
     def zoom_in(self):
+        """ Zooms in by a constant factor. """
+
         self.zoom(1 / ZOOM)
 
     def zoom_out(self):
+        """ Zooms out by a constant factor. """
+
         self.zoom(ZOOM)
 
-    def zoom(self, factor, cursor_position=None):
+    def zoom(self, factor):
+        """
+        Changes zoom relatively to factor by changing viewport.
+
+        Parameters
+        ----------
+        factor : float
+            Relative zoom magnitude
+        """
+
         height, width = self.viewport_size()
         new_height = height * factor
         new_width = width * factor
 
-        if cursor_position is not None:
-            old_center = self.viewport_center()
-            rel_pos_x, rel_pos_y = self.relative_position(
-                old_center, cursor_position
-            ) #this stays constant before and after zooming
-            new_center_x = (
-                cursor_position[0] - rel_pos_x * new_width
-            )
-            new_center_y = (
-                cursor_position[1] - rel_pos_y * new_height
-            )
-        else:
-            new_center_y, new_center_x = self.viewport_center()
+        new_center_y, new_center_x = self.viewport_center()
 
         new_viewport = [
             (
@@ -1145,6 +1831,19 @@ class ViewRotation(QtWidgets.QLabel):
         self.update_scene(new_viewport)
 
     def viewport_center(self, viewport=None):
+        """
+        Finds viewport's center (pixels).
+
+        Parameters
+        ----------
+        viewport: tuple (default=None)
+            Viewport to be evaluated. If None self.viewport is taken
+
+        Returns
+        tuple
+            Contains x and y coordinates of viewport's center (pixels)
+        """
+
         if viewport is None:
             viewport = self.viewport
         return (
@@ -1153,35 +1852,80 @@ class ViewRotation(QtWidgets.QLabel):
         )
 
     def viewport_height(self, viewport=None):
+        """
+        Finds viewport's height.
+
+        Parameters
+        ----------
+        viewport: tuple (default=None)
+            Viewport to be evaluated. If None self.viewport is taken
+
+        Returns
+        float
+            Viewport's height (pixels)
+        """
+
         if viewport is None:
             viewport = self.viewport
         return viewport[1][0] - viewport[0][0]
 
     def viewport_size(self, viewport=None):
+        """
+        Finds viewport's height and width.
+
+        Parameters
+        ----------
+        viewport: tuple (default=None)
+            Viewport to be evaluated. If None self.viewport is taken
+
+        Returns
+        tuple
+            Viewport's height and width (pixels)
+        """
+
         if viewport is None:
             viewport = self.viewport
         return self.viewport_height(viewport), self.viewport_width(viewport)
 
     def viewport_width(self, viewport=None):
+        """
+        Finds viewport's width.
+
+        Parameters
+        ----------
+        viewport: tuple (default=None)
+            Viewport to be evaluated. If None self.viewport is taken
+
+        Returns
+        float
+            Viewport's width (pixels)
+        """
+
         if viewport is None:
             viewport = self.viewport
         return viewport[1][1] - viewport[0][1]
 
-    def relative_position(self, center, cursor_position):
-        # finds the position of the cursor relative to the current 
-        # viewport center;
-        rel_pos_x = (cursor_position[0] - center[1])/self.viewport_width()
-        rel_pos_y = (cursor_position[1] - center[0])/self.viewport_height()
-        return rel_pos_x, rel_pos_y
-
     def set_mode(self, action):
+        """
+        Sets self._mode for QMouseEvents.
+
+        Activated when Rotate or Measure is chosen from Tools menu
+        in the main window.
+
+        Parameters
+        ----------
+        action : QAction
+            Action defined in Window.__init__: ("Rotate" or "Measure")
+        """
+
         self._mode = action.text()
 
     def adjust_viewport_to_view(self, viewport):
         """
-        Adds space to a desired viewport
-        so that it matches the window aspect ratio.
+        Adds space to a desired viewport, such that it matches the 
+        window aspect ratio. Returns a viewport.
         """
+
         viewport_height = viewport[1][0] - viewport[0][0]
         viewport_width = viewport[1][1] - viewport[0][1]
         view_height = self.height()
@@ -1206,12 +1950,29 @@ class ViewRotation(QtWidgets.QLabel):
 
     def get_render_kwargs(self, viewport=None, animation=False):
         """
-        Returns a dictionary to be used for the
-        keyword arguments of render.
+        Returns a dictionary to be used for the keyword arguments of 
+        render.render.
+
+        Parameters
+        ----------
+        viewport : list (default=None)
+            Specifies the FOV to be rendered. If None, the current 
+            viewport is taken.
+        animation : boolean
+            If True, kwargs are found for building animation
+
+        Returns
+        -------
+        dict
+            Contains blur method, oversampling, viewport and min blur
+            width
         """
+
+        # blur method
         blur_button = (
             self.window.display_settings_dlg.blur_buttongroup.checkedButton()
         )
+        # oversampling
         optimal_oversampling = (
             self.display_pixels_per_viewport_pixels(
                 viewport=viewport, animation=animation
@@ -1239,10 +2000,14 @@ class ViewRotation(QtWidgets.QLabel):
                 self.window.display_settings_dlg.set_oversampling_silently(
                     optimal_oversampling
                 )
+
+        # viewport
         if viewport is None:
             viewport = self.viewport
+
         if animation:
             oversampling = optimal_oversampling
+
         return {
             "oversampling": oversampling,
             "viewport": viewport,
@@ -1257,6 +2022,8 @@ class ViewRotation(QtWidgets.QLabel):
     def display_pixels_per_viewport_pixels(
         self, viewport=None, animation=False
     ):
+        """ Returns optimal oversampling. """
+
         if animation:
             os_horizontal = 500 / self.viewport_width(viewport)
             os_vertical = 500 / self.viewport_height(viewport)
@@ -1266,7 +2033,32 @@ class ViewRotation(QtWidgets.QLabel):
         # The values should be identical, but just in case, we choose the max:
         return max(os_horizontal, os_vertical)
 
-    def scale_contrast(self, image):
+    def scale_contrast(self, image, autoscale=False):
+        """
+        Scales image based on contrast values from Display Settings
+        Dialog.
+
+        Parameters
+        ----------
+        image : np.array or list of np.arrays
+            Array with rendered locs (grayscale)
+        autoscale : boolean (default=False)
+            If True, finds optimal contrast
+
+        Returns
+        -------
+        image : np.array or list of np.arrays
+            Scaled image(s)
+        """
+
+        if autoscale: # find optimum contrast
+            if image.ndim == 2:
+                max_ = image.max()
+            else:
+                max_ = min([_.max() for _ in image])
+            upper = INITIAL_REL_MAXIMUM * max_
+            self.window.display_settings_dlg.silent_minimum_update(0)
+            self.window.display_settings_dlg.silent_maximum_update(upper)
         upper = self.window.display_settings_dlg.maximum.value()
         lower = self.window.display_settings_dlg.minimum.value()
 
@@ -1281,23 +2073,72 @@ class ViewRotation(QtWidgets.QLabel):
         return image
 
     def to_8bit(self, image):
+        """
+        Converts image to 8 bit ready to convert to QImage.
+
+        Parameters
+        ----------
+        image : np.array
+            Image to be converted, with values between 0.0 and 1.0
+
+        Returns
+        -------
+        np.array
+            Image converted to 8 bit
+        """
+
         return np.round(255 * image).astype("uint8")
 
 
 class RotationWindow(QtWidgets.QMainWindow):
+    """
+    A class containg the rotation window dialog.
+
+    ...
+
+    Attributes
+    ----------
+    animation_dialog : AnimationDialog
+        instance of animation dialog
+    display_settings_dlg : DisplaySettingsRotationDialog
+        instance of display settings rotation dialog
+    menu_bar : QMenuBar
+        menu bar with menus: File, View, Tools
+    menus : list
+        contains File, View and Tools menus, used for plugins
+    view_rot : ViewRotation
+        instance of the class for displaying rendered localizations
+    window : QMainWindow
+        instance of the main Picasso: Render window (RotationWindow's
+        parent)
+
+    Methods
+    -------
+    closeEvent(event)
+        Closes all children dialogs and self
+    move_pick(dx, dy)
+        Moves the pick in the main window by a given amount
+    save_channel_multi()
+        Opens an input dialog to ask which channel to save
+    save_locs_rotated()
+        Save locs from the main window and provides rotation info for
+        later loading
+    """
+
     def __init__(self, window):
         super().__init__()
         self.setWindowTitle("Rotation window")
+
         self.window = window
         self.view_rot = ViewRotation(self)
         self.setCentralWidget(self.view_rot)
-
         self.display_settings_dlg = DisplaySettingsRotationDialog(self)
         self.display_settings_dlg.ilp_warning = True
-
         self.animation_dialog = AnimationDialog(self)
 
         self.menu_bar = self.menuBar()
+
+        # menu bar - File
         file_menu = self.menu_bar.addMenu("File")
         save_action = file_menu.addAction("Save rotated localizations")
         save_action.setShortcut("Ctrl+S")
@@ -1311,6 +2152,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         animation.setShortcut("Ctrl+Shift+E")
         animation.triggered.connect(self.animation_dialog.show)
 
+        # menu bar - View
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings")
         display_settings_action.setShortcut("Ctrl+D")
@@ -1333,7 +2175,6 @@ class RotationWindow(QtWidgets.QMainWindow):
         delete_rotation_action = view_menu.addAction("Remove rotation")
         delete_rotation_action.triggered.connect(self.view_rot.delete_rotation)
         delete_rotation_action.setShortcut("Ctrl+Shift+W")
-
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcut("Ctrl+W")
         fit_in_view_action.triggered.connect(self.view_rot.fit_in_view_rotated)
@@ -1362,6 +2203,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         zoom_out_action.triggered.connect(self.view_rot.zoom_out)
         view_menu.addAction(zoom_out_action)
 
+        # menu bar - Tools
         tools_menu = self.menu_bar.addMenu("Tools")
         tools_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
 
@@ -1379,31 +2221,49 @@ class RotationWindow(QtWidgets.QMainWindow):
         tools_menu.addAction(rotate_tool_action)
 
         self.menus = [file_menu, view_menu, tools_menu]
-
         self.setMinimumSize(500, 500)
         self.setMaximumSize(500, 500)
         self.move(20,20)
 
     def move_pick(self, dx, dy):
-        """ moves the pick in the main window """
+        """
+        Moves the pick in the main window by a given amount.
+
+        Parameters
+        ----------
+        dx : float
+            pick shift in x axis (pixels)
+        dy : float
+            pick shift in x axis (pixels)
+        """
+
         if self.view_rot.pick_shape == "Circle":
             x = self.window.view._picks[0][0]
             y = self.window.view._picks[0][1]
-            self.window.view._picks = [(x + dx, y + dy)]
-            self.view_rot.pick = (x + dx, y + dy)
-        else:
+            self.window.view._picks = [(x + dx, y + dy)] # main window
+            self.view_rot.pick = (x + dx, y + dy) # view rotation
+        else: # rectangle
             (xs, ys), (xe, ye) = self.window.view._picks[0]
             self.window.view._picks = [(
                 (xs + dx, ys + dy), 
                 (xe + dx, ye + dy),
-            )]
+            )] # main window
             self.view_rot.pick = (
                 (xs + dx, ys + dy), 
                 (xe + dx, ye + dy),
-            )
-        self.window.view.update_scene()
+            ) # view rotation
+        self.window.view.update_scene() # update scene in main window
 
     def save_channel_multi(self, title="Choose a channel"):
+        """
+        Opens an input dialog to ask which channel to save.
+        There is an option to save all channels.
+
+        Returns
+        None if no locs found or channel picked, int otherwise
+            Index of the chosen channel
+        """
+
         n_channels = len(self.view_rot.paths)
         if n_channels == 0:
             return None
@@ -1425,22 +2285,25 @@ class RotationWindow(QtWidgets.QMainWindow):
                 return None
 
     def save_locs_rotated(self):
+        """
+        Save locs from the main window and provides rotation info for
+        later loading.
+        """
 
-        # save
         channel = self.save_channel_multi("Save rotated localizations")
         if channel is not None:
+            # rotation info
             angx = self.view_rot.angx * 180 / np.pi
             angy = self.view_rot.angy * 180 / np.pi
             angz = self.view_rot.angz * 180 / np.pi
             if self.view_rot.pick_shape == "Circle":
-                x, y = self.pick
+                x, y = self.view_rot.pick
                 pick = [float(x), float(y)]
-                size = self.pick_size
-            else:
+                size = self.view_rot.pick_size
+            else: # rectangle
                 (ys, xs), (ye, xe) = self.pick
                 pick = [[float(ys), float(xs)], [float(ye), float(xe)]]
-                size = self.pick_size
-
+                size = self.view_rot.pick_size
             new_info = [{
                 "Generated by": "Picasso Render 3D",
                 # "Last driftfile": None,
@@ -1452,14 +2315,15 @@ class RotationWindow(QtWidgets.QMainWindow):
                 "angz": self.view_rot.angz,
             }]
 
-            if channel is (len(self.view_rot.paths)):
+            # save locs (all locs from main window)
+            if channel is (len(self.view_rot.paths)): # all channels
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
                     "_arender",
-                )
+                ) # get the save file suffix
                 if ok:
                     for channel in tqdm(range(len(self.view_rot.paths))):
                         base, ext = os.path.splitext(
@@ -1471,23 +2335,25 @@ class RotationWindow(QtWidgets.QMainWindow):
                             + "_rotated_{}_{}_{}.hdf5".format(
                                 int(angx), int(angy), int(angz)
                             )
-                        )
+                        ) # name of the saved files
                         info = self.view_rot.infos[channel] + new_info
                         io.save_locs(
                             out_path, self.window.view.locs[channel], info
                         )
-            else:
+            else: # one channel
                 base, ext = os.path.splitext(self.view_rot.paths[channel])
                 out_path = (
                     base 
                     + "_rotated_{}_{}_{}.hdf5".format(
                         int(angx), int(angy), int(angz)
-                    )
+                    ) # name of the save file
                 )
                 info = self.view_rot.infos[channel] + new_info
                 io.save_locs(out_path, self.window.view.locs[channel], info)
 
     def closeEvent(self, event):
+        """ Closes all children dialogs and self. """
+        
         self.display_settings_dlg.close()
         self.animation_dialog.close()
         QtWidgets.QMainWindow.closeEvent(self, event)
