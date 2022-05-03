@@ -1293,37 +1293,20 @@ class ViewRotation(QtWidgets.QLabel):
 
         n_channels = len(self.locs)
         painter = QtGui.QPainter(image)
-        width = 15
-        height = 15
-        x = 20
-        y = -5
-        dy = 25
+        x = 12
+        y = 20
+        dy = 20
         for i in range(n_channels):
             if self.window.dataset_dialog.checks[i].isChecked():
-                painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
                 palette = self.window.dataset_dialog.colordisp_all[i].palette()
                 color = palette.color(QtGui.QPalette.Window)
-                painter.setBrush(QtGui.QBrush(color))
-                y += dy
-                painter.drawRect(x, y, height, height)
+                painter.setPen(QtGui.QColor(color))
                 font = painter.font()
                 font.setPixelSize(12)
                 painter.setFont(font)
-                painter.setPen(QtGui.QColor("white"))
-                if self.window.dataset_dialog.wbackground.isChecked():
-                    painter.setPen(QtGui.QColor("black"))
-                text_spacer = 25
-                text_width = 1000
-                text_height = 15
                 text = self.window.dataset_dialog.checks[i].text()
-                painter.drawText(
-                    x + text_spacer,
-                    y,
-                    text_width,
-                    text_height,
-                    QtCore.Qt.AlignLeft,
-                    text,
-                )
+                painter.drawText(QtCore.QPoint(x, y), text)
+                y += dy
         return image
 
     def draw_rotation(self, image):

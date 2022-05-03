@@ -4711,44 +4711,22 @@ class View(QtWidgets.QLabel):
         if self.window.dataset_dialog.legend.isChecked():
             n_channels = len(self.locs_paths)
             painter = QtGui.QPainter(image)
-
-            # size of drawn squares with colors (display pixels)
-            width = 15
-            height = 15
-
             # initial positions
-            x = 20
-            y = -5
-
-            dy = 25 # space between squares
+            x = 12
+            y = 20
+            dy = 20 # space between names
             for i in range(n_channels):
                 if self.window.dataset_dialog.checks[i].isChecked():
                     painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
                     colordisp = self.window.dataset_dialog.colordisp_all[i]
                     color = colordisp.palette().color(QtGui.QPalette.Window)
-                    painter.setBrush(QtGui.QBrush(color))
-                    y += dy
-                    painter.drawRect(x, y, height, height)
+                    painter.setPen(QtGui.QPen(color))
                     font = painter.font()
                     font.setPixelSize(12)
                     painter.setFont(font)
-                    painter.setPen(QtGui.QColor("white"))
-
-                    # white channel name not visible on white background
-                    if self.window.dataset_dialog.wbackground.isChecked():
-                        painter.setPen(QtGui.QColor("black"))
-                    text_spacer = 25
-                    text_width = 1000 # in case of long names
-                    text_height = 15
                     text = self.window.dataset_dialog.checks[i].text()
-                    painter.drawText(
-                        x + text_spacer,
-                        y,
-                        text_width,
-                        text_height,
-                        QtCore.Qt.AlignLeft,
-                        text,
-                    )
+                    painter.drawText(QtCore.QPoint(x, y), text)
+                    y += dy
         return image
 
     def draw_minimap(self, image):
