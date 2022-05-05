@@ -746,7 +746,9 @@ class DatasetDialog(QtWidgets.QDialog):
             if len(self.window.view.locs) == 1:
                 if hasattr(self.window.view.locs[0], "group"):
                     self.window.view.group_color = (
-                        self.window.view.get_group_color()
+                        self.window.view.get_group_color(
+                            self.window.view.locs[0]
+                        )
                     )
 
             # delete drift data if provided
@@ -3262,7 +3264,9 @@ class FastRenderDialog(QtWidgets.QDialog):
             hasattr(self.window.view.locs[0], "group")
         ):
             self.window.view.group_color = (
-                self.window.view.get_group_color()
+                self.window.view.get_group_color(
+                    self.window.view.locs[0]
+                )
             )
         self.index_blocks = [None] * len(self.window.view.locs)
         self.window.view.update_scene()
@@ -3716,7 +3720,7 @@ class View(QtWidgets.QLabel):
         Opens an input dialog to ask for a channel
     get_channel3d()
         Similar to get_channel, used in selecting 3D picks
-    get_group_color()
+    get_group_color(locs)
         Finds group color index for each localization
     get_index_blocks(channel)
         Calls self.index_locs if not calculated earlier
@@ -3924,20 +3928,21 @@ class View(QtWidgets.QLabel):
         self.x_render_cache = []
         self.x_render_state = False
 
-    def get_group_color(self):
+    def get_group_color(self, locs):
         """ 
         Finds group color for each localization in single channel data
         with group info.
 
-        Assumed to ba called only for single channel with group info.
+        Parameters
+        ----------
+        locs : np.recarray
+            Array with all localizations
 
         Returns
         -------
         np.array
             Array with int group color index for each loc
         """
-
-        locs = self.locs[0]
 
         groups = np.unique(locs.group)
         groupcopy = locs.group.copy()
@@ -4059,7 +4064,7 @@ class View(QtWidgets.QLabel):
             )
             if hasattr(locs, "group"):
                 if len(self.group_color) == 0:
-                    self.group_color = self.get_group_color()
+                    self.group_color = self.get_group_color(self.locs[0])
 
         # render the loaded file
         if render:
@@ -6763,6 +6768,7 @@ class View(QtWidgets.QLabel):
         else:
             self.render_multi_channel(
                 kwargs,
+                autoscale=autoscale, 
                 use_cache=use_cache,
                 cache=cache,
             )
@@ -6779,6 +6785,7 @@ class View(QtWidgets.QLabel):
         self,
         kwargs,
         locs=None,
+        autoscale=False,
         use_cache=False,
         cache=True,
     ):
@@ -6792,6 +6799,8 @@ class View(QtWidgets.QLabel):
         ----------
         kwargs : dict
             Contains blur method, etc. See self.get_render_kwargs
+        autoscale : boolean (default=False)
+            True if optimally adjust contrast
         locs : np.recarray (default=None)
             Locs to be rendered. If None, self.locs is used
         use_cache : boolean (default=False)
@@ -6834,7 +6843,7 @@ class View(QtWidgets.QLabel):
             self.image = image
 
         # adjust contrast
-        image = self.scale_contrast(image)
+        image = self.scale_contrast(image, autoscale=autoscale)
 
         Y, X = image.shape[1:]
         # array with rgb and alpha channels
@@ -6936,14 +6945,14 @@ class View(QtWidgets.QLabel):
         if self.x_render_state:
             locs = self.x_locs
             return self.render_multi_channel(
-                kwargs, locs=locs, use_cache=use_cache
+                kwargs, locs=locs, autoscale=autoscale, use_cache=use_cache
             )            
 
         # if clustered or picked locs
         if hasattr(locs, "group"):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
-                kwargs, locs=locs, use_cache=use_cache
+                kwargs, locs=locs, autoscale=autoscale, use_cache=use_cache
             )
         # if slicing, show only the current slice
         if hasattr(locs, "z"):
@@ -7179,7 +7188,13 @@ class View(QtWidgets.QLabel):
             if image.ndim == 2:
                 max_ = image.max()
             else:
-                max_ = min([_.max() for _ in image])
+                max_ = min(
+                    [
+                        _.max() 
+                        for _ in image  # single channel locs with only 
+                        if _.max() != 0 # one group have 
+                    ]                   # N_GROUP_COLORS - 1 images of 
+                )                       # only zeroes
             upper = INITIAL_REL_MAXIMUM * max_
             self.window.display_settings_dlg.silent_minimum_update(0)
             self.window.display_settings_dlg.silent_maximum_update(upper)

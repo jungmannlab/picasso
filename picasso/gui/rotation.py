@@ -653,6 +653,14 @@ class AnimationDialog(QtWidgets.QDialog):
             path = base[:idx] + "/animation_frames"
             try:
                 os.mkdir(path)
+                for i in range(len(angx)):
+                    qimage = self.window.view_rot.render_scene(
+                        viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
+                        ang=(angx[i], angy[i], angz[i]),
+                        animation=True,
+                    )
+                    qimage = qimage.scaled(500, 500)
+                    qimage.save(path + "/frame_{}.png".format(i+1))
             except:
                 # if folder exists, ask if it should be used or deleted
                 m = QtWidgets.QMessageBox()
@@ -2076,7 +2084,13 @@ class ViewRotation(QtWidgets.QLabel):
             if image.ndim == 2:
                 max_ = image.max()
             else:
-                max_ = min([_.max() for _ in image])
+                max_ = min(
+                    [
+                        _.max() 
+                        for _ in image  # single channel locs with only 
+                        if _.max() != 0 # one group have 
+                    ]                   # N_GROUP_COLORS - 1 images of 
+                )                       # only zeroes
             upper = INITIAL_REL_MAXIMUM * max_
             self.window.display_settings_dlg.silent_minimum_update(0)
             self.window.display_settings_dlg.silent_maximum_update(upper)
