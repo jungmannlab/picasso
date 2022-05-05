@@ -884,7 +884,9 @@ class ViewRotation(QtWidgets.QLabel):
             main window
         """
 
+        fast_render = False # should locs be reindexed
         if update_window:
+            fast_render = True
             # update blur and colormap
             blur = (
                 self.window.window.display_settings_dlg.blur_buttongroup. \
@@ -920,7 +922,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.infos = []
         for i in range(n_channels):
             temp = self.window.window.view.picked_locs(
-                i, add_group=False, fast_render=True
+                i, add_group=False, fast_render=fast_render
             )
             self.locs.append(temp[0])
             self.infos.append(self.window.window.view.infos[i])
