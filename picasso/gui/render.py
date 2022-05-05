@@ -3995,6 +3995,15 @@ class View(QtWidgets.QLabel):
             return
         locs = lib.ensure_sanity(locs, info)
 
+        # Older Localize versions provide z coordinate in nm, rather 
+        # than camera px. The section below tries to automatically 
+        # adjust that
+        if hasattr(locs, "z"):
+            if locs.z.max() - locs.z.min() > 50: # probably z in nm
+                print("Automatically converted z coordinates to px")
+                pixelsize = self.window.display_settings_dlg.pixelsize.value()
+                locs.z = locs.z / pixelsize
+
         # update pixelsize
         for element in info:
             if "Picasso Localize" in element.values():
