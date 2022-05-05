@@ -688,12 +688,18 @@ class DatasetDialog(QtWidgets.QDialog):
                     if new_title == "Reset" or new_title == "reset":
                         path = self.window.view.locs_paths[i]
                         if len(path) > 40:
-                            path = "..." + path[-40:]
-                        self.checks[i].setText(path)
+                                path = os.path.basename(path)
+                                new_title, ext = os.path.splitext(path)
+                        self.checks[i].setText(new_title)
                     else:
                         self.checks[i].setText(new_title)
                     self.update_viewport()
+                    # change size of the dialog
                     self.adjustSize()
+                    # change name in the fast render dialog
+                    self.window.fast_render_dialog.channel.setItemText(
+                        i+1, new_title
+                    )
                 break
 
     def close_file(self, i):
@@ -732,13 +738,15 @@ class DatasetDialog(QtWidgets.QDialog):
             del self.window.view.infos[i]
             del self.window.view.index_blocks[i]
 
+            # delete attributes from the fast render dialog
+            del self.window.view.all_locs[i]
+            self.window.fast_render_dialog.on_file_closed(i)
+
             # adjust group color if needed
             if len(self.window.view.locs) == 1:
                 if hasattr(self.window.view.locs[0], "group"):
                     self.window.view.group_color = (
-                        self.window.view.get_group_color(
-                            self.window.view.locs[0]
-                        )
+                        self.window.view.get_group_color()
                     )
 
             # delete drift data if provided
@@ -3109,6 +3117,157 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.window.view.update_scene(use_cache=True)
 
 
+class FastRenderDialog(QtWidgets.QDialog):
+    """
+    A class to randomly sample a given percentage of locs to increase
+    the speed of rendering.
+
+    ...
+
+    Attributes
+    ----------
+    channel : QComboBox
+        contains the channel where fast rendering is to be applied
+    fraction : QSpinBox
+        contains the percentage of locs to be sampled
+    fractions : list
+        contains the percetanges for all channels of locs to be sampled
+    sample_button : QPushButton
+        click to sample locs according to the percetanges specified by
+        self.fractions
+    window : QMainWindow
+        instance of the main window
+    
+    Methods
+    -------
+    on_channel_changed()
+        Retrieves value in self.fraction to the last chosen one
+    on_file_added()
+        Adds new item in self.channel
+    on_file_closed(idx)
+        Removes item in self.channel
+    on_fraction_changed()
+        Updates self.fractions 
+    sample_locs()
+        Draws a fraction of locs specified by self.fractions
+    """
+
+    def __init__(self, window):
+        super().__init__()
+        self.window = window
+        self.setWindowTitle("Fast Render")
+        self.setWindowIcon(self.window.icon)
+        self.layout = QtWidgets.QGridLayout()
+        self.setLayout(self.layout)
+        self.fractions = [100]
+
+        # info explaining what is this dialog
+        self.layout.addWidget(QtWidgets.QLabel(
+            (
+                "Change percentage of locs displayed in each\n"
+                "channel to increase the speed of rendering.\n\n"
+                "NOTE: sampling locs may lead to unexpected behaviour\n"
+                "when using some of Picasso : Render functions,\n"
+                "such as undrifting.  Please set the percentage below\n"
+                "to 100 to avoid it."
+            )
+        ), 0, 0, 1, 2)
+
+        # choose channel
+        self.layout.addWidget(QtWidgets.QLabel("Channel: "), 1, 0)
+        self.channel = QtWidgets.QComboBox(self)
+        self.channel.setEditable(False)
+        self.channel.addItem("All channels")
+        self.channel.activated.connect(self.on_channel_changed)
+        self.layout.addWidget(self.channel, 1, 1)
+
+        # choose percentage
+        self.layout.addWidget(
+            QtWidgets.QLabel(
+                "Percentage of localizations\nto be displayed"
+            ), 2, 0
+        )
+        self.fraction = QtWidgets.QSpinBox(self)
+        self.fraction.setSingleStep(1)
+        self.fraction.setMinimum(1)
+        self.fraction.setMaximum(100)
+        self.fraction.setValue(100)
+        self.fraction.valueChanged.connect(self.on_fraction_changed)
+        self.layout.addWidget(self.fraction, 2, 1)
+
+        # randomly draw localizations in each channel
+        self.sample_button = QtWidgets.QPushButton(
+            "Randomly sample\nlocalizations"
+        ) 
+        self.sample_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.sample_button.clicked.connect(self.sample_locs)
+        self.layout.addWidget(self.sample_button, 3, 1)
+
+    def on_channel_changed(self):
+        """ 
+        Retrieves value in self.fraction to the last chosen one. 
+        """
+
+        idx = self.channel.currentIndex()
+        self.fraction.blockSignals(True)
+        self.fraction.setValue(self.fractions[idx])
+        self.fraction.blockSignals(False)
+
+    def on_file_added(self):
+        """ Adds new item in self.channel. """
+
+        self.channel.addItem(self.window.dataset_dialog.checks[-1].text())
+        self.fractions.append(100)
+
+    def on_file_closed(self, idx):
+        """ Removes item from self.channel. """
+        
+        self.channel.removeItem(idx+1)
+        del self.fractions[idx+1]
+
+    def on_fraction_changed(self):
+        """ Updates self.fractions. """
+
+        idx = self.channel.currentIndex()
+        self.fractions[idx] = self.fraction.value()
+
+    def sample_locs(self):
+        """ Draws a fraction of locs specified by self.fractions. """
+        
+        idx = self.channel.currentIndex()
+        if idx == 0: # all channels share the same fraction
+            for i in range(len(self.window.view.locs_paths)):
+                n_locs = len(self.window.view.all_locs[i])
+                rand_idx = np.random.choice(
+                    n_locs, 
+                    size=int(n_locs * self.fractions[0] / 100),
+                    replace=False,
+                ) # random indeces to extract locs
+                self.window.view.locs[i] = (
+                    self.window.view.all_locs[i][rand_idx]
+                ) # assign new localizations to be displayed
+        else: # each channel individually
+            for i in range(len(self.window.view.locs_paths)):
+                n_locs = len(self.window.view.all_locs[i])
+                rand_idx = np.random.choice(
+                    n_locs,
+                    size=int(n_locs * self.fractions[i+1] / 100),
+                    replace=False,
+                ) # random indeces to extract locs
+                self.window.view.locs[i] = (
+                    self.window.view.all_locs[i][rand_idx]
+                ) # assign new localizations to be displayed
+        # update view.group_color if needed:
+        if (len(self.fractions) == 2 and
+            hasattr(self.window.view.locs[0], "group")
+        ):
+            self.window.view.group_color = (
+                self.window.view.get_group_color()
+            )
+        self.index_blocks = [None] * len(self.window.view.locs)
+        self.window.view.update_scene()
+
+
 class SlicerDialog(QtWidgets.QDialog):
     """
     A class to customize slicing 3D data in z axis.
@@ -3155,7 +3314,7 @@ class SlicerDialog(QtWidgets.QDialog):
     -------
     calculate_histogram()
         Calculates and histograms z coordintes of each channel
-    export_stack(self)
+    export_stack()
         Saves all slices as .tif files
     initialize()
         Called when the dialog is open, calculates the histograms and 
@@ -3403,6 +3562,9 @@ class View(QtWidgets.QLabel):
 
     Attributes
     ----------
+    all_locs : list
+        contains a np.recarray with localizations for each channel; 
+        important for fast rendering
     currentdrift : list
         contains the most up-to-date drift for each channel
     _drift : list
@@ -3422,7 +3584,8 @@ class View(QtWidgets.QLabel):
     infos : list
         contains a dictionary with metadata for each channel
     locs : list
-        contains a np.recarray with localizations for each channel
+        contains a np.recarray with localizations for each channel, 
+        reduced in case of fast rendering
     locs_paths : list
         contains a str defining the path for each channel
     median_lp : float
@@ -3553,7 +3716,7 @@ class View(QtWidgets.QLabel):
         Opens an input dialog to ask for a channel
     get_channel3d()
         Similar to get_channel, used in selecting 3D picks
-    get_group_color(locs)
+    get_group_color()
         Finds group color index for each localization
     get_index_blocks(channel)
         Calls self.index_locs if not calculated earlier
@@ -3742,6 +3905,7 @@ class View(QtWidgets.QLabel):
         self.rubberband.setStyleSheet("selection-background-color: white")
         self.window = window
         self._pixmap = None
+        self.all_locs = [] # for fast render
         self.locs = []
         self.infos = []
         self.locs_paths = []
@@ -3760,21 +3924,20 @@ class View(QtWidgets.QLabel):
         self.x_render_cache = []
         self.x_render_state = False
 
-    def get_group_color(self, locs):
+    def get_group_color(self):
         """ 
         Finds group color for each localization in single channel data
         with group info.
 
-        Parameters
-        ----------
-        locs : np.recarray
-            Array with all localizations
+        Assumed to ba called only for single channel with group info.
 
         Returns
         -------
         np.array
             Array with int group color index for each loc
         """
+
+        locs = self.locs[0]
 
         groups = np.unique(locs.group)
         groupcopy = locs.group.copy()
@@ -3845,6 +4008,7 @@ class View(QtWidgets.QLabel):
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
+        self.all_locs.append(locs) # for fast rendering
 
         # try to load a drift .txt file:
         drift = None
@@ -3886,7 +4050,7 @@ class View(QtWidgets.QLabel):
             )
             if hasattr(locs, "group"):
                 if len(self.group_color) == 0:
-                    self.group_color = self.get_group_color(locs)
+                    self.group_color = self.get_group_color()
 
         # render the loaded file
         if render:
@@ -3923,6 +4087,9 @@ class View(QtWidgets.QLabel):
         self.window.setWindowTitle(
             "Picasso: Render. File: {}".format(os.path.basename(path))
         )
+
+        # fast rendering add channel
+        self.window.fast_render_dialog.on_file_added()
 
     def add_multiple(self, paths):
         """ Loads several .hdf5 and .yaml files. 
@@ -6291,13 +6458,16 @@ class View(QtWidgets.QLabel):
         com_y = locs.y.mean()
         return np.sqrt(np.mean((locs.x - com_x) ** 2 + (locs.y - com_y) ** 2))
 
-    def index_locs(self, channel):
+    def index_locs(self, channel, fast_render=False):
         """
         Indexes localizations from a given channel in a grid with grid 
         size equal to the pick radius.
         """
 
-        locs = self.locs[channel]
+        if fast_render:
+            locs = self.locs[channel]
+        else:
+            locs = self.all_locs[channel]
         info = self.infos[channel]
         d = self.window.tools_settings_dialog.pick_diameter.value()
         size = d / 2
@@ -6308,14 +6478,14 @@ class View(QtWidgets.QLabel):
         status.close()
         self.index_blocks[channel] = index_blocks
 
-    def get_index_blocks(self, channel):
+    def get_index_blocks(self, channel, fast_render=False):
         """
         Calls self.index_locs if not calculated earlier.
         Returns indexed locs from a given channel.
         """
 
-        if self.index_blocks[channel] is None:
-            self.index_locs(channel)
+        if self.index_blocks[channel] is None or fast_render:
+            self.index_locs(channel, fast_render=fast_render)
         return self.index_blocks[channel]
 
     @check_picks
@@ -6399,7 +6569,12 @@ class View(QtWidgets.QLabel):
             self.add_picks(similar)
             status.close()
 
-    def picked_locs(self, channel, add_group=True):
+    def picked_locs(
+        self, 
+        channel, 
+        add_group=True, 
+        fast_render=False,
+    ):
         """ 
         Returns picked localizations in the specified channel. 
         
@@ -6410,6 +6585,9 @@ class View(QtWidgets.QLabel):
         add_group : boolean (default=True)
             True if group id should be added to locs. Each pick will be
             assigned a different id.
+        fast_render : boolean
+            If True, takes self.locs, i.e. after randomly sampling a 
+            fraction of self.all_locs. If False, takes self.all_locs.
 
         Returns
         -------
@@ -6426,7 +6604,9 @@ class View(QtWidgets.QLabel):
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
                 r = d / 2
-                index_blocks = self.get_index_blocks(channel)
+                index_blocks = self.get_index_blocks(
+                    channel, fast_render=fast_render
+                )
                 for i, pick in enumerate(self._picks):
                     x, y = pick
                     block_locs = postprocess.get_block_locs_at(
@@ -6443,7 +6623,10 @@ class View(QtWidgets.QLabel):
                     progress.set_value(i + 1)
             elif self._pick_shape == "Rectangle":
                 w = self.window.tools_settings_dialog.pick_width.value()
-                channel_locs = self.locs[channel]
+                if fast_render:
+                    channel_locs = self.locs[channel]
+                else:
+                    channel_locs = self.all_locs[channel]
                 for i, pick in enumerate(self._picks):
                     (xs, ys), (xe, ye) = pick
                     X, Y = self.get_pick_rectangle_corners(xs, ys, xe, ye, w)
@@ -8141,6 +8324,9 @@ class Window(QtWidgets.QMainWindow):
         instance of the dialog for display settings
     info_dialog : InfoDialog
         instance of the dialog storing information about data and picks
+    fast_render_dialog: FastRenderDialog
+        instance of the dialog for sampling a fraction of locs to speed
+        up rendering
     mask_settings_dialog : MaskSettingsDialog
         isntance of the dialog for masking image
     menu_bar : QMenuBar
@@ -8256,6 +8442,7 @@ class Window(QtWidgets.QMainWindow):
         self.slicer_dialog = SlicerDialog(self)
         self.info_dialog = InfoDialog(self)
         self.dataset_dialog = DatasetDialog(self)  
+        self.fast_render_dialog = FastRenderDialog(self)
         self.window_rot = RotationWindow(self)
 
         self.dialogs = [
@@ -8266,6 +8453,7 @@ class Window(QtWidgets.QMainWindow):
             self.tools_settings_dialog,
             self.slicer_dialog,
             self.window_rot,
+            self.fast_render_dialog,
         ]
         
         # menu bar
@@ -8427,8 +8615,13 @@ class Window(QtWidgets.QMainWindow):
         cluster_action = tools_menu.addAction("Cluster in pick (k-means)")
         cluster_action.triggered.connect(self.view.analyze_cluster)
 
+        tools_menu.addSeparator()
         mask_action = tools_menu.addAction("Mask image")
         mask_action.triggered.connect(self.mask_settings_dialog.init_dialog)
+
+        tools_menu.addSeparator()
+        fast_render_action = tools_menu.addAction("Fast rendering")
+        fast_render_action.triggered.connect(self.fast_render_dialog.show)
         
         # menu bar - Postprocess
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
@@ -9339,6 +9532,9 @@ class Window(QtWidgets.QMainWindow):
             self.view.locs[channel] = lib.remove_from_rec(
                 self.view.locs[channel], "group"
             )
+            self.view.all_locs[channel] = lib.remove_from_rec(
+                self.view.all_locs[channel], "group"
+            )
             self.view.update_scene()
 
     def save_pick_properties(self):
@@ -9405,7 +9601,9 @@ class Window(QtWidgets.QMainWindow):
                                 ],
                             }
                         ]
-                        io.save_locs(out_path, self.view.locs[channel], info)
+                        io.save_locs(
+                            out_path, self.view.all_locs[channel], info
+                        )
 
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
@@ -9420,7 +9618,7 @@ class Window(QtWidgets.QMainWindow):
                             "Last driftfile": self.view._driftfiles[channel],
                         }
                     ]
-                    io.save_locs(path, self.view.locs[channel], info)
+                    io.save_locs(path, self.view.all_locs[channel], info)
 
     def save_picked_locs(self):
         """

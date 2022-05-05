@@ -911,7 +911,9 @@ class ViewRotation(QtWidgets.QLabel):
         self.locs = []
         self.infos = []
         for i in range(n_channels):
-            temp = self.window.window.view.picked_locs(i, add_group=False)
+            temp = self.window.window.view.picked_locs(
+                i, add_group=False, fast_render=True
+            )
             self.locs.append(temp[0])
             self.infos.append(self.window.window.view.infos[i])
 
