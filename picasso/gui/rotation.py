@@ -365,7 +365,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
                     " rotate the object using a different blur method and "
                     " then to apply individual localization precision."
                 )
-                QtWidgets.QMessageBox.information(self, "Warning", warning)
+                # QtWidgets.QMessageBox.information(self, "Warning", warning)
         # update scene
         self.window.view_rot.update_scene()
 
@@ -653,6 +653,14 @@ class AnimationDialog(QtWidgets.QDialog):
             path = base[:idx] + "/animation_frames"
             try:
                 os.mkdir(path)
+                for i in range(len(angx)):
+                    qimage = self.window.view_rot.render_scene(
+                        viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
+                        ang=(angx[i], angy[i], angz[i]),
+                        animation=True,
+                    )
+                    qimage = qimage.scaled(500, 500)
+                    qimage.save(path + "/frame_{}.png".format(i+1))
             except:
                 # if folder exists, ask if it should be used or deleted
                 m = QtWidgets.QMessageBox()
@@ -711,6 +719,8 @@ class ViewRotation(QtWidgets.QLabel):
         current rotation angle around y axis
     angz : float
         current rotation angle around z axis
+    display_angles : boolean
+        True if current rotation angles are to be displayed
     display_legend : boolean
         True if legend is to be displayed
     display_rotation : boolean
@@ -748,6 +758,8 @@ class ViewRotation(QtWidgets.QLabel):
 
     Methods
     -------
+    add_angles_view()
+        Shows/Hides current rotation in angles.
     add_legend()
         Shows/Hides legend
     add_rotation_view()
@@ -766,6 +778,8 @@ class ViewRotation(QtWidgets.QLabel):
         Draws points and lines and distances between them onto image
     draw_rotation(image)
         Draws a small 3 axes icon that rotates with locs
+    draw_rotation_angles(image)
+        Draws text displaying current rotation angles in degrees 
     draw_scalebar(image)
         Draws a scalebar
     draw_scene(viewport)
@@ -853,6 +867,7 @@ class ViewRotation(QtWidgets.QLabel):
         self._pan = False
         self.display_legend = False
         self.display_rotation = True
+        self.display_angles = False
         self.setMaximumSize(500, 500)
 
     def load_locs(self, update_window=False):
@@ -869,7 +884,9 @@ class ViewRotation(QtWidgets.QLabel):
             main window
         """
 
+        fast_render = False # should locs be reindexed
         if update_window:
+            fast_render = True
             # update blur and colormap
             blur = (
                 self.window.window.display_settings_dlg.blur_buttongroup. \
@@ -898,13 +915,16 @@ class ViewRotation(QtWidgets.QLabel):
             self.viewport = self.fit_in_view_rotated(get_viewport=True)
             self.window.dataset_dialog = self.window.window.dataset_dialog
             self.paths = self.window.window.view.locs_paths
+            self.z_converted = self.window.window.view.z_converted
 
         # load locs in the pick and their metadata
         n_channels = len(self.paths)
         self.locs = []
         self.infos = []
         for i in range(n_channels):
-            temp = self.window.window.view.picked_locs(i, add_group=False)
+            temp = self.window.window.view.picked_locs(
+                i, add_group=False, fast_render=fast_render
+            )
             self.locs.append(temp[0])
             self.infos.append(self.window.window.view.infos[i])
 
@@ -1000,14 +1020,12 @@ class ViewRotation(QtWidgets.QLabel):
         # other parameters for rendering
         n_channels = len(locs)
         colors = get_colors(n_channels) # automatic colors
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         if ang is None: # no build animation
             renderings = [
                 render.render(
                     _, **kwargs, 
                     ang=(self.angx, self.angy, self.angz), 
-                    pixelsize=pixelsize,
                 ) for _ in locs
             ]
         else: # build animation
@@ -1015,7 +1033,6 @@ class ViewRotation(QtWidgets.QLabel):
                 render.render(
                     _, **kwargs, 
                     ang=ang, 
-                    pixelsize=pixelsize,
                 ) for _ in locs
             ]
         n_locs = sum([_[0] for _ in renderings])
@@ -1122,14 +1139,12 @@ class ViewRotation(QtWidgets.QLabel):
                 kwargs, locs=locs, ang=ang, autoscale=autoscale
             )
 
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if ang is None: # if build animation
             n_locs, image = render.render(
                 locs, 
                 **kwargs, 
                 info=self.infos[0], 
                 ang=(self.angx, self.angy, self.angz), 
-                pixelsize=pixelsize,
             )
         else: # if not build animation
             n_locs, image = render.render(
@@ -1137,7 +1152,6 @@ class ViewRotation(QtWidgets.QLabel):
                 **kwargs, 
                 info=self.infos[0], 
                 ang=ang, 
-                pixelsize=pixelsize,
             )
         self.n_locs = n_locs
         self.image = image
@@ -1207,12 +1221,14 @@ class ViewRotation(QtWidgets.QLabel):
             self.height(),
             QtCore.Qt.KeepAspectRatioByExpanding,
         )
-        # draw scalebar, legend and rotation and measuring points
+        # draw scalebar, legend, rotation and measuring points
         self.qimage = self.draw_scalebar(self.qimage)
         if self.display_legend:
             self.qimage = self.draw_legend(self.qimage)
         if self.display_rotation:
             self.qimage = self.draw_rotation(self.qimage)
+        if self.display_angles:
+            self.qimage = self.draw_rotation_angles(self.qimage)
         self.qimage = self.draw_points(self.qimage)
 
         # convert to pixmap
@@ -1290,37 +1306,20 @@ class ViewRotation(QtWidgets.QLabel):
 
         n_channels = len(self.locs)
         painter = QtGui.QPainter(image)
-        width = 15
-        height = 15
-        x = 20
-        y = -5
-        dy = 25
+        x = 12
+        y = 20
+        dy = 20
         for i in range(n_channels):
             if self.window.dataset_dialog.checks[i].isChecked():
-                painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
                 palette = self.window.dataset_dialog.colordisp_all[i].palette()
                 color = palette.color(QtGui.QPalette.Window)
-                painter.setBrush(QtGui.QBrush(color))
-                y += dy
-                painter.drawRect(x, y, height, height)
+                painter.setPen(QtGui.QColor(color))
                 font = painter.font()
                 font.setPixelSize(12)
                 painter.setFont(font)
-                painter.setPen(QtGui.QColor("white"))
-                if self.window.dataset_dialog.wbackground.isChecked():
-                    painter.setPen(QtGui.QColor("black"))
-                text_spacer = 25
-                text_width = 1000
-                text_height = 15
                 text = self.window.dataset_dialog.checks[i].text()
-                painter.drawText(
-                    x + text_spacer,
-                    y,
-                    text_width,
-                    text_height,
-                    QtCore.Qt.AlignLeft,
-                    text,
-                )
+                painter.drawText(QtCore.QPoint(x, y), text)
+                y += dy
         return image
 
     def draw_rotation(self, image):
@@ -1393,6 +1392,30 @@ class ViewRotation(QtWidgets.QLabel):
         painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 0, 1)))
         painter.drawLine(line_z)
         return image
+
+    def draw_rotation_angles(self, image):
+        """ 
+        Draws text displaying current rotation angles in degrees. 
+        """
+        
+        image = image.copy()
+        [angx, angy, angz] = [
+            int(np.round(_ * 180 / np.pi, 0)) 
+            for _ in [self.angx, self.angy, self.angz]
+        ]
+        text = f"{angx} {angy} {angz}"
+        x = self.width() - len(text) * 7.5 - 10
+        y = self.height() - 20      
+        painter = QtGui.QPainter(image)
+        font = painter.font()
+        font.setPixelSize(12)
+        painter.setFont(font)
+        painter.setPen(QtGui.QColor("white"))
+        if self.window.dataset_dialog.wbackground.isChecked():
+            painter.setPen(QtGui.QColor("black"))
+        painter.drawText(QtCore.QPoint(x, y), text)
+        return image
+
 
     def draw_points(self, image):
         """
@@ -1473,6 +1496,15 @@ class ViewRotation(QtWidgets.QLabel):
             self.display_rotation = False
         else:
             self.display_rotation = True
+        self.update_scene()
+
+    def add_angles_view(self):
+        """ Shows/Hides current rotation in angles. """
+
+        if self.display_angles:
+            self.display_angles = False
+        else:
+            self.display_angles = True
         self.update_scene()
 
     def rotation_input(self): 
@@ -2055,7 +2087,13 @@ class ViewRotation(QtWidgets.QLabel):
             if image.ndim == 2:
                 max_ = image.max()
             else:
-                max_ = min([_.max() for _ in image])
+                max_ = min(
+                    [
+                        _.max() 
+                        for _ in image  # single channel locs with only 
+                        if _.max() != 0 # one group have 
+                    ]                   # N_GROUP_COLORS - 1 images of 
+                )                       # only zeroes
             upper = INITIAL_REL_MAXIMUM * max_
             self.window.display_settings_dlg.silent_minimum_update(0)
             self.window.display_settings_dlg.silent_maximum_update(upper)
@@ -2166,6 +2204,10 @@ class RotationWindow(QtWidgets.QMainWindow):
         rotation_view_action = view_menu.addAction("Show/hide rotation")
         rotation_view_action.setShortcut("Ctrl+P")
         rotation_view_action.triggered.connect(self.view_rot.add_rotation_view)
+        angles_display_action = view_menu.addAction(
+            "Show/hide rotation angles"
+        )
+        angles_display_action.triggered.connect(self.view_rot.add_angles_view)
         
         view_menu.addSeparator()
         rotation_action = view_menu.addAction("Rotate by angle")
@@ -2290,8 +2332,21 @@ class RotationWindow(QtWidgets.QMainWindow):
         later loading.
         """
 
-        channel = self.save_channel_multi("Save rotated localizations")
-        if channel is not None:
+        if any(self.window.view.z_converted):
+            m = QtWidgets.QMessageBox()
+            m.setWindowTitle("z coordinates have been converted to pixels")
+            ret = m.question(
+                self,
+                "",
+                "Convert z back to nm? (old picasso format)",
+                m.Yes | m.No,
+            )
+            if ret == m.Yes:
+                pixelsize = self.window.display_settings_dlg.pixelsize.value()
+                for channel in range(len(self.view_rot.locs)):
+                    if self.view_rot.z_converted[channel]:
+                        self.view_rot.locs[channel].z *= pixelsize
+                        self.view_rot.z_converted[channel] = False
             # rotation info
             angx = self.view_rot.angx * 180 / np.pi
             angy = self.view_rot.angy * 180 / np.pi

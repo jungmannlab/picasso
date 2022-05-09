@@ -27,7 +27,6 @@ def render(
     blur_method=None,
     min_blur_width=0,
     ang=None,
-    pixelsize=None,
 ):  
     """
     Renders locs.
@@ -52,9 +51,6 @@ def render(
     ang : tuple (default=None)
         Rotation angles of locs around x, y and z axes. If None, 
         locs are not rotated.
-    pixelsize : float (default=None)
-        Size of camera pixel (nm). Used in rotation as z coordinate
-        is given in nm, as opposed to x and y (pixels)
 
     Raises
     ------
@@ -84,7 +80,6 @@ def render(
             oversampling, 
             y_min, x_min, y_max, x_max, 
             ang=ang, 
-            pixelsize=pixelsize,
         )
     elif blur_method == "gaussian":
         # individual localization precision
@@ -94,7 +89,6 @@ def render(
             y_min, x_min, y_max, x_max, 
             min_blur_width, 
             ang=ang, 
-            pixelsize=pixelsize,
         )
     elif blur_method == "gaussian_iso":
         # individual localization precision (same for x and y)
@@ -104,7 +98,6 @@ def render(
             y_min, x_min, y_max, x_max, 
             min_blur_width, 
             ang=ang, 
-            pixelsize=pixelsize,
         )
     elif blur_method == "smooth":
         # one pixel blur
@@ -113,7 +106,6 @@ def render(
             oversampling, 
             y_min, x_min, y_max, x_max, 
             ang=ang, 
-            pixelsize=pixelsize,
         )
     elif blur_method == "convolve":
         # global localization precision
@@ -123,7 +115,6 @@ def render(
             y_min, x_min, y_max, x_max, 
             min_blur_width, 
             ang=ang, 
-            pixelsize=pixelsize,
         )
     else:
         raise Exception("blur_method not understood.")
@@ -185,7 +176,6 @@ def _render_setup3d(
     locs, 
     oversampling, 
     y_min, x_min, y_max, x_max, z_min, z_max, 
-    pixelsize,
 ):
     """
     Finds coordinates to be rendered in 3D and sets up an empty image 
@@ -209,8 +199,6 @@ def _render_setup3d(
         Minimum z coordinate to be rendered (nm)
     z_max : float
         Maximum z coordinate to be rendered (nm)
-    pixelsize : float
-        Size of camera pixel in nm
 
     Returns
     -------
@@ -234,7 +222,7 @@ def _render_setup3d(
 
     n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
     n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
-    n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min) / pixelsize))
+    n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min)))
     x = locs.x
     y = locs.y
     z = locs.z
@@ -251,23 +239,23 @@ def _render_setup3d(
     z = z[in_view]
     x = oversampling * (x - x_min)
     y = oversampling * (y - y_min)
-    z = oversampling * (z - z_min) / pixelsize
+    z = oversampling * (z - z_min)
     image = _np.zeros((n_pixel_y, n_pixel_x, n_pixel_z), dtype=_np.float32)
     return image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view
 
 # @_numba.njit
 # def _render_setupz(
-#     locs, oversampling, x_min, z_min, x_max, z_max, pixelsize
+#     locs, oversampling, x_min, z_min, x_max, z_max
 # ):
 #     n_pixel_x = int(_np.ceil(oversampling * (x_max - x_min)))
-#     n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min) / pixelsize))
+#     n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min)))
 #     x = locs.x
 #     z = locs.z
 #     in_view = (x > x_min) & (z > z_min) & (x < x_max) & (z < z_max)
 #     x = x[in_view]
 #     z = z[in_view]
 #     x = oversampling * (x - x_min)
-#     z = oversampling * (z - z_min) / pixelsize
+#     z = oversampling * (z - z_min)
 #     image = _np.zeros((n_pixel_x, n_pixel_z), dtype=_np.float32)
 #     return image, n_pixel_z, n_pixel_x, x, z, in_view
 
@@ -415,23 +403,28 @@ def _fill_gaussian_rot(
             [1.0, 0.0, 0.0],
             [0.0, _np.cos(angx), _np.sin(angx)],
             [0.0, -_np.sin(angx), _np.cos(angx)],
-        ]
+        ], dtype=_np.float32
     ) # rotation matrix around x axis
     rot_mat_y = _np.array(
         [
             [_np.cos(angy), 0.0, _np.sin(angy)],
             [0.0, 1.0, 0.0],
             [-_np.sin(angy), 0.0, _np.cos(angy)],
-        ]
+        ], dtype=_np.float32
     ) # rotation matrix around y axis
     rot_mat_z = _np.array(
         [
             [_np.cos(angz), -_np.sin(angz), 0.0],
             [_np.sin(angz), _np.cos(angz), 0.0],
             [0.0, 0.0, 1.0],
-        ]
+        ], dtype=_np.float32
     ) # rotation matrix around z axis
-    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z # rotation matrix...
+    # rot_matrix = _np.matmul(
+    #     _np.matmul(
+    #         rot_mat_x, rot_mat_y, dtype=_np.float32
+    #     ), rot_mat_z, dtype=_np.float32
+    # )
+    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z # rotation matrix
     rot_matrixT = _np.transpose(rot_matrix) # ...and its transpose
 
     # draw each localization separately
@@ -452,7 +445,7 @@ def _fill_gaussian_rot(
         j_max = int(x_ + max_x + 1)
         if j_max > n_pixel_x:
             j_max = n_pixel_x
-        max_z = (_DRAW_MAX_SIGMA * 2.5) * sz_ # loc precision is lower in z
+        max_z = (_DRAW_MAX_SIGMA * 3) * sz_ # loc precision is lower in z
         k_min = int(z_ - max_z)
         k_max = int(z_ + max_z + 1)
 
@@ -462,7 +455,7 @@ def _fill_gaussian_rot(
                 [sx_**2, 0, 0], 
                 [0, sy_**2, 0], 
                 [0, 0, sz_**2],
-            ]
+            ], dtype=_np.float32
         ) # covariance matrix (CM)
         cov_rot = rot_matrixT @ cov_matrix @ rot_matrix # rotated CM
         cri = inverse_3x3(cov_rot) # inverse of rotated CM
@@ -472,11 +465,11 @@ def _fill_gaussian_rot(
         # PDF of a rotated gaussian in 3D is calculated and 
         # image is summed over z axis
         for i in range(i_min, i_max):
-            b = i + 0.5 - y_
+            b = _np.float32(i + 0.5 - y_)
             for j in range(j_min, j_max):
-                a = j + 0.5 - x_
+                a = _np.float32(j + 0.5 - x_)
                 for k in range(k_min, k_max):   
-                    c = k + 0.5 - z_
+                    c = _np.float32(k + 0.5 - z_)
                     exponent = (
                         a*a * cri[0,0] + a*b * cri[0,1] + a*c * cri[0,2] 
                         + a*b * cri[1,0] + b*b * cri[1,1] + b*c * cri[1,2]
@@ -505,7 +498,7 @@ def inverse_3x3(a):
         Inverse of a
     """
 
-    c = _np.zeros((3,3))
+    c = _np.zeros((3,3), dtype=_np.float32)
     det = determinant_3x3(a)
 
     c[0,0] = (a[1,1] * a[2,2] - a[1,2] * a[2,1]) / det
@@ -540,7 +533,7 @@ def determinant_3x3(a):
         Determinant of a
     """
 
-    return (
+    return _np.float32(
         a[0,0] * (a[1,1] * a[2,2] - a[1,2] * a[2,1]) 
         - a[0,1] * (a[1,0] * a[2,2] - a[2,0] * a[1,2]) 
         + a[0,2] * (a[1,0] * a[2,1] - a[2,0] * a[1,1])
@@ -551,7 +544,6 @@ def render_hist(
     oversampling, 
     y_min, x_min, y_max, x_max, 
     ang=None, 
-    pixelsize=None,
 ):
     """
     Renders locs with no blur.
@@ -573,9 +565,6 @@ def render_hist(
     ang : tuple (default=None)
         Rotation angles of locs around x, y and z axes. If None, 
         locs are not rotated.
-    pixelsize : float (default=None)
-        Size of camera pixel (nm). Used in rotation as z coordinate
-        is given in nm, as opposed to x and y (pixels)
 
     Returns
     -------
@@ -596,15 +585,14 @@ def render_hist(
             oversampling,
             x_min, x_max, y_min, y_max, 
             ang, 
-            pixelsize,
         )
     _fill(image, x, y)
     return len(x), image
 
 # @_numba.jit(nopython=True, nogil=True)
-# def render_histz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
+# def render_histz(locs, oversampling, x_min, z_min, x_max, z_max):
 #     image, n_pixel_z, n_pixel_x, x, z, in_view = _render_setupz(
-#         locs, oversampling, x_min, z_min, x_max, z_max, pixelsize
+#         locs, oversampling, x_min, z_min, x_max, z_max
 #     )
 #     _fill(image, z, x)
 #     return len(x), image
@@ -614,7 +602,6 @@ def render_hist3d(
     locs, 
     oversampling, 
     y_min, x_min, y_max, x_max, z_min, z_max, 
-    pixelsize,
 ):
     """
     Renders locs in 3D with no blur.
@@ -638,8 +625,6 @@ def render_hist3d(
         Minimum z coordinate to be rendered (nm)
     z_max : float
         Maximum z coordinate to be rendered (nm)
-    pixelsize : float (default=None)
-        Size of camera pixel (nm)
 
     Returns
     -------
@@ -652,7 +637,6 @@ def render_hist3d(
         locs, 
         oversampling, 
         y_min, x_min, y_max, x_max, z_min, z_max, 
-        pixelsize,
     )
     _fill3d(image, x, y, z)
     return len(x), image
@@ -663,7 +647,6 @@ def render_gaussian(
     y_min, x_min, y_max, x_max, 
     min_blur_width, 
     ang=None, 
-    pixelsize=None,
 ):
     """
     Renders locs with with individual localization precision which 
@@ -688,9 +671,6 @@ def render_gaussian(
     ang : tuple (default=None)
         Rotation angles of locs around x, y and z axes. If None, 
         locs are not rotated.
-    pixelsize : float (default=None)
-        Size of camera pixel (nm). Used in rotation as z coordinate
-        is given in nm, as opposed to x and y (pixels)
 
     Returns
     -------
@@ -720,11 +700,10 @@ def render_gaussian(
             oversampling, 
             x_min, x_max, y_min, y_max, 
             ang, 
-            pixelsize,
         )
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
-        # for now, let lpz be twice the mean of lpx and lpy:
+        # for now, let lpz be twice the mean of lpx and lpy (todo):
         lpz = 2 * _np.mean(_np.stack((locs.lpx, locs.lpy)), axis=0)
         blur_depth = oversampling * _np.maximum(lpz, min_blur_width)
 
@@ -744,7 +723,6 @@ def render_gaussian_iso(
     y_min, x_min, y_max, x_max, 
     min_blur_width, 
     ang=None, 
-    pixelsize=None,
 ):
     """
     Renders locs with with individual localization precision which 
@@ -769,9 +747,6 @@ def render_gaussian_iso(
     ang : tuple (default=None)
         Rotation angles of locs around x, y and z axes. If None, 
         locs are not rotated.
-    pixelsize : float (default=None)
-        Size of camera pixel (nm). Used in rotation as z coordinate
-        is given in nm, as opposed to x and y (pixels)
 
     Returns
     -------
@@ -801,7 +776,6 @@ def render_gaussian_iso(
             oversampling, 
             x_min, x_max, y_min, y_max, 
             ang, 
-            pixelsize,
         )
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
@@ -825,7 +799,6 @@ def render_convolve(
     y_min, x_min, y_max, x_max, 
     min_blur_width, 
     ang=None, 
-    pixelsize=None,
 ):
     """
     Renders locs with with global localization precision, i.e. each
@@ -851,9 +824,6 @@ def render_convolve(
     ang : tuple (default=None)
         Rotation angles of locs around x, y and z axes. If None, 
         locs are not rotated.
-    pixelsize : float (default=None)
-        Size of camera pixel (nm). Used in rotation as z coordinate
-        is given in nm, as opposed to x and y (pixels)
 
     Returns
     -------
@@ -874,7 +844,6 @@ def render_convolve(
             oversampling, 
             x_min, x_max, y_min, y_max, 
             ang, 
-            pixelsize,
         ) 
 
     n = len(x)
@@ -895,7 +864,6 @@ def render_smooth(
     oversampling, 
     y_min, x_min, y_max, x_max, 
     ang=None, 
-    pixelsize=None,
 ):
     """
     Renders locs with with blur of one display pixel (set by 
@@ -918,9 +886,6 @@ def render_smooth(
     ang : tuple (default=None)
         Rotation angles of locs around x, y and z axes. If None, 
         locs are not rotated.
-    pixelsize : float (default=None)
-        Size of camera pixel (nm). Used in rotation as z coordinate
-        is given in nm, as opposed to x and y (pixels)
 
     Returns
     -------
@@ -942,7 +907,6 @@ def render_smooth(
             oversampling, 
             x_min, x_max, y_min, y_max, 
             ang, 
-            pixelsize,
         )
 
     n = len(x)
@@ -1027,7 +991,6 @@ def locs_rotation(
     oversampling,
     x_min, x_max, y_min, y_max, 
     ang, 
-    pixelsize,
 ):
     """
     Rotates localizations within a FOV.
@@ -1048,8 +1011,6 @@ def locs_rotation(
         Maximum x coordinate to be rendered (pixels)
     ang : tuple
         Rotation angles of locs around x, y and z axes.
-    pixelsize : float
-        Size of camera pixel (nm)
 
     Returns
     -------
@@ -1064,7 +1025,7 @@ def locs_rotation(
     """
 
     # z is translated to pixels
-    locs_coord = _np.stack((locs.x ,locs.y, locs.z/pixelsize)).T
+    locs_coord = _np.stack((locs.x ,locs.y, locs.z)).T
 
     # x and y are in range (x_min/y_min, x_max/y_max) so they need to be
     # shifted (scipy rotation is around origin)
