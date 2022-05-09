@@ -737,6 +737,7 @@ class DatasetDialog(QtWidgets.QDialog):
             del self.window.view.locs_paths[i]
             del self.window.view.infos[i]
             del self.window.view.index_blocks[i]
+            del self.window.view.z_converted[i]
 
             # delete attributes from the fast render dialog
             del self.window.view.all_locs[i]
@@ -3927,6 +3928,7 @@ class View(QtWidgets.QLabel):
         self.currentdrift = []
         self.x_render_cache = []
         self.x_render_state = False
+        self.z_converted = []
 
     def get_group_color(self, locs):
         """ 
@@ -4004,10 +4006,13 @@ class View(QtWidgets.QLabel):
         # than camera px. The section below tries to automatically 
         # adjust that
         if hasattr(locs, "z"):
-            if locs.z.max() - locs.z.min() > 50: # probably z in nm
+            if locs.z.max() - locs.z.min() > 100: # probably z in nm
                 print("Automatically converted z coordinates to px")
                 pixelsize = self.window.display_settings_dlg.pixelsize.value()
-                locs.z = locs.z / pixelsize
+                locs.z /= pixelsize
+                self.z_converted.append(True)
+            else:
+                self.z_converted.append(False)
 
         # update pixelsize
         for element in info:
@@ -9561,6 +9566,25 @@ class Window(QtWidgets.QMainWindow):
             )
             self.view.update_scene()
 
+    def convert_z(self):
+        """ temporary function to convert z back to nm if needed. """
+
+        if any(self.view.z_converted):
+            m = QtWidgets.QMessageBox()
+            m.setWindowTitle("z coordinates have been converted to pixels")
+            ret = m.question(
+                self,
+                "",
+                "Convert z back to nm? (old picasso format)",
+                m.Yes | m.No,
+            )
+            if ret == m.Yes:
+                pixelsize = self.display_settings_dlg.pixelsize.value()
+                for channel in range(len(self.view.locs_paths)):
+                    if self.view.z_converted[channel]:
+                        self.view.all_locs[channel].z *= pixelsize
+                        self.view.z_converted[channel] = False
+
     def save_pick_properties(self):
         """ 
         Saves pick properties in a given channel (or all channels). 
@@ -9568,6 +9592,7 @@ class Window(QtWidgets.QMainWindow):
 
         channel = self.view.save_channel_pickprops("Save localizations")
         if channel is not None:
+            self.convert_z()
             if channel is (len(self.view.locs_paths)):
                 print("Save all at once.")
                 suffix, ok = QtWidgets.QInputDialog.getText(
@@ -9601,6 +9626,7 @@ class Window(QtWidgets.QMainWindow):
 
         channel = self.view.save_channel_multi("Save localizations")
         if channel is not None:
+            self.convert_z()
             if channel is (len(self.view.locs_paths)):
                 print("Save all at once.")
                 suffix, ok = QtWidgets.QInputDialog.getText(
@@ -9650,8 +9676,8 @@ class Window(QtWidgets.QMainWindow):
         """
 
         channel = self.view.save_channel("Save picked localizations")
-
         if channel is not None:
+            self.convert_z()
             if channel is (len(self.view.locs_paths) + 1):
                 print("Multichannel")
                 base, ext = os.path.splitext(self.view.locs_paths[0])

@@ -915,6 +915,7 @@ class ViewRotation(QtWidgets.QLabel):
             self.viewport = self.fit_in_view_rotated(get_viewport=True)
             self.window.dataset_dialog = self.window.window.dataset_dialog
             self.paths = self.window.window.view.locs_paths
+            self.z_converted = self.window.window.view.z_converted
 
         # load locs in the pick and their metadata
         n_channels = len(self.paths)
@@ -2331,8 +2332,21 @@ class RotationWindow(QtWidgets.QMainWindow):
         later loading.
         """
 
-        channel = self.save_channel_multi("Save rotated localizations")
-        if channel is not None:
+        if any(self.window.view.z_converted):
+            m = QtWidgets.QMessageBox()
+            m.setWindowTitle("z coordinates have been converted to pixels")
+            ret = m.question(
+                self,
+                "",
+                "Convert z back to nm? (old picasso format)",
+                m.Yes | m.No,
+            )
+            if ret == m.Yes:
+                pixelsize = self.window.display_settings_dlg.pixelsize.value()
+                for channel in range(len(self.view_rot.locs)):
+                    if self.view_rot.z_converted[channel]:
+                        self.view_rot.locs[channel].z *= pixelsize
+                        self.view_rot.z_converted[channel] = False
             # rotation info
             angx = self.view_rot.angx * 180 / np.pi
             angy = self.view_rot.angy * 180 / np.pi
