@@ -4005,14 +4005,13 @@ class View(QtWidgets.QLabel):
         # Older Localize versions provide z coordinate in nm, rather 
         # than camera px. The section below tries to automatically 
         # adjust that
+        self.z_converted.append(False)
         if hasattr(locs, "z"):
             if locs.z.max() - locs.z.min() > 100: # probably z in nm
                 print("Automatically converted z coordinates to px")
                 pixelsize = self.window.display_settings_dlg.pixelsize.value()
                 locs.z /= pixelsize
-                self.z_converted.append(True)
-            else:
-                self.z_converted.append(False)
+                self.z_converted[-1] = True
 
         # update pixelsize
         for element in info:
@@ -4024,10 +4023,10 @@ class View(QtWidgets.QLabel):
 
         # append loaded data
         self.locs.append(locs)
+        self.all_locs.append(copy.copy(locs)) # for fast rendering
         self.infos.append(info)
         self.locs_paths.append(path)
         self.index_blocks.append(None)
-        self.all_locs.append(locs) # for fast rendering
 
         # try to load a drift .txt file:
         drift = None
@@ -5779,7 +5778,7 @@ class View(QtWidgets.QLabel):
 
         removelist = [] # picks to be removed
 
-        channel = self.get_channel("Undrift from picked")
+        channel = self.get_channel("Select traces")
         if channel is not None:
             if self._picks: # if there are picks present
                 params = {} # stores info about selecting picks
@@ -7537,7 +7536,7 @@ class View(QtWidgets.QLabel):
             )
 
             if ok:
-                locs = self.locs[channel]
+                locs = self.all_locs[channel]
                 info = self.infos[channel]
                 n_segments = postprocess.n_segments(info, segmentation)
                 seg_progress = lib.ProgressDialog(
@@ -7564,7 +7563,9 @@ class View(QtWidgets.QLabel):
                         np.round(finish_time-start_time, 1)
                     )
                     # sanity check and assign attributes
-                    self.locs[channel] = lib.ensure_sanity(locs, info)
+                    locs = lib.ensure_sanity(locs, info)
+                    self.all_locs[channel] = locs
+                    self.locs[channel] = copy.copy(locs)
                     self.index_blocks[channel] = None
                     self.add_drift(channel, drift)
                     self.update_scene()
@@ -7680,6 +7681,8 @@ class View(QtWidgets.QLabel):
         ) # find drift in y
 
         # Apply drift
+        self.all_locs[channel].x -= drift_x[self.all_locs[channel].frame]
+        self.all_locs[channel].y -= drift_y[self.all_locs[channel].frame]
         self.locs[channel].x -= drift_x[self.locs[channel].frame]
         self.locs[channel].y -= drift_y[self.locs[channel].frame]
 
@@ -7692,6 +7695,7 @@ class View(QtWidgets.QLabel):
             drift_z = self._undrift_from_picked_coordinate(
                 channel, picked_locs, "z"
             )
+            self.all_locs[channel].z -= drift_z[self.all_locs[channel].frame]
             self.locs[channel].z -= drift_z[self.locs[channel].frame]
             drift = lib.append_to_rec(drift, drift_z, "z")
 
@@ -7722,6 +7726,8 @@ class View(QtWidgets.QLabel):
         )
 
         # Apply drift
+        self.all_locs[channel].x -= drift_x[self.all_locs[channel].frame]
+        self.all_locs[channel].y -= drift_y[self.all_locs[channel].frame]
         self.locs[channel].x -= drift_x[self.locs[channel].frame]
         self.locs[channel].y -= drift_y[self.locs[channel].frame]
 
@@ -7756,11 +7762,14 @@ class View(QtWidgets.QLabel):
         drift.x = -drift.x
         drift.y = -drift.y
 
+        self.all_locs[channel].x -= drift.x[self.all_locs[channel].frame]
+        self.all_locs[channel].y -= drift.y[self.all_locs[channel].frame]
         self.locs[channel].x -= drift.x[self.locs[channel].frame]
         self.locs[channel].y -= drift.y[self.locs[channel].frame]
 
         if hasattr(drift, "z"):
             drift.z = -drift.z
+            self.all_locs[channel].z -= drift.z[self.all_locs[channel].frame]
             self.locs[channel].z -= drift.z[self.locs[channel].frame]
 
         self.add_drift(channel, drift)
@@ -7809,7 +7818,7 @@ class View(QtWidgets.QLabel):
         """ 
         Applies drift to locs from a .txt file. 
         
-        Assigns attributes and shifts self.locs.
+        Assigns attributes and shifts self.locs and self.all_locs.
         """
 
         channel = self.get_channel("Apply drift")
@@ -7825,17 +7834,42 @@ class View(QtWidgets.QLabel):
                         drift, 
                         dtype=[("x", "f"), ("y", "f"), ("z", "f")],
                     )
-                    self.locs[channel].x -= drift.x[self.locs[channel].frame]
-                    self.locs[channel].y -= drift.y[self.locs[channel].frame]
-                    self.locs[channel].z -= drift.z[self.locs[channel].frame]
+                    self.all_locs[channel].x -= drift.x[
+                        self.all_locs[channel].frame
+                    ]
+                    self.all_locs[channel].y -= drift.y[
+                        self.all_locs[channel].frame
+                    ]
+                    self.all_locs[channel].z -= drift.z[
+                        self.all_locs[channel].frame
+                    ]
+                    self.locs[channel].x -= drift.x[
+                        self.locs[channel].frame
+                    ]
+                    self.locs[channel].y -= drift.y[
+                        self.locs[channel].frame
+                    ]
+                    self.locs[channel].z -= drift.z[
+                        self.locs[channel].frame
+                    ]
                 else:
                     drift = (drift[:,0], drift[:,1])
                     drift = np.rec.array(
                         drift, 
                         dtype=[("x", "f"), ("y", "f")],
                     )
-                    self.locs[channel].x -= drift.x[self.locs[channel].frame]
-                    self.locs[channel].y -= drift.y[self.locs[channel].frame]
+                    self.all_locs[channel].x -= drift.x[
+                        self.all_locs[channel].frame
+                    ]
+                    self.all_locs[channel].y -= drift.y[
+                        self.all_locs[channel].frame
+                    ]
+                    self.locs[channel].x -= drift.x[
+                        self.locs[channel].frame
+                    ]
+                    self.locs[channel].y -= drift.y[
+                        self.locs[channel].frame
+                    ]
                 self._drift[channel] = drift
                 self._driftfiles[channel] = path
                 self.currentdrift[channel] = copy.copy(drift)
