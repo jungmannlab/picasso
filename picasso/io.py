@@ -168,7 +168,7 @@ class AbstractPicassoMovie(abc.ABC):
     """
     @abc.abstractmethod
     def __init__(self):
-        self.use_dask = False
+        pass
 
     @abc.abstractmethod
     def __enter__(self):
@@ -239,13 +239,11 @@ class ND2Movie(AbstractPicassoMovie):
     files.
     """
     def __init__(self, path, verbose=False):
-        super().__init__()
-        self.use_dask = True
         if verbose:
             print("Reading info from {}".format(path))
         self.path = _ospath.abspath(path)
         self.nd2file = nd2.ND2File(path)
-        self.data = self.nd2file.to_dask()
+        self.dask = self.nd2file.to_dask()
 
         required_dims = ['T', 'Y', 'X']  # exactly these, not more
         for dim in required_dims:
@@ -454,10 +452,6 @@ class ND2Movie(AbstractPicassoMovie):
     def __len__(self):
         return self.nd2file.sizes['T']
 
-    @property
-    def shape(self):
-        return self.data.shape
-
     def close(self):
         self.nd2file.close()
 
@@ -471,7 +465,7 @@ class ND2Movie(AbstractPicassoMovie):
                 the image data of the frame
         """
         # return self.nd2file.asarray()[index, ...]
-        return self.data[index, ...].compute()
+        return self.dask[index, ...].compute()
 
     def tofile(self, file_handle, byte_order=None):
         raise NotImplementedError('Cannot write .nd2 file.')
@@ -585,7 +579,7 @@ class ND2Movie(AbstractPicassoMovie):
 
     @property
     def dtype(self):
-        return _np.dtype(self.meta['Data Type'])
+        return self.meta['Data Type']
 
 
 class TiffMap:
@@ -824,7 +818,6 @@ class TiffMultiMap(AbstractPicassoMovie):
     accessed by TiffMap.
     """
     def __init__(self, path, memmap_frames=False, verbose=False):
-        super().__init__()
         self.path = _ospath.abspath(path)
         self.dir = _ospath.dirname(self.path)
         base, ext = _ospath.splitext(

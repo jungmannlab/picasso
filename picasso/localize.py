@@ -8,7 +8,6 @@
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 import numpy as _np
-import dask.array as _da
 import numba as _numba
 import multiprocessing as _multiprocessing
 import ctypes as _ctypes
@@ -227,100 +226,27 @@ def _cut_spots_frame(
     return j
 
 
-@_numba.jit(nopython=True, cache=False)
-def _cut_spots_daskmov(movie, l_mov, ids_frame, ids_x, ids_y, box, spots):
-    """Cuts the spots out of a movie frame by frame.
-
-    Args:
-        movie : 3D array (t, x, y)
-            the image data (can be dask or numpy array)
-        l_mov : 1D array, len 1
-            lenght of the movie (=t); in array to satisfy the combination of
-            range() and guvectorization
-        ids_frame, ids_x, ids_y : 1D array (k)
-            spot positions in the image data. Length: number of spots
-            identified
-        box : uneven int
-            the cut spot box size
-        spots : 3D array (k, box, box)
-            the cut spots
-    Returns:
-        spots : as above
-            the image-data filled spots
-    """
-    r = int(box / 2)
-    N = len(ids_frame)
-    start = 0
-    for frame_number in range(l_mov[0]):
-        frame = movie[frame_number, :, :]
-        start = _cut_spots_frame(
-            frame,
-            frame_number,
-            ids_frame,
-            ids_x,
-            ids_y,
-            r,
-            start,
-            N,
-            spots,
-        )
-    return spots
-
-
-def _cut_spots_framebyframe(movie, ids_frame, ids_x, ids_y, box, spots):
-    """Cuts the spots out of a movie frame by frame.
-
-    Args:
-        movie : 3D array (t, x, y)
-            the image data (can be dask or numpy array)
-        ids_frame, ids_x, ids_y : 1D array (k)
-            spot positions in the image data. Length: number of spots
-            identified
-        box : uneven int
-            the cut spot box size
-        spots : 3D array (k, box, box)
-            the cut spots
-    Returns:
-        spots : as above
-            the image-data filled spots
-    """
-    r = int(box / 2)
-    N = len(ids_frame)
-    start = 0
-    for frame_number, frame in enumerate(movie):
-        start = _cut_spots_frame(
-            frame,
-            frame_number,
-            ids_frame,
-            ids_x,
-            ids_y,
-            r,
-            start,
-            N,
-            spots,
-        )
-    return spots
-
-
 def _cut_spots(movie, ids, box):
     if isinstance(movie, _np.ndarray):
         return _cut_spots_numba(movie, ids.frame, ids.x, ids.y, box)
-    # elif isinstance(movie, _io.ND2Movie):
-    elif movie.use_dask:
-        """ Assumes that identifications are in order of frames! """
-        N = len(ids.frame)
-        spots = _np.zeros((N, box, box), dtype=movie.dtype)
-        spots = _da.apply_gufunc(
-            _cut_spots_daskmov,
-            '(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)',
-            movie.data, _np.array([len(movie)]), ids.frame, ids.x, ids.y, box, spots,
-            output_dtypes=[movie.dtype], allow_rechunk=True).compute()
-        return spots
     else:
         """ Assumes that identifications are in order of frames! """
+        r = int(box / 2)
+        N = len(ids.frame)
         spots = _np.zeros((N, box, box), dtype=movie.dtype)
-        spots = _cut_spots_framebyframe(
-            movie, ids.frame, ids.x, ids.y, box, spots)
+        start = 0
+        for frame_number, frame in enumerate(movie):
+            start = _cut_spots_frame(
+                frame,
+                frame_number,
+                ids.frame,
+                ids.x,
+                ids.y,
+                r,
+                start,
+                N,
+                spots,
+            )
         return spots
 
 
