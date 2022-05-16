@@ -9477,7 +9477,13 @@ class Window(QtWidgets.QMainWindow):
                     self.view.locs[channel][var_1] = (
                         self.view.locs[channel][var_2] / pixelsize + dist / 2
                     )  # exchange w. info
+                    self.view.all_locs[channel][var_1] = (
+                        self.view.all_locs[channel[var_2]]
+                        / pixelsize
+                        + dist / 2
+                    )
                     self.view.locs[channel][var_2] = templocs * pixelsize
+                    self.view.all_locs[channel][var_2] = templocs * pixelsize
                 else:
                     var_1 = input[1]
                     var_2 = input[2]
@@ -9485,7 +9491,11 @@ class Window(QtWidgets.QMainWindow):
                     self.view.locs[channel][var_1] = self.view.locs[channel][
                         var_2
                     ]
+                    self.view.all_locs[channel][var_1] = self.view.all_locs[
+                        channel
+                    ][var_2]
                     self.view.locs[channel][var_2] = templocs
+                    self.view.all_locs[channel][var_2] = templocs
 
             elif input[0] == "spiral" and len(input) == 3:
                 # spiral uses radius and turns
@@ -9505,14 +9515,22 @@ class Window(QtWidgets.QMainWindow):
                 self.view.locs[channel]["x"] = (
                     x * np.cos(x)
                 ) / scale_x * radius + self.view.locs[channel]["x"]
+                self.view.all_locs[channel]["x"] = (
+                    x * np.cos(x)
+                ) / scale_x * radius + self.view.all_locs[channel]["x"]
                 self.view.locs[channel]["y"] = (
                     x * np.sin(x)
                 ) / scale_x * radius + self.view.locs[channel]["y"]
+                self.view.all_locs[channel]["y"] = (
+                    x * np.sin(x)
+                ) / scale_x * radius + self.view.all_locs[channel]["y"]
 
             elif input[0] == "uspiral":
                 try: 
                     self.view.locs[channel]["x"] = self.x_spiral
+                    self.view.all_locs[channel]["x"] = self.x_spiral
                     self.view.locs[channel]["y"] = self.y_spiral
+                    self.view.all_locs[channel]["y"] = self.y_spiral
                     self.display_settings_dlg.render_check.setChecked(False)
                 except:
                     QtWidgets.QMessageBox.information(
@@ -9523,8 +9541,12 @@ class Window(QtWidgets.QMainWindow):
             else:
                 vars = self.view.locs[channel].dtype.names
                 exec(cmd, {k: self.view.locs[channel][k] for k in vars})
+                exec(cmd, {k: self.view.all_locs[channel][k] for k in vars})
             lib.ensure_sanity(
                 self.view.locs[channel], self.view.infos[channel]
+            )
+            lib.ensure_sanity(
+                self.view.all_locs[channel], self.view.infos[channel]
             )
             self.view.index_blocks[channel] = None
             self.view.update_scene()
