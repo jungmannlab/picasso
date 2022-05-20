@@ -4122,9 +4122,14 @@ class View(QtWidgets.QLabel):
 
         fit_in_view = len(self.locs) == 0
         paths = sorted(paths)
-        for path in paths:
+        pd = lib.ProgressDialog(
+                "Loading channels", 0, len(paths), self
+            )
+        pd.set_value(0)
+        for i, path in enumerate(paths):
             self.add(path, render=False)
-        if len(self.locs):  # in case loading was not succesful
+            pd.set_value(i+1)
+        if len(self.locs):  # if loading was successful
             if fit_in_view:
                 self.fit_in_view(autoscale=True)
             else:
@@ -6743,7 +6748,7 @@ class View(QtWidgets.QLabel):
             self.all_locs[channel] = lib.append_to_rec(
                 self.all_locs[channel], index, "index"
             ) # used for indexing picked localizations
-            
+
             # if locs were indexed before, they do not have the index 
             # attribute
             if self._pick_shape == "Circle":
@@ -6758,10 +6763,6 @@ class View(QtWidgets.QLabel):
             )
             self.locs[channel] = self.all_locs[channel]
             self.update_scene()
-
-        # todo: get channel for removing all channels at once
-        # todo: test multichannel
-        # todo: doesnt work after pick similar
 
     def remove_points(self):
         """ Removes all distance measurement points. """
