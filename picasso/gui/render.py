@@ -3775,6 +3775,8 @@ class View(QtWidgets.QLabel):
         Removes all distance measurement points
     remove_picks(position)
         Deletes picks at a given position
+    remove_picked_locs()
+        Deletes localizations in picks
     render_multi_channel(kwargs)
         Renders and paints multichannel locs
     render_scene()
@@ -6526,7 +6528,6 @@ class View(QtWidgets.QLabel):
             )
         channel = self.get_channel("Pick similar")
         if channel is not None:
-            locs = self.locs[channel]
             info = self.infos[channel]
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
@@ -6602,10 +6603,10 @@ class View(QtWidgets.QLabel):
             Channel of locs to be processed
         add_group : boolean (default=True)
             True if group id should be added to locs. Each pick will be
-            assigned a different id.
+            assigned a different id
         fast_render : boolean
             If True, takes self.locs, i.e. after randomly sampling a 
-            fraction of self.all_locs. If False, takes self.all_locs.
+            fraction of self.all_locs. If False, takes self.all_locs
 
         Returns
         -------
@@ -6727,6 +6728,40 @@ class View(QtWidgets.QLabel):
             self.update_scene(picks_only=True)
         else:
             self.add_picks(new_picks)
+
+    def remove_picked_locs(self):
+        """ 
+        Deletes localizations in picks. 
+
+        Temporarily adds index to localizations to compare which
+        localizations were picked.
+        """
+
+        channel = self.get_channel("Remove picked localizations")
+        if channel is not None:
+            index = np.arange(len(self.locs[channel]), dtype=np.int32)
+            self.all_locs[channel] = lib.append_to_rec(
+                self.all_locs[channel], index, "index"
+            ) # used for indexing picked localizations
+            
+            # if locs were indexed before, they do not have the index 
+            # attribute
+            if self._pick_shape == "Circle":
+                self.index_locs(channel)
+            all_picked_locs = self.picked_locs(channel, add_group=False)
+            idx = np.array([], dtype=np.int32)
+            for picked_locs in all_picked_locs:
+                idx = np.concatenate((idx, picked_locs.index))
+            self.all_locs[channel] = np.delete(self.all_locs[channel], idx)
+            self.all_locs[channel] = lib.remove_from_rec(
+                self.all_locs[channel], "index"
+            )
+            self.locs[channel] = self.all_locs[channel]
+            self.update_scene()
+
+        # todo: get channel for removing all channels at once
+        # todo: test multichannel
+        # todo: doesnt work after pick similar
 
     def remove_points(self):
         """ Removes all distance measurement points. """
@@ -8646,6 +8681,17 @@ class Window(QtWidgets.QMainWindow):
         pick_similar_action.setShortcut("Ctrl+Shift+P")
         pick_similar_action.triggered.connect(self.view.pick_similar)
 
+        clear_picks_action = tools_menu.addAction("Clear picks")
+        clear_picks_action.triggered.connect(self.view.clear_picks)
+        clear_picks_action.setShortcut("Ctrl+C")
+
+        remove_locs_picks_action = tools_menu.addAction(
+            "Remove localizations in picks"
+        )
+        remove_locs_picks_action.triggered.connect(
+            self.view.remove_picked_locs
+        )
+
         move_to_pick_action = tools_menu.addAction("Move to pick")
         move_to_pick_action.triggered.connect(self.view.move_to_pick)
 
@@ -8666,11 +8712,10 @@ class Window(QtWidgets.QMainWindow):
             "Select picks (XYZ scatter, 4 panels)"
         )
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
+
         filter_picks_action = tools_menu.addAction("Filter picks by locs")
         filter_picks_action.triggered.connect(self.view.filter_picks)
-        clear_picks_action = tools_menu.addAction("Clear picks")
-        clear_picks_action.triggered.connect(self.view.clear_picks)
-        clear_picks_action.setShortcut("Ctrl+C")
+
         pickadd_action = tools_menu.addAction("Subtract pick regions")
         pickadd_action.triggered.connect(self.subtract_picks)
 
