@@ -35,7 +35,7 @@ from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from sklearn.metrics.pairwise import euclidean_distances
-from sklearn.cluster import KMeans
+from sklearn.cluster import KMeans, DBSCAN
 from mpl_toolkits.mplot3d import axes3d
 from collections import Counter
 from h5py import File
@@ -45,6 +45,12 @@ import colorsys
 
 from .. import imageprocess, io, lib, postprocess, render
 from .rotation import RotationWindow
+
+try:
+    from hdbscan import HDBSCAN
+    HDBSCAN_IMPORTED = True
+except:
+    HDBSCAN_IMPORTED = False
 
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
@@ -1657,12 +1663,14 @@ class DbscanDialog(QtWidgets.QDialog):
         grid = QtWidgets.QGridLayout()
         grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
-        self.radius.setRange(0, 1e6)
-        self.radius.setValue(1)
+        self.radius.setRange(0.001, 1e6)
+        self.radius.setValue(0.1)
+        self.radius.setDecimals(3)
+        self.radius.setSingleStep(0.001)
         grid.addWidget(self.radius, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
         self.density = QtWidgets.QSpinBox()
-        self.density.setRange(0, 1e6)
+        self.density.setRange(1, 1e6)
         self.density.setValue(4)
         grid.addWidget(self.density, 1, 1)
         vbox.addLayout(grid)
@@ -1725,18 +1733,22 @@ class HdbscanDialog(QtWidgets.QDialog):
         grid = QtWidgets.QGridLayout()
         grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 0, 0)
         self.min_cluster = QtWidgets.QSpinBox()
-        self.min_cluster.setRange(0, 1e6)
+        self.min_cluster.setRange(1, 1e6)
         self.min_cluster.setValue(10)
         grid.addWidget(self.min_cluster, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
         self.min_samples = QtWidgets.QSpinBox()
-        self.min_samples.setRange(0, 1e6)
+        self.min_samples.setRange(1, 1e6)
         self.min_samples.setValue(10)
         grid.addWidget(self.min_samples, 1, 1)
-        grid.addWidget(QtWidgets.QLabel("Intercluster max. distance: (pixels)"), 2, 0)
+        grid.addWidget(QtWidgets.QLabel(
+            "Intercluster max.\ndistance (pixels):"), 2, 0
+        )
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
+        self.cluster_eps.setDecimals(3)
+        self.cluster_eps.setSingleStep(0.001)
         grid.addWidget(self.cluster_eps, 2, 1)
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -1766,6 +1778,340 @@ class HdbscanDialog(QtWidgets.QDialog):
             dialog.cluster_eps.value(),
             result == QtWidgets.QDialog.Accepted,
         )
+
+
+class TestClustererDialog(QtWidgets.QDialog):
+    """
+    A class to test clustering paramaters on a region of interest.
+
+    ...
+
+    Attributes
+    ----------
+
+    Methods
+    -------
+
+
+    # todo: doctrings
+    # todo: it needs some mechanism to know if the pick has been changed
+    or channels were added
+    # todo: test on both dbscan and hdbscan
+    # todo: apply the parameters to the whole fov
+    # todo: get the guessed values using nena
+    """
+
+    def __init__(self, window):
+        super().__init__()
+        self.setWindowTitle("Test Clusterer")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path) 
+        self.setWindowIcon(icon)  
+        self.cluster_ready = True
+        self.pick = None
+        self.pick_size = None
+        self.window = window
+        self.view = TestClustererView(self)
+        self.layout = QtWidgets.QGridLayout(self)
+        self.setLayout(self.layout)
+
+        # explanation
+        self.layout.addWidget(
+            QtWidgets.QLabel(
+                "Pick a region of interest \n"
+                "and test different\n"
+                "clustering parameters."
+            ), 0, 0
+        )
+
+        # parameters
+        parameters_box = QtWidgets.QGroupBox("Parameters")
+        self.layout.addWidget(parameters_box, 1, 0)
+        parameters_grid = QtWidgets.QGridLayout(parameters_box)
+        # parameters - choose clusterer
+        self.clusterer_name = QtWidgets.QComboBox()
+        for name in ['DBSCAN', 'HDBSCAN']:
+            self.clusterer_name.addItem(name)
+        self.clusterer_name.currentIndexChanged.connect(self.on_params_changed)
+        parameters_grid.addWidget(self.clusterer_name, 0, 0)
+        # parameters - clusterer parameters
+        parameters_stack = QtWidgets.QStackedWidget()
+        parameters_grid.addWidget(parameters_stack, 1, 0, 1, 2)
+        self.clusterer_name.currentIndexChanged.connect(
+            parameters_stack.setCurrentIndex
+        )
+        self.test_dbscan_params = TestDBSCANParams(self)
+        parameters_stack.addWidget(self.test_dbscan_params)
+        self.test_hdbscan_params = TestHDBSCANParams(self)
+        parameters_stack.addWidget(self.test_hdbscan_params)
+
+        # parameters - test
+        self.test_button = QtWidgets.QPushButton("Test")
+        self.test_button.clicked.connect(self.test_clusterer)
+        parameters_grid.addWidget(self.test_button, 2, 0)
+
+        # display settings
+        settings_box = QtWidgets.QGroupBox("Display settings")
+        self.layout.addWidget(settings_box, 2, 0)
+        settings_grid = QtWidgets.QGridLayout(settings_box)
+        # display settings - oversampling
+        settings_grid.addWidget(
+            QtWidgets.QLabel("Display pixel size (nm):"), 0, 0
+        )
+        self.disp_px_size = QtWidgets.QDoubleSpinBox()
+        self.disp_px_size.setRange(0.00001, 100000)
+        self.disp_px_size.setSingleStep(0.1)
+        self.disp_px_size.setDecimals(5)
+        self.disp_px_size.setKeyboardTracking(True)
+        self.disp_px_size.valueChanged.connect(self.view.on_disp_px_changed)
+        settings_grid.addWidget(self.disp_px_size, 0, 1)
+        # display settings - max contrast
+        settings_grid.addWidget(QtWidgets.QLabel("Max contrast"), 1, 0)
+        self.max = QtWidgets.QDoubleSpinBox()
+        self.max.setRange(0.00001, 1000000)
+        self.max.setSingleStep(0.1)
+        self.max.setDecimals(5)
+        self.max.setKeyboardTracking(True)
+        self.max.valueChanged.connect(self.view.on_contrast_changed)
+        settings_grid.addWidget(self.max, 1, 1)
+        # display settings - return to full FOV
+        self.full_fov = QtWidgets.QPushButton("Full FOV")
+        self.full_fov.clicked.connect(self.get_full_fov)
+        settings_grid.addWidget(self.full_fov, 2, 0)
+
+        # view
+        view_box = QtWidgets.QGroupBox("View")
+        self.layout.addWidget(view_box, 0, 1, 3, 1)
+        view_grid = QtWidgets.QGridLayout(view_box)
+        view_grid.addWidget(self.view)
+
+    def cluster(self, locs, params):
+        if hasattr(locs, "z"):
+            X = np.vstack((locs.x, locs.y, locs.z)).T
+        else:
+            X = np.vstack((locs.x, locs.y)).T
+        clusterer_name = self.clusterer_name.currentText()
+        if clusterer_name == 'DBSCAN':
+            clusterer = DBSCAN(
+                eps=params["radius"], 
+                min_samples=params["min_samples"],
+            ).fit(X)
+        elif clusterer_name == 'HDBSCAN':
+            if HDBSCAN_IMPORTED:
+                clusterer = HDBSCAN(
+                    min_samples=params["min_samples"], 
+                    min_cluster_size=params["min_cluster_size"],
+                    cluster_selection_epsilon=params["intercluster_radius"],
+                ).fit(X)
+            else:
+                return None
+        group = np.int32(clusterer.labels_)
+        locs = lib.append_to_rec(locs, group, "group")
+        locs = locs[locs.group != -1]
+        return locs
+
+    def get_cluster_params(self):
+        params = {}
+        clusterer_name = self.clusterer_name.currentText()
+        if clusterer_name == 'DBSCAN':
+            params["radius"] = self.test_dbscan_params.radius.value()
+            params["min_samples"] = self.test_dbscan_params.min_samples.value()
+        elif clusterer_name == 'HDBSCAN':
+            params["min_cluster_size"] = (
+                self.test_hdbscan_params.min_cluster_size.value()
+            )
+            params["min_samples"] = self.test_hdbscan_params.min_samples.value()
+            params["intercluster_radius"] = (
+                self.test_hdbscan_params.cluster_eps.value()
+            )
+        return params
+
+    def get_full_fov(self):
+        self.view.viewport = self.view.get_full_fov()
+        self.view.update_scene()
+
+    def on_params_changed(self):
+        self.cluster_ready = True
+
+    def test_clusterer(self):
+        if self.cluster_ready:
+            params = self.get_cluster_params()
+            # make sure one pick is present
+            if len(self.window.view._picks) != 1:
+                raise ValueError("Choose only one pick region")
+            # extract picked locs # todo: multichannel
+            channel = 0
+            locs = self.window.view.picked_locs(channel)[0]
+            pick = self.window.view._picks[0]
+            # cluster picked locs
+            locs = self.cluster(locs, params)
+            if locs is None:
+                message = (
+                    "No HDBSCAN detected. Please install\n"
+                    "the python package HDBSCAN*."
+                )
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "No HDBSCAN",
+                    message,
+                )
+            # render clustered locs
+            self.view.update_scene(locs=locs)
+        self.cluster_ready = False
+
+
+class TestDBSCANParams(QtWidgets.QWidget):
+    # todo: dosctirng
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        self.grid = QtWidgets.QGridLayout(self)
+        self.grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
+        self.radius = QtWidgets.QDoubleSpinBox()
+        self.radius.setKeyboardTracking(False)
+        self.radius.setRange(0.001, 1e6)
+        self.radius.setValue(0.1)
+        self.radius.setDecimals(3)
+        self.radius.setSingleStep(0.001)
+        self.radius.valueChanged.connect(self.dialog.on_params_changed)
+        self.grid.addWidget(self.radius, 0, 1)
+
+        self.grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
+        self.min_samples = QtWidgets.QSpinBox()
+        self.min_samples.setKeyboardTracking(False)
+        self.min_samples.setValue(4)
+        self.min_samples.setRange(1, 1e6)
+        self.min_samples.setSingleStep(1)
+        self.min_samples.valueChanged.connect(self.dialog.on_params_changed)
+        self.grid.addWidget(self.min_samples, 1, 1)
+        self.grid.setRowStretch(2, 1)
+ 
+
+class TestHDBSCANParams(QtWidgets.QWidget):
+    # todo doctrings
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        self.grid = QtWidgets.QGridLayout(self)
+        self.grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 0, 0)
+        self.min_cluster_size = QtWidgets.QSpinBox()
+        self.min_cluster_size.setKeyboardTracking(False)
+        self.min_cluster_size.setValue(10)
+        self.min_cluster_size.setRange(1, 1e6)
+        self.min_cluster_size.setSingleStep(1)
+        self.min_cluster_size.valueChanged.connect(self.dialog.on_params_changed)   
+        self.grid.addWidget(self.min_cluster_size, 0, 1)
+
+        self.grid.addWidget(QtWidgets.QLabel("Min. samples"), 1, 0)     
+        self.min_samples = QtWidgets.QSpinBox()
+        self.min_samples.setKeyboardTracking(False)
+        self.min_samples.setValue(10)
+        self.min_samples.setRange(1, 1e6)
+        self.min_samples.setSingleStep(1)
+        self.min_samples.valueChanged.connect(self.dialog.on_params_changed)
+        self.grid.addWidget(self.min_samples, 1, 1)
+
+        self.grid.addWidget(
+            QtWidgets.QLabel("Intercluster max.\ndistance (pixels):"), 2, 0
+        )
+        self.cluster_eps = QtWidgets.QDoubleSpinBox()
+        self.cluster_eps.setKeyboardTracking(False)
+        self.cluster_eps.setRange(0, 1e6)
+        self.cluster_eps.setValue(0.0)
+        self.cluster_eps.setDecimals(3)
+        self.cluster_eps.setSingleStep(0.001)
+        self.grid.addWidget(self.cluster_eps, 2, 1)
+        self.grid.setRowStretch(3, 1)
+
+
+class TestClustererView(QtWidgets.QLabel):
+    """
+
+    # todo: docstrings
+    #todo: zoom in and out, panning using +/- and arrow buttons
+    #todo: change display settings by the user
+    """
+
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        self.view = dialog.window.view
+        self.viewport = None
+        self.locs = None
+        self.setMinimumSize(600, 600)
+        self.setMaximumSize(600, 600)
+        # self.count = 0
+
+    def on_disp_px_changed(self): # todo
+        # get the oversampling 
+        pass
+
+    def on_contrast_changed(self): # todo
+        pass    
+
+    def update_scene(self, locs=None):
+        if locs is None:
+            locs = self.locs
+        else:
+            self.locs = locs
+
+        if self.viewport is None:
+            self.viewport = self.get_full_fov()
+
+        # get group color index
+        group_color = self.view.get_group_color(locs)
+
+        # split locs according to their group colors
+        locs = [locs[group_color == _] for _ in range(N_GROUP_COLORS)]
+
+        # render kwargs
+        oversampling = max(
+            self.width() / (self.viewport[1][1] - self.viewport[0][1]),
+            self.height() / (self.viewport[1][0] - self.viewport[0][0]),
+        )
+        kwargs = {
+            'oversampling': oversampling,
+            'viewport': self.viewport,
+            'blur_method': 'convolve',
+            'min_blur_width': 0,
+        }
+
+        # render all channels
+        renderings = [render.render(_, **kwargs) for _ in locs]
+        images = np.array([_[1] for _ in renderings])
+
+        images = self.view.scale_contrast(images, autoscale=True)
+        Y, X = images.shape[1:]
+        bgra = np.zeros((Y, X, 4), dtype=np.float32)
+        colors = get_colors(N_GROUP_COLORS)
+        for color, image in zip(colors, images):
+            bgra[:, :, 0] += color[2] * image
+            bgra[:, :, 1] += color[1] * image
+            bgra[:, :, 2] += color[0] * image
+
+        bgra = np.minimum(bgra, 1)
+        bgra = self.view.to_8bit(bgra)
+        bgra[:, :, 3].fill(255)
+        # qimage = QtGui.QImage(
+        #     bgra.data, X, Y, QtGui.QImage.Format_RGB32
+        # ).scaled(600, 600, QtCore.Qt.KeepAspectRatioByExpanding)
+        # path, ext = os.path.splitext(self.view.locs_paths[0])
+        # qimage.save(path + "_" + str(self.count) + ".png")
+        # self.count += 1
+        # pixmap = QtGui.QPixmap.fromImage(qimage)
+        self.setPixmap(QtGui.QPixmap.fromImage(
+            QtGui.QImage(
+                bgra.data, X, Y, QtGui.QImage.Format_RGB32
+            ).scaled(600, 600, QtCore.Qt.KeepAspectRatioByExpanding)
+        ))
+
+    def get_full_fov(self):
+        x_min = np.min(self.locs.x) - 5
+        x_max = np.max(self.locs.x) + 5
+        y_min = np.min(self.locs.y) - 5
+        y_max = np.max(self.locs.y) + 5
+        return ([y_min, x_min], [y_max, x_max])
 
 
 class DriftPlotWindow(QtWidgets.QTabWidget):
@@ -2751,7 +3097,9 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
         self.pick_annotation.stateChanged.connect(self.update_scene_with_cache)
         pick_grid.addWidget(self.pick_annotation, 3, 0)
 
-        self.point_picks = QtWidgets.QCheckBox("Display circular picks as points")
+        self.point_picks = QtWidgets.QCheckBox(
+            "Display circular picks as points"
+        )
         self.point_picks.stateChanged.connect(self.update_scene_with_cache)
         pick_grid.addWidget(self.point_picks, 4, 0)
 
@@ -8543,6 +8891,7 @@ class Window(QtWidgets.QMainWindow):
         self.dataset_dialog = DatasetDialog(self)  
         self.fast_render_dialog = FastRenderDialog(self)
         self.window_rot = RotationWindow(self)
+        self.test_clusterer_dialog = TestClustererDialog(self)
 
         self.dialogs = [
             self.display_settings_dlg,
@@ -8553,6 +8902,7 @@ class Window(QtWidgets.QMainWindow):
             self.slicer_dialog,
             self.window_rot,
             self.fast_render_dialog,
+            self.test_clusterer_dialog,
         ]
         
         # menu bar
@@ -8792,6 +9142,10 @@ class Window(QtWidgets.QMainWindow):
         dbscan_action.triggered.connect(self.view.dbscan)
         hdbscan_action = clustering_menu.addAction("HDBSCAN")
         hdbscan_action.triggered.connect(self.view.hdbscan)
+        test_cluster_action = clustering_menu.addAction("Test clusterer")
+        test_cluster_action.triggered.connect(
+            self.test_clusterer_dialog.show
+        )
 
         self.load_user_settings()        
 
