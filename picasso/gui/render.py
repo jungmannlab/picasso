@@ -1796,9 +1796,9 @@ class TestClustererDialog(QtWidgets.QDialog):
     # todo: doctrings
     # todo: it needs some mechanism to know if the pick has been changed
     or channels were added
-    # todo: test on both dbscan and hdbscan
-    # todo: apply the parameters to the whole fov
-    # todo: get the guessed values using nena
+    # todo: tidy up the code, make more functions
+    # todo: multichannel
+    # todo: test on remote desktop
     """
 
     def __init__(self, window):
@@ -1808,7 +1808,6 @@ class TestClustererDialog(QtWidgets.QDialog):
         icon_path = os.path.join(this_directory, "icons", "render.ico")
         icon = QtGui.QIcon(icon_path) 
         self.setWindowIcon(icon)  
-        self.cluster_ready = True
         self.pick = None
         self.pick_size = None
         self.window = window
@@ -1819,9 +1818,9 @@ class TestClustererDialog(QtWidgets.QDialog):
         # explanation
         self.layout.addWidget(
             QtWidgets.QLabel(
-                "Pick a region of interest \n"
-                "and test different\n"
-                "clustering parameters."
+                "Pick a region of interest and test different clustering\n"
+                "parameters.\n\n"
+                "Use shortcuts Alt + {W, A, S, D, -, =} to change FOV.\n"
             ), 0, 0
         )
 
@@ -1829,12 +1828,13 @@ class TestClustererDialog(QtWidgets.QDialog):
         parameters_box = QtWidgets.QGroupBox("Parameters")
         self.layout.addWidget(parameters_box, 1, 0)
         parameters_grid = QtWidgets.QGridLayout(parameters_box)
+
         # parameters - choose clusterer
         self.clusterer_name = QtWidgets.QComboBox()
         for name in ['DBSCAN', 'HDBSCAN']:
             self.clusterer_name.addItem(name)
-        self.clusterer_name.currentIndexChanged.connect(self.on_params_changed)
         parameters_grid.addWidget(self.clusterer_name, 0, 0)
+
         # parameters - clusterer parameters
         parameters_stack = QtWidgets.QStackedWidget()
         parameters_grid.addWidget(parameters_stack, 1, 0, 1, 2)
@@ -1846,45 +1846,90 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.test_hdbscan_params = TestHDBSCANParams(self)
         parameters_stack.addWidget(self.test_hdbscan_params)
 
-        # parameters - test
-        self.test_button = QtWidgets.QPushButton("Test")
-        self.test_button.clicked.connect(self.test_clusterer)
-        parameters_grid.addWidget(self.test_button, 2, 0)
-
-        # display settings
-        settings_box = QtWidgets.QGroupBox("Display settings")
-        self.layout.addWidget(settings_box, 2, 0)
-        settings_grid = QtWidgets.QGridLayout(settings_box)
-        # display settings - oversampling
-        settings_grid.addWidget(
-            QtWidgets.QLabel("Display pixel size (nm):"), 0, 0
+        # parameters - display mode
+        self.display_all_locs = QtWidgets.QCheckBox(
+            "Display non-clustered localizations"
         )
-        self.disp_px_size = QtWidgets.QDoubleSpinBox()
-        self.disp_px_size.setRange(0.00001, 100000)
-        self.disp_px_size.setSingleStep(0.1)
-        self.disp_px_size.setDecimals(5)
-        self.disp_px_size.setKeyboardTracking(True)
-        self.disp_px_size.valueChanged.connect(self.view.on_disp_px_changed)
-        settings_grid.addWidget(self.disp_px_size, 0, 1)
-        # display settings - max contrast
-        settings_grid.addWidget(QtWidgets.QLabel("Max contrast"), 1, 0)
-        self.max = QtWidgets.QDoubleSpinBox()
-        self.max.setRange(0.00001, 1000000)
-        self.max.setSingleStep(0.1)
-        self.max.setDecimals(5)
-        self.max.setKeyboardTracking(True)
-        self.max.valueChanged.connect(self.view.on_contrast_changed)
-        settings_grid.addWidget(self.max, 1, 1)
+        self.display_all_locs.setChecked(False)
+        parameters_grid.addWidget(self.display_all_locs, 2, 0, 1, 2)
+
+        # parameters - get recommended values
+        calculate_params_button = QtWidgets.QPushButton(
+            "Calculate recommended values"
+        )
+        calculate_params_button.clicked.connect(self.calculate_params)
+        parameters_grid.addWidget(calculate_params_button, 3, 0, 1, 2)
+
+        # parameters - test
+        test_button = QtWidgets.QPushButton("Test")
+        test_button.clicked.connect(self.test_clusterer)
+        test_button.setDefault(True)
+        parameters_grid.addWidget(test_button, 4, 0)
+
         # display settings - return to full FOV
-        self.full_fov = QtWidgets.QPushButton("Full FOV")
-        self.full_fov.clicked.connect(self.get_full_fov)
-        settings_grid.addWidget(self.full_fov, 2, 0)
+        full_fov = QtWidgets.QPushButton("Full FOV")
+        full_fov.clicked.connect(self.get_full_fov)
+        parameters_grid.addWidget(full_fov, 4, 1)
 
         # view
         view_box = QtWidgets.QGroupBox("View")
         self.layout.addWidget(view_box, 0, 1, 3, 1)
         view_grid = QtWidgets.QGridLayout(view_box)
         view_grid.addWidget(self.view)
+
+        # shortcuts for navigating in view
+        # arrows
+        left_action = QtWidgets.QAction(self)
+        left_action.setShortcut("Alt+A")
+        left_action.triggered.connect(self.view.to_left)
+        self.addAction(left_action)
+
+        right_action = QtWidgets.QAction(self)
+        right_action.setShortcut("Alt+D")
+        right_action.triggered.connect(self.view.to_right)
+        self.addAction(right_action)
+
+        up_action = QtWidgets.QAction(self)
+        up_action.setShortcut("Alt+W")
+        up_action.triggered.connect(self.view.to_up)
+        self.addAction(up_action)
+
+        down_action = QtWidgets.QAction(self)
+        down_action.setShortcut("Alt+S")
+        down_action.triggered.connect(self.view.to_down)
+        self.addAction(down_action)
+
+        # zooming
+        zoomin_action = QtWidgets.QAction(self)
+        zoomin_action.setShortcut("Alt+=")
+        zoomin_action.triggered.connect(self.view.zoom_in)
+        self.addAction(zoomin_action)
+
+        zoomout_action = QtWidgets.QAction(self)
+        zoomout_action.setShortcut("Alt+-")
+        zoomout_action.triggered.connect(self.view.zoom_out)
+        self.addAction(zoomout_action)
+
+    def calculate_params(self):
+        clusterer_name = self.clusterer_name.currentText()
+        if clusterer_name == 'DBSCAN':
+            self.calculate_params_dbscan()
+        elif clusterer_name == 'HDBSCAN':
+            self.calculate_params_hdbscan()
+
+    def calculate_params_dbscan(self):
+        nena_lp = self.window.info_dialog.lp # nena loc precision
+        if not nena_lp: # if not calculated already
+            self.window.info_dialog.calculate_nena_lp()
+            nena_lp = self.window.info_dialog.lp
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        nena_lp /= pixelsize
+        self.test_dbscan_params.radius.setValue(nena_lp)
+
+    def calculate_params_hdbscan(self):
+        QtWidgets.QMessageBox.information(
+            self, "", "Not implemented for HDBSCAN yet."
+        )
 
     def cluster(self, locs, params):
         if hasattr(locs, "z"):
@@ -1909,6 +1954,7 @@ class TestClustererDialog(QtWidgets.QDialog):
         group = np.int32(clusterer.labels_)
         locs = lib.append_to_rec(locs, group, "group")
         locs = locs[locs.group != -1]
+        self.view.group_color = self.window.view.get_group_color(locs)
         return locs
 
     def get_cluster_params(self):
@@ -1928,37 +1974,49 @@ class TestClustererDialog(QtWidgets.QDialog):
         return params
 
     def get_full_fov(self):
-        self.view.viewport = self.view.get_full_fov()
-        self.view.update_scene()
-
-    def on_params_changed(self):
-        self.cluster_ready = True
+        if self.view.viewport:
+            self.view.viewport = self.view.get_full_fov()
+            self.view.update_scene()
 
     def test_clusterer(self):
-        if self.cluster_ready:
-            params = self.get_cluster_params()
-            # make sure one pick is present
-            if len(self.window.view._picks) != 1:
-                raise ValueError("Choose only one pick region")
-            # extract picked locs # todo: multichannel
-            channel = 0
-            locs = self.window.view.picked_locs(channel)[0]
-            pick = self.window.view._picks[0]
-            # cluster picked locs
-            locs = self.cluster(locs, params)
-            if locs is None:
-                message = (
-                    "No HDBSCAN detected. Please install\n"
-                    "the python package HDBSCAN*."
-                )
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "No HDBSCAN",
-                    message,
-                )
-            # render clustered locs
-            self.view.update_scene(locs=locs)
-        self.cluster_ready = False
+        params = self.get_cluster_params()
+        # make sure one pick is present
+        if len(self.window.view._picks) != 1:
+            raise ValueError("Choose only one pick region")
+        # extract picked locs # todo: multichannel
+        channel = 0
+        locs = self.window.view.picked_locs(channel)[0]
+        # cluster picked locs
+        self.view.locs = self.cluster(locs, params)
+        # update viewport if pick has changed
+        if self.pick_changed():
+            self.view.viewport = self.view.get_full_fov()
+        if self.view.locs is None:
+            message = (
+                "No HDBSCAN detected. Please install\n"
+                "the python package HDBSCAN*."
+            )
+            QtWidgets.QMessageBox.information(
+                self,
+                "No HDBSCAN",
+                message,
+            )
+            return
+        # render clustered locs
+        self.view.update_scene()
+
+    def pick_changed(self):
+        pick = self.window.view._picks[0]
+        if self.window.tools_settings_dialog.pick_shape == "Circle":
+            pick_size = self.window.tools_settings_dialog.pick_diameter.value()
+        else:
+            pick_size = self.window.tools_settings_dialog.pick_width.value()
+        if pick != self.pick or pick_size != self.pick_size:
+            self.pick = pick
+            self.pick_size = pick_size
+            return True
+        else:
+            return False
 
 
 class TestDBSCANParams(QtWidgets.QWidget):
@@ -1974,7 +2032,6 @@ class TestDBSCANParams(QtWidgets.QWidget):
         self.radius.setValue(0.1)
         self.radius.setDecimals(3)
         self.radius.setSingleStep(0.001)
-        self.radius.valueChanged.connect(self.dialog.on_params_changed)
         self.grid.addWidget(self.radius, 0, 1)
 
         self.grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
@@ -1983,7 +2040,6 @@ class TestDBSCANParams(QtWidgets.QWidget):
         self.min_samples.setValue(4)
         self.min_samples.setRange(1, 1e6)
         self.min_samples.setSingleStep(1)
-        self.min_samples.valueChanged.connect(self.dialog.on_params_changed)
         self.grid.addWidget(self.min_samples, 1, 1)
         self.grid.setRowStretch(2, 1)
  
@@ -2000,7 +2056,6 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         self.min_cluster_size.setValue(10)
         self.min_cluster_size.setRange(1, 1e6)
         self.min_cluster_size.setSingleStep(1)
-        self.min_cluster_size.valueChanged.connect(self.dialog.on_params_changed)   
         self.grid.addWidget(self.min_cluster_size, 0, 1)
 
         self.grid.addWidget(QtWidgets.QLabel("Min. samples"), 1, 0)     
@@ -2009,7 +2064,6 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         self.min_samples.setValue(10)
         self.min_samples.setRange(1, 1e6)
         self.min_samples.setSingleStep(1)
-        self.min_samples.valueChanged.connect(self.dialog.on_params_changed)
         self.grid.addWidget(self.min_samples, 1, 1)
 
         self.grid.addWidget(
@@ -2029,8 +2083,6 @@ class TestClustererView(QtWidgets.QLabel):
     """
 
     # todo: docstrings
-    #todo: zoom in and out, panning using +/- and arrow buttons
-    #todo: change display settings by the user
     """
 
     def __init__(self, dialog):
@@ -2038,53 +2090,117 @@ class TestClustererView(QtWidgets.QLabel):
         self.dialog = dialog
         self.view = dialog.window.view
         self.viewport = None
+        self.oversampling = None
         self.locs = None
-        self.setMinimumSize(600, 600)
-        self.setMaximumSize(600, 600)
-        # self.count = 0
+        self.setMinimumSize(500, 500)
+        self.setMaximumSize(500, 500)
 
-    def on_disp_px_changed(self): # todo
-        # get the oversampling 
-        pass
+    def to_left(self):
+        if self.viewport is not None:
+            w = self.viewport_width()
+            dx = -0.3 * w
+            self.shift_viewport(dx, 0)
 
-    def on_contrast_changed(self): # todo
-        pass    
+    def to_right(self):
+        if self.viewport is not None:
+            w = self.viewport_width()
+            dx = 0.3 * w
+            self.shift_viewport(dx, 0)
 
-    def update_scene(self, locs=None):
-        if locs is None:
-            locs = self.locs
+    def to_up(self):
+        if self.viewport is not None:
+            h = self.viewport_height()
+            dy = -0.3 * h
+            self.shift_viewport(0, dy)
+
+    def to_down(self):
+        if self.viewport is not None:
+            h = self.viewport_height()
+            dy = 0.3 * h
+            self.shift_viewport(0, dy)
+
+    def zoom_in(self):
+        if self.viewport is not None:
+            self.zoom(1 / ZOOM)
+
+    def zoom_out(self):
+        if self.viewport is not None:
+            self.zoom(ZOOM)
+
+    def zoom(self, factor):
+        height = self.viewport_height()
+        width = self.viewport_width()
+        new_height = height * factor
+        new_width = width * factor
+
+        center_y, center_x = self.view.viewport_center(self.viewport)
+
+        self.viewport = [
+            (
+                center_y - new_height / 2,
+                center_x - new_width / 2,
+            ),
+            (
+                center_y + new_height / 2,
+                center_x + new_width / 2,
+            ),
+        ]
+
+        self.update_scene()
+
+    def viewport_width(self):
+        return self.viewport[1][1] - self.viewport[0][1]
+
+    def viewport_height(self):
+        return self.viewport[1][0] - self.viewport[0][0]
+
+    def shift_viewport(self, dx, dy):
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        self.viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
+        self.update_scene()   
+
+    def get_optimal_oversampling(self):
+        height = self.viewport_height()
+        width = self.viewport_width()
+        return 500 / min(height, width)
+
+    def split_locs(self):
+        if self.dialog.display_all_locs.isChecked():
+            channel = 0 # todo: multichannel
+            locs = [
+                self.dialog.window.view.picked_locs(channel)[0],
+                self.locs,
+            ]
         else:
-            self.locs = locs
+            locs = [
+                self.locs[self.group_color == _] for _ in range(N_GROUP_COLORS)
+            ]
+        return locs
 
+
+    def update_scene(self):
         if self.viewport is None:
             self.viewport = self.get_full_fov()
 
-        # get group color index
-        group_color = self.view.get_group_color(locs)
-
         # split locs according to their group colors
-        locs = [locs[group_color == _] for _ in range(N_GROUP_COLORS)]
+        locs = self.split_locs()
 
         # render kwargs
-        oversampling = max(
-            self.width() / (self.viewport[1][1] - self.viewport[0][1]),
-            self.height() / (self.viewport[1][0] - self.viewport[0][0]),
-        )
+        self.oversampling = self.get_optimal_oversampling()
         kwargs = {
-            'oversampling': oversampling,
+            'oversampling': self.oversampling,
             'viewport': self.viewport,
             'blur_method': 'convolve',
             'min_blur_width': 0,
         }
 
         # render all channels
-        renderings = [render.render(_, **kwargs) for _ in locs]
-        images = np.array([_[1] for _ in renderings])
+        images = [render.render(_, **kwargs)[1] for _ in locs]
 
-        images = self.view.scale_contrast(images, autoscale=True)
+        images = self.scale_contrast(images)
         Y, X = images.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
-        colors = get_colors(N_GROUP_COLORS)
+        colors = get_colors(len(locs))
         for color, image in zip(colors, images):
             bgra[:, :, 0] += color[2] * image
             bgra[:, :, 1] += color[1] * image
@@ -2093,24 +2209,33 @@ class TestClustererView(QtWidgets.QLabel):
         bgra = np.minimum(bgra, 1)
         bgra = self.view.to_8bit(bgra)
         bgra[:, :, 3].fill(255)
-        # qimage = QtGui.QImage(
-        #     bgra.data, X, Y, QtGui.QImage.Format_RGB32
-        # ).scaled(600, 600, QtCore.Qt.KeepAspectRatioByExpanding)
-        # path, ext = os.path.splitext(self.view.locs_paths[0])
-        # qimage.save(path + "_" + str(self.count) + ".png")
-        # self.count += 1
-        # pixmap = QtGui.QPixmap.fromImage(qimage)
-        self.setPixmap(QtGui.QPixmap.fromImage(
-            QtGui.QImage(
-                bgra.data, X, Y, QtGui.QImage.Format_RGB32
-            ).scaled(600, 600, QtCore.Qt.KeepAspectRatioByExpanding)
-        ))
+        qimage = QtGui.QImage(
+            bgra.data, X, Y, QtGui.QImage.Format_RGB32
+        ).scaled(500, 500, QtCore.Qt.KeepAspectRatioByExpanding)
+        time.sleep(0.5) # rendering sometimes does not work for some reason
+        self.setPixmap(QtGui.QPixmap.fromImage(qimage))
+
+    def scale_contrast(self, images):
+        max_ = min(
+            [
+                _.max() 
+                for _ in images  # if no locs were clustered
+                if _.max() != 0  # the maximum value in image is 0.0
+            ]
+        )
+        upper = INITIAL_REL_MAXIMUM * max_
+
+        images = images / upper
+        images[~np.isfinite(images)] = 0
+        images = np.minimum(images, 1.0)
+        images = np.maximum(images, 0.0)
+        return images
 
     def get_full_fov(self):
-        x_min = np.min(self.locs.x) - 5
-        x_max = np.max(self.locs.x) + 5
-        y_min = np.min(self.locs.y) - 5
-        y_max = np.max(self.locs.y) + 5
+        x_min = np.min(self.locs.x) - 1
+        x_max = np.max(self.locs.x) + 1
+        y_min = np.min(self.locs.y) - 1
+        y_max = np.max(self.locs.y) + 1
         return ([y_min, x_min], [y_max, x_max])
 
 
@@ -2365,6 +2490,8 @@ class InfoDialog(QtWidgets.QDialog):
         contains the calculated or input influx rate (1/frames)
     locs_label : QLabel
         shows the number of locs in the current FOV
+    lp: float
+        NeNA localization precision (pixels). None, if not calculated yet
     max_dark_time : QSpinBox
         contains the maximum gap between localizations (frames) to be
         considered as belonging to the same group of linked locs
@@ -2424,6 +2551,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.window = window
         self.setWindowTitle("Info")
         self.setModal(False)
+        self.lp = None
         self.change_fov = ChangeFOV(self.window)
         vbox = QtWidgets.QVBoxLayout(self)
         # Display
@@ -2570,9 +2698,9 @@ class InfoDialog(QtWidgets.QDialog):
             result_lp = postprocess.nena(locs, info, progress.set_value)
             self.nena_label = QtWidgets.QLabel()
             self.movie_grid.addWidget(self.nena_label, 1, 1)
-            self.nena_result, lp = result_lp
-            lp *= self.window.display_settings_dlg.pixelsize.value()
-            self.nena_label.setText("{:.3} nm".format(lp))
+            self.nena_result, self.lp = result_lp
+            self.lp *= self.window.display_settings_dlg.pixelsize.value()
+            self.nena_label.setText("{:.3} nm".format(self.lp))
             show_plot_button = QtWidgets.QPushButton("Show plot")
             self.movie_grid.addWidget(
                 show_plot_button, self.movie_grid.rowCount() - 1, 2
@@ -9296,7 +9424,7 @@ class Window(QtWidgets.QMainWindow):
                         (
                             row[0] * pixelsize,
                             row[1] * pixelsize,
-                            row[2],
+                            row[2] * pixelsize,
                             1,
                             row[3] * pixelsize,
                             row[4],
@@ -9387,7 +9515,12 @@ class Window(QtWidgets.QMainWindow):
                 if hasattr(locs, "z"):
                     loctxt = locs[["x", "y", "z"]].copy()
                     loctxt = [
-                        (1, row[0] * pixelsize, row[1] * pixelsize, row[2])
+                        (
+                            1, 
+                            row[0] * pixelsize, 
+                            row[1] * pixelsize, 
+                            row[2] * pixelsize,
+                        )
                         for row in loctxt
                     ]
                     with open(path, "wb") as f:
@@ -9430,6 +9563,7 @@ class Window(QtWidgets.QMainWindow):
                     locs = locs[["x", "y", "z", "photons", "frame"]].copy()
                     locs.x *= pixelsize
                     locs.y *= pixelsize
+                    locs.z *= pixelsize
                     with open(path, "wb") as f:
                         np.savetxt(
                             f,
@@ -9465,6 +9599,7 @@ class Window(QtWidgets.QMainWindow):
                 tempdata_xyz = locs[["x", "y", "z", "frame"]].copy()
                 tempdata_xyz["x"] = tempdata_xyz["x"] * pixelsize
                 tempdata_xyz["y"] = tempdata_xyz["y"] * pixelsize
+                tempdata_xyz["z"] = tempdata_xyz["z"] * pixelsize
                 tempdata = np.array(tempdata_xyz.tolist())
                 tempdata = np.array(tempdata_xyz.tolist())
                 tempdata_channel = np.hstack(
@@ -9547,7 +9682,7 @@ class Window(QtWidgets.QMainWindow):
                                 row[0],
                                 row[1] * pixelsize,
                                 row[2] * pixelsize,
-                                row[9],
+                                row[9] * pixelsize,
                                 row[3] * pixelsize,
                                 row[4] * pixelsize,
                                 row[5],
@@ -9689,7 +9824,7 @@ class Window(QtWidgets.QMainWindow):
                                 row[0],
                                 row[1] * pixelsize,
                                 row[2] * pixelsize,
-                                row[9],
+                                row[9] * pixelsize,
                                 row[3] * pixelsize,
                                 row[4] * pixelsize,
                                 row[5],
