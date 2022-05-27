@@ -1784,17 +1784,61 @@ class TestClustererDialog(QtWidgets.QDialog):
     """
     A class to test clustering paramaters on a region of interest.
 
+    The user needs to pick a single region of interest using the Pick
+    tool. Use Alt + {W, A, S, D, -, =} to change field of view. 
+
+    Calculating recommended values works for DBSCAN only. Search radius
+    is taken to be NeNA precision across the whole image. Please keep
+    in mind that this value does not have to be the optimal one.
+
     ...
 
     Attributes
     ----------
-
+    channel : int
+        Channel index for localizations that are tested
+    clusterer_name : QComboBox
+        contains all clusterer types available in Picasso: Render
+    display_all_locs : QCheckBox
+        if ticked, unclustered locs are displayed in separete channel
+    pick : list
+        coordinates of the last pick (region of interest) that was 
+        displayed
+    pick_size : float
+        width (if rectangular) or diameter (if circular) of the pick
+    test_dbscan_params : QWidget
+        contains widgets with changing parameters for DBSCAN
+    test_hdbscan_params : QWidget
+        contains widgets with changing parameters for DBSCANs
+    view : QLabel
+        widget for displaying rendered clustered localizations
+    window : QMainWindow
+        instance of the main Picasso: Render window
+    
     Methods
     -------
-
-
-    # todo: doctrings
-    # todo: test on remote desktop
+    assign_groups(locs, labels)
+        Filters out non-clustered locs and adds group column to locs
+    calculate_params()
+        Calls function for calculating recommended parameters for the
+        current clusterer
+    calculate_params_dbscan()
+        Finds NeNA and sets it as search radius
+    calculate_params_hdbscan
+        Not implemented yet.
+    cluster(locs, params):
+        Clusters locs using the chosen clusterer and its params
+    get_cluster_params()
+        Extracts clustering parameters for a given clusterer into a 
+        dictionary
+    get_full_fov()
+        Updates viewport in self.view
+    pick_changed()
+        Checks if region of interest has changed since the last 
+        rendering
+    test_clusterer()
+        Prepares clustering parameters, performs clustering and 
+        renders localizations    
     """
 
     def __init__(self, window):
@@ -1808,11 +1852,11 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.pick_size = None
         self.window = window
         self.view = TestClustererView(self)
-        self.layout = QtWidgets.QGridLayout(self)
-        self.setLayout(self.layout)
+        layout = QtWidgets.QGridLayout(self)
+        self.setLayout(layout)
 
         # explanation
-        self.layout.addWidget(
+        layout.addWidget(
             QtWidgets.QLabel(
                 "Pick a region of interest and test different clustering\n"
                 "parameters.\n\n"
@@ -1822,7 +1866,7 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # parameters
         parameters_box = QtWidgets.QGroupBox("Parameters")
-        self.layout.addWidget(parameters_box, 1, 0)
+        layout.addWidget(parameters_box, 1, 0)
         parameters_grid = QtWidgets.QGridLayout(parameters_box)
 
         # parameters - choose clusterer
@@ -1869,7 +1913,7 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # view
         view_box = QtWidgets.QGroupBox("View")
-        self.layout.addWidget(view_box, 0, 1, 3, 1)
+        layout.addWidget(view_box, 0, 1, 3, 1)
         view_grid = QtWidgets.QGridLayout(view_box)
         view_grid.addWidget(self.view)
 
@@ -1907,6 +1951,11 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.addAction(zoomout_action)
 
     def calculate_params(self):
+        """
+        Calls function for calculating recommended parameters for the
+        current clusterer.
+        """
+
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == 'DBSCAN':
             self.calculate_params_dbscan()
@@ -1914,6 +1963,8 @@ class TestClustererDialog(QtWidgets.QDialog):
             self.calculate_params_hdbscan()
 
     def calculate_params_dbscan(self):
+        """ Finds NeNA and sets it as search radius. """
+
         nena_lp = self.window.info_dialog.lp # nena loc precision
         if not nena_lp: # if not calculated already
             self.window.info_dialog.calculate_nena_lp()
@@ -1928,6 +1979,23 @@ class TestClustererDialog(QtWidgets.QDialog):
         )
 
     def cluster(self, locs, params):
+        """ 
+        Clusters locs using the chosen clusterer. 
+
+        Parameters
+        ----------
+        locs : np.recarray
+            Contains all picked localizations from a given channel
+        params : dict
+            Contains clustering paramters for a given clusterer
+
+        Returns
+        -------
+        np.recarray
+            Contains localizations that were clustered. Cluster label
+            is saved in "group" dtype.
+        """
+
         if hasattr(locs, "z"):
             X = np.vstack((locs.x, locs.y, locs.z)).T
         else:
@@ -1952,12 +2020,35 @@ class TestClustererDialog(QtWidgets.QDialog):
         return locs
 
     def assign_groups(self, locs, labels):
-        group = np.int(32(clusterer.labels_))
+        """ 
+        Filters out non-clustered locs and adds group column to locs. 
+
+        Parameters
+        ----------
+        locs : np.recarray
+            Contains all picked localizations from a given channel
+        labels : np.array
+            Contains cluster indeces in scikit-learn format, i.e.
+            -1 means no cluster, other integers are cluster ids.
+
+        Returns
+        -------
+        np.recarray
+            Contains localizations that were clustered, with "group"
+            dtype specifying cluster indeces
+        """
+
+        group = np.int32(labels)
         locs = lib.append_to_rec(locs, group, "group")
         locs = locs[locs.group != -1]
         return locs
 
     def get_cluster_params(self):
+        """
+        Extracts clustering parameters for a given clusterer into a 
+        dictionary.
+        """
+
         params = {}
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == 'DBSCAN':
@@ -1974,11 +2065,18 @@ class TestClustererDialog(QtWidgets.QDialog):
         return params
 
     def get_full_fov(self):
+        """ Updates viewport in self.view. """
+
         if self.view.viewport:
             self.view.viewport = self.view.get_full_fov()
             self.view.update_scene()
 
     def test_clusterer(self):
+        """
+        Prepares clustering parameters, performs clustering and 
+        renders localizations.
+        """
+
         # make sure one pick is present
         if len(self.window.view._picks) != 1:
             raise ValueError("Choose only one pick region")
@@ -2007,6 +2105,11 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.view.update_scene()
 
     def pick_changed(self):
+        """
+        Checks if region of interest has changed since the last 
+        rendering.
+        """
+
         pick = self.window.view._picks[0]
         if self.window.tools_settings_dialog.pick_shape == "Circle":
             pick_size = self.window.tools_settings_dialog.pick_diameter.value()
@@ -2021,53 +2124,59 @@ class TestClustererDialog(QtWidgets.QDialog):
 
 
 class TestDBSCANParams(QtWidgets.QWidget):
-    # todo: dosctirng
+    """
+    Class containg user-chosen clustering parameters for DBSCAN.
+    """
+
     def __init__(self, dialog):
         super().__init__()
         self.dialog = dialog
-        self.grid = QtWidgets.QGridLayout(self)
-        self.grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
+        grid = QtWidgets.QGridLayout(self)
+        grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
         self.radius.setKeyboardTracking(False)
         self.radius.setRange(0.001, 1e6)
         self.radius.setValue(0.1)
         self.radius.setDecimals(3)
         self.radius.setSingleStep(0.001)
-        self.grid.addWidget(self.radius, 0, 1)
+        grid.addWidget(self.radius, 0, 1)
 
-        self.grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
+        grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
         self.min_samples = QtWidgets.QSpinBox()
         self.min_samples.setKeyboardTracking(False)
         self.min_samples.setValue(4)
         self.min_samples.setRange(1, 1e6)
         self.min_samples.setSingleStep(1)
-        self.grid.addWidget(self.min_samples, 1, 1)
-        self.grid.setRowStretch(2, 1)
+        grid.addWidget(self.min_samples, 1, 1)
+        grid.setRowStretch(2, 1)
  
 
 class TestHDBSCANParams(QtWidgets.QWidget):
-    # todo doctrings
+    """
+    Class containg user-chosen clustering parameters for HDBSCAN.
+    """
+
     def __init__(self, dialog):
         super().__init__()
         self.dialog = dialog
-        self.grid = QtWidgets.QGridLayout(self)
-        self.grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 0, 0)
+        grid = QtWidgets.QGridLayout(self)
+        grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 0, 0)
         self.min_cluster_size = QtWidgets.QSpinBox()
         self.min_cluster_size.setKeyboardTracking(False)
         self.min_cluster_size.setValue(10)
         self.min_cluster_size.setRange(1, 1e6)
         self.min_cluster_size.setSingleStep(1)
-        self.grid.addWidget(self.min_cluster_size, 0, 1)
+        grid.addWidget(self.min_cluster_size, 0, 1)
 
-        self.grid.addWidget(QtWidgets.QLabel("Min. samples"), 1, 0)     
+        grid.addWidget(QtWidgets.QLabel("Min. samples"), 1, 0)     
         self.min_samples = QtWidgets.QSpinBox()
         self.min_samples.setKeyboardTracking(False)
         self.min_samples.setValue(10)
         self.min_samples.setRange(1, 1e6)
         self.min_samples.setSingleStep(1)
-        self.grid.addWidget(self.min_samples, 1, 1)
+        grid.addWidget(self.min_samples, 1, 1)
 
-        self.grid.addWidget(
+        grid.addWidget(
             QtWidgets.QLabel("Intercluster max.\ndistance (pixels):"), 2, 0
         )
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
@@ -2076,14 +2185,64 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         self.cluster_eps.setValue(0.0)
         self.cluster_eps.setDecimals(3)
         self.cluster_eps.setSingleStep(0.001)
-        self.grid.addWidget(self.cluster_eps, 2, 1)
-        self.grid.setRowStretch(3, 1)
+        grid.addWidget(self.cluster_eps, 2, 1)
+        grid.setRowStretch(3, 1)
 
 
 class TestClustererView(QtWidgets.QLabel):
     """
+    Class used for rendering and displaying clustered localizations.
 
-    # todo: docstrings
+    ...
+
+    Attributes
+    ----------
+    dialog : QDialog
+        Instance of the Test Clusterer dialog
+    locs : np.recarray
+        Clustered localizations
+    _size : int
+        Specifies size of this widget (display pixels)
+    view : QLabel
+        Instance of View class. Used for calling functions
+    viewport : list
+        Contains two elements specifying min and max values of x and y
+        to be displayed.
+
+    Methods
+    -------
+    get_full_fov()
+        Finds field of view that contains all localizations
+    get_optimal_oversampling()
+        Finds optimal oversampling for the current viewport
+    scale_contrast(images)
+        Finds optimal contrast for images
+    shift_viewport(dx, dy)
+        Moves viewport by a specified amount
+    split_locs()
+        Splits self.locs into a list. It has either two (all 
+        clustered locs and all picked locs) or N_GROUP_COLORS elements
+        (each one for a group color)
+    to_down()
+        Shifts viewport downwards
+    to_left()
+        Shifts viewport to the left
+    to_right()
+        Shifts viewport to the right
+    to_up()
+        Shifts viewport upwards
+    update_scene()
+        Renders localizations
+    viewport_height()
+        Returns viewport's height in pixels
+    viewport_width()
+        Returns viewport's width in pixels
+    zoom(factor)
+        Changes size of viewport given factor
+    zoom_in()
+        Decreases size of viewport
+    zoom_out()
+        Increases size of viewport
     """
 
     def __init__(self, dialog):
@@ -2091,92 +2250,96 @@ class TestClustererView(QtWidgets.QLabel):
         self.dialog = dialog
         self.view = dialog.window.view
         self.viewport = None
-        self.oversampling = None
         self.locs = None
         self._size = 500
         self.setMinimumSize(self._size, self._size)
         self.setMaximumSize(self._size, self._size)
 
+    def to_down(self):
+        """ Shifts viewport downwards. """
+
+        if self.viewport is not None:
+            h = self.viewport_height()
+            dy = 0.3 * h
+            self.shift_viewport(0, dy)
+
     def to_left(self):
+        """ Shifts viewport to the left. """
+
         if self.viewport is not None:
             w = self.viewport_width()
             dx = -0.3 * w
             self.shift_viewport(dx, 0)
 
     def to_right(self):
+        """ Shifts viewport to the right. """
+
         if self.viewport is not None:
             w = self.viewport_width()
             dx = 0.3 * w
             self.shift_viewport(dx, 0)
 
     def to_up(self):
+        """ Shifts viewport upwards. """
+
         if self.viewport is not None:
             h = self.viewport_height()
             dy = -0.3 * h
             self.shift_viewport(0, dy)
 
-    def to_down(self):
-        if self.viewport is not None:
-            h = self.viewport_height()
-            dy = 0.3 * h
-            self.shift_viewport(0, dy)
-
     def zoom_in(self):
+        """ Decreases size of viewport. """
+        
         if self.viewport is not None:
             self.zoom(1 / ZOOM)
 
     def zoom_out(self):
+        """ Increases size of viewport. """
+
         if self.viewport is not None:
             self.zoom(ZOOM)
 
     def zoom(self, factor):
+        """ 
+        Changes size of viewport. 
+
+        Paramaters
+        ----------
+        factor : float
+            Specifies the factor by which viewport is changed
+        """
+
         height = self.viewport_height()
         width = self.viewport_width()
         new_height = height * factor
         new_width = width * factor
-
         center_y, center_x = self.view.viewport_center(self.viewport)
-
         self.viewport = [
             (center_y - new_height / 2, center_x - new_width / 2),
             (center_y + new_height / 2, center_x + new_width / 2),
         ]
-
         self.update_scene()
 
     def viewport_width(self):
+        """ Returns viewport's width in pixels. """
+
         return self.viewport[1][1] - self.viewport[0][1]
 
     def viewport_height(self):
+        """ Returns viewport's height in pixels. """
+
         return self.viewport[1][0] - self.viewport[0][0]
 
     def shift_viewport(self, dx, dy):
+        """ Moves viewport by a specified amount. """
+
         (y_min, x_min), (y_max, x_max) = self.viewport
         self.viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
         self.update_scene()   
 
-    def get_optimal_oversampling(self):
-        height = self.viewport_height()
-        width = self.viewport_width()
-        return self._size / min(height, width)
-
-    def split_locs(self):
-        if self.dialog.display_all_locs.isChecked():
-            # two channels, all locs and clustered locs
-            channel = self.dialog.channel
-            locs = [
-                self.dialog.window.view.picked_locs(channel)[0],
-                self.locs,
-            ]
-        else:
-            # multiple channels, each for one group color
-            locs = [
-                self.locs[self.group_color == _] for _ in range(N_GROUP_COLORS)
-            ]
-        return locs
-
-
     def update_scene(self):
+        """ Renders localizations. """
+
         if self.viewport is None:
             self.viewport = self.get_full_fov()
 
@@ -2200,14 +2363,14 @@ class TestClustererView(QtWidgets.QLabel):
         # create image to display
         Y, X = images.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
-        colors = get_colors(len(locs))
+        colors = get_colors(images.shape[0])
         for color, image in zip(colors, images): # color each channel
             bgra[:, :, 0] += color[2] * image
             bgra[:, :, 1] += color[1] * image
             bgra[:, :, 2] += color[0] * image
         bgra = np.minimum(bgra, 1)
         bgra = self.view.to_8bit(bgra)
-        bgra[:, :, 3].fill(255)
+        bgra[:, :, 3].fill(255) # black background
         qimage = QtGui.QImage(
             bgra.data, X, Y, QtGui.QImage.Format_RGB32
         ).scaled(
@@ -2218,15 +2381,65 @@ class TestClustererView(QtWidgets.QLabel):
         time.sleep(0.5) # rendering sometimes does not work for some reason
         self.setPixmap(QtGui.QPixmap.fromImage(qimage))
 
+    def split_locs(self):
+        """
+        Splits self.locs into a list. It has either two (all 
+        clustered locs and all picked locs) or N_GROUP_COLORS elements
+        (each one for a group color).
+        """
+
+        if self.dialog.display_all_locs.isChecked():
+            # two channels, all locs and clustered locs
+            channel = self.dialog.channel
+            locs = [
+                self.dialog.window.view.picked_locs(channel)[0],
+                self.locs,
+            ]
+        else:
+            # multiple channels, each for one group color
+            locs = [
+                self.locs[self.group_color == _] for _ in range(N_GROUP_COLORS)
+            ]
+        return locs
+
+    def get_optimal_oversampling(self):
+        """
+        Finds optimal oversampling for the current viewport.
+
+        Returns
+        -------
+        float
+            The optimal oversampling, i.e. number of display pixels per
+            camera pixels 
+        """
+
+        height = self.viewport_height()
+        width = self.viewport_width()
+        return self._size / min(height, width)
+
     def scale_contrast(self, images):
-        max_ = min(
+        """
+        Finds optimal contrast for images.
+
+        Parameters
+        ----------
+        images : list of np.arrays
+            Arrays with rendered locs (grayscale)
+
+        Returns
+        -------
+        list of np.arrays
+            Scaled images
+        """
+
+        upper = min(
             [
                 _.max() 
                 for _ in images  # if no locs were clustered
                 if _.max() != 0  # the maximum value in image is 0.0
             ]
-        )
-        upper = INITIAL_REL_MAXIMUM * max_
+        ) / 4
+        # upper = INITIAL_REL_MAXIMUM * max_
 
         images = images / upper
         images[~np.isfinite(images)] = 0
@@ -2235,6 +2448,15 @@ class TestClustererView(QtWidgets.QLabel):
         return images
 
     def get_full_fov(self):
+        """
+        Finds field of view that contains all localizations.
+
+        Returns
+        -------
+        list
+            Specifies viewport
+        """
+
         x_min = np.min(self.locs.x) - 1
         x_max = np.max(self.locs.x) + 1
         y_min = np.min(self.locs.y) - 1
