@@ -1794,10 +1794,6 @@ class TestClustererDialog(QtWidgets.QDialog):
 
 
     # todo: doctrings
-    # todo: it needs some mechanism to know if the pick has been changed
-    or channels were added
-    # todo: tidy up the code, make more functions
-    # todo: multichannel
     # todo: test on remote desktop
     """
 
@@ -1951,10 +1947,14 @@ class TestClustererDialog(QtWidgets.QDialog):
                 ).fit(X)
             else:
                 return None
-        group = np.int32(clusterer.labels_)
+        locs = self.assign_groups(locs, clusterer.labels_)
+        self.view.group_color = self.window.view.get_group_color(locs)
+        return locs
+
+    def assign_groups(self, locs, labels):
+        group = np.int(32(clusterer.labels_))
         locs = lib.append_to_rec(locs, group, "group")
         locs = locs[locs.group != -1]
-        self.view.group_color = self.window.view.get_group_color(locs)
         return locs
 
     def get_cluster_params(self):
@@ -1979,13 +1979,14 @@ class TestClustererDialog(QtWidgets.QDialog):
             self.view.update_scene()
 
     def test_clusterer(self):
-        params = self.get_cluster_params()
         # make sure one pick is present
         if len(self.window.view._picks) != 1:
             raise ValueError("Choose only one pick region")
-        # extract picked locs # todo: multichannel
-        channel = 0
-        locs = self.window.view.picked_locs(channel)[0]
+        # get clustering parameters
+        params = self.get_cluster_params()
+        # extract picked locs
+        self.channel = self.window.view.get_channel("Test clusterer")
+        locs = self.window.view.picked_locs(self.channel)[0]
         # cluster picked locs
         self.view.locs = self.cluster(locs, params)
         # update viewport if pick has changed
@@ -2092,8 +2093,9 @@ class TestClustererView(QtWidgets.QLabel):
         self.viewport = None
         self.oversampling = None
         self.locs = None
-        self.setMinimumSize(500, 500)
-        self.setMaximumSize(500, 500)
+        self._size = 500
+        self.setMinimumSize(self._size, self._size)
+        self.setMaximumSize(self._size, self._size)
 
     def to_left(self):
         if self.viewport is not None:
@@ -2136,14 +2138,8 @@ class TestClustererView(QtWidgets.QLabel):
         center_y, center_x = self.view.viewport_center(self.viewport)
 
         self.viewport = [
-            (
-                center_y - new_height / 2,
-                center_x - new_width / 2,
-            ),
-            (
-                center_y + new_height / 2,
-                center_x + new_width / 2,
-            ),
+            (center_y - new_height / 2, center_x - new_width / 2),
+            (center_y + new_height / 2, center_x + new_width / 2),
         ]
 
         self.update_scene()
@@ -2162,16 +2158,18 @@ class TestClustererView(QtWidgets.QLabel):
     def get_optimal_oversampling(self):
         height = self.viewport_height()
         width = self.viewport_width()
-        return 500 / min(height, width)
+        return self._size / min(height, width)
 
     def split_locs(self):
         if self.dialog.display_all_locs.isChecked():
-            channel = 0 # todo: multichannel
+            # two channels, all locs and clustered locs
+            channel = self.dialog.channel
             locs = [
                 self.dialog.window.view.picked_locs(channel)[0],
                 self.locs,
             ]
         else:
+            # multiple channels, each for one group color
             locs = [
                 self.locs[self.group_color == _] for _ in range(N_GROUP_COLORS)
             ]
@@ -2186,32 +2184,37 @@ class TestClustererView(QtWidgets.QLabel):
         locs = self.split_locs()
 
         # render kwargs
-        self.oversampling = self.get_optimal_oversampling()
         kwargs = {
-            'oversampling': self.oversampling,
+            'oversampling': self.get_optimal_oversampling(),
             'viewport': self.viewport,
             'blur_method': 'convolve',
             'min_blur_width': 0,
         }
 
-        # render all channels
+        # render images for all channels
         images = [render.render(_, **kwargs)[1] for _ in locs]
 
+        # scale image 
         images = self.scale_contrast(images)
+
+        # create image to display
         Y, X = images.shape[1:]
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
         colors = get_colors(len(locs))
-        for color, image in zip(colors, images):
+        for color, image in zip(colors, images): # color each channel
             bgra[:, :, 0] += color[2] * image
             bgra[:, :, 1] += color[1] * image
             bgra[:, :, 2] += color[0] * image
-
         bgra = np.minimum(bgra, 1)
         bgra = self.view.to_8bit(bgra)
         bgra[:, :, 3].fill(255)
         qimage = QtGui.QImage(
             bgra.data, X, Y, QtGui.QImage.Format_RGB32
-        ).scaled(500, 500, QtCore.Qt.KeepAspectRatioByExpanding)
+        ).scaled(
+            self._size, 
+            self._size, 
+            QtCore.Qt.KeepAspectRatioByExpanding
+        )
         time.sleep(0.5) # rendering sometimes does not work for some reason
         self.setPixmap(QtGui.QPixmap.fromImage(qimage))
 
