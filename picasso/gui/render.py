@@ -2378,7 +2378,6 @@ class TestClustererView(QtWidgets.QLabel):
             self._size, 
             QtCore.Qt.KeepAspectRatioByExpanding
         )
-        time.sleep(0.5) # rendering sometimes does not work for some reason
         self.setPixmap(QtGui.QPixmap.fromImage(qimage))
 
     def split_locs(self):
@@ -2415,7 +2414,7 @@ class TestClustererView(QtWidgets.QLabel):
 
         height = self.viewport_height()
         width = self.viewport_width()
-        return self._size / min(height, width)
+        return (self._size / min(height, width)) / 1.05
 
     def scale_contrast(self, images):
         """
