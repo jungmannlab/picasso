@@ -29,6 +29,7 @@ from collections import OrderedDict as _OrderedDict
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
+from . import clusterer as _clusterer
 from threading import Thread as _Thread
 import time as _time
 from tqdm import tqdm as _tqdm

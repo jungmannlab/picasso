@@ -43,7 +43,7 @@ from tqdm import tqdm
 
 import colorsys
 
-from .. import imageprocess, io, lib, postprocess, render
+from .. import imageprocess, io, lib, postprocess, render, clusterer
 from .rotation import RotationWindow
 
 try:
@@ -5075,12 +5075,11 @@ class View(QtWidgets.QLabel):
             status = lib.StatusDialog(
                 "Applying DBSCAN. This may take a while...", self
             )
-
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
             # perform DBSCAN for each channel
             for locs, locs_info, locs_path in zip(
                 self.locs, self.infos, self.locs_paths
             ):
-                pixelsize = self.window.display_settings_dlg.pixelsize.value()
                 clusters, locs = postprocess.dbscan(
                     locs, radius, min_density, pixelsize
                 )
@@ -5113,7 +5112,7 @@ class View(QtWidgets.QLabel):
 
     def hdbscan(self):
         """
-        Gets DBSCAN parameters, performs clustering and saves data.
+        Gets HDBSCAN parameters, performs clustering and saves data.
         """
 
         # get HDBSCAN parameters
@@ -5155,6 +5154,91 @@ class View(QtWidgets.QLabel):
                     ),
                 )
             status.close()
+
+    def smlm_clusterer(self):
+        # todo: 3d and 2d separetely
+        """
+        Gets Smlm clusterer parameters, performs clustering and 
+        saves data.
+        """
+        # parameters are similar to dbscan
+        radius, min_cluster, ok = DbscanDialog.getParams()
+        t0 = time.time()
+        if ok:
+            channel = self.get_channel("Cluster")
+            if len(self._picks) > 0:
+                # perform clustering with cpu
+                clustered_locs = [] # list with picked locs after clustering
+                picked_locs = self.picked_locs(channel, add_group=False)
+                group_offset = 0
+                tot_groups = 0
+                pd = lib.ProgressDialog(
+                    "Clustering in picks", 0, len(picked_locs), self
+                )
+                pd.set_value(0)
+                for i in range(len(picked_locs)):
+                    locs = picked_locs[i]
+                    ic(len(locs))
+                    labels = clusterer.clusterer_picked(
+                        locs.x,
+                        locs.y,
+                        locs.frame,
+                        radius,
+                        min_cluster,
+                    )
+                    temp_locs = lib.append_to_rec(
+                        locs, labels, "group"
+                    ) # add cluster id to locs
+                    # -1 means no cluster
+                    temp_locs = temp_locs[temp_locs.group != -1]
+                    temp_locs.group += group_offset
+                    clustered_locs.append(temp_locs)
+                    group_offset += np.max(labels)
+                    tot_groups += (len(np.unique(labels)) - 1)
+                    pd.set_value(i + 1)
+
+                #todo: progress dialogs
+                #todo: test clusterer
+                #todo: needs spliting locs in gpu if there are more than 1mln?
+                #todo: maybe need to change all_locs too
+                clustered_locs = stack_arrays(
+                    clustered_locs, asrecarray=True, usemask=False
+                )
+            else:
+                # cluster all locs, ask if gpu or cpu
+                qm = QtWidgets.QMessageBox()
+                qm.setWindowTitle("Clusterer")
+                ret = qm.question(
+                    self,
+                    "",
+                    (
+                        "Use GPU? \n"
+                        "CPU clustering may take hours to finish.\n"
+                        "If CPU is preferred,  it is recommended to\n"
+                        "cluster only picked localizations."
+                    )
+                )
+                #todo: is it really hours?
+                if ret == qm.Yes:
+                    labels = clusterer.clusterer_GPU()
+                elif ret == qm.No:
+                    labels = clusterer.clusterer_CPU(
+                        self.locs[channel].x,
+                        self.locs[channel].y,
+                        self.locs[channel].frame,
+                        radius,
+                        min_cluster,
+                    )
+                clustered_losc = lib.append_to_rec(
+                    self.locs[channel], labels, "group"
+                )
+                clustered_locs = clustered_locs[clustered_locs.group != -1]
+
+            path, ext = os.path.splitext(self.locs_paths[0])
+            path = path + '_clustered.hdf5'
+            io.save_locs(path, clustered_locs, self.infos[0])  
+            print(f'time requiried: {(time.time() - t0) / 60} minutes')
+            print('clustered locs saved')           
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
         """
@@ -9494,6 +9578,8 @@ class Window(QtWidgets.QMainWindow):
         dbscan_action.triggered.connect(self.view.dbscan)
         hdbscan_action = clustering_menu.addAction("HDBSCAN")
         hdbscan_action.triggered.connect(self.view.hdbscan)
+        clusterer_action = clustering_menu.addAction("SMLM clusterer")
+        clusterer_action.triggered.connect(self.view.smlm_clusterer)
         test_cluster_action = clustering_menu.addAction("Test clusterer")
         test_cluster_action.triggered.connect(
             self.test_clusterer_dialog.show
