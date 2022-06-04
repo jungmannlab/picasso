@@ -4905,10 +4905,10 @@ class View(QtWidgets.QLabel):
                 locs_.x -= shift[1][i]
                 if len(shift) == 3:
                     locs_.z -= shift[2][i]
+                self.all_locs[i] = copy.copy(locs_)
                 # Cleanup
                 self.index_blocks[i] = None
                 sp.set_value(i + 1)
-
             self.update_scene()
 
         else: # align using whole images
@@ -4957,6 +4957,7 @@ class View(QtWidgets.QLabel):
                         locs_.z -= shift[2][i]
                         temp_shift_z.append(shift[2][i])
                     sp.set_value(i + 1)
+                self.all_locs = copy.copy(self.locs)
                 shift_x.append(np.mean(temp_shift_x))
                 shift_y.append(np.mean(temp_shift_y))
                 if len(shift) == 3:
