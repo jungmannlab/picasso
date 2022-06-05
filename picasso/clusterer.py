@@ -93,7 +93,7 @@ def local_maxima(dist, nn, eps):
 	with the highest number of neighbors within given distance dist
 	"""
 	n = dist.shape[0]
-	lm = _np.zeros(n, dtype=_np.int8)
+	lm = _np.zeros(n, dtype=_np.int32)
 	for i in range(n):
 		for j in range(n):
 			if (dist[i][j] <= eps) and (nn[i] >= nn[j]):
@@ -156,7 +156,7 @@ def cluster_properties(cluster_id, n_clusters, frame):
 @_njit
 def find_true_clusters(mean_frame, locs_perc, frame):
 	n_frame = _np.int32(_np.max(frame))
-	true_cluster = _np.zeros(len(mean_frame), dtype=_np.int8)
+	true_cluster = _np.zeros(len(mean_frame), dtype=_np.int32)
 	for i in range(len(mean_frame)):
 		cond1 = locs_perc[i] < 0.8
 		cond2 = mean_frame[i] < n_frame * 0.8
@@ -188,7 +188,7 @@ def clusterer_picked(x, y, frame, eps, min_samples):
 		cluster_id, n_clusters, frame
 	)
 	true_cluster = find_true_clusters(mean_frame, locs_perc, frame)
-	labels = -1 * _np.ones(len(x), dtype=_np.int8)
+	labels = -1 * _np.ones(len(x), dtype=_np.int32)
 	for i in range(len(x)):
 		if (cluster_id[i] != 0) and (true_cluster[cluster_id[i]] == 1):
 			labels[i] = cluster_id[i] - 1
@@ -221,7 +221,7 @@ def clusterer_CPU(x, y, frame, eps, min_samples):
 		cluster_id, n_clusters, frame
 	)
 	true_cluster = find_true_clusters(mean_frame, locs_perc, frame)
-	labels = -1 * _np.ones(len(x), dtype=_np.int8)
+	labels = -1 * _np.ones(len(x), dtype=_np.int32)
 	for i in range(len(x)):
 		if (cluster_id[i] != 0) and (true_cluster[cluster_id[i]] == 1):
 			labels[i] = cluster_id[i] - 1

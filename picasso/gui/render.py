@@ -5172,14 +5172,12 @@ class View(QtWidgets.QLabel):
                 clustered_locs = [] # list with picked locs after clustering
                 picked_locs = self.picked_locs(channel, add_group=False)
                 group_offset = 0
-                tot_groups = 0
                 pd = lib.ProgressDialog(
                     "Clustering in picks", 0, len(picked_locs), self
                 )
                 pd.set_value(0)
                 for i in range(len(picked_locs)):
                     locs = picked_locs[i]
-                    ic(len(locs))
                     labels = clusterer.clusterer_picked(
                         locs.x,
                         locs.y,
@@ -5195,7 +5193,6 @@ class View(QtWidgets.QLabel):
                     temp_locs.group += group_offset
                     clustered_locs.append(temp_locs)
                     group_offset += np.max(labels)
-                    tot_groups += (len(np.unique(labels)) - 1)
                     pd.set_value(i + 1)
 
                 #todo: progress dialogs
@@ -7207,7 +7204,11 @@ class View(QtWidgets.QLabel):
                 ax = fig.add_subplot(111)
                 ax.set_title("Localizations in Picks ")
                 n, bins, patches = ax.hist(
-                    loccount, 20, density=True, facecolor="green", alpha=0.75
+                    loccount, 
+                    bins='auto', 
+                    density=True, 
+                    facecolor="green", 
+                    alpha=0.75,
                 )
                 ax.set_xlabel("Number of localizations")
                 ax.set_ylabel("Counts")
