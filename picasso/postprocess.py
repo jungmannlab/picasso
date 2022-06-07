@@ -29,6 +29,7 @@ from collections import OrderedDict as _OrderedDict
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
+from . import clusterer as _clusterer
 from threading import Thread as _Thread
 import time as _time
 from tqdm import tqdm as _tqdm
@@ -106,16 +107,11 @@ def _fill_index_blocks(
     Y, X = block_starts.shape
     N = len(x_index)
     k = 0
-    # if counter is not None:
-    #     counter[0] = 0
     for i in range(Y):
         for j in range(X):
             k = _fill_index_block(
                 block_starts, block_ends, N, x_index, y_index, i, j, k
             )
-        # if counter is not None:
-        #     counter[0] = i + 1
-
 
 @_numba.jit(nopython=True, nogil=True)
 def _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k):
