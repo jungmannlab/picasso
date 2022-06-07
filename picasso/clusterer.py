@@ -17,10 +17,9 @@ from tqdm import tqdm as _tqdm
 
 from icecream import ic
 
-#TODO: CPu clustering with indexed locs
+#TODO: CPu clustering with indexed locs - change the other function too
 #todo: gpu clustering
 #todo: docstrings
-
 
 def assing_locs_to_boxes(x, y, radius):
 	box_id = _np.zeros(len(x), dtype=_np.int32)
