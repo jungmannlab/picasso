@@ -17,66 +17,128 @@ from tqdm import tqdm as _tqdm
 
 from icecream import ic
 
-#TODO: CPu clustering with indexed locs - change the other function too
 #todo: gpu clustering
+#todo: 3D for all cases!
 #todo: docstrings
+#todo: check if I can put the lm[i] == 1 loop in picked clusterer inside njit
 
-def assing_locs_to_boxes(x, y, radius):
+def get_distance(x1, x2, y1, y2):
+	return _np.sqrt((x2-x1)**2 + (y2-y1)**2)
+
+def assing_locs_to_boxes(x, y, box_size):
+
+	# assigns each loc to a box
 	box_id = _np.zeros(len(x), dtype=_np.int32)
-	box_radius = radius
 	
 	x_start = x.min()
 	x_end = x.max()
 	y_start = y.min()
 	y_end = y.max()
 
-	n_boxes_x = int((x_end - x_start) / box_radius) + 1
-	n_boxes_y = int((y_end - y_start) / box_radius) + 1
+	n_boxes_x = int((x_end - x_start) / box_size) + 1
+	n_boxes_y = int((y_end - y_start) / box_size) + 1
 	n_boxes = n_boxes_x * n_boxes_y
 
-	locs_in_box = [[]] * n_boxes
-
-	print("assigning box ids...")
-	for i in _tqdm(range(len(x))):
+	for i in range(len(x)):
 		box_id[i] = (
-			int((x[i] - x_start) / box_radius)
-			+ int((y[i] - y_start) / box_radius)
+			int((x[i] - x_start) / box_size)
+			+ int((y[i] - y_start) / box_size)
 			* n_boxes_x
 		)
 
-	print("assigning locs to boxes...")
-	for i in _tqdm(range(len(x))):
-		locs_in_box[box_id[i]].append(i)
+	# gives indeces of locs in a given box
+	locs_id_box = [[]]
+	for i in range(n_boxes):
+		locs_id_box.append([])
+
+	# fill values for locs_id_box
+	# also add locs that are in the adjacent boxes
+	for i in range(len(x)):
+		locs_id_box[box_id[i]].append(i)
 
 		if box_id[i] != n_boxes:
-			locs_in_box[box_id[i]+1].append(i)
+			locs_id_box[box_id[i]+1].append(i)
 		if box_id[i] != 0:
-			locs_in_box[box_id[i]-1].append(i)
+			locs_id_box[box_id[i]-1].append(i)
 
 		if box_id[i] > n_boxes_x:
-			locs_in_box[box_id[i]-n_boxes_x].append(i)
-			locs_in_box[box_id[i]-n_boxes_x+1].append(i)
-			locs_in_box[box_id[i]-n_boxes_x-1].append(i)
+			locs_id_box[box_id[i]-n_boxes_x].append(i)
+			locs_id_box[box_id[i]-n_boxes_x+1].append(i)
+			locs_id_box[box_id[i]-n_boxes_x-1].append(i)
 
 		if box_id[i] < n_boxes - n_boxes_x:
-			locs_in_box[box_id[i]+n_boxes_x].append(i)
-			locs_in_box[box_id[i]+n_boxes_x+1].append(i)
-			locs_in_box[box_id[i]+n_boxes_x-1].append(i)	
+			locs_id_box[box_id[i]+n_boxes_x].append(i)
+			locs_id_box[box_id[i]+n_boxes_x+1].append(i)
+			locs_id_box[box_id[i]+n_boxes_x-1].append(i)	
 
-	return locs_in_box, box_id	
+	return locs_id_box, box_id	
 
-def count_neighbors_CPU(locs_in_box, box_id, x, y, radius):
-	nn = _np.zeros(len(x), dtype=_np.int32)
-	print("counting neighbors")
-	for i in _tqdm(range(len(x))):
-		for j in locs_in_box[box_id[i]]:
-			if i != j:
-				dist = _np.sqrt(
-					(x[i] - x[j]) ** 2
-					+ (y[i] - y[j]) ** 2
-				)
+def count_neighbors_CPU(locs_id_box, box_id, x, y, radius):
+	nn = _np.zeros(len(x), dtype=_np.int32) # number of neighbors
+	for i in range(len(x)):
+		for j_, j in enumerate(locs_id_box[box_id[i]]):
+			if i != j_:
+				dist = get_distance(x[i], x[j], y[i], y[j])
 				if dist <= radius:
 					nn[i] += 1
+	return nn
+
+def local_maxima_CPU(locs_id_box, box_id, nn, x, y, radius):
+	lm = _np.zeros(len(x))
+	for i in range(len(x)):
+		for j in locs_id_box[box_id[i]]:
+			dist = get_distance(x[i], x[j], y[i], y[j])
+			if dist <= radius and nn[i] >= nn[j]:
+				lm[i] = 1
+			if dist <= radius and nn[i] < nn[j]:
+				lm[i] = 0
+				break
+	return lm
+
+def assign_to_cluster_CPU(locs_id_box, box_id, nn, lm, x, y, radius):
+	cluster_id = _np.zeros(len(x), dtype=_np.int32)
+	for i in range(len(x)):
+		if lm[i]:
+			for j in locs_id_box[box_id[i]]:
+				dist = get_distance(x[i], x[j], y[i], y[j])
+				if dist <= radius:
+					if cluster_id[i] != 0:
+						if cluster_id[j] == 0:
+							cluster_id[j] = cluster_id[i]
+					else:
+						if j == 0:
+							cluster_id[i] = i + 1
+						cluster_id[j] = i + 1
+	return cluster_id
+
+def clusterer_CPU(x, y, frame, eps, min_samples):
+	"""
+	almost the same as clusterer picked, except locs are allocated
+	to boxes and neighbors counting is slightly different.
+	"""
+	xy = _np.stack((x, y)).T
+	locs_id_box, box_id = assing_locs_to_boxes(x, y, eps)
+	n_neighbors = count_neighbors_CPU(locs_id_box, box_id, x, y, eps)
+	local_max = local_maxima_CPU(locs_id_box, box_id, n_neighbors, x, y, eps)
+	cluster_id = assign_to_cluster_CPU(
+		locs_id_box, box_id, n_neighbors, local_max, x, y, eps
+	)
+	cluster_n_locs = _np.bincount(cluster_id)
+	cluster_id = check_cluster_size(
+		cluster_n_locs, min_samples, cluster_id
+	)
+	clusters = _np.unique(cluster_id)
+	cluster_id = rename_clusters(cluster_id, clusters)
+	n_clusters = len(clusters)
+	mean_frame, locs_perc = cluster_properties(
+		cluster_id, n_clusters, frame
+	)
+	true_cluster = find_true_clusters(mean_frame, locs_perc, frame)
+	labels = -1 * _np.ones(len(x), dtype=_np.int32)
+	for i in range(len(x)):
+		if (cluster_id[i] != 0) and (true_cluster[cluster_id[i]] == 1):
+			labels[i] = cluster_id[i] - 1
+	return labels
 
 @_njit 
 def count_neighbors_picked(dist, eps):
@@ -86,7 +148,7 @@ def count_neighbors_picked(dist, eps):
 	return nn
 
 @_njit
-def local_maxima(dist, nn, eps):
+def local_maxima_picked(dist, nn, eps):
 	"""
 	Finds the positions of the local maxima which are the locs 
 	with the highest number of neighbors within given distance dist
@@ -95,25 +157,28 @@ def local_maxima(dist, nn, eps):
 	lm = _np.zeros(n, dtype=_np.int32)
 	for i in range(n):
 		for j in range(n):
-			if (dist[i][j] <= eps) and (nn[i] >= nn[j]):
+			if dist[i][j] <= eps and nn[i] >= nn[j]:
 				lm[i] = 1
-			if (dist[i][j] <= eps) and (nn[i] < nn[j]):
+			if dist[i][j] <= eps and nn[i] < nn[j]:
 				lm[i] = 0
 				break
 	return lm
 
 @_njit
-def assign_to_cluster(i, dist, eps, cluster_id):
+def assign_to_cluster_picked(dist, eps, lm):
 	n = dist.shape[0]
-	for j in range(n):
-		if dist[i][j] <= eps:
-			if cluster_id[i] != 0:
-				if cluster_id[j] == 0:
-					cluster_id[j] = cluster_id[i]
-			if cluster_id[i] == 0:
-				if j == 0:
-					cluster_id[i] = i + 1
-				cluster_id[j] = i + 1
+	cluster_id = _np.zeros(n, dtype=_np.int32)
+	for i in range(n):
+		if lm[i]:
+			for j in range(n):
+				if dist[i][j] <= eps:
+					if cluster_id[i] != 0:
+						if cluster_id[j] == 0:
+							cluster_id[j] = cluster_id[i]
+					if cluster_id[i] == 0:
+						if j == 0:
+							cluster_id[i] = i + 1
+						cluster_id[j] = i + 1
 	return cluster_id
 
 @_njit
@@ -165,24 +230,18 @@ def find_true_clusters(mean_frame, locs_perc, frame):
 	return true_cluster
 
 def clusterer_picked(x, y, frame, eps, min_samples):
-	"""
-	less than 1000 locs in picks recommended.
-	"""
 	xy = _np.stack((x, y)).T
-	cluster_id = _np.zeros(len(x), dtype=_np.int32)
 	dist = _dm(xy, xy)
 	n_neighbors = count_neighbors_picked(dist, eps)
-	local_max = local_maxima(dist, n_neighbors, eps)
-	for i in range(len(x)):
-		if local_max[i]:
-			cluster_id = assign_to_cluster(i, dist, eps, cluster_id)
+	local_max = local_maxima_picked(dist, n_neighbors, eps)
+	cluster_id = assign_to_cluster_picked(dist, eps, local_max)
 	cluster_n_locs = _np.bincount(cluster_id)
 	cluster_id = check_cluster_size(
 		cluster_n_locs, min_samples, cluster_id
 	)
 	clusters = _np.unique(cluster_id)
-	n_clusters = len(clusters)
 	cluster_id = rename_clusters(cluster_id, clusters)
+	n_clusters = len(clusters)
 	mean_frame, locs_perc = cluster_properties(
 		cluster_id, n_clusters, frame
 	)
@@ -195,33 +254,3 @@ def clusterer_picked(x, y, frame, eps, min_samples):
 
 def clusterer_GPU():
 	print('clustering all locs gpu')
-
-def clusterer_CPU(x, y, frame, eps, min_samples):
-	"""
-	almost the same as clusterer picked, except locs are allocated
-	to boxes and neighbors counting is slightly different.
-	"""
-	xy = _np.stack((x, y)).T
-	locs_in_box, box_id = assing_locs_to_boxes(x, y, eps)
-	n_neighbors = count_neighbors_CPU(locs_in_box, box_id, x, y, eps)
-	local_max = local_maxima(dist, n_neighbors, eps)
-	cluster_id = _np.zeros(len(x), dtype=_np.int32)
-	for i in range(len(x)):
-		if local_max[i]:
-			cluster_id = assign_to_cluster(i, dist, eps, cluster_id)
-	cluster_n_locs = _np.bincount(cluster_id)
-	cluster_id = check_cluster_size(
-		cluster_n_locs, min_samples, cluster_id
-	)
-	clusters = _np.unique(cluster_id)
-	n_clusters = len(clusters)
-	cluster_id = rename_clusters(cluster_id, clusters)
-	mean_frame, locs_perc = cluster_properties(
-		cluster_id, n_clusters, frame
-	)
-	true_cluster = find_true_clusters(mean_frame, locs_perc, frame)
-	labels = -1 * _np.ones(len(x), dtype=_np.int32)
-	for i in range(len(x)):
-		if (cluster_id[i] != 0) and (true_cluster[cluster_id[i]] == 1):
-			labels[i] = cluster_id[i] - 1
-	return labels
