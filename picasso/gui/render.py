@@ -5221,7 +5221,13 @@ class View(QtWidgets.QLabel):
                 if ret == qm.Yes:
                     # check if gpu is available
                     if cuda.is_available():
-                        labels = clusterer.clusterer_GPU()
+                        labels = clusterer.clusterer_GPU(
+                            self.locs[channel].x,
+                            self.locs[channel].y,
+                            self.locs[channel].frame,
+                            radius,
+                            min_cluster,
+                        )
                     else:
                         message = (
                             "Make sure your computer has a GPU installed"
