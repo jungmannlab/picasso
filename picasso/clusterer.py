@@ -10,6 +10,7 @@
 import os as _os
 
 import numpy as _np
+import math as _math
 import yaml as _yaml
 from scipy.spatial import distance_matrix as _dm
 from numba import njit as _njit
@@ -258,7 +259,6 @@ def clusterer_picked(x, y, frame, eps, min_samples):
 			labels[i] = cluster_id[i] - 1
 	return labels
 
-
 @_cuda.jit
 def count_neighbors_GPU(nn, radius, x, y):
 	i = _cuda.grid(1)
@@ -267,8 +267,7 @@ def count_neighbors_GPU(nn, radius, x, y):
 
 	temp_sum = 0
 	for j in range(len(x)):
-		# dist = _np.sqrt((x[i]-x[j])**2 + (y[i]-y[j])**2)
-		dist = get_distance(x[i], x[j], y[i], y[j])
+		dist = _math.sqrt((x[i]-x[j])**2 + (y[i]-y[j])**2)
 		if dist <= radius:
 			temp_sum += 1
 
@@ -281,7 +280,7 @@ def local_maxima_GPU(lm, nn, radius, x, y):
 		return
 
 	for j in range(len(x)):
-		dist = get_distance(x[i], x[j], y[i], y[j])
+		dist = _math.sqrt((x[i]-x[j])**2 + (y[i]-y[j])**2)
 		if dist <= radius and nn[i] >= nn[j]:
 			lm[i] = 1
 		if dist <= radius and nn[i] < nn[j]:
@@ -291,11 +290,11 @@ def local_maxima_GPU(lm, nn, radius, x, y):
 # todo: if i thing must stay, maybe cpu version is better?
 @_cuda.jit
 def assign_to_cluster_GPU(i, radius, cluster_id, x, y):
-	j = cuda.grid(1)
+	j = _cuda.grid(1)
 	if j >= len(x):
 		return
 
-	dist = get_distance(x[i], x[j], y[i], y[j])
+	dist = dist = _math.sqrt((x[i]-x[j])**2 + (y[i]-y[j])**2)
 	if dist <= radius:
 		if cluster_id[i] != 0:
 			if cluster_id[j] == 0:
@@ -391,23 +390,27 @@ def true_cluster_GPU(mean_frame, locs_perc, true_cluster, frame_nr):
 		true_cluster[i] = 0
 
 def clusterer_GPU(x, y, frame, eps, min_samples):
+	x = _np.ascontiguousarray(x, dtype=_np.float32)
+	y = _np.ascontiguousarray(y, dtype=_np.float32)
+	frame = _np.ascontiguousarray(frame, dtype=_np.float32)
+
 	block = 32
-	grid = len(x) // block + 1
+	grid_x = len(x) // block + 1
 	# todo: remember about moving to and from cpu and gpu + cuda.synchronize()
 	### number of neighbors
 	# move arrays to device
 	d_x = _cuda.to_device(x)
 	d_y = _cuda.to_device(y)
 	d_n_neighbors = _cuda.to_device(_np.zeros(len(x), dtype=_np.int32))
-	count_neighbors_GPU[grid, block](
-		d_n_neighbors, radius, d_x, d_y
+	count_neighbors_GPU[grid_x, block](
+		d_n_neighbors, eps, d_x, d_y
 	)
 	_cuda.synchronize()
 
 	### local maxima
 	d_local_max = _cuda.to_device(_np.zeros(len(x), dtype=_np.int32))
-	local_maxima_GPU[grid, block](
-		d_local_max, d_n_neighbors, radius, d_x, d_y
+	local_maxima_GPU[grid_x, block](
+		d_local_max, d_n_neighbors, eps, d_x, d_y
 	)
 	_cuda.synchronize()
 	local_max = d_local_max.copy_to_host()
@@ -416,8 +419,8 @@ def clusterer_GPU(x, y, frame, eps, min_samples):
 	d_cluster_id = _cuda.to_device(_np.zeros(len(x), dtype=_np.int32))
 	for i in range(len(x)):
 		if local_max[i]:
-			assign_to_cluster_GPU[grid, block](
-				i, radius, d_cluster_id, d_x, d_y
+			assign_to_cluster_GPU[grid_x, block](
+				i, eps, d_cluster_id, d_x, d_y
 			)
 			_cuda.synchronize()
 	cluster_id = d_cluster_id.copy_to_host()
@@ -425,7 +428,7 @@ def clusterer_GPU(x, y, frame, eps, min_samples):
 	### check cluster size
 	cluster_n_locs = _np.bincount(cluster_id)
 	d_cluster_n_locs = _cuda.to_device(cluster_n_locs)
-	check_cluster_size_GPU[grid, block](
+	check_cluster_size_GPU[grid_x, block](
 		d_cluster_n_locs, min_samples, d_cluster_id
 	)
 	_cuda.synchronize()
@@ -434,7 +437,7 @@ def clusterer_GPU(x, y, frame, eps, min_samples):
 	cluster_id = d_cluster_id.copy_to_host()
 	clusters = _np.unique(cluster_id)
 	d_clusters = _cuda.to_device(clusters)
-	rename_clusters_GPU[grid, block](
+	rename_clusters_GPU[grid_x, block](
 		d_cluster_id, d_clusters
 	)
 	_cuda.synchronize()
@@ -450,7 +453,8 @@ def clusterer_GPU(x, y, frame, eps, min_samples):
 	d_occ_locs_window = _cuda.to_device(
 		_np.zeros((n ,21), dtype=_np.float32)
 	)
-	cluster_properties_GPU1[grid, block](
+	grid_n = len(clusters) // block + 1
+	cluster_properties_GPU1[grid_n, block](
 		d_cluster_id,
 		d_clusters,
 		d_com_x,
@@ -466,8 +470,8 @@ def clusterer_GPU(x, y, frame, eps, min_samples):
 	_cuda.synchronize()
 
 	### check cluster props 2
-	d_locs_perc = _cuda.to_device(_np.zeros(n), dtype=_np.float32)
-	cluster_properties_GPU2[grid, block](
+	d_locs_perc = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
+	cluster_properties_GPU2[grid_n, block](
 		d_com_x, 
 		d_com_y, 
 		d_occ_locs_window, 
@@ -478,9 +482,9 @@ def clusterer_GPU(x, y, frame, eps, min_samples):
 	_cuda.synchronize()
 
 	### check for true clusters
-	d_true_cluser = _cuda.to_device(_np.zeros(n), dtype=_np.int8)
+	d_true_cluser = _cuda.to_device(_np.zeros(n, dtype=_np.int8))
 	frame_nr = frame[-1]
-	true_cluster_GPU[grid, block](
+	true_cluster_GPU[grid_n, block](
 		d_mean_frame, d_locs_perc, d_true_cluser, frame_nr
 	)
 	_cuda.synchronize()
