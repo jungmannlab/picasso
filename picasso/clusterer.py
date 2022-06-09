@@ -40,7 +40,7 @@ def local_maxima_picked(dist, nn, radius):
 	with the highest number of neighbors within given distance dist
 	"""
 	n = dist.shape[0]
-	lm = _np.zeros(n, dtype=_np.int32)
+	lm = _np.zeros(n, dtype=_np.int8)
 	for i in range(n):
 		for j in range(n):
 			if dist[i][j] <= radius and nn[i] >= nn[j]:
@@ -139,8 +139,7 @@ def clusterer_picked_2D(x, y, frame, radius, min_locs):
 	return labels
 
 def clusterer_picked_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
-	z *= radius_xy / radius_z
-	xyz = _np.stack((x, y, z)).T
+	xyz = _np.stack((x, y, z * (radius_xy/radius_z))).T # scale z
 	dist = _dm(xyz, xyz)
 	n_neighbors = count_neighbors_picked(dist, radius_xy)
 	local_max = local_maxima_picked(dist, n_neighbors, radius_xy)
@@ -304,7 +303,7 @@ def count_neighbors_CPU_3D(locs_id_box, box_id, x, y, z, r2, r_rel):
 	return nn	
 
 def local_maxima_CPU_2D(locs_id_box, box_id, nn, x, y, r2):
-	lm = _np.zeros(len(x))
+	lm = _np.zeros(len(x), dtype=_np.int8)
 	for i in range(len(x)):
 		for j in locs_id_box[box_id[i]]:
 			d2 = get_d2_2D(x[i], x[j], y[i], y[j])
@@ -316,7 +315,7 @@ def local_maxima_CPU_2D(locs_id_box, box_id, nn, x, y, r2):
 	return lm
 
 def local_maxima_CPU_3D(locs_id_box, box_id, nn, x, y, z, r2, r_rel):
-	lm = _np.zeros(len(x))
+	lm = _np.zeros(len(x), dtype=_np.int8)
 	for i in range(len(x)):
 		for j in locs_id_box[box_id[i]]:
 			d2 = get_d2_3D(x[i], x[j], y[i], y[j], z[i], z[j], r_rel)
@@ -658,9 +657,10 @@ def clusterer_GPU_2D(x, y, frame, radius, min_locs):
 
 def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	# cuda does not accept noncontiguous arrays
-	x = _np.ascontiguousarray(x, dtype=_np.float32)
-	y = _np.ascontiguousarray(y, dtype=_np.float32)
-	frame = _np.ascontiguousarray(frame, dtype=_np.float32)
+	x = _np.ascontiguousarray(x)
+	y = _np.ascontiguousarray(y)
+	z = _np.ascontiguousarray(z)
+	frame = _np.ascontiguousarray(frame)
 	r2 = radius_xy ** 2
 	r_rel = radius_xy / radius_z
 
@@ -679,7 +679,7 @@ def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	_cuda.synchronize()
 
 	### local maxima
-	d_local_max = _cuda.to_device(_np.zeros(len(x), dtype=_np.int32))
+	d_local_max = _cuda.to_device(_np.zeros(len(x), dtype=_np.int8))
 	local_maxima_GPU_3D[grid_x, block](
 		d_local_max, d_n_neighbors, r2, r_rel, d_x, d_y, d_z
 	)
