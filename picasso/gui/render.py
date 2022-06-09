@@ -1780,6 +1780,108 @@ class HdbscanDialog(QtWidgets.QDialog):
             result == QtWidgets.QDialog.Accepted,
         )
 
+class SMLMDialog3D(QtWidgets.QDialog):
+    #todo: docstrings
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters (3D)")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Cluster radius xy (pixels):"), 0, 0)
+        self.radius_xy = QtWidgets.QDoubleSpinBox()
+        self.radius_xy.setRange(0.0001, 1e3)
+        self.radius_xy.setDecimals(4)
+        self.radius_xy.setValue(0.1)
+        grid.addWidget(self.radius_xy, 0, 1)
+        grid.addWidget(QtWidgets.QLabel("Cluster radius z (pixels):"), 1, 0)
+        self.radius_z = QtWidgets.QDoubleSpinBox()
+        self.radius_z.setRange(0, 1e3)
+        self.radius_z.setDecimals(4)
+        self.radius_z.setValue(0.25)
+        grid.addWidget(self.radius_z, 1, 1)
+        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 2, 0)
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setRange(1, 1e6)
+        self.min_locs.setValue(10)
+        grid.addWidget(self.min_locs, 2, 1)
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(parent=None):
+        """
+        Creates the dialog and returns the requested values for 
+        SMLM clusterer.
+        """
+
+        dialog = SMLMDialog3D(parent)
+        result = dialog.exec_()
+        return (
+            dialog.radius_xy.value(),
+            dialog.radius_z.value(),
+            dialog.min_locs.value(),
+            result == QtWidgets.QDialog.Accepted,
+        )    
+
+
+class SMLMDialog2D(QtWidgets.QDialog):
+    #todo: docstrings
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters (2D)")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Cluster radius (pixels):"), 0, 0)
+        self.radius = QtWidgets.QDoubleSpinBox()
+        self.radius.setRange(0.0001, 1e3)
+        self.radius.setDecimals(4)
+        self.radius.setValue(0.1)
+        grid.addWidget(self.radius, 0, 1)
+        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 1, 0)
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setRange(1, 1e6)
+        self.min_locs.setValue(10)
+        grid.addWidget(self.min_locs, 1, 1)
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(parent=None):
+        """
+        Creates the dialog and returns the requested values for 
+        SMLM clusterer.
+        """
+
+        dialog = SMLMDialog2D(parent)
+        result = dialog.exec_()
+        return (
+            dialog.radius.value(),
+            dialog.min_locs.value(),
+            result == QtWidgets.QDialog.Accepted,
+        )  
+
 
 class TestClustererDialog(QtWidgets.QDialog):
     """
@@ -5158,17 +5260,21 @@ class View(QtWidgets.QLabel):
             status.close()
 
     def smlm_clusterer(self):
-        # todo: 3d and 2d separetely
         #todo: test clusterer
         #todo: needs spliting locs in gpu if there are more than 1mln?
         #todo: doctrings here and in clusterer.py
+        #todo: tidy up the code
+        #todo: correct the other clusterers, the pixelsize thing
         """
         Gets Smlm clusterer parameters, performs clustering and 
         saves data.
         """
         # parameters are similar to dbscan
-        radius, min_cluster, ok = DbscanDialog.getParams()
         channel = self.get_channel("Cluster")
+        if hasattr(self.locs[channel], "z"):
+            radius_xy, radius_z, min_locs, ok = SMLMDialog3D.getParams()
+        else:
+            radius, min_locs, ok = SMLMDialog2D.getParams()
         t0 = time.time()
         if ok:
             if len(self._picks) > 0:
@@ -5183,13 +5289,24 @@ class View(QtWidgets.QLabel):
                 for i in range(len(picked_locs)):
                     locs = picked_locs[i]
                     if len(locs) > 0:
-                        labels = clusterer.clusterer_picked(
-                            locs.x,
-                            locs.y,
-                            locs.frame,
-                            radius,
-                            min_cluster,
-                        )
+                        if hasattr(locs, "z"):
+                            labels = clusterer.clusterer_picked_3D(
+                                locs.x,
+                                locs.y,
+                                locs.z,
+                                locs.frame,
+                                radius_xy,
+                                radius_z,
+                                min_locs,
+                            )
+                        else:
+                            labels = clusterer.clusterer_picked_2D(
+                                locs.x,
+                                locs.y,
+                                locs.frame,
+                                radius,
+                                min_locs,
+                            )
                         temp_locs = lib.append_to_rec(
                             locs, labels, "group"
                         ) # add cluster id to locs
@@ -5221,13 +5338,24 @@ class View(QtWidgets.QLabel):
                 if ret == qm.Yes:
                     # check if gpu is available
                     if cuda.is_available():
-                        labels = clusterer.clusterer_GPU(
-                            self.locs[channel].x,
-                            self.locs[channel].y,
-                            self.locs[channel].frame,
-                            radius,
-                            min_cluster,
-                        )
+                        if hasattr(self.locs[channel], "z"):
+                            labels = clusterer.clusterer_GPU_3D(
+                                self.locs[channel].x,
+                                self.locs[channel].y,
+                                self.locs[channel].z,
+                                self.locs[channel].frame,
+                                radius_xy,
+                                radius_z,
+                                min_locs,
+                            )
+                        else:
+                            labels = clusterer.clusterer_GPU_2D(
+                                self.locs[channel].x,
+                                self.locs[channel].y,
+                                self.locs[channel].frame,
+                                radius,
+                                min_locs,
+                            )
                     else:
                         message = (
                             "Make sure your computer has a GPU installed"
@@ -5239,13 +5367,24 @@ class View(QtWidgets.QLabel):
                         )
                         return
                 elif ret == qm.No:
-                    labels = clusterer.clusterer_CPU(
-                        self.locs[channel].x,
-                        self.locs[channel].y,
-                        self.locs[channel].frame,
-                        radius,
-                        min_cluster,
-                    )
+                    if hasattr(self.locs[channel], "z"):
+                        labels = clusterer.clusterer_CPU_3D(
+                            self.locs[channel].x,
+                            self.locs[channel].y,
+                            self.locs[channel].z,
+                            self.locs[channel].frame,
+                            radius_xy,
+                            radius_z,
+                            min_locs,
+                        )
+                    else:
+                        labels = clusterer.clusterer_CPU_2D(
+                            self.locs[channel].x,
+                            self.locs[channel].y,
+                            self.locs[channel].frame,
+                            radius,
+                            min_locs,
+                        )
                 clustered_locs = lib.append_to_rec(
                     self.locs[channel], labels, "group"
                 )
@@ -5253,12 +5392,21 @@ class View(QtWidgets.QLabel):
 
             path, ext = os.path.splitext(self.locs_paths[channel])
             path = path + '_clustered.hdf5'
-            new_info = {
-                "Generated by": "Picasso Render SMLM clusterer",
-                "Number of clusters": len(np.unique(clustered_locs.group)),
-                "Clustering radius [cam. px]": radius,
-                "Min. cluster size": min_cluster,
-            }
+            if hasattr(self.locs[channel], "z"):
+                new_info = {
+                    "Generated by": "Picasso Render SMLM clusterer 3D",
+                    "Number of clusters": len(np.unique(clustered_locs.group)),
+                    "Clustering radius xy [cam. px]": radius_xy,
+                    "Clustering radius z [cam. px]": radius_z,
+                    "Min. cluster size": min_locs,
+                }            
+            else:
+                new_info = {
+                    "Generated by": "Picasso Render SMLM clusterer 2D",
+                    "Number of clusters": len(np.unique(clustered_locs.group)),
+                    "Clustering radius [cam. px]": radius,
+                    "Min. cluster size": min_locs,
+                }
             io.save_locs(
                 path, clustered_locs, self.infos[channel] + [new_info]
             )

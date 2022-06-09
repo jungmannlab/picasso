@@ -242,7 +242,7 @@ def assing_locs_to_boxes_3D(x, y, z, box_size_xy, box_size_z):
 
 	n_boxes_x = int((x_end - x_start) / box_size_xy) + 1
 	n_boxes_y = int((y_end - y_start) / box_size_xy) + 1
-	n_boxes_z = int((z_end - z_start) / box_size_z)
+	n_boxes_z = int((z_end - z_start) / box_size_z) + 1
 	n_boxes = n_boxes_x * n_boxes_y * n_boxes_z
 
 	for i in range(len(x)):
@@ -396,7 +396,7 @@ def clusterer_CPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	to boxes and neighbors counting is slightly different.
 	"""
 	locs_id_box, box_id = assing_locs_to_boxes_3D(
-		x, y, z, radius*1.05, radius_z
+		x, y, z, radius_xy*1.05, radius_z
 	) # todo: check if 1.05 changes results
 	r2 = radius_xy ** 2
 	r_rel = radius_xy / radius_z
