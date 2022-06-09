@@ -155,7 +155,7 @@ def clusterer_picked_2D(x, y, frame, radius, min_locs):
 def clusterer_picked_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	xyz = _np.stack((x, y, z * (radius_xy/radius_z))).T # scale z
 	dist = _dm(xyz, xyz)
-	clusterd_id = find_clusters_picked(dist, radius_xy)
+	cluster_id = find_clusters_picked(dist, radius_xy)
 	cluster_id, true_cluster = postprocess_clusters(
 		cluster_id, min_locs, frame
 	)
