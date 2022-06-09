@@ -1781,7 +1781,28 @@ class HdbscanDialog(QtWidgets.QDialog):
         )
 
 class SMLMDialog3D(QtWidgets.QDialog):
-    #todo: docstrings
+    """
+    A class to obtain inputs for SMLM clusterer (3D).
+
+    ...
+
+    Attributes
+    ----------
+    radius_xy : QDoubleSpinBox
+        contains clustering radius in x and y directions
+    radius_z : QDoubleSpinBox
+        contains clustering radius in z direction 
+        (typically =2*radius_xy)
+    min_locs : QSpinBox
+        contains minimum number of locs in cluster
+
+    Methods
+    -------
+    getParams(parent=None)
+        Creates the dialog and returns the requested values for 
+        clustering
+    """
+    
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -1822,7 +1843,7 @@ class SMLMDialog3D(QtWidgets.QDialog):
     def getParams(parent=None):
         """
         Creates the dialog and returns the requested values for 
-        SMLM clusterer.
+        SMLM clusterer (3D).
         """
 
         dialog = SMLMDialog3D(parent)
@@ -1836,7 +1857,25 @@ class SMLMDialog3D(QtWidgets.QDialog):
 
 
 class SMLMDialog2D(QtWidgets.QDialog):
-    #todo: docstrings
+    """
+    A class to obtain inputs for SMLM clusterer (2D).
+
+    ...
+
+    Attributes
+    ----------
+    radius : QDoubleSpinBox
+        contains clustering radius in x and y directions
+    min_locs : QSpinBox
+        contains minimum number of locs in cluster
+
+    Methods
+    -------
+    getParams(parent=None)
+        Creates the dialog and returns the requested values for 
+        clustering
+    """
+
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -1871,7 +1910,7 @@ class SMLMDialog2D(QtWidgets.QDialog):
     def getParams(parent=None):
         """
         Creates the dialog and returns the requested values for 
-        SMLM clusterer.
+        SMLM clusterer (2D).
         """
 
         dialog = SMLMDialog2D(parent)
@@ -4639,6 +4678,8 @@ class View(QtWidgets.QLabel):
         Displays x and y coordinates of locs in picks in time
     sizeHint()
         Returns recommended window size
+    smlm_clusterer()
+        Clusters locs using SMLM clusterer and saves the result
     subtract_picks(path)
         Clears current picks that cover the picks loaded from path
     to_8bit(image)
@@ -5260,25 +5301,33 @@ class View(QtWidgets.QLabel):
             status.close()
 
     def smlm_clusterer(self):
-        #todo: test clusterer
-        #todo: needs spliting locs in gpu if there are more than 1mln?
-        #todo: doctrings here and in clusterer.py
-        #todo: tidy up the code
-        #todo: correct the other clusterers, the pixelsize thing
         """
-        Gets Smlm clusterer parameters, performs clustering and 
-        saves data.
+        Clusters locs using SMLM clusterer and saves the result.
+
+        There are three modes of clustering, each in 2D and 3D versions:
+            * clusterer_picked - clusters locs in picks; distances 
+                between points are stored in a distance matrix. It is 
+                recommended that there are no more than 700 (2D) or 
+                600 (3D) locs in each pick.
+            * clusterer CPU - clusters all loaded locs with a CPU; 
+                distances are calculated on demand. May take a long 
+                time to finish
+            * clusterer GPU - clusters all loaded locs with a GPU;
+                distances are calculated on demand.
         """
-        # parameters are similar to dbscan
+
         channel = self.get_channel("Cluster")
+
+        # get clustering parameters
         if hasattr(self.locs[channel], "z"):
             radius_xy, radius_z, min_locs, ok = SMLMDialog3D.getParams()
         else:
             radius, min_locs, ok = SMLMDialog2D.getParams()
-        t0 = time.time()
+
         if ok:
-            if len(self._picks) > 0:
-                # perform clustering with cpu
+            t0 = time.time()
+            # cluster picked locs with cpu (distance matrix)
+            if len(self._picks) > 0: 
                 clustered_locs = [] # list with picked locs after clustering
                 picked_locs = self.picked_locs(channel, add_group=False)
                 group_offset = 0
@@ -5310,18 +5359,20 @@ class View(QtWidgets.QLabel):
                         temp_locs = lib.append_to_rec(
                             locs, labels, "group"
                         ) # add cluster id to locs
-                        # -1 means no cluster
+
+                        # -1 means no cluster assigned to a loc
                         temp_locs = temp_locs[temp_locs.group != -1]
                         if len(temp_locs) > 0:
+                            # make sure each picks produces unique cluster ids
                             temp_locs.group += group_offset
                             clustered_locs.append(temp_locs)
                             group_offset += np.max(labels)
                     pd.set_value(i + 1)
                 clustered_locs = stack_arrays(
                     clustered_locs, asrecarray=True, usemask=False
-                )
-            else:
-                # cluster all locs, ask if gpu or cpu
+                ) # np.recarray with all clustered locs to be saved
+
+            else: # cluster all locs
                 qm = QtWidgets.QMessageBox()
                 qm.setWindowTitle("Clusterer")
                 ret = qm.question(
@@ -5334,10 +5385,8 @@ class View(QtWidgets.QLabel):
                         "cluster only picked localizations."
                     )
                 )
-                #todo: is it really hours?
-                if ret == qm.Yes:
-                    # check if gpu is available
-                    if cuda.is_available():
+                if ret == qm.Yes: # use gpu
+                    if cuda.is_available(): # gpu is available
                         if hasattr(self.locs[channel], "z"):
                             labels = clusterer.clusterer_GPU_3D(
                                 self.locs[channel].x,
@@ -5356,7 +5405,7 @@ class View(QtWidgets.QLabel):
                                 radius,
                                 min_locs,
                             )
-                    else:
+                    else: # gpu not found, cancel operation
                         message = (
                             "Make sure your computer has a GPU installed"
                             " and that you have the required software.\n"
@@ -5366,7 +5415,7 @@ class View(QtWidgets.QLabel):
                             self, "GPU not found.", message
                         )
                         return
-                elif ret == qm.No:
+                elif ret == qm.No: # use cpu (distance calculated on demand)
                     if hasattr(self.locs[channel], "z"):
                         labels = clusterer.clusterer_CPU_3D(
                             self.locs[channel].x,
@@ -5387,9 +5436,12 @@ class View(QtWidgets.QLabel):
                         )
                 clustered_locs = lib.append_to_rec(
                     self.locs[channel], labels, "group"
-                )
+                ) # add cluster id to locs
+
+                # -1 means no cluster assigned to a loc
                 clustered_locs = clustered_locs[clustered_locs.group != -1]
 
+            # saving
             path, ext = os.path.splitext(self.locs_paths[channel])
             path = path + '_clustered.hdf5'
             if hasattr(self.locs[channel], "z"):
@@ -10525,7 +10577,6 @@ class Window(QtWidgets.QMainWindow):
                 radius = float(input[1])
                 turns = int(input[2])
                 maxframe = self.view.infos[channel][0]["Frames"]
-                # Todo: at some point save the spiral in the respective channel
 
                 self.x_spiral = self.view.locs[channel]["x"].copy()
                 self.y_spiral = self.view.locs[channel]["y"].copy()
