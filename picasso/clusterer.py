@@ -225,10 +225,6 @@ def assing_locs_to_boxes_2D(x, y, box_size):
 	return locs_id_box, box_id	
 
 def assing_locs_to_boxes_3D(x, y, z, box_size_xy, box_size_z):
-	'''
-	does not add locs to adjacent boxes in z, just use higher box size
-	'''
-	box_size_z *= 2.05
 	# assigns each loc to a box
 	box_id = _np.zeros(len(x), dtype=_np.int32)
 	
@@ -279,6 +275,33 @@ def assing_locs_to_boxes_3D(x, y, z, box_size_xy, box_size_z):
 			locs_id_box[box_id[i]+n_boxes_x].append(i)
 			locs_id_box[box_id[i]+n_boxes_x+1].append(i)
 			locs_id_box[box_id[i]+n_boxes_x-1].append(i)	
+
+		# add locs in front of and behind
+		if box_id[i] > n_boxes_x * n_boxes_y:
+			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y]
+			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y+1]
+			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y-1]
+
+			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y]
+			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y+1]
+			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y-1]
+
+			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y]
+			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y+1]
+			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y-1]
+
+		if box_id[i] < n - n_boxes_x * n_boxes_y:
+			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y]
+			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y+1]
+			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y-1]
+
+			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y]
+			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y+1]
+			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y-1]
+
+			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y]
+			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y+1]
+			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y-1]
 
 	return locs_id_box, box_id		
 
@@ -395,8 +418,8 @@ def clusterer_CPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	to boxes and neighbors counting is slightly different.
 	"""
 	locs_id_box, box_id = assing_locs_to_boxes_3D(
-		x, y, z, radius_xy*1.05, radius_z
-	) # todo: check if 1.05 changes results
+		x, y, z, radius_xy*1.05, radius_z*1.05
+	)
 	r2 = radius_xy ** 2
 	r_rel = radius_xy / radius_z
 	n_neighbors = count_neighbors_CPU_3D(

@@ -5329,7 +5329,7 @@ class View(QtWidgets.QLabel):
                     "",
                     (
                         "Use GPU? \n"
-                        "CPU clustering may take hours to finish.\n"
+                        "CPU clustering may take a long time to finish.\n"
                         "If CPU is preferred,  it is recommended to\n"
                         "cluster only picked localizations."
                     )
