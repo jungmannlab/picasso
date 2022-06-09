@@ -5263,7 +5263,7 @@ class View(QtWidgets.QLabel):
                 path, clustered_locs, self.infos[channel] + [new_info]
             )
             dt = np.round((time.time() - t0) / 60, 2)
-            print(f'time requiried: {dt} minutes')
+            print(f'time required: {dt} minutes')
             print('clustered locs saved')           
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
