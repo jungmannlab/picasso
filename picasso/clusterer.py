@@ -526,12 +526,12 @@ def assing_locs_to_boxes_2D(x, y, box_size):
 		if box_id[i] != 0:
 			locs_id_box[box_id[i]-1].append(i)
 
-		if box_id[i] > n_boxes_x:
+		if box_id[i] >= n_boxes_x:
 			locs_id_box[box_id[i]-n_boxes_x].append(i)
 			locs_id_box[box_id[i]-n_boxes_x+1].append(i)
 			locs_id_box[box_id[i]-n_boxes_x-1].append(i)
 
-		if box_id[i] < n_boxes - n_boxes_x:
+		if box_id[i] <= n_boxes - n_boxes_x:
 			locs_id_box[box_id[i]+n_boxes_x].append(i)
 			locs_id_box[box_id[i]+n_boxes_x+1].append(i)
 			locs_id_box[box_id[i]+n_boxes_x-1].append(i)	
@@ -611,17 +611,17 @@ def assing_locs_to_boxes_3D(x, y, z, box_size_xy, box_size_z):
 		if box_id[i] != 0:
 			locs_id_box[box_id[i]-1].append(i)
 
-		if box_id[i] > n_boxes_x:
+		if box_id[i] >= n_boxes_x:
 			locs_id_box[box_id[i]-n_boxes_x].append(i)
 			locs_id_box[box_id[i]-n_boxes_x+1].append(i)
 			locs_id_box[box_id[i]-n_boxes_x-1].append(i)
 
-		if box_id[i] < n_boxes - n_boxes_x:
+		if box_id[i] <= n_boxes - n_boxes_x:
 			locs_id_box[box_id[i]+n_boxes_x].append(i)
 			locs_id_box[box_id[i]+n_boxes_x+1].append(i)
 			locs_id_box[box_id[i]+n_boxes_x-1].append(i)	
 
-		if box_id[i] > n_boxes_x * n_boxes_y:
+		if box_id[i] >= n_boxes_x * n_boxes_y:
 			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y].append(i)
 			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y+1].append(i)
 			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y-1].append(i)
@@ -634,7 +634,7 @@ def assing_locs_to_boxes_3D(x, y, z, box_size_xy, box_size_z):
 			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y+1].append(i)
 			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y-1].append(i)
 
-		if box_id[i] < n_boxes - n_boxes_x * n_boxes_y:
+		if box_id[i] <= n_boxes - n_boxes_x * n_boxes_y:
 			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y].append(i)
 			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y+1].append(i)
 			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y-1].append(i)
