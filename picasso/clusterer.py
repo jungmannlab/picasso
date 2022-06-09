@@ -566,7 +566,6 @@ def postprocess_clusters_GPU(cluster_id, min_locs, frame):
 	grid_x = len(cluster_id) // block + 1
 
 	### check cluster size
-	cluster_id = d_cluster_id.copy_to_host()
 	cluster_n_locs = _np.bincount(cluster_id)
 	cluster_id = check_cluster_size(cluster_n_locs, min_locs, cluster_id)
 
@@ -653,6 +652,7 @@ def clusterer_GPU_2D(x, y, frame, radius, min_locs):
 			)
 			_cuda.synchronize()
 
+	cluster_id = d_cluster_id.copy_to_host()
 	cluster_id, true_cluster = postprocess_clusters_GPU(
 		cluster_id, min_locs, frame
 	)
@@ -697,6 +697,7 @@ def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 				i, r2, r_rel, d_cluster_id, d_x, d_y, d_z
 			)
 			_cuda.synchronize()
+	cluster_id = d_cluster_id.copy_to_host()
 	cluster_id, true_cluster = postprocess_clusters_GPU(
 		cluster_id, min_locs, frame
 	)
