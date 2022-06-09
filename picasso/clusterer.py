@@ -115,16 +115,18 @@ def find_true_clusters(mean_frame, locs_frac, frame):
 			true_cluster[i] = 1
 	return true_cluster
 
-def clusterer_picked_2D(x, y, frame, radius, min_locs):
-	xy = _np.stack((x, y)).T
-	dist = _dm(xy, xy)
+def find_clusters_picked(dist, radius):
 	n_neighbors = count_neighbors_picked(dist, radius)
 	local_max = local_maxima_picked(dist, n_neighbors, radius)
 	cluster_id = assign_to_cluster_picked(dist, radius, local_max)
+	return cluster_id	
+
+def postprocess_clusters(cluster_id, min_locs, frame):
+	"""
+	filters clusters w.r.t. their size, and performs basic frame analysis
+	"""
 	cluster_n_locs = _np.bincount(cluster_id)
-	cluster_id = check_cluster_size(
-		cluster_n_locs, min_locs, cluster_id
-	)
+	cluster_id = check_cluster_size(cluster_n_locs, min_locs, cluster_id)
 	clusters = _np.unique(cluster_id)
 	cluster_id = rename_clusters(cluster_id, clusters)
 	n_clusters = len(clusters)
@@ -132,34 +134,32 @@ def clusterer_picked_2D(x, y, frame, radius, min_locs):
 		cluster_id, n_clusters, frame
 	)
 	true_cluster = find_true_clusters(mean_frame, locs_frac, frame)
-	labels = -1 * _np.ones(len(x), dtype=_np.int32)
-	for i in range(len(x)):
+	return cluster_id, true_cluster
+
+def get_labels(cluster_id, true_cluster):
+	labels = -1 * _np.ones(len(cluster_id), dtype=_np.int32)
+	for i in range(len(cluster_id)):
 		if cluster_id[i] != 0 and true_cluster[cluster_id[i]] == 1:
 			labels[i] = cluster_id[i] - 1
 	return labels
 
+def clusterer_picked_2D(x, y, frame, radius, min_locs):
+	xy = _np.stack((x, y)).T
+	dist = _dm(xy, xy)
+	cluster_id = find_clusters_picked(dist, radius)
+	cluster_id, true_cluster = postprocess_clusters(
+		cluster_id, min_locs, frame
+	)
+	return get_labels(cluster_id, true_cluster)
+
 def clusterer_picked_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	xyz = _np.stack((x, y, z * (radius_xy/radius_z))).T # scale z
 	dist = _dm(xyz, xyz)
-	n_neighbors = count_neighbors_picked(dist, radius_xy)
-	local_max = local_maxima_picked(dist, n_neighbors, radius_xy)
-	cluster_id = assign_to_cluster_picked(dist, radius_xy, local_max)
-	cluster_n_locs = _np.bincount(cluster_id)
-	cluster_id = check_cluster_size(
-		cluster_n_locs, min_locs, cluster_id
+	clusterd_id = find_clusters_picked(dist, radius_xy)
+	cluster_id, true_cluster = postprocess_clusters(
+		cluster_id, min_locs, frame
 	)
-	clusters = _np.unique(cluster_id)
-	cluster_id = rename_clusters(cluster_id, clusters)
-	n_clusters = len(clusters)
-	mean_frame, locs_frac = cluster_properties(
-		cluster_id, n_clusters, frame
-	)
-	true_cluster = find_true_clusters(mean_frame, locs_frac, frame)
-	labels = -1 * _np.ones(len(x), dtype=_np.int32)
-	for i in range(len(x)):
-		if cluster_id[i] != 0 and true_cluster[cluster_id[i]] == 1:
-			labels[i] = cluster_id[i] - 1
-	return labels
+	return get_labels(cluster_id, true_cluster)
 
 #_____________________________________________________________________#
 
@@ -278,30 +278,30 @@ def assing_locs_to_boxes_3D(x, y, z, box_size_xy, box_size_z):
 
 		# add locs in front of and behind
 		if box_id[i] > n_boxes_x * n_boxes_y:
-			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y]
-			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y+1]
-			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y-1]
+			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y].append(i)
+			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y+1].append(i)
+			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y-1].append(i)
 
-			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y]
-			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y+1]
-			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y-1]
+			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y].append(i)
+			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y+1].append(i)
+			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y-1].append(i)
 
-			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y]
-			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y+1]
-			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y-1]
+			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y].append(i)
+			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y+1].append(i)
+			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y-1].append(i)
 
-		if box_id[i] < n - n_boxes_x * n_boxes_y:
-			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y]
-			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y+1]
-			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y-1]
+		if box_id[i] < n_boxes - n_boxes_x * n_boxes_y:
+			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y].append(i)
+			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y+1].append(i)
+			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y-1].append(i)
 
-			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y]
-			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y+1]
-			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y-1]
+			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y].append(i)
+			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y+1].append(i)
+			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y-1].append(i)
 
-			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y]
-			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y+1]
-			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y-1]
+			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y].append(i)
+			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y+1].append(i)
+			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y-1].append(i)
 
 	return locs_id_box, box_id		
 
@@ -388,29 +388,17 @@ def clusterer_CPU_2D(x, y, frame, radius, min_locs):
 	almost the same as clusterer picked, except locs are allocated
 	to boxes and neighbors counting is slightly different.
 	"""
-	locs_id_box, box_id = assing_locs_to_boxes_2D(x, y, radius*1.05) # todo: check if 1.05 changes results
+	locs_id_box, box_id = assing_locs_to_boxes_2D(x, y, radius*1.1)
 	r2 = radius ** 2
 	n_neighbors = count_neighbors_CPU_2D(locs_id_box, box_id, x, y, r2)
 	local_max = local_maxima_CPU_2D(locs_id_box, box_id, n_neighbors, x, y, r2)
 	cluster_id = assign_to_cluster_CPU_2D(
 		locs_id_box, box_id, n_neighbors, local_max, x, y, r2
 	)
-	cluster_n_locs = _np.bincount(cluster_id)
-	cluster_id = check_cluster_size(
-		cluster_n_locs, min_locs, cluster_id
+	cluster_id, true_cluster = postprocess_clusters(
+		cluster_id, min_locs, frame
 	)
-	clusters = _np.unique(cluster_id)
-	cluster_id = rename_clusters(cluster_id, clusters)
-	n_clusters = len(clusters)
-	mean_frame, locs_frac = cluster_properties(
-		cluster_id, n_clusters, frame
-	)
-	true_cluster = find_true_clusters(mean_frame, locs_frac, frame)
-	labels = -1 * _np.ones(len(x), dtype=_np.int32)
-	for i in range(len(x)):
-		if cluster_id[i] != 0 and true_cluster[cluster_id[i]] == 1:
-			labels[i] = cluster_id[i] - 1
-	return labels
+	return get_labels(cluster_id, true_cluster)
 
 def clusterer_CPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	"""
@@ -418,7 +406,7 @@ def clusterer_CPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	to boxes and neighbors counting is slightly different.
 	"""
 	locs_id_box, box_id = assing_locs_to_boxes_3D(
-		x, y, z, radius_xy*1.05, radius_z*1.05
+		x, y, z, radius_xy*1.1, radius_z*1.1
 	)
 	r2 = radius_xy ** 2
 	r_rel = radius_xy / radius_z
@@ -431,22 +419,10 @@ def clusterer_CPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	cluster_id = assign_to_cluster_CPU_3D(
 		locs_id_box, box_id, n_neighbors, local_max, x, y, z, r2, r_rel
 	)
-	cluster_n_locs = _np.bincount(cluster_id)
-	cluster_id = check_cluster_size(
-		cluster_n_locs, min_locs, cluster_id
+	cluster_id, true_cluster = postprocess_clusters(
+		cluster_id, min_locs, frame
 	)
-	clusters = _np.unique(cluster_id)
-	cluster_id = rename_clusters(cluster_id, clusters)
-	n_clusters = len(clusters)
-	mean_frame, locs_frac = cluster_properties(
-		cluster_id, n_clusters, frame
-	)
-	true_cluster = find_true_clusters(mean_frame, locs_frac, frame)
-	labels = -1 * _np.ones(len(x), dtype=_np.int32)
-	for i in range(len(x)):
-		if cluster_id[i] != 0 and true_cluster[cluster_id[i]] == 1:
-			labels[i] = cluster_id[i] - 1
-	return labels
+	return get_labels(cluster_id, true_cluster)
 
 #_____________________________________________________________________#
 
@@ -585,6 +561,61 @@ def cluster_properties_GPU2(
 		if temp > locs_frac[i]:
 			locs_frac[i] = temp
 
+def postprocess_clusters_GPU(cluster_id, min_locs, frame):
+	block = 32
+	grid_x = len(cluster_id) // block + 1
+
+	### check cluster size
+	cluster_id = d_cluster_id.copy_to_host()
+	cluster_n_locs = _np.bincount(cluster_id)
+	cluster_id = check_cluster_size(cluster_n_locs, min_locs, cluster_id)
+
+	### renaming cluster ids
+	d_cluster_id = _cuda.to_device(cluster_id)
+	clusters = _np.unique(cluster_id)
+	d_clusters = _cuda.to_device(clusters)
+	rename_clusters_GPU[grid_x, block](
+		d_cluster_id, d_clusters
+	)
+	_cuda.synchronize()
+
+	### cluster props 1
+	n = len(clusters)
+	d_frame = _cuda.to_device(frame)
+	d_n_locs_cluster = _cuda.to_device(_np.zeros(n, dtype=_np.int32))
+	d_mean_frame = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
+	d_locs_in_window = _cuda.to_device(
+		_np.zeros((n, 21), dtype=_np.float32)
+	)
+	grid_n = len(clusters) // block + 1
+	cluster_properties_GPU1[grid_n, block](
+		d_cluster_id,
+		n,
+		d_frame,
+		d_locs_in_window,
+		d_n_locs_cluster,
+		d_mean_frame,
+	)
+	_cuda.synchronize()
+
+	### check cluster props 2
+	d_locs_frac = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
+	cluster_properties_GPU2[grid_n, block](
+		d_locs_in_window, 
+		d_n_locs_cluster,
+		d_locs_frac,
+	)
+	_cuda.synchronize()
+
+	### check for true clusters
+	mean_frame = d_mean_frame.copy_to_host()
+	locs_frac = d_locs_frac.copy_to_host()
+	true_cluster = find_true_clusters(mean_frame, locs_frac, frame)
+
+	### return labels
+	cluster_id = d_cluster_id.copy_to_host()
+	return cluster_id, true_cluster	
+
 def clusterer_GPU_2D(x, y, frame, radius, min_locs):
 	# cuda does not accept noncontiguous arrays
 	x = _np.ascontiguousarray(x, dtype=_np.float32)
@@ -622,61 +653,10 @@ def clusterer_GPU_2D(x, y, frame, radius, min_locs):
 			)
 			_cuda.synchronize()
 
-	### check cluster size
-	cluster_id = d_cluster_id.copy_to_host()
-	cluster_n_locs = _np.bincount(cluster_id)
-	cluster_id = check_cluster_size(cluster_n_locs, min_locs, cluster_id)
-
-	### renaming cluster ids
-	d_cluster_id = _cuda.to_device(cluster_id)
-	clusters = _np.unique(cluster_id)
-	d_clusters = _cuda.to_device(clusters)
-	rename_clusters_GPU[grid_x, block](
-		d_cluster_id, d_clusters
+	cluster_id, true_cluster = postprocess_clusters_GPU(
+		cluster_id, min_locs, frame
 	)
-	_cuda.synchronize()
-
-	### cluster props 1
-	n = len(clusters)
-	d_frame = _cuda.to_device(frame)
-	d_n_locs_cluster = _cuda.to_device(_np.zeros(n, dtype=_np.int32))
-	d_mean_frame = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
-	window_search = frame[-1] / 20
-	d_locs_in_window = _cuda.to_device(
-		_np.zeros((n, 21), dtype=_np.float32)
-	)
-	grid_n = len(clusters) // block + 1
-	cluster_properties_GPU1[grid_n, block](
-		d_cluster_id,
-		n,
-		d_frame,
-		d_locs_in_window,
-		d_n_locs_cluster,
-		d_mean_frame,
-	)
-	_cuda.synchronize()
-
-	### check cluster props 2
-	d_locs_frac = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
-	cluster_properties_GPU2[grid_n, block](
-		d_locs_in_window, 
-		d_n_locs_cluster,
-		d_locs_frac,
-	)
-	_cuda.synchronize()
-
-	### check for true clusters
-	mean_frame = d_mean_frame.copy_to_host()
-	locs_frac = d_locs_frac.copy_to_host()
-	true_cluster = find_true_clusters(mean_frame, locs_frac, frame)
-
-	### return labels
-	cluster_id = d_cluster_id.copy_to_host()
-	labels = -1 * _np.ones(len(x), dtype=_np.int32)
-	for i in range(len(x)):
-		if cluster_id[i] != 0 and true_cluster[cluster_id[i]] == 1:
-			labels[i] = cluster_id[i] - 1
-	return labels
+	return get_labels(cluster_id, true_cluster)
 
 def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	# cuda does not accept noncontiguous arrays
@@ -717,59 +697,7 @@ def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 				i, r2, r_rel, d_cluster_id, d_x, d_y, d_z
 			)
 			_cuda.synchronize()
-
-	### check cluster size
-	cluster_id = d_cluster_id.copy_to_host()
-	cluster_n_locs = _np.bincount(cluster_id)
-	cluster_id = check_cluster_size(cluster_n_locs, min_locs, cluster_id)
-
-	### renaming cluster ids
-	d_cluster_id = _cuda.to_device(cluster_id)
-	clusters = _np.unique(cluster_id)
-	d_clusters = _cuda.to_device(clusters)
-	rename_clusters_GPU[grid_x, block](
-		d_cluster_id, d_clusters
+	cluster_id, true_cluster = postprocess_clusters_GPU(
+		cluster_id, min_locs, frame
 	)
-	_cuda.synchronize()
-
-	### cluster props 1
-	n = len(clusters)
-	d_frame = _cuda.to_device(frame)
-	d_n_locs_cluster = _cuda.to_device(_np.zeros(n, dtype=_np.int32))
-	d_mean_frame = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
-	window_search = frame[-1] / 20
-	d_locs_in_window = _cuda.to_device(
-		_np.zeros((n, 21), dtype=_np.float32)
-	)
-	grid_n = len(clusters) // block + 1
-	cluster_properties_GPU1[grid_n, block](
-		d_cluster_id,
-		n,
-		d_frame,
-		d_locs_in_window,
-		d_n_locs_cluster,
-		d_mean_frame,
-	)
-	_cuda.synchronize()
-
-	### check cluster props 2
-	d_locs_frac = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
-	cluster_properties_GPU2[grid_n, block](
-		d_locs_in_window, 
-		d_n_locs_cluster,
-		d_locs_frac,
-	)
-	_cuda.synchronize()
-
-	### check for true clusters
-	mean_frame = d_mean_frame.copy_to_host()
-	locs_frac = d_locs_frac.copy_to_host()
-	true_cluster = find_true_clusters(mean_frame, locs_frac, frame)
-
-	### return labels
-	cluster_id = d_cluster_id.copy_to_host()
-	labels = -1 * _np.ones(len(x), dtype=_np.int32)
-	for i in range(len(x)):
-		if cluster_id[i] != 0 and true_cluster[cluster_id[i]] == 1:
-			labels[i] = cluster_id[i] - 1
-	return labels
+	return get_labels(cluster_id, true_cluster)
