@@ -60,6 +60,20 @@ INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
 N_GROUP_COLORS = 8
 N_Z_COLORS = 32
+CLUSTER_CENTERS_DTYPE = [
+    ("frame", "u4"),
+    ("x", "f4"),
+    ("y", "f4"),
+    ("photons", "f4"),
+    ("sx", "f4"),
+    ("sy", "f4"),
+    ("bg", "f4"),
+    ("lpx", "f4"),
+    ("lpy", "f4"),
+    ("ellipticity", "f4"),
+    ("net_gradient", "f4"),
+    ("n", "u4"),
+]
 
 
 def get_colors(n_channels):
@@ -145,6 +159,27 @@ def kinetic_rate_from_fit(data):
     return rate
 
 estimate_kinetic_rate = kinetic_rate_from_fit
+
+def error_sums_wtd(x, w):
+    """ 
+    Function used for finding localization precision for cluster 
+    centers.
+
+    Parameters
+    ----------
+    x : float
+        x or y coordinate of the cluster center
+    w : float
+        weight (localization precision squared)
+
+    Returns
+    -------
+    float
+        weighted localizaiton precision of the cluster center
+    """
+
+    return (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
+
 
 def check_pick(f):
     """ Decorator verifying if there is at least one pick. """
@@ -1809,23 +1844,31 @@ class SMLMDialog3D(QtWidgets.QDialog):
         self.setWindowTitle("Enter parameters (3D)")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
+        # radius xy
         grid.addWidget(QtWidgets.QLabel("Cluster radius xy (pixels):"), 0, 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
         self.radius_xy.setRange(0.0001, 1e3)
         self.radius_xy.setDecimals(4)
         self.radius_xy.setValue(0.1)
         grid.addWidget(self.radius_xy, 0, 1)
+        # radius z
         grid.addWidget(QtWidgets.QLabel("Cluster radius z (pixels):"), 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setRange(0, 1e3)
         self.radius_z.setDecimals(4)
         self.radius_z.setValue(0.25)
         grid.addWidget(self.radius_z, 1, 1)
+        # min no. locs
         grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 2, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setRange(1, 1e6)
         self.min_locs.setValue(10)
         grid.addWidget(self.min_locs, 2, 1)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(True)
+        grid.addWidget(self.save_centers, 3, 0, 1, 2)
+
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
@@ -1852,6 +1895,7 @@ class SMLMDialog3D(QtWidgets.QDialog):
             dialog.radius_xy.value(),
             dialog.radius_z.value(),
             dialog.min_locs.value(),
+            dialog.save_centers.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )    
 
@@ -1882,17 +1926,24 @@ class SMLMDialog2D(QtWidgets.QDialog):
         self.setWindowTitle("Enter parameters (2D)")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
+        # clustering radius
         grid.addWidget(QtWidgets.QLabel("Cluster radius (pixels):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
         self.radius.setRange(0.0001, 1e3)
         self.radius.setDecimals(4)
         self.radius.setValue(0.1)
         grid.addWidget(self.radius, 0, 1)
+        # min no. locs
         grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 1, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setRange(1, 1e6)
         self.min_locs.setValue(10)
         grid.addWidget(self.min_locs, 1, 1)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(True)
+        grid.addWidget(self.save_centers, 2, 0, 1, 2)
+
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
@@ -1918,6 +1969,7 @@ class SMLMDialog2D(QtWidgets.QDialog):
         return (
             dialog.radius.value(),
             dialog.min_locs.value(),
+            dialog.save_centers.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )  
 
@@ -4637,6 +4689,8 @@ class View(QtWidgets.QLabel):
     save_channel_pickprops()
         Opens an input dialog asking which channel to use in saving 
         pick properties
+    save_cluster_centers(path, locs, info)
+        Extracts cluster centers from clustered locs and saves them
     save_pick_properties(path, channel)
         Saves picks' properties in a given channel to path
     save_picked_locs(path, channel)
@@ -5320,9 +5374,20 @@ class View(QtWidgets.QLabel):
 
         # get clustering parameters
         if hasattr(self.locs[channel], "z"):
-            radius_xy, radius_z, min_locs, ok = SMLMDialog3D.getParams()
+            (
+                radius_xy, 
+                radius_z, 
+                min_locs, 
+                save_centers, 
+                ok,
+            ) = SMLMDialog3D.getParams()
         else:
-            radius, min_locs, ok = SMLMDialog2D.getParams()
+            (
+                radius, 
+                min_locs, 
+                save_centers,
+                ok,
+            ) = SMLMDialog2D.getParams()
 
         if ok:
             t0 = time.time()
@@ -5337,6 +5402,10 @@ class View(QtWidgets.QLabel):
                 pd.set_value(0)
                 for i in range(len(picked_locs)):
                     locs = picked_locs[i]
+                    if hasattr(locs, "group"):
+                        locs = lib.append_to_rec(
+                            locs, locs.group, "group_input"
+                        )
                     if len(locs) > 0:
                         if hasattr(locs, "z"):
                             labels = clusterer.clusterer_picked_3D(
@@ -5356,6 +5425,7 @@ class View(QtWidgets.QLabel):
                                 radius,
                                 min_locs,
                             )
+
                         temp_locs = lib.append_to_rec(
                             locs, labels, "group"
                         ) # add cluster id to locs
@@ -5373,6 +5443,14 @@ class View(QtWidgets.QLabel):
                 ) # np.recarray with all clustered locs to be saved
 
             else: # cluster all locs
+                if hasattr(self.locs[channel], "group"):
+                    locs = lib.append_to_rec(
+                        self.locs[channel], 
+                        self.locs[channel].group, 
+                        "group_input",
+                    )
+                else:
+                    locs = self.locs[channel]
                 qm = QtWidgets.QMessageBox()
                 qm.setWindowTitle("Clusterer")
                 ret = qm.question(
@@ -5387,21 +5465,21 @@ class View(QtWidgets.QLabel):
                 )
                 if ret == qm.Yes: # use gpu
                     if cuda.is_available(): # gpu is available
-                        if hasattr(self.locs[channel], "z"):
+                        if hasattr(locs, "z"):
                             labels = clusterer.clusterer_GPU_3D(
-                                self.locs[channel].x,
-                                self.locs[channel].y,
-                                self.locs[channel].z,
-                                self.locs[channel].frame,
+                                locs.x,
+                                locs.y,
+                                locs.z,
+                                locs.frame,
                                 radius_xy,
                                 radius_z,
                                 min_locs,
                             )
                         else:
                             labels = clusterer.clusterer_GPU_2D(
-                                self.locs[channel].x,
-                                self.locs[channel].y,
-                                self.locs[channel].frame,
+                                locs.x,
+                                locs.y,
+                                locs.frame,
                                 radius,
                                 min_locs,
                             )
@@ -5416,26 +5494,26 @@ class View(QtWidgets.QLabel):
                         )
                         return
                 elif ret == qm.No: # use cpu (distance calculated on demand)
-                    if hasattr(self.locs[channel], "z"):
+                    if hasattr(locs, "z"):
                         labels = clusterer.clusterer_CPU_3D(
-                            self.locs[channel].x,
-                            self.locs[channel].y,
-                            self.locs[channel].z,
-                            self.locs[channel].frame,
+                            locs.x,
+                            locs.y,
+                            locs.z,
+                            locs.frame,
                             radius_xy,
                             radius_z,
                             min_locs,
                         )
                     else:
                         labels = clusterer.clusterer_CPU_2D(
-                            self.locs[channel].x,
-                            self.locs[channel].y,
-                            self.locs[channel].frame,
+                            locs.x,
+                            locs.y,
+                            locs.frame,
                             radius,
                             min_locs,
                         )
                 clustered_locs = lib.append_to_rec(
-                    self.locs[channel], labels, "group"
+                    locs, labels, "group"
                 ) # add cluster id to locs
 
                 # -1 means no cluster assigned to a loc
@@ -5459,9 +5537,29 @@ class View(QtWidgets.QLabel):
                     "Clustering radius [cam. px]": radius,
                     "Min. cluster size": min_locs,
                 }
-            io.save_locs(
-                path, clustered_locs, self.infos[channel] + [new_info]
-            )
+            info = self.infos[channel] + [new_info]
+            # check if z needs to be converted
+            if self.z_converted[channel]:
+                m = QtWidgets.QMessageBox()
+                m.setWindowTitle("z coordinates have been converted to pixels")
+                ret = m.question(
+                    self,
+                    "",
+                    "Convert z back to nm? (old picasso format)",
+                    m.Yes | m.No,
+                )
+                if ret == m.Yes:
+                    pixelsize = (
+                        self.window.display_settings_dlg.pixelsize.value()
+                    )
+                    clustered_locs.z *= pixelsize
+
+            # save locs
+            io.save_locs(path, clustered_locs, info)
+            # save cluster centers
+            if save_centers:
+                path = path.replace('_clustered', '_cluster_centers')
+                self.save_cluster_centers(path, clustered_locs, info)
             dt = np.round((time.time() - t0) / 60, 2)
             print(f'time required: {dt} minutes')
             print('clustered locs saved')           
@@ -6147,6 +6245,104 @@ class View(QtWidgets.QLabel):
                 return pathlist.index(index)
             else:
                 return None
+
+    def save_cluster_centers(self, path, locs, info):
+        """
+        Extract information about clustered localizations, defines
+        cluster centers and saves them in Picasso: Render - compatible
+        format.
+
+        Parameters
+        ----------
+        path : str
+            Path to save cluster centers
+        locs : np.recarray
+            Clustered localizations (contain group info)
+        info : list
+            List of dictionaries with metadata to save in .yaml format
+
+        """
+
+        # group ids
+        cluster_idx = np.unique(locs.group)
+
+        # arrays to store attributes of cluster centeres
+        frame = np.zeros_like(cluster_idx)
+        x = np.zeros_like(cluster_idx, dtype=np.float32)
+        y = np.zeros_like(x)
+        photons = np.zeros_like(x)
+        sx = np.zeros_like(x)
+        sy = np.zeros_like(x)
+        bg = np.zeros_like(x)
+        lpx = np.zeros_like(x)
+        lpy = np.zeros_like(x)
+        ellipticity = np.zeros_like(x)
+        net_gradient = np.zeros_like(x)
+        n = np.zeros_like(cluster_idx)
+        if hasattr(locs, "z"):
+            z = np.zeros_like(x)
+            lpz = np.zeros_like(x)
+
+        # extract values for each cluster one by one
+        for i, idx in enumerate(cluster_idx):
+            # extract locs from the given cluster
+            grouplocs = locs[locs.group == idx]
+
+            # mean frame
+            frame[i] = np.mean(grouplocs.frame)
+            # weighted mean of x and y
+            x[i] = np.average(
+                grouplocs.x, weights=1/(grouplocs.lpx)**2
+            )
+            y[i] = np.average(
+                grouplocs.y, weights=1/(grouplocs.lpy)**2
+            )
+            # mean photons, sx, sy, background
+            photons[i] = np.mean(grouplocs.photons)
+            sx[i] = np.mean(grouplocs.sx)
+            sy[i] = np.mean(grouplocs.sy)
+            bg[i] = np.mean(grouplocs.bg)
+            # weighted localization precision
+            lpx[i] = np.sqrt(
+                error_sums_wtd(grouplocs.x, grouplocs.lpx)
+                / (len(grouplocs) - 1)
+            )
+            lpy[i] = np.sqrt(
+                error_sums_wtd(grouplocs.y, grouplocs.lpy)
+                / (len(grouplocs) - 1)
+            )
+
+            ellipticity[i] = sx[i] / sy[i]
+            # mean net gradient
+            net_gradient[i] = np.mean(grouplocs.net_gradient)
+            # number of locs in the cluster
+            n[i] = len(grouplocs)
+            if hasattr(locs, "z"):
+                z[i] = np.mean(grouplocs.z)
+                lpz[i] = lpx[i] + lpy[i] # 2 * mean of lpx and lpy
+
+        # recarray to save
+        centers = np.rec.array(
+            (
+                frame,
+                x,
+                y,
+                photons,
+                sx,
+                sy,
+                bg,
+                lpx,
+                lpy,
+                ellipticity,
+                net_gradient,
+                n,
+            ), dtype=CLUSTER_CENTERS_DTYPE
+        )
+        if hasattr(locs, "z"):
+            centers = lib.append_to_rec(centers, z, "z")
+            centers = lib.append_to_rec(centers, lpz, "lpz")
+        io.save_locs(path, centers, info)
+
 
     def save_channel_multi(self, title="Choose a channel"):
         """
