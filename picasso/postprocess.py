@@ -1575,3 +1575,60 @@ def calculate_fret(acc_locs, don_locs):
     fret_dict["maxframes"] = max_frames
 
     return fret_dict, f_locs
+
+def nn_analysis_2D(
+    x1, x2, 
+    y1, y2, 
+    nn_count, 
+    same_channel, 
+    path, 
+    callback=None,
+):
+    # array holding distances to each of the nn_count nearest neighbors
+    nn = _np.zeros((len(x1), nn_count), dtype=_np.float32)
+    # array holding all squared distances to a given point
+    dist = _np.zeros(len(x2), dtype=_np.float32)
+
+    for i in range(len(x1)):
+        for j in range(len(x2)):
+            dist[j] = (x2[j] - x1[i]) ** 2 + (y2[j] - y1[i]) ** 2
+        if same_channel: # avoid saving distance to self (zero distance)
+            nn[i, :] = _np.sort(dist)[1:nn_count+1]
+        else: # no zero distance present
+            nn[i, :] = _np.sqrt(dist)[:nn_count]
+        if callback is not None:
+            callback(i + 1)
+    # so far, we have squared distances
+    nn = _np.sqrt(nn)
+    return nn
+
+def nn_analysis_3D(
+    x1, x2, 
+    y1, y2, 
+    z1, z2,
+    nn_count, 
+    same_channel, 
+    path, 
+    callback=None,
+):
+    # array holding distances to each of the nn_count nearest neighbors
+    nn = _np.zeros((len(x1), nn_count), dtype=_np.float32)
+    # array holding all squared distances to a given point
+    dist = _np.zeros(len(x2), dtype=_np.float32)
+
+    for i in range(len(x1)):
+        for j in range(len(x2)):
+            dist[j] = (
+                (x2[j] - x1[i]) ** 2 
+                + (y2[j] - y1[i]) ** 2
+                + (z2[j] - z1[j]) ** 2
+            )
+        if same_channel: # avoid saving distance to self (zero distance)
+            nn[i, :] = _np.sort(dist)[1:nn_count+1]
+        else: # no zero distance present
+            nn[i, :] = _np.sqrt(dist)[:nn_count]
+        if callback is not None:
+            callback(i + 1)
+    # so far, we have squared distances
+    nn = _np.sqrt(nn)
+    return nn

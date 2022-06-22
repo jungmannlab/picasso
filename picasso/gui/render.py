@@ -4578,6 +4578,9 @@ class View(QtWidgets.QLabel):
         Combines all locs in each pick into one localization
     clear_picks()
         Deletes all current picks
+    CPU_or_GPU_box()
+        Creates a message box with buttons to choose between 
+        CPU and GPU SMLM clustering.
     dbscan()
         Performs DBSCAN with user-defined parameters
     deactivate_property_menu()
@@ -4650,6 +4653,11 @@ class View(QtWidgets.QLabel):
         Change viewport to show a pick identified by its id
     movie_size()
         Returns tuple with movie height and width
+    nearest_neighbor()
+        Gets channel for nearest neighbor analysis
+    _nearest_neighbor(channel1, channel2)
+        Calculates and saves distances of the nearest neighbors between
+        localizations in channels 1 and 2
     on_pick_shape_changed(pick_shape_index)
         Assigns attributes and updates scene if new pick shape chosen
     pan_relative(dy, dx)
@@ -5451,19 +5459,11 @@ class View(QtWidgets.QLabel):
                     )
                 else:
                     locs = self.locs[channel]
-                qm = QtWidgets.QMessageBox()
-                qm.setWindowTitle("Clusterer")
-                ret = qm.question(
-                    self,
-                    "",
-                    (
-                        "Use GPU? \n"
-                        "CPU clustering may take a long time to finish.\n"
-                        "If CPU is preferred,  it is recommended to\n"
-                        "cluster only picked localizations."
-                    )
-                )
-                if ret == qm.Yes: # use gpu
+
+                m = self.CPU_or_GPU_box()
+                reply = m.exec()
+
+                if reply == 0: # use gpu
                     if cuda.is_available(): # gpu is available
                         if hasattr(locs, "z"):
                             labels = clusterer.clusterer_GPU_3D(
@@ -5493,7 +5493,7 @@ class View(QtWidgets.QLabel):
                             self, "GPU not found.", message
                         )
                         return
-                elif ret == qm.No: # use cpu (distance calculated on demand)
+                elif reply == 1: # use cpu (distance calculated on demand)
                     if hasattr(locs, "z"):
                         labels = clusterer.clusterer_CPU_3D(
                             locs.x,
@@ -5512,6 +5512,8 @@ class View(QtWidgets.QLabel):
                             radius,
                             min_locs,
                         )
+                else:
+                    return
                 clustered_locs = lib.append_to_rec(
                     locs, labels, "group"
                 ) # add cluster id to locs
@@ -5562,7 +5564,39 @@ class View(QtWidgets.QLabel):
                 self.save_cluster_centers(path, clustered_locs, info)
             dt = np.round((time.time() - t0) / 60, 2)
             print(f'time required: {dt} minutes')
-            print('clustered locs saved')           
+            print('clustered locs saved')     
+
+    def CPU_or_GPU_box(self):
+        """
+        Creates a message box with buttons to choose between 
+        CPU and GPU SMLM clustering.
+
+        Returns
+        -------
+        QtWidgets.QMessageBox
+            The specified message box
+        """
+
+        m = QtWidgets.QMessageBox(self)
+        m.setWindowTitle("Clusterer")
+        m.setWindowIcon(self.icon)
+        m.setText(
+            "Use GPU? \n"
+            "CPU clustering may take a long time to finish.\n"
+            "If CPU is preferred,  it is recommended to\n"
+            "cluster only picked localizations."
+        )
+        m.addButton(
+            QtWidgets.QPushButton("GPU"), QtWidgets.QMessageBox.YesRole
+        )
+        m.setDefaultButton(m.buttons()[0])
+        m.addButton(
+            QtWidgets.QPushButton("CPU"), QtWidgets.QMessageBox.NoRole
+        )
+        m.addButton(
+            QtWidgets.QPushButton("Cancel"), QtWidgets.QMessageBox.RejectRole
+        )
+        return m
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
         """
@@ -6816,6 +6850,102 @@ class View(QtWidgets.QLabel):
         movie_height = self.max_movie_height()
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
+
+    def nearest_neighbor(self):
+        """ Gets channel for nearest neighbor analysis. """
+
+        # choose both channels
+        channel1 = self.get_channel("Nearest Neighbor Analysis")
+        channel2 = self.get_channel("Nearest Neighbor Analysis")
+
+        # make sure that not more than 50k locs 
+        # (this function is meant for cluster centers)
+        if (
+            len(self.locs[channel1]) > 50000 
+            or len(self.locs[channel2]) > 50000
+        ):
+            message = (
+                "This function is meant for cluster centers.\n"
+                "Number of locs in at least one of the channels exceeds\n"
+                "50 000.\n\n"
+                "Are you sure you want to continue?\n"
+                "The calculations may take a long time to finish.\n"
+            )
+            qm = QtWidgets.QMessageBox()
+            ret = qm.question(self, "", message)
+            if ret == qm.Yes:
+                self._nearest_neighbor(channel1, channel2)
+        else:
+            self._nearest_neighbor(channel1, channel2)
+
+    def _nearest_neighbor(self, channel1, channel2):
+        """
+        Calculates and saves distances of the nearest neighbors between
+        localizations in channels 1 and 2
+
+        Saves calculated distances in .csv format.
+
+        Parameters
+        ----------
+        channel1 : int
+            Channel to calculate nearest neighbors distances
+        channel2 : int
+            Second channel to calculate nearest neighbor distances
+        """
+
+        # ask how many nearest neighbors
+        nn_count, ok = QtWidgets.QInputDialog.getInt(
+            self, "", "Number of nearest neighbors: ", 0, 1, 10
+        )
+        if ok:
+            # extract x, y and z from both channels 
+            x1 = self.locs[channel1].x
+            x2 = self.locs[channel2].x
+            y1 = self.locs[channel1].y
+            y2 = self.locs[channel2].y
+            if (
+                hasattr(self.locs[channel1], "z")
+                and hasattr(self.locs[channel2], "z")
+            ):
+                z1 = self.locs[channel1].z
+                z2 = self.locs[channel2].z
+            else: 
+                z1 = None
+
+            # used for avoiding zero distances (to self)
+            same_channel = channel1 == channel2
+
+            # get saved file name
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self, 
+                "Save nearest neighbor distances", 
+                self.locs_paths[channel1].replace(".hdf5", "_nn.csv"),
+                filter="*.csv")
+
+            p = lib.ProgressDialog(
+                "Calculating nearest neighbor distances", 0, len(x1), self
+            )
+            if z1 is not None:
+                nn = postprocess.nn_analysis_3D(
+                    x1, x2, 
+                    y1, y2, 
+                    z1, z2,
+                    nn_count, 
+                    same_channel, 
+                    path, 
+                    p.set_value,
+                )
+            else:
+                nn = postprocess.nn_analysis_2D(
+                    x1, x2,
+                    y1, y2,
+                    nn_count,
+                    same_channel,
+                    path,
+                    p.set_value,
+                )
+            # save as .csv
+            np.savetxt(path, nn, delimiter=',')
 
     def display_pixels_per_viewport_pixels(self):
         """ Returns optimal oversampling. """
@@ -10011,6 +10141,10 @@ class Window(QtWidgets.QMainWindow):
             self.test_clusterer_dialog.show
         )
 
+        postprocess_menu.addSeparator()
+        nn_action = postprocess_menu.addAction("Nearest Neighbor Analysis")
+        nn_action.triggered.connect(self.view.nearest_neighbor)
+
         self.load_user_settings()        
 
         # Define 3D entries
@@ -10904,6 +11038,8 @@ class Window(QtWidgets.QMainWindow):
                 "Convert z back to nm? (old picasso format)",
                 m.Yes | m.No,
             )
+            if m.Cancel:
+                return
             if ret == m.Yes:
                 pixelsize = self.display_settings_dlg.pixelsize.value()
                 for channel in range(len(self.view.locs_paths)):
