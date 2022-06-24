@@ -4851,7 +4851,7 @@ class View(QtWidgets.QLabel):
         self.x_render_state = False
         self.z_converted = []
 
-    def get_group_color(self, locs):
+    def get_group_color(self, locs, progress_dialog=None):
         """ 
         Finds group color for each localization in single channel data
         with group info.
@@ -4860,6 +4860,8 @@ class View(QtWidgets.QLabel):
         ----------
         locs : np.recarray
             Array with all localizations
+        progress_dialog : QtWidgets.QProgressDialog
+            Progress dialog instance
 
         Returns
         -------
@@ -4873,6 +4875,8 @@ class View(QtWidgets.QLabel):
         # check if groups are consecutive
         if set(groups) == set(range(min(groups), max(groups) + 1)):
             if len(groups) > 5000:
+                if progress_dialog is not None:
+                    progress_dialog.setModal(False)
                 choice = QtWidgets.QMessageBox.question(
                     self,
                     "Group question",
@@ -4883,6 +4887,8 @@ class View(QtWidgets.QLabel):
                     ),
                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 )
+                if progress_dialog is not None:
+                    progress_dialog.setModal(True)
                 if choice == QtWidgets.QMessageBox.Yes:
                     pb = lib.ProgressDialog(
                         "Re-Indexing groups", 0, len(groups), self
@@ -4902,7 +4908,7 @@ class View(QtWidgets.QLabel):
         groups %= N_GROUP_COLORS
         return groups[groupcopy]
 
-    def add(self, path, render=True):
+    def add(self, path, render=True, progress_dialog=None):
         """
         Loads a .hdf5 localizations and the associated .yaml metadata 
         files. 
@@ -4914,6 +4920,8 @@ class View(QtWidgets.QLabel):
         render : boolean, optional
             Specifies if the loaded files should be rendered 
             (default True)
+        progress_dialog : QtWidgets.QProgressDialog
+            Progress dialog instance
         """
 
         # read .hdf5 and .yaml files
@@ -4989,7 +4997,9 @@ class View(QtWidgets.QLabel):
             )
             if hasattr(locs, "group"):
                 if len(self.group_color) == 0:
-                    self.group_color = self.get_group_color(self.locs[0])
+                    self.group_color = self.get_group_color(
+                        self.locs[0], progress_dialog=progress_dialog
+                    )
 
         # render the loaded file
         if render:
@@ -5047,7 +5057,7 @@ class View(QtWidgets.QLabel):
                 )
             pd.set_value(0)
             for i, path in enumerate(paths):
-                self.add(path, render=False)
+                self.add(path, render=False, progress_dialog=pd)
                 pd.set_value(i+1)
             if len(self.locs):  # if loading was successful
                 if fit_in_view:
