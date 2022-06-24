@@ -22,12 +22,11 @@ import numpy as np
 import os.path
 from .. import io, lib
 
+from icecream import ic
 
 plt.style.use("ggplot")
 
-
 ROW_HEIGHT = 30
-
 
 class TableModel(QtCore.QAbstractTableModel):
     def __init__(self, locs, index, parent=None):
@@ -221,6 +220,79 @@ class Hist2DWindow(PlotWindow):
         event.accept()
 
 
+class FilterNum(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Filter by numeric values")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "filter.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+
+        self.layout = QtWidgets.QGridLayout()
+        self.setLayout(self.layout)
+
+        # combox box with all atributes
+        self.attributes = QtWidgets.QComboBox(self)
+        self.attributes.setEditable(False)
+        self.layout.addWidget(self.attributes, 0, 0, 1, 2)
+
+        # lower value
+        self.layout.addWidget(QtWidgets.QLabel("Min:"), 1, 0)
+        self.min = QtWidgets.QDoubleSpinBox()
+        self.min.setValue(10)
+        self.min.setDecimals(5)
+        self.min.setRange(-9999999, 9999999)
+        self.min.setSingleStep(1)
+        self.min.setKeyboardTracking(True)
+        self.layout.addWidget(self.min, 1, 1)
+
+        # higher value
+        self.layout.addWidget(QtWidgets.QLabel("Max:"), 2, 0)
+        self.max = QtWidgets.QDoubleSpinBox()
+        self.max.setValue(100)
+        self.max.setDecimals(5)
+        self.max.setRange(-9999999, 9999999)
+        self.max.setSingleStep(1)
+        self.max.setKeyboardTracking(True)
+        self.layout.addWidget(self.max, 2, 1)
+
+        # filter button
+        filter_button = QtWidgets.QPushButton("Filter")
+        filter_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        filter_button.clicked.connect(self.filter)
+        self.layout.addWidget(filter_button, 3, 0, 1, 2)
+
+    # action to filter locs
+    def filter(self):
+        '''
+        Filters locs given the range values
+        '''
+
+        # check that min value < max value
+        xmin = self.min.value()
+        xmax = self.max.value()
+        if xmin < xmax:
+            field = self.attributes.currentText()
+            locs = self.window.locs
+            locs = locs[(locs[field] > xmin) & (locs[field] < xmax)]
+            self.window.update_locs(locs)
+            self.window.log_filter(field, xmin, xmax)        
+
+    def on_locs_loaded(self):
+        ''' 
+        Changes attributes in the dialog according to locs.dtypes
+        '''
+
+        while self.attributes.count():
+            self.attributes.removeItem(0)
+
+        names = self.window.locs.dtype.names
+        for name in names:
+            self.attributes.addItem(name)   
+
+
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
@@ -231,6 +303,8 @@ class Window(QtWidgets.QMainWindow):
         icon_path = os.path.join(this_directory, "icons", "filter.ico")
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
+        self.table_view = TableView(self, self)
+        self.filter_num = FilterNum(self)
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
@@ -248,7 +322,10 @@ class Window(QtWidgets.QMainWindow):
         scatter_action = plot_menu.addAction("2D Histogram")
         scatter_action.setShortcut("Ctrl+D")
         scatter_action.triggered.connect(self.plot_hist2d)
-        self.table_view = TableView(self, self)
+        filter_menu = menu_bar.addMenu("Filter")
+        filter_action = filter_menu.addAction("Filter")
+        filter_action.setShortcut("Ctrl+F")
+        filter_menu.triggered.connect(self.filter_num.show)
         main_widget = QtWidgets.QWidget()
         hbox = QtWidgets.QHBoxLayout(main_widget)
         hbox.setContentsMargins(0,0,0,0)
@@ -290,6 +367,7 @@ class Window(QtWidgets.QMainWindow):
             for field_y in self.locs.dtype.names:
                 self.hist2d_windows[field][field_y] = None
             self.filter_log[field] = None
+        self.filter_num.on_locs_loaded()
 
     def plot_histogram(self):
         selection_model = self.table_view.selectionModel()
