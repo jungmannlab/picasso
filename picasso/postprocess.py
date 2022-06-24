@@ -36,6 +36,8 @@ from tqdm import tqdm as _tqdm
 from tqdm import trange as _trange
 from numpy.lib.recfunctions import stack_arrays
 
+from icecream import ic
+
 
 def get_index_blocks(locs, info, size, callback=None):
     locs = _lib.ensure_sanity(locs, info)
@@ -91,9 +93,9 @@ def get_block_locs_at(x, y, index_blocks):
     y_index = _np.uint32(y / size) 
     indices = []
     for k in range(y_index - 1, y_index + 2):
-        if 0 < k < K:
+        if 0 <= k < K:
             for l in range(x_index - 1, x_index + 2):
-                if 0 < l < L:
+                if 0 <= l < L:
                     indices.append(
                         list(range(block_starts[k, l], block_ends[k, l]))
                     )
