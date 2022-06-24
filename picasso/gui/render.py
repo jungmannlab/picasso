@@ -523,6 +523,10 @@ class DatasetDialog(QtWidgets.QDialog):
         Opens QInputDialog to enter the new title for a given channel
     close_file(i)
         Closes a given channel and delets all corresponding attributes
+    load_colors()
+        Loads a list of colors from a .yaml file
+    save_colors()
+        Saves the list of colors as a .yaml file
     set_color(n)
         Sets colorsdisp_all and colorselection in the given channel
     update_colors()
@@ -567,6 +571,20 @@ class DatasetDialog(QtWidgets.QDialog):
         self.wbackground.stateChanged.connect(self.update_viewport)
         self.auto_display.stateChanged.connect(self.update_viewport)
         self.auto_colors.stateChanged.connect(self.update_colors)
+
+        # save and load color list
+        save_button = QtWidgets.QPushButton("Save colors")
+        self.layout.addWidget(
+            save_button, 0, self.layout.columnCount() - 2, 1, 2
+        )
+        save_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        save_button.clicked.connect(self.save_colors)
+        load_button = QtWidgets.QPushButton("Load colors")
+        self.layout.addWidget(
+            load_button, 1, self.layout.columnCount() - 2, 1, 2
+        )
+        load_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        load_button.clicked.connect(self.load_colors)
 
         self.default_colors = [ 
             "red",
@@ -852,6 +870,56 @@ class DatasetDialog(QtWidgets.QDialog):
             )
         self.colordisp_all[n].setPalette(palette)
 
+    def save_colors(self):
+        """ Saves the list of colors as a .yaml file. """
+
+        colornames = [_.currentText() for _ in self.colorselection]
+
+        out_path = self.window.view.locs_paths[0].replace(
+            ".hdf5", "_colors.txt"
+        )
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save colors to", out_path, filter="*txt"
+        )
+        if path:
+            with open(path, "w") as file:
+                for color in colornames:
+                    file.write(color + "\n")
+
+    def load_colors(self):
+        """ Loads a list of colors from a .yaml file. """
+
+        path, ext = QtWidgets.QFileDialog.getOpenFileName(
+            self, 
+            "Load colors from .txt", 
+            directory=self.window.pwd, 
+            filter="*.txt",
+        )
+        if path:
+            with open(path, "r") as file:
+                colors = file.readlines()
+                colornames = [color.rstrip() for color in colors]
+
+            # check that the number of channels is smaller than
+            # or equal to the number of color names in the .txt
+            if len(self.checks) > len(colornames):
+                raise ValueError("Txt file contains too few names")
+
+            # check that all the names are valid
+            for i, color in enumerate(colornames):
+                if (
+                    not color in self.default_colors
+                    and not is_hexadecimal(color)
+                ):
+                    raise ValueError(
+                        f"'{color}' at position {i+1} is invalid."
+                    )
+
+            # add the names to the 'Color' column (self.colorseletion)
+            for i, color_ in enumerate(self.colorselection):
+                color_.setCurrentText(colornames[i])
+
+            self.update_colors()
 
 class PlotDialog(QtWidgets.QDialog):
     """ 
