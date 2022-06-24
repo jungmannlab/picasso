@@ -11289,14 +11289,14 @@ class Window(QtWidgets.QMainWindow):
         Saves localizations in a given channel (or all channels).
         """
 
+        self.convert_z()
         channel = self.view.save_channel("Save localizations")
         if channel is not None:
-            self.convert_z()
             # combine all channels
             if channel is (len(self.view.locs_paths) + 1):
                 print("Multichannel")
                 base, ext = os.path.splitext(self.view.locs_paths[0])
-                out_path = base + "_picked_multi.hdf5"
+                out_path = base + "_multi.hdf5"
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
                     "Save picked localizations",
@@ -11306,7 +11306,10 @@ class Window(QtWidgets.QMainWindow):
                 if path:
                     # combine locs from all channels
                     all_locs = stack_arrays(
-                        self.view.all_locs, asrecarray=True, usemask=False
+                        self.view.all_locs, 
+                        asrecarray=True, 
+                        usemask=False,
+                        autoconvert=True,
                     )
                     all_locs.sort(kind="mergesort", order="frame")
                     info = self.view.infos[0] + [
