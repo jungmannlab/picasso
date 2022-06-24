@@ -4064,9 +4064,9 @@ class FastRenderDialog(QtWidgets.QDialog):
                 "Change percentage of locs displayed in each\n"
                 "channel to increase the speed of rendering.\n\n"
                 "NOTE: sampling locs may lead to unexpected behaviour\n"
-                "when using some of Picasso : Render functions,\n"
-                "such as undrifting.  Please set the percentage below\n"
-                "to 100 to avoid it."
+                "when using some of Picasso : Render functions.\n"
+                "Please set the percentage below to 100 to avoid\n"
+                "such situations."
             )
         ), 0, 0, 1, 2)
 
@@ -4096,7 +4096,6 @@ class FastRenderDialog(QtWidgets.QDialog):
         self.sample_button = QtWidgets.QPushButton(
             "Randomly sample\nlocalizations"
         ) 
-        self.sample_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.sample_button.clicked.connect(self.sample_locs)
         self.layout.addWidget(self.sample_button, 3, 1)
 
@@ -8418,13 +8417,12 @@ class View(QtWidgets.QLabel):
         """
 
         # for each channel stack locs from all picks and combine them
-        for i in range(len(self.locs_paths)):
-            channel = self.locs_paths[i]
-            if i == 0:
-                locs = self.picked_locs(self.locs_paths.index(channel))
+        for channel in range(len(self.locs_paths)):
+            if channel == 0:
+                locs = self.picked_locs(channel)
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
             else:
-                templocs = self.picked_locs(self.locs_paths.index(channel))
+                templocs = self.picked_locs(channel)
                 templocs = stack_arrays(
                     templocs, asrecarray=True, usemask=False
                 )
@@ -10248,7 +10246,7 @@ class Window(QtWidgets.QMainWindow):
                 filter="*.frc.txt",
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 loctxt = locs[["frame", "x", "y"]].copy()
                 np.savetxt(
                     path,
@@ -10285,7 +10283,7 @@ class Window(QtWidgets.QMainWindow):
                 filter="*.nis.txt",
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 if hasattr(locs, "z"):
                     loctxt = locs[
                         ["x", "y", "z", "sx", "bg", "photons", "frame"]
@@ -10381,7 +10379,7 @@ class Window(QtWidgets.QMainWindow):
                 out_path,
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 if hasattr(locs, "z"):
                     loctxt = locs[["x", "y", "z"]].copy()
                     loctxt = [
@@ -10428,7 +10426,7 @@ class Window(QtWidgets.QMainWindow):
                 out_path,
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 if hasattr(locs, "z"):
                     locs = locs[["x", "y", "z", "photons", "frame"]].copy()
                     locs.x *= pixelsize
@@ -10464,7 +10462,7 @@ class Window(QtWidgets.QMainWindow):
                 filter="*.imaris.txt",
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 channel = 0
                 tempdata_xyz = locs[["x", "y", "z", "frame"]].copy()
                 tempdata_xyz["x"] = tempdata_xyz["x"] * pixelsize
@@ -10528,7 +10526,7 @@ class Window(QtWidgets.QMainWindow):
             )
             if path:
                 stddummy = 0
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 if hasattr(locs, "len"):  # Linked locs -> add detections
                     if hasattr(locs, "z"):
                         loctxt = locs[
@@ -11038,8 +11036,6 @@ class Window(QtWidgets.QMainWindow):
                 "Convert z back to nm? (old picasso format)",
                 m.Yes | m.No,
             )
-            if m.Cancel:
-                return
             if ret == m.Yes:
                 pixelsize = self.display_settings_dlg.pixelsize.value()
                 for channel in range(len(self.view.locs_paths)):
@@ -11055,7 +11051,7 @@ class Window(QtWidgets.QMainWindow):
         channel = self.view.save_channel_pickprops("Save localizations")
         if channel is not None:
             self.convert_z()
-            if channel is (len(self.view.locs_paths)):
+            if channel is len(self.view.locs_paths):
                 print("Save all at once.")
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
@@ -11065,8 +11061,7 @@ class Window(QtWidgets.QMainWindow):
                     "_apicked",
                 )
                 if ok:
-                    for i in tqdm(range(len(self.view.locs_paths))):
-                        channel = i
+                    for channel in tqdm(range(len(self.view.locs_paths))):
                         base, ext = os.path.splitext(
                             self.view.locs_paths[channel]
                         )
@@ -11103,13 +11098,13 @@ class Window(QtWidgets.QMainWindow):
                 if path:
                     # combine locs from all channels
                     all_locs = stack_arrays(
-                        self.view.locs, asrecarray=True, usemask=False
+                        self.view.all_locs, asrecarray=True, usemask=False
                     )
                     all_locs.sort(kind="mergesort", order="frame")
                     info = self.view.infos[0] + [
                         {
                             "Generated by": "Picasso Render Combine",
-                            "Paths to combinde files": self.view.locs_paths,
+                            "Paths to combined files": self.view.locs_paths,
                         }
                     ]
                     io.save_locs(path, all_locs, info)
@@ -11166,7 +11161,7 @@ class Window(QtWidgets.QMainWindow):
         if channel is not None:
             self.convert_z()
             if channel is (len(self.view.locs_paths) + 1):
-                print("Multichannel")
+                print("Combine all channels")
                 base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + "_picked_multi.hdf5"
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -11179,8 +11174,7 @@ class Window(QtWidgets.QMainWindow):
                     self.view.save_picked_locs_multi(path)
             elif channel is (len(self.view.locs_paths)):
                 print("Save all at once")
-                for i in range(len(self.view.locs_paths)):
-                    channel = i
+                for channel in range(len(self.view.locs_paths)):
                     base, ext = os.path.splitext(self.view.locs_paths[channel])
                     out_path = base + "_apicked.hdf5"
                     self.view.save_picked_locs(out_path, channel)
