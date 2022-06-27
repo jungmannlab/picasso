@@ -24,6 +24,7 @@ import matplotlib.patches as patches
 import numpy as np
 import yaml
 import joblib
+from numba import cuda
 
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT \
@@ -59,6 +60,20 @@ INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
 N_GROUP_COLORS = 8
 N_Z_COLORS = 32
+CLUSTER_CENTERS_DTYPE = [
+    ("frame", "u4"),
+    ("x", "f4"),
+    ("y", "f4"),
+    ("photons", "f4"),
+    ("sx", "f4"),
+    ("sy", "f4"),
+    ("bg", "f4"),
+    ("lpx", "f4"),
+    ("lpy", "f4"),
+    ("ellipticity", "f4"),
+    ("net_gradient", "f4"),
+    ("n", "u4"),
+]
 
 
 def get_colors(n_channels):
@@ -144,6 +159,27 @@ def kinetic_rate_from_fit(data):
     return rate
 
 estimate_kinetic_rate = kinetic_rate_from_fit
+
+def error_sums_wtd(x, w):
+    """ 
+    Function used for finding localization precision for cluster 
+    centers.
+
+    Parameters
+    ----------
+    x : float
+        x or y coordinate of the cluster center
+    w : float
+        weight (localization precision squared)
+
+    Returns
+    -------
+    float
+        weighted localizaiton precision of the cluster center
+    """
+
+    return (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
+
 
 def check_pick(f):
     """ Decorator verifying if there is at least one pick. """
@@ -487,6 +523,10 @@ class DatasetDialog(QtWidgets.QDialog):
         Opens QInputDialog to enter the new title for a given channel
     close_file(i)
         Closes a given channel and delets all corresponding attributes
+    load_colors()
+        Loads a list of colors from a .yaml file
+    save_colors()
+        Saves the list of colors as a .yaml file
     set_color(n)
         Sets colorsdisp_all and colorselection in the given channel
     update_colors()
@@ -531,6 +571,20 @@ class DatasetDialog(QtWidgets.QDialog):
         self.wbackground.stateChanged.connect(self.update_viewport)
         self.auto_display.stateChanged.connect(self.update_viewport)
         self.auto_colors.stateChanged.connect(self.update_colors)
+
+        # save and load color list
+        save_button = QtWidgets.QPushButton("Save colors")
+        self.layout.addWidget(
+            save_button, 0, self.layout.columnCount() - 2, 1, 2
+        )
+        save_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        save_button.clicked.connect(self.save_colors)
+        load_button = QtWidgets.QPushButton("Load colors")
+        self.layout.addWidget(
+            load_button, 1, self.layout.columnCount() - 2, 1, 2
+        )
+        load_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        load_button.clicked.connect(self.load_colors)
 
         self.default_colors = [ 
             "red",
@@ -816,6 +870,56 @@ class DatasetDialog(QtWidgets.QDialog):
             )
         self.colordisp_all[n].setPalette(palette)
 
+    def save_colors(self):
+        """ Saves the list of colors as a .yaml file. """
+
+        colornames = [_.currentText() for _ in self.colorselection]
+
+        out_path = self.window.view.locs_paths[0].replace(
+            ".hdf5", "_colors.txt"
+        )
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save colors to", out_path, filter="*txt"
+        )
+        if path:
+            with open(path, "w") as file:
+                for color in colornames:
+                    file.write(color + "\n")
+
+    def load_colors(self):
+        """ Loads a list of colors from a .yaml file. """
+
+        path, ext = QtWidgets.QFileDialog.getOpenFileName(
+            self, 
+            "Load colors from .txt", 
+            directory=self.window.pwd, 
+            filter="*.txt",
+        )
+        if path:
+            with open(path, "r") as file:
+                colors = file.readlines()
+                colornames = [color.rstrip() for color in colors]
+
+            # check that the number of channels is smaller than
+            # or equal to the number of color names in the .txt
+            if len(self.checks) > len(colornames):
+                raise ValueError("Txt file contains too few names")
+
+            # check that all the names are valid
+            for i, color in enumerate(colornames):
+                if (
+                    not color in self.default_colors
+                    and not is_hexadecimal(color)
+                ):
+                    raise ValueError(
+                        f"'{color}' at position {i+1} is invalid."
+                    )
+
+            # add the names to the 'Color' column (self.colorseletion)
+            for i, color_ in enumerate(self.colorselection):
+                color_.setCurrentText(colornames[i])
+
+            self.update_colors()
 
 class PlotDialog(QtWidgets.QDialog):
     """ 
@@ -1676,6 +1780,10 @@ class DbscanDialog(QtWidgets.QDialog):
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(False)
+        grid.addWidget(self.save_centers, 3, 0, 1, 2)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
@@ -1697,6 +1805,7 @@ class DbscanDialog(QtWidgets.QDialog):
         return (
             dialog.radius.value(),
             dialog.density.value(),
+            dialog.save_centers.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )
 
@@ -1753,6 +1862,10 @@ class HdbscanDialog(QtWidgets.QDialog):
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
         vbox.addLayout(hbox)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(False)
+        grid.addWidget(self.save_centers, 3, 0, 1, 2)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
@@ -1776,8 +1889,167 @@ class HdbscanDialog(QtWidgets.QDialog):
             dialog.min_cluster.value(),
             dialog.min_samples.value(),
             dialog.cluster_eps.value(),
+            dialog.save_centers.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )
+
+class SMLMDialog3D(QtWidgets.QDialog):
+    """
+    A class to obtain inputs for SMLM clusterer (3D).
+
+    ...
+
+    Attributes
+    ----------
+    radius_xy : QDoubleSpinBox
+        contains clustering radius in x and y directions
+    radius_z : QDoubleSpinBox
+        contains clustering radius in z direction 
+        (typically =2*radius_xy)
+    min_locs : QSpinBox
+        contains minimum number of locs in cluster
+
+    Methods
+    -------
+    getParams(parent=None)
+        Creates the dialog and returns the requested values for 
+        clustering
+    """
+    
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters (3D)")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        # radius xy
+        grid.addWidget(QtWidgets.QLabel("Cluster radius xy (pixels):"), 0, 0)
+        self.radius_xy = QtWidgets.QDoubleSpinBox()
+        self.radius_xy.setRange(0.0001, 1e3)
+        self.radius_xy.setDecimals(4)
+        self.radius_xy.setValue(0.1)
+        grid.addWidget(self.radius_xy, 0, 1)
+        # radius z
+        grid.addWidget(QtWidgets.QLabel("Cluster radius z (pixels):"), 1, 0)
+        self.radius_z = QtWidgets.QDoubleSpinBox()
+        self.radius_z.setRange(0, 1e3)
+        self.radius_z.setDecimals(4)
+        self.radius_z.setValue(0.25)
+        grid.addWidget(self.radius_z, 1, 1)
+        # min no. locs
+        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 2, 0)
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setRange(1, 1e6)
+        self.min_locs.setValue(10)
+        grid.addWidget(self.min_locs, 2, 1)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(False)
+        grid.addWidget(self.save_centers, 3, 0, 1, 2)
+
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(parent=None):
+        """
+        Creates the dialog and returns the requested values for 
+        SMLM clusterer (3D).
+        """
+
+        dialog = SMLMDialog3D(parent)
+        result = dialog.exec_()
+        return (
+            dialog.radius_xy.value(),
+            dialog.radius_z.value(),
+            dialog.min_locs.value(),
+            dialog.save_centers.isChecked(),
+            result == QtWidgets.QDialog.Accepted,
+        )    
+
+
+class SMLMDialog2D(QtWidgets.QDialog):
+    """
+    A class to obtain inputs for SMLM clusterer (2D).
+
+    ...
+
+    Attributes
+    ----------
+    radius : QDoubleSpinBox
+        contains clustering radius in x and y directions
+    min_locs : QSpinBox
+        contains minimum number of locs in cluster
+
+    Methods
+    -------
+    getParams(parent=None)
+        Creates the dialog and returns the requested values for 
+        clustering
+    """
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters (2D)")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        # clustering radius
+        grid.addWidget(QtWidgets.QLabel("Cluster radius (pixels):"), 0, 0)
+        self.radius = QtWidgets.QDoubleSpinBox()
+        self.radius.setRange(0.0001, 1e3)
+        self.radius.setDecimals(4)
+        self.radius.setValue(0.1)
+        grid.addWidget(self.radius, 0, 1)
+        # min no. locs
+        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 1, 0)
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setRange(1, 1e6)
+        self.min_locs.setValue(10)
+        grid.addWidget(self.min_locs, 1, 1)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(True)
+        grid.addWidget(self.save_centers, 2, 0, 1, 2)
+
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(parent=None):
+        """
+        Creates the dialog and returns the requested values for 
+        SMLM clusterer (2D).
+        """
+
+        dialog = SMLMDialog2D(parent)
+        result = dialog.exec_()
+        return (
+            dialog.radius.value(),
+            dialog.min_locs.value(),
+            dialog.save_centers.isChecked(),
+            result == QtWidgets.QDialog.Accepted,
+        )  
 
 
 class TestClustererDialog(QtWidgets.QDialog):
@@ -3870,9 +4142,9 @@ class FastRenderDialog(QtWidgets.QDialog):
                 "Change percentage of locs displayed in each\n"
                 "channel to increase the speed of rendering.\n\n"
                 "NOTE: sampling locs may lead to unexpected behaviour\n"
-                "when using some of Picasso : Render functions,\n"
-                "such as undrifting.  Please set the percentage below\n"
-                "to 100 to avoid it."
+                "when using some of Picasso : Render functions.\n"
+                "Please set the percentage below to 100 to avoid\n"
+                "such situations."
             )
         ), 0, 0, 1, 2)
 
@@ -3901,8 +4173,7 @@ class FastRenderDialog(QtWidgets.QDialog):
         # randomly draw localizations in each channel
         self.sample_button = QtWidgets.QPushButton(
             "Randomly sample\nlocalizations"
-        ) 
-        self.sample_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        )
         self.sample_button.clicked.connect(self.sample_locs)
         self.layout.addWidget(self.sample_button, 3, 1)
 
@@ -3994,8 +4265,8 @@ class SlicerDialog(QtWidgets.QDialog):
         viewport
     patches : list
         contains plt.artists used in creating histograms
-    pick_slice : QSpinBox
-        contains slice thickness (nm)
+    pick_slice : QDoubleSpinBox
+        contains slice thickness (pixels)
     separate_check : QCheckBox
         tick to save channels separately when exporting slice
     sl : QSlider
@@ -4013,7 +4284,8 @@ class SlicerDialog(QtWidgets.QDialog):
     window : QMainWindow
         instance of the main window
     zcoord : list
-        z coordinates of each channel of localization (nm)
+        z coordinates of each channel of localization (pixels);
+        added when loading each channel (see View.add)
 
     Methods
     -------
@@ -4035,18 +4307,21 @@ class SlicerDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("3D Slicer ")
+        self.setWindowTitle("3D Slicer")
         self.setModal(False)
         vbox = QtWidgets.QVBoxLayout(self)
         slicer_groupbox = QtWidgets.QGroupBox("Slicer Settings")
 
         vbox.addWidget(slicer_groupbox)
         slicer_grid = QtWidgets.QGridLayout(slicer_groupbox)
-        slicer_grid.addWidget(QtWidgets.QLabel("Slice Thickness [nm]:"), 0, 0)
-        self.pick_slice = QtWidgets.QSpinBox()
-        self.pick_slice.setRange(1, 999999)
-        self.pick_slice.setValue(50)
-        self.pick_slice.setSingleStep(5)
+        slicer_grid.addWidget(
+            QtWidgets.QLabel("Slice Thickness [pixels]:"), 0, 0
+        )
+        self.pick_slice = QtWidgets.QDoubleSpinBox()
+        self.pick_slice.setRange(0.0001, 999)
+        self.pick_slice.setValue(0.3846)
+        self.pick_slice.setSingleStep(0.001)
+        self.pick_slice.setDecimals(4)
         self.pick_slice.setKeyboardTracking(False)
         self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
         slicer_grid.addWidget(self.pick_slice, 0, 1)
@@ -4384,6 +4659,9 @@ class View(QtWidgets.QLabel):
         Combines all locs in each pick into one localization
     clear_picks()
         Deletes all current picks
+    CPU_or_GPU_box()
+        Creates a message box with buttons to choose between 
+        CPU and GPU SMLM clustering.
     dbscan()
         Performs DBSCAN with user-defined parameters
     deactivate_property_menu()
@@ -4456,6 +4734,11 @@ class View(QtWidgets.QLabel):
         Change viewport to show a pick identified by its id
     movie_size()
         Returns tuple with movie height and width
+    nearest_neighbor()
+        Gets channel for nearest neighbor analysis
+    _nearest_neighbor(channel1, channel2)
+        Calculates and saves distances of the nearest neighbors between
+        localizations in channels 1 and 2
     on_pick_shape_changed(pick_shape_index)
         Assigns attributes and updates scene if new pick shape chosen
     pan_relative(dy, dx)
@@ -4495,6 +4778,8 @@ class View(QtWidgets.QLabel):
     save_channel_pickprops()
         Opens an input dialog asking which channel to use in saving 
         pick properties
+    save_cluster_centers(path, locs, info)
+        Extracts cluster centers from clustered locs and saves them
     save_pick_properties(path, channel)
         Saves picks' properties in a given channel to path
     save_picked_locs(path, channel)
@@ -4536,6 +4821,8 @@ class View(QtWidgets.QLabel):
         Displays x and y coordinates of locs in picks in time
     sizeHint()
         Returns recommended window size
+    smlm_clusterer()
+        Clusters locs using SMLM clusterer and saves the result
     subtract_picks(path)
         Clears current picks that cover the picks loaded from path
     to_8bit(image)
@@ -4632,7 +4919,7 @@ class View(QtWidgets.QLabel):
         self.x_render_state = False
         self.z_converted = []
 
-    def get_group_color(self, locs):
+    def get_group_color(self, locs, progress_dialog=None):
         """ 
         Finds group color for each localization in single channel data
         with group info.
@@ -4641,6 +4928,8 @@ class View(QtWidgets.QLabel):
         ----------
         locs : np.recarray
             Array with all localizations
+        progress_dialog : QtWidgets.QProgressDialog
+            Progress dialog instance
 
         Returns
         -------
@@ -4654,6 +4943,8 @@ class View(QtWidgets.QLabel):
         # check if groups are consecutive
         if set(groups) == set(range(min(groups), max(groups) + 1)):
             if len(groups) > 5000:
+                if progress_dialog is not None:
+                    progress_dialog.setModal(False)
                 choice = QtWidgets.QMessageBox.question(
                     self,
                     "Group question",
@@ -4664,6 +4955,8 @@ class View(QtWidgets.QLabel):
                     ),
                     QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 )
+                if progress_dialog is not None:
+                    progress_dialog.setModal(True)
                 if choice == QtWidgets.QMessageBox.Yes:
                     pb = lib.ProgressDialog(
                         "Re-Indexing groups", 0, len(groups), self
@@ -4683,7 +4976,7 @@ class View(QtWidgets.QLabel):
         groups %= N_GROUP_COLORS
         return groups[groupcopy]
 
-    def add(self, path, render=True):
+    def add(self, path, render=True, progress_dialog=None):
         """
         Loads a .hdf5 localizations and the associated .yaml metadata 
         files. 
@@ -4695,6 +4988,8 @@ class View(QtWidgets.QLabel):
         render : boolean, optional
             Specifies if the loaded files should be rendered 
             (default True)
+        progress_dialog : QtWidgets.QProgressDialog
+            Progress dialog instance
         """
 
         # read .hdf5 and .yaml files
@@ -4770,7 +5065,9 @@ class View(QtWidgets.QLabel):
             )
             if hasattr(locs, "group"):
                 if len(self.group_color) == 0:
-                    self.group_color = self.get_group_color(self.locs[0])
+                    self.group_color = self.get_group_color(
+                        self.locs[0], progress_dialog=progress_dialog
+                    )
 
         # render the loaded file
         if render:
@@ -4820,20 +5117,21 @@ class View(QtWidgets.QLabel):
             Contains the paths to the files to be loaded
         """
 
-        fit_in_view = len(self.locs) == 0
-        paths = sorted(paths)
-        pd = lib.ProgressDialog(
-                "Loading channels", 0, len(paths), self
-            )
-        pd.set_value(0)
-        for i, path in enumerate(paths):
-            self.add(path, render=False)
-            pd.set_value(i+1)
-        if len(self.locs):  # if loading was successful
-            if fit_in_view:
-                self.fit_in_view(autoscale=True)
-            else:
-                self.update_scene()
+        if len(paths):
+            fit_in_view = len(self.locs) == 0
+            paths = sorted(paths)
+            pd = lib.ProgressDialog(
+                    "Loading channels", 0, len(paths), self
+                )
+            pd.set_value(0)
+            for i, path in enumerate(paths):
+                self.add(path, render=False, progress_dialog=pd)
+                pd.set_value(i+1)
+            if len(self.locs):  # if loading was successful
+                if fit_in_view:
+                    self.fit_in_view(autoscale=True)
+                else:
+                    self.update_scene()
 
     def add_pick(self, position, update_scene=True):
         """ Adds a pick at a given position. """
@@ -5021,17 +5319,18 @@ class View(QtWidgets.QLabel):
             else:
                 out_locs.append(pick_locs_out)
             progress.set_value(i + 1)
-        self.locs[channel] = stack_arrays(
+        self.all_locs[channel] = stack_arrays(
             out_locs, asrecarray=True, usemask=False
         )
+        self.locs[channel] = copy.copy(self.all_locs[channel])
 
-        if hasattr(self.locs[channel], "group"):
-            groups = np.unique(self.locs[channel].group)
+        if hasattr(self.all_locs[channel], "group"):
+            groups = np.unique(self.all_locs[channel].group)
             # In case a group is missing
             groups = np.arange(np.max(groups) + 1)
             np.random.shuffle(groups)
             groups %= N_GROUP_COLORS
-            self.group_color = groups[self.locs[channel].group]
+            self.group_color = groups[self.all_locs[channel].group]
 
         self.update_scene()
 
@@ -5041,7 +5340,7 @@ class View(QtWidgets.QLabel):
         """
 
         channel = self.get_channel()
-        if hasattr(self.locs[channel], "len"):
+        if hasattr(self.all_locs[channel], "len"):
             QtWidgets.QMessageBox.information(
                 self, "Link", "Localizations are already linked. Aborting..."
             )
@@ -5050,19 +5349,20 @@ class View(QtWidgets.QLabel):
             r_max, max_dark, ok = LinkDialog.getParams()
             if ok:
                 status = lib.StatusDialog("Linking localizations...", self)
-                self.locs[channel] = postprocess.link(
-                    self.locs[channel],
+                self.all_locs[channel] = postprocess.link(
+                    self.all_locs[channel],
                     self.infos[channel],
                     r_max=r_max,
                     max_dark_time=max_dark,
                 )
                 status.close()
-                if hasattr(self.locs[channel], "group"):
-                    groups = np.unique(self.locs[channel].group)
+                if hasattr(self.all_locs[channel], "group"):
+                    groups = np.unique(self.all_locs[channel].group)
                     groups = np.arange(np.max(groups) + 1)
                     np.random.shuffle(groups)
                     groups %= N_GROUP_COLORS
-                    self.group_color = groups[self.locs[channel].group]
+                    self.group_color = groups[self.all_locs[channel].group]
+                self.locs[channel] = copy.copy(self.all_locs[channel])
                 self.update_scene()
 
     def dbscan(self):
@@ -5070,173 +5370,412 @@ class View(QtWidgets.QLabel):
         Gets DBSCAN parameters, performs clustering and saves data.
         """
 
+        channel = self.get_channel("Cluster")
+
         # get DBSCAN parameters
-        radius, min_density, ok = DbscanDialog.getParams()
+        radius, min_density, save_centers, ok = DbscanDialog.getParams()
         if ok:
-            status = lib.StatusDialog(
-                "Applying DBSCAN. This may take a while...", self
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save clustered locs",
+                self.locs_paths[channel].replace(".hdf5", "_clustered.hdf5"),
+                filter="*.hdf5",
             )
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
-            # perform DBSCAN for each channel
-            for locs, locs_info, locs_path in zip(
-                self.locs, self.infos, self.locs_paths
-            ):
-                clusters, locs = postprocess.dbscan(
-                    locs, radius, min_density, pixelsize
+            if path: 
+                status = lib.StatusDialog(
+                    "Applying DBSCAN. This may take a while.", self
                 )
-                base, ext = os.path.splitext(locs_path)
+                # keep group info if already present
+                if hasattr(self.all_locs[channel], "group"):
+                    locs = lib.append_to_rec(
+                        self.all_locs[channel],
+                        self.all_locs[channel].group,
+                        "group_input",
+                    )
+                else: 
+                    locs = self.all_locs[channel]
+
+                # perform DBSCAN in a channel
+                locs = postprocess.dbscan(
+                    locs, 
+                    radius, 
+                    min_density,
+                )
                 dbscan_info = {
                     "Generated by": "Picasso DBSCAN",
-                    "Radius": radius,
+                    "Number of clusters": len(np.unique(locs.group)),
+                    "Radius [cam. px]": radius,
                     "Minimum local density": min_density,
                 }
-                locs_info.append(dbscan_info)
-                io.save_locs(base + "_dbscan.hdf5", locs, locs_info)
-                with File(base + "_dbclusters.hdf5", "w") as clusters_file:
-                    clusters_file.create_dataset("clusters", data=clusters)
-
-                # inform tbe user where clustered locs were saved
-                QtWidgets.QMessageBox.information(
-                    self, 
-                    "DBSCAN", 
-                    (
-                        "Clustering executed.  Results are saved in: \n" 
-                        + base 
-                        + "_dbscan.hdf5" 
-                        + "\n" 
-                        + base 
-                        + "_dbclusters.hdf5"
-                    ),
-                )
-
-            status.close()
+                self.infos[channel].append(dbscan_info)
+                # convert z if needed
+                if self.z_converted[channel]:
+                    m = QtWidgets.QMessageBox()
+                    m.setWindowTitle("z coordinates have been converted to pixels")
+                    ret = m.question(
+                        self,
+                        "",
+                        "Convert z back to nm? (old picasso format)",
+                        m.Yes | m.No,
+                    )
+                    if ret == m.Yes:
+                        pixelsize = (
+                            self.window.display_settings_dlg.pixelsize.value()
+                        )
+                        locs.z *= pixelsize
+                io.save_locs(path, locs, self.infos[channel])
+                status.close()
+                if save_centers:
+                    path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                        self,
+                        "Save cluster centers",
+                        path.replace(".hdf5", "_cluster_centers.hdf5"),
+                        filter="*.hdf5",
+                    )
+                    if path: 
+                        self.save_cluster_centers(path, locs, self.infos[channel])
 
     def hdbscan(self):
         """
         Gets HDBSCAN parameters, performs clustering and saves data.
         """
 
-        # get HDBSCAN parameters
-        min_cluster, min_samples, cluster_eps, ok = HdbscanDialog.getParams()
-        if ok:
-            status = lib.StatusDialog(
-                "Applying HDBSCAN. This may take a while...", self
+        if not HDBSCAN_IMPORTED: # no hdbscan package found
+            message = (
+                "No HDBSCAN detected. Please install\n"
+                "the python package HDBSCAN*."
             )
-            # perform HDBSCAN for each channel
-            for locs, locs_info, locs_path in zip(
-                    self.locs, self.infos, self.locs_paths
-            ):
-                pixelsize = self.window.display_settings_dlg.pixelsize.value()
-                clusters, locs = postprocess.hdbscan(
-                    locs, min_cluster, min_samples, cluster_eps, pixelsize
-                )
-                base, ext = os.path.splitext(locs_path)
-                hdbscan_info = {
-                    "Generated by": "Picasso HDBSCAN",
-                    "Min. cluster": min_cluster,
-                    "Min. samples": min_samples,
-                    "Intercluster distance": cluster_eps,
-                }
-                locs_info.append(hdbscan_info)
-                io.save_locs(base + "_hdbscan.hdf5", locs, locs_info)
-                with File(base + "_hdbclusters.hdf5", "w") as clusters_file:
-                    clusters_file.create_dataset("clusters", data=clusters)
-                # inform tbe user where clustered locs were saved
-                QtWidgets.QMessageBox.information(
-                    self, 
-                    "HDBSCAN", 
-                    (
-                        "Clustering executed.  Results are saved in: \n" 
-                        + base 
-                        + "_hdbscan.hdf5" 
-                        + "\n" 
-                        + base 
-                        + "_hdbclusters.hdf5"
+            QtWidgets.QMessageBox.information(
+                self,
+                "No HDBSCAN",
+                message,
+            )
+            return
+        else: # hdscan package found
+            channel = self.get_channel("Cluster")
+            # get HDBSCAN parameters
+            (
+                min_cluster, 
+                min_samples, 
+                cluster_eps, 
+                save_centers, 
+                ok,
+            ) = HdbscanDialog.getParams()
+            if ok:
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    self,
+                    "Save clustered locs",
+                    self.locs_paths[channel].replace(
+                        ".hdf5", "_clustered.hdf5"
                     ),
+                    filter="*.hdf5",
                 )
-            status.close()
+                if path: 
+                    status = lib.StatusDialog(
+                        "Applying HDBSCAN. This may take a while.", self
+                    )
+                    # keep group info if already present
+                    if hasattr(self.all_locs[channel], "group"):
+                        locs = lib.append_to_rec(
+                            self.all_locs[channel],
+                            self.all_locs[channel].group,
+                            "group_input",
+                        )
+                    else: 
+                        locs = self.all_locs[channel]
+
+                    # perform HDBSCAN for each channel
+                    locs = postprocess.hdbscan(
+                        locs,
+                        min_cluster, 
+                        min_samples, 
+                        cluster_eps,
+                    )
+                    hdbscan_info = {
+                        "Generated by": "Picasso HDBSCAN",
+                        "Number of clusters": len(np.unique(locs.group)),
+                        "Min. cluster": min_cluster,
+                        "Min. samples": min_samples,
+                        "Intercluster distance": cluster_eps,
+                    }
+                    self.infos[channel].append(hdbscan_info)
+                    # convert z if needed
+                    if self.z_converted[channel]:
+                        m = QtWidgets.QMessageBox()
+                        m.setWindowTitle(
+                            "z coordinates have been converted to pixels"
+                        )
+                        ret = m.question(
+                            self,
+                            "",
+                            "Convert z back to nm? (old picasso format)",
+                            m.Yes | m.No,
+                        )
+                        if ret == m.Yes:
+                            pixelsize = (
+                                self.window.display_settings_dlg.pixelsize.value()
+                            )
+                            locs.z *= pixelsize
+                    io.save_locs(path, locs, self.infos[channel])
+                    status.close()
+                    if save_centers:
+                        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                            self,
+                            "Save cluster centers",
+                            path.replace(".hdf5", "_cluster_centers.hdf5"),
+                            filter="*.hdf5",
+                        )
+                        if path: 
+                            self.save_cluster_centers(
+                                path, locs, self.infos[channel]
+                            )
 
     def smlm_clusterer(self):
-        # todo: 3d and 2d separetely
         """
-        Gets Smlm clusterer parameters, performs clustering and 
-        saves data.
+        Clusters locs using SMLM clusterer and saves the result.
+
+        There are three modes of clustering, each in 2D and 3D versions:
+            * clusterer_picked - clusters locs in picks; distances 
+                between points are stored in a distance matrix. It is 
+                recommended that there are no more than 700 (2D) or 
+                600 (3D) locs in each pick.
+            * clusterer CPU - clusters all loaded locs with a CPU; 
+                distances are calculated on demand. May take a long 
+                time to finish
+            * clusterer GPU - clusters all loaded locs with a GPU;
+                distances are calculated on demand.
         """
-        # parameters are similar to dbscan
-        radius, min_cluster, ok = DbscanDialog.getParams()
-        t0 = time.time()
+
+        channel = self.get_channel("Cluster")
+
+        # get clustering parameters
+        if hasattr(self.all_locs[channel], "z"):
+            (
+                radius_xy, 
+                radius_z, 
+                min_locs, 
+                save_centers, 
+                ok,
+            ) = SMLMDialog3D.getParams()
+        else:
+            (
+                radius, 
+                min_locs, 
+                save_centers,
+                ok,
+            ) = SMLMDialog2D.getParams()
+
         if ok:
-            channel = self.get_channel("Cluster")
-            if len(self._picks) > 0:
-                # perform clustering with cpu
-                clustered_locs = [] # list with picked locs after clustering
-                picked_locs = self.picked_locs(channel, add_group=False)
-                group_offset = 0
-                pd = lib.ProgressDialog(
-                    "Clustering in picks", 0, len(picked_locs), self
-                )
-                pd.set_value(0)
-                for i in range(len(picked_locs)):
-                    locs = picked_locs[i]
-                    labels = clusterer.clusterer_picked(
-                        locs.x,
-                        locs.y,
-                        locs.frame,
-                        radius,
-                        min_cluster,
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save clustered locs",
+                self.locs_paths[channel].replace(".hdf5", "_clustered.hdf5"),
+                filter="*.hdf5",
+            )
+            if path:
+                t0 = time.time()
+                # cluster picked locs with cpu (distance matrix)
+                if len(self._picks) > 0: 
+                    clustered_locs = [] # list with picked locs after clustering
+                    picked_locs = self.picked_locs(channel, add_group=False)
+                    group_offset = 0
+                    pd = lib.ProgressDialog(
+                        "Clustering in picks", 0, len(picked_locs), self
                     )
-                    temp_locs = lib.append_to_rec(
+                    pd.set_value(0)
+                    for i in range(len(picked_locs)):
+                        locs = picked_locs[i]
+
+                        # keep group info if already present
+                        if hasattr(locs, "group"):
+                            locs = lib.append_to_rec(
+                                locs, locs.group, "group_input"
+                            )
+                        if len(locs) > 0:
+                            if hasattr(locs, "z"):
+                                labels = clusterer.clusterer_picked_3D(
+                                    locs.x,
+                                    locs.y,
+                                    locs.z,
+                                    locs.frame,
+                                    radius_xy,
+                                    radius_z,
+                                    min_locs,
+                                )
+                            else:
+                                labels = clusterer.clusterer_picked_2D(
+                                    locs.x,
+                                    locs.y,
+                                    locs.frame,
+                                    radius,
+                                    min_locs,
+                                )
+
+                            temp_locs = lib.append_to_rec(
+                                locs, labels, "group"
+                            ) # add cluster id to locs
+
+                            # -1 means no cluster assigned to a loc
+                            temp_locs = temp_locs[temp_locs.group != -1]
+                            if len(temp_locs) > 0:
+                                # make sure each picks produces unique cluster ids
+                                temp_locs.group += group_offset
+                                clustered_locs.append(temp_locs)
+                                group_offset += np.max(labels)
+                        pd.set_value(i + 1)
+                    clustered_locs = stack_arrays(
+                        clustered_locs, asrecarray=True, usemask=False
+                    ) # np.recarray with all clustered locs to be saved
+
+                else: # cluster all locs
+                    status = lib.StatusDialog("Clustering localizations", self)
+
+                    # keep group info if already present
+                    if hasattr(self.all_locs[channel], "group"):
+                        locs = lib.append_to_rec(
+                            self.all_locs[channel], 
+                            self.all_locs[channel].group, 
+                            "group_input",
+                        )
+                    else:
+                        locs = self.all_locs[channel]
+
+                    m = self.CPU_or_GPU_box()
+                    reply = m.exec()
+
+                    if reply == 0: # use gpu
+                        if cuda.is_available(): # gpu is available
+                            if hasattr(locs, "z"):
+                                labels = clusterer.clusterer_GPU_3D(
+                                    locs.x,
+                                    locs.y,
+                                    locs.z,
+                                    locs.frame,
+                                    radius_xy,
+                                    radius_z,
+                                    min_locs,
+                                )
+                            else:
+                                labels = clusterer.clusterer_GPU_2D(
+                                    locs.x,
+                                    locs.y,
+                                    locs.frame,
+                                    radius,
+                                    min_locs,
+                                )
+                        else: # gpu not found, cancel operation
+                            message = (
+                                "Make sure your computer has a GPU installed"
+                                " and that you have the required software.\n"
+                                "To obtain it,  run 'conda install cudatoolkit'."
+                            )
+                            QtWidgets.QMessageBox.information(
+                                self, "GPU not found.", message
+                            )
+                            return
+                    elif reply == 1: # use cpu (distance calculated on demand)
+                        if hasattr(locs, "z"):
+                            labels = clusterer.clusterer_CPU_3D(
+                                locs.x,
+                                locs.y,
+                                locs.z,
+                                locs.frame,
+                                radius_xy,
+                                radius_z,
+                                min_locs,
+                            )
+                        else:
+                            labels = clusterer.clusterer_CPU_2D(
+                                locs.x,
+                                locs.y,
+                                locs.frame,
+                                radius,
+                                min_locs,
+                            )
+                    else:
+                        return
+                    clustered_locs = lib.append_to_rec(
                         locs, labels, "group"
                     ) # add cluster id to locs
-                    # -1 means no cluster
-                    temp_locs = temp_locs[temp_locs.group != -1]
-                    temp_locs.group += group_offset
-                    clustered_locs.append(temp_locs)
-                    group_offset += np.max(labels)
-                    pd.set_value(i + 1)
 
-                #todo: progress dialogs
-                #todo: test clusterer
-                #todo: needs spliting locs in gpu if there are more than 1mln?
-                #todo: maybe need to change all_locs too
-                clustered_locs = stack_arrays(
-                    clustered_locs, asrecarray=True, usemask=False
-                )
-            else:
-                # cluster all locs, ask if gpu or cpu
-                qm = QtWidgets.QMessageBox()
-                qm.setWindowTitle("Clusterer")
-                ret = qm.question(
-                    self,
-                    "",
-                    (
-                        "Use GPU? \n"
-                        "CPU clustering may take hours to finish.\n"
-                        "If CPU is preferred,  it is recommended to\n"
-                        "cluster only picked localizations."
-                    )
-                )
-                #todo: is it really hours?
-                if ret == qm.Yes:
-                    labels = clusterer.clusterer_GPU()
-                elif ret == qm.No:
-                    labels = clusterer.clusterer_CPU(
-                        self.locs[channel].x,
-                        self.locs[channel].y,
-                        self.locs[channel].frame,
-                        radius,
-                        min_cluster,
-                    )
-                clustered_losc = lib.append_to_rec(
-                    self.locs[channel], labels, "group"
-                )
-                clustered_locs = clustered_locs[clustered_locs.group != -1]
+                    # -1 means no cluster assigned to a loc
+                    clustered_locs = clustered_locs[clustered_locs.group != -1]
+                    status.close()
 
-            path, ext = os.path.splitext(self.locs_paths[0])
-            path = path + '_clustered.hdf5'
-            io.save_locs(path, clustered_locs, self.infos[0])  
-            print(f'time requiried: {(time.time() - t0) / 60} minutes')
-            print('clustered locs saved')           
+                # saving
+                if hasattr(self.all_locs[channel], "z"):
+                    new_info = {
+                        "Generated by": "Picasso Render SMLM clusterer 3D",
+                        "Number of clusters": len(np.unique(clustered_locs.group)),
+                        "Clustering radius xy [cam. px]": radius_xy,
+                        "Clustering radius z [cam. px]": radius_z,
+                        "Min. cluster size": min_locs,
+                    }            
+                else:
+                    new_info = {
+                        "Generated by": "Picasso Render SMLM clusterer 2D",
+                        "Number of clusters": len(np.unique(clustered_locs.group)),
+                        "Clustering radius [cam. px]": radius,
+                        "Min. cluster size": min_locs,
+                    }
+                info = self.infos[channel] + [new_info]
+                # check if z needs to be converted
+                if self.z_converted[channel]:
+                    m = QtWidgets.QMessageBox()
+                    m.setWindowTitle("z coordinates have been converted to pixels")
+                    ret = m.question(
+                        self,
+                        "",
+                        "Convert z back to nm? (old picasso format)",
+                        m.Yes | m.No,
+                    )
+                    if ret == m.Yes:
+                        pixelsize = (
+                            self.window.display_settings_dlg.pixelsize.value()
+                        )
+                        clustered_locs.z *= pixelsize
+
+                # save locs
+                io.save_locs(path, clustered_locs, info)
+                # save cluster centers
+                if save_centers:
+                    path = path.replace(".hdf5", "_cluster_centers.hdf5")
+                    self.save_cluster_centers(path, clustered_locs, info)
+                dt = np.round((time.time() - t0) / 60, 2)
+                print(f'time required: {dt} minutes')
+                print('clustered locs saved')     
+
+    def CPU_or_GPU_box(self):
+        """
+        Creates a message box with buttons to choose between 
+        CPU and GPU SMLM clustering.
+
+        Returns
+        -------
+        QtWidgets.QMessageBox
+            The specified message box
+        """
+
+        m = QtWidgets.QMessageBox(self)
+        m.setWindowTitle("Clusterer")
+        m.setWindowIcon(self.icon)
+        m.setText(
+            "Use GPU? \n"
+            "CPU clustering may take a long time to finish.\n"
+            "If CPU is preferred,  it is recommended to\n"
+            "cluster only picked localizations."
+        )
+        m.addButton(
+            QtWidgets.QPushButton("GPU"), QtWidgets.QMessageBox.YesRole
+        )
+        m.setDefaultButton(m.buttons()[0])
+        m.addButton(
+            QtWidgets.QPushButton("CPU"), QtWidgets.QMessageBox.NoRole
+        )
+        m.addButton(
+            QtWidgets.QPushButton("Cancel"), QtWidgets.QMessageBox.RejectRole
+        )
+        return m
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
         """
@@ -5920,6 +6459,110 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
+    def save_cluster_centers(self, path, locs, info):
+        """
+        Extract information about clustered localizations, defines
+        cluster centers and saves them in Picasso: Render - compatible
+        format.
+
+        Parameters
+        ----------
+        path : str
+            Path to save cluster centers
+        locs : np.recarray
+            Clustered localizations (contain group info)
+        info : list
+            List of dictionaries with metadata to save in .yaml format
+
+        """
+
+        # group ids
+        cluster_idx = np.unique(locs.group)
+
+        # arrays to store attributes of cluster centeres
+        frame = np.zeros_like(cluster_idx)
+        x = np.zeros_like(cluster_idx, dtype=np.float32)
+        y = np.zeros_like(x)
+        photons = np.zeros_like(x)
+        sx = np.zeros_like(x)
+        sy = np.zeros_like(x)
+        bg = np.zeros_like(x)
+        lpx = np.zeros_like(x)
+        lpy = np.zeros_like(x)
+        ellipticity = np.zeros_like(x)
+        net_gradient = np.zeros_like(x)
+        n = np.zeros_like(cluster_idx)
+        if hasattr(locs, "z"):
+            z = np.zeros_like(x)
+            lpz = np.zeros_like(x)
+
+        pd = lib.ProgressDialog(
+            "Calculating cluster centers", 0, len(cluster_idx), self
+        )
+        pd.set_value(0)
+
+        # extract values for each cluster one by one
+        for i, idx in enumerate(cluster_idx):
+            # extract locs from the given cluster
+            grouplocs = locs[locs.group == idx]
+
+            # mean frame
+            frame[i] = np.mean(grouplocs.frame)
+            # weighted mean of x and y
+            x[i] = np.average(
+                grouplocs.x, weights=1/(grouplocs.lpx)**2
+            )
+            y[i] = np.average(
+                grouplocs.y, weights=1/(grouplocs.lpy)**2
+            )
+            # mean photons, sx, sy, background
+            photons[i] = np.mean(grouplocs.photons)
+            sx[i] = np.mean(grouplocs.sx)
+            sy[i] = np.mean(grouplocs.sy)
+            bg[i] = np.mean(grouplocs.bg)
+            # weighted localization precision
+            lpx[i] = np.sqrt(
+                error_sums_wtd(grouplocs.x, grouplocs.lpx)
+                / (len(grouplocs) - 1)
+            )
+            lpy[i] = np.sqrt(
+                error_sums_wtd(grouplocs.y, grouplocs.lpy)
+                / (len(grouplocs) - 1)
+            )
+
+            ellipticity[i] = sx[i] / sy[i]
+            # mean net gradient
+            net_gradient[i] = np.mean(grouplocs.net_gradient)
+            # number of locs in the cluster
+            n[i] = len(grouplocs)
+            if hasattr(locs, "z"):
+                z[i] = np.mean(grouplocs.z)
+                lpz[i] = lpx[i] + lpy[i] # 2 * mean of lpx and lpy
+            pd.set_value(i + 1)
+
+        # recarray to save
+        centers = np.rec.array(
+            (
+                frame,
+                x,
+                y,
+                photons,
+                sx,
+                sy,
+                bg,
+                lpx,
+                lpy,
+                ellipticity,
+                net_gradient,
+                n,
+            ), dtype=CLUSTER_CENTERS_DTYPE
+        )
+        if hasattr(locs, "z"):
+            centers = lib.append_to_rec(centers, z, "z")
+            centers = lib.append_to_rec(centers, lpz, "lpz")
+        io.save_locs(path, centers, info)
+
+
     def save_channel_multi(self, title="Choose a channel"):
         """
         Opens an input dialog to ask which channel to save.
@@ -6392,6 +7035,103 @@ class View(QtWidgets.QLabel):
         movie_height = self.max_movie_height()
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
+
+    def nearest_neighbor(self):
+        """ Gets channel for nearest neighbor analysis. """
+
+        # choose both channels
+        channel1 = self.get_channel("Nearest Neighbor Analysis")
+        channel2 = self.get_channel("Nearest Neighbor Analysis")
+
+        # make sure that not more than 50k locs 
+        # (this function is meant for cluster centers)
+        if (
+            len(self.locs[channel1]) > 50000 
+            or len(self.locs[channel2]) > 50000
+        ):
+            message = (
+                "This function is meant for cluster centers.\n"
+                "Number of locs in at least one of the channels exceeds\n"
+                "50 000.\n\n"
+                "Are you sure you want to continue?\n"
+                "The calculations may take a long time to finish.\n"
+            )
+            qm = QtWidgets.QMessageBox()
+            ret = qm.question(self, "", message)
+            if ret == qm.Yes:
+                self._nearest_neighbor(channel1, channel2)
+        else:
+            self._nearest_neighbor(channel1, channel2)
+
+    def _nearest_neighbor(self, channel1, channel2):
+        """
+        Calculates and saves distances of the nearest neighbors between
+        localizations in channels 1 and 2
+
+        Saves calculated distances in .csv format.
+
+        Parameters
+        ----------
+        channel1 : int
+            Channel to calculate nearest neighbors distances
+        channel2 : int
+            Second channel to calculate nearest neighbor distances
+        """
+
+        # ask how many nearest neighbors
+        nn_count, ok = QtWidgets.QInputDialog.getInt(
+            self, "", "Number of nearest neighbors: ", 0, 1, 10
+        )
+        if ok:
+            # extract x, y and z from both channels 
+            x1 = self.locs[channel1].x
+            x2 = self.locs[channel2].x
+            y1 = self.locs[channel1].y
+            y2 = self.locs[channel2].y
+            if (
+                hasattr(self.locs[channel1], "z")
+                and hasattr(self.locs[channel2], "z")
+            ):
+                z1 = self.locs[channel1].z
+                z2 = self.locs[channel2].z
+            else: 
+                z1 = None
+
+            # used for avoiding zero distances (to self)
+            same_channel = channel1 == channel2
+
+            # get saved file name
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self, 
+                "Save nearest neighbor distances", 
+                self.locs_paths[channel1].replace(".hdf5", "_nn.csv"),
+                filter="*.csv",
+            )
+
+            p = lib.ProgressDialog(
+                "Calculating nearest neighbor distances", 0, len(x1), self
+            )
+            if z1 is not None:
+                nn = postprocess.nn_analysis_3D(
+                    x1, x2, 
+                    y1, y2, 
+                    z1, z2,
+                    nn_count, 
+                    same_channel, 
+                    path, 
+                    p.set_value,
+                )
+            else:
+                nn = postprocess.nn_analysis_2D(
+                    x1, x2,
+                    y1, y2,
+                    nn_count,
+                    same_channel,
+                    path,
+                    p.set_value,
+                )
+            # save as .csv
+            np.savetxt(path, nn, delimiter=',')
 
     def display_pixels_per_viewport_pixels(self):
         """ Returns optimal oversampling. """
@@ -7168,7 +7908,7 @@ class View(QtWidgets.QLabel):
 
         channel = self.get_channel("Filter picks by locs")
         if channel is not None:
-            locs = self.locs[channel]
+            locs = self.all_locs[channel]
             info = self.infos[channel]
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
@@ -7530,7 +8270,7 @@ class View(QtWidgets.QLabel):
 
         channel = self.get_channel("Remove picked localizations")
         if channel is not None:
-            index = np.arange(len(self.locs[channel]), dtype=np.int32)
+            index = np.arange(len(self.all_locs[channel]), dtype=np.int32)
             self.all_locs[channel] = lib.append_to_rec(
                 self.all_locs[channel], index, "index"
             ) # used for indexing picked localizations
@@ -7547,7 +8287,9 @@ class View(QtWidgets.QLabel):
             self.all_locs[channel] = lib.remove_from_rec(
                 self.all_locs[channel], "index"
             )
-            self.locs[channel] = self.all_locs[channel]
+            self.locs[channel] = self.all_locs[channel].copy()
+            # fast rendering
+            self.window.fast_render_dialog.sample_locs()
             self.update_scene()
 
     def remove_points(self):
@@ -7863,14 +8605,13 @@ class View(QtWidgets.QLabel):
             Path for saving localizations
         """
 
-        # for each channel stack all locs from a pick
-        for i in range(len(self.locs_paths)):
-            channel = self.locs_paths[i]
-            if i == 0:
-                locs = self.picked_locs(self.locs_paths.index(channel))
+        # for each channel stack locs from all picks and combine them
+        for channel in range(len(self.locs_paths)):
+            if channel == 0:
+                locs = self.picked_locs(channel)
                 locs = stack_arrays(locs, asrecarray=True, usemask=False)
             else:
-                templocs = self.picked_locs(self.locs_paths.index(channel))
+                templocs = self.picked_locs(channel)
                 templocs = stack_arrays(
                     templocs, asrecarray=True, usemask=False
                 )
@@ -8704,13 +9445,17 @@ class View(QtWidgets.QLabel):
 
         Useful for locs that were processed with Picasso: Average.
         """
+        if len(self.all_locs) > 1:
+            raise NotImplementedError(
+                "Please load only one channel."
+            )
 
         if not hasattr(self, "unfold_status"):
             self.unfold_status = "folded"
         if self.unfold_status == "folded":
-            if hasattr(self.locs[0], "group"):
-                self.locs[0].x += self.locs[0].group * 2
-                groups = np.unique(self.locs[0].group)
+            if hasattr(self.all_locs[0], "group"):
+                self.all_locs[0].x += self.all_locs[0].group * 2
+                groups = np.unique(self.all_locs[0].group)
 
                 if self._picks:
                     if self._pick_shape == "Rectangle":
@@ -8727,11 +9472,14 @@ class View(QtWidgets.QLabel):
                 # Update width information
                 self.oldwidth = self.infos[0][0]["Width"]
                 minwidth = np.ceil(
-                    np.mean(self.locs[0].x)
-                    + np.max(self.locs[0].x)
-                    - np.min(self.locs[0].x)
+                    np.mean(self.all_locs[0].x)
+                    + np.max(self.all_locs[0].x)
+                    - np.min(self.all_locs[0].x)
                 )
-                self.infos[0][0]["Width"] = np.max([self.oldwidth, minwidth])
+                self.infos[0][0]["Width"] = int(
+                    np.max([self.oldwidth, minwidth])
+                )
+                self.locs[0] = copy.copy(self.all_locs[0])
                 self.fit_in_view()
                 self.unfold_status = "unfolded"
                 self.n_picks = len(self._picks)
@@ -8747,28 +9495,33 @@ class View(QtWidgets.QLabel):
         Useful for locs that were processed with Picasso: Average.
         """
 
+        if len(self.all_locs) > 1:
+            raise NotImplementedError(
+                "Please load only one channel."
+            )
+
         n_square, ok = QtWidgets.QInputDialog.getInt(
             self,
             "Input Dialog",
             "Set number of elements per row and column:",
             100,
         )
-        if hasattr(self.locs[0], "group"):
+        if hasattr(self.all_locs[0], "group"):
 
-            self.locs[0].x += np.mod(self.locs[0].group, n_square) * 2
-            self.locs[0].y += np.floor(self.locs[0].group / n_square) * 2
+            self.all_locs[0].x += np.mod(self.all_locs[0].group, n_square) * 2
+            self.all_locs[0].y += np.floor(self.all_locs[0].group / n_square) * 2
 
             mean_x = np.mean(self.locs[0].x)
             mean_y = np.mean(self.locs[0].y)
 
-            self.locs[0].x -= mean_x
-            self.locs[0].y -= np.mean(self.locs[0].y)
+            self.all_locs[0].x -= mean_x
+            self.all_locs[0].y -= np.mean(self.all_locs[0].y)
 
-            offset_x = np.absolute(np.min(self.locs[0].x))
-            offset_y = np.absolute(np.min(self.locs[0].y))
+            offset_x = np.absolute(np.min(self.all_locs[0].x))
+            offset_y = np.absolute(np.min(self.all_locs[0].y))
 
-            self.locs[0].x += offset_x
-            self.locs[0].y += offset_y
+            self.all_locs[0].x += offset_x
+            self.all_locs[0].y += offset_y
 
             if self._picks:
                 if self._pick_shape == "Rectangle":
@@ -8776,7 +9529,7 @@ class View(QtWidgets.QLabel):
                         "Not implemented for rectangle picks"
                     )
                 # Also unfold picks
-                groups = np.unique(self.locs[0].group)
+                groups = np.unique(self.all_locs[0].group)
 
                 shift_x = np.mod(groups, n_square) * 2 - mean_x + offset_x
                 shift_y = np.floor(groups / n_square) * 2 - mean_y + offset_y
@@ -8792,15 +9545,22 @@ class View(QtWidgets.QLabel):
                 self.update_pick_info_short()
 
         # Update width information
-        self.infos[0][0]["Height"] = int(np.ceil(np.max(self.locs[0].y)))
-        self.infos[0][0]["Width"] = int(np.ceil(np.max(self.locs[0].x)))
+        self.infos[0][0]["Height"] = int(np.ceil(np.max(self.all_locs[0].y)))
+        self.infos[0][0]["Width"] = int(np.ceil(np.max(self.all_locs[0].x)))
+        self.locs[0] = copy.copy(self.all_locs[0])
         self.fit_in_view()
 
     def refold_groups(self):
         """ Refolds grouped locs across x axis. """
 
-        if hasattr(self.locs[0], "group"):
-            self.locs[0].x -= self.locs[0].group * 2
+        if len(self.all_locs) > 1:
+            raise NotImplementedError(
+                "Please load only one channel."
+            )
+
+        if hasattr(self.all_locs[0], "group"):
+            self.all_locs[0].x -= self.all_locs[0].group * 2
+        self.locs[0] = copy.copy(self.all_locs[0])
         self.fit_in_view()
         self.infos[0][0]["Width"] = self.oldwidth
         self.unfold_status == "folded"
@@ -9587,6 +10347,10 @@ class Window(QtWidgets.QMainWindow):
             self.test_clusterer_dialog.show
         )
 
+        postprocess_menu.addSeparator()
+        nn_action = postprocess_menu.addAction("Nearest Neighbor Analysis")
+        nn_action.triggered.connect(self.view.nearest_neighbor)
+
         self.load_user_settings()        
 
         # Define 3D entries
@@ -9690,7 +10454,7 @@ class Window(QtWidgets.QMainWindow):
                 filter="*.frc.txt",
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 loctxt = locs[["frame", "x", "y"]].copy()
                 np.savetxt(
                     path,
@@ -9727,7 +10491,7 @@ class Window(QtWidgets.QMainWindow):
                 filter="*.nis.txt",
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 if hasattr(locs, "z"):
                     loctxt = locs[
                         ["x", "y", "z", "sx", "bg", "photons", "frame"]
@@ -9823,7 +10587,7 @@ class Window(QtWidgets.QMainWindow):
                 out_path,
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 if hasattr(locs, "z"):
                     loctxt = locs[["x", "y", "z"]].copy()
                     loctxt = [
@@ -9870,7 +10634,7 @@ class Window(QtWidgets.QMainWindow):
                 out_path,
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 if hasattr(locs, "z"):
                     locs = locs[["x", "y", "z", "photons", "frame"]].copy()
                     locs.x *= pixelsize
@@ -9906,7 +10670,7 @@ class Window(QtWidgets.QMainWindow):
                 filter="*.imaris.txt",
             )
             if path:
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 channel = 0
                 tempdata_xyz = locs[["x", "y", "z", "frame"]].copy()
                 tempdata_xyz["x"] = tempdata_xyz["x"] * pixelsize
@@ -9970,7 +10734,7 @@ class Window(QtWidgets.QMainWindow):
             )
             if path:
                 stddummy = 0
-                locs = self.view.locs[channel]
+                locs = self.view.all_locs[channel]
                 if hasattr(locs, "len"):  # Linked locs -> add detections
                     if hasattr(locs, "z"):
                         loctxt = locs[
@@ -10349,7 +11113,6 @@ class Window(QtWidgets.QMainWindow):
                 radius = float(input[1])
                 turns = int(input[2])
                 maxframe = self.view.infos[channel][0]["Frames"]
-                # Todo: at some point save the spiral in the respective channel
 
                 self.x_spiral = self.view.locs[channel]["x"].copy()
                 self.y_spiral = self.view.locs[channel]["y"].copy()
@@ -10402,16 +11165,16 @@ class Window(QtWidgets.QMainWindow):
         """ Opens Picasso .hdf5 file(s). """
 
         if self.pwd == []:
-            path, ext = QtWidgets.QFileDialog.getOpenFileNames(
+            paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
                 self, "Add localizations", filter="*.hdf5"
             )
         else:
-            path, ext = QtWidgets.QFileDialog.getOpenFileNames(
+            paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
                 self, "Add localizations", directory=self.pwd, filter="*.hdf5"
             )
-        if path:
-            self.pwd = path[0]
-            self.view.add_multiple(path)
+        if paths:
+            self.pwd = paths[0]
+            self.view.add_multiple(paths)
 
     def open_rotated_locs(self):
         """ 
@@ -10496,7 +11259,7 @@ class Window(QtWidgets.QMainWindow):
         channel = self.view.save_channel_pickprops("Save localizations")
         if channel is not None:
             self.convert_z()
-            if channel is (len(self.view.locs_paths)):
+            if channel is len(self.view.locs_paths):
                 print("Save all at once.")
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
@@ -10506,8 +11269,7 @@ class Window(QtWidgets.QMainWindow):
                     "_apicked",
                 )
                 if ok:
-                    for i in tqdm(range(len(self.view.locs_paths))):
-                        channel = i
+                    for channel in tqdm(range(len(self.view.locs_paths))):
                         base, ext = os.path.splitext(
                             self.view.locs_paths[channel]
                         )
@@ -10527,10 +11289,39 @@ class Window(QtWidgets.QMainWindow):
         Saves localizations in a given channel (or all channels).
         """
 
-        channel = self.view.save_channel_multi("Save localizations")
+        self.convert_z()
+        channel = self.view.save_channel("Save localizations")
         if channel is not None:
-            self.convert_z()
-            if channel is (len(self.view.locs_paths)):
+            # combine all channels
+            if channel is (len(self.view.locs_paths) + 1):
+                print("Multichannel")
+                base, ext = os.path.splitext(self.view.locs_paths[0])
+                out_path = base + "_multi.hdf5"
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    self,
+                    "Save picked localizations",
+                    out_path,
+                    filter="*.hdf5",
+                )
+                if path:
+                    # combine locs from all channels
+                    all_locs = stack_arrays(
+                        self.view.all_locs, 
+                        asrecarray=True, 
+                        usemask=False,
+                        autoconvert=True,
+                    )
+                    all_locs.sort(kind="mergesort", order="frame")
+                    info = self.view.infos[0] + [
+                        {
+                            "Generated by": "Picasso Render Combine",
+                            "Paths to combined files": self.view.locs_paths,
+                        }
+                    ]
+                    io.save_locs(path, all_locs, info)
+
+            # save all channels one by one
+            elif channel is (len(self.view.locs_paths)):
                 print("Save all at once.")
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
@@ -10540,8 +11331,7 @@ class Window(QtWidgets.QMainWindow):
                     "_arender",
                 )
                 if ok:
-                    for i in tqdm(range(len(self.view.locs_paths))):
-                        channel = i
+                    for channel in tqdm(range(len(self.view.locs_paths))):
                         base, ext = os.path.splitext(
                             self.view.locs_paths[channel]
                         )
@@ -10557,7 +11347,7 @@ class Window(QtWidgets.QMainWindow):
                         io.save_locs(
                             out_path, self.view.all_locs[channel], info
                         )
-
+            # save a single channel
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_render.hdf5"
@@ -10582,7 +11372,7 @@ class Window(QtWidgets.QMainWindow):
         if channel is not None:
             self.convert_z()
             if channel is (len(self.view.locs_paths) + 1):
-                print("Multichannel")
+                print("Combine all channels")
                 base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + "_picked_multi.hdf5"
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -10595,8 +11385,7 @@ class Window(QtWidgets.QMainWindow):
                     self.view.save_picked_locs_multi(path)
             elif channel is (len(self.view.locs_paths)):
                 print("Save all at once")
-                for i in range(len(self.view.locs_paths)):
-                    channel = i
+                for channel in range(len(self.view.locs_paths)):
                     base, ext = os.path.splitext(self.view.locs_paths[channel])
                     out_path = base + "_apicked.hdf5"
                     self.view.save_picked_locs(out_path, channel)
