@@ -37,12 +37,18 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             parent,
             QtCore.Qt.CustomizeWindowHint,
         )
+        self.initalized = None
+
+    def init(self):
         _dialogs.append(self)
         self.setMinimumDuration(500)
         self.setModal(True)
         self.app = QtCore.QCoreApplication.instance()
+        self.initalized = True
 
     def set_value(self, value):
+        if not self.initalized:
+            self.init()
         self.setValue(value)
         self.app.processEvents()
 

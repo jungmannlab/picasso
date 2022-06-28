@@ -103,6 +103,7 @@ class PlotWindow(QtWidgets.QWidget):
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
         self.setWindowTitle("Picasso: Filter")
+
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "filter.ico")
         icon = QtGui.QIcon(icon_path)
@@ -263,10 +264,11 @@ class Window(QtWidgets.QMainWindow):
         self.hist2d_windows = {}
         self.filter_log = {}
         self.locs = None
+        self.pwd = None
 
     def open_file_dialog(self):
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open localizations", filter="*.hdf5"
+            self, "Open localizations", self.pwd, filter="*.hdf5"
         )
         if path:
             self.open(path)
@@ -291,6 +293,11 @@ class Window(QtWidgets.QMainWindow):
             for field_y in self.locs.dtype.names:
                 self.hist2d_windows[field][field_y] = None
             self.filter_log[field] = None
+
+        self.setWindowTitle(
+            "Picasso: Filter. File: {}".format(os.path.basename(path))
+        )
+        self.pwd = os.path.dirname(path)
 
     def plot_histogram(self):
         selection_model = self.table_view.selectionModel()

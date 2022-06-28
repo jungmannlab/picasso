@@ -220,6 +220,8 @@ def _cut_spots_frame(
     for j in range(start, N):
         if ids_frame[j] > frame_number:
             break
+        if ids_frame[j] < frame_number:
+            break
         yc = ids_y[j]
         xc = ids_x[j]
         spots[j] = frame[yc - r: yc + r + 1, xc - r: xc + r + 1]
