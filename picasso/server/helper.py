@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 import pandas as pd
 import streamlit as st
 import time
+import subprocess
 
 
 def _db_filename():

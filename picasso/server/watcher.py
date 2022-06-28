@@ -10,6 +10,7 @@ from sqlalchemy import create_engine
 from picasso import localize
 from helper import fetch_watcher
 import psutil
+import subprocess
 
 UPDATE_TIME = 60
 
@@ -165,6 +166,11 @@ def watcher():
                 calib_file = None
                 magnification_factor = None
 
+            if st.checkbox("Custom command"):
+                st.text('Allows to execute a custom command via shell.')
+
+                command = st.text_input('Command','')
+
         if st.button("Submit"):
             settings = {}
             settings["box_side_length"] = box
@@ -181,7 +187,11 @@ def watcher():
             if magnification_factor:
                 settings["magnification_factor"] = magnification_factor
 
+            settings['command'] = command
+
             st.write(settings)
+
+            settings['database'] = True
 
             p = Process(
                 target=check_new_and_process,
@@ -255,6 +265,12 @@ def check_new_and_process(settings, path):
 
             args_ = aclass(**settings)
             _localize(args_)
+
+            cmd = settings['command']
+
+            if cmd != '':
+                print(f'Executing {cmd}')
+                subprocess.run(settings['command'])
 
             processed[file] = True
 
