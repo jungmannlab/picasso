@@ -545,6 +545,8 @@ class ParametersDialog(QtWidgets.QDialog):
 
         if not gpufit_installed:
             self.gpufit_checkbox.hide()
+        else:
+            self.gpufit_checkbox.setDisabled(False)
         lq_grid.addWidget(self.gpufit_checkbox)
 
         fit_stack.addWidget(lq_widget)
