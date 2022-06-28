@@ -1585,8 +1585,7 @@ class Window(QtWidgets.QMainWindow):
             if fit_z:
                 self.fit_z()
             else:
-                locs_path = base + "_locs.hdf5"
-                self.save_locs(locs_path)
+                self.save_locs_after_fit()
 
 
     def on_fit_z_progress(self, curr, total):
@@ -1600,8 +1599,18 @@ class Window(QtWidgets.QMainWindow):
             )
         )
         self.locs = locs
+        self.save_locs_after_fit()
+
+    def save_locs_after_fit(self):
         base, ext = os.path.splitext(self.movie_path)
         self.save_locs(base + "_locs.hdf5")
+
+        if self.parameters_dialog.database_checkbox.isChecked():
+            self.status_bar.showMessage('Adding to database.')
+            localize.add_file_to_db(self.movie_path)
+            self.status_bar.showMessage('Done.')
+        else:
+            print('Not adding to database.')
 
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
