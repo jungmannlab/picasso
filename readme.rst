@@ -100,7 +100,7 @@ The individual modules of picasso can be started as follows:
 Using GPU for Fitting
 ^^^^^^^^^^^^^^^^^^^^^
 
-To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
+To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
 Example Usage
 -------------
