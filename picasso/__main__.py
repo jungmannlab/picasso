@@ -934,16 +934,21 @@ def _localize(args):
             out_path = base + "_locs.hdf5"
             save_locs(out_path, locs, info)
             print("File saved to {}".format(out_path))
-            if args.drift > 0:
-                print("Undrifting file:")
-                print("------------------------------------------")
-                try:
-                    _undrift(
-                        out_path, args.drift, display=False, fromfile=None
-                    )
-                except Exception as e:
-                    print(e)
-                    print("Drift correction failed for {}".format(out_path))
+
+            if args.database:
+                print('Adding to DB')
+                add_file_to_db(path, args.drift)
+            else:
+                if args.drift > 0:
+                    print("Undrifting file:")
+                    print("------------------------------------------")
+                    try:
+                        _undrift(
+                            out_path, args.drift, display=False, fromfile=None
+                        )
+                    except Exception as e:
+                        print(e)
+                        print("Drift correction failed for {}".format(out_path))
 
             print("                                          ")
     else:
@@ -1375,6 +1380,12 @@ def main():
     )
     localize_parser.add_argument(
         "-zc", "--zc", type=str, default='', help="Path to 3d calibration file (only 3d)"
+    )
+    localize_parser.add_argument(
+        "-db",
+        "--database",
+        action="store_true",
+        help="do not add to database",
     )
 
     # nneighbors

@@ -402,12 +402,14 @@ def save_file_summary(summary):
     s  = pd.Series(summary, index=summary.keys()).to_frame().T
     s.to_sql("files", con=engine, if_exists="append", index=False)
 
-def add_file_to_db(file):
+def add_file_to_db(file, drift=1000):
     base, ext = os.path.splitext(file)
     out_path = base + "_locs.hdf5"
 
     try:
-        main._undrift(out_path, 1000, display=False, fromfile=None)
+        print("Undrifting file:")
+        print("------------------------------------------")
+        main._undrift(out_path, drift, display=False, fromfile=None)
     except Exception as e:
         print(e)
         print("Drift correction failed for {}".format(out_path))
