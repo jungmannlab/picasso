@@ -20,7 +20,9 @@ setup(
     entry_points={
         "console_scripts": ["picasso=picasso.__main__:main"],
     },
-    install_requires=requirements,
+    install_requires=requirements + [
+        "PyImarisWriter==0.7.0; sys_platform=='win32'"
+    ],
     classifiers=[
         "Programming Language :: Python",
         "Programming Language :: Python :: 3.7",
