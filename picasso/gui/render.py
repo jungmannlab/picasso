@@ -7042,26 +7042,7 @@ class View(QtWidgets.QLabel):
         # choose both channels
         channel1 = self.get_channel("Nearest Neighbor Analysis")
         channel2 = self.get_channel("Nearest Neighbor Analysis")
-
-        # make sure that not more than 50k locs 
-        # (this function is meant for cluster centers)
-        if (
-            len(self.locs[channel1]) > 50000 
-            or len(self.locs[channel2]) > 50000
-        ):
-            message = (
-                "This function is meant for cluster centers.\n"
-                "Number of locs in at least one of the channels exceeds\n"
-                "50 000.\n\n"
-                "Are you sure you want to continue?\n"
-                "The calculations may take a long time to finish.\n"
-            )
-            qm = QtWidgets.QMessageBox()
-            ret = qm.question(self, "", message)
-            if ret == qm.Yes:
-                self._nearest_neighbor(channel1, channel2)
-        else:
-            self._nearest_neighbor(channel1, channel2)
+        self._nearest_neighbor(channel1, channel2)
 
     def _nearest_neighbor(self, channel1, channel2):
         """
@@ -7096,6 +7077,7 @@ class View(QtWidgets.QLabel):
                 z2 = self.locs[channel2].z
             else: 
                 z1 = None
+                z2 = None
 
             # used for avoiding zero distances (to self)
             same_channel = channel1 == channel2
@@ -7107,29 +7089,13 @@ class View(QtWidgets.QLabel):
                 self.locs_paths[channel1].replace(".hdf5", "_nn.csv"),
                 filter="*.csv",
             )
-
-            p = lib.ProgressDialog(
-                "Calculating nearest neighbor distances", 0, len(x1), self
+            nn = postprocess.nn_analysis(
+                x1, x2, 
+                y1, y2, 
+                z1, z2,
+                nn_count, 
+                same_channel, 
             )
-            if z1 is not None:
-                nn = postprocess.nn_analysis_3D(
-                    x1, x2, 
-                    y1, y2, 
-                    z1, z2,
-                    nn_count, 
-                    same_channel, 
-                    path, 
-                    p.set_value,
-                )
-            else:
-                nn = postprocess.nn_analysis_2D(
-                    x1, x2,
-                    y1, y2,
-                    nn_count,
-                    same_channel,
-                    path,
-                    p.set_value,
-                )
             # save as .csv
             np.savetxt(path, nn, delimiter=',')
 
