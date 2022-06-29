@@ -464,7 +464,7 @@ def get_d2_3D(x1, x2, y1, y2, z1, z2, r_rel):
 
 	return (x2-x1) ** 2 + (y2-y1) ** 2 + (r_rel * (z2-z1)) ** 2
 
-def assing_locs_to_boxes_2D(x, y, box_size):
+def assign_locs_to_boxes(x, y, box_size):
 	"""
 	Splits FOV into boxes and assigns localizations to their
 	corresponding boxes (2D).
@@ -538,116 +538,116 @@ def assing_locs_to_boxes_2D(x, y, box_size):
 
 	return locs_id_box, box_id	
 
-def assing_locs_to_boxes_3D(x, y, z, box_size_xy, box_size_z):
-	"""
-	Splits FOV into boxes and assigns localizations to their
-	corresponding boxes (3D).
+# def assign_locs_to_boxes_3D(x, y, z, box_size_xy, box_size_z):
+# 	"""
+# 	Splits FOV into boxes and assigns localizations to their
+# 	corresponding boxes (3D).
 
-	Localizations in boxes are overlapping, i.e., locs that are
-	located in the neighboring boxes are also assigned to the given
-	box.
+# 	Localizations in boxes are overlapping, i.e., locs that are
+# 	located in the neighboring boxes are also assigned to the given
+# 	box.
 
-	Note that box sizes in xy and z can be different.
+# 	Note that box sizes in xy and z can be different.
 
-	Parameters
-	----------
-	x : np.array
-		x coordinates of localizations
-	y : np.array
-		y coordinates of localizations
-	z : np.array
-		z coordinates of localizations
-	box_size_xy : float
-		Size of box in the grid in xy
-	box_size_z : float
-		Size of box in the grid in z. It is recommended to be equal to,
-		or slightly larger than clustering radius.
+# 	Parameters
+# 	----------
+# 	x : np.array
+# 		x coordinates of localizations
+# 	y : np.array
+# 		y coordinates of localizations
+# 	z : np.array
+# 		z coordinates of localizations
+# 	box_size_xy : float
+# 		Size of box in the grid in xy
+# 	box_size_z : float
+# 		Size of box in the grid in z. It is recommended to be equal to,
+# 		or slightly larger than clustering radius.
 
-	Returns
-	-------
-	list
-		Contains localizations' indeces assigned to each box (including
-		neighboring boxes)
-	list
-		Contains box id for each localization
-	"""
+# 	Returns
+# 	-------
+# 	list
+# 		Contains localizations' indeces assigned to each box (including
+# 		neighboring boxes)
+# 	list
+# 		Contains box id for each localization
+# 	"""
 
-	# assigns each loc to a box
-	box_id = _np.zeros(len(x), dtype=_np.int32)
+# 	# assigns each loc to a box
+# 	box_id = _np.zeros(len(x), dtype=_np.int32)
 	
-	x_start = x.min()
-	x_end = x.max()
-	y_start = y.min()
-	y_end = y.max()
-	z_start = z.min()
-	z_end = z.max()
+# 	x_start = x.min()
+# 	x_end = x.max()
+# 	y_start = y.min()
+# 	y_end = y.max()
+# 	z_start = z.min()
+# 	z_end = z.max()
 
-	n_boxes_x = int((x_end - x_start) / box_size_xy) + 1
-	n_boxes_y = int((y_end - y_start) / box_size_xy) + 1
-	n_boxes_z = int((z_end - z_start) / box_size_z) + 1
-	n_boxes = n_boxes_x * n_boxes_y * n_boxes_z
+# 	n_boxes_x = int((x_end - x_start) / box_size_xy) + 1
+# 	n_boxes_y = int((y_end - y_start) / box_size_xy) + 1
+# 	n_boxes_z = int((z_end - z_start) / box_size_z) + 1
+# 	n_boxes = n_boxes_x * n_boxes_y * n_boxes_z
 
-	for i in range(len(x)):
-		box_id[i] = (
-			int((x[i] - x_start) / box_size_xy)
-			+ int((y[i] - y_start) / box_size_xy)
-			* n_boxes_x
-			+ int((z[i] - z_start) / box_size_z)
-			* n_boxes_x * n_boxes_y
-		)
+# 	for i in range(len(x)):
+# 		box_id[i] = (
+# 			int((x[i] - x_start) / box_size_xy)
+# 			+ int((y[i] - y_start) / box_size_xy)
+# 			* n_boxes_x
+# 			+ int((z[i] - z_start) / box_size_z)
+# 			* n_boxes_x * n_boxes_y
+# 		)
 
-	# gives indeces of locs in a given box
-	locs_id_box = [[]]
-	for i in range(n_boxes):
-		locs_id_box.append([])
+# 	# gives indeces of locs in a given box
+# 	locs_id_box = [[]]
+# 	for i in range(n_boxes):
+# 		locs_id_box.append([])
 
-	# fill values for locs_id_box
-	for i in range(len(x)):
-		locs_id_box[box_id[i]].append(i)
+# 	# fill values for locs_id_box
+# 	for i in range(len(x)):
+# 		locs_id_box[box_id[i]].append(i)
 
-		# add locs that are in the adjacent boxes
-		if box_id[i] != n_boxes:
-			locs_id_box[box_id[i]+1].append(i)
-		if box_id[i] != 0:
-			locs_id_box[box_id[i]-1].append(i)
+# 		# add locs that are in the adjacent boxes
+# 		if box_id[i] != n_boxes:
+# 			locs_id_box[box_id[i]+1].append(i)
+# 		if box_id[i] != 0:
+# 			locs_id_box[box_id[i]-1].append(i)
 
-		if box_id[i] >= n_boxes_x:
-			locs_id_box[box_id[i]-n_boxes_x].append(i)
-			locs_id_box[box_id[i]-n_boxes_x+1].append(i)
-			locs_id_box[box_id[i]-n_boxes_x-1].append(i)
+# 		if box_id[i] >= n_boxes_x:
+# 			locs_id_box[box_id[i]-n_boxes_x].append(i)
+# 			locs_id_box[box_id[i]-n_boxes_x+1].append(i)
+# 			locs_id_box[box_id[i]-n_boxes_x-1].append(i)
 
-		if box_id[i] < (n_boxes_x + 1) * n_boxes_y:
-			locs_id_box[box_id[i]+n_boxes_x].append(i)
-			locs_id_box[box_id[i]+n_boxes_x+1].append(i)
-			locs_id_box[box_id[i]+n_boxes_x-1].append(i)	
+# 		if box_id[i] < (n_boxes_x + 1) * n_boxes_y:
+# 			locs_id_box[box_id[i]+n_boxes_x].append(i)
+# 			locs_id_box[box_id[i]+n_boxes_x+1].append(i)
+# 			locs_id_box[box_id[i]+n_boxes_x-1].append(i)	
 
-		if box_id[i] >= n_boxes_x * n_boxes_y:
-			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y].append(i)
-			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y+1].append(i)
-			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y-1].append(i)
+# 		if box_id[i] >= n_boxes_x * n_boxes_y:
+# 			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y].append(i)
+# 			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y+1].append(i)
+# 			locs_id_box[box_id[i]-n_boxes_x*n_boxes_y-1].append(i)
 
-			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y].append(i)
-			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y+1].append(i)
-			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y-1].append(i)
+# 			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y].append(i)
+# 			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y+1].append(i)
+# 			locs_id_box[box_id[i]-(n_boxes_x-1)*n_boxes_y-1].append(i)
 
-			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y].append(i)
-			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y+1].append(i)
-			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y-1].append(i)
+# 			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y].append(i)
+# 			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y+1].append(i)
+# 			locs_id_box[box_id[i]-(n_boxes_x+1)*n_boxes_y-1].append(i)
 
-		if box_id[i] < n_boxes - (n_boxes_x + 1) * n_boxes_y:
-			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y].append(i)
-			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y+1].append(i)
-			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y-1].append(i)
+# 		if box_id[i] < n_boxes - (n_boxes_x + 1) * n_boxes_y:
+# 			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y].append(i)
+# 			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y+1].append(i)
+# 			locs_id_box[box_id[i]+n_boxes_x*n_boxes_y-1].append(i)
 
-			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y].append(i)
-			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y+1].append(i)
-			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y-1].append(i)
+# 			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y].append(i)
+# 			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y+1].append(i)
+# 			locs_id_box[box_id[i]+(n_boxes_x-1)*n_boxes_y-1].append(i)
 
-			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y].append(i)
-			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y+1].append(i)
-			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y-1].append(i)
+# 			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y].append(i)
+# 			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y+1].append(i)
+# 			locs_id_box[box_id[i]+(n_boxes_x+1)*n_boxes_y-1].append(i)
 
-	return locs_id_box, box_id		
+# 	return locs_id_box, box_id		
 
 def count_neighbors_CPU_2D(locs_id_box, box_id, x, y, r2):
 	"""
@@ -947,7 +947,7 @@ def clusterer_CPU_2D(x, y, frame, radius, min_locs):
 		Labels for each localization
 	"""
 
-	locs_id_box, box_id = assing_locs_to_boxes_2D(x, y, radius*1.1)
+	locs_id_box, box_id = assign_locs_to_boxes(x, y, radius*1.1)
 	r2 = radius ** 2
 	n_neighbors = count_neighbors_CPU_2D(locs_id_box, box_id, x, y, r2)
 	local_max = local_maxima_CPU_2D(locs_id_box, box_id, n_neighbors, x, y, r2)
@@ -992,9 +992,7 @@ def clusterer_CPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 		Labels for each localization
 	"""
 
-	locs_id_box, box_id = assing_locs_to_boxes_3D(
-		x, y, z, radius_xy*1.1, radius_z*1.1
-	)
+	locs_id_box, box_id = assign_locs_to_boxes(x, y, radius_xy*1.1)
 	r2 = radius_xy ** 2
 	r_rel = radius_xy / radius_z
 	n_neighbors = count_neighbors_CPU_3D(

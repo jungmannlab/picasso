@@ -2019,7 +2019,7 @@ class SMLMDialog2D(QtWidgets.QDialog):
         grid.addWidget(self.min_locs, 1, 1)
         # save cluster centers
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
-        self.save_centers.setChecked(True)
+        self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 2, 0, 1, 2)
 
         vbox.addLayout(grid)
