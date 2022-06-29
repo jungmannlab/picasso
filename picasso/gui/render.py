@@ -7080,7 +7080,7 @@ class View(QtWidgets.QLabel):
 
         # ask how many nearest neighbors
         nn_count, ok = QtWidgets.QInputDialog.getInt(
-            self, "", "Number of nearest neighbors: ", 0, 1, 10
+            self, "", "Number of nearest neighbors: ", 0, 1, 100
         )
         if ok:
             # extract x, y and z from both channels 
