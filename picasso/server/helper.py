@@ -44,4 +44,4 @@ def refresh(to_wait: int):
     for i in range(to_wait):
         ref.write(f"Refreshing in {to_wait-i} s")
         time.sleep(1)
-    raise st.script_runner.RerunException(st.script_request_queue.RerunData(None))
+    st.stop()

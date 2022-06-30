@@ -111,9 +111,7 @@ def watcher():
                 )
                 df.to_sql("watcher", con=engine, if_exists="replace", index=False)
 
-                raise st.script_runner.RerunException(
-                    st.script_request_queue.RerunData(None)
-                )
+                st.stop()
     else:
         st.write("None")
 
@@ -217,9 +215,7 @@ def watcher():
                 display.success(f"Restarting in {3-reset}.")
                 time.sleep(1)
 
-            raise st.script_runner.RerunException(
-                st.script_request_queue.RerunData(None)
-            )
+            st.stop()
 
 
 def wait_for_change(file):
