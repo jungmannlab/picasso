@@ -7,12 +7,8 @@ import pandas as pd
 import streamlit as st
 import time
 import subprocess
-
-
-def _db_filename():
-    home = os.path.expanduser("~")
-    return os.path.abspath(os.path.join(home, ".picasso", "app.db"))
-
+import picasso.localize
+from picasso.localize import _db_filename
 
 def fetch_db():
     try:

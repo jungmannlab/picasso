@@ -1606,7 +1606,7 @@ class Window(QtWidgets.QMainWindow):
         self.save_locs(base + "_locs.hdf5")
 
         if self.parameters_dialog.database_checkbox.isChecked():
-            self.status_bar.showMessage('Adding to database.')
+            self.status_bar.showMessage('Adding to database..')
             localize.add_file_to_db(self.movie_path)
             self.status_bar.showMessage('Done.')
         else:

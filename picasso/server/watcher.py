@@ -38,6 +38,8 @@ def check_new(path, processed):
     return new
 
 
+
+
 def wait_for_change(file):
     print(f"Waiting for {file}")
     filesize = os.path.getsize(file)
@@ -92,8 +94,9 @@ def watcher():
     st.write(
         "Set up a file watcher to process files in a folder with pre-defined settings automatically."
     )
-    st.write("All raw files that haven't been processed will be processed.")
+    st.write("All raw files and new files that haven't been processed will be processed.")
     st.write("Use different folders to process files with different settings.")
+    st.write("You can also chain custom commands to the watcher.")
 
     st.write("## Existing watchers")
     df_ = fetch_watcher()
@@ -166,7 +169,7 @@ def watcher():
 
             if st.checkbox("Custom command"):
                 st.text('Allows to execute a custom command via shell.')
-
+                st.text('You can pass the filename with $FILENAME.')
                 command = st.text_input('Command','')
 
         if st.button("Submit"):
@@ -214,7 +217,7 @@ def watcher():
             for reset in range(3):
                 display.success(f"Restarting in {3-reset}.")
                 time.sleep(1)
-
+            display.success('Please refresh page.')
             st.stop()
 
 
@@ -264,9 +267,12 @@ def check_new_and_process(settings, path):
 
             cmd = settings['command']
 
+            if '$FILENAME' in cmd:
+                cmd = cmd.replace('$FILENAME', f'"{file}"')
+
             if cmd != '':
                 print(f'Executing {cmd}')
-                subprocess.run(settings['command'])
+                subprocess.run(cmd)
 
             processed[file] = True
 

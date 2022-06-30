@@ -12,13 +12,25 @@ def check_file(file):
 
     return os.path.isfile(file_hdf)
 
+def escape_markdown(text: str) -> str:
+    """Helper function to escape markdown in text.
+    Args:
+        text (str): Input text.
+    Returns:
+        str: Converted text to be used in markdown.
+    """
+    MD_SPECIAL_CHARS = "\`*_{}[]()#+-.!"
+    for char in MD_SPECIAL_CHARS:
+        text = text.replace(char, "\\" + char)
+    return text
+
 
 def status():
     st.write("# Status")
 
     with st.expander("Getting started"):
         st.write(
-            f"Picasso server allows to monitor perfomance of your super resolution runs. By selecting `Add to Database` in localize, summary statistics of a run will be stored in a local database in the picasso user folder ({localize._db_filename()})."
+            f"Picasso server allows to monitor perfomance of your super resolution runs. By selecting `Add to Database` in localize, summary statistics of a run will be stored in a local database in the picasso user folder ({escape_markdown(localize._db_filename())})."
         )
         st.write(
             "- Status: Displays the current database status and documentation."
@@ -86,25 +98,18 @@ def status():
             pbar = st.progress(0)
 
             if st.button("Add files"):
-
                 current_file = st.empty()
                 all_df = []
                 for idx, file in enumerate(files):
-
                     current_file.text(f"Current file {file}.")
-
                     path_ = os.path.join(path, file)
-
                     if path_ not in df["filename"].tolist():
-
                         base, ext = os.path.splitext(path_)
                         file_hdf = base + "_locs.hdf5"
-
                         if os.path.isfile(file_hdf):
                             summary = localize.get_file_summary(path_)
                             df_ = pd.DataFrame(summary.values(), summary.keys()).T
                             all_df.append(df_)
-
                     pbar.progress(int((idx + 1) / (n_files) * 100))
 
                 stack = pd.concat(all_df)

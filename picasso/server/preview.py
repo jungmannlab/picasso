@@ -86,7 +86,8 @@ def preview():
 
                         # plt.imshow(image, cmap='hot', vmax=10)
                         fig, ax = plt.subplots()
-                        im = ax.imshow(image, cmap="hot", vmax=vmax)
+                        st.write(f"Image with dimensions {image.shape}")
+                        im = ax.imshow(image, cmap="hot", vmin=vmin, vmax=vmax)
                         # Hide grid lines
                         ax.grid(False)
 
