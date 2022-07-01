@@ -9,7 +9,7 @@ scikit-learn==0.23.2
 colorama==0.4.4
 tqdm==4.50.2
 lmfit==1.0.1
-streamlit==0.88.0
+streamlit==1.10.0
 sqlalchemy==1.4.22
 plotly-express==0.4.1
 watchdog==2.1.4
