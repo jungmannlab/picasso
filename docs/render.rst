@@ -143,6 +143,13 @@ Load pick regions
 ^^^^^^^^^^^^^^^^^
 Resets the current picked regions and loads regions from a .yaml file that contains pick regions.
 
+Export ROI for Imaris
+^^^^^^^^^^^^^^^^^^^^^
+This function allows to export the current ROI for Imaris. Note that this is currently only implemented for Windows.
+Click on File / Export ROI for imaris and enter a filename for export. Picasso will export the current region of interest with the current oversampling settings. If multiple channels are loaded it will export the channels with the same colors as set in Picasso (Shortcut CTRL+F or View / Files to change.)
+Depending on the size of the ROI, the export will take a couple of seconds. Once exporting is finished, the file will be saved at the set location.
+The resulting file can be opened e.g. with ImarisViewer or Imaris. Note that the orientation is the same as in Picasso.
+
 Export localizations
 ^^^^^^^^^^^^^^^^^^^^
 Select export for various other programs. Note that some exporters only work for 3D files (with z coordinates). For additional file converters check out the convert folder at Picasso's GitHub page.
@@ -168,10 +175,6 @@ For the case of linked localizations, a column named ``detections`` will be adde
 Export as .txt for FRC
 ++++++++++++++++++++++
 Export as .txt file to be used for the fourier ring correlation plugin in ImageJ.
-
-Export as .txt for IMARIS
-+++++++++++++++++++++++++
-Export as .txt file to be used for IMARIS import.
 
 Export as .xyz for Chimera
 ++++++++++++++++++++++++++

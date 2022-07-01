@@ -20,8 +20,10 @@ import threading as _threading
 from PyQt5.QtWidgets import QMessageBox as _QMessageBox
 from . import lib as _lib
 
-from . ext.bitplane import IMSFile
+from . ext.bitplane import IMSWRITER
 
+if IMSWRITER:
+    from . ext.bitplane import IMSFile
 
 class NoMetadataFileError(FileNotFoundError):
     pass

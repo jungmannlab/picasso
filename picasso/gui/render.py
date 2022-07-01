@@ -43,7 +43,12 @@ import h5py
 import colorsys
 
 from .. import imageprocess, io, lib, postprocess, render
-from .. ext.bitplane import numpy_to_imaris
+
+from .. ext.bitplane import IMSWRITER
+
+if IMSWRITER:
+    from .. ext.bitplane import numpy_to_imaris
+
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
