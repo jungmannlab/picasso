@@ -10,7 +10,11 @@ import subprocess
 import picasso.localize
 from picasso.localize import _db_filename
 
+
 def fetch_db():
+    """
+    Helper function to load the local database and return the files.
+    """
     try:
         engine = create_engine("sqlite:///" + _db_filename(), echo=False)
         df = pd.read_sql_table("files", con=engine)
@@ -23,6 +27,9 @@ def fetch_db():
 
 
 def fetch_watcher():
+    """
+    Helper function to load the local database and return running watchers.
+    """
     try:
         engine = create_engine("sqlite:///" + _db_filename(), echo=False)
         df = pd.read_sql_table("watcher", con=engine)
@@ -34,7 +41,7 @@ def fetch_watcher():
 
 def refresh(to_wait: int):
     """
-    Utility function that waits for a given amount and then restarts streamlit.
+    Utility function that waits for a given amount and then stops streamlit.
     """
     ref = st.empty()
     for i in range(to_wait):

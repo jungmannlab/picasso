@@ -12,6 +12,7 @@ def check_file(file):
 
     return os.path.isfile(file_hdf)
 
+
 def escape_markdown(text: str) -> str:
     """Helper function to escape markdown in text.
     Args:
@@ -26,6 +27,9 @@ def escape_markdown(text: str) -> str:
 
 
 def status():
+    """
+    Streamlit page to show the status page.
+    """
     st.write("# Status")
 
     with st.expander("Getting started"):

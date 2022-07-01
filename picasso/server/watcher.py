@@ -23,7 +23,18 @@ class aclass:
         self.__dict__.update(entries)
 
 
-def check_new(path, processed):
+def check_new(path: str, processed: list):
+    """Check if files in a folder are not processed yet.
+    Files are considered processed if they have a _locs.hdf5 file.
+
+    Args:
+        path (str): Folder to check.
+        processed (list): List of files that are already processed.
+
+    Returns:
+        _type_: _description_
+    """
+
     all_ = os.listdir(path)
 
     new = [_ for _ in all_ if _ not in processed and _.endswith(FILETYPES)]
@@ -38,9 +49,12 @@ def check_new(path, processed):
     return new
 
 
+def wait_for_change(file: str):
+    """Helper function that checks if a file is changing the size.
 
-
-def wait_for_change(file):
+    Args:
+        file (str): Path to file.
+    """
     print(f"Waiting for {file}")
     filesize = os.path.getsize(file)
     writing = True
@@ -53,7 +67,13 @@ def wait_for_change(file):
             filesize = new_filesize
 
 
-def get_children_files(file, checked):
+def get_children_files(file: str, checked: list):
+    """Helper function that extracts files with the same start and same ending.
+
+    Args:
+        file (str): Path to check.
+        checked (list): List with files that are already checked.
+    """
     dir_ = os.path.dirname(file)
     files_in_folder = [os.path.abspath(os.path.join(dir_, _)) for _ in os.listdir(dir_)]
     # Multiple ome tifs; Pos0.ome.tif', Pos0_1.ome.tif', Pos0_2.ome.tif'
@@ -69,7 +89,13 @@ def get_children_files(file, checked):
     return files_in_folder
 
 
-def wait_for_completion(file):
+def wait_for_completion(file: str):
+    """Helper function that waits until a file is completely written.
+
+    Args:
+        file (str): Filepath.
+    """
+
     wait_for_change(file)
 
     if file.endswith(".ome.tif"):
@@ -89,12 +115,57 @@ def wait_for_completion(file):
     return checked
 
 
+def check_new_and_process(settings: dict, path: str):
+    """
+    Checks a folder for new files and processes them with defined settigns.
+    Args:
+        settings (dict): Dictionary with settings.
+        path (str): Path to folder.
+    """
+    print(f"Started watcher for {path}")
+    print(f"Settings {settings}")
+    processed = {}
+
+    while True:
+        new = check_new(path, processed)
+
+        if len(new) > 0:
+            file = os.path.abspath(os.path.join(path, new[0]))
+            children = wait_for_completion(file)
+
+            settings["files"] = file
+
+            args_ = aclass(**settings)
+            _localize(args_)
+
+            cmd = settings["command"]
+
+            if "$FILENAME" in cmd:
+                cmd = cmd.replace("$FILENAME", f'"{file}"')
+
+            if cmd != "":
+                print(f"Executing {cmd}")
+                subprocess.run(cmd)
+
+            processed[file] = True
+
+            for _ in children:
+                processed[_] = True
+
+        time.sleep(UPDATE_TIME)
+
+
 def watcher():
+    """
+    Streamlit page to show the watcher page.
+    """
     st.write("# Watcher")
     st.write(
         "Set up a file watcher to process files in a folder with pre-defined settings automatically."
     )
-    st.write("All raw files and new files that haven't been processed will be processed.")
+    st.write(
+        "All raw files and new files that haven't been processed will be processed."
+    )
     st.write("Use different folders to process files with different settings.")
     st.write("You can also chain custom commands to the watcher.")
 
@@ -168,9 +239,9 @@ def watcher():
                 magnification_factor = None
 
             if st.checkbox("Custom command"):
-                st.text('Allows to execute a custom command via shell.')
-                st.text('You can pass the filename with $FILENAME.')
-                command = st.text_input('Command','')
+                st.text("Allows to execute a custom command via shell.")
+                st.text("You can pass the filename with $FILENAME.")
+                command = st.text_input("Command", "")
 
         if st.button("Submit"):
             settings = {}
@@ -188,11 +259,11 @@ def watcher():
             if magnification_factor:
                 settings["magnification_factor"] = magnification_factor
 
-            settings['command'] = command
+            settings["command"] = command
 
             st.write(settings)
 
-            settings['database'] = True
+            settings["database"] = True
 
             p = Process(
                 target=check_new_and_process,
@@ -217,7 +288,7 @@ def watcher():
             for reset in range(3):
                 display.success(f"Restarting in {3-reset}.")
                 time.sleep(1)
-            display.success('Please refresh page.')
+            display.success("Please refresh page.")
             st.stop()
 
 
@@ -232,51 +303,3 @@ def wait_for_change(file):
             writing = False
         else:
             filesize = new_filesize
-
-
-def get_children_files(file, checked):
-    dir_ = os.path.dirname(file)
-    files_in_folder = [os.path.join(dir_, _) for _ in os.listdir(dir_)]
-    # Multiple ome tifs; Pos0.ome.tif', Pos0_1.ome.tif', Pos0_2.ome.tif'
-    files_in_folder = [
-        _ for _ in files_in_folder if _.startswith(file[:-8]) and _ not in checked
-    ]
-
-    for _ in files_in_folder:
-        wait_for_change(_)
-
-    return files_in_folder
-
-
-def check_new_and_process(settings, path):
-    print(f"Started watcher for {path}")
-    print(f"Settings {settings}")
-    processed = {}
-
-    while True:
-        new = check_new(path, processed)
-
-        if len(new) > 0:
-            file = os.path.abspath(os.path.join(path, new[0]))
-            children = wait_for_completion(file)
-
-            settings["files"] = file
-
-            args_ = aclass(**settings)
-            _localize(args_)
-
-            cmd = settings['command']
-
-            if '$FILENAME' in cmd:
-                cmd = cmd.replace('$FILENAME', f'"{file}"')
-
-            if cmd != '':
-                print(f'Executing {cmd}')
-                subprocess.run(cmd)
-
-            processed[file] = True
-
-            for _ in children:
-                processed[_] = True
-
-        time.sleep(UPDATE_TIME)
