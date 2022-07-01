@@ -3,7 +3,7 @@ Changelog
 
 Last change: 01-JUL-2022 MTS
 
-0.4.2
+0.4.2/3
 -----
 - Added more docstrings / documentation for Picasso Server
 - Import and export for handling IMS (Imaris) files
