@@ -935,7 +935,12 @@ def _localize(args):
             save_locs(out_path, locs, info)
             print("File saved to {}".format(out_path))
 
-            if args.database:
+            if hasattr(args, 'database'):
+                CHECK_DB = args.database
+            else:
+                CHECK_DB = False
+
+            if CHECK_DB:
                 print('Adding to DB')
                 add_file_to_db(path, args.drift)
             else:
