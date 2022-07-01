@@ -9,6 +9,7 @@ Last change: 01-JUL-2022 MTS
 - Import and export for handling IMS (Imaris) files
 - Fixed a bug where GPUFit was greyed out, added better installation instructions for GPUfit
 - More documentation
+- Added dockerfile
 
 0.4.1
 -----
