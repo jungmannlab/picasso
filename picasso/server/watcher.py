@@ -197,7 +197,7 @@ def watcher():
     else:
         with st.expander("Settings"):
             box = st.number_input(label="Box side length:", value=7)
-            min_net_gradient = st.slider(
+            min_net_gradient = st.number_input(
                 label="Min. Net Gradient:", value=5000, min_value=0, max_value=10000
             )
 
@@ -242,6 +242,8 @@ def watcher():
                 st.text("Allows to execute a custom command via shell.")
                 st.text("You can pass the filename with $FILENAME.")
                 command = st.text_input("Command", "")
+            else:
+                command = ""
 
         if st.button("Submit"):
             settings = {}
