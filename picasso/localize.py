@@ -162,18 +162,16 @@ def identifications_from_futures(futures):
 def identify_async(movie, minimum_ng, box, roi=None):
     "Use the user settings to define the number of workers that are being used"
     settings = _io.load_user_settings()
-    try:
-        cpu_utilization = settings["Localize"]["cpu_utilization"]
+
+    cpu_utilization = settings["Localize"]["cpu_utilization"]
+    if isinstance(cpu_utilization, int):
         if cpu_utilization >= 1:
             cpu_utilization = 1
-    except Exception as e:
-        print(e)
-        print(
-            "An Error occured. Setting cpu_utilization to 0.8"
-        )  # TODO at some point re-write this
+    else:
+        print('CPU utilization was not set. Set to 0.8')
         cpu_utilization = 0.8
-        settings["Localize"]["cpu_utilization"] = cpu_utilization
-        _io.save_user_settings(settings)
+    settings["Localize"]["cpu_utilization"] = cpu_utilization
+    _io.save_user_settings(settings)
 
     n_workers = max(1, int(cpu_utilization * _multiprocessing.cpu_count()))
 
