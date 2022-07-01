@@ -139,7 +139,7 @@ class Scene(QtWidgets.QGraphicsScene):
         if not event.mimeData().hasUrls():
             return False
         path, extension = self.path_from_drop(event)
-        if extension.lower() not in [".raw", ".tif"]:
+        if extension.lower() not in [".raw", ".tif",".ims"]:
             return False
         return True
 
@@ -273,6 +273,40 @@ class PromptInfoDialog(QtWidgets.QDialog):
         save = dialog.save.isChecked()
         return (info, save, result == QtWidgets.QDialog.Accepted)
 
+
+class PromptChannelDialog(QtWidgets.QDialog):
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Select channel")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Channel:"), 0, 0)
+        self.byte_order = QtWidgets.QComboBox()
+
+        grid.addWidget(self.byte_order, 0, 1)
+
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    # static method to create the dialog and return (date, time, accepted)
+    @staticmethod
+    def getMovieSpecs(parent=None, channels=None):
+        dialog = PromptChannelDialog(parent)
+        dialog.byte_order.addItems(channels)
+        result = dialog.exec_()
+        channel = dialog.byte_order.currentText()
+        return (channel, result == QtWidgets.QDialog.Accepted)
 
 class ParametersDialog(QtWidgets.QDialog):
     """ The dialog showing analysis parameters """
@@ -463,7 +497,7 @@ class ParametersDialog(QtWidgets.QDialog):
         # QE
         photon_grid.addWidget(QtWidgets.QLabel("Pixelsize (nm):"), 4, 0)
         self.pixelsize = QtWidgets.QSpinBox()
-        self.pixelsize.setRange(0, 1000)
+        self.pixelsize.setRange(0, 10000)
         self.pixelsize.setValue(130)
         self.pixelsize.setSingleStep(1)
         photon_grid.addWidget(self.pixelsize, 4, 1)
@@ -511,6 +545,8 @@ class ParametersDialog(QtWidgets.QDialog):
 
         if not gpufit_installed:
             self.gpufit_checkbox.hide()
+        else:
+            self.gpufit_checkbox.setDisabled(False)
         lq_grid.addWidget(self.gpufit_checkbox)
 
         fit_stack.addWidget(lq_widget)
@@ -523,6 +559,7 @@ class ParametersDialog(QtWidgets.QDialog):
         # 3D
         z_groupbox = QtWidgets.QGroupBox("3D via Astigmatism")
         vbox.addWidget(z_groupbox)
+
         z_grid = QtWidgets.QGridLayout(z_groupbox)
         z_grid.addWidget(
             QtWidgets.QLabel("Non-integrated Gaussian fitting is recommend! (LQ)"),
@@ -562,6 +599,31 @@ class ParametersDialog(QtWidgets.QDialog):
                 ):
                     self.update_sensitivity()
 
+
+        astig_groupbox = QtWidgets.QGroupBox("Astigmatism-Correction")
+        vbox.addWidget(astig_groupbox)
+        astig_grid = QtWidgets.QGridLayout(astig_groupbox)
+        load_astig_calib = QtWidgets.QPushButton("Load correction")
+        load_astig_calib.setAutoDefault(False)
+        load_astig_calib.clicked.connect(self.load_astig_calib)
+
+        astig_groupbox.setVisible(False)
+
+        astig_grid.addWidget(load_astig_calib, 1, 1)
+        self.calib_astig_checkbox = QtWidgets.QCheckBox("Correct Astigmatism")
+        self.calib_astig_checkbox.setEnabled(False)
+
+        astig_grid.addWidget(self.calib_astig_checkbox, 3, 1)
+        self.astig_label = QtWidgets.QLabel("-- no calibration loaded --")
+        self.astig_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.astig_label.setSizePolicy(
+            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed
+        )
+        astig_grid.addWidget(self.astig_label, 1, 0)
+
+        self.vbox = vbox
+        self.imsgrid = False
+
     def on_fit_method_changed(self, state):
         if self.fit_method.currentText() == "LQ, Gaussian":
             self.gpufit_checkbox.setDisabled(False)
@@ -581,6 +643,19 @@ class ParametersDialog(QtWidgets.QDialog):
             self.z_calib_label.setText(os.path.basename(path))
             self.fit_z_checkbox.setEnabled(True)
             self.fit_z_checkbox.setChecked(True)
+
+    def load_astig_calib(self):
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load astigmatism calibration", directory=None, filter="*.pkl"
+        )
+        if path:
+            with open(path, "r") as f:
+                #self.astig_calibration = yaml.load(f)
+                self.astig_calibration_path = path
+            self.astig_label.setAlignment(QtCore.Qt.AlignRight)
+            self.astig_label.setText(os.path.basename(path))
+            self.calib_astig_checkbox.setEnabled(True)
+            self.calib_astig_checkbox.setChecked(True)
 
     def on_box_changed(self, value):
         self.window.on_parameters_changed()
@@ -780,6 +855,7 @@ class Window(QtWidgets.QMainWindow):
         super().__init__()
         # Init GUI
         self.setWindowTitle("Picasso: Localize")
+
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "localize.ico")
         icon = QtGui.QIcon(icon_path)
@@ -943,8 +1019,11 @@ class Window(QtWidgets.QMainWindow):
         localize_action.setShortcut("Ctrl+L")
         localize_action.triggered.connect(self.localize)
         analyze_menu.addAction(localize_action)
-        analyze_menu.addSeparator()
-        calibrate_z_action = analyze_menu.addAction("Calibrate 3D")
+
+        """ 3D """
+        threed_menu = menu_bar.addMenu("3D")
+
+        calibrate_z_action = threed_menu.addAction("Calibrate 3D")
         calibrate_z_action.triggered.connect(self.calibrate_z)
 
     @property
@@ -966,7 +1045,7 @@ class Window(QtWidgets.QMainWindow):
             dir = self.pwd
 
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open image sequence", directory=dir, filter="All supported formats (*.raw *.tif *.tiff);;Raw files (*.raw);;Tiff iimages (*.tif *.tiff)"
+            self, "Open image sequence", directory=dir, filter="All supported formats (*.raw *.tif *.tiff *.ims);;Raw files (*.raw);;Tiff images (*.tif *.tiff);; Imaris IMS (*.ims);;"
         )
         if path:
             self.pwd = path
@@ -974,7 +1053,14 @@ class Window(QtWidgets.QMainWindow):
 
     def open(self, path):
         t0 = time.time()
-        result = io.load_movie(path, prompt_info=self.prompt_info)
+
+        if path.endswith('.ims'):
+            prompt_info = self.prompt_channel
+        else:
+            prompt_info=self.prompt_info
+
+        result = io.load_movie(path, prompt_info=prompt_info)
+
         if result is not None:
             self.movie, self.info = result
             dt = time.time() - t0
@@ -988,6 +1074,41 @@ class Window(QtWidgets.QMainWindow):
             self.status_bar.showMessage(
                 "Opened movie in {:.2f} seconds.".format(dt)
             )
+
+            if 'Pixelsize' in self.info[0]:
+                self.parameters_dialog.pixelsize.setValue(int(self.info[0]['Pixelsize']))
+
+
+
+        self.setWindowTitle(
+            "Picasso: Localize. File: {}".format(os.path.basename(path))
+        )
+        if False: #placeholder for filegroups
+            if path.endswith('.ims'):
+                dirname = os.path.dirname(path)
+                base, file = os.path.split(path)
+                file_family = [_ for _ in os.listdir(dirname) if _.startswith(file[:-5]) & _.endswith('.ims')]
+
+                self.file_family = [os.path.join(dirname, _) for _ in file_family]
+
+                file_family_short = [_[-6:-4] for _ in file_family]
+
+                file_family_short.sort()
+
+                if len(file_family_short) > 1:
+                    if self.parameters_dialog.imsgrid:
+                        files_string = " ".join(file_family_short)
+                        self.ims_all_label.setText(files_string)
+                    else:
+                        ims_groupbox = QtWidgets.QGroupBox("IMS Filegroup")
+                        ims_grid = QtWidgets.QGridLayout(ims_groupbox)
+                        files_string = " ".join(file_family_short)
+                        self.ims_all_label = QtWidgets.QLabel(files_string)
+                        self.ims_all_checkbox = QtWidgets.QCheckBox("Process all:")
+                        ims_grid.addWidget(self.ims_all_checkbox, 1, 1)
+                        ims_grid.addWidget(self.ims_all_label, 1, 2)
+                        self.parameters_dialog.vbox.addWidget(ims_groupbox)
+                        self.parameters_dialog.imsgrid = True
 
     def open_picks(self):
         if self.movie_path != []:
@@ -1178,6 +1299,12 @@ class Window(QtWidgets.QMainWindow):
         info, save, ok = PromptInfoDialog.getMovieSpecs(self)
         if ok:
             return info, save
+
+    def prompt_channel(self, channels):
+        channel, ok = PromptChannelDialog.getMovieSpecs(self, channels)
+        if ok:
+            return channel
+
 
     def previous_frame(self):
         if self.movie is not None:
@@ -1478,11 +1605,12 @@ class Window(QtWidgets.QMainWindow):
         base, ext = os.path.splitext(self.movie_path)
         self.save_locs(base + "_locs.hdf5")
 
-        if self.parameters_dialog.database_checkbox:
-
-            self.status_bar.showMessage('Adding to database.')
+        if self.parameters_dialog.database_checkbox.isChecked():
+            self.status_bar.showMessage('Adding to database..')
             localize.add_file_to_db(self.movie_path)
             self.status_bar.showMessage('Done.')
+        else:
+            print('Not adding to database.')
 
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
@@ -1524,6 +1652,10 @@ class Window(QtWidgets.QMainWindow):
                 "Z Calibration"
             ] = self.parameters_dialog.z_calibration
         info = self.info + [localize_info]
+
+        if self.parameters_dialog.calib_astig_checkbox.isChecked():
+            print('Correcting astigmatism...')
+
         io.save_locs(path, self.locs, info)
 
     def save_locs_dialog(self):
@@ -1543,6 +1675,27 @@ class Window(QtWidgets.QMainWindow):
             self.fit(calibrate_z=calibrate_z)
         else:
             self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
+
+        if False:
+            if self.ims_all_checkbox:
+
+                self.fit_done = False
+
+                for file in self.file_family:
+                    print(f"Opening {file}")
+                    self.open(file)
+                    if self.identifications is not None and calibrate_z is True:
+                        self.fit(calibrate_z=calibrate_z)
+                    else:
+                        self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
+
+                    while not self.fit_done:
+                        time.sleep(1)
+            else:
+                if self.identifications is not None and calibrate_z is True:
+                    self.fit(calibrate_z=calibrate_z)
+                else:
+                    self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
 
 
 class IdentificationWorker(QtCore.QThread):

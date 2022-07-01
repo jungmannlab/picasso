@@ -8,7 +8,7 @@ with open("readme.rst", encoding='utf-8') as readme_file:
 
 setup(
     name="picassosr",
-    version="0.4.1",
+    version="0.4.2",
     author="Joerg Schnitzbauer, Maximilian T. Strauss",
     author_email=(
         "joschnitzbauer@gmail.com, straussmaximilian@gmail.com"
@@ -20,7 +20,9 @@ setup(
     entry_points={
         "console_scripts": ["picasso=picasso.__main__:main"],
     },
-    install_requires=requirements,
+    install_requires=requirements + [
+        "PyImarisWriter==0.7.0; sys_platform=='win32'"
+    ],
     classifiers=[
         "Programming Language :: Python",
         "Programming Language :: Python :: 3.7",

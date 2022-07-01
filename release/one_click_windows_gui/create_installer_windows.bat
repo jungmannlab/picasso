@@ -11,9 +11,9 @@ call conda activate picasso_installer
 call python setup.py sdist bdist_wheel
 
 call cd release/one_click_windows_gui
-call pip install "../../dist/picassosr-0.4.1-py3-none-any.whl"
+call pip install "../../dist/picassosr-0.4.2-py3-none-any.whl"
 
-call pip install pyinstaller
+call pip install pyinstaller==5.1
 call pyinstaller ../pyinstaller/picasso.spec -y
 call pyinstaller ../pyinstaller/picassow.spec -y
 call conda deactivate

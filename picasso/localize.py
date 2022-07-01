@@ -162,18 +162,16 @@ def identifications_from_futures(futures):
 def identify_async(movie, minimum_ng, box, roi=None):
     "Use the user settings to define the number of workers that are being used"
     settings = _io.load_user_settings()
-    try:
-        cpu_utilization = settings["Localize"]["cpu_utilization"]
+
+    cpu_utilization = settings["Localize"]["cpu_utilization"]
+    if isinstance(cpu_utilization, int):
         if cpu_utilization >= 1:
             cpu_utilization = 1
-    except Exception as e:
-        print(e)
-        print(
-            "An Error occured. Setting cpu_utilization to 0.8"
-        )  # TODO at some point re-write this
+    else:
+        print('CPU utilization was not set. Set to 0.8')
         cpu_utilization = 0.8
-        settings["Localize"]["cpu_utilization"] = cpu_utilization
-        _io.save_user_settings(settings)
+    settings["Localize"]["cpu_utilization"] = cpu_utilization
+    _io.save_user_settings(settings)
 
     n_workers = max(1, int(cpu_utilization * _multiprocessing.cpu_count()))
 
@@ -219,6 +217,8 @@ def _cut_spots_frame(
 ):
     for j in range(start, N):
         if ids_frame[j] > frame_number:
+            break
+        if ids_frame[j] < frame_number:
             break
         yc = ids_y[j]
         xc = ids_x[j]
@@ -393,19 +393,21 @@ def get_file_summary(file):
 
 def _db_filename():
     home = os.path.expanduser("~")
-    return os.path.abspath(os.path.join(home, ".picasso", "app.db"))
+    return os.path.abspath(os.path.join(home, ".picasso", "app_042.db"))
 
 def save_file_summary(summary):
     engine = create_engine("sqlite:///"+_db_filename(), echo=False)
     s  = pd.Series(summary, index=summary.keys()).to_frame().T
     s.to_sql("files", con=engine, if_exists="append", index=False)
 
-def add_file_to_db(file):
+def add_file_to_db(file, drift=1000):
     base, ext = os.path.splitext(file)
     out_path = base + "_locs.hdf5"
 
     try:
-        main._undrift(out_path, 1000, display=False, fromfile=None)
+        print("Undrifting file:")
+        print("------------------------------------------")
+        main._undrift(out_path, drift, display=False, fromfile=None)
     except Exception as e:
         print(e)
         print("Drift correction failed for {}".format(out_path))

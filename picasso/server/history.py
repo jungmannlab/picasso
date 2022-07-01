@@ -20,11 +20,25 @@ DEFAULT_PLOTS = [
 
 
 @st.cache
-def convert_df(df):
+def convert_df(df: pd.DataFrame):
+    """
+    Helper function to encode a dataframe as utf-8
+
+    Args:
+        df (pd.DataFrame): Dataframe to convert.
+    """
+
     return df.to_csv().encode("utf-8")
 
 
-def parse_input(input_):
+def parse_input(input_: str):
+    """
+    Parses an input string and looks for & and |.
+    Keywords with & will be added to an include list and keywords with | to an exclude list.
+
+    Args:
+        input_ (str): Input string
+    """
 
     token = ("&", "|")
 
@@ -61,7 +75,13 @@ def parse_input(input_):
     return to_add, to_exclude
 
 
-def filter_db(df_):
+def filter_db(df_: pd.DataFrame):
+    """
+    Utility function to create a user interface to filter a dataframe.
+
+    Args:
+        df_ (pd.DataFrame): Input dataframe.
+    """
 
     df = df_.copy()
     st.write("## Filter")
@@ -105,7 +125,19 @@ def filter_db(df_):
     return df
 
 
-def filter_by_tags(df, to_add, to_exclude):
+def filter_by_tags(df: pd.DataFrame, to_add: list, to_exclude: list):
+    """
+    Filters the entries of a dataframe according to an to_add and to_exclude list.
+    Rows will be removed according to their filename.
+
+    Args:
+        df (pd.DataFrame): Dataframe
+        to_add (list): keywords that should be in the filename.
+        to_exclude (list): keywords that should not be in the filename.
+
+    Returns:
+        _type_: _description_
+    """
 
     add = df["filename"].apply(lambda x: True if any(i in x for i in to_add) else False)
 
@@ -123,8 +155,13 @@ def filter_by_tags(df, to_add, to_exclude):
     return df[add & exclude]
 
 
-def check_group(filename, groups):
+def check_group(filename: str, groups: tuple):
+    """Check if a filename belongs to a group
 
+    Args:
+        filename (str): filename
+        groups (tuple): tuple with groups as strings
+    """
     found = "None"
     for g in groups:
         if g in filename:
@@ -134,6 +171,9 @@ def check_group(filename, groups):
 
 
 def history():
+    """
+    Streamlit page to show the file history.
+    """
     st.write("# History")
 
     df_ = fetch_db()

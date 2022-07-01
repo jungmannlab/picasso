@@ -64,6 +64,24 @@ def _render_setup(locs, oversampling, y_min, x_min, y_max, x_max):
     image = _np.zeros((n_pixel_y, n_pixel_x), dtype=_np.float32)
     return image, n_pixel_y, n_pixel_x, x, y, in_view
 
+@_numba.jit(nopython=True, nogil=True)
+def _render_min_z(locs, x_min, x_max, y_min, y_max):
+    """
+    Estimate minimum and maximum z for a given ROI
+    """
+    x = locs.x
+    y = locs.y
+    z = locs.z
+    in_view = (
+        (x > x_min)
+        & (y > y_min)
+        & (x < x_max)
+        & (y < y_max)
+    )
+
+    z = z[in_view]
+
+    return z.min(), z.max()
 
 @_numba.jit(nopython=True, nogil=True)
 def _render_setup3d(
@@ -104,7 +122,7 @@ def _render_setupz(locs, oversampling, x_min, z_min, x_max, z_max, pixelsize):
     z = z[in_view]
     x = oversampling * (x - x_min)
     z = oversampling * (z - z_min) / pixelsize
-    image = _np.zeros((n_pixel_x, n_pixel_z), dtype=_np.float32)
+    image = _np.zeros((n_pixel_x, n_pixel_z), dtype=_np.int32)
     return image, n_pixel_z, n_pixel_x, x, z, in_view
 
 
