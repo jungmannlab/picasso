@@ -3273,6 +3273,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Generate Mask")
         self.setModal(False)
         self.channel = 0
+        self._size_hint = (670, 840)
+        self.setMinimumSize(*self._size_hint)
 
         vbox = QtWidgets.QVBoxLayout(self)
         mask_groupbox = QtWidgets.QGroupBox("Mask Settings")
@@ -3312,7 +3314,12 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.mask_tresh.valueChanged.connect(self.update_plots)
         mask_grid.addWidget(self.mask_tresh, 2, 1)
 
-        gridspec_dict = {'bottom': 0.05, 'top': 0.95, 'left': 0.05, 'right': 0.95}
+        gridspec_dict = {
+            'bottom': 0.05, 
+            'top': 0.95, 
+            'left': 0.05, 
+            'right': 0.95,
+        }
         (
             self.figure, 
             ((self.ax1, self.ax2), (self.ax3, self.ax4)),
@@ -3322,7 +3329,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         self.save_all = QtWidgets.QCheckBox("Mask all channels")
         self.save_all.setChecked(False)
-        mask_grid.addWidget(self.save_all, 4, 0)
+        # mask_grid.addWidget(self.save_all, 4, 0)
 
         load_mask_button = QtWidgets.QPushButton("Load Mask")
         load_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
@@ -3355,6 +3362,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.cached_thresh = 0
 
         self.mask_exists = 0
+
+    def sizeHint(self):
+        return QtCore.QSize(*self._size_hint)
 
     def init_dialog(self):
         self.channel = self.window.view.get_channel("Mask image")
