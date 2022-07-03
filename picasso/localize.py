@@ -437,7 +437,7 @@ def get_file_summary(file, drift = None, kinetics = None, nena = None):
 
 def _db_filename():
     home = os.path.expanduser("~")
-    return os.path.abspath(os.path.join(home, ".picasso", "app_042.db"))
+    return os.path.abspath(os.path.join(home, ".picasso", "app_044.db"))
 
 def save_file_summary(summary):
     engine = create_engine("sqlite:///"+_db_filename(), echo=False)
