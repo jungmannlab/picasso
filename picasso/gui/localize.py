@@ -377,12 +377,6 @@ class ParametersDialog(QtWidgets.QDialog):
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
-        #Database addition
-
-        self.database_checkbox = QtWidgets.QCheckBox("Add to Database")
-        self.database_checkbox.setChecked(True)
-        identification_grid.addWidget(self.database_checkbox, 4, 1)
-
         # Camera:
         if "Cameras" in CONFIG:
             # Experiment settings
@@ -624,6 +618,21 @@ class ParametersDialog(QtWidgets.QDialog):
         self.vbox = vbox
         self.imsgrid = False
 
+        #Sample quality
+        quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
+        vbox.addWidget(quality_groupbox)
+
+        self.quality_grid = QtWidgets.QGridLayout(quality_groupbox)
+
+        #Database addition
+        self.quality_check = QtWidgets.QPushButton("Estimate")
+        self.quality_check.setEnabled(False)
+
+        self.quality_grid.addWidget(self.quality_check, 1, 1)
+
+        self.quality_check.clicked.connect(self.check_quality)
+
+
     def on_fit_method_changed(self, state):
         if self.fit_method.currentText() == "LQ, Gaussian":
             self.gpufit_checkbox.setDisabled(False)
@@ -643,6 +652,43 @@ class ParametersDialog(QtWidgets.QDialog):
             self.z_calib_label.setText(os.path.basename(path))
             self.fit_z_checkbox.setEnabled(True)
             self.fit_z_checkbox.setChecked(True)
+
+    def check_quality(self):
+        print('Assesing Quality of sample')
+
+        drift = 1000
+
+        self.quality_grid.addWidget(QtWidgets.QLabel('Locs/frame'), 2, 1)
+        self.quality_grid.addWidget(QtWidgets.QLabel('NeNA'), 3, 1)
+        self.quality_grid.addWidget(QtWidgets.QLabel('Drift'), 4, 1)
+        self.quality_grid.addWidget(QtWidgets.QLabel('Kinetics (Frames)'), 5, 1)
+
+        #Locs
+        self.window.status_bar.showMessage('Checking Quality (1/4) Locs ..')
+        locs_per_frame = len(self.window.locs) / self.window.info[0]["Frames"]
+        self.quality_grid.addWidget(QtWidgets.QLabel(f'{locs_per_frame:.1f}'), 2, 2)
+
+        #NeNA
+        self.window.status_bar.showMessage('Checking Quality (2/4) NeNA ..')
+        nena_px = localize.check_nena(self.window.locs, self.window.info)
+        nena_nm = float(self.pixelsize.value() * nena_px)
+        self.quality_grid.addWidget(QtWidgets.QLabel(f'{nena_px:.2f} px / {nena_nm:.2f} nm'), 3, 2)
+
+        #Drift
+        self.window.status_bar.showMessage('Checking Quality (3/4) Drift ..')
+        drift_x, drift_y = localize.check_drift(self.window.movie_path, drift)
+        self.quality_grid.addWidget(QtWidgets.QLabel(f'X: {drift_x:.2f} px / Y: {drift_y:.2f} px'), 4, 2)
+
+        #Kinetics
+        self.window.status_bar.showMessage('Checking Quality (4/4) Kinetics ..')
+        kinetics = localize.check_kinetics(self.window.locs, self.window.info)
+        len_mean, dark_mean = kinetics
+        self.quality_grid.addWidget(QtWidgets.QLabel(f'Bright: {len_mean:.2f} / Dark: {dark_mean:.2f}'), 5, 2)
+
+        localize.add_file_to_db(self.window.movie_path, drift = drift, kinetics = kinetics, nena = nena_px)
+
+        self.window.status_bar.showMessage('Quality parameters complete.')
+
 
     def load_astig_calib(self):
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
@@ -1083,6 +1129,10 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowTitle(
             "Picasso: Localize. File: {}".format(os.path.basename(path))
         )
+
+        #Loading a movie resets the quality check
+        self.parameters_dialog.quality_check.setEnabled(False)
+
         if False: #placeholder for filegroups
             if path.endswith('.ims'):
                 dirname = os.path.dirname(path)
@@ -1605,12 +1655,8 @@ class Window(QtWidgets.QMainWindow):
         base, ext = os.path.splitext(self.movie_path)
         self.save_locs(base + "_locs.hdf5")
 
-        if self.parameters_dialog.database_checkbox.isChecked():
-            self.status_bar.showMessage('Adding to database..')
-            localize.add_file_to_db(self.movie_path)
-            self.status_bar.showMessage('Done.')
-        else:
-            print('Not adding to database.')
+        if not self.parameters_dialog.quality_check.isEnabled():
+            self.parameters_dialog.quality_check.setEnabled(True)
 
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)

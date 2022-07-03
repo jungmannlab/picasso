@@ -633,7 +633,7 @@ def _local_density(
 
 
 def compute_local_density(locs, info, radius):
-    locs, x_index, y_index, block_starts, block_ends = get_index_blocks(
+    locs, x_index, y_index, block_starts, block_ends, K, L = get_index_blocks(
         locs, info, radius
     )
     N = len(locs)
@@ -661,6 +661,9 @@ def compute_local_density(locs, info, radius):
 
 
 def compute_dark_times(locs, group=None):
+
+    if 'len' not in locs.dtype.names:
+        raise AttributeError('Length not found. Please link localizations first.')
     dark = dark_times(locs, group)
     locs = _lib.append_to_rec(locs, _np.int32(dark), "dark")
     locs = locs[locs.dark != -1]

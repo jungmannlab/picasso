@@ -164,11 +164,11 @@ def identify_async(movie, minimum_ng, box, roi=None):
     settings = _io.load_user_settings()
 
     cpu_utilization = settings["Localize"]["cpu_utilization"]
-    if isinstance(cpu_utilization, int):
+    if isinstance(cpu_utilization, float):
         if cpu_utilization >= 1:
             cpu_utilization = 1
     else:
-        print('CPU utilization was not set. Set to 0.8')
+        print('CPU utilization was not set. Setting to 0.8')
         cpu_utilization = 0.8
     settings["Localize"]["cpu_utilization"] = cpu_utilization
     _io.save_user_settings(settings)
@@ -329,12 +329,64 @@ def localize(movie, info, parameters):
     identifications = identify(movie, parameters)
     return fit(movie, info, identifications, parameters["Box Size"])
 
-def get_file_summary(file):
+def check_nena(locs, info):
+    #Nena
+    try:
+        result, best_result = _postprocess.nena(locs, info)
+        nena_px= best_result
+    except Exception as e:
+        print(e)
+        nena_px = float('nan')
+
+    return nena_px
+
+def check_kinetics(locs, info):
+
+    locs = _postprocess.link(locs, info=info)
+    locs = _postprocess.compute_dark_times(locs)
+
+    len_mean = locs.len.mean()
+    dark_mean = locs.dark.mean()
+
+    return (len_mean, dark_mean)
+
+def check_drift(out_path, drift=1000):
+
+    summary = {}
+
+    base, ext = os.path.splitext(out_path)
+    drift_path = os.path.join(base + '_locs_undrift.hdf5')
+
+    if not os.path.isfile(drift_path):
+        try:
+            print("Undrifting file:")
+            print("------------------------------------------")
+            main._undrift(out_path, drift, display=False, fromfile=None)
+        except Exception as e:
+            print(e)
+            print("Drift correction failed for {}".format(out_path))
+
+    if os.path.isfile(drift_path):
+        locs, info = _io.load_locs(drift_path)
+        for col in DRIFT_COLS:
+            col_ = col.lower()
+            col_ = col_.replace(' ', '_')
+            for inf in info:
+                if col in inf:
+                    summary[col_] = inf[col]
+
+    for col in DRIFT_COLS:
+        col_ = col.lower()
+        col_ = col_.replace(' ', '_')
+        if col_ not in summary:
+            summary[col_] = float('nan')
+
+    return (summary['drift_x'], summary['drift_y'])
+
+def get_file_summary(file, drift = None, kinetics = None, nena = None):
 
     base, ext = os.path.splitext(file)
-
     file_hdf = base + '_locs.hdf5'
-
     locs, info = _io.load_locs(file_hdf)
 
     summary = {}
@@ -358,32 +410,24 @@ def get_file_summary(file):
         if col_ not in summary:
             summary[col_] = float('nan')
 
-    #Nena
-    try:
-        result, best_result = _postprocess.nena(locs, info)
-        summary['nena_px'] = best_result
-    except Exception as e:
-        print(e)
-        summary['nena_px'] = float('nan')
+    if nena is None:
+        summary['nena_px'] = check_nena(locs, info)
+
+    if kinetics is None:
+        len_mean, dark_mean = check_kinetics(locs, info)
+    else:
+        len_mean, dark_mean = kinetics
+
+    summary['len_mean'] = len_mean
+    summary['dark_mean'] = dark_mean
 
     summary['n_locs'] = len(locs)
     summary['locs_frame'] = len(locs)/summary['frames']
 
-    drift_path = os.path.join(base + '_locs_undrift.hdf5')
-    if os.path.isfile(drift_path):
-        locs, info = _io.load_locs(drift_path)
-        for col in DRIFT_COLS:
-            col_ = col.lower()
-            col_ = col_.replace(' ', '_')
-            for inf in info:
-                if col in inf:
-                    summary[col_] = inf[col]
+    drift_x, drift_y = check_drift(file, drift)
 
-    for col in DRIFT_COLS:
-        col_ = col.lower()
-        col_ = col_.replace(' ', '_')
-        if col_ not in summary:
-            summary[col_] = float('nan')
+    summary['drift_x'] = drift_x
+    summary['drift_y'] = drift_y
 
     summary['filename'] = file
     summary['file_created'] = datetime.fromtimestamp(os.path.getmtime(file))
@@ -398,19 +442,11 @@ def _db_filename():
 def save_file_summary(summary):
     engine = create_engine("sqlite:///"+_db_filename(), echo=False)
     s  = pd.Series(summary, index=summary.keys()).to_frame().T
-    s.to_sql("files", con=engine, if_exists="append", index=False)
+    s.to_sql("files", con=engine, if_exists="append", index=False)\
 
-def add_file_to_db(file, drift=1000):
+def add_file_to_db(file, drift=1000, kinetics= None, nena=None):
     base, ext = os.path.splitext(file)
     out_path = base + "_locs.hdf5"
 
-    try:
-        print("Undrifting file:")
-        print("------------------------------------------")
-        main._undrift(out_path, drift, display=False, fromfile=None)
-    except Exception as e:
-        print(e)
-        print("Drift correction failed for {}".format(out_path))
-
-    summary = get_file_summary(file)
+    summary = get_file_summary(file, drift, kinetics, nena)
     save_file_summary(summary)

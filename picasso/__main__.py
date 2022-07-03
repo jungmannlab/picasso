@@ -246,7 +246,7 @@ def _link(files, d_max, tolerance):
                 with File(cluster_path, "w") as clusters_file:
                     clusters_file.create_dataset("clusters", data=clusters)
             except Exception as e:
-                print(e)
+                print('No clusterfile found for updating.')
                 continue
 
 
