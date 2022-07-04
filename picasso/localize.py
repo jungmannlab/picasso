@@ -395,6 +395,8 @@ def get_file_summary(file, drift = None, len_mean = None, nena = None):
 
     if nena is None:
         summary['nena_px'] = check_nena(locs, info)
+    else:
+        summary['nena_px'] = nena
 
     if len_mean is None:
         len_mean = check_kinetics(locs, info)
@@ -412,6 +414,8 @@ def get_file_summary(file, drift = None, len_mean = None, nena = None):
 
     summary['drift_x'] = drift_x
     summary['drift_y'] = drift_y
+
+    summary['nena_nm'] = summary['nena_px'] * summary['pixelsize']
 
     summary['filename'] = file
     summary['file_created'] = datetime.fromtimestamp(os.path.getmtime(file))

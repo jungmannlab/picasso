@@ -941,19 +941,22 @@ def _localize(args):
                 CHECK_DB = False
 
             if CHECK_DB:
-                print('Adding to DB')
-                add_file_to_db(path, args.drift)
-            else:
-                if args.drift > 0:
-                    print("Undrifting file:")
-                    print("------------------------------------------")
-                    try:
-                        _undrift(
-                            out_path, args.drift, display=False, fromfile=None
-                        )
-                    except Exception as e:
-                        print(e)
-                        print("Drift correction failed for {}".format(out_path))
+                print('\n')
+                print('Assesing quality and adding to DB')
+                add_file_to_db(path)
+                print('Done.')
+                print('\n')
+
+            if args.drift > 0:
+                print("Undrifting file:")
+                print("------------------------------------------")
+                try:
+                    _undrift(
+                        out_path, args.drift, display=False, fromfile=None
+                    )
+                except Exception as e:
+                    print(e)
+                    print("Drift correction failed for {}".format(out_path))
 
             print("                                          ")
     else:
