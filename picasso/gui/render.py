@@ -2019,7 +2019,7 @@ class SMLMDialog2D(QtWidgets.QDialog):
         grid.addWidget(self.min_locs, 1, 1)
         # save cluster centers
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
-        self.save_centers.setChecked(True)
+        self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 2, 0, 1, 2)
 
         vbox.addLayout(grid)
@@ -2964,12 +2964,10 @@ class InfoDialog(QtWidgets.QDialog):
     A class to show information about the current display, fit
     precision, number of locs and picks, including QPAINT.
 
+    ...
+
     Attributes
-    ----------
-
-
-
-    
+    ----------    
     change_display : QPushButton
         opens self.change_fov
     change_fov : ChangeFOV(QDialog)
@@ -3267,11 +3265,131 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
 
 
 class MaskSettingsDialog(QtWidgets.QDialog):
+    """
+    A class to mask localizations based on their density.
+
+    ...
+
+    Attributes
+    ----------
+    ax1 : plt.axes.Axes
+        axis where all locs are shown with a given oversampling
+    ax2 : plt.axes.Axes
+        axis where blurred locs are shown
+    ax3 : plt.axes.Axes
+        axis where binary mask is shown
+    ax4 : plt.axes.Axes
+        axis where masked locs are shown (initially shows only zeros)
+    blur : float
+        std of Gaussian kernel for blurring in ax2
+    cached_blur : int
+        0 if image is to be blurred, 1 otherwise
+    cached_oversampling : int
+        0 if image is to be redrawn, 1 otherwise
+    cached_thresh : int
+        0 if mask is to be calculated, 1 otherwise
+    canvas : FigureCanvas
+        canvas used for plotting
+    channel : int
+        channel of localizations that are plotted in the canvas
+    cmap : str
+        colormap used in displaying images, same as in the main window
+    figure : plt.figure.Figure
+        figure containg subplots
+    index_locs : list
+        localizations that were masked; may contain a single or all
+        channels
+    index_locs_out : list
+        localizations that were not masked; may contain a single or 
+        all channels
+    infos : list
+        contains .yaml metadata files for all locs channels loaded when
+        starting the dialog
+    H : np.array
+        histogram displaying all localizations loaded; displayed in ax1
+    H_blur : np.array
+        histogram displaying blurred localizations; displayed in ax2
+    H_new : np.array
+        histogram displaying masked localizations; displayed in ax4
+    locs : list
+        contains all localizations loaded when starting the dialog
+    mask : np.array
+        histogram displaying binary mask; displayed in ax3
+    mask_oversampling : QSpinBox
+        contains the oversampling value
+    mask_blur : QDoubleSpinBox
+        contains the blur value
+    mask_thresh : QDoubleSpinBox
+        contains the threshold value for masking
+    oversampling : int
+        determines resolution of the iamge displayed in all axes, the
+        higher the value, the higher the resolution
+    paths : list
+        contains paths to all localizations loaded when starting the
+        dialog
+    save_all : QCheckBox
+        if checked, all channels loaded are masked; otherwise only 
+        one channel
+    save_button : QPushButton
+        used for saving masked localizations
+    save_mask_button : QPushButton
+        used for saving the current mask as a .npy
+    _size_hint : tuple
+        determines the minimum size of the dialog
+    thresh : float
+        determines threshold of density of localizations for masking; 
+        the higher the value, the less localizations will be masked
+    window : QMainWindow
+        instance of the main window
+    xedges : np.array
+        contains bins used for histograming displayed localizations
+        in horizontal direction
+    x_max : float
+        width of the loaded localizations
+    x_min_d, x_max_d : floats
+        x axes limits; determine which part of the image is displayed
+    yedges : np.array
+        contains bind used for histograming displayed localizations
+        in vertical direction
+    y_max : float
+        height of the loaded localizations
+    y_min_d, y_max_d : floats
+        y axes limits; determine which part of the image is displayed
+
+    Methods
+    -------
+    blur_image()
+        Blurs localizations using a Gaussian filter
+    generate_image()
+        Histograms loaded localizations from a given channel
+    init_dialog()
+        Initializes dialog when called from the main window
+    load_mask()
+        Loads binary mask from .npy format
+    mask_image()
+        Calculates binary mask based on threshold
+    mask_locs()
+        Masks localizations from a single or all channels
+    _mask_locs(locs)
+        Masks locs given a mask
+    save_mask()
+        Saves binary mask into .npy format
+    save_locs()
+        Saves masked localizations
+    save_locs_multi()
+        Saves masked localizations for all loaded channels
+    update_plots()
+        Plots in all 4 axes
+    """
+
     def __init__(self, window):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Generate Mask")
         self.setModal(False)
+        self.channel = 0
+        self._size_hint = (670, 840)
+        self.setMinimumSize(*self._size_hint)
 
         vbox = QtWidgets.QVBoxLayout(self)
         mask_groupbox = QtWidgets.QGroupBox("Mask Settings")
@@ -3281,59 +3399,70 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         mask_grid.addWidget(QtWidgets.QLabel("Oversampling"), 0, 0)
         self.mask_oversampling = QtWidgets.QSpinBox()
         self.mask_oversampling.setRange(1, 999999)
-        self.mask_oversampling.setValue(1)
+        self.mask_oversampling.setValue(2)
         self.mask_oversampling.setSingleStep(1)
         self.mask_oversampling.setKeyboardTracking(False)
-
         self.mask_oversampling.valueChanged.connect(self.update_plots)
-
         mask_grid.addWidget(self.mask_oversampling, 0, 1)
 
         mask_grid.addWidget(QtWidgets.QLabel("Blur"), 1, 0)
         self.mask_blur = QtWidgets.QDoubleSpinBox()
         self.mask_blur.setRange(0, 999999)
-        self.mask_blur.setValue(2)
+        self.mask_blur.setValue(1)
         self.mask_blur.setSingleStep(0.1)
-        self.mask_blur.setDecimals(3)
+        self.mask_blur.setDecimals(5)
+        self.mask_blur.setKeyboardTracking(False)
+        self.mask_blur.valueChanged.connect(self.update_plots)
         mask_grid.addWidget(self.mask_blur, 1, 1)
 
-        self.mask_blur.valueChanged.connect(self.update_plots)
-
         mask_grid.addWidget(QtWidgets.QLabel("Threshold"), 2, 0)
-        self.mask_tresh = QtWidgets.QDoubleSpinBox()
-        self.mask_tresh.setRange(0, 1)
-        self.mask_tresh.setValue(0.5)
-        self.mask_tresh.setSingleStep(0.01)
-        self.mask_tresh.setDecimals(3)
+        self.mask_thresh = QtWidgets.QDoubleSpinBox()
+        self.mask_thresh.setRange(0, 1)
+        self.mask_thresh.setValue(0.5)
+        self.mask_thresh.setSingleStep(0.01)
+        self.mask_thresh.setDecimals(5)
+        self.mask_thresh.setKeyboardTracking(False)
+        self.mask_thresh.valueChanged.connect(self.update_plots)
+        mask_grid.addWidget(self.mask_thresh, 2, 1)
 
-        self.mask_tresh.valueChanged.connect(self.update_plots)
-        mask_grid.addWidget(self.mask_tresh, 2, 1)
-
-        self.figure = plt.figure(figsize=(12, 3))
+        gridspec_dict = {
+            'bottom': 0.05, 
+            'top': 0.95, 
+            'left': 0.05, 
+            'right': 0.95,
+        }
+        (
+            self.figure, 
+            ((self.ax1, self.ax2), (self.ax3, self.ax4)),
+        ) = plt.subplots(2, 2, figsize=(6, 6), gridspec_kw=gridspec_dict)
         self.canvas = FigureCanvas(self.figure)
         mask_grid.addWidget(self.canvas, 3, 0, 1, 2)
 
-        self.maskButton = QtWidgets.QPushButton("Mask")
-        mask_grid.addWidget(self.maskButton, 5, 0)
-        self.maskButton.clicked.connect(self.mask_locs)
+        self.save_all = QtWidgets.QCheckBox("Mask all channels")
+        self.save_all.setChecked(False)
+        mask_grid.addWidget(self.save_all, 4, 0)
 
-        self.saveButton = QtWidgets.QPushButton("Save")
-        self.saveButton.setEnabled(False)
-        self.saveButton.clicked.connect(self.save_locs)
-        mask_grid.addWidget(self.saveButton, 5, 1)
+        load_mask_button = QtWidgets.QPushButton("Load Mask")
+        load_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        load_mask_button.clicked.connect(self.load_mask)
+        mask_grid.addWidget(load_mask_button, 5, 0)
 
-        self.loadMaskButton = QtWidgets.QPushButton("Load Mask")
-        self.loadMaskButton.clicked.connect(self.load_mask)
-        mask_grid.addWidget(self.loadMaskButton, 4, 0)
+        self.save_mask_button = QtWidgets.QPushButton("Save Mask")
+        self.save_mask_button.setEnabled(False)
+        self.save_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.save_mask_button.clicked.connect(self.save_mask)
+        mask_grid.addWidget(self.save_mask_button, 5, 1)
 
-        self.saveMaskButton = QtWidgets.QPushButton("Save Mask")
-        self.saveMaskButton.setEnabled(False)
-        self.saveMaskButton.clicked.connect(self.save_mask)
-        mask_grid.addWidget(self.saveMaskButton, 4, 1)
+        mask_button = QtWidgets.QPushButton("Mask")
+        mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        mask_button.clicked.connect(self.mask_locs)
+        mask_grid.addWidget(mask_button, 6, 0)
 
-        self.locs = []
-        self.paths = []
-        self.infos = []
+        self.save_button = QtWidgets.QPushButton("Save localizations")
+        self.save_button.setEnabled(False)
+        self.save_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.save_button.clicked.connect(self.save_locs)
+        mask_grid.addWidget(self.save_button, 6, 1)
 
         self.oversampling = 2
         self.blur = 1
@@ -3343,44 +3472,59 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.cached_blur = 0
         self.cached_thresh = 0
 
-        self.mask_exists = 0
-
     def init_dialog(self):
+        """
+        Initializes dialog when called from the main window.
+
+        Loades localizations and metadata, updates plots.
+        """
+
+        self.locs = self.window.view.locs
+        self.paths = self.window.view.locs_paths
+        self.infos = self.window.view.infos
+        # which channel to plot
+        self.channel = self.window.view.get_channel("Mask image")
+        self.cmap = self.window.display_settings_dlg.colormap.currentText()
         self.show()
-        locs = self.locs[0]
-        info = self.infos[0][0]
-        self.x_min = 0
-        self.y_min = 0
+        locs = self.locs[self.channel]
+        info = self.infos[self.channel][0]
         self.x_max = info["Width"]
         self.y_max = info["Height"]
+        # the images are rotated after plotting histograms so the values
+        # below may seem counter-intuitive
         self.x_min_d, self.x_max_d = [
             np.floor(np.min(locs["x"])),
             np.ceil(np.max(locs["x"])),
         ]
         self.y_min_d, self.y_max_d = [
-            np.floor(np.min(locs["y"])),
-            np.ceil(np.max(locs["y"])),
+            self.y_max - np.ceil(np.max(locs["y"])),
+            self.y_max - np.floor(np.min(locs["y"])),
         ]
         self.update_plots()
 
     def generate_image(self):
-        locs = self.locs[0]
-        self.stepsize = 1 / self.oversampling
-        self.xedges = np.arange(self.x_min, self.x_max, self.stepsize)
-        self.yedges = np.arange(self.y_min, self.y_max, self.stepsize)
-        H, xedges, yedges = np.histogram2d(
+        """ Histograms loaded localizations from a given channel. """
+
+        locs = self.locs[self.channel]
+        self.stepsize = 1 / self.oversampling # number of bins in histograms
+        self.xedges = np.arange(0, self.x_max, self.stepsize)
+        self.yedges = np.arange(0, self.y_max, self.stepsize)
+        H, _, _ = np.histogram2d(
             locs["x"], locs["y"], bins=(self.xedges, self.yedges)
         )
-        H = H.T  # Let each row list bins with common y range.
-        self.H = H
+        self.H = np.rot90(H) # image to be displayed in self.ax1
 
     def blur_image(self):
+        """ Blurs localizations using a Gaussian filter. """
+
         H_blur = gaussian_filter(self.H, sigma=self.blur)
         H_blur = H_blur / np.max(H_blur)
-        self.H_blur = H_blur
+        self.H_blur = H_blur # image to be displayed in self.ax2
 
     def save_mask(self):
-        # Open dialog to save mask
+        """ Saves binary mask into .npy format. """
+
+        # get name for saving mask
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save mask to", filter="*.npy"
         )
@@ -3388,7 +3532,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             np.save(path, self.mask)
 
     def load_mask(self):
-        # Save dialog to load mask
+        """ Loads binary mask from .npy format. """
+
+        # choose which file to load
         path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load mask", filter="*.npy"
         )
@@ -3398,46 +3544,56 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             oversampling = int((self.mask.shape[0] + 1) / self.y_max)
             self.oversampling = oversampling
             self.mask_oversampling.setValue(oversampling)
-            self.saveMaskButton.setEnabled(True)
+            self.save_mask_button.setEnabled(True)
             self.generate_image()
             self.blur_image()
-            self.update_plots(newMask=False)
+            # update plots without drawing a new mask
+            self.update_plots(new_mask=False)
 
     def mask_image(self):
-        mask = np.zeros_like(self.H_blur)
-        mask[self.H_blur > self.tresh] = 1
-        self.mask = mask
-        self.saveMaskButton.setEnabled(True)
+        """ Calculates binary mask based on threshold. """
 
-    def update_plots(self, newMask=True):
-        if newMask:
-            if (
+        mask = np.zeros_like(self.H_blur)
+        mask[self.H_blur > self.thresh] = 1
+        self.mask = mask
+        self.save_mask_button.setEnabled(True)
+
+    def update_plots(self, new_mask=True):
+        """ 
+        Plots in all 4 axes.
+
+        Parameters
+        ----------
+        new_mask : boolean (default=True)
+            True if new mask is to be calculated
+        """
+
+        if new_mask:
+            if not (
                 self.mask_oversampling.value() == self.oversampling
-                and self.cached_oversampling == 1
-            ):
-                self.cached_oversampling = 1
-            else:
+                and self.cached_oversampling
+            ): # if oversampling changed and cached
+                # update oversampling and delete cache
                 self.oversampling = self.mask_oversampling.value()
                 self.cached_oversampling = 0
 
-            if self.mask_blur.value() == self.blur and self.cached_blur == 1:
-                self.cached_blur = 1
-            else:
+            if not (
+                self.mask_blur.value() == self.blur 
+                and self.cached_blur
+            ): # if blur changed and cached
+                # update blur and delete cache
                 self.blur = self.mask_blur.value()
                 self.cached_oversampling = 0
 
-            if (
-                self.mask_tresh.value() == self.thresh
-                and self.cached_thresh == 1
-            ):
-                self.cached_thresh = 1
-            else:
-                self.tresh = self.mask_tresh.value()
+            if not (
+                self.mask_thresh.value() == self.thresh
+                and self.cached_thresh
+            ): # if threshold changed and cached
+                # update threshold and delete cache
+                self.thresh = self.mask_thresh.value()
                 self.cached_thresh = 0
 
-            if self.cached_oversampling:
-                pass
-            else:
+            if not self.cached_oversampling:
                 self.generate_image()
                 self.blur_image()
                 self.mask_image()
@@ -3445,27 +3601,21 @@ class MaskSettingsDialog(QtWidgets.QDialog):
                 self.cached_blur = 1
                 self.cached_thresh = 1
 
-            if self.cached_blur:
-                pass
-            else:
+            if not self.cached_blur:
                 self.blur_image()
                 self.mask_image()
                 self.cached_blur = 1
                 self.cached_thresh = 1
 
-            if self.cached_thresh:
-                pass
-            else:
+            if not self.cached_thresh:
                 self.mask_image()
                 self.cached_thresh = 1
-        else:
-            pass
 
-        ax1 = self.figure.add_subplot(141, title="Original")
-        ax1.imshow(
+        self.ax1.imshow(
             self.H,
             interpolation="nearest",
             origin="lower",
+            cmap=self.cmap,
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -3473,14 +3623,12 @@ class MaskSettingsDialog(QtWidgets.QDialog):
                 self.yedges[-1],
             ],
         )
-        ax1.grid(False)
-        ax1.set_xlim(self.x_min_d, self.x_max_d)
-        ax1.set_ylim(self.y_min_d, self.y_max_d)
-        ax2 = self.figure.add_subplot(142, title="Blurred")
-        ax2.imshow(
+        self.ax1.set_title("Original")
+        self.ax2.imshow(
             self.H_blur,
             interpolation="nearest",
             origin="lower",
+            cmap=self.cmap,
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -3488,14 +3636,12 @@ class MaskSettingsDialog(QtWidgets.QDialog):
                 self.yedges[-1],
             ],
         )
-        ax2.grid(False)
-        ax2.set_xlim(self.x_min_d, self.x_max_d)
-        ax2.set_ylim(self.y_min_d, self.y_max_d)
-        ax3 = self.figure.add_subplot(143, title="Mask")
-        ax3.imshow(
+        self.ax2.set_title("Blurred")
+        self.ax3.imshow(
             self.mask,
             interpolation="nearest",
             origin="lower",
+            cmap='Greys_r',
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -3503,14 +3649,12 @@ class MaskSettingsDialog(QtWidgets.QDialog):
                 self.yedges[-1],
             ],
         )
-        ax3.grid(False)
-        ax3.set_xlim(self.x_min_d, self.x_max_d)
-        ax3.set_ylim(self.y_min_d, self.y_max_d)
-        ax4 = self.figure.add_subplot(144, title="Masked image")
-        ax4.imshow(
+        self.ax3.set_title("Mask")
+        self.ax4.imshow(
             np.zeros_like(self.H),
             interpolation="nearest",
             origin="lower",
+            cmap=self.cmap,
             extent=[
                 self.xedges[0],
                 self.xedges[-1],
@@ -3518,96 +3662,172 @@ class MaskSettingsDialog(QtWidgets.QDialog):
                 self.yedges[-1],
             ],
         )
-        ax4.grid(False)
-        ax4.set_xlim(self.x_min_d, self.x_max_d)
-        ax4.set_ylim(self.y_min_d, self.y_max_d)
+        self.ax4.set_title("Masked image")
+
+        for ax in [self.ax1, self.ax2, self.ax3, self.ax4]:
+            ax.grid(False)
+            ax.set_xlim(self.x_min_d, self.x_max_d)
+            ax.set_ylim(self.y_min_d, self.y_max_d)
+            ax.axis('off')
+
         self.canvas.draw()
 
     def mask_locs(self):
-        locs = self.locs[0]
+        """ Masks localizations from a single or all channels. """
+
+        self.index_locs = [] # locs in the mask
+        self.index_locs_out = [] # locs outside the mask
+        if self.save_all.isChecked(): # all channels
+            for locs in self.locs:
+                self._mask_locs(locs)
+        else: # only the current channel
+            locs = self.locs[self.channel]
+            self._mask_locs(locs)
+
+    def _mask_locs(self, locs):
+        """ 
+        Masks locs given a mask. 
+
+        Parameters
+        ----------
+        locs : np.recarray
+            Localizations to be masked
+        """
+        
         steps_x = len(self.xedges)
         steps_y = len(self.yedges)
 
-        x_ind = (
-            np.floor(
-                (locs["x"] - self.x_min) / (self.x_max - self.x_min) * steps_x
-            )
-            - 1
-        )
-        y_ind = (
-            np.floor(
-                (locs["y"] - self.y_min) / (self.y_max - self.y_min) * steps_y
-            )
-            - 1
-        )
-        x_ind = x_ind.astype(int)
-        y_ind = y_ind.astype(int)
+        x_ind = (np.floor(locs["x"] / self.x_max * steps_x) - 1).astype(int)
+        y_ind = (np.floor(locs["y"] / self.y_max * steps_y) - 1).astype(int)
 
         index = self.mask[y_ind, x_ind].astype(bool)
-        self.index_locs = locs[index]
-        self.index_locs_out = locs[~index]
+        self.index_locs.append(locs[index]) # locs in the mask
+        self.index_locs_out.append(locs[~index]) # locs outside the mask
 
-        H_new, xedges, yedges = np.histogram2d(
-            self.index_locs["x"],
-            self.index_locs["y"],
-            bins=(self.xedges, self.yedges),
-        )
-        self.H_new = H_new.T  # Let each row list bins with common y range.
+        if (
+            (
+                self.save_all.isChecked() 
+                and len(self.index_locs) == self.channel + 1
+            )
+            or not self.save_all.isChecked()
+        ): # update masked locs plot if the current channel is masked
+            H_new, _, _ = np.histogram2d(
+                self.index_locs[-1]["x"],
+                self.index_locs[-1]["y"],
+                bins=(self.xedges, self.yedges),
+            )
+            self.H_new = np.rot90(H_new)
 
-        ax4 = self.figure.add_subplot(144, title="Masked image")
-        ax4.imshow(
-            self.H_new,
-            interpolation="nearest",
-            origin="low",
-            extent=[
-                self.xedges[0],
-                self.xedges[-1],
-                self.yedges[0],
-                self.yedges[-1],
-            ],
-        )
-        ax4.grid(False)
-        self.mask_exists = 1
-        self.saveButton.setEnabled(True)
-        self.canvas.draw()
+            self.ax4.imshow(
+                self.H_new,
+                interpolation="nearest",
+                origin="lower",
+                cmap=self.cmap,
+                extent=[
+                    self.xedges[0],
+                    self.xedges[-1],
+                    self.yedges[0],
+                    self.yedges[-1],
+                ],
+            )
+            self.ax4.grid(False)
+            self.ax4.axis('off')
+            self.ax4.set_xlim(self.x_min_d, self.x_max_d)
+            self.ax4.set_ylim(self.y_min_d, self.y_max_d)
+            self.save_button.setEnabled(True)
+            self.canvas.draw()
 
     def save_locs(self):
-        channel = 0
-        base, ext = os.path.splitext(self.paths[channel])
-        out_path = base + "_mask_in.hdf5"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save localizations within mask", out_path, filter="*.hdf5"
-        )
-        if path:
-            info = self.infos[channel] + [
-                {"Generated by": "Picasso Render : Mask in "}
-            ]
-            clusterfilter_info = {
-                "Oversampling": self.oversampling,
-                "Blur": self.blur,
-                "Threshold": self.tresh,
-            }
-            info.append(clusterfilter_info)
-            io.save_locs(path, self.index_locs, info)
-        out_path = base + "_mask_out.hdf5"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self,
-            "Save localizations outside of mask",
-            out_path,
-            filter="*.hdf5",
-        )
-        if path:
-            info = self.infos[channel] + [
-                {"Generated by": "Picasso Render : Mask out"}
-            ]
-            clusterfilter_info = {
-                "Oversampling": self.oversampling,
-                "Blur": self.blur,
-                "Threshold": self.tresh,
-            }
-            info.append(clusterfilter_info)
-            io.save_locs(path, self.index_locs_out, info)
+        """ Saves masked localizations. """
 
+        if self.save_all.isChecked(): # save all channels
+            self.save_locs_multi()
+        else:
+            out_path = self.paths[self.channel].replace(
+                ".hdf5", "_mask_in.hdf5"
+            )
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self, 
+                "Save localizations within mask", 
+                out_path, 
+                filter="*.hdf5",
+            )
+            if path:
+                info = self.infos[self.channel] + [
+                    {
+                        "Generated by": "Picasso Render : Mask in ",
+                        "Oversampling": self.oversampling,
+                        "Blur": self.blur,
+                        "Threshold": self.thresh,
+                    }
+                ]
+                io.save_locs(path, self.index_locs[0], info)
+
+            out_path = self.paths[self.channel].replace(
+                ".hdf5", "_mask_out.hdf5"
+            )
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save localizations outside of mask",
+                out_path,
+                filter="*.hdf5",
+            )
+            if path:
+                info = self.infos[self.channel] + [
+                    {
+                        "Generated by": "Picasso Render : Mask out",
+                        "Oversampling": self.oversampling,
+                        "Blur": self.blur,
+                        "Threshold": self.thresh,
+                    }
+                ]
+                io.save_locs(path, self.index_locs_out[0], info)
+
+    def save_locs_multi(self):
+        """ Saves masked localizations for all loaded channels. """
+
+        suffix_in, ok1 = QtWidgets.QInputDialog.getText(
+            self, 
+            "", 
+            "Enter suffix for localizations inside the mask",
+            QtWidgets.QLineEdit.Normal,
+            "_mask_in",
+        )
+        if ok1:
+            suffix_out, ok2 = QtWidgets.QInputDialog.getText(
+                self,
+                "",
+                "Enter suffix for localizations outside the mask",
+                QtWidgets.QLineEdit.Normal,
+                "_mask_out",
+            )
+            if ok2:
+                for channel in range(len(self.index_locs)):
+                    out_path = self.paths[channel].replace(
+                        ".hdf5", f"{suffix_in}.hdf5"
+                    )
+                    info = self.infos[channel] + [
+                        {
+                            "Generated by": "Picasso Render : Mask in",
+                            "Oversampling": self.oversampling,
+                            "Blur": self.blur,
+                            "Threshold": self.thresh,
+                        }
+                    ]
+                    io.save_locs(out_path, self.index_locs[channel], info)
+
+                    out_path = self.paths[channel].replace(
+                        ".hdf5", f"{suffix_out}.hdf5"
+                    )
+                    info = self.infos[channel] + [
+                        {
+                            "Generated by": "Picasso Render : Mask out",
+                            "Oversampling": self.oversampling,
+                            "Blur": self.blur,
+                            "Threshold": self.thresh,
+                        }
+                    ]
+                    io.save_locs(out_path, self.index_locs_out[channel], info)
 
 class PickToolCircleSettings(QtWidgets.QWidget):
     """ A class contating information about circular pick. """
@@ -5004,7 +5224,7 @@ class View(QtWidgets.QLabel):
         # adjust that
         self.z_converted.append(False)
         if hasattr(locs, "z"):
-            if locs.z.max() - locs.z.min() > 100: # probably z in nm
+            if locs.z.max() - locs.z.min() > 50: # probably z in nm
                 print("Automatically converted z coordinates to px")
                 pixelsize = self.window.display_settings_dlg.pixelsize.value()
                 locs.z /= pixelsize
@@ -5087,13 +5307,6 @@ class View(QtWidgets.QLabel):
         # allow using View, Tools and Postprocess menus
         for menu in self.window.menus:
             menu.setDisabled(False)
-
-        # append data for masking
-        self.window.mask_settings_dialog.locs.append(
-            locs
-        )  # TODO: replace at some point, not very efficient
-        self.window.mask_settings_dialog.paths.append(path)
-        self.window.mask_settings_dialog.infos.append(info)
 
         # change current working directory
         os.chdir(os.path.dirname(path))
@@ -7042,26 +7255,7 @@ class View(QtWidgets.QLabel):
         # choose both channels
         channel1 = self.get_channel("Nearest Neighbor Analysis")
         channel2 = self.get_channel("Nearest Neighbor Analysis")
-
-        # make sure that not more than 50k locs 
-        # (this function is meant for cluster centers)
-        if (
-            len(self.locs[channel1]) > 50000 
-            or len(self.locs[channel2]) > 50000
-        ):
-            message = (
-                "This function is meant for cluster centers.\n"
-                "Number of locs in at least one of the channels exceeds\n"
-                "50 000.\n\n"
-                "Are you sure you want to continue?\n"
-                "The calculations may take a long time to finish.\n"
-            )
-            qm = QtWidgets.QMessageBox()
-            ret = qm.question(self, "", message)
-            if ret == qm.Yes:
-                self._nearest_neighbor(channel1, channel2)
-        else:
-            self._nearest_neighbor(channel1, channel2)
+        self._nearest_neighbor(channel1, channel2)
 
     def _nearest_neighbor(self, channel1, channel2):
         """
@@ -7080,7 +7274,7 @@ class View(QtWidgets.QLabel):
 
         # ask how many nearest neighbors
         nn_count, ok = QtWidgets.QInputDialog.getInt(
-            self, "", "Number of nearest neighbors: ", 0, 1, 10
+            self, "", "Number of nearest neighbors: ", 0, 1, 100
         )
         if ok:
             # extract x, y and z from both channels 
@@ -7096,6 +7290,7 @@ class View(QtWidgets.QLabel):
                 z2 = self.locs[channel2].z
             else: 
                 z1 = None
+                z2 = None
 
             # used for avoiding zero distances (to self)
             same_channel = channel1 == channel2
@@ -7107,29 +7302,13 @@ class View(QtWidgets.QLabel):
                 self.locs_paths[channel1].replace(".hdf5", "_nn.csv"),
                 filter="*.csv",
             )
-
-            p = lib.ProgressDialog(
-                "Calculating nearest neighbor distances", 0, len(x1), self
+            nn = postprocess.nn_analysis(
+                x1, x2, 
+                y1, y2, 
+                z1, z2,
+                nn_count, 
+                same_channel, 
             )
-            if z1 is not None:
-                nn = postprocess.nn_analysis_3D(
-                    x1, x2, 
-                    y1, y2, 
-                    z1, z2,
-                    nn_count, 
-                    same_channel, 
-                    path, 
-                    p.set_value,
-                )
-            else:
-                nn = postprocess.nn_analysis_2D(
-                    x1, x2,
-                    y1, y2,
-                    nn_count,
-                    same_channel,
-                    path,
-                    p.set_value,
-                )
             # save as .csv
             np.savetxt(path, nn, delimiter=',')
 
