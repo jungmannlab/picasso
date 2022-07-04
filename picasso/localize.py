@@ -43,7 +43,6 @@ LOCS_DTYPE = [
 MEAN_COLS = ['frame', 'x', 'y', 'photons', 'sx', 'sy', 'bg', 'lpx', 'lpy',
            'ellipticity', 'net_gradient', 'z', 'd_zcalib']
 SET_COLS = ['Frames', 'Height', 'Width', 'Box Size', 'Min. Net Gradient', 'Pixelsize']
-DRIFT_COLS = ['Drift X', 'Drift Y']
 
 _plt.style.use("ggplot")
 
@@ -329,10 +328,10 @@ def localize(movie, info, parameters):
     identifications = identify(movie, parameters)
     return fit(movie, info, identifications, parameters["Box Size"])
 
-def check_nena(locs, info):
+def check_nena(locs, info, callback=None):
     #Nena
     try:
-        result, best_result = _postprocess.nena(locs, info)
+        result, best_result = _postprocess.nena(locs, info, callback=callback)
         nena_px= best_result
     except Exception as e:
         print(e)
@@ -341,49 +340,33 @@ def check_nena(locs, info):
     return nena_px
 
 def check_kinetics(locs, info):
-
+    print('Linking..')
     locs = _postprocess.link(locs, info=info)
-    locs = _postprocess.compute_dark_times(locs)
-
+    #print('Dark Time')
+    #locs = _postprocess.compute_dark_times(locs)
     len_mean = locs.len.mean()
-    dark_mean = locs.dark.mean()
+    #dark_mean = locs.dark.mean()
 
-    return (len_mean, dark_mean)
+    return len_mean
 
-def check_drift(out_path, drift=1000):
+def check_drift(locs, info, callback=None):
 
-    summary = {}
+    n_frames = info[0]["Frames"]
 
-    base, ext = os.path.splitext(out_path)
-    drift_path = os.path.join(base + '_locs_undrift.hdf5')
+    segmentation = max(1, int(n_frames//10))
 
-    if not os.path.isfile(drift_path):
-        try:
-            print("Undrifting file:")
-            print("------------------------------------------")
-            main._undrift(out_path, drift, display=False, fromfile=None)
-        except Exception as e:
-            print(e)
-            print("Drift correction failed for {}".format(out_path))
+    print(f'Drift Segmentation {segmentation}')
 
-    if os.path.isfile(drift_path):
-        locs, info = _io.load_locs(drift_path)
-        for col in DRIFT_COLS:
-            col_ = col.lower()
-            col_ = col_.replace(' ', '_')
-            for inf in info:
-                if col in inf:
-                    summary[col_] = inf[col]
+    drift, locs = _postprocess.undrift(
+        locs, info, segmentation, display=False, rcc_callback=callback,
+    )
 
-    for col in DRIFT_COLS:
-        col_ = col.lower()
-        col_ = col_.replace(' ', '_')
-        if col_ not in summary:
-            summary[col_] = float('nan')
+    drift_x = float(drift['x'].mean())
+    drift_y = float(drift['y'].mean())
 
-    return (summary['drift_x'], summary['drift_y'])
+    return (drift_x, drift_y)
 
-def get_file_summary(file, drift = None, kinetics = None, nena = None):
+def get_file_summary(file, drift = None, len_mean = None, nena = None):
 
     base, ext = os.path.splitext(file)
     file_hdf = base + '_locs.hdf5'
@@ -413,18 +396,19 @@ def get_file_summary(file, drift = None, kinetics = None, nena = None):
     if nena is None:
         summary['nena_px'] = check_nena(locs, info)
 
-    if kinetics is None:
-        len_mean, dark_mean = check_kinetics(locs, info)
+    if len_mean is None:
+        len_mean = check_kinetics(locs, info)
     else:
-        len_mean, dark_mean = kinetics
+        len_mean = len_mean
+
+    if drift is None:
+        drift_x, drift_y = check_drift(locs, info)
+    else:
+        drift_x, drift_y = drift
 
     summary['len_mean'] = len_mean
-    summary['dark_mean'] = dark_mean
-
     summary['n_locs'] = len(locs)
     summary['locs_frame'] = len(locs)/summary['frames']
-
-    drift_x, drift_y = check_drift(file, drift)
 
     summary['drift_x'] = drift_x
     summary['drift_y'] = drift_y
@@ -444,9 +428,9 @@ def save_file_summary(summary):
     s  = pd.Series(summary, index=summary.keys()).to_frame().T
     s.to_sql("files", con=engine, if_exists="append", index=False)\
 
-def add_file_to_db(file, drift=1000, kinetics= None, nena=None):
+def add_file_to_db(file, drift=None, len_mean= None, nena=None):
     base, ext = os.path.splitext(file)
     out_path = base + "_locs.hdf5"
 
-    summary = get_file_summary(file, drift, kinetics, nena)
+    summary = get_file_summary(file, drift, len_mean, nena)
     save_file_summary(summary)

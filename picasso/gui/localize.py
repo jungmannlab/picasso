@@ -619,18 +619,37 @@ class ParametersDialog(QtWidgets.QDialog):
         self.imsgrid = False
 
         #Sample quality
-        quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
-        vbox.addWidget(quality_groupbox)
+        self.quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
+        vbox.addWidget(self.quality_groupbox)
 
-        self.quality_grid = QtWidgets.QGridLayout(quality_groupbox)
-
-        #Database addition
+        self.quality_grid = QtWidgets.QGridLayout(self.quality_groupbox)
         self.quality_check = QtWidgets.QPushButton("Estimate")
         self.quality_check.setEnabled(False)
-
-        self.quality_grid.addWidget(self.quality_check, 1, 1)
-
+        self.quality_grid.addWidget(self.quality_check, 1, 2)
         self.quality_check.clicked.connect(self.check_quality)
+
+        self.quality_grid_labels = [QtWidgets.QLabel('Locs/Frame'), QtWidgets.QLabel('NeNA'), QtWidgets.QLabel('Drift'), QtWidgets.QLabel('Bright Time (Frames)')]
+        for idx, _ in enumerate(self.quality_grid_labels):
+            self.quality_grid.addWidget(_, idx+1, 1)
+
+        self.quality_grid_values = [QtWidgets.QLabel(""), QtWidgets.QLabel(""), QtWidgets.QLabel(""), QtWidgets.QLabel("")]
+
+        for idx, _ in enumerate(self.quality_grid_values):
+            self.quality_grid.addWidget(_, idx+1, 2)
+
+        self.reset_quality_check()
+
+
+    def reset_quality_check(self):
+        self.quality_check.setEnabled(False)
+        self.quality_check.setVisible(True)
+
+        for idx, _ in enumerate(self.quality_grid_labels):
+            _.setVisible(False)
+
+        for idx, _ in enumerate(self.quality_grid_values):
+            _.setVisible(False)
+            _.setText("")
 
 
     def on_fit_method_changed(self, state):
@@ -653,41 +672,27 @@ class ParametersDialog(QtWidgets.QDialog):
             self.fit_z_checkbox.setEnabled(True)
             self.fit_z_checkbox.setChecked(True)
 
+    def quality_progress(self, msg, index, result):
+        if msg != '':
+            self.window.status_bar.showMessage(msg)
+        else:
+            self.quality_grid_values[index].setText(result)
+
+    def quality_progress_finished(self, msg):
+        self.window.status_bar.showMessage(msg)
+
     def check_quality(self):
-        print('Assesing Quality of sample')
+        print('Assesing Quality of Sample')
+        self.quality_check.setVisible(False)
+        for idx, _ in enumerate(self.quality_grid_labels):
+            _.setVisible(True)
+        for idx, _ in enumerate(self.quality_grid_values):
+            _.setVisible(True)
 
-        drift = 1000
-
-        self.quality_grid.addWidget(QtWidgets.QLabel('Locs/frame'), 2, 1)
-        self.quality_grid.addWidget(QtWidgets.QLabel('NeNA'), 3, 1)
-        self.quality_grid.addWidget(QtWidgets.QLabel('Drift'), 4, 1)
-        self.quality_grid.addWidget(QtWidgets.QLabel('Kinetics (Frames)'), 5, 1)
-
-        #Locs
-        self.window.status_bar.showMessage('Checking Quality (1/4) Locs ..')
-        locs_per_frame = len(self.window.locs) / self.window.info[0]["Frames"]
-        self.quality_grid.addWidget(QtWidgets.QLabel(f'{locs_per_frame:.1f}'), 2, 2)
-
-        #NeNA
-        self.window.status_bar.showMessage('Checking Quality (2/4) NeNA ..')
-        nena_px = localize.check_nena(self.window.locs, self.window.info)
-        nena_nm = float(self.pixelsize.value() * nena_px)
-        self.quality_grid.addWidget(QtWidgets.QLabel(f'{nena_px:.2f} px / {nena_nm:.2f} nm'), 3, 2)
-
-        #Drift
-        self.window.status_bar.showMessage('Checking Quality (3/4) Drift ..')
-        drift_x, drift_y = localize.check_drift(self.window.movie_path, drift)
-        self.quality_grid.addWidget(QtWidgets.QLabel(f'X: {drift_x:.2f} px / Y: {drift_y:.2f} px'), 4, 2)
-
-        #Kinetics
-        self.window.status_bar.showMessage('Checking Quality (4/4) Kinetics ..')
-        kinetics = localize.check_kinetics(self.window.locs, self.window.info)
-        len_mean, dark_mean = kinetics
-        self.quality_grid.addWidget(QtWidgets.QLabel(f'Bright: {len_mean:.2f} / Dark: {dark_mean:.2f}'), 5, 2)
-
-        localize.add_file_to_db(self.window.movie_path, drift = drift, kinetics = kinetics, nena = nena_px)
-
-        self.window.status_bar.showMessage('Quality parameters complete.')
+        self.q_worker = QualityWorker(self.window.locs, self.window.info, self.window.movie_path, self.pixelsize)
+        self.q_worker.progressMade.connect(self.quality_progress)
+        self.q_worker.finished.connect(self.quality_progress_finished)
+        self.q_worker.start()
 
 
     def load_astig_calib(self):
@@ -1131,7 +1136,9 @@ class Window(QtWidgets.QMainWindow):
         )
 
         #Loading a movie resets the quality check
-        self.parameters_dialog.quality_check.setEnabled(False)
+        #self.parameters_dialog.quality_check.setEnabled(False)
+
+        self.parameters_dialog.reset_quality_check()
 
         if False: #placeholder for filegroups
             if path.endswith('.ims'):
@@ -1658,6 +1665,8 @@ class Window(QtWidgets.QMainWindow):
         if not self.parameters_dialog.quality_check.isEnabled():
             self.parameters_dialog.quality_check.setEnabled(True)
 
+        self.parameters_dialog.gpufit_checkbox.setDisabled(False)
+
     def fit_in_view(self):
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
 
@@ -1717,6 +1726,7 @@ class Window(QtWidgets.QMainWindow):
                 self.save_locs(path)
 
     def localize(self, calibrate_z=False):
+        self.parameters_dialog.gpufit_checkbox.setDisabled(True)
         if self.identifications is not None and calibrate_z is True:
             self.fit(calibrate_z=calibrate_z)
         else:
@@ -1907,6 +1917,62 @@ class FitZWorker(QtCore.QThread):
         dt = time.time() - t0
         self.finished.emit(locs, dt)
 
+class QualityWorker(QtCore.QThread):
+
+    progressMade = QtCore.pyqtSignal(str, int, str)
+    finished = QtCore.pyqtSignal(str)
+
+    def __init__(self, locs, info, path, pixelsize):
+        super().__init__()
+        self.locs = locs
+        self.info = info
+        self.path = path
+        self.pixelsize = pixelsize
+
+    def run(self):
+        MAX_LOCS = int(1e6)
+
+        #Sanity of locs.
+        sane_locs = lib.ensure_sanity(self.locs, self.info)
+
+        #Locs
+        self.progressMade.emit('Checking Quality (1/4) Locs ..', 0, '')
+        locs_per_frame = len(sane_locs) / self.info[0]["Frames"]
+        self.progressMade.emit('', 0, f'{locs_per_frame:.1f}')
+
+        #NeNA
+        self.progressMade.emit('Checking Quality (2/4) NeNA ..', 0, '')
+
+        def nena_callback(x):
+            self.progressMade.emit(f'Checking Quality (2/4) NeNA: {x} %', 0, '')
+
+        nena_px = localize.check_nena(sane_locs[0:MAX_LOCS], self.info, nena_callback)
+        nena_nm = float(self.pixelsize.value() * nena_px)
+        self.progressMade.emit('', 1, f'{nena_px:.2f} px / {nena_nm:.2f} nm')
+
+        #Drift
+        self.progressMade.emit('Checking Quality (3/4) Drift ..', 0, '')
+
+        steps = int(len(sane_locs)//(MAX_LOCS))
+        steps = max(1,steps)
+
+        def drift_callback(x):
+            self.progressMade.emit(f'Checking Quality (3/4) Drift {x} %', 0, '')
+
+        print(f"Stepsize for drift correction {steps}")
+        drift_x, drift_y = localize.check_drift(sane_locs[::steps], self.info, callback=drift_callback)
+        self.progressMade.emit('', 2, f'X: {drift_x:.3f} px / Y: {drift_y:.3f} px')
+
+        #Kinetics
+        self.progressMade.emit('Checking Quality (4/4) Kinetics ..', 0, '')
+        len_mean = localize.check_kinetics(sane_locs[0:MAX_LOCS], self.info)
+        self.progressMade.emit('', 3, f'{len_mean:.3f}')
+
+        print(f'Quality {nena_px} {drift_x} {drift_y} {len_mean}')
+
+        localize.add_file_to_db(self.path, drift = (drift_x, drift_y), len_mean = len_mean, nena = nena_px)
+
+        self.finished.emit('Quality parameters complete.')
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
