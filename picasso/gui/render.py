@@ -3666,8 +3666,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         for ax in [self.ax1, self.ax2, self.ax3, self.ax4]:
             ax.grid(False)
-            # ax.set_xlim(self.x_min_d, self.x_max_d)
-            # ax.set_ylim(self.y_min_d, self.y_max_d)
+            ax.set_xlim(self.x_min_d, self.x_max_d)
+            ax.set_ylim(self.y_min_d, self.y_max_d)
             ax.axis('off')
 
         self.canvas.draw()
@@ -3732,8 +3732,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             )
             self.ax4.grid(False)
             self.ax4.axis('off')
-            # self.ax4.set_xlim(self.x_min_d, self.x_max_d)
-            # self.ax4.set_ylim(self.y_min_d, self.y_max_d)
+            self.ax4.set_xlim(self.x_min_d, self.x_max_d)
+            self.ax4.set_ylim(self.y_min_d, self.y_max_d)
             self.save_button.setEnabled(True)
             self.canvas.draw()
 
@@ -3785,7 +3785,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
     def save_locs_multi(self):
         """ Saves masked localizations for all loaded channels. """
-        
+
         suffix_in, ok1 = QtWidgets.QInputDialog.getText(
             self, 
             "", 
