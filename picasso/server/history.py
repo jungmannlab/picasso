@@ -183,6 +183,7 @@ def history():
         options.remove("file_created")
 
         df = filter_db(df_)
+        df = df.reset_index(drop=True)
 
         c1, c2 = st.columns(2)
 
@@ -194,9 +195,7 @@ def history():
 
         df["file_created_date"] = df["file_created"].apply(lambda x: x.date())
 
-        df = df.drop_duplicates("file_created")
         df = df.sort_values("file_created", ascending=False)
-        df = df.set_index("file_created", drop=False)
 
         c2.write(df["group"].value_counts())
 
@@ -209,15 +208,18 @@ def history():
             else:
                 trendline = None
 
+
+        df['file_created_'] = df['file_created'].apply(lambda x: x.timestamp())
+        df['file_created_date'] = df['file_created'].apply(lambda x: x.date())
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             with st.spinner("Creating plots.."):
 
                 if plotmode == "Table":
-                    table = df[fields + ["filename"]]
+                    table = df[fields + ["filename", "file_created"]]
 
                     st.write(table.style.bar(color="gray").format(precision=4))
-
                     csv = convert_df(table)
 
                     st.download_button(
@@ -235,7 +237,7 @@ def history():
                         if plotmode == "Scatter":
                             fig = px.scatter(
                                 df,
-                                x="file_created",
+                                x="file_created_",
                                 y=field,
                                 color="group",
                                 hover_name="filename",
@@ -244,6 +246,13 @@ def history():
                                 trendline=trendline,
                                 height=400,
                             )
+
+                            fig.update_xaxes(
+                             tickangle=45,
+                             tickmode = 'array',
+                             tickvals = df['file_created_'],
+                             ticktext= df['file_created_date'])
+
                             st.plotly_chart(fig)
                         elif plotmode == "Box":
                             fig = px.box(
@@ -256,6 +265,7 @@ def history():
                                 title=f"{field} - median {median_:.2f}",
                                 height=400,
                             )
+
                             st.plotly_chart(fig)
 
                         else:
