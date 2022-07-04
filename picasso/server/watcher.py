@@ -65,6 +65,8 @@ def wait_for_change(file: str):
             writing = False
         else:
             filesize = new_filesize
+            
+    print(f'File {file} complete.')
 
 
 def get_children_files(file: str, checked: list):
@@ -292,16 +294,3 @@ def watcher():
                 time.sleep(1)
             display.success("Please refresh page.")
             st.stop()
-
-
-def wait_for_change(file):
-    print(f"Waiting for {file}")
-    filesize = os.path.getsize(file)
-    writing = True
-    while writing:
-        time.sleep(2)
-        new_filesize = os.path.getsize(file)
-        if filesize == new_filesize:
-            writing = False
-        else:
-            filesize = new_filesize
