@@ -16,12 +16,14 @@ You can also set up a ``FileWatcher`` that allows to continuously process new fi
 
 Database
 --------
-The local SQL database will be stored in the ``.alphapept`` folder in your home directory. To directly access the database
+The local SQL database will be stored in the ``.picasso`` folder in your home directory. To directly access the database
 the tool `DB Browser for SQLite <https://sqlitebrowser.org>`_ is recommended.
 
 Localize
 --------
-The integration within ``Localize`` is by activating the ``Add to Database``- checkbox in the ``Parameters``.
+The integration within ``Localize`` is by pressing the ``Estimate``- button in the ``Sample Quality`` field in ``Parameters``.
+The button can be pressed once the image stack has been localized. It calculates Localizations per Frame, NeNA, Drift and bright time based on a subset of the data (i.e. max. 1 Mio localizations).
+The estimate and additional summary statistics will then be stored in the local database.
 
 .. image:: ../docs/server_localize.png
    :scale: 20 %
