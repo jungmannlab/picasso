@@ -6839,17 +6839,7 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def save_channel_pickprops(self, title="Choose a channel"):
-        """
-        Opens an input dialog to ask which channel to use in saving 
-        pick properties.
-        There is an option to save all channels.
-
-        Returns
-        None if no locs found or channel picked, int otherwise
-            Index of the chosen channel
-        """
-
+    def remove_locs_channel(self, title="Choose a channel"):
         n_channels = len(self.locs_paths)
         if n_channels == 0:
             return None
@@ -6857,10 +6847,10 @@ class View(QtWidgets.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
-            pathlist.append("Save all at once")
+            pathlist.append("Apply to all at once")
             index, ok = QtWidgets.QInputDialog.getItem(
                 self,
-                "Save pick properties",
+                "Save localizations",
                 "Channel:",
                 pathlist,
                 editable=False,
@@ -6868,7 +6858,38 @@ class View(QtWidgets.QLabel):
             if ok:
                 return pathlist.index(index)
             else:
-                return None
+                return None        
+
+    # def save_channel_pickprops(self, title="Choose a channel"):
+    #     """
+    #     Opens an input dialog to ask which channel to use in saving 
+    #     pick properties.
+    #     There is an option to save all channels.
+
+    #     Returns
+    #     None if no locs found or channel picked, int otherwise
+    #         Index of the chosen channel
+    #     """
+
+    #     n_channels = len(self.locs_paths)
+    #     if n_channels == 0:
+    #         return None
+    #     elif n_channels == 1:
+    #         return 0
+    #     elif len(self.locs_paths) > 1:
+    #         pathlist = list(self.locs_paths)
+    #         pathlist.append("Save all at once")
+    #         index, ok = QtWidgets.QInputDialog.getItem(
+    #             self,
+    #             "Save pick properties",
+    #             "Channel:",
+    #             pathlist,
+    #             editable=False,
+    #         )
+    #         if ok:
+    #             return pathlist.index(index)
+    #         else:
+    #             return None
 
     def get_channel3d(self, title="Choose a channel"):
         """
@@ -8447,29 +8468,35 @@ class View(QtWidgets.QLabel):
         localizations were picked.
         """
 
-        channel = self.get_channel("Remove picked localizations")
-        if channel is not None:
-            index = np.arange(len(self.all_locs[channel]), dtype=np.int32)
-            self.all_locs[channel] = lib.append_to_rec(
-                self.all_locs[channel], index, "index"
-            ) # used for indexing picked localizations
+        channel = self.remove_locs_channel("Remove picked localizations")
+        if channel is len(self.locs_paths): # apply to all channels
+            for channel in range(len(self.locs)):
+                self._remove_picked_locs(channel)
+        elif channel is not None: # apply to a single channel
+            self._remove_picked_locs(channel)
 
-            # if locs were indexed before, they do not have the index 
-            # attribute
-            if self._pick_shape == "Circle":
-                self.index_locs(channel)
-            all_picked_locs = self.picked_locs(channel, add_group=False)
-            idx = np.array([], dtype=np.int32)
-            for picked_locs in all_picked_locs:
-                idx = np.concatenate((idx, picked_locs.index))
-            self.all_locs[channel] = np.delete(self.all_locs[channel], idx)
-            self.all_locs[channel] = lib.remove_from_rec(
-                self.all_locs[channel], "index"
-            )
-            self.locs[channel] = self.all_locs[channel].copy()
-            # fast rendering
-            self.window.fast_render_dialog.sample_locs()
-            self.update_scene()
+    def _remove_picked_locs(self, channel):
+        index = np.arange(len(self.all_locs[channel]), dtype=np.int32)
+        self.all_locs[channel] = lib.append_to_rec(
+            self.all_locs[channel], index, "index"
+        ) # used for indexing picked localizations
+
+        # if locs were indexed before, they do not have the index 
+        # attribute
+        if self._pick_shape == "Circle":
+            self.index_locs(channel)
+        all_picked_locs = self.picked_locs(channel, add_group=False)
+        idx = np.array([], dtype=np.int32)
+        for picked_locs in all_picked_locs:
+            idx = np.concatenate((idx, picked_locs.index))
+        self.all_locs[channel] = np.delete(self.all_locs[channel], idx)
+        self.all_locs[channel] = lib.remove_from_rec(
+            self.all_locs[channel], "index"
+        )
+        self.locs[channel] = self.all_locs[channel].copy()
+        # fast rendering
+        self.window.fast_render_dialog.sample_locs()
+        self.update_scene()
 
     def remove_points(self):
         """ Removes all distance measurement points. """
@@ -11435,7 +11462,7 @@ class Window(QtWidgets.QMainWindow):
         Saves pick properties in a given channel (or all channels). 
         """
 
-        channel = self.view.save_channel_pickprops("Save localizations")
+        channel = self.view.save_channel_multi("Save localizations")
         if channel is not None:
             self.convert_z()
             if channel is len(self.view.locs_paths):
