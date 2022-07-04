@@ -12,6 +12,7 @@ def test_localize():
     import argparse
 
     import os
+
     cwd = os.getcwd()
     print(cwd)
 

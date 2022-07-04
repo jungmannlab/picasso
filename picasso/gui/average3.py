@@ -519,8 +519,10 @@ class Window(QtWidgets.QMainWindow):
             msgBox = QtWidgets.QMessageBox(self)
             msgBox.setWindowTitle("Error")
             msgBox.setText(
-                ("Datafile does not contain group information."
-                    " Please load file with picked localizations.")
+                (
+                    "Datafile does not contain group information."
+                    " Please load file with picked localizations."
+                )
             )
             msgBox.exec_()
 
@@ -552,9 +554,7 @@ class Window(QtWidgets.QMainWindow):
             self.index_blocks.append(None)
             self._drift.append(None)
             self.dataset_dialog.add_entry(path)
-            self.dataset_dialog.checks[-1].stateChanged.connect(
-                self.updateLayout
-            )
+            self.dataset_dialog.checks[-1].stateChanged.connect(self.updateLayout)
 
             cx = self.infos[-1][0]["Width"] / 2
             cy = self.infos[-1][0]["Height"] / 2
@@ -563,9 +563,7 @@ class Window(QtWidgets.QMainWindow):
             self.locs[-1].y -= cy
 
             if len(self.locs) == 1:
-                self.median_lp = np.mean(
-                    [np.median(locs.lpx), np.median(locs.lpy)]
-                )
+                self.median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
                 if hasattr(locs, "group"):
                     groups = np.unique(locs.group)
                     groupcopy = locs.group.copy()
@@ -587,12 +585,8 @@ class Window(QtWidgets.QMainWindow):
                 self.z_min = np.min(locs.z)
                 self.z_max = np.max(locs.z)
             else:
-                self.t_min = np.min(
-                    [np.min(locs.x), np.min(locs.y), self.t_min]
-                )
-                self.t_max = np.max(
-                    [np.max(locs.x), np.max(locs.y), self.t_max]
-                )
+                self.t_min = np.min([np.min(locs.x), np.min(locs.y), self.t_min])
+                self.t_max = np.max([np.max(locs.x), np.max(locs.y), self.t_max])
                 self.z_min = np.min([np.min(locs.z), self.z_min])
                 self.z_max = np.min([np.max(locs.z), self.z_max])
 
@@ -600,8 +594,7 @@ class Window(QtWidgets.QMainWindow):
                 print("Dataset loaded from {}.".format(path))
             else:
                 print(
-                    ("Dataset loaded from {},"
-                        " Total number of datasets {}.").format(
+                    ("Dataset loaded from {}," " Total number of datasets {}.").format(
                         path, len(self.locs)
                     )
                 )
@@ -612,9 +605,7 @@ class Window(QtWidgets.QMainWindow):
                 n_groups = len(groups)
                 n_locs = len(locs)
 
-                group_index = scipy.sparse.lil_matrix(
-                    (n_groups, n_locs), dtype=np.bool
-                )
+                group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
                 progress = lib.ProgressDialog(
                     "Creating group index", 0, len(groups), self
                 )
@@ -681,16 +672,11 @@ class Window(QtWidgets.QMainWindow):
         for j in range(n_channels):
             self.r = np.max(
                 [
-                    3
-                    * np.sqrt(
-                        np.mean(self.locs[j].x ** 2 + self.locs[j].y ** 2)
-                    ),
+                    3 * np.sqrt(np.mean(self.locs[j].x ** 2 + self.locs[j].y ** 2)),
                     self.r,
                 ]
             )
-            self.r_z = np.max(
-                [5 * np.sqrt(np.mean(self.locs[j].z ** 2)), self.r_z]
-            )
+            self.r_z = np.max([5 * np.sqrt(np.mean(self.locs[j].z ** 2)), self.r_z])
         self.t_min = -self.r
         self.t_max = self.r
         self.z_min = -self.r_z
@@ -703,9 +689,7 @@ class Window(QtWidgets.QMainWindow):
         print("Aligning by center of mass.. ", end="", flush=True)
         n_groups = self.n_groups
         n_channels = len(self.locs)
-        progress = lib.ProgressDialog(
-            "Aligning by center of mass", 0, n_groups, self
-        )
+        progress = lib.ProgressDialog("Aligning by center of mass", 0, n_groups, self)
         progress.set_value(0)
 
         for i in range(n_groups):
@@ -727,15 +711,9 @@ class Window(QtWidgets.QMainWindow):
                 out_locs_z.append(sel_locs_z)
                 progress.set_value(i + 1)
 
-            out_locs_x = stack_arrays(
-                out_locs_x, asrecarray=True, usemask=False
-            )
-            out_locs_y = stack_arrays(
-                out_locs_y, asrecarray=True, usemask=False
-            )
-            out_locs_z = stack_arrays(
-                out_locs_z, asrecarray=True, usemask=False
-            )
+            out_locs_x = stack_arrays(out_locs_x, asrecarray=True, usemask=False)
+            out_locs_y = stack_arrays(out_locs_y, asrecarray=True, usemask=False)
+            out_locs_z = stack_arrays(out_locs_z, asrecarray=True, usemask=False)
 
             mean_x = np.mean(out_locs_x)
             mean_y = np.mean(out_locs_y)
@@ -1082,9 +1060,7 @@ class Window(QtWidgets.QMainWindow):
                         fig = plt.figure()
                         ax1 = fig.add_subplot(1, 2, 1)
                         ax1.set_aspect("equal")
-                        plt.imshow(
-                            image, interpolation="nearest", cmap=plt.cm.ocean
-                        )
+                        plt.imshow(image, interpolation="nearest", cmap=plt.cm.ocean)
                         plt.colorbar()
                         plt.show()
                         plt.waitforbuttonpress()
@@ -1247,9 +1223,7 @@ class Window(QtWidgets.QMainWindow):
         print("Convolving..")
         for i in tqdm(range(n_groups)):
             self.status_bar.showMessage("Group {} / {}.".format(i, n_groups))
-            self.rotatexy_convolution_group(
-                CF_image_avg, angles, i, rotaxis, proplane
-            )
+            self.rotatexy_convolution_group(CF_image_avg, angles, i, rotaxis, proplane)
         self.updateLayout()
         self.status_bar.showMessage("Done!")
 
@@ -1468,9 +1442,7 @@ class Window(QtWidgets.QMainWindow):
             model_x, model_y, model_z, proplane, pixelsize
         )
 
-        self.template_img = scipy.ndimage.filters.gaussian_filter(
-            template_img, blur
-        )
+        self.template_img = scipy.ndimage.filters.gaussian_filter(template_img, blur)
 
     def model_preview(self):
 
@@ -1537,9 +1509,7 @@ class Window(QtWidgets.QMainWindow):
         )
 
         plt.hist(np.array(self.scores), 40)
-        plt.title(
-            "Histogram of Scores, Mean: {:.2f}".format(np.mean(self.scores))
-        )
+        plt.title("Histogram of Scores, Mean: {:.2f}".format(np.mean(self.scores)))
         plt.xlabel("Score")
         plt.ylabel("Counts")
         plt.show()
@@ -1638,36 +1608,20 @@ class Window(QtWidgets.QMainWindow):
                         # CREATE ALIGNIMAGE
                         if alignaxis == "zz":
                             alignimage[np.int(alignimage.shape[0] / 2), :] += 2
-                            alignimage[
-                                np.int(alignimage.shape[0] / 2) + 1, :
-                            ] += 1
-                            alignimage[
-                                np.int(alignimage.shape[0] / 2) - 1, :
-                            ] += 1
+                            alignimage[np.int(alignimage.shape[0] / 2) + 1, :] += 1
+                            alignimage[np.int(alignimage.shape[0] / 2) - 1, :] += 1
                         elif alignaxis == "zy":
                             alignimage[:, np.int(alignimage.shape[0] / 2)] += 2
-                            alignimage[
-                                :, np.int(alignimage.shape[0] / 2) + 1
-                            ] += 1
-                            alignimage[
-                                :, np.int(alignimage.shape[0] / 2) - 1
-                            ] += 1
+                            alignimage[:, np.int(alignimage.shape[0] / 2) + 1] += 1
+                            alignimage[:, np.int(alignimage.shape[0] / 2) - 1] += 1
                         elif alignaxis == "y":
                             alignimage[:, np.int(alignimage.shape[1] / 2)] += 2
-                            alignimage[
-                                :, np.int(alignimage.shape[1] / 2) - 1
-                            ] += 1
-                            alignimage[
-                                :, np.int(alignimage.shape[1] / 2) + 1
-                            ] += 1
+                            alignimage[:, np.int(alignimage.shape[1] / 2) - 1] += 1
+                            alignimage[:, np.int(alignimage.shape[1] / 2) + 1] += 1
                         elif alignaxis == "x":
                             alignimage[np.int(alignimage.shape[0] / 2), :] += 2
-                            alignimage[
-                                np.int(alignimage.shape[0] / 2) + 1, :
-                            ] += 1
-                            alignimage[
-                                np.int(alignimage.shape[0] / 2) - 1, :
-                            ] += 1
+                            alignimage[np.int(alignimage.shape[0] / 2) + 1, :] += 1
+                            alignimage[np.int(alignimage.shape[0] / 2) - 1, :] += 1
 
                     all_corr[k, j] = np.sum(np.multiply(alignimage, image))
 
@@ -1675,9 +1629,7 @@ class Window(QtWidgets.QMainWindow):
                         fig = plt.figure()
                         ax1 = fig.add_subplot(1, 2, 1)
                         ax1.set_aspect("equal")
-                        plt.imshow(
-                            image, interpolation="nearest", cmap=plt.cm.ocean
-                        )
+                        plt.imshow(image, interpolation="nearest", cmap=plt.cm.ocean)
                         ax2 = fig.add_subplot(1, 2, 2)
                         ax2.set_aspect("equal")
                         plt.imshow(
@@ -1714,9 +1666,7 @@ class Window(QtWidgets.QMainWindow):
             self.locs[j].z = z_rot
 
         self.updateLayout()
-        self.status_bar.showMessage(
-            "Align on Axis {} complete.".format(alignaxis)
-        )
+        self.status_bar.showMessage("Align on Axis {} complete.".format(alignaxis))
 
     def align_group(self, CF_image_avg, angles, group, rotaxis, proplane):
         n_channels = len(self.locs)
@@ -1792,18 +1742,12 @@ class Window(QtWidgets.QMainWindow):
                         image_halfb = n_pixelb / 2
 
                         # find the brightest pixel
-                        b_max, a_max = np.unravel_index(
-                            xcorr.argmax(), xcorr.shape
-                        )
+                        b_max, a_max = np.unravel_index(xcorr.argmax(), xcorr.shape)
                         # store the transformation if the correlation
                         # is larger than before
                         all_xcorr[k, j] = xcorr[b_max, a_max]
-                        all_db[k, j] = (
-                            np.ceil(b_max - image_halfb) / self.oversampling
-                        )
-                        all_da[k, j] = (
-                            np.ceil(a_max - image_halfa) / self.oversampling
-                        )
+                        all_db[k, j] = np.ceil(b_max - image_halfb) / self.oversampling
+                        all_da[k, j] = np.ceil(a_max - image_halfa) / self.oversampling
 
             flipstate = False
             if f == 0:
@@ -1888,7 +1832,7 @@ class Window(QtWidgets.QMainWindow):
         return (movie_height, movie_width)
 
     def max_movie_height(self):
-        """ Returns maximum height of all loaded images. """
+        """Returns maximum height of all loaded images."""
         return max(info[0]["Height"] for info in self.infos)
 
     def max_movie_width(self):
@@ -1908,9 +1852,7 @@ class Window(QtWidgets.QMainWindow):
             )
             # self.update_cursor()
 
-    def draw_scene(
-        self, viewport, autoscale=False, use_cache=False, picks_only=False
-    ):
+    def draw_scene(self, viewport, autoscale=False, use_cache=False, picks_only=False):
         self.viewport = self.adjust_viewport_to_view(viewport)
         qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
         self.qimage = qimage.scaled(
@@ -1946,9 +1888,7 @@ class Window(QtWidgets.QMainWindow):
             y_max = viewport[1][0] + y_margin
         return [(y_min, x_min), (y_max, x_max)]
 
-    def render_scene(
-        self, autoscale=False, use_cache=False, cache=True, viewport=None
-    ):
+    def render_scene(self, autoscale=False, use_cache=False, cache=True, viewport=None):
         kwargs = self.get_render_kwargs(viewport=viewport)
         n_channels = len(self.locs)
         if n_channels == 1:
@@ -1964,9 +1904,7 @@ class Window(QtWidgets.QMainWindow):
         qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
         return qimage
 
-    def get_render_kwargs(
-        self, viewport=None
-    ):  # Dummy for now: TODO: Implement
+    def get_render_kwargs(self, viewport=None):  # Dummy for now: TODO: Implement
         viewport = [(0, 0), (32, 32)]
         return {
             "oversampling": 5,
@@ -2064,9 +2002,7 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window, "An error occured", message
-        )
+        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

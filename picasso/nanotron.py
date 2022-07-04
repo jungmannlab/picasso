@@ -19,7 +19,7 @@ from . import render
 def prepare_img(img, img_shape, alpha=1, bg=0):
 
     img = alpha * img - bg
-    img = img.astype('float')
+    img = img.astype("float")
     img = img / img.max()
     img = img.clip(min=0)
     img = img.reshape(img_shape**2)
@@ -32,6 +32,7 @@ def rotate_img(img, angle):
     rot_img = ndimage.rotate(img, angle, reshape=False)
 
     return rot_img
+
 
 def roi_to_img(locs, pick, radius, oversampling):
 
@@ -54,37 +55,38 @@ def roi_to_img(locs, pick, radius, oversampling):
     # for debugging
     if False:
         print("mean x: {}".format(np.mean(pick_locs.x)))
-        print('length x: {}'.format(x_max - x_min))
+        print("length x: {}".format(x_max - x_min))
         print("mean y: {}".format(np.mean(pick_locs.y)))
-        print('length y: {}'.format(y_max - y_min))
-        print('radius: {}'.format(radius))
-        print('viewport: {}'.format(viewport))
+        print("length y: {}".format(y_max - y_min))
+        print("radius: {}".format(radius))
+        print("viewport: {}".format(viewport))
 
     # Render locs with Picasso render function
-    len_x, pick_img = render.render(pick_locs, viewport=viewport,
-                                    oversampling=oversampling,
-                                    blur_method='smooth')
+    len_x, pick_img = render.render(
+        pick_locs, viewport=viewport, oversampling=oversampling, blur_method="smooth"
+    )
 
     return pick_img
 
 
-def prepare_data(locs, label, pick_radius,
-                 oversampling, alpha=10,
-                 bg=1, export=False):
+def prepare_data(locs, label, pick_radius, oversampling, alpha=10, bg=1, export=False):
 
     img_shape = int(2 * pick_radius * oversampling)
     data = []
     labels = []
 
-    for pick in tqdm(range(locs.group.max()), desc='Prepare '+str(label)):
+    for pick in tqdm(range(locs.group.max()), desc="Prepare " + str(label)):
 
-        pick_img = roi_to_img(locs, pick,
-                              radius=pick_radius,
-                              oversampling=oversampling)
+        pick_img = roi_to_img(locs, pick, radius=pick_radius, oversampling=oversampling)
 
         if export is True and pick < 10:
-            filename = 'label' + str(label) + '-' + str(pick)
-            plt.imsave('./img/' + filename + '.png', (alpha*pick_img-bg), cmap='Greys', vmax=10)
+            filename = "label" + str(label) + "-" + str(pick)
+            plt.imsave(
+                "./img/" + filename + ".png",
+                (alpha * pick_img - bg),
+                cmap="Greys",
+                vmax=10,
+            )
 
         pick_img = prepare_img(pick_img, img_shape=img_shape, alpha=alpha, bg=bg)
 

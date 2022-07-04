@@ -208,9 +208,8 @@ def history():
             else:
                 trendline = None
 
-
-        df['file_created_'] = df['file_created'].apply(lambda x: x.timestamp())
-        df['file_created_date'] = df['file_created'].apply(lambda x: x.date())
+        df["file_created_"] = df["file_created"].apply(lambda x: x.timestamp())
+        df["file_created_date"] = df["file_created"].apply(lambda x: x.date())
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
@@ -248,10 +247,11 @@ def history():
                             )
 
                             fig.update_xaxes(
-                             tickangle=45,
-                             tickmode = 'array',
-                             tickvals = df['file_created_'],
-                             ticktext= df['file_created_date'])
+                                tickangle=45,
+                                tickmode="array",
+                                tickvals=df["file_created_"],
+                                ticktext=df["file_created_date"],
+                            )
 
                             st.plotly_chart(fig)
                         elif plotmode == "Box":

@@ -131,9 +131,7 @@ class HistWindow(PlotWindow):
         axes = self.figure.add_subplot(111)
         axes.hist(data, bins, rwidth=1, linewidth=0)
         data_range = data.ptp()
-        axes.set_xlim(
-            [bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range]
-        )
+        axes.set_xlim([bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range])
         self.span = SpanSelector(
             axes,
             self.on_span_select,
@@ -253,7 +251,7 @@ class Window(QtWidgets.QMainWindow):
         self.table_view = TableView(self, self)
         main_widget = QtWidgets.QWidget()
         hbox = QtWidgets.QHBoxLayout(main_widget)
-        hbox.setContentsMargins(0,0,0,0)
+        hbox.setContentsMargins(0, 0, 0, 0)
         hbox.setSpacing(0)
         self.setCentralWidget(main_widget)
         hbox.addWidget(self.table_view)
@@ -294,9 +292,7 @@ class Window(QtWidgets.QMainWindow):
                 self.hist2d_windows[field][field_y] = None
             self.filter_log[field] = None
 
-        self.setWindowTitle(
-            "Picasso: Filter. File: {}".format(os.path.basename(path))
-        )
+        self.setWindowTitle("Picasso: Filter. File: {}".format(os.path.basename(path)))
         self.pwd = os.path.dirname(path)
 
     def plot_histogram(self):
@@ -307,9 +303,7 @@ class Window(QtWidgets.QMainWindow):
                 index = index.column()
                 field = self.locs.dtype.names[index]
                 if not self.hist_windows[field]:
-                    self.hist_windows[field] = HistWindow(
-                        self, self.locs, field
-                    )
+                    self.hist_windows[field] = HistWindow(self, self.locs, field)
                 self.hist_windows[field].show()
 
     def plot_hist2d(self):
@@ -317,9 +311,7 @@ class Window(QtWidgets.QMainWindow):
         indices = selection_model.selectedColumns()
         if len(indices) == 2:
             indices = [index.column() for index in indices]
-            field_x, field_y = [
-                self.locs.dtype.names[index] for index in indices
-            ]
+            field_x, field_y = [self.locs.dtype.names[index] for index in indices]
             if not self.hist2d_windows[field_x][field_y]:
                 self.hist2d_windows[field_x][field_y] = Hist2DWindow(
                     self, self.locs, field_x, field_y
@@ -342,9 +334,7 @@ class Window(QtWidgets.QMainWindow):
         if self.locs is not None:
             view_height = self.table_view.viewport().height()
             n_rows = int(view_height / ROW_HEIGHT) + 2
-            table_model = TableModel(
-                self.locs[index: index + n_rows], index, self
-            )
+            table_model = TableModel(self.locs[index : index + n_rows], index, self)
             self.table_view.setModel(table_model)
 
     def log_filter(self, field, xmin, xmax):
@@ -355,7 +345,7 @@ class Window(QtWidgets.QMainWindow):
             self.filter_log[field] = [xmin, xmax]
 
     def save_file_dialog(self):
-        if 'x' in self.locs.dtype.names:  # Saving only for locs
+        if "x" in self.locs.dtype.names:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)
             out_path = base + "_filter.hdf5"
             path, exe = QtWidgets.QFileDialog.getSaveFileName(
@@ -367,9 +357,7 @@ class Window(QtWidgets.QMainWindow):
                 info = self.info + [filter_info]
                 io.save_locs(path, self.locs, info)
         else:
-            raise NotImplementedError(
-                "Saving only implmented for locs."
-            )
+            raise NotImplementedError("Saving only implmented for locs.")
 
     def wheelEvent(self, event):
         new_value = self.vertical_scrollbar.value() - 0.1 * event.angleDelta().y()
@@ -390,9 +378,7 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window, "An error occured", message
-        )
+        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

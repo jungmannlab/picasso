@@ -36,16 +36,26 @@ from PyQt5.QtGui import QIcon
 
 from .. import io, lib, render, nanotron
 
-DEFAULT_MODEL_PATH = _ospath.join(os.sep, 'picasso', 'model', 'default_model.sav')
+DEFAULT_MODEL_PATH = _ospath.join(os.sep, "picasso", "model", "default_model.sav")
 default_model = False
+
 
 class Generator(QtCore.QThread):
 
     datasets_made = QtCore.pyqtSignal(int, int, int, int)
     datasets_finished = QtCore.pyqtSignal(list, list)
 
-    def __init__(self, locs, classes, pick_radius, oversampling,
-                 expand, export, export_paths, parent=None):
+    def __init__(
+        self,
+        locs,
+        classes,
+        pick_radius,
+        oversampling,
+        expand,
+        export,
+        export_paths,
+        parent=None,
+    ):
         super().__init__()
         self.locs_files = locs.copy()
         self.pick_radius = pick_radius
@@ -83,18 +93,24 @@ class Generator(QtCore.QThread):
 
             export_path = _ospath.dirname(self.export_paths[id]) + "/"
 
-            for c, pick in enumerate(tqdm(np.unique(locs.group),
-                                     desc="Prepare class " + str(label))):
+            for c, pick in enumerate(
+                tqdm(np.unique(locs.group), desc="Prepare class " + str(label))
+            ):
 
-                pick_img = nanotron.roi_to_img(locs=locs,
-                                               pick=pick,
-                                               radius=self.pick_radius,
-                                               oversampling=self.oversampling)
+                pick_img = nanotron.roi_to_img(
+                    locs=locs,
+                    pick=pick,
+                    radius=self.pick_radius,
+                    oversampling=self.oversampling,
+                )
 
                 if self.export is True and pick < 10:
                     filename = str(label).replace(" ", "_").lower() + "-" + str(pick)
-                    plt.imsave(export_path + filename + ".png", (10*pick_img-1),
-                               cmap="Greys")
+                    plt.imsave(
+                        export_path + filename + ".png",
+                        (10 * pick_img - 1),
+                        cmap="Greys",
+                    )
 
                 if self.expand:
                     delta = 30
@@ -103,27 +119,21 @@ class Generator(QtCore.QThread):
                     for angle in range(delta, last_rot, delta):
 
                         rot_img = nanotron.rotate_img(pick_img, angle)
-                        rot_img = nanotron.prepare_img(rot_img,
-                                                       img_shape=img_shape,
-                                                       alpha=10,
-                                                       bg=1)
+                        rot_img = nanotron.prepare_img(
+                            rot_img, img_shape=img_shape, alpha=10, bg=1
+                        )
                         labels.append(id)
                         data.append(rot_img)
 
-                    self.datasets_made.emit(id+1,
-                                            self.n_datasets,
-                                            splits*(c+1),
-                                            splits*(n_locs+1))
+                    self.datasets_made.emit(
+                        id + 1, self.n_datasets, splits * (c + 1), splits * (n_locs + 1)
+                    )
                 else:
-                    self.datasets_made.emit(id+1,
-                                            self.n_datasets,
-                                            c+1,
-                                            n_locs+1)
+                    self.datasets_made.emit(id + 1, self.n_datasets, c + 1, n_locs + 1)
 
-                pick_img = nanotron.prepare_img(pick_img,
-                                                img_shape=img_shape,
-                                                alpha=10,
-                                                bg=1)
+                pick_img = nanotron.prepare_img(
+                    pick_img, img_shape=img_shape, alpha=10, bg=1
+                )
 
                 data.append(pick_img)
                 labels.append(id)
@@ -147,10 +157,9 @@ class Trainer(QtCore.QThread):
         self.iterations = parameter["iterations"]
         self.learning_rate = parameter["learning_rate"]
         self.solver = parameter["solver"]
-        self.X_train, self.X_test, self.Y_train, self.Y_test = train_test_split(X_train,
-                                                                                Y_train,
-                                                                                test_size=0.30,
-                                                                                random_state=42)
+        self.X_train, self.X_test, self.Y_train, self.Y_test = train_test_split(
+            X_train, Y_train, test_size=0.30, random_state=42
+        )
         self.mlp_list = []  # container to carry mlp class
         self.cm_list = []  # container to carry confusion_matrix
 
@@ -158,17 +167,19 @@ class Trainer(QtCore.QThread):
         self.mlp_list = []
         hidden_layer_sizes = tuple(self.network.values())
 
-        mlp = MLPClassifier(hidden_layer_sizes=hidden_layer_sizes,
-                            activation=self.activation,
-                            max_iter=self.iterations,
-                            alpha=0.01,
-                            solver=self.solver,
-                            verbose=False,
-                            shuffle=True,
-                            tol=1e-4,
-                            random_state=1,
-                            validation_fraction=0.15,
-                            learning_rate_init=self.learning_rate)
+        mlp = MLPClassifier(
+            hidden_layer_sizes=hidden_layer_sizes,
+            activation=self.activation,
+            max_iter=self.iterations,
+            alpha=0.01,
+            solver=self.solver,
+            verbose=False,
+            shuffle=True,
+            tol=1e-4,
+            random_state=1,
+            validation_fraction=0.15,
+            learning_rate_init=self.learning_rate,
+        )
 
         mlp.fit(self.X_train, self.Y_train)
         score = mlp.score(self.X_train, self.Y_train)
@@ -179,10 +190,7 @@ class Trainer(QtCore.QThread):
         cm = confusion_matrix(self.Y_test, Y_pred)
         self.cm_list.append(cm)
 
-        self.training_finished.emit(self.mlp_list,
-                                    score,
-                                    test_score,
-                                    self.cm_list)
+        self.training_finished.emit(self.mlp_list, score, test_score, self.cm_list)
 
 
 class Predictor(QtCore.QThread):
@@ -198,27 +206,38 @@ class Predictor(QtCore.QThread):
         self.oversampling = oversampling
 
         self.n_locs = len(self.locs["group"])
-        self.prediction = np.zeros(len(np.unique(self.locs['group'])),
-                                                 dtype=[('group', 'u4'),
-                                                       ('prediction', 'i4'),
-                                                       ('score', 'f4')])
+        self.prediction = np.zeros(
+            len(np.unique(self.locs["group"])),
+            dtype=[("group", "u4"), ("prediction", "i4"), ("score", "f4")],
+        )
 
-        self.prediction['group'] = np.unique(self.locs['group'])
+        self.prediction["group"] = np.unique(self.locs["group"])
 
-        self.n_groups = len(np.unique(self.locs['group']))
+        self.n_groups = len(np.unique(self.locs["group"]))
 
-        self.p_locs = np.zeros(len(self.locs['group']),
-                                   dtype=[('group', 'u4'),
-                                         ('prediction', 'i4'),
-                                         ('score', 'f4')])
+        self.p_locs = np.zeros(
+            len(self.locs["group"]),
+            dtype=[("group", "u4"), ("prediction", "i4"), ("score", "f4")],
+        )
 
     def checkConsecutive(self, l):
         n = len(l) - 1
-        return (sum(np.diff(sorted(l)) == 1) >= n)
+        return sum(np.diff(sorted(l)) == 1) >= n
 
-    def _worker(self, mlp, locs, picks, pick_radius,
-                oversampling, current, lock, n_picks,
-                predicitions, probabilities, finished):
+    def _worker(
+        self,
+        mlp,
+        locs,
+        picks,
+        pick_radius,
+        oversampling,
+        current,
+        lock,
+        n_picks,
+        predicitions,
+        probabilities,
+        finished,
+    ):
 
         while True:
             with lock:
@@ -228,11 +247,13 @@ class Predictor(QtCore.QThread):
                 current[0] += 1
 
             pick = picks[index]
-            pred, pred_proba = nanotron.predict_structure(mlp=mlp,
-                                                 locs=locs,
-                                                 pick=pick,
-                                                 pick_radius=pick_radius,
-                                                 oversampling=oversampling)
+            pred, pred_proba = nanotron.predict_structure(
+                mlp=mlp,
+                locs=locs,
+                pick=pick,
+                pick_radius=pick_radius,
+                oversampling=oversampling,
+            )
             predicitions[index] = pred[0]
             probabilities[index] = pred_proba.max()
 
@@ -266,7 +287,7 @@ class Predictor(QtCore.QThread):
                 n_picks,
                 predictions,
                 probabilities,
-                finished
+                finished,
             )
 
         executor.shutdown(wait=False)
@@ -274,15 +295,11 @@ class Predictor(QtCore.QThread):
 
     def run(self):
 
-        N = len(self.prediction['group'])
-        picks = self.prediction['group']
+        N = len(self.prediction["group"])
+        picks = self.prediction["group"]
 
         current, predictions, probabilities, finished = self.predict_async(
-            self.model,
-            self.locs,
-            picks,
-            self.pick_radius,
-            self.oversampling
+            self.model, self.locs, picks, self.pick_radius, self.oversampling
         )
 
         while finished[0] < N:
@@ -294,14 +311,13 @@ class Predictor(QtCore.QThread):
 
         assert self.checkConsecutive(picks)
 
-        self.locs = lib.append_to_rec(self.locs,
-                                      classes[self.locs['group']],
-                                      'prediction')
-        self.locs = lib.append_to_rec(self.locs,
-                                      probas[self.locs['group']],
-                                      'score')
+        self.locs = lib.append_to_rec(
+            self.locs, classes[self.locs["group"]], "prediction"
+        )
+        self.locs = lib.append_to_rec(self.locs, probas[self.locs["group"]], "score")
 
         self.prediction_finished.emit(self.locs)
+
 
 class GenericPlotWindow(QtWidgets.QTabWidget):
     def __init__(self, window_title):
@@ -320,6 +336,7 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
 
         self.toolbar = NavigationToolbar(self.canvas, self)
         vbox.addWidget(self.toolbar)
+
 
 class train_dialog(QtWidgets.QDialog):
     def __init__(self, window):
@@ -519,6 +536,7 @@ class train_dialog(QtWidgets.QDialog):
             self.train_log["Model"] = fname
             self.train_log["Generated by"] = "Picasso nanoTRON : Train"
             import sklearn
+
             self.train_log["Scikit-Learn Version"] = sklearn.__version__
             self.train_log["Created on"] = datetime.datetime.now()
 
@@ -548,9 +566,9 @@ class train_dialog(QtWidgets.QDialog):
             parameter["iterations"] = self.iterations.value()
             parameter["learning_rate"] = self.learing_rate.value()
             parameter["solver"] = self.solver.currentText()
-            self.train_thread = Trainer(X_train=self.X_train,
-                                        Y_train=self.Y_train,
-                                        parameter=parameter)
+            self.train_thread = Trainer(
+                X_train=self.X_train, Y_train=self.Y_train, parameter=parameter
+            )
 
             self.train_thread.training_finished.connect(self.train_finished)
             self.train_thread.start()
@@ -572,25 +590,34 @@ class train_dialog(QtWidgets.QDialog):
 
             im = ax2.imshow(self.cm, interpolation="nearest", cmap=plt.cm.Blues)
             ax2.figure.colorbar(im, ax=ax2)
-            ax2.set(xticks=np.arange(self.cm.shape[1]),
-                    yticks=np.arange(self.cm.shape[0]),
-                    xticklabels=self.classes.values(),
-                    yticklabels=self.classes.values(),
-                    title="Confusion Matrix",
-                    ylabel="True label",
-                    xlabel="Predicted label")
+            ax2.set(
+                xticks=np.arange(self.cm.shape[1]),
+                yticks=np.arange(self.cm.shape[0]),
+                xticklabels=self.classes.values(),
+                yticklabels=self.classes.values(),
+                title="Confusion Matrix",
+                ylabel="True label",
+                xlabel="Predicted label",
+            )
 
-            plt.setp(ax2.get_yticklabels(),
-                     rotation="vertical",
-                     horizontalalignment="right",
-                     verticalalignment="center")
+            plt.setp(
+                ax2.get_yticklabels(),
+                rotation="vertical",
+                horizontalalignment="right",
+                verticalalignment="center",
+            )
 
-            thresh = self.cm.max() / 2.
+            thresh = self.cm.max() / 2.0
             for i in range(self.cm.shape[0]):
                 for j in range(self.cm.shape[1]):
-                    ax2.text(j, i, format(self.cm[i, j], "d"),
-                             ha="center", va="center",
-                             color="white" if self.cm[i, j] > thresh else "black")
+                    ax2.text(
+                        j,
+                        i,
+                        format(self.cm[i, j], "d"),
+                        ha="center",
+                        va="center",
+                        color="white" if self.cm[i, j] > thresh else "black",
+                    )
             plt.autoscale()
             plt.tight_layout()
             canvas.canvas.draw()
@@ -608,8 +635,7 @@ class train_dialog(QtWidgets.QDialog):
                 self.train_files_grid.addWidget(c, file, 0)
 
                 self.f_btn = QtWidgets.QPushButton("Load File", self)
-                self.f_btn.clicked.connect(lambda _,
-                                           fi=file: self.load_train_file(fi))
+                self.f_btn.clicked.connect(lambda _, fi=file: self.load_train_file(fi))
                 self.train_files_grid.addWidget(self.f_btn, file, 1)
                 self.f_btns.append(self.f_btn)
 
@@ -642,8 +668,11 @@ class train_dialog(QtWidgets.QDialog):
             msgBox.setWindowTitle("Warning")
             msgBox.setText("No groups found")
             msgBox.setInformativeText(
-                ("Datafile does not contain group information."
-                 "Please load file with picked localizations."))
+                (
+                    "Datafile does not contain group information."
+                    "Please load file with picked localizations."
+                )
+            )
             msgBox.exec_()
         else:
             self.training_files[(file)] = locs
@@ -690,14 +719,16 @@ class train_dialog(QtWidgets.QDialog):
 
                 if val >= 1.5:
                     print("Dataset {} will be downsampled.".format(key))
-                    self.training_files[key] = file[ file["group"] <= median_length]
+                    self.training_files[key] = file[file["group"] <= median_length]
 
                     msgBox = QtWidgets.QMessageBox(self)
                     msgBox.setIcon(QtWidgets.QMessageBox.Information)
                     msgBox.setWindowTitle("Info")
                     msgBox.setText("Class {} will be downsampled".format(key))
-                    msgBox.setInformativeText("Datasets are inbalanced. "
-                                              "This can cause training artifacts. ")
+                    msgBox.setInformativeText(
+                        "Datasets are inbalanced. "
+                        "This can cause training artifacts. "
+                    )
                     msgBox.exec_()
 
                 if val <= 0.5:
@@ -707,9 +738,11 @@ class train_dialog(QtWidgets.QDialog):
                     msgBox.setIcon(QtWidgets.QMessageBox.Information)
                     msgBox.setWindowTitle("Info")
                     msgBox.setText("Class {} is to small. Not enough picks".format(key))
-                    msgBox.setInformativeText("Datasets are inbalanced. "
-                                              "This can cause training artifacts. "
-                                              "Try to gather more data for class {}.".format(key))
+                    msgBox.setInformativeText(
+                        "Datasets are inbalanced. "
+                        "This can cause training artifacts. "
+                        "Try to gather more data for class {}.".format(key)
+                    )
                     msgBox.exec_()
 
         return passed
@@ -722,7 +755,7 @@ class train_dialog(QtWidgets.QDialog):
             msgBox.setWindowTitle("Warning")
             msgBox.setText("Preparation already running")
             msgBox.exec_()
-        elif (self.check_set()):
+        elif self.check_set():
             self.generator_running = True
 
             max_key = max(self.pick_radii, key=lambda x: self.pick_radii.get(x))
@@ -733,13 +766,15 @@ class train_dialog(QtWidgets.QDialog):
             self.train_log["Oversampling"] = self.oversampling
             self.train_log["Expand Trainig Set"] = self.expand_training.isChecked()
 
-            self.generate_thread = Generator(locs=self.training_files,
-                                             classes=self.classes,
-                                             pick_radius=self.pick_radius,
-                                             oversampling=self.oversampling,
-                                             expand=self.expand_training.isChecked(),
-                                             export=self.export_img.isChecked(),
-                                             export_paths=self.training_files_path)
+            self.generate_thread = Generator(
+                locs=self.training_files,
+                classes=self.classes,
+                pick_radius=self.pick_radius,
+                oversampling=self.oversampling,
+                expand=self.expand_training.isChecked(),
+                export=self.export_img.isChecked(),
+                export_paths=self.training_files_path,
+            )
 
             self.generate_thread.datasets_made.connect(self.prepare_progress)
             self.generate_thread.datasets_finished.connect(self.prepare_finished)
@@ -750,16 +785,16 @@ class train_dialog(QtWidgets.QDialog):
             msgBox.setIcon(QtWidgets.QMessageBox.Warning)
             msgBox.setWindowTitle("Warning")
             msgBox.setText("No all data sets loaded or names defined")
-            msgBox.setInformativeText("Check if all names are set up correct."
-                                      " Duplicate names are not valid.")
+            msgBox.setInformativeText(
+                "Check if all names are set up correct."
+                " Duplicate names are not valid."
+            )
             msgBox.exec_()
 
     def prepare_progress(self, current_dataset, last_dataset, current_img, last_img):
 
-        self.progress_sets_label.setText("{}/{}".format(current_dataset,
-                                                        last_dataset))
-        self.progress_imgs_label.setText("{}/{}".format(current_img,
-                                                        last_img))
+        self.progress_sets_label.setText("{}/{}".format(current_dataset, last_dataset))
+        self.progress_imgs_label.setText("{}/{}".format(current_img, last_img))
         self.progress_bar.setMaximum(last_img)
         self.progress_bar.setValue(current_img)
 
@@ -827,7 +862,7 @@ class View(QtWidgets.QLabel):
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
-        self._bgra[:,:,3].fill(255)
+        self._bgra[:, :, 3].fill(255)
         qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
         self._pixmap = QtGui.QPixmap.fromImage(qimage)
         self.set_pixmap(self._pixmap)
@@ -933,8 +968,8 @@ class Window(QtWidgets.QMainWindow):
         accuracy_grid.addWidget(self.filter_accuracy_btn, 1, 0)
         accuracy_grid.addWidget(self.export_accuracy, 0, 1)
 
-        self.export_regions_btn =  QtWidgets.QCheckBox("Export Pick Regions")
-        self.regroup_btn =  QtWidgets.QCheckBox("Regroup Export Files")
+        self.export_regions_btn = QtWidgets.QCheckBox("Export Pick Regions")
+        self.regroup_btn = QtWidgets.QCheckBox("Regroup Export Files")
         self.regroup_btn.setChecked(True)
 
         self.export_btn = QtWidgets.QPushButton("Export")
@@ -973,7 +1008,10 @@ class Window(QtWidgets.QMainWindow):
             self.pick_radius = self.pick_diameter / 2
 
             self.thread = Predictor(
-                self.model, self.locs, self.pick_radius, self.oversampling,
+                self.model,
+                self.locs,
+                self.pick_radius,
+                self.oversampling,
             )
             self.thread.predictions_made.connect(self.on_progress)
             self.thread.prediction_finished.connect(self.on_finished)
@@ -1010,11 +1048,13 @@ class Window(QtWidgets.QMainWindow):
                     probabilities_per_pick[c] = pick_score
 
                 ax1 = canvas.figure.subplots(1, 1)
-                ax1.hist(probabilities_per_pick,
-                         bins=100,
-                         range=(0,1.0),
-                         align="mid",
-                         rwidth = 1)
+                ax1.hist(
+                    probabilities_per_pick,
+                    bins=100,
+                    range=(0, 1.0),
+                    align="mid",
+                    rwidth=1,
+                )
                 ax1.set_xlabel("Probability")
                 ax1.set_ylabel("Counts")
 
@@ -1022,7 +1062,6 @@ class Window(QtWidgets.QMainWindow):
                 plt.tight_layout()
                 canvas.canvas.draw()
                 canvas.show()
-
 
     def on_finished(self, locs):
         self.locs = locs.copy()
@@ -1033,10 +1072,15 @@ class Window(QtWidgets.QMainWindow):
 
     def on_progress(self, pick, total_picks):
         if pick == total_picks:
-            self.status_bar.showMessage("Predicting finished. Cleaning up... Please wait.")
+            self.status_bar.showMessage(
+                "Predicting finished. Cleaning up... Please wait."
+            )
         else:
-            self.status_bar.showMessage("Predicting... Please wait. From {} picks - predicted {}"
-                                       .format(total_picks, pick))
+            self.status_bar.showMessage(
+                "Predicting... Please wait. From {} picks - predicted {}".format(
+                    total_picks, pick
+                )
+            )
 
     def open(self):
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
@@ -1060,8 +1104,11 @@ class Window(QtWidgets.QMainWindow):
             msgBox.setWindowTitle("Warning")
             msgBox.setText("No groups found")
             msgBox.setInformativeText(
-                ("Datafile does not contain group information."
-                 " Please load file with picked localizations."))
+                (
+                    "Datafile does not contain group information."
+                    " Please load file with picked localizations."
+                )
+            )
             msgBox.exec_()
         else:
             groups = np.unique(self.locs.group)
@@ -1073,7 +1120,9 @@ class Window(QtWidgets.QMainWindow):
             self.status_bar.showMessage("{} picks loaded.".format(str(groups_max)))
 
         if self.model_loaded is False:
-            self.status_bar.showMessage("{} picks loaded. Load model to predict".format(str(groups_max)))
+            self.status_bar.showMessage(
+                "{} picks loaded. Load model to predict".format(str(groups_max))
+            )
         else:
             self.predict_btn.setDisabled(False)
 
@@ -1116,7 +1165,8 @@ class Window(QtWidgets.QMainWindow):
     def load_model(self):
 
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load model file", filter="*.sav", directory=None)
+            self, "Load model file", filter="*.sav", directory=None
+        )
         if path:
 
             try:
@@ -1146,7 +1196,6 @@ class Window(QtWidgets.QMainWindow):
             if child.widget():
                 child.widget().deleteLater()
 
-
     def update_class_buttons(self):
 
         self.clearLayout(self.classbox_grid)
@@ -1174,7 +1223,9 @@ class Window(QtWidgets.QMainWindow):
         pick_centers = []
         pick_regions = {}
 
-        checks = (self.classbox_grid.itemAt(i) for i in range(self.classbox_grid.count()))
+        checks = (
+            self.classbox_grid.itemAt(i) for i in range(self.classbox_grid.count())
+        )
         for btn in checks:
 
             if isinstance(btn, QtWidgets.QWidgetItem):
@@ -1198,9 +1249,8 @@ class Window(QtWidgets.QMainWindow):
 
         export_locs = self.locs.copy()
 
-
         if self.filter_accuracy_btn.isChecked():
-            print("Probability filter set to {:4}%".format(accuracy*100))
+            print("Probability filter set to {:4}%".format(accuracy * 100))
             export_locs = export_locs[export_locs["score"] >= accuracy]
             dropped_picks = all_picks - len(np.unique(export_locs["group"]))
             print("Dropped {} from {} picks.".format(dropped_picks, all_picks))
@@ -1238,19 +1288,24 @@ class Window(QtWidgets.QMainWindow):
 
                 for pick in np.unique(filtered_locs["group"]):
                     pick_locs = filtered_locs[filtered_locs["group"] == pick]
-                    pick_centers.append([float(np.mean(pick_locs.x)),
-                                        float(np.mean(pick_locs.y))])
+                    pick_centers.append(
+                        [float(np.mean(pick_locs.x)), float(np.mean(pick_locs.y))]
+                    )
 
                 pick_regions["Centers"] = pick_centers
                 pick_regions["Diameter"] = self.model_info["Pick Diameter"]
                 pick_regions["Shape"] = "Circle"
-                pick_out_path = os.path.splitext(self.path)[0] + out_filename + "_picks.yaml"
+                pick_out_path = (
+                    os.path.splitext(self.path)[0] + out_filename + "_picks.yaml"
+                )
                 with open(pick_out_path, "w") as f:
                     yaml.dump(pick_regions, f)
 
         progress.close()
         print("Export of all predicted datasets finished.")
-        self.status_bar.showMessage("{} files exported.".format(len(export_classes.items())))
+        self.status_bar.showMessage(
+            "{} files exported.".format(len(export_classes.items()))
+        )
 
 
 def main():
@@ -1265,9 +1320,7 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window, "An error occured", message
-        )
+        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

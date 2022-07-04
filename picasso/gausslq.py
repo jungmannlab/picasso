@@ -75,9 +75,7 @@ def _initial_parameters(spot, size, size_half):
     spot_without_bg = spot - theta[3]
     sum, theta[1], theta[0] = _sum_and_center_of_mass(spot_without_bg, size)
     theta[2] = _np.maximum(1.0, sum)
-    theta[5], theta[4] = _initial_sigmas(
-        spot - theta[3], theta[1], theta[0], sum, size
-    )
+    theta[5], theta[4] = _initial_sigmas(spot - theta[3], theta[1], theta[0], sum, size)
     theta[0:2] -= size_half
     return theta
 
@@ -120,9 +118,7 @@ def _compute_model(theta, grid, size, model_x, model_y, model):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _compute_residuals(
-    theta, spot, grid, size, model_x, model_y, model, residuals
-):
+def _compute_residuals(theta, spot, grid, size, model_x, model_y, model, residuals):
     _compute_model(theta, grid, size, model_x, model_y, model)
     residuals[:, :] = spot - model
     return residuals.flatten()
@@ -168,16 +164,14 @@ def fit_spots_parallel(spots, asynch=False):
     n_spots = len(spots)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_spots / n_tasks + 1)
-        if _ < n_spots % n_tasks
-        else int(n_spots / n_tasks)
+        int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(n_spots / n_tasks)
         for _ in range(n_tasks)
     ]
     start_indices = _np.cumsum([0] + spots_per_task[:-1])
     fs = []
     executor = _futures.ProcessPoolExecutor(n_workers)
     for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i: i + n_spots_task]))
+        fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
     if asynch:
         return fs
     with _tqdm(total=n_tasks, unit="task") as progress_bar:
