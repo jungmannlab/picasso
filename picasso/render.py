@@ -457,7 +457,7 @@ def _fill_gaussian_rot(
                 [0, 0, sz_**2],
             ], dtype=_np.float32
         ) # covariance matrix (CM)
-        cov_rot = rot_matrixT @ cov_matrix @ rot_matrix # rotated CM
+        cov_rot = rot_matrix @ cov_matrix @ rot_matrixT # rotated CM
         cri = inverse_3x3(cov_rot) # inverse of rotated CM
         dcr = determinant_3x3(cov_rot) # determinant of rotated CM
 
