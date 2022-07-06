@@ -14,8 +14,8 @@ call cd release/one_click_windows_gui
 call pip install "../../dist/picassosr-0.4.5-py3-none-any.whl"
 
 call pip install pyinstaller==5.1
-call pyinstaller ../pyinstaller/picasso.spec -y
-call pyinstaller ../pyinstaller/picassow.spec -y
+call pyinstaller ../pyinstaller/picasso.spec -y --clean
+call pyinstaller ../pyinstaller/picassow.spec -y --clean
 call conda deactivate
 
 call robocopy ../../picasso dist/picasso/picasso /E
