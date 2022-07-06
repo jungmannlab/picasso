@@ -93,6 +93,22 @@ Set up a watcher to automatically process files in a folder with pre-defined set
 * All raw files in the folder that haven't been processed will be processed.
 * Use different folders to process files with different settings.
 
+You can use the "Custom command" to execute a custom script after a file was processed.
+Consider the following example for a script that you want to execute named test.py:::
+
+  import sys
+  from slack_sdk.webhook import WebhookClient
+  url = "REPLACE_WITH_SLACKHOOK"
+  webhook = WebhookClient(url)
+
+  _, filename = sys.argv[0], sys.argv[1]
+
+  response = webhook.send(text=f"Processed file {filename}!")
+
+This script would send a message to a slack webhook with the first argument as filename. To call this from the watcher, we need to point to a python environment.
+E.g. for a conda installation at ``C:\ProgramData\Miniconda3\python.exe`` and the script being located at ``C:\Users\Maximilian\Desktop\test.py`` the complete command to enter in Picasso server would be:
+``C:\ProgramData\Miniconda3\python.exe C:\Users\Maximilian\Desktop\test.py $FILENAME``.
+
 Preview
 ~~~~~~~
 Preview will render the super-resolution data in the browser.
@@ -102,3 +118,11 @@ Preview will render the super-resolution data in the browser.
    :alt: Histogram
 
 **The database will store the file path when it is localized. If the file is moved, it will not be selectable.**
+
+
+Docker
+~~~~~~
+If you want to install picasso server in a headless linux or mac system, the provided dockerfile might be useful for installation.
+* Build the docker image from the dockerfile (clone the github repository): ``docker build -t picasso .``
+* Run the docker image (interactive mode, port forwarding and with a mounted drive): ``docker run -it -p 8501:8501 --volume "C:/Users/Maximilian/Desktop/data:/home/picasso/data" picasso`` Note that you need to replace the respective paths.
+* Launch picasso server in the docker image: ``python3 -m picasso server``

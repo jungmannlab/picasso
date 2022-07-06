@@ -448,7 +448,9 @@ def get_file_summary(file, drift=None, len_mean=None, nena=None):
 
 def _db_filename():
     home = os.path.expanduser("~")
-    return os.path.abspath(os.path.join(home, ".picasso", "app_044.db"))
+    picasso_dir = os.path.join(home, ".picasso")
+    os.makedirs(picasso_dir, exist_ok=True)
+    return os.path.abspath(os.path.join(picasso_dir, "app_044.db"))
 
 
 def save_file_summary(summary):

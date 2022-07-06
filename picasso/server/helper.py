@@ -2,6 +2,7 @@ import picasso.io
 import picasso.postprocess
 import os
 import numpy as np
+import sqlalchemy
 from sqlalchemy import create_engine
 import pandas as pd
 import streamlit as st
@@ -16,7 +17,8 @@ def fetch_db():
     Helper function to load the local database and return the files.
     """
     try:
-        engine = create_engine("sqlite:///" + _db_filename(), echo=False)
+        DB_PATH = "sqlite:///" + _db_filename()
+        engine = create_engine(DB_PATH, echo=False)
         df = pd.read_sql_table("files", con=engine)
 
         df = df.sort_values("file_created")
