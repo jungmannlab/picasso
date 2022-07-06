@@ -343,7 +343,7 @@ def check_nena(locs, info, callback=None):
         print(e)
         nena_px = float("nan")
 
-    print(f"{nena_px:.2f}")
+    print(f"{nena_px:.2f} px.")
 
     return nena_px
 
@@ -356,7 +356,7 @@ def check_kinetics(locs, info):
     # locs = _postprocess.compute_dark_times(locs)
     len_mean = locs.len.mean()
     # dark_mean = locs.dark.mean()
-    print(f"{len_mean:.2f}")
+    print(f"Mean lenght {len_mean:.2f} frames.")
 
     return len_mean
 
@@ -383,7 +383,7 @@ def check_drift(locs, info, callback=None):
     drift_x = float(drift["x"].mean())
     drift_y = float(drift["y"].mean())
 
-    print(f"Drift is X: {drift_x:.2f}, Y: {drift_y:.2f}")
+    print(f"Drift is X: {drift_x:.2f}, Y: {drift_y:.2f}.")
 
     return (drift_x, drift_y)
 

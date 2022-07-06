@@ -1921,7 +1921,6 @@ class QualityWorker(QtCore.QThread):
         def drift_callback(x):
             self.progressMade.emit(f"Checking Quality (3/4) Drift {x} %", 0, "")
 
-        print(f"Stepsize for drift correction {steps}")
         drift_x, drift_y = localize.check_drift(
             sane_locs, self.info, callback=drift_callback
         )
