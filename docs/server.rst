@@ -109,6 +109,14 @@ This script would send a message to a slack webhook with the first argument as f
 E.g. for a conda installation at ``C:\ProgramData\Miniconda3\python.exe`` and the script being located at ``C:\Users\Maximilian\Desktop\test.py`` the complete command to enter in Picasso server would be:
 ``C:\ProgramData\Miniconda3\python.exe C:\Users\Maximilian\Desktop\test.py $FILENAME``.
 
+When having an existing Picasso one-click installation, Picasso can directly be called via the command-line. Some example commands would then be:
+
+* ``picasso undrift $FILENAME`` for drift correction
+* ``picasso link $FILENAME`` for linking localizations
+* ``picasso dbscan $FILENAME 0.1 2`` for performing DBSCAN cluster analysis with 0.1 / 2
+
+etc.
+
 Preview
 ~~~~~~~
 Preview will render the super-resolution data in the browser.
