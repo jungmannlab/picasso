@@ -1897,8 +1897,6 @@ class QualityWorker(QtCore.QThread):
         self.pixelsize = pixelsize
 
     def run(self):
-        MAX_LOCS = int(1e6)
-
         # Sanity of locs.
         sane_locs = lib.ensure_sanity(self.locs, self.info)
 
@@ -1913,28 +1911,25 @@ class QualityWorker(QtCore.QThread):
         def nena_callback(x):
             self.progressMade.emit(f"Checking Quality (2/4) NeNA: {x} %", 0, "")
 
-        nena_px = localize.check_nena(sane_locs[0:MAX_LOCS], self.info, nena_callback)
+        nena_px = localize.check_nena(sane_locs, self.info, nena_callback)
         nena_nm = float(self.pixelsize.value() * nena_px)
         self.progressMade.emit("", 1, f"{nena_px:.2f} px / {nena_nm:.2f} nm")
 
         # Drift
         self.progressMade.emit("Checking Quality (3/4) Drift ..", 0, "")
 
-        steps = int(len(sane_locs) // (MAX_LOCS))
-        steps = max(1, steps)
-
         def drift_callback(x):
             self.progressMade.emit(f"Checking Quality (3/4) Drift {x} %", 0, "")
 
         print(f"Stepsize for drift correction {steps}")
         drift_x, drift_y = localize.check_drift(
-            sane_locs[::steps], self.info, callback=drift_callback
+            sane_locs, self.info, callback=drift_callback
         )
         self.progressMade.emit("", 2, f"X: {drift_x:.3f} px / Y: {drift_y:.3f} px")
 
         # Kinetics
         self.progressMade.emit("Checking Quality (4/4) Kinetics ..", 0, "")
-        len_mean = localize.check_kinetics(sane_locs[0:MAX_LOCS], self.info)
+        len_mean = localize.check_kinetics(sane_locs, self.info)
         self.progressMade.emit("", 3, f"{len_mean:.3f}")
 
         print(f"Quality {nena_px} {drift_x} {drift_y} {len_mean}")

@@ -24,6 +24,8 @@ from datetime import datetime
 from sqlalchemy import create_engine
 import pandas as pd
 
+MAX_LOCS = int(1e6)
+
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
 LOCS_DTYPE = [
     ("frame", "u4"),
@@ -332,6 +334,8 @@ def localize(movie, info, parameters):
 
 def check_nena(locs, info, callback=None):
     # Nena
+    print('Calculating NeNA..')
+    locs = [0:MAX_LOCS]
     try:
         result, best_result = _postprocess.nena(locs, info, callback=callback)
         nena_px = best_result
@@ -344,6 +348,7 @@ def check_nena(locs, info, callback=None):
 
 def check_kinetics(locs, info):
     print("Linking..")
+    locs = [0:MAX_LOCS]
     locs = _postprocess.link(locs, info=info)
     # print('Dark Time')
     # locs = _postprocess.compute_dark_times(locs)
@@ -354,6 +359,11 @@ def check_kinetics(locs, info):
 
 
 def check_drift(locs, info, callback=None):
+    print('Estimating drift..')
+    steps = int(len(locs) // (MAX_LOCS))
+    steps = max(1, steps)
+
+    locs = locs[::steps]
 
     n_frames = info[0]["Frames"]
 
