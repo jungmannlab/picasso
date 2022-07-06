@@ -334,8 +334,8 @@ def localize(movie, info, parameters):
 
 def check_nena(locs, info, callback=None):
     # Nena
-    print('Calculating NeNA..')
-    locs = [0:MAX_LOCS]
+    print('Calculating NeNA.. ', end ='')
+    locs = locs[0:MAX_LOCS]
     try:
         result, best_result = _postprocess.nena(locs, info, callback=callback)
         nena_px = best_result
@@ -343,23 +343,25 @@ def check_nena(locs, info, callback=None):
         print(e)
         nena_px = float("nan")
 
+    print(f"{nena_px:.2f}")
+
     return nena_px
 
 
 def check_kinetics(locs, info):
-    print("Linking..")
-    locs = [0:MAX_LOCS]
+    print("Linking.. ", end ='')
+    locs = locs[0:MAX_LOCS]
     locs = _postprocess.link(locs, info=info)
     # print('Dark Time')
     # locs = _postprocess.compute_dark_times(locs)
     len_mean = locs.len.mean()
     # dark_mean = locs.dark.mean()
+    print(f"{len_mean:.2f}")
 
     return len_mean
 
 
 def check_drift(locs, info, callback=None):
-    print('Estimating drift..')
     steps = int(len(locs) // (MAX_LOCS))
     steps = max(1, steps)
 
@@ -369,8 +371,7 @@ def check_drift(locs, info, callback=None):
 
     segmentation = max(1, int(n_frames // 10))
 
-    print(f"Drift Segmentation {segmentation}")
-
+    print(f"Estimating drift with segmentation {segmentation}")
     drift, locs = _postprocess.undrift(
         locs,
         info,
@@ -381,6 +382,8 @@ def check_drift(locs, info, callback=None):
 
     drift_x = float(drift["x"].mean())
     drift_y = float(drift["y"].mean())
+
+    print(f"Drift is X: {drift_x:.2f}, Y: {drift_y:.2f}")
 
     return (drift_x, drift_y)
 
