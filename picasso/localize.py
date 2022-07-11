@@ -249,7 +249,6 @@ def _cut_spots(movie, ids, box):
             )
         return spots
 
-
 def _to_photons(spots, camera_info):
     spots = _np.float32(spots)
     baseline = camera_info["baseline"]

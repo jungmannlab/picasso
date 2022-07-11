@@ -431,21 +431,21 @@ def _fill_gaussian_rot(
     for x_, y_, z_, sx_, sy_, sz_ in zip(x, y, z, sx, sy, sz):
 
         # get min and max indeces to draw the given localization
-        max_y = _DRAW_MAX_SIGMA * sy_
+        max_y = (_DRAW_MAX_SIGMA * 2.5) * sy_
         i_min = int(y_ - max_y)
         if i_min < 0:
             i_min = 0
         i_max = int(y_ + max_y + 1)
         if i_max > n_pixel_y:
             i_max = n_pixel_y
-        max_x = _DRAW_MAX_SIGMA * sx_
+        max_x = (_DRAW_MAX_SIGMA * 2.5) * sx_
         j_min = int(x_ - max_x)
         if j_min < 0:
             j_min = 0
         j_max = int(x_ + max_x + 1)
         if j_max > n_pixel_x:
             j_max = n_pixel_x
-        max_z = (_DRAW_MAX_SIGMA * 3) * sz_ # loc precision is lower in z
+        max_z = (_DRAW_MAX_SIGMA * 2.5) * sz_ 
         k_min = int(z_ - max_z)
         k_max = int(z_ + max_z + 1)
 
@@ -1029,16 +1029,16 @@ def locs_rotation(
 
     # x and y are in range (x_min/y_min, x_max/y_max) so they need to be
     # shifted (scipy rotation is around origin)
-    locs_coord[:,0] -= x_min + (x_max-x_min)/2
-    locs_coord[:,1] -= y_min + (y_max-y_min)/2
+    locs_coord[:, 0] -= x_min + (x_max - x_min) / 2
+    locs_coord[:, 1] -= y_min + (y_max - y_min) / 2
 
     # rotate locs
     R = rotation_matrix(ang[0], ang[1], ang[2])
     locs_coord = R.apply(locs_coord)
 
     # unshift locs
-    locs_coord[:,0] += x_min + (x_max-x_min)/2
-    locs_coord[:,1] += y_min + (y_max-y_min)/2
+    locs_coord[:,0] += x_min + (x_max - x_min) / 2
+    locs_coord[:,1] += y_min + (y_max - y_min) / 2
 
     # output
     x = locs_coord[:,0]
