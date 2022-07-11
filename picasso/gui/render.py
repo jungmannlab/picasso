@@ -5852,7 +5852,7 @@ class View(QtWidgets.QLabel):
         if len(self._picks) > 0: 
             clustered_locs = [] # list with picked locs after clustering
             picked_locs = self.picked_locs(channel, add_group=False)
-            group_offset = 0
+            group_offset = 1
             pd = lib.ProgressDialog(
                 "Clustering in picks", 0, len(picked_locs), self
             )
@@ -5895,7 +5895,7 @@ class View(QtWidgets.QLabel):
                         # make sure each picks produces unique cluster ids
                         temp_locs.group += group_offset
                         clustered_locs.append(temp_locs)
-                        group_offset += np.max(labels)
+                        group_offset += np.max(labels) + 1
                 pd.set_value(i + 1)
             clustered_locs = stack_arrays(
                 clustered_locs, asrecarray=True, usemask=False
