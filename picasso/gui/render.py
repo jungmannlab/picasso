@@ -5815,6 +5815,12 @@ class View(QtWidgets.QLabel):
         apply_to_all = params[-2]
         ok = params[-1]
 
+        if len(self._picks) == 0:
+            m = self.CPU_or_GPU_box()
+            self.use_gpu = m.exec()
+        else:
+            self.use_gpu = None
+
         if ok:
             if apply_to_all:
                 # get saving name suffix
@@ -5836,7 +5842,9 @@ class View(QtWidgets.QLabel):
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
                     "Save clustered locs",
-                    self.locs_paths[channel].replace(".hdf5", "_clustered.hdf5"),
+                    self.locs_paths[channel].replace(
+                        ".hdf5", "_clustered.hdf5"
+                    ),
                     filter="*.hdf5",
                 )
                 if path:
@@ -5849,7 +5857,7 @@ class View(QtWidgets.QLabel):
             radius_xy, radius_z, min_locs, save_centers, _, _ = params
 
         # cluster picked locs with cpu (distance matrix)
-        if len(self._picks) > 0: 
+        if self.use_gpu is None: 
             clustered_locs = [] # list with picked locs after clustering
             picked_locs = self.picked_locs(channel, add_group=False)
             group_offset = 1
@@ -5914,10 +5922,7 @@ class View(QtWidgets.QLabel):
             else:
                 locs = self.all_locs[channel]
 
-            m = self.CPU_or_GPU_box()
-            reply = m.exec()
-
-            if reply == 0: # use gpu
+            if self.use_gpu == 0: # use gpu
                 if cuda.is_available(): # gpu is available
                     if hasattr(locs, "z"):
                         labels = clusterer.clusterer_GPU_3D(
@@ -5947,7 +5952,7 @@ class View(QtWidgets.QLabel):
                         self, "GPU not found.", message
                     )
                     return
-            elif reply == 1: # use cpu (distance calculated on demand)
+            elif self.use_gpu == 1: # use cpu (distance calculated on demand)
                 if hasattr(locs, "z"):
                     labels = clusterer.clusterer_CPU_3D(
                         locs.x,
@@ -6808,8 +6813,12 @@ class View(QtWidgets.QLabel):
             n[i] = len(grouplocs)
             if hasattr(locs, "z"):
                 z[i] = np.mean(grouplocs.z)
-                lpz[i] = lpx[i] + lpy[i] # 2 * mean of lpx and lpy
             pd.set_value(i + 1)
+
+        # take the average of lpx and lpy as lateral localization precision
+        lpx = np.mean(np.stack((lpx, lpy)), axis=0)
+        lpy = lpx
+        lpz = 2 * lpx # for now, take lpz to be double lpx
 
         # recarray to save
         centers = np.rec.array(
