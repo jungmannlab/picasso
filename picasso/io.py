@@ -21,6 +21,10 @@ from PyQt5.QtWidgets import QMessageBox as _QMessageBox
 from . import lib as _lib
 import abc
 import nd2
+from nd2reader import ND2Reader
+from nd2reader.label_map import LabelMap
+from nd2reader.raw_metadata import RawMetadata
+from nd2reader.common_raw_metadata import parse_roi_shape, parse_roi_type, parse_dimension_text_line
 
 
 class NoMetadataFileError(FileNotFoundError):
@@ -168,7 +172,7 @@ class AbstractPicassoMovie(abc.ABC):
     """
     @abc.abstractmethod
     def __init__(self):
-        pass
+        self.use_dask = False
 
     @abc.abstractmethod
     def __enter__(self):
@@ -237,35 +241,57 @@ class AbstractPicassoMovie(abc.ABC):
 class ND2Movie(AbstractPicassoMovie):
     """Subclass of the AbstractPicassoMovie to implement reading Nikon nd2
     files.
+    Two packages for reading nd2 files have been tested and are used here:
+    * nd2.ND2File - makes all metadata accessible, and uses dask arrays
+      which is good for multiprocessing. Nonetheless, converting all data to
+      numpy arrays takes long (2000 frames/s for dask planes; 20 frames/s with
+      compute() on dask planes to get numpy)
+    * nd2reader.ND2Reader - image reading is a bit faster than TiffMultiMap
+      (ca 800 frames/s), and the file is serealizable for multiprocessing.
+      However, very limited metadata is available.
+
+    This class implements a hybrid version which uses both packages:
+    nd2 for metadata retrieval, and nd2reader for image data retrieval
     """
     def __init__(self, path, verbose=False):
+        super().__init__()
         if verbose:
             print("Reading info from {}".format(path))
         self.path = _ospath.abspath(path)
-        self.nd2file = nd2.ND2File(path)
-        self.dask = self.nd2file.to_dask()
+        nd2file = nd2.ND2File(path)
+        self.sizes = nd2file.sizes
 
         required_dims = ['T', 'Y', 'X']  # exactly these, not more
         for dim in required_dims:
-            if dim not in self.nd2file.sizes.keys():
+            if dim not in nd2file.sizes.keys():
                 raise KeyError(
                     'Required dimension {:s} not in file {:s}'.format(
                         dim, self.path))
-        if self.nd2file.ndim != len(required_dims):
+        if nd2file.ndim != len(required_dims):
             raise KeyError(
                 'File {:s} has dimensions {:s} '.format(
-                    self.path, str(self.nd2file.sizes.keys())) +
+                    self.path, str(nd2file.sizes.keys())) +
                 'but should have exactly {:s}.'.format(str(required_dims)))
 
-        self.meta = self.get_metadata()
+        self.meta = self.get_metadata(nd2file)
+
+        self.nd2data = ND2Reader(self.path)
+        self._shape = [
+            self.nd2data.metadata['num_frames'],
+            self.nd2data.metadata['width'],
+            self.nd2data.metadata['height'],
+            ]
 
     def info(self):
         return self.meta
 
-    def get_metadata(self):
+    def get_metadata(self, nd2file):
         """Brings the file metadata in a readable form, and preprocesses it
         for easier downstream use.
 
+        Args:
+            nd2file : nd2.ND2File
+                the object holding the image incl metadata
         Returns:
             info : dict
                 the metadata
@@ -273,14 +299,14 @@ class ND2Movie(AbstractPicassoMovie):
         info = {
             # "Byte Order": self._tif_byte_order,
             "File": self.path,
-            "Height": self.nd2file.sizes['Y'],
-            "Width": self.nd2file.sizes['X'],
-            "Data Type": self.nd2file.dtype.name,
-            "Frames": self.nd2file.sizes['T'],
+            "Height": nd2file.sizes['Y'],
+            "Width": nd2file.sizes['X'],
+            "Data Type": nd2file.dtype.name,
+            "Frames": nd2file.sizes['T'],
         }
         info['Acquisition Comments'] = ''
 
-        mm_info = self.metadata_to_dict()
+        mm_info = self.metadata_to_dict(nd2file)
         camera_name = mm_info.get('description', {}).get(
                 'Metadata', {}).get('Camera Name', 'None')
         info['Camera'] = camera_name
@@ -322,24 +348,27 @@ class ND2Movie(AbstractPicassoMovie):
 
         return info
 
-    def metadata_to_dict(self):
+    def metadata_to_dict(self, nd2file):
         """Extracts all types of metadata in the file and returns it in a dict.
 
+        Args:
+            nd2file : nd2.ND2File
+                the object holding the image incl metadata
         Returns:
             mmmeta : dict
                 all metadata
         """
         mmmeta = {}
 
-        text_info = self.nd2file.text_info
+        text_info = nd2file.text_info
         mmmeta['capturing'] = self.nikontext_to_dict(text_info['capturing'])
         mmmeta['AcquisitionDate'] = text_info['date']
         mmmeta['description'] = self.nikontext_to_dict(text_info['description'])
         mmmeta['optics'] = self.nikontext_to_dict(text_info['optics'])
 
-        mmmeta['custom_data'] = self.nd2file.custom_data
-        mmmeta['attributes'] = self.nd2file.attributes._asdict()
-        mmmeta['metadata'] = self.nd2metadata_to_dict(self.nd2file.metadata)
+        mmmeta['custom_data'] = nd2file.custom_data
+        mmmeta['attributes'] = nd2file.attributes._asdict()
+        mmmeta['metadata'] = self.nd2metadata_to_dict(nd2file.metadata)
 
         return mmmeta
 
@@ -437,7 +466,7 @@ class ND2Movie(AbstractPicassoMovie):
         currlvl[keys[-1]] = val
 
     def __enter__(self):
-        return self.nd2file
+        return self.nd2data
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
@@ -446,14 +475,18 @@ class ND2Movie(AbstractPicassoMovie):
         return self.get_frame(it)
 
     def __iter__(self):
-        for i in range(self.nd2file.sizes['T']):
+        for i in range(self.sizes['T']):
             yield self[i]
 
     def __len__(self):
-        return self.nd2file.sizes['T']
+        return self.sizes['T']
+
+    @property
+    def shape(self):
+        return self._shape
 
     def close(self):
-        self.nd2file.close()
+        self.nd2data.close()
 
     def get_frame(self, index):
         """Load one frame of the movie
@@ -464,8 +497,7 @@ class ND2Movie(AbstractPicassoMovie):
             frame : 2D array
                 the image data of the frame
         """
-        # return self.nd2file.asarray()[index, ...]
-        return self.dask[index, ...].compute()
+        return self.nd2data[index]
 
     def tofile(self, file_handle, byte_order=None):
         raise NotImplementedError('Cannot write .nd2 file.')
@@ -579,7 +611,7 @@ class ND2Movie(AbstractPicassoMovie):
 
     @property
     def dtype(self):
-        return self.meta['Data Type']
+        return _np.dtype(self.meta['Data Type'])
 
 
 class TiffMap:
@@ -818,6 +850,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     accessed by TiffMap.
     """
     def __init__(self, path, memmap_frames=False, verbose=False):
+        super().__init__()
         self.path = _ospath.abspath(path)
         self.dir = _ospath.dirname(self.path)
         base, ext = _ospath.splitext(

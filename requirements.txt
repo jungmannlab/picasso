@@ -10,7 +10,7 @@ colorama==0.4.4
 tqdm==4.50.2
 lmfit==1.0.1
 moviepy==1.0.3
-nd2==0.2.2
+nd2==0.3.0
 streamlit==0.88.0
 sqlalchemy==1.4.22
 plotly-express==0.4.1
