@@ -5788,6 +5788,19 @@ class View(QtWidgets.QLabel):
         ok = params[-1] # true if parameters were given
 
         if ok:
+            self.convert_nm = False
+            if any(self.z_converted):
+                m = QtWidgets.QMessageBox()
+                m.setWindowTitle("z coordinates have been converted to pixels")
+                ret = m.question(
+                    self,
+                    "",
+                    "Convert z back to nm? (old picasso format)",
+                    m.Yes | m.No,
+                )
+                if ret == m.Yes:
+                    self.convert_nm = True
+
             if len(self._picks) == 0:
                 m = self.CPU_or_GPU_box()
                 self.use_gpu = m.exec()
@@ -5971,20 +5984,11 @@ class View(QtWidgets.QLabel):
             }
         info = self.infos[channel] + [new_info]
         # check if z needs to be converted
-        if self.z_converted[channel]:
-            m = QtWidgets.QMessageBox()
-            m.setWindowTitle("z coordinates have been converted to pixels")
-            ret = m.question(
-                self,
-                "",
-                "Convert z back to nm? (old picasso format)",
-                m.Yes | m.No,
+        if self.z_converted[channel] and self.convert_nm:
+            pixelsize = (
+                self.window.display_settings_dlg.pixelsize.value()
             )
-            if ret == m.Yes:
-                pixelsize = (
-                    self.window.display_settings_dlg.pixelsize.value()
-                )
-                clustered_locs.z *= pixelsize
+            clustered_locs.z *= pixelsize
 
         # save locs
         io.save_locs(path, clustered_locs, info)
