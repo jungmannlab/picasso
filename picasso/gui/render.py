@@ -1784,10 +1784,6 @@ class DbscanDialog(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 2, 0, 1, 2)
-        # apply to all channels
-        self.apply_to_all = QtWidgets.QCheckBox("Apply to all channels")
-        self.apply_to_all.setChecked(False)
-        grid.addWidget(self.apply_to_all, 3, 0, 1, 2)
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1811,7 +1807,6 @@ class DbscanDialog(QtWidgets.QDialog):
             dialog.radius.value(),
             dialog.density.value(),
             dialog.save_centers.isChecked(),
-            dialog.apply_to_all.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )
 
@@ -1872,10 +1867,6 @@ class HdbscanDialog(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
-        # apply to all channels
-        self.apply_to_all = QtWidgets.QCheckBox("Apply to all channels")
-        self.apply_to_all.setChecked(False)
-        grid.addWidget(self.apply_to_all, 4, 0, 1, 2)
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1901,7 +1892,6 @@ class HdbscanDialog(QtWidgets.QDialog):
             dialog.min_samples.value(),
             dialog.cluster_eps.value(),
             dialog.save_centers.isChecked(),
-            dialog.apply_to_all.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )
 
@@ -1958,10 +1948,6 @@ class SMLMDialog3D(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
-        # apply to all channels
-        self.apply_to_all = QtWidgets.QCheckBox("Apply to all channels")
-        self.apply_to_all.setChecked(False)
-        grid.addWidget(self.apply_to_all, 4, 0, 1, 2)
 
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -1990,7 +1976,6 @@ class SMLMDialog3D(QtWidgets.QDialog):
             dialog.radius_z.value(),
             dialog.min_locs.value(),
             dialog.save_centers.isChecked(),
-            dialog.apply_to_all.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )    
 
@@ -2038,10 +2023,6 @@ class SMLMDialog2D(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 2, 0, 1, 2)
-        # apply to all channels
-        self.apply_to_all = QtWidgets.QCheckBox("Apply to all channels")
-        self.apply_to_all.setChecked(False)
-        grid.addWidget(self.apply_to_all, 3, 0, 1, 2)
 
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -2069,7 +2050,6 @@ class SMLMDialog2D(QtWidgets.QDialog):
             dialog.radius.value(),
             dialog.min_locs.value(),
             dialog.save_centers.isChecked(),
-            dialog.apply_to_all.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )  
 
@@ -5596,15 +5576,14 @@ class View(QtWidgets.QLabel):
         Gets DBSCAN parameters, performs clustering and saves data.
         """
 
-        channel = self.get_channel("Cluster")
+        channel = self.remove_locs_channel("Cluster")
 
         # get DBSCAN parameters
-        (
-            radius, min_density, save_centers, apply_to_all, ok 
-        ) = DbscanDialog.getParams()
+        params = DbscanDialog.getParams()
+        ok = params[-1] # true if parameters were given
 
         if ok:
-            if apply_to_all: # apply to all channels
+            if channel == len(self.locs_paths): # apply to all channels
                 # get saving name suffix
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
@@ -5631,7 +5610,7 @@ class View(QtWidgets.QLabel):
                     self._dbscan(channel, path, params)
 
     def _dbscan(self, channel, path, params):
-        radius, min_density, save_centers, _, _ = params
+        radius, min_density, save_centers, _ = params
         status = lib.StatusDialog(
             "Applying DBSCAN. This may take a while.", self
         )
@@ -5696,20 +5675,14 @@ class View(QtWidgets.QLabel):
             )
             return
 
-        channel = self.get_channel("Cluster")
+        channel = self.remove_locs_channel("Cluster")
 
         # get HDBSCAN parameters
-        (
-            min_cluster, 
-            min_samples, 
-            cluster_eps, 
-            save_centers, 
-            apply_to_all, 
-            ok, 
-        ) = HdbscanDialog.getParams()
+        params = HdbscanDialog.getParams()
+        ok = params[-1] # true if parameters were given
 
         if ok:
-            if apply_to_all: # apply to all channels
+            if channel == len(self.locs_paths): # apply to all channels
                 # get saving name suffix
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
@@ -5736,7 +5709,7 @@ class View(QtWidgets.QLabel):
                     self._hdbscan(channel, path, params)
 
     def _hdbscan(self, channel, path, params):
-        min_cluster, min_samples, cluster_eps, save_centers, _, _ = params
+        min_cluster, min_samples, cluster_eps, save_centers, _ = params
         status = lib.StatusDialog(
             "Applying HDBSCAN. This may take a while.", self
         )
@@ -5804,7 +5777,7 @@ class View(QtWidgets.QLabel):
                 distances are calculated on demand.
         """
 
-        channel = self.get_channel("Cluster")
+        channel = self.remove_locs_channel("Cluster")
 
         # get clustering parameters
         if hasattr(self.all_locs[channel], "z"):
@@ -5812,17 +5785,29 @@ class View(QtWidgets.QLabel):
         else:
             params = SMLMDialog2D.getParams()
 
-        apply_to_all = params[-2]
-        ok = params[-1]
-
-        if len(self._picks) == 0:
-            m = self.CPU_or_GPU_box()
-            self.use_gpu = m.exec()
-        else:
-            self.use_gpu = None
+        ok = params[-1] # true if parameters were given
 
         if ok:
-            if apply_to_all:
+            self.convert_nm = False
+            if any(self.z_converted):
+                m = QtWidgets.QMessageBox()
+                m.setWindowTitle("z coordinates have been converted to pixels")
+                ret = m.question(
+                    self,
+                    "",
+                    "Convert z back to nm? (old picasso format)",
+                    m.Yes | m.No,
+                )
+                if ret == m.Yes:
+                    self.convert_nm = True
+
+            if len(self._picks) == 0:
+                m = self.CPU_or_GPU_box()
+                self.use_gpu = m.exec()
+            else:
+                self.use_gpu = None
+
+            if channel == len(self.locs_paths): # apply to all
                 # get saving name suffix
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
@@ -5851,7 +5836,7 @@ class View(QtWidgets.QLabel):
                     self._smlm_clusterer(channel, path, params)
 
     def _smlm_clusterer(self, channel, path, params):
-        if len(params) == 5: # 2D
+        if len(params) == 4: # 2D
             radius, min_locs, save_centers, _, _ = params
         else: # 3D
             radius_xy, radius_z, min_locs, save_centers, _, _ = params
@@ -5999,20 +5984,11 @@ class View(QtWidgets.QLabel):
             }
         info = self.infos[channel] + [new_info]
         # check if z needs to be converted
-        if self.z_converted[channel]:
-            m = QtWidgets.QMessageBox()
-            m.setWindowTitle("z coordinates have been converted to pixels")
-            ret = m.question(
-                self,
-                "",
-                "Convert z back to nm? (old picasso format)",
-                m.Yes | m.No,
+        if self.z_converted[channel] and self.convert_nm:
+            pixelsize = (
+                self.window.display_settings_dlg.pixelsize.value()
             )
-            if ret == m.Yes:
-                pixelsize = (
-                    self.window.display_settings_dlg.pixelsize.value()
-                )
-                clustered_locs.z *= pixelsize
+            clustered_locs.z *= pixelsize
 
         # save locs
         io.save_locs(path, clustered_locs, info)
