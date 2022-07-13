@@ -5837,9 +5837,9 @@ class View(QtWidgets.QLabel):
 
     def _smlm_clusterer(self, channel, path, params):
         if len(params) == 4: # 2D
-            radius, min_locs, save_centers, _, _ = params
+            radius, min_locs, save_centers, _ = params
         else: # 3D
-            radius_xy, radius_z, min_locs, save_centers, _, _ = params
+            radius_xy, radius_z, min_locs, save_centers, _ = params
 
         # cluster picked locs with cpu (distance matrix)
         if self.use_gpu is None: 
