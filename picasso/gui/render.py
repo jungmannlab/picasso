@@ -5780,7 +5780,7 @@ class View(QtWidgets.QLabel):
         channel = self.remove_locs_channel("Cluster")
 
         # get clustering parameters
-        if hasattr(self.all_locs[channel], "z"):
+        if any([hasattr(_, "z") for _ in self.all_locs]):
             params = SMLMDialog3D.getParams()
         else:
             params = SMLMDialog2D.getParams()
