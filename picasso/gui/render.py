@@ -4930,7 +4930,7 @@ class View(QtWidgets.QLabel):
     movie_size()
         Returns tuple with movie height and width
     nearest_neighbor()
-        Gets channel for nearest neighbor analysis
+        Gets channels for nearest neighbor analysis
     _nearest_neighbor(channel1, channel2)
         Calculates and saves distances of the nearest neighbors between
         localizations in channels 1 and 2
@@ -7206,7 +7206,7 @@ class View(QtWidgets.QLabel):
         return (movie_height, movie_width)
 
     def nearest_neighbor(self):
-        """ Gets channel for nearest neighbor analysis. """
+        """ Gets channels for nearest neighbor analysis. """
 
         # choose both channels
         channel1 = self.get_channel("Nearest Neighbor Analysis")
@@ -7233,17 +7233,18 @@ class View(QtWidgets.QLabel):
             self, "", "Number of nearest neighbors: ", 0, 1, 100
         )
         if ok:
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
             # extract x, y and z from both channels 
-            x1 = self.locs[channel1].x
-            x2 = self.locs[channel2].x
-            y1 = self.locs[channel1].y
-            y2 = self.locs[channel2].y
+            x1 = self.locs[channel1].x * pixelsize
+            x2 = self.locs[channel2].x * pixelsize
+            y1 = self.locs[channel1].y * pixelsize
+            y2 = self.locs[channel2].y * pixelsize
             if (
                 hasattr(self.locs[channel1], "z")
                 and hasattr(self.locs[channel2], "z")
             ):
-                z1 = self.locs[channel1].z
-                z2 = self.locs[channel2].z
+                z1 = self.locs[channel1].z * pixelsize
+                z2 = self.locs[channel2].z * pixelsize
             else: 
                 z1 = None
                 z2 = None

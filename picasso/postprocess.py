@@ -1307,6 +1307,7 @@ def nn_analysis(
     nn_count, 
     same_channel, 
 ):
+    # coordinates are in nm
     if z1 is not None: # 3D
         input1 = _np.stack((x1, y1, z1)).T
         input2 = _np.stack((x2, y2, z2)).T
