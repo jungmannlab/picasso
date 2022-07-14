@@ -72,7 +72,7 @@ def natural_keys(text):
         digits are converted to int
     """
 
-    return [ atoi(c) for c in re.split('([0-9]+)', text) ]
+    return [atoi(c) for c in re.split('([0-9]+)', text)]
 
 def get_colors(n_channels):
     """ 
@@ -127,8 +127,8 @@ def is_hexadecimal(text):
 
 class DisplaySettingsRotationDialog(QtWidgets.QDialog):
     """
-    A class to change display settings, e.g., oversampling, contrast,
-    and blur.
+    A class to change display settings, e.g., display pixel size, 
+    contrast and blur.
 
     Very similar to its counterpart in gui/render.py but some functions
     were deleted.
@@ -141,7 +141,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         contains available localization blur methods
     colormap : QComboBox
         contains strings with available colormaps (single channel only)
-    dynamic_oversampling : QCheckBox
+    dynamic_disp_px : QCheckBox
         tick to automatically adjust to current window size when zooming.
     maximum : QDoubleSpinBox
         defines at which number of localizations per super-resolution
@@ -151,29 +151,29 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
     minimum : QDoubleSpinBox
         defines at which number of localizations per super-resolution
         pixel the minimum color of the colormap should be applied
-    oversampling : QDoubleSpinBox
-        contains the number of super-resolution pixels per camera pixel
+    disp_px_size : QDoubleSpinBox
+        contains the size of super-resolution pixels in nm
     scalebar : QDoubleSpinBox
         contains the scale bar's length (nm)
     scalebar_groupbox : QGroupBox
         group with options for customizing scale bar, tick to display
     scalebar_text : QCheckBox
         tick to display scale bar's length (nm)
-    _silent_oversampling_update : boolean
-        True if update oversampling in background
+    _silent_disp_px_update : boolean
+        True if update display pixel size in background
 
     Methods
     -------
-    on_oversampling_changed(value)
-        Sets new oversampling, updates contrast and updates scene in
-        the main window
+    on_disp_px_changed(value)
+        Sets new display pixel size, updates contrast and updates scene 
+        in the main window
     render_scene(*args, **kwargs)
         Updates scene in the rotation window and gives warning if 
         needed
-    set_dynamic_oversampling(state)
-        Updates scene if dynamic oversampling is checked
-    set_oversampling_silently(oversampling)
-        Changes the value of oversampling in the background
+    set_dynamic_disp_px(state)
+        Updates scene if dynamic disp_px is checked
+    set_disp_px_silently(disp_px_size)
+        Changes the value of display pixel size in the background
     silent_maximum_update(value)
         Changes the value of self.maximum in the background
     silent_minimum_update(value)
@@ -192,21 +192,24 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         general_groupbox = QtWidgets.QGroupBox("General")
         vbox.addWidget(general_groupbox)
         general_grid = QtWidgets.QGridLayout(general_groupbox)
-        general_grid.addWidget(QtWidgets.QLabel("Oversampling:"), 1, 0)
-        self._oversampling = DEFAULT_OVERSAMPLING
-        self.oversampling = QtWidgets.QDoubleSpinBox()
-        self.oversampling.setRange(0.001, 1000)
-        self.oversampling.setSingleStep(5)
-        self.oversampling.setValue(self._oversampling)
-        self.oversampling.setKeyboardTracking(False)
-        self.oversampling.valueChanged.connect(self.on_oversampling_changed)
-        general_grid.addWidget(self.oversampling, 1, 1)
-        self.dynamic_oversampling = QtWidgets.QCheckBox("dynamic")
-        self.dynamic_oversampling.setChecked(True)
-        self.dynamic_oversampling.toggled.connect(
-            self.set_dynamic_oversampling
+        general_grid.addWidget(
+            QtWidgets.QLabel("Display pixel size [nm]:"), 1, 0
         )
-        general_grid.addWidget(self.dynamic_oversampling, 2, 1)
+        self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
+        self.disp_px_size = QtWidgets.QDoubleSpinBox()
+        self.disp_px_size.setRange(0.00001, 100000)
+        self.disp_px_size.setSingleStep(0.1)
+        self.disp_px_size.setDecimals(5)
+        self.disp_px_size.setValue(self._disp_px_size)
+        self.disp_px_size.setKeyboardTracking(False)
+        self.disp_px_size.valueChanged.connect(self.on_disp_px_changed)
+        general_grid.addWidget(self.disp_px_size, 1, 1)
+        self.dynamic_disp_px = QtWidgets.QCheckBox("dynamic")
+        self.dynamic_disp_px.setChecked(True)
+        self.dynamic_disp_px.toggled.connect(
+            self.set_dynamic_disp_px
+        )
+        general_grid.addWidget(self.dynamic_disp_px, 2, 1)
 
         # contrast
         contrast_groupbox = QtWidgets.QGroupBox("Contrast")
@@ -311,28 +314,30 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.scalebar_text.stateChanged.connect(self.render_scene)
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
 
-        self._silent_oversampling_update = False
+        self._silent_disp_px_update = False
 
-    def on_oversampling_changed(self, value):
+    def on_disp_px_changed(self, value):
         """
-        Sets new oversampling, updates contrast and updates scene in
-        the main window.
+        Sets new display pixel size, updates contrast and updates scene 
+        in the main window.
         """
 
-        contrast_factor = (self._oversampling / value) ** 2
-        self._oversampling = value
+        contrast_factor = (value / self._disp_px_size) ** 2
+        self._disp_px_size = value
         self.silent_minimum_update(contrast_factor * self.minimum.value())
         self.silent_maximum_update(contrast_factor * self.maximum.value())
-        if not self._silent_oversampling_update:
-            self.dynamic_oversampling.setChecked(False)
+        if not self._silent_disp_px_update:
+            self.dynamic_disp_px.setChecked(False)
             self.window.view_rot.update_scene()
 
-    def set_oversampling_silently(self, oversampling):
-        """ Changes the value of oversampling in the background. """
+    def set_disp_px_silently(self, disp_px_size):
+        """ 
+        Changes the value of display pixel size in the background. 
+        """
 
-        self._silent_oversampling_update = True
-        self.oversampling.setValue(oversampling)
-        self._silent_oversampling_update = False
+        self._silent_disp_px_update = True
+        self.disp_px_size.setValue(disp_px_size)
+        self._silent_disp_px_update = False
 
     def silent_minimum_update(self, value):
         """ Changes the value of self.minimum in the background. """
@@ -349,28 +354,12 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.maximum.blockSignals(False)
 
     def render_scene(self, *args, **kwargs):
-        """
-        Updates scene in the rotation window and gives warning if 
-        needed.
-        """
+        """ Updates scene in the rotation window. """
 
-        # check if ind loc prec button is checked
-        if (self.blur_buttongroup.checkedId() == -5 
-            or self.blur_buttongroup.checkedId() == -6):
-            if self.ilp_warning:
-                self.ilp_warning = False
-                warning = (
-                    "Rotating with individual localization precision may be "
-                    "time consuming.  Therefore, we recommend to firstly "
-                    " rotate the object using a different blur method and "
-                    " then to apply individual localization precision."
-                )
-                # QtWidgets.QMessageBox.information(self, "Warning", warning)
-        # update scene
         self.window.view_rot.update_scene()
 
-    def set_dynamic_oversampling(self, state):
-        """ Updates scene if dynamic oversampling is checked. """
+    def set_dynamic_disp_px(self, state):
+        """ Updates scene if dynamic display pixel size is checked. """
 
         if state:
             self.window.view_rot.update_scene()
@@ -2005,40 +1994,44 @@ class ViewRotation(QtWidgets.QLabel):
             self.window.display_settings_dlg.blur_buttongroup.checkedButton()
         )
         # oversampling
-        optimal_oversampling = (
-            self.display_pixels_per_viewport_pixels(
-                viewport=viewport, animation=animation
+        if not animation:
+            optimal_oversampling = (
+                self.display_pixels_per_viewport_pixels(viewport=viewport)
             )
-        )
-        if self.window.display_settings_dlg.dynamic_oversampling.isChecked():
-            oversampling = optimal_oversampling
-            self.window.display_settings_dlg.set_oversampling_silently(
-                optimal_oversampling
-            )
+            if self.window.display_settings_dlg.dynamic_disp_px.isChecked():
+                oversampling = optimal_oversampling
+                self.window.display_settings_dlg.set_disp_px_silently(
+                    self.window.window.display_settings_dlg.pixelsize.value()
+                    / optimal_oversampling
+                )
+            else:
+                oversampling = float(
+                    self.window.window.display_settings_dlg.pixelsize.value()
+                    / self.window.display_settings_dlg.disp_px_size.value()
+                )
+                if oversampling > optimal_oversampling:
+                    QtWidgets.QMessageBox.information(
+                        self,
+                        "Display pixel size too low",
+                        (
+                            "Oversampling will be adjusted to"
+                            " match the display pixel density."
+                        ),
+                    )
+                    oversampling = optimal_oversampling
+                    self.window.display_settings_dlg.set_disp_px_silently(
+                        self.window.window.display_settings_dlg.pixelsize.value()
+                        / optimal_oversampling
+                    )
         else:
             oversampling = float(
-                self.window.display_settings_dlg.oversampling.value()
+                self.window.window.display_settings_dlg.pixelsize.value()
+                / self.window.display_settings_dlg.disp_px_size.value()
             )
-            if oversampling > optimal_oversampling:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Oversampling too high",
-                    (
-                        "Oversampling will be adjusted to"
-                        " match the display pixel density."
-                    ),
-                )
-                oversampling = optimal_oversampling
-                self.window.display_settings_dlg.set_oversampling_silently(
-                    optimal_oversampling
-                )
 
         # viewport
         if viewport is None:
             viewport = self.viewport
-
-        if animation:
-            oversampling = optimal_oversampling
 
         return {
             "oversampling": oversampling,
@@ -2051,18 +2044,13 @@ class ViewRotation(QtWidgets.QLabel):
             ),
         }
 
-    def display_pixels_per_viewport_pixels(
-        self, viewport=None, animation=False
-    ):
+    def display_pixels_per_viewport_pixels(self, viewport=None):
         """ Returns optimal oversampling. """
 
-        if animation:
-            os_horizontal = 500 / self.viewport_width(viewport)
-            os_vertical = 500 / self.viewport_height(viewport)
-        else:
-            os_horizontal = self.width() / self.viewport_width()
-            os_vertical = self.height() / self.viewport_height()
-        # The values should be identical, but just in case, we choose the max:
+        os_horizontal = self.width() / self.viewport_width()
+        os_vertical = self.height() / self.viewport_height()
+        # The values should be identical, but just in case, 
+        # we choose the maximum value:
         return max(os_horizontal, os_vertical)
 
     def scale_contrast(self, image, autoscale=False):
@@ -2171,7 +2159,6 @@ class RotationWindow(QtWidgets.QMainWindow):
         self.view_rot = ViewRotation(self)
         self.setCentralWidget(self.view_rot)
         self.display_settings_dlg = DisplaySettingsRotationDialog(self)
-        self.display_settings_dlg.ilp_warning = True
         self.animation_dialog = AnimationDialog(self)
 
         self.menu_bar = self.menuBar()

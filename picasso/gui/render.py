@@ -3984,6 +3984,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
     Methods
     -------
+    on_cmap_changed()
+        Loads custom colormap if requested
     on_disp_px_changed(value)
         Sets new display pixel size, updates contrast and updates scene 
         in the main window
@@ -4219,9 +4221,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.show_legend.clicked.connect(self.window.view.show_legend)
 
     def on_cmap_changed(self):
-        # add docstring to here and class docstirgns
-        # call update scene!!!!!
-        # load npy if custom
+        """ Loads custom colormap if requested. """
+
         if self.colormap.currentText() == "Custom":
             path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load custom colormap", filter="*.npy"
@@ -4763,6 +4764,8 @@ class View(QtWidgets.QLabel):
         important for fast rendering
     currentdrift : list
         contains the most up-to-date drift for each channel
+    custom_cmap : np.array
+        custom colormap loaded from .npy, see DisplaySettingsDialog
     _drift : list
         contains np.recarrays with drift info for each channel, None if 
         no drift found/calculated
