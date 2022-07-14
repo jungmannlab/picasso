@@ -4072,8 +4072,11 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
         self.colormap = QtWidgets.QComboBox()
         self.colormap.addItems(plt.colormaps())
+        self.colormap.addItem("Custom")
         contrast_grid.addWidget(self.colormap, 2, 1)
-        self.colormap.currentIndexChanged.connect(self.update_scene)
+        self.colormap.currentIndexChanged.connect(
+            self.on_cmap_changed
+        )
 
         # Blur
         blur_groupbox = QtWidgets.QGroupBox("Blur")
@@ -4214,6 +4217,32 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
+
+    def on_cmap_changed(self):
+        # add docstring to here and class docstirgns
+        # call update scene!!!!!
+        # load npy if custom
+        if self.colormap.currentText() == "Custom":
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load custom colormap", filter="*.npy"
+            )
+            if path:
+                cmap = np.load(path)
+                if cmap.shape != (256, 4):
+                    raise ValueError(
+                        "Colormap must be of shape (256,  4)\n"
+                        f"The loaded colormap has shape {cmap.shape}"
+                    )
+                    self.colormap.setCurrentIndex(0)
+                elif not np.all((cmap >= 0) & (cmap <= 1)):
+                    raise ValueError(
+                        "All elements of the colormap must be between\n"
+                        "0 and 1"
+                    )
+                    self.colormap.setCurrentIndex(0)
+                else:
+                    self.window.view.custom_cmap = cmap
+        self.update_scene()
 
     def on_disp_px_changed(self, value):
         """
@@ -8695,7 +8724,14 @@ class View(QtWidgets.QLabel):
         # paint locs using the colormap of choice (Display Settings
         # Dialog)
         cmap = self.window.display_settings_dlg.colormap.currentText()
-        cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
+        if cmap == "Custom":
+            cmap = np.uint8(
+                np.round(255 * self.custom_cmap)
+            )
+        else:
+            cmap = np.uint8(
+                np.round(255 * plt.get_cmap(cmap)(np.arange(256)))
+            )
 
         # return a 4 channel (rgb and alpha) array
         Y, X = image.shape
