@@ -19,6 +19,24 @@ from numba import njit as _njit
 from numba import cuda as _cuda
 from tqdm import tqdm as _tqdm
 
+from . import lib as _lib
+from . import io as _io
+
+CLUSTER_CENTERS_DTYPE = [
+    ("frame", "u4"),
+    ("x", "f4"),
+    ("y", "f4"),
+    ("photons", "f4"),
+    ("sx", "f4"),
+    ("sy", "f4"),
+    ("bg", "f4"),
+    ("lpx", "f4"),
+    ("lpy", "f4"),
+    ("ellipticity", "f4"),
+    ("net_gradient", "f4"),
+    ("n", "u4"),
+] # for saving cluster centers
+
 @_njit 
 def count_neighbors_picked(dist, radius):
 	"""
@@ -1581,3 +1599,130 @@ def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 		cluster_id, min_locs, frame
 	)
 	return get_labels(cluster_id, true_cluster)
+
+def error_sums_wtd(x, w):
+    """ 
+    Function used for finding localization precision for cluster 
+    centers.
+
+    Parameters
+    ----------
+    x : float
+        x or y coordinate of the cluster center
+    w : float
+        weight (localization precision squared)
+
+    Returns
+    -------
+    float
+        weighted localizaiton precision of the cluster center
+    """
+
+    return (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
+
+def save_cluster_centers(path, locs, info, parent):
+    """
+    Extract information about clustered localizations, defines
+    cluster centers and saves them as localizations (.hdf5).
+
+    Parameters
+    ----------
+    path : str
+        Path to save cluster centers
+    locs : np.recarray
+        Clustered localizations (contain group info)
+    info : list
+        List of dictionaries with metadata to save in .yaml format
+	parent : QtWidget
+		Parent calling this function
+    """
+
+    # group ids
+    cluster_idx = _np.unique(locs.group)
+
+    # arrays to store attributes of cluster centeres
+    frame = _np.zeros_like(cluster_idx)
+    x = _np.zeros_like(cluster_idx, dtype=_np.float32)
+    y = _np.zeros_like(x)
+    photons = _np.zeros_like(x)
+    sx = _np.zeros_like(x)
+    sy = _np.zeros_like(x)
+    bg = _np.zeros_like(x)
+    lpx = _np.zeros_like(x)
+    lpy = _np.zeros_like(x)
+    ellipticity = _np.zeros_like(x)
+    net_gradient = _np.zeros_like(x)
+    n = _np.zeros_like(cluster_idx)
+    if hasattr(locs, "z"):
+        z = _np.zeros_like(x)
+        lpz = _np.zeros_like(x)
+
+    pd = _lib.ProgressDialog(
+        "Calculating cluster centers", 0, len(cluster_idx), parent
+    )
+    pd.set_value(0)
+
+    # extract values for each cluster one by one
+    for i, idx in enumerate(cluster_idx):
+        # extract locs from the given cluster
+        grouplocs = locs[locs.group == idx]
+
+        # mean frame
+        frame[i] = _np.mean(grouplocs.frame)
+        # weighted mean of x and y
+        x[i] = _np.average(
+            grouplocs.x, weights=1/(grouplocs.lpx)**2
+        )
+        y[i] = _np.average(
+            grouplocs.y, weights=1/(grouplocs.lpy)**2
+        )
+        # mean photons, sx, sy, background
+        photons[i] = _np.mean(grouplocs.photons)
+        sx[i] = _np.mean(grouplocs.sx)
+        sy[i] = _np.mean(grouplocs.sy)
+        bg[i] = _np.mean(grouplocs.bg)
+        # weighted localization precision
+        lpx[i] = _np.sqrt(
+            error_sums_wtd(grouplocs.x, grouplocs.lpx)
+            / (len(grouplocs) - 1)
+        )
+        lpy[i] = _np.sqrt(
+            error_sums_wtd(grouplocs.y, grouplocs.lpy)
+            / (len(grouplocs) - 1)
+        )
+
+        ellipticity[i] = sx[i] / sy[i]
+        # mean net gradient
+        net_gradient[i] = _np.mean(grouplocs.net_gradient)
+        # number of locs in the cluster
+        n[i] = len(grouplocs)
+        if hasattr(locs, "z"):
+            z[i] = _np.mean(grouplocs.z)
+        pd.set_value(i + 1)
+
+    # take the average of lpx and lpy as lateral localization precision
+    lpx = _np.mean(_np.stack((lpx, lpy)), axis=0)
+    lpy = lpx
+    lpz = 2 * lpx # for now, take lpz to be double lpx
+
+    # recarray to save
+    centers = _np.rec.array(
+        (
+            frame,
+            x,
+            y,
+            photons,
+            sx,
+            sy,
+            bg,
+            lpx,
+            lpy,
+            ellipticity,
+            net_gradient,
+            n,
+        ), dtype=CLUSTER_CENTERS_DTYPE
+    )
+    if hasattr(locs, "z"):
+        centers = _lib.append_to_rec(centers, z, "z")
+        centers = _lib.append_to_rec(centers, lpz, "lpz")
+    _io.save_locs(path, centers, info)

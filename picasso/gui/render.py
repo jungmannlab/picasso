@@ -60,20 +60,6 @@ INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
 N_GROUP_COLORS = 8
 N_Z_COLORS = 32
-CLUSTER_CENTERS_DTYPE = [
-    ("frame", "u4"),
-    ("x", "f4"),
-    ("y", "f4"),
-    ("photons", "f4"),
-    ("sx", "f4"),
-    ("sy", "f4"),
-    ("bg", "f4"),
-    ("lpx", "f4"),
-    ("lpy", "f4"),
-    ("ellipticity", "f4"),
-    ("net_gradient", "f4"),
-    ("n", "u4"),
-]
 
 
 def get_colors(n_channels):
@@ -159,27 +145,6 @@ def kinetic_rate_from_fit(data):
     return rate
 
 estimate_kinetic_rate = kinetic_rate_from_fit
-
-def error_sums_wtd(x, w):
-    """ 
-    Function used for finding localization precision for cluster 
-    centers.
-
-    Parameters
-    ----------
-    x : float
-        x or y coordinate of the cluster center
-    w : float
-        weight (localization precision squared)
-
-    Returns
-    -------
-    float
-        weighted localizaiton precision of the cluster center
-    """
-
-    return (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
-
 
 def check_pick(f):
     """ Decorator verifying if there is at least one pick. """
@@ -4019,6 +3984,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
     Methods
     -------
+    on_cmap_changed()
+        Loads custom colormap if requested
     on_disp_px_changed(value)
         Sets new display pixel size, updates contrast and updates scene 
         in the main window
@@ -4107,8 +4074,11 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
         self.colormap = QtWidgets.QComboBox()
         self.colormap.addItems(plt.colormaps())
+        self.colormap.addItem("Custom")
         contrast_grid.addWidget(self.colormap, 2, 1)
-        self.colormap.currentIndexChanged.connect(self.update_scene)
+        self.colormap.currentIndexChanged.connect(
+            self.on_cmap_changed
+        )
 
         # Blur
         blur_groupbox = QtWidgets.QGroupBox("Blur")
@@ -4249,6 +4219,31 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
+
+    def on_cmap_changed(self):
+        """ Loads custom colormap if requested. """
+
+        if self.colormap.currentText() == "Custom":
+            path, ext = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Load custom colormap", filter="*.npy"
+            )
+            if path:
+                cmap = np.load(path)
+                if cmap.shape != (256, 4):
+                    raise ValueError(
+                        "Colormap must be of shape (256,  4)\n"
+                        f"The loaded colormap has shape {cmap.shape}"
+                    )
+                    self.colormap.setCurrentIndex(0)
+                elif not np.all((cmap >= 0) & (cmap <= 1)):
+                    raise ValueError(
+                        "All elements of the colormap must be between\n"
+                        "0 and 1"
+                    )
+                    self.colormap.setCurrentIndex(0)
+                else:
+                    self.window.view.custom_cmap = cmap
+        self.update_scene()
 
     def on_disp_px_changed(self, value):
         """
@@ -4769,6 +4764,8 @@ class View(QtWidgets.QLabel):
         important for fast rendering
     currentdrift : list
         contains the most up-to-date drift for each channel
+    custom_cmap : np.array
+        custom colormap loaded from .npy, see DisplaySettingsDialog
     _drift : list
         contains np.recarrays with drift info for each channel, None if 
         no drift found/calculated
@@ -4885,7 +4882,9 @@ class View(QtWidgets.QLabel):
         Creates a message box with buttons to choose between 
         CPU and GPU SMLM clustering.
     dbscan()
-        Performs DBSCAN with user-defined parameters
+        Gets channel, parameters and path for DBSCAN
+    _dbscan(channel, path, params)
+        Performs DBSCAN in a given channel with user-defined parameters
     deactivate_property_menu()
         Blocks changing render parameters
     display_pixels_per_viewport_pixels()
@@ -4921,6 +4920,9 @@ class View(QtWidgets.QLabel):
         Opens an input dialog to ask for a channel
     get_channel3d()
         Similar to get_channel, used in selecting 3D picks
+    get_channel_all_at_once()
+        Similar to get_channel, adds extra index for applying to all
+        channels
     get_group_color(locs)
         Finds group color index for each localization
     get_index_blocks(channel)
@@ -4932,7 +4934,10 @@ class View(QtWidgets.QLabel):
     get_render_kwargs()
         Returns a dictionary to be used for the kwargs of render.render
     hdscan()
-        Performs HDBSCAN with user-defined parameters
+        Gets channel, parameters and path for HDBSCAN
+    _hdbscan(channel, path, params)
+        Performs HDBSCAN in a given channel with user-defined 
+        parameters
     index_locs(channel)
         Indexes locs from channel in a grid
     load_picks(path)
@@ -4957,7 +4962,7 @@ class View(QtWidgets.QLabel):
     movie_size()
         Returns tuple with movie height and width
     nearest_neighbor()
-        Gets channel for nearest neighbor analysis
+        Gets channels for nearest neighbor analysis
     _nearest_neighbor(channel1, channel2)
         Calculates and saves distances of the nearest neighbors between
         localizations in channels 1 and 2
@@ -4981,7 +4986,9 @@ class View(QtWidgets.QLabel):
     remove_picks(position)
         Deletes picks at a given position
     remove_picked_locs()
-        Deletes localizations in picks
+        Gets channel for removing picked localizations
+    _remove_picked_locs(channel)
+        Deletes localizations in picks in channel
     render_multi_channel(kwargs)
         Renders and paints multichannel locs
     render_scene()
@@ -4992,16 +4999,11 @@ class View(QtWidgets.QLabel):
         Defines what happens when window is resized
     rmsd_at_com(locs)
         Calculates root mean square displacement at center of mass
-    save_channel_multi()
-        Opens an input dialog asking which channel to save
     save_channel()
-        Opens an input dialog asking which channel of picked locs to
-        save
+        Opens an input dialog asking which channel of locs to save
     save_channel_pickprops()
         Opens an input dialog asking which channel to use in saving 
         pick properties
-    save_cluster_centers(path, locs, info)
-        Extracts cluster centers from clustered locs and saves them
     save_pick_properties(path, channel)
         Saves picks' properties in a given channel to path
     save_picked_locs(path, channel)
@@ -5044,7 +5046,10 @@ class View(QtWidgets.QLabel):
     sizeHint()
         Returns recommended window size
     smlm_clusterer()
-        Clusters locs using SMLM clusterer and saves the result
+        Gets channel, parameters and path for SMLM clustering
+    _smlm_clusterer(channel, path, params)
+        Performs SMLM clustering in a given channel with user-defined 
+        parameters
     subtract_picks(path)
         Clears current picks that cover the picks loaded from path
     to_8bit(image)
@@ -5573,10 +5578,10 @@ class View(QtWidgets.QLabel):
 
     def dbscan(self):
         """
-        Gets DBSCAN parameters, performs clustering and saves data.
+        Gets channel, parameters and path for DBSCAN.
         """
 
-        channel = self.remove_locs_channel("Cluster")
+        channel = self.get_channel_all_at_once("Cluster")
 
         # get DBSCAN parameters
         params = DbscanDialog.getParams()
@@ -5610,6 +5615,20 @@ class View(QtWidgets.QLabel):
                     self._dbscan(channel, path, params)
 
     def _dbscan(self, channel, path, params):
+        """
+        Performs DBSCAN in a given channel with user-defined parameters
+        and saves the result.
+
+        Parameters
+        ----------
+        channel : int
+            Index of the channel were clustering is performed
+        path : str
+            Path to save clustered localizations
+        params : list
+            DBSCAN parameters
+        """
+
         radius, min_density, save_centers, _ = params
         status = lib.StatusDialog(
             "Applying DBSCAN. This may take a while.", self
@@ -5656,11 +5675,13 @@ class View(QtWidgets.QLabel):
         status.close()
         if save_centers:
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            self.save_cluster_centers(path, locs, self.infos[channel])
+            clusterer.save_cluster_centers(
+                path, locs, self.infos[channel], self
+            )
 
     def hdbscan(self):
         """
-        Gets HDBSCAN parameters, performs clustering and saves data.
+        Gets channel, parameters and path for HDBSCAN.
         """
 
         if not HDBSCAN_IMPORTED: # no hdbscan package found
@@ -5675,7 +5696,7 @@ class View(QtWidgets.QLabel):
             )
             return
 
-        channel = self.remove_locs_channel("Cluster")
+        channel = self.get_channel_all_at_once("Cluster")
 
         # get HDBSCAN parameters
         params = HdbscanDialog.getParams()
@@ -5709,6 +5730,20 @@ class View(QtWidgets.QLabel):
                     self._hdbscan(channel, path, params)
 
     def _hdbscan(self, channel, path, params):
+        """
+        Performs HDBSCAN in a given channel with user-defined 
+        parameters and saves the result.
+
+        Parameters
+        ----------
+        channel : int
+            Index of the channel were clustering is performed
+        path : str
+            Path to save clustered localizations
+        params : list
+            HDBSCAN parameters
+        """
+
         min_cluster, min_samples, cluster_eps, save_centers, _ = params
         status = lib.StatusDialog(
             "Applying HDBSCAN. This may take a while.", self
@@ -5759,25 +5794,16 @@ class View(QtWidgets.QLabel):
         status.close()
         if save_centers:
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            self.save_cluster_centers(path, locs, self.infos[channel])
+            clusterer.save_cluster_centers(
+                path, locs, self.infos[channel], self
+            )
 
     def smlm_clusterer(self):
         """
-        Clusters locs using SMLM clusterer and saves the result.
-
-        There are three modes of clustering, each in 2D and 3D versions:
-            * clusterer_picked - clusters locs in picks; distances 
-                between points are stored in a distance matrix. It is 
-                recommended that there are no more than 700 (2D) or 
-                600 (3D) locs in each pick.
-            * clusterer CPU - clusters all loaded locs with a CPU; 
-                distances are calculated on demand. May take a long 
-                time to finish
-            * clusterer GPU - clusters all loaded locs with a GPU;
-                distances are calculated on demand.
+        Gets channel, parameters and path for SMLM clustering
         """
 
-        channel = self.remove_locs_channel("Cluster")
+        channel = self.get_channel_all_at_once("Cluster")
 
         # get clustering parameters
         if any([hasattr(_, "z") for _ in self.all_locs]):
@@ -5820,7 +5846,7 @@ class View(QtWidgets.QLabel):
                     for channel in range(len(self.locs_paths)):
                         path = self.locs_paths[channel].replace(
                             ".hdf5", f"{suffix}.hdf5"
-                        )
+                        ) # add the suffix to the current path
                         self._smlm_clusterer(channel, path, params)
             else:
                 # get the path to save
@@ -5836,6 +5862,31 @@ class View(QtWidgets.QLabel):
                     self._smlm_clusterer(channel, path, params)
 
     def _smlm_clusterer(self, channel, path, params):
+        """
+        Performs SMLM clustering in a given channel with user-defined
+        parameters and saves the result.
+
+        There are three modes of clustering, each in 2D and 3D versions:
+            * clusterer_picked - clusters locs in picks; distances 
+                between points are stored in a distance matrix. It is 
+                recommended that there are no more than 700 (2D) or 
+                600 (3D) locs in each pick.
+            * clusterer CPU - clusters all loaded locs with a CPU; 
+                distances are calculated on demand. May take a long 
+                time to finish
+            * clusterer GPU - clusters all loaded locs with a GPU;
+                distances are calculated on demand.
+
+        Parameters
+        ----------
+        channel : int
+            Index of the channel were clustering is performed
+        path : str
+            Path to save clustered localizations
+        params : list
+            SMLM clustering parameters        
+        """
+
         if len(params) == 4: # 2D
             radius, min_locs, save_centers, _ = params
         else: # 3D
@@ -5995,7 +6046,7 @@ class View(QtWidgets.QLabel):
         # save cluster centers
         if save_centers:
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            self.save_cluster_centers(path, clustered_locs, info)
+            clusterer.save_cluster_centers(path, clustered_locs, info, self)
 
     def CPU_or_GPU_box(self):
         """
@@ -6711,148 +6762,9 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def save_cluster_centers(self, path, locs, info):
-        """
-        Extract information about clustered localizations, defines
-        cluster centers and saves them in Picasso: Render - compatible
-        format.
-
-        Parameters
-        ----------
-        path : str
-            Path to save cluster centers
-        locs : np.recarray
-            Clustered localizations (contain group info)
-        info : list
-            List of dictionaries with metadata to save in .yaml format
-
-        """
-
-        # group ids
-        cluster_idx = np.unique(locs.group)
-
-        # arrays to store attributes of cluster centeres
-        frame = np.zeros_like(cluster_idx)
-        x = np.zeros_like(cluster_idx, dtype=np.float32)
-        y = np.zeros_like(x)
-        photons = np.zeros_like(x)
-        sx = np.zeros_like(x)
-        sy = np.zeros_like(x)
-        bg = np.zeros_like(x)
-        lpx = np.zeros_like(x)
-        lpy = np.zeros_like(x)
-        ellipticity = np.zeros_like(x)
-        net_gradient = np.zeros_like(x)
-        n = np.zeros_like(cluster_idx)
-        if hasattr(locs, "z"):
-            z = np.zeros_like(x)
-            lpz = np.zeros_like(x)
-
-        pd = lib.ProgressDialog(
-            "Calculating cluster centers", 0, len(cluster_idx), self
-        )
-        pd.set_value(0)
-
-        # extract values for each cluster one by one
-        for i, idx in enumerate(cluster_idx):
-            # extract locs from the given cluster
-            grouplocs = locs[locs.group == idx]
-
-            # mean frame
-            frame[i] = np.mean(grouplocs.frame)
-            # weighted mean of x and y
-            x[i] = np.average(
-                grouplocs.x, weights=1/(grouplocs.lpx)**2
-            )
-            y[i] = np.average(
-                grouplocs.y, weights=1/(grouplocs.lpy)**2
-            )
-            # mean photons, sx, sy, background
-            photons[i] = np.mean(grouplocs.photons)
-            sx[i] = np.mean(grouplocs.sx)
-            sy[i] = np.mean(grouplocs.sy)
-            bg[i] = np.mean(grouplocs.bg)
-            # weighted localization precision
-            lpx[i] = np.sqrt(
-                error_sums_wtd(grouplocs.x, grouplocs.lpx)
-                / (len(grouplocs) - 1)
-            )
-            lpy[i] = np.sqrt(
-                error_sums_wtd(grouplocs.y, grouplocs.lpy)
-                / (len(grouplocs) - 1)
-            )
-
-            ellipticity[i] = sx[i] / sy[i]
-            # mean net gradient
-            net_gradient[i] = np.mean(grouplocs.net_gradient)
-            # number of locs in the cluster
-            n[i] = len(grouplocs)
-            if hasattr(locs, "z"):
-                z[i] = np.mean(grouplocs.z)
-            pd.set_value(i + 1)
-
-        # take the average of lpx and lpy as lateral localization precision
-        lpx = np.mean(np.stack((lpx, lpy)), axis=0)
-        lpy = lpx
-        lpz = 2 * lpx # for now, take lpz to be double lpx
-
-        # recarray to save
-        centers = np.rec.array(
-            (
-                frame,
-                x,
-                y,
-                photons,
-                sx,
-                sy,
-                bg,
-                lpx,
-                lpy,
-                ellipticity,
-                net_gradient,
-                n,
-            ), dtype=CLUSTER_CENTERS_DTYPE
-        )
-        if hasattr(locs, "z"):
-            centers = lib.append_to_rec(centers, z, "z")
-            centers = lib.append_to_rec(centers, lpz, "lpz")
-        io.save_locs(path, centers, info)
-
-
-    def save_channel_multi(self, title="Choose a channel"):
-        """
-        Opens an input dialog to ask which channel to save.
-        There is an option to save all channels.
-
-        Returns
-        None if no locs found or channel picked, int otherwise
-            Index of the chosen channel
-        """
-
-        n_channels = len(self.locs_paths)
-        if n_channels == 0:
-            return None
-        elif n_channels == 1:
-            return 0
-        elif len(self.locs_paths) > 1:
-            pathlist = list(self.locs_paths)
-            pathlist.append("Save all at once")
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self,
-                "Save localizations",
-                "Channel:",
-                pathlist,
-                editable=False,
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
-
     def save_channel(self, title="Choose a channel"):
         """
-        Opens an input dialog to ask which channel of picked locs to 
-        save.
+        Opens an input dialog to ask which channel to save.
         There is an option to save all channels separetely or merge
         them together.
 
@@ -6868,7 +6780,7 @@ class View(QtWidgets.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
-            pathlist.append("Save all at once")
+            pathlist.append("Apply to all at once")
             pathlist.append("Combine all channels")
             index, ok = QtWidgets.QInputDialog.getItem(
                 self,
@@ -6882,7 +6794,19 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def remove_locs_channel(self, title="Choose a channel"):
+    def get_channel_all_at_once(self, title="Choose a channel"):
+        """ 
+        Opens an input dialog to ask for a channel. 
+        Returns a channel index or None if no locs loaded.
+        If apply to all at once is chosen, the index is equal to the
+        number of channels loaded.
+
+        Returns
+        -------
+        None if no locs loaded or channel picked, int otherwise
+            Index of the chosen channel
+        """
+
         n_channels = len(self.locs_paths)
         if n_channels == 0:
             return None
@@ -7314,7 +7238,7 @@ class View(QtWidgets.QLabel):
         return (movie_height, movie_width)
 
     def nearest_neighbor(self):
-        """ Gets channel for nearest neighbor analysis. """
+        """ Gets channels for nearest neighbor analysis. """
 
         # choose both channels
         channel1 = self.get_channel("Nearest Neighbor Analysis")
@@ -7341,17 +7265,18 @@ class View(QtWidgets.QLabel):
             self, "", "Number of nearest neighbors: ", 0, 1, 100
         )
         if ok:
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
             # extract x, y and z from both channels 
-            x1 = self.locs[channel1].x
-            x2 = self.locs[channel2].x
-            y1 = self.locs[channel1].y
-            y2 = self.locs[channel2].y
+            x1 = self.locs[channel1].x * pixelsize
+            x2 = self.locs[channel2].x * pixelsize
+            y1 = self.locs[channel1].y * pixelsize
+            y2 = self.locs[channel2].y * pixelsize
             if (
                 hasattr(self.locs[channel1], "z")
                 and hasattr(self.locs[channel2], "z")
             ):
-                z1 = self.locs[channel1].z
-                z2 = self.locs[channel2].z
+                z1 = self.locs[channel1].z * pixelsize
+                z2 = self.locs[channel2].z * pixelsize
             else: 
                 z1 = None
                 z2 = None
@@ -8504,14 +8429,9 @@ class View(QtWidgets.QLabel):
             self.add_picks(new_picks)
 
     def remove_picked_locs(self):
-        """ 
-        Deletes localizations in picks. 
+        """ Gets channel for removing picked localizations. """
 
-        Temporarily adds index to localizations to compare which
-        localizations were picked.
-        """
-
-        channel = self.remove_locs_channel("Remove picked localizations")
+        channel = self.get_channel_all_at_once("Remove picked localizations")
         if channel is len(self.locs_paths): # apply to all channels
             for channel in range(len(self.locs)):
                 self._remove_picked_locs(channel)
@@ -8519,6 +8439,18 @@ class View(QtWidgets.QLabel):
             self._remove_picked_locs(channel)
 
     def _remove_picked_locs(self, channel):
+        """ 
+        Deletes localizations in picks in channel. 
+
+        Temporarily adds index to localizations to compare which
+        localizations were picked.
+
+        Parameters
+        ----------
+        channel : int
+            Index of the channel were localizations are removed
+        """
+
         index = np.arange(len(self.all_locs[channel]), dtype=np.int32)
         self.all_locs[channel] = lib.append_to_rec(
             self.all_locs[channel], index, "index"
@@ -8795,7 +8727,14 @@ class View(QtWidgets.QLabel):
         # paint locs using the colormap of choice (Display Settings
         # Dialog)
         cmap = self.window.display_settings_dlg.colormap.currentText()
-        cmap = np.uint8(np.round(255 * plt.get_cmap(cmap)(np.arange(256))))
+        if cmap == "Custom":
+            cmap = np.uint8(
+                np.round(255 * self.custom_cmap)
+            )
+        else:
+            cmap = np.uint8(
+                np.round(255 * plt.get_cmap(cmap)(np.arange(256)))
+            )
 
         # return a 4 channel (rgb and alpha) array
         Y, X = image.shape
@@ -11511,7 +11450,7 @@ class Window(QtWidgets.QMainWindow):
         Saves pick properties in a given channel (or all channels). 
         """
 
-        channel = self.view.save_channel_multi("Save localizations")
+        channel = self.view.get_channel_all_at_once("Save localizations")
         if channel is not None:
             self.convert_z()
             if channel is len(self.view.locs_paths):
