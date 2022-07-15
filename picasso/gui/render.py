@@ -764,6 +764,9 @@ class DatasetDialog(QtWidgets.QDialog):
             del self.window.view.index_blocks[i]
             del self.window.view.z_converted[i]
 
+            # delete zcoord from slicer dialog
+            del self.window.slicer_dialog.zcoord[i]
+
             # delete attributes from the fast render dialog
             del self.window.view.all_locs[i]
             self.window.fast_render_dialog.on_file_closed(i)
@@ -4657,8 +4660,14 @@ class SlicerDialog(QtWidgets.QDialog):
         plt.cla()
         n_channels = len(self.zcoord)
 
-        # get colors for each channel
-        self.colors = get_colors(n_channels)
+        # get colors for each channel (from dataset dialog)
+        colors = [
+            _.palette().color(QtGui.QPalette.Window)
+            for _ in self.window.dataset_dialog.colordisp_all
+        ]
+        self.colors = [
+            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
+        ]
 
         # get bins, starting with minimum z and ending with max z
         self.bins = np.arange(
@@ -4679,8 +4688,8 @@ class SlicerDialog(QtWidgets.QDialog):
             )
             self.patches.append(patches)
 
-        plt.xlabel("Z-Coordinate [pixels]")
-        plt.ylabel("Counts")
+        plt.xlabel("z-coordinate [pixels]")
+        plt.ylabel("Rel. frequency")
         plt.title(r"$\mathrm{Histogram\ of\ Z:}$")
         self.canvas.draw()
         self.sl.setMaximum(len(self.bins) - 2)
@@ -4758,7 +4767,7 @@ class SlicerDialog(QtWidgets.QDialog):
                             + "_Z"
                             + "{num:03d}".format(num=i)
                             + "_CH"
-                            + "{num:03d}".format(num=j + 1)
+                            + "{num:03d}".format(num=j+1)
                             + ".tif"
                         )
                         if self.full_check.isChecked(): # full FOV
@@ -4791,7 +4800,6 @@ class SlicerDialog(QtWidgets.QDialog):
 
                 for i in tqdm(range(self.sl.maximum() + 1)):
                     self.sl.setValue(i)
-                    print("Slide: " + str(i))
                     out_path = (
                         base
                         + "_Z"
@@ -5357,8 +5365,8 @@ class View(QtWidgets.QLabel):
         # add options to rendering by parameter
         self.window.display_settings_dlg.parameter.addItems(locs.dtype.names)
 
-        # append z coordinates for slicing
         if hasattr(locs, "z"):
+            # append z coordinates for slicing
             self.window.slicer_dialog.zcoord.append(locs.z)
             # unlock 3D settings
             for action in self.window.actions_3d:
@@ -8628,7 +8636,12 @@ class View(QtWidgets.QLabel):
 
         # get localizations for rendering
         if locs is None:
-            locs = self.locs
+            # if slicing is used, locs are indexed and changing slices deletes
+            # all localizations
+            if self.window.slicer_dialog.slicer_radio_button.isChecked():
+                locs = copy.copy(self.locs)
+            else:
+                locs = self.locs
 
         # if slicing, show only current slice from every channel
         for i in range(len(locs)):
@@ -8636,10 +8649,9 @@ class View(QtWidgets.QLabel):
                 if self.window.slicer_dialog.slicer_radio_button.isChecked():
                     z_min = self.window.slicer_dialog.slicermin
                     z_max = self.window.slicer_dialog.slicermax
-                    in_view = (locs[i].z > z_min) & (
-                        locs[i].z <= z_max
-                    )
+                    in_view = (locs[i].z > z_min) & (locs[i].z <= z_max)
                     locs[i] = locs[i][in_view]
+
         n_channels = len(locs)
         
         if use_cache: # used saved image
@@ -8652,8 +8664,8 @@ class View(QtWidgets.QLabel):
                 int(np.ceil(kwargs["oversampling"] * (x_max - x_min))),
                 int(np.ceil(kwargs["oversampling"] * (y_max - y_min)))
             )
-            # if single channel with group info is rendered
-            if len(self.locs) == 1 and hasattr(self.locs[0], "group"):
+            # if single channel is rendered
+            if len(self.locs) == 1:
                 renderings = [render.render(_, **kwargs) for _ in locs]
             else:
                 renderings = [
