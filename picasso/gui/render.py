@@ -8652,12 +8652,16 @@ class View(QtWidgets.QLabel):
                 int(np.ceil(kwargs["oversampling"] * (x_max - x_min))),
                 int(np.ceil(kwargs["oversampling"] * (y_max - y_min)))
             )
-            renderings = [
-                render.render(_, **kwargs) 
-                if self.window.dataset_dialog.checks[i].isChecked()
-                else [0, np.zeros((Y, X))]
-                for i, _ in enumerate(locs)
-            ] # renders only channels that are checked in dataset dialog
+            # if single channel with group info is rendered
+            if len(self.locs) == 1 and hasattr(self.locs[0], "group"):
+                renderings = [render.render(_, **kwargs) for _ in locs]
+            else:
+                renderings = [
+                    render.render(_, **kwargs) 
+                    if self.window.dataset_dialog.checks[i].isChecked()
+                    else [0, np.zeros((Y, X))]
+                    for i, _ in enumerate(locs)
+                ] # renders only channels that are checked in dataset dialog
             # renderings = [render.render(_, **kwargs) for _ in locs]
             n_locs = sum([_[0] for _ in renderings])
             image = np.array([_[1] for _ in renderings])
