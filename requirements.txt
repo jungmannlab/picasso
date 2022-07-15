@@ -17,3 +17,4 @@ plotly-express==0.4.1
 watchdog==2.1.4
 psutil==5.8.0
 nd2reader==3.3.0
+icecream
