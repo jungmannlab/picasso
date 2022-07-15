@@ -4,7 +4,7 @@
 
 	Clusterer optimized for DNA PAINT in CPU and GPU versions.
 
-	Based on the work of Susanne Reinhardt.
+	Based on the work of Thomas Schlichthaerle.
 	:authors: Susanne Reinhardt, Rafal Kowalewski, 2020-2022
     :copyright: Copyright (c) 2022 Jungmann Lab, MPI of Biochemistry
 """
