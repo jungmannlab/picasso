@@ -4554,7 +4554,7 @@ class SlicerDialog(QtWidgets.QDialog):
     sl : QSlider
         points to the slice to be displayed
     slicer_cache : dict
-        contains QPixMaps that have been drawn for each slice
+        contains QPixmaps that have been drawn for each slice
     slicermax : float
         maximum value of self.sl
     slicermin : float
@@ -4579,11 +4579,11 @@ class SlicerDialog(QtWidgets.QDialog):
         Called when the dialog is open, calculates the histograms and 
         shows the dialog
     on_pick_slice_changed()
-        Modifies histograms when slice size changes
+        Modifies histograms when slice thickness changes
     on_slice_position_changed(position)
         Changes some properties and updates scene in the main window
     toggle_slicer()
-        Updates scene in the main window when slicer is moved
+        Updates scene in the main window when slicing is called
     """
 
     def __init__(self, window):
@@ -4591,6 +4591,7 @@ class SlicerDialog(QtWidgets.QDialog):
         self.window = window
         self.setWindowTitle("3D Slicer")
         self.setModal(False)
+        self.setMinimumSize(550, 690) # to display the histogram
         vbox = QtWidgets.QVBoxLayout(self)
         slicer_groupbox = QtWidgets.QGroupBox("Slicer Settings")
 
@@ -4615,28 +4616,26 @@ class SlicerDialog(QtWidgets.QDialog):
         self.sl.setTickPosition(QtWidgets.QSlider.TicksBelow)
         self.sl.setTickInterval(1)
         self.sl.valueChanged.connect(self.on_slice_position_changed)
-
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
 
         self.figure = plt.figure(figsize=(3, 3))
         self.canvas = FigureCanvas(self.figure)
+        slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
 
         self.slicer_radio_button = QtWidgets.QCheckBox("Slice Dataset")
         self.slicer_radio_button.stateChanged.connect(self.toggle_slicer)
+        slicer_grid.addWidget(self.slicer_radio_button, 3, 0)
 
-        self.zcoord = []
         self.separate_check = QtWidgets.QCheckBox("Export channels separate")
+        slicer_grid.addWidget(self.separate_check, 4, 0)
         self.full_check = QtWidgets.QCheckBox("Export full image")
+        slicer_grid.addWidget(self.full_check, 5, 0)
         self.export_button = QtWidgets.QPushButton("Export Slices")
         self.export_button.setAutoDefault(False)
-
         self.export_button.clicked.connect(self.export_stack)
-
-        slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
-        slicer_grid.addWidget(self.slicer_radio_button, 3, 0)
-        slicer_grid.addWidget(self.separate_check, 4, 0)
-        slicer_grid.addWidget(self.full_check, 5, 0)
         slicer_grid.addWidget(self.export_button, 6, 0)
+
+        self.zcoord = []
 
     def initialize(self):
         """ 
@@ -4671,7 +4670,7 @@ class SlicerDialog(QtWidgets.QDialog):
         # plot histograms
         self.patches = []
         for i in range(len(self.zcoord)):
-            n, bins, patches = plt.hist(
+            _, _, patches = plt.hist(
                 self.zcoord[i],
                 self.bins,
                 density=True,
@@ -4680,7 +4679,7 @@ class SlicerDialog(QtWidgets.QDialog):
             )
             self.patches.append(patches)
 
-        plt.xlabel("Z-Coordinate [nm]")
+        plt.xlabel("Z-Coordinate [pixels]")
         plt.ylabel("Counts")
         plt.title(r"$\mathrm{Histogram\ of\ Z:}$")
         self.canvas.draw()
@@ -4691,7 +4690,7 @@ class SlicerDialog(QtWidgets.QDialog):
         self.slicer_cache = {}
 
     def on_pick_slice_changed(self):
-        """ Modifies histograms when slice size changes. """
+        """ Modifies histograms when slice thickness changes. """
 
         # reset cache
         self.slicer_cache = {}
@@ -4700,10 +4699,10 @@ class SlicerDialog(QtWidgets.QDialog):
         else:
             self.calculate_histogram()
             self.sl.setValue(len(self.bins) / 2)
-            self.on_slice_position_changed(self.sl.value())
+            # self.on_slice_position_changed(self.sl.value())
 
     def toggle_slicer(self):
-        """ Updates scene in the main window when slicer is moved. """
+        """ Updates scene in the main window slicing is called. """
 
         self.window.view.update_scene()
 
@@ -4754,7 +4753,6 @@ class SlicerDialog(QtWidgets.QDialog):
                     # save each channel one by one
                     for i in tqdm(range(self.sl.maximum() + 1)):
                         self.sl.setValue(i)
-                        print("Slide: " + str(i))
                         out_path = (
                             base
                             + "_Z"
@@ -6735,9 +6733,9 @@ class View(QtWidgets.QLabel):
                 use_cache=use_cache,
                 picks_only=picks_only,
             )
-            self.window.slicer_dialog.slicer_cache[
-                slicerposition
-            ] = self.pixmap
+            self.window.slicer_dialog.slicer_cache[slicerposition] = (
+                self.pixmap
+            )
         else:
             self.setPixmap(pixmap)
 
@@ -8775,7 +8773,7 @@ class View(QtWidgets.QLabel):
                 kwargs, locs=locs, autoscale=autoscale, use_cache=use_cache
             )            
 
-        # if clustered or picked locs
+        # if locs have group identity (e.g. clusters)
         if hasattr(locs, "group"):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
