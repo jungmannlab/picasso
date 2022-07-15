@@ -2046,9 +2046,11 @@ class TestClustererDialog(QtWidgets.QDialog):
     pick_size : float
         width (if rectangular) or diameter (if circular) of the pick
     test_dbscan_params : QWidget
-        contains widgets with changing parameters for DBSCAN
+        contains widgets with parameters for DBSCAN
     test_hdbscan_params : QWidget
-        contains widgets with changing parameters for DBSCANs
+        contains widgets with parameters for HDBSCAN
+    test_smlm_params : QWidget
+        contains widhtes with parameters for SMLM clusterer
     view : QLabel
         widget for displaying rendered clustered localizations
     window : QMainWindow
@@ -2110,7 +2112,7 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # parameters - choose clusterer
         self.clusterer_name = QtWidgets.QComboBox()
-        for name in ['DBSCAN', 'HDBSCAN']:
+        for name in ['DBSCAN', 'HDBSCAN', 'SMLM']:
             self.clusterer_name.addItem(name)
         parameters_grid.addWidget(self.clusterer_name, 0, 0)
 
@@ -2124,6 +2126,8 @@ class TestClustererDialog(QtWidgets.QDialog):
         parameters_stack.addWidget(self.test_dbscan_params)
         self.test_hdbscan_params = TestHDBSCANParams(self)
         parameters_stack.addWidget(self.test_hdbscan_params)
+        self.test_smlm_params = TestSMLMParams(self)
+        parameters_stack.addWidget(self.test_smlm_params)
 
         # parameters - display mode
         self.display_all_locs = QtWidgets.QCheckBox(
@@ -2240,21 +2244,42 @@ class TestClustererDialog(QtWidgets.QDialog):
         else:
             X = np.vstack((locs.x, locs.y)).T
         clusterer_name = self.clusterer_name.currentText()
-        if clusterer_name == 'DBSCAN':
-            clusterer = DBSCAN(
+        if clusterer_name == "DBSCAN":
+            clusterer_ = DBSCAN(
                 eps=params["radius"], 
                 min_samples=params["min_samples"],
             ).fit(X)
-        elif clusterer_name == 'HDBSCAN':
+            labels = clusterer_.labels_
+        elif clusterer_name == "HDBSCAN":
             if HDBSCAN_IMPORTED:
-                clusterer = HDBSCAN(
+                clusterer_ = HDBSCAN(
                     min_samples=params["min_samples"], 
                     min_cluster_size=params["min_cluster_size"],
                     cluster_selection_epsilon=params["intercluster_radius"],
                 ).fit(X)
+                labels = clusterer_.labels_
             else:
                 return None
-        locs = self.assign_groups(locs, clusterer.labels_)
+        elif clusterer_name == "SMLM":
+            if hasattr(locs, "z"):
+                labels = clusterer.clusterer_picked_3D(
+                    X[:, 0], 
+                    X[:, 1], 
+                    X[:, 2], 
+                    locs.frame, 
+                    params["radius_xy"],
+                    params["radius_z"],
+                    params["min_cluster_size"],
+                )
+            else:
+                labels = clusterer.clusterer_picked_2D(
+                    X[:, 0], 
+                    X[:, 1], 
+                    locs.frame, 
+                    params["radius_xy"],
+                    params["min_cluster_size"],
+                )                
+        locs = self.assign_groups(locs, labels)
         self.view.group_color = self.window.view.get_group_color(locs)
         return locs
 
@@ -2290,17 +2315,23 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         params = {}
         clusterer_name = self.clusterer_name.currentText()
-        if clusterer_name == 'DBSCAN':
+        if clusterer_name == "DBSCAN":
             params["radius"] = self.test_dbscan_params.radius.value()
             params["min_samples"] = self.test_dbscan_params.min_samples.value()
-        elif clusterer_name == 'HDBSCAN':
+        elif clusterer_name == "HDBSCAN":
             params["min_cluster_size"] = (
                 self.test_hdbscan_params.min_cluster_size.value()
             )
-            params["min_samples"] = self.test_hdbscan_params.min_samples.value()
+            params["min_samples"] = (
+                self.test_hdbscan_params.min_samples.value()
+            )
             params["intercluster_radius"] = (
                 self.test_hdbscan_params.cluster_eps.value()
             )
+        elif clusterer_name == "SMLM":
+            params["radius_xy"] = self.test_smlm_params.radius_xy.value()
+            params["radius_z"] = self.test_smlm_params.radius_z.value()
+            params["min_cluster_size"] = self.test_smlm_params.min_locs.value()
         return params
 
     def get_full_fov(self):
@@ -2364,7 +2395,7 @@ class TestClustererDialog(QtWidgets.QDialog):
 
 class TestDBSCANParams(QtWidgets.QWidget):
     """
-    Class containg user-chosen clustering parameters for DBSCAN.
+    Class containing user-selected clustering parameters for DBSCAN.
     """
 
     def __init__(self, dialog):
@@ -2392,7 +2423,7 @@ class TestDBSCANParams(QtWidgets.QWidget):
 
 class TestHDBSCANParams(QtWidgets.QWidget):
     """
-    Class containg user-chosen clustering parameters for HDBSCAN.
+    Class containing user-selected clustering parameters for HDBSCAN.
     """
 
     def __init__(self, dialog):
@@ -2427,6 +2458,40 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         grid.addWidget(self.cluster_eps, 2, 1)
         grid.setRowStretch(3, 1)
 
+class TestSMLMParams(QtWidgets.QWidget):
+    """
+    Class containing user-selected clustering parameters for SMLM 
+    clusterer.
+    """
+
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        grid = QtWidgets.QGridLayout(self)
+        grid.addWidget(QtWidgets.QLabel("Radius xy [pixels]:"), 0, 0)
+        self.radius_xy = QtWidgets.QDoubleSpinBox()
+        self.radius_xy.setKeyboardTracking(False)
+        self.radius_xy.setValue(0.1)
+        self.radius_xy.setRange(0.0001, 1e3)
+        self.radius_xy.setDecimals(4)
+        grid.addWidget(self.radius_xy, 0, 1)
+
+        grid.addWidget(QtWidgets.QLabel("Radius z (3D only):"), 1, 0)
+        self.radius_z = QtWidgets.QDoubleSpinBox()
+        self.radius_z.setKeyboardTracking(False)
+        self.radius_z.setValue(0.25)
+        self.radius_z.setRange(0, 1e3)
+        self.radius_z.setDecimals(4)
+        grid.addWidget(self.radius_z, 1, 1)
+
+        grid.addWidget(QtWidgets.QLabel("Min. no. locs"), 2, 0)     
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setKeyboardTracking(False)
+        self.min_locs.setValue(10)
+        self.min_locs.setRange(1, 1e6)
+        self.min_locs.setSingleStep(1)
+        grid.addWidget(self.min_locs, 2, 1)
+        grid.setRowStretch(3, 1)
 
 class TestClustererView(QtWidgets.QLabel):
     """
@@ -10212,9 +10277,9 @@ class Window(QtWidgets.QMainWindow):
     open_apply_dialog()
         Loads expression and applies it to locs
     open_file_dialog()
-        Opens Picasso .hdf5 file(s)
+        Opens localizaitons .hdf5 file(s)
     open_rotated_locs()
-        Opens Picasso : Render rotated .hdf5 file(s)
+        Opens rotated localizations .hdf5 file(s)
     remove_group()
         Displayed locs will have no group information
     resizeEvent(event)
@@ -11350,7 +11415,7 @@ class Window(QtWidgets.QMainWindow):
             self.view.update_scene()
 
     def open_file_dialog(self):
-        """ Opens Picasso .hdf5 file(s). """
+        """ Opens localizations .hdf5 file(s). """
 
         if self.pwd == []:
             paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
@@ -11366,7 +11431,7 @@ class Window(QtWidgets.QMainWindow):
 
     def open_rotated_locs(self):
         """ 
-        Opens Picasso : Render rotated .hdf5 file(s). 
+        Opens rotated localizations .hdf5 file(s). 
 
         In addition to normal file opening, it also requires to load
         info about the pick and rotation.
