@@ -340,11 +340,29 @@ class Window(QtWidgets.QMainWindow):
         self.filter_log = {}
         self.locs = None
 
+        # load user settings (working directory)
+        settings = io.load_user_settings()
+        pwd = []
+        try:
+            pwd = settings["Filter"]["PWD"]
+        except Exception as e:
+            print(e)
+            pass
+        if len(pwd) == 0:
+            pwd = []
+        self.pwd = pwd
+
     def open_file_dialog(self):
-        path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Open localizations", filter="*.hdf5"
-        )
+        if self.pwd == []:
+            path, exe = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Open localizations", filter="*.hdf5"
+            )
+        else:
+            path, exe = QtWidgets.QFileDialog.getOpenFileName(
+                self, "Open localizations", directory=self.pwd, filter="*.hdf5"
+            )
         if path:
+            self.pwd = path
             self.open(path)
 
     def open(self, path):
@@ -449,6 +467,10 @@ class Window(QtWidgets.QMainWindow):
         self.display_locs(self.vertical_scrollbar.value())
 
     def closeEvent(self, event):
+        settings = io.load_user_settings()
+        if self.locs is not None:
+            settings["Filter"]["PWD"] = self.pwd
+            io.save_user_settings(settings)
         QtWidgets.qApp.closeAllWindows()
 
 

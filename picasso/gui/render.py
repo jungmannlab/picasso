@@ -764,6 +764,9 @@ class DatasetDialog(QtWidgets.QDialog):
             del self.window.view.index_blocks[i]
             del self.window.view.z_converted[i]
 
+            # delete zcoord from slicer dialog
+            del self.window.slicer_dialog.zcoord[i]
+
             # delete attributes from the fast render dialog
             del self.window.view.all_locs[i]
             self.window.fast_render_dialog.on_file_closed(i)
@@ -2046,9 +2049,11 @@ class TestClustererDialog(QtWidgets.QDialog):
     pick_size : float
         width (if rectangular) or diameter (if circular) of the pick
     test_dbscan_params : QWidget
-        contains widgets with changing parameters for DBSCAN
+        contains widgets with parameters for DBSCAN
     test_hdbscan_params : QWidget
-        contains widgets with changing parameters for DBSCANs
+        contains widgets with parameters for HDBSCAN
+    test_smlm_params : QWidget
+        contains widhtes with parameters for SMLM clusterer
     view : QLabel
         widget for displaying rendered clustered localizations
     window : QMainWindow
@@ -2110,7 +2115,7 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # parameters - choose clusterer
         self.clusterer_name = QtWidgets.QComboBox()
-        for name in ['DBSCAN', 'HDBSCAN']:
+        for name in ['DBSCAN', 'HDBSCAN', 'SMLM']:
             self.clusterer_name.addItem(name)
         parameters_grid.addWidget(self.clusterer_name, 0, 0)
 
@@ -2124,6 +2129,8 @@ class TestClustererDialog(QtWidgets.QDialog):
         parameters_stack.addWidget(self.test_dbscan_params)
         self.test_hdbscan_params = TestHDBSCANParams(self)
         parameters_stack.addWidget(self.test_hdbscan_params)
+        self.test_smlm_params = TestSMLMParams(self)
+        parameters_stack.addWidget(self.test_smlm_params)
 
         # parameters - display mode
         self.display_all_locs = QtWidgets.QCheckBox(
@@ -2240,21 +2247,42 @@ class TestClustererDialog(QtWidgets.QDialog):
         else:
             X = np.vstack((locs.x, locs.y)).T
         clusterer_name = self.clusterer_name.currentText()
-        if clusterer_name == 'DBSCAN':
-            clusterer = DBSCAN(
+        if clusterer_name == "DBSCAN":
+            clusterer_ = DBSCAN(
                 eps=params["radius"], 
                 min_samples=params["min_samples"],
             ).fit(X)
-        elif clusterer_name == 'HDBSCAN':
+            labels = clusterer_.labels_
+        elif clusterer_name == "HDBSCAN":
             if HDBSCAN_IMPORTED:
-                clusterer = HDBSCAN(
+                clusterer_ = HDBSCAN(
                     min_samples=params["min_samples"], 
                     min_cluster_size=params["min_cluster_size"],
                     cluster_selection_epsilon=params["intercluster_radius"],
                 ).fit(X)
+                labels = clusterer_.labels_
             else:
                 return None
-        locs = self.assign_groups(locs, clusterer.labels_)
+        elif clusterer_name == "SMLM":
+            if hasattr(locs, "z"):
+                labels = clusterer.clusterer_picked_3D(
+                    X[:, 0], 
+                    X[:, 1], 
+                    X[:, 2], 
+                    locs.frame, 
+                    params["radius_xy"],
+                    params["radius_z"],
+                    params["min_cluster_size"],
+                )
+            else:
+                labels = clusterer.clusterer_picked_2D(
+                    X[:, 0], 
+                    X[:, 1], 
+                    locs.frame, 
+                    params["radius_xy"],
+                    params["min_cluster_size"],
+                )                
+        locs = self.assign_groups(locs, labels)
         self.view.group_color = self.window.view.get_group_color(locs)
         return locs
 
@@ -2290,17 +2318,23 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         params = {}
         clusterer_name = self.clusterer_name.currentText()
-        if clusterer_name == 'DBSCAN':
+        if clusterer_name == "DBSCAN":
             params["radius"] = self.test_dbscan_params.radius.value()
             params["min_samples"] = self.test_dbscan_params.min_samples.value()
-        elif clusterer_name == 'HDBSCAN':
+        elif clusterer_name == "HDBSCAN":
             params["min_cluster_size"] = (
                 self.test_hdbscan_params.min_cluster_size.value()
             )
-            params["min_samples"] = self.test_hdbscan_params.min_samples.value()
+            params["min_samples"] = (
+                self.test_hdbscan_params.min_samples.value()
+            )
             params["intercluster_radius"] = (
                 self.test_hdbscan_params.cluster_eps.value()
             )
+        elif clusterer_name == "SMLM":
+            params["radius_xy"] = self.test_smlm_params.radius_xy.value()
+            params["radius_z"] = self.test_smlm_params.radius_z.value()
+            params["min_cluster_size"] = self.test_smlm_params.min_locs.value()
         return params
 
     def get_full_fov(self):
@@ -2364,7 +2398,7 @@ class TestClustererDialog(QtWidgets.QDialog):
 
 class TestDBSCANParams(QtWidgets.QWidget):
     """
-    Class containg user-chosen clustering parameters for DBSCAN.
+    Class containing user-selected clustering parameters for DBSCAN.
     """
 
     def __init__(self, dialog):
@@ -2392,7 +2426,7 @@ class TestDBSCANParams(QtWidgets.QWidget):
 
 class TestHDBSCANParams(QtWidgets.QWidget):
     """
-    Class containg user-chosen clustering parameters for HDBSCAN.
+    Class containing user-selected clustering parameters for HDBSCAN.
     """
 
     def __init__(self, dialog):
@@ -2427,6 +2461,40 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         grid.addWidget(self.cluster_eps, 2, 1)
         grid.setRowStretch(3, 1)
 
+class TestSMLMParams(QtWidgets.QWidget):
+    """
+    Class containing user-selected clustering parameters for SMLM 
+    clusterer.
+    """
+
+    def __init__(self, dialog):
+        super().__init__()
+        self.dialog = dialog
+        grid = QtWidgets.QGridLayout(self)
+        grid.addWidget(QtWidgets.QLabel("Radius xy [pixels]:"), 0, 0)
+        self.radius_xy = QtWidgets.QDoubleSpinBox()
+        self.radius_xy.setKeyboardTracking(False)
+        self.radius_xy.setValue(0.1)
+        self.radius_xy.setRange(0.0001, 1e3)
+        self.radius_xy.setDecimals(4)
+        grid.addWidget(self.radius_xy, 0, 1)
+
+        grid.addWidget(QtWidgets.QLabel("Radius z (3D only):"), 1, 0)
+        self.radius_z = QtWidgets.QDoubleSpinBox()
+        self.radius_z.setKeyboardTracking(False)
+        self.radius_z.setValue(0.25)
+        self.radius_z.setRange(0, 1e3)
+        self.radius_z.setDecimals(4)
+        grid.addWidget(self.radius_z, 1, 1)
+
+        grid.addWidget(QtWidgets.QLabel("Min. no. locs"), 2, 0)     
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setKeyboardTracking(False)
+        self.min_locs.setValue(10)
+        self.min_locs.setRange(1, 1e6)
+        self.min_locs.setSingleStep(1)
+        grid.addWidget(self.min_locs, 2, 1)
+        grid.setRowStretch(3, 1)
 
 class TestClustererView(QtWidgets.QLabel):
     """
@@ -4489,7 +4557,7 @@ class SlicerDialog(QtWidgets.QDialog):
     sl : QSlider
         points to the slice to be displayed
     slicer_cache : dict
-        contains QPixMaps that have been drawn for each slice
+        contains QPixmaps that have been drawn for each slice
     slicermax : float
         maximum value of self.sl
     slicermin : float
@@ -4514,11 +4582,11 @@ class SlicerDialog(QtWidgets.QDialog):
         Called when the dialog is open, calculates the histograms and 
         shows the dialog
     on_pick_slice_changed()
-        Modifies histograms when slice size changes
+        Modifies histograms when slice thickness changes
     on_slice_position_changed(position)
         Changes some properties and updates scene in the main window
     toggle_slicer()
-        Updates scene in the main window when slicer is moved
+        Updates scene in the main window when slicing is called
     """
 
     def __init__(self, window):
@@ -4526,6 +4594,7 @@ class SlicerDialog(QtWidgets.QDialog):
         self.window = window
         self.setWindowTitle("3D Slicer")
         self.setModal(False)
+        self.setMinimumSize(550, 690) # to display the histogram
         vbox = QtWidgets.QVBoxLayout(self)
         slicer_groupbox = QtWidgets.QGroupBox("Slicer Settings")
 
@@ -4550,28 +4619,26 @@ class SlicerDialog(QtWidgets.QDialog):
         self.sl.setTickPosition(QtWidgets.QSlider.TicksBelow)
         self.sl.setTickInterval(1)
         self.sl.valueChanged.connect(self.on_slice_position_changed)
-
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
 
         self.figure = plt.figure(figsize=(3, 3))
         self.canvas = FigureCanvas(self.figure)
+        slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
 
         self.slicer_radio_button = QtWidgets.QCheckBox("Slice Dataset")
         self.slicer_radio_button.stateChanged.connect(self.toggle_slicer)
+        slicer_grid.addWidget(self.slicer_radio_button, 3, 0)
 
-        self.zcoord = []
         self.separate_check = QtWidgets.QCheckBox("Export channels separate")
+        slicer_grid.addWidget(self.separate_check, 4, 0)
         self.full_check = QtWidgets.QCheckBox("Export full image")
+        slicer_grid.addWidget(self.full_check, 5, 0)
         self.export_button = QtWidgets.QPushButton("Export Slices")
         self.export_button.setAutoDefault(False)
-
         self.export_button.clicked.connect(self.export_stack)
-
-        slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
-        slicer_grid.addWidget(self.slicer_radio_button, 3, 0)
-        slicer_grid.addWidget(self.separate_check, 4, 0)
-        slicer_grid.addWidget(self.full_check, 5, 0)
         slicer_grid.addWidget(self.export_button, 6, 0)
+
+        self.zcoord = []
 
     def initialize(self):
         """ 
@@ -4593,8 +4660,14 @@ class SlicerDialog(QtWidgets.QDialog):
         plt.cla()
         n_channels = len(self.zcoord)
 
-        # get colors for each channel
-        self.colors = get_colors(n_channels)
+        # get colors for each channel (from dataset dialog)
+        colors = [
+            _.palette().color(QtGui.QPalette.Window)
+            for _ in self.window.dataset_dialog.colordisp_all
+        ]
+        self.colors = [
+            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
+        ]
 
         # get bins, starting with minimum z and ending with max z
         self.bins = np.arange(
@@ -4606,7 +4679,7 @@ class SlicerDialog(QtWidgets.QDialog):
         # plot histograms
         self.patches = []
         for i in range(len(self.zcoord)):
-            n, bins, patches = plt.hist(
+            _, _, patches = plt.hist(
                 self.zcoord[i],
                 self.bins,
                 density=True,
@@ -4615,8 +4688,8 @@ class SlicerDialog(QtWidgets.QDialog):
             )
             self.patches.append(patches)
 
-        plt.xlabel("Z-Coordinate [nm]")
-        plt.ylabel("Counts")
+        plt.xlabel("z-coordinate [pixels]")
+        plt.ylabel("Rel. frequency")
         plt.title(r"$\mathrm{Histogram\ of\ Z:}$")
         self.canvas.draw()
         self.sl.setMaximum(len(self.bins) - 2)
@@ -4626,7 +4699,7 @@ class SlicerDialog(QtWidgets.QDialog):
         self.slicer_cache = {}
 
     def on_pick_slice_changed(self):
-        """ Modifies histograms when slice size changes. """
+        """ Modifies histograms when slice thickness changes. """
 
         # reset cache
         self.slicer_cache = {}
@@ -4635,10 +4708,10 @@ class SlicerDialog(QtWidgets.QDialog):
         else:
             self.calculate_histogram()
             self.sl.setValue(len(self.bins) / 2)
-            self.on_slice_position_changed(self.sl.value())
+            # self.on_slice_position_changed(self.sl.value())
 
     def toggle_slicer(self):
-        """ Updates scene in the main window when slicer is moved. """
+        """ Updates scene in the main window slicing is called. """
 
         self.window.view.update_scene()
 
@@ -4689,13 +4762,12 @@ class SlicerDialog(QtWidgets.QDialog):
                     # save each channel one by one
                     for i in tqdm(range(self.sl.maximum() + 1)):
                         self.sl.setValue(i)
-                        print("Slide: " + str(i))
                         out_path = (
                             base
                             + "_Z"
                             + "{num:03d}".format(num=i)
                             + "_CH"
-                            + "{num:03d}".format(num=j + 1)
+                            + "{num:03d}".format(num=j+1)
                             + ".tif"
                         )
                         if self.full_check.isChecked(): # full FOV
@@ -4728,7 +4800,6 @@ class SlicerDialog(QtWidgets.QDialog):
 
                 for i in tqdm(range(self.sl.maximum() + 1)):
                     self.sl.setValue(i)
-                    print("Slide: " + str(i))
                     out_path = (
                         base
                         + "_Z"
@@ -5294,8 +5365,8 @@ class View(QtWidgets.QLabel):
         # add options to rendering by parameter
         self.window.display_settings_dlg.parameter.addItems(locs.dtype.names)
 
-        # append z coordinates for slicing
         if hasattr(locs, "z"):
+            # append z coordinates for slicing
             self.window.slicer_dialog.zcoord.append(locs.z)
             # unlock 3D settings
             for action in self.window.actions_3d:
@@ -6670,9 +6741,9 @@ class View(QtWidgets.QLabel):
                 use_cache=use_cache,
                 picks_only=picks_only,
             )
-            self.window.slicer_dialog.slicer_cache[
-                slicerposition
-            ] = self.pixmap
+            self.window.slicer_dialog.slicer_cache[slicerposition] = (
+                self.pixmap
+            )
         else:
             self.setPixmap(pixmap)
 
@@ -8565,7 +8636,12 @@ class View(QtWidgets.QLabel):
 
         # get localizations for rendering
         if locs is None:
-            locs = self.locs
+            # if slicing is used, locs are indexed and changing slices deletes
+            # all localizations
+            if self.window.slicer_dialog.slicer_radio_button.isChecked():
+                locs = copy.copy(self.locs)
+            else:
+                locs = self.locs
 
         # if slicing, show only current slice from every channel
         for i in range(len(locs)):
@@ -8573,17 +8649,32 @@ class View(QtWidgets.QLabel):
                 if self.window.slicer_dialog.slicer_radio_button.isChecked():
                     z_min = self.window.slicer_dialog.slicermin
                     z_max = self.window.slicer_dialog.slicermax
-                    in_view = (locs[i].z > z_min) & (
-                        locs[i].z <= z_max
-                    )
+                    in_view = (locs[i].z > z_min) & (locs[i].z <= z_max)
                     locs[i] = locs[i][in_view]
+
         n_channels = len(locs)
         
         if use_cache: # used saved image
             n_locs = self.n_locs
             image = self.image
         else: # render each channel one by one
-            renderings = [render.render(_, **kwargs) for _ in locs]
+            # get image shape (to avoid rendering unchecked channels)
+            (y_min, x_min), (y_max, x_max) = kwargs["viewport"]
+            X, Y = (
+                int(np.ceil(kwargs["oversampling"] * (x_max - x_min))),
+                int(np.ceil(kwargs["oversampling"] * (y_max - y_min)))
+            )
+            # if single channel is rendered
+            if len(self.locs) == 1:
+                renderings = [render.render(_, **kwargs) for _ in locs]
+            else:
+                renderings = [
+                    render.render(_, **kwargs) 
+                    if self.window.dataset_dialog.checks[i].isChecked()
+                    else [0, np.zeros((Y, X))]
+                    for i, _ in enumerate(locs)
+                ] # renders only channels that are checked in dataset dialog
+            # renderings = [render.render(_, **kwargs) for _ in locs]
             n_locs = sum([_[0] for _ in renderings])
             image = np.array([_[1] for _ in renderings])
 
@@ -8604,8 +8695,9 @@ class View(QtWidgets.QLabel):
             # change colors if not automatic coloring
             if not self.window.dataset_dialog.auto_colors.isChecked():
                 # get color from Dataset Dialog
-                color = self.window.dataset_dialog.colorselection[i]
-                color = color.currentText()
+                color = (
+                    self.window.dataset_dialog.colorselection[i].currentText()
+                )
                 # if default color
                 if color in self.window.dataset_dialog.default_colors:
                     colors_array = np.array(
@@ -8646,8 +8738,8 @@ class View(QtWidgets.QLabel):
             image[i] = iscale * image[i]
 
             # don't display if channel unchecked in Dataset Dialog
-            if not self.window.dataset_dialog.checks[i].isChecked():
-                image[i] = 0 * image[i]
+            # if not self.window.dataset_dialog.checks[i].isChecked():
+            #     image[i] = 0 * image[i]
 
         # color rgb channels and store in bgra
         for color, image in zip(colors, image):
@@ -8697,7 +8789,7 @@ class View(QtWidgets.QLabel):
                 kwargs, locs=locs, autoscale=autoscale, use_cache=use_cache
             )            
 
-        # if clustered or picked locs
+        # if locs have group identity (e.g. clusters)
         if hasattr(locs, "group"):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
@@ -10218,9 +10310,9 @@ class Window(QtWidgets.QMainWindow):
     open_apply_dialog()
         Loads expression and applies it to locs
     open_file_dialog()
-        Opens Picasso .hdf5 file(s)
+        Opens localizaitons .hdf5 file(s)
     open_rotated_locs()
-        Opens Picasso : Render rotated .hdf5 file(s)
+        Opens rotated localizations .hdf5 file(s)
     remove_group()
         Displayed locs will have no group information
     resizeEvent(event)
@@ -11356,7 +11448,7 @@ class Window(QtWidgets.QMainWindow):
             self.view.update_scene()
 
     def open_file_dialog(self):
-        """ Opens Picasso .hdf5 file(s). """
+        """ Opens localizations .hdf5 file(s). """
 
         if self.pwd == []:
             paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
@@ -11372,7 +11464,7 @@ class Window(QtWidgets.QMainWindow):
 
     def open_rotated_locs(self):
         """ 
-        Opens Picasso : Render rotated .hdf5 file(s). 
+        Opens rotated localizations .hdf5 file(s). 
 
         In addition to normal file opening, it also requires to load
         info about the pick and rotation.
