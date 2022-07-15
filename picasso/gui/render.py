@@ -8648,7 +8648,19 @@ class View(QtWidgets.QLabel):
             n_locs = self.n_locs
             image = self.image
         else: # render each channel one by one
-            renderings = [render.render(_, **kwargs) for _ in locs]
+            # get image shape (to avoid rendering unchecked channels)
+            (y_min, x_min), (y_max, x_max) = kwargs["viewport"]
+            X, Y = (
+                int(np.ceil(kwargs["oversampling"] * (x_max - x_min))),
+                int(np.ceil(kwargs["oversampling"] * (y_max - y_min)))
+            )
+            renderings = [
+                render.render(_, **kwargs) 
+                if self.window.dataset_dialog.checks[i].isChecked()
+                else [0, np.zeros((Y, X))]
+                for i, _ in enumerate(locs)
+            ] # renders only channels that are checked in dataset dialog
+            # renderings = [render.render(_, **kwargs) for _ in locs]
             n_locs = sum([_[0] for _ in renderings])
             image = np.array([_[1] for _ in renderings])
 
@@ -8669,8 +8681,9 @@ class View(QtWidgets.QLabel):
             # change colors if not automatic coloring
             if not self.window.dataset_dialog.auto_colors.isChecked():
                 # get color from Dataset Dialog
-                color = self.window.dataset_dialog.colorselection[i]
-                color = color.currentText()
+                color = (
+                    self.window.dataset_dialog.colorselection[i].currentText()
+                )
                 # if default color
                 if color in self.window.dataset_dialog.default_colors:
                     colors_array = np.array(
@@ -8711,8 +8724,8 @@ class View(QtWidgets.QLabel):
             image[i] = iscale * image[i]
 
             # don't display if channel unchecked in Dataset Dialog
-            if not self.window.dataset_dialog.checks[i].isChecked():
-                image[i] = 0 * image[i]
+            # if not self.window.dataset_dialog.checks[i].isChecked():
+            #     image[i] = 0 * image[i]
 
         # color rgb channels and store in bgra
         for color, image in zip(colors, image):
