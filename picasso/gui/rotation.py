@@ -2319,25 +2319,31 @@ class RotationWindow(QtWidgets.QMainWindow):
         later loading.
         """
 
-        if any(self.window.view.z_converted):
-            m = QtWidgets.QMessageBox()
-            m.setWindowTitle("z coordinates have been converted to pixels")
-            ret = m.question(
-                self,
-                "",
-                "Convert z back to nm? (old picasso format)",
-                m.Yes | m.No,
-            )
-            if ret == m.Yes:
-                pixelsize = self.window.display_settings_dlg.pixelsize.value()
-                for channel in range(len(self.view_rot.locs)):
-                    if self.view_rot.z_converted[channel]:
-                        self.view_rot.locs[channel].z *= pixelsize
-                        self.view_rot.z_converted[channel] = False
+        channel = self.window.view.get_channel_all_at_once(
+            "Save rotated localizations"
+        )
+
+        if channel is not None:
+
+            if any(self.window.view.z_converted):
+                m = QtWidgets.QMessageBox()
+                m.setWindowTitle("z coordinates have been converted to pixels")
+                ret = m.question(
+                    self,
+                    "",
+                    "Convert z back to nm? (old picasso format)",
+                    m.Yes | m.No,
+                )
+                if ret == m.Yes:
+                    pixelsize = self.window.display_settings_dlg.pixelsize.value()
+                    for i in range(len(self.view_rot.locs)):
+                        if self.view_rot.z_converted[i]:
+                            self.view_rot.locs[i].z *= pixelsize
+                            self.view_rot.z_converted[i] = False
             # rotation info
-            angx = self.view_rot.angx * 180 / np.pi
-            angy = self.view_rot.angy * 180 / np.pi
-            angz = self.view_rot.angz * 180 / np.pi
+            angx = int(self.view_rot.angx * 180 / np.pi)
+            angy = int(self.view_rot.angy * 180 / np.pi)
+            angz = int(self.view_rot.angz * 180 / np.pi)
             if self.view_rot.pick_shape == "Circle":
                 x, y = self.view_rot.pick
                 pick = [float(x), float(y)]
@@ -2364,34 +2370,27 @@ class RotationWindow(QtWidgets.QMainWindow):
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_arender",
+                    f"_arotated_{angx}_{angy}_{angz}.hdf5",
                 ) # get the save file suffix
                 if ok:
                     for channel in tqdm(range(len(self.view_rot.paths))):
                         base, ext = os.path.splitext(
                             self.view_rot.paths[channel]
                         )
-                        out_path = (
-                            base 
-                            + suffix 
-                            + "_rotated_{}_{}_{}.hdf5".format(
-                                int(angx), int(angy), int(angz)
-                            )
-                        ) # name of the saved files
+                        out_path = base + suffix # name of the saved files
                         info = self.view_rot.infos[channel] + new_info
                         io.save_locs(
                             out_path, self.window.view.locs[channel], info
                         )
             else: # one channel
-                base, ext = os.path.splitext(self.view_rot.paths[channel])
-                out_path = (
-                    base 
-                    + "_rotated_{}_{}_{}.hdf5".format(
-                        int(angx), int(angy), int(angz)
-                    ) # name of the save file
+                out_path = self.view_rot.paths[channel].replace(
+                    ".hdf5", f"_rotated_{angx}_{angy}_{angz}.hdf5"
+                )
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    self, "Save rotated localizations", out_path, filter="*hdf5"
                 )
                 info = self.view_rot.infos[channel] + new_info
-                io.save_locs(out_path, self.window.view.locs[channel], info)
+                io.save_locs(path, self.window.view.locs[channel], info)
 
     def closeEvent(self, event):
         """ Closes all children dialogs and self. """

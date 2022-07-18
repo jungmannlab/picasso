@@ -9489,7 +9489,7 @@ class View(QtWidgets.QLabel):
         # where each pick is weighted according to its msd
         nan_mask = np.isnan(drift)
         drift = np.ma.MaskedArray(drift, mask=nan_mask)
-        drift_mean = np.ma.average(drift, axis=0, weights=1 / msd)
+        drift_mean = np.ma.average(drift, axis=0, weights=1/msd)
         drift_mean = drift_mean.filled(np.nan)
 
         # Linear interpolation for frames without localizations
@@ -10695,6 +10695,7 @@ class Window(QtWidgets.QMainWindow):
         )
         if path:
             self.view.qimage.save(path)
+            ic(self.view.qimage.size())
         self.view.setMinimumSize(1, 1)
 
     def export_complete(self):
@@ -11464,15 +11465,14 @@ class Window(QtWidgets.QMainWindow):
         info about the pick and rotation.
         """
 
-        pwd = self.pwd
-        self.remove_locs()
-        if pwd == []:
+        # self.remove_locs()
+        if self.pwd == []:
             path, ext = QtWidgets.QFileDialog.getOpenFileNames(
                 self, "Add localizations", filter="*.hdf5" 
             )
         else:
             path, ext = QtWidgets.QFileDialog.getOpenFileNames(
-                self, "Add localizations", directory=pwd, filter="*.hdf5"
+                self, "Add localizations", directory=self.pwd, filter="*.hdf5"
             )
         if path:
             self.pwd = path[0]
