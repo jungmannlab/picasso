@@ -6051,9 +6051,9 @@ class View(QtWidgets.QLabel):
                         )
                 else: # gpu not found, cancel operation
                     message = (
-                        "Make sure your computer has a GPU installed"
-                        " and that you have the required software.\n"
-                        "To obtain it,  run 'conda install cudatoolkit'."
+                        "Make sure your computer has a CUDA-enabled GPU installed\n"
+                        "and that you have the required software. To obtain it,\n"
+                        "run 'conda install cudatoolkit' in the the Anaconda prompt."
                     )
                     QtWidgets.QMessageBox.information(
                         self, "GPU not found.", message
