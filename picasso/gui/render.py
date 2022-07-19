@@ -8138,12 +8138,7 @@ class View(QtWidgets.QLabel):
 
     @check_picks
     def filter_picks(self):
-        """ 
-        Filters picks by number of locs. 
-
-        To avoid time-consuming self.pick_similar, only the initial 
-        parts of the function are run.
-        """
+        """ Filters picks by number of locs. """
 
         channel = self.get_channel("Filter picks by locs")
         if channel is not None:
