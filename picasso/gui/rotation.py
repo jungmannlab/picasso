@@ -631,7 +631,9 @@ class AnimationDialog(QtWidgets.QDialog):
             )
 
         # get save file name
-        out_path = self.window.view_rot.paths[0] + "_video.mp4"
+        out_path = self.window.view_rot.paths[0].replace(
+            ".hdf5", "_video.mp4"
+        )
         name, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save animation", out_path, filter="*.mp4"
         )
@@ -850,6 +852,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.infos = []
         self.paths = []
         self.group_color = []
+        self._size_hint = (512, 512)
         self._mode = "Rotate"
         self._rotation = []
         self._points = []
@@ -857,7 +860,12 @@ class ViewRotation(QtWidgets.QLabel):
         self.display_legend = False
         self.display_rotation = True
         self.display_angles = False
-        self.setMaximumSize(500, 500)
+
+    def sizeHint(self):
+        return QtCore.QSize(*self._size_hint)
+
+    def resizeEvent(self, event):
+        self.update_scene()
 
     def load_locs(self, update_window=False):
         """
@@ -2250,8 +2258,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         tools_menu.addAction(rotate_tool_action)
 
         self.menus = [file_menu, view_menu, tools_menu]
-        self.setMinimumSize(500, 500)
-        self.setMaximumSize(500, 500)
+        self.setMinimumSize(100, 100)
         self.move(20,20)
 
     def move_pick(self, dx, dy):
@@ -2324,7 +2331,6 @@ class RotationWindow(QtWidgets.QMainWindow):
         )
 
         if channel is not None:
-
             if any(self.window.view.z_converted):
                 m = QtWidgets.QMessageBox()
                 m.setWindowTitle("z coordinates have been converted to pixels")
