@@ -650,7 +650,11 @@ class AnimationDialog(QtWidgets.QDialog):
                         ang=(angx[i], angy[i], angz[i]),
                         animation=True,
                     )
-                    qimage = qimage.scaled(500, 500)
+                    qimage = qimage.scaled(
+                        self.width(), 
+                        self.height(),
+                        QtCore.Qt.KeepAspectRatioByExpanding,
+                    )
                     qimage.save(path + "/frame_{}.png".format(i+1))
             except:
                 # if folder exists, ask if it should be used or deleted
@@ -672,7 +676,11 @@ class AnimationDialog(QtWidgets.QDialog):
                             ang=(angx[i], angy[i], angz[i]),
                             animation=True,
                         )
-                        qimage = qimage.scaled(500, 500)
+                        qimage = qimage.scaled(
+                            self.width(), 
+                            self.height(),
+                            QtCore.Qt.KeepAspectRatioByExpanding,
+                        )
                         qimage.save(path + "/frame_{}.png".format(i+1))
                 elif ret == m.Yes:
                     # use old frames
@@ -710,6 +718,12 @@ class ViewRotation(QtWidgets.QLabel):
         current rotation angle around y axis
     angz : float
         current rotation angle around z axis
+    block_x: boolean
+        True if rotate only around x axis
+    block_y: boolean
+        True if rotate only around y axis
+    block_z: boolean
+        True if rotate only around z axis
     display_angles : boolean
         True if current rotation angles are to be displayed
     display_legend : boolean
@@ -860,6 +874,10 @@ class ViewRotation(QtWidgets.QLabel):
         self.display_legend = False
         self.display_rotation = True
         self.display_angles = False
+        self.block_x = False
+        self.block_y = False
+        self.block_z = False
+        self.setFocusPolicy(QtCore.Qt.ClickFocus)
 
     def sizeHint(self):
         return QtCore.QSize(*self._size_hint)
@@ -1642,6 +1660,34 @@ class ViewRotation(QtWidgets.QLabel):
         self.load_locs() # pick locs in the new viewport
         self.update_scene(viewport=new_viewport)
 
+    def keyPressEvent(self, event):
+        if event.key() == 88: # x
+            self.block_x = True
+            self.block_y = False
+            self.block_z = False
+            event.accept()
+        elif event.key() == 89: # y
+            self.block_x = False
+            self.block_y = True
+            self.block_z = False
+            event.accept()
+        elif event.key() == 90: # z
+            self.block_x = False
+            self.block_y = False
+            self.block_z = True
+            event.accept()
+        else:
+            event.ignore()
+
+    def keyReleaseEvent(self, event):
+        if event.key() in [88, 89, 90]: # x, y or z
+            self.block_x = False
+            self.block_y = False
+            self.block_z = False
+            event.accept()
+        else:
+            event.ignore()
+
     def mouseMoveEvent(self, event):
         """
         Defines actions taken when moving mouse.
@@ -1680,11 +1726,15 @@ class ViewRotation(QtWidgets.QLabel):
                 # whether Ctrl/Command is pressed
                 modifiers = QtWidgets.QApplication.keyboardModifiers()
                 if modifiers == QtCore.Qt.ControlModifier:
-                    self.angy += float(2 * np.pi * rel_pos_x/width)
-                    self.angz += float(2 * np.pi * rel_pos_y/height)
+                    if not self.block_y:
+                        self.angz += float(2 * np.pi * rel_pos_y/height)
+                    if not self.block_z:
+                        self.angy += float(2 * np.pi * rel_pos_x/width)
                 else:
-                    self.angx += float(2 * np.pi * rel_pos_y/height)
-                    self.angy += float(2 * np.pi * rel_pos_x/width)
+                    if not self.block_x:
+                        self.angy += float(2 * np.pi * rel_pos_x/width)
+                    if not self.block_y:
+                        self.angx += float(2 * np.pi * rel_pos_y/height)
 
                 self.update_scene()
 
