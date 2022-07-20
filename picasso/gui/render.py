@@ -765,7 +765,10 @@ class DatasetDialog(QtWidgets.QDialog):
             del self.window.view.z_converted[i]
 
             # delete zcoord from slicer dialog
-            del self.window.slicer_dialog.zcoord[i]
+            try:
+                l self.window.slicer_dialog.zcoord[i]
+            except:
+                pass
 
             # delete attributes from the fast render dialog
             del self.window.view.all_locs[i]
