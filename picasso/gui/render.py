@@ -766,7 +766,7 @@ class DatasetDialog(QtWidgets.QDialog):
 
             # delete zcoord from slicer dialog
             try:
-                l self.window.slicer_dialog.zcoord[i]
+                self.window.slicer_dialog.zcoord[i]
             except:
                 pass
 
