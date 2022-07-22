@@ -52,10 +52,13 @@ Sample instructions to create an environment and installation of packages with c
 
 1. Open the console and create a new conda environment: ``conda create --name picasso python=3.8``
 2. Activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
+2a. For Mac systems (e.g. M1) install PyQt via conda: ``conda install -c anaconda pyqt``.
 3. Install using pip: ``pip install picassosr``.
 4. (Optional) If you want to use hdbscan install using pip: ``pip install hdbscan``.
 5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
 6. Continue with the installation of Picasso
+
+Troubleshooting: In case installing via ``pip`` fails, try to install the failing packages via conda.
 
 Note that sometimes outdated packages can cause problems. As of version 0.3.0, Picasso switched from PyQt4 to PyQt5, so make sure to update PyQt. If you experience errors, please check whether your packages have the correct version (e.g., see issue #4). When using conda, make sure that you have the default package channel (e.g., see issue #30).
 
