@@ -20,9 +20,9 @@ import threading as _threading
 from PyQt5.QtWidgets import QMessageBox as _QMessageBox
 from . import lib as _lib
 
-from .ext.bitplane import IMSWRITER
+from .ext import bitplane
 
-if IMSWRITER:
+if bitplane.IMSWRITER:
     from .ext.bitplane import IMSFile
 
 
