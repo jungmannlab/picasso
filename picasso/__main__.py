@@ -916,6 +916,9 @@ def _localize(args):
                 "Min. Net Gradient": min_net_gradient,
                 "Convergence Criterion": convergence,
                 "Max. Iterations": max_iterations,
+                "Pixelsize": args.pixelsize,
+                "Fit method": args.fit_method
+
             }
 
             if args.fit_method == "lq-3d" or args.fit_method == "lq-gpu-3d":
@@ -938,7 +941,8 @@ def _localize(args):
             info.append(localize_info)
 
             base, ext = splitext(path)
-            out_path = base + "_locs.hdf5"
+
+            out_path = f"{base}{args.suffix}_locs.hdf5"
             save_locs(out_path, locs, info)
             print("File saved to {}".format(out_path))
 
@@ -950,7 +954,7 @@ def _localize(args):
             if CHECK_DB:
                 print("\n")
                 print("Assesing quality and adding to DB")
-                add_file_to_db(path)
+                add_file_to_db(path, out_path)
                 print("Done.")
                 print("\n")
 
@@ -1367,12 +1371,24 @@ def main():
         "-mf", "--mf", type=float, default=0, help="Magnification factor (only 3d)"
     )
     localize_parser.add_argument(
+        "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
+    )
+    localize_parser.add_argument(
         "-zc",
         "--zc",
         type=str,
         default="",
         help="Path to 3d calibration file (only 3d)",
     )
+
+    localize_parser.add_argument(
+        "-sf",
+        "--suffix",
+        type=str,
+        default="",
+        help="Suffix to add to files",
+    )
+
     localize_parser.add_argument(
         "-db",
         "--database",

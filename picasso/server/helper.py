@@ -35,7 +35,8 @@ def fetch_watcher():
     try:
         engine = create_engine("sqlite:///" + _db_filename(), echo=False)
         df = pd.read_sql_table("watcher", con=engine)
-    except ValueError:
+    except ValueError as e:
+        print(e)
         df = pd.DataFrame()
 
     return df

@@ -77,7 +77,7 @@ To compare experiments, select one or multiple experiments from the dropdown men
 If multiple hdf files are present, you can select hdf files that belong to the same file family.
 
 **Comparing files will load the entire hdf file and could mean that one is comparing millions of localizations.
-Creating the plots might, therefore, not be instantaneous. **
+Creating the plots might, therefore, not be instantaneous.**
 
 - Localizations per frame: this will plot the localization per frame. This is useful to inspect the performance of an experiment over time.
 - Histogram: creates a histogram for the population. This is useful e.g., for comparing background signals.
@@ -88,11 +88,28 @@ Creating the plots might, therefore, not be instantaneous. **
 
 Watcher
 ~~~~~~~
-Set up a watcher to automatically process files in a folder with pre-defined settings.
+- Set up a file watcher to process files in a folder with pre-defined settings automatically.
+- All raw files and new files that haven't been processed will be processed.
+- You can define different parameter groups so that a file will be processed with different settings.
+- You can also chain custom commands to the watcher.
+- The watcher will check for the following filetypes: ('.raw', '.ome.tif', '.ims')
 
-* All raw files in the folder that haven't been processed will be processed.
-* Use different folders to process files with different settings.
+Logging
+"""""""
+Each watcher will write their statust to a logfile. The path is visible when setting up the logfile and when checking the currently running watchers. To view the log, select the logfile and expand the `Log`-field.
 
+Multiple Parameter Groups
+"""""""""""""""""""""""""
+.. image:: ../docs/server_watcher_pg.png
+   :scale: 10 %
+   :alt: Histogram
+
+With multiple parameter groups a file will be processed with different settings. To make multiple parameter groups available, set the `Number of Parameter Groups` to a value larger than 1. 
+The file ending will be different according to the parameter group used. E.g. if you have two parameter groups, file `testfile.raw` will be processed as `testfile_pg_1_locs.hdf5` and `testfile_pg_2_locs.hdf5`.
+
+
+Custom commands
+"""""""""""""""
 You can use the "Custom command" to execute a custom script after a file was processed.
 Consider the following example for a script that you want to execute named test.py:::
 
@@ -115,7 +132,6 @@ When having an existing Picasso one-click installation, Picasso can directly be 
 * ``picasso link $FILENAME`` for linking localizations
 * ``picasso dbscan $FILENAME 0.1 2`` for performing DBSCAN cluster analysis with 0.1 / 2
 
-etc.
 
 Preview
 ~~~~~~~

@@ -216,9 +216,16 @@ def history():
             with st.spinner("Creating plots.."):
 
                 if plotmode == "Table":
-                    table = df[fields + ["filename", "file_created"]]
+                    table = df
 
-                    st.write(table.style.bar(color="gray").format(precision=4))
+                    if st.checkbox("Barchart in column"):
+                        table_style = table.style.bar(color="lightgray")
+                        st.write(
+                            table_style.to_html(escape=False), unsafe_allow_html=True
+                        )
+                    else:
+                        st.dataframe(table)
+
                     csv = convert_df(table)
 
                     st.download_button(
@@ -239,7 +246,7 @@ def history():
                                 x="file_created_",
                                 y=field,
                                 color="group",
-                                hover_name="filename",
+                                hover_name="filename_hdf",
                                 hover_data=["file_created"],
                                 title=f"{field} - median {median_:.2f}",
                                 trendline=trendline,
@@ -260,7 +267,7 @@ def history():
                                 x="file_created_date",
                                 y=field,
                                 color="group",
-                                hover_name="filename",
+                                hover_name="filename_hdf",
                                 hover_data=["file_created"],
                                 title=f"{field} - median {median_:.2f}",
                                 height=400,

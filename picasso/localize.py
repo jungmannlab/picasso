@@ -388,10 +388,12 @@ def check_drift(locs, info, callback=None):
     return (drift_x, drift_y)
 
 
-def get_file_summary(file, drift=None, len_mean=None, nena=None):
+def get_file_summary(file, file_hdf, drift=None, len_mean=None, nena=None):
 
-    base, ext = os.path.splitext(file)
-    file_hdf = base + "_locs.hdf5"
+    if file_hdf is None:
+        base, ext = os.path.splitext(file)
+        file_hdf = base + "_locs.hdf5"
+    
     locs, info = _io.load_locs(file_hdf)
 
     summary = {}
@@ -440,6 +442,7 @@ def get_file_summary(file, drift=None, len_mean=None, nena=None):
     summary["nena_nm"] = summary["nena_px"] * summary["pixelsize"]
 
     summary["filename"] = file
+    summary["filename_hdf"] = file_hdf
     summary["file_created"] = datetime.fromtimestamp(os.path.getmtime(file))
     summary["entry_created"] = datetime.now()
 
@@ -450,7 +453,7 @@ def _db_filename():
     home = os.path.expanduser("~")
     picasso_dir = os.path.join(home, ".picasso")
     os.makedirs(picasso_dir, exist_ok=True)
-    return os.path.abspath(os.path.join(picasso_dir, "app_044.db"))
+    return os.path.abspath(os.path.join(picasso_dir, "app_048.db"))
 
 
 def save_file_summary(summary):
@@ -459,9 +462,6 @@ def save_file_summary(summary):
     s.to_sql("files", con=engine, if_exists="append", index=False)
 
 
-def add_file_to_db(file, drift=None, len_mean=None, nena=None):
-    base, ext = os.path.splitext(file)
-    out_path = base + "_locs.hdf5"
-
-    summary = get_file_summary(file, drift, len_mean, nena)
+def add_file_to_db(file, file_hdf, drift=None, len_mean=None, nena=None):
+    summary = get_file_summary(file, file_hdf, drift, len_mean, nena)
     save_file_summary(summary)

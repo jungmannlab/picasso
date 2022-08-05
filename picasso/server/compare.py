@@ -13,7 +13,7 @@ import plotly.graph_objects as go
 
 
 @st.cache
-def load_file(path: str, file: str):
+def load_file(path: str):
     """Loads a localization file and returns as pandas Dataframe.
     Adds a column with the filename.
 
@@ -24,7 +24,7 @@ def load_file(path: str, file: str):
 
     locs, info = io.load_locs(path)
     locs = pd.DataFrame(locs)
-    locs["file"] = file
+    locs["file"] = os.path.split(path)[-1]
     return locs, info
 
 
@@ -170,18 +170,21 @@ def compare():
             for file in selected:
                 try:
                     c1, f1 = get_file_family(file)
-                    file_dict[file] = st.selectbox(
-                        f"Select hdf file for {file}", [None] + c1
+                    file_dict[file] = st.multiselect(
+                        f"Select hdf file for {file}",
+                        c1,
+                        None,
                     )
 
                     if file_dict[file] is not None:
-                        path = os.path.dirname(file)
+                        for _ in file_dict[file]:
+                            path = os.path.dirname(file)
 
-                        with st.spinner("Loading files"):
-                            locs, info = load_file(
-                                os.path.join(path, file_dict[file]), file_dict[file]
-                            )
-                            hdf_dict[file] = locs
+                            locs_filename = os.path.join(path, _)
+
+                            with st.spinner("Loading files"):
+                                locs, info = load_file(locs_filename)
+                                hdf_dict[locs_filename] = locs
                 except FileNotFoundError:
                     st.error(
                         f"File **{file}** was not found. Please check that this file exists."
