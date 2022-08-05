@@ -333,7 +333,8 @@ def watcher():
                 command = ""
 
             logfile_dir = os.path.dirname(localize._db_filename())
-            logfile = os.path.join(logfile_dir, f"{datetime.now()}_watcher.log")
+            now_str = datetime.now().strftime("%Y-%m-%d %H_%M_%S")
+            logfile = os.path.join(logfile_dir, f"{now_str}_watcher.log")
             logfile = st.text_input("Logfile", logfile)
 
             if st.button("Submit"):
