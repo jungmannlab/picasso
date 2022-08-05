@@ -1,10 +1,8 @@
 import streamlit as st
-from helper import fetch_db
 import os
 import pandas as pd
 from multiprocessing import Process
 import time
-from collections import namedtuple
 from sqlalchemy import create_engine
 from picasso import localize
 from helper import fetch_watcher
@@ -223,7 +221,7 @@ def watcher():
                 st.stop()
 
         logfile = st.selectbox("Select logfile", df["logfile"])
-        with st.expander(f"Log"):
+        with st.expander("Log"):
             with open(logfile, "r") as f:
                 text = f.readlines()
                 st.text("".join(text))
@@ -317,7 +315,7 @@ def watcher():
                         "Enter path to calibration file.", os.getcwd()
                     )
 
-                    if not os.path.isfile(calib_file):
+                    if not os.path.isfile(settings[i]["calib_file"]):
                         col.error("Not a valid file.")
 
                     settings[i]["magnification_factor"] = col.number_input(
