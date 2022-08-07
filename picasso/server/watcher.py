@@ -9,8 +9,9 @@ from helper import fetch_watcher
 import psutil
 import subprocess
 from datetime import datetime
+import sys
 
-UPDATE_TIME = 60
+DEFAULT_UPDATE_TIME = 1
 
 FILETYPES = (".raw", ".ome.tif", ".ims")
 from picasso.__main__ import _localize
@@ -35,19 +36,20 @@ def check_new(path: str, processed: dict, logfile: str):
     """
 
     all_ = os.listdir(path)
+    all_ = [os.path.join(path, _) for _ in all_]
 
-    new = [_ for _ in all_ if _ not in processed and _.endswith(FILETYPES)]
+    new = [_ for _ in all_ if _ not in processed.keys() and _.endswith(FILETYPES)]
     locs = [_ for _ in all_ if _.endswith("_locs.hdf5")]
 
     print_to_file(
         logfile,
-        f"{datetime.now()} {len(new)} files with valid ending and {len(locs)} `_locs.hdf5` files in {path}.",
+        f"{datetime.now()} Checking: {len(all_)} files, {len(new)} with unprocessed with valid ending and {len(locs)} `_locs.hdf5` files in {path}.",
     )
 
     for _ in new:
         base, ext = os.path.splitext(_)
         for ref in locs:
-            if base in ref:
+            if base.startswith(ref):
                 processed[_] = True
                 new.remove(_)
                 break
@@ -88,7 +90,7 @@ def get_children_files(file: str, checked: list):
     files_in_folder = [
         _
         for _ in files_in_folder
-        if _.startswith(file[:-8]) and _ not in checked and _.endswith(".ome.tif")
+        if _.startswith(file[:-8]) and _ not in checked and _.endswith(".ome.tif") and 'MMStack_Pos0' in _
     ]
 
     for _ in files_in_folder:
@@ -110,6 +112,7 @@ def wait_for_completion(file: str):
         checked = [file]
 
         time.sleep(2)
+
         children = get_children_files(file, checked)
         checked.extend(children)
 
@@ -129,7 +132,9 @@ def print_to_file(path, text):
         f.write("\n")
 
 
-def check_new_and_process(settings_list: dict, path: str, command: str, logfile: str):
+def check_new_and_process(
+    settings_list: dict, path: str, command: str, logfile: str, update_time: int
+):
     """
     Checks a folder for new files and processes them with defined settigns.
     Args:
@@ -137,6 +142,7 @@ def check_new_and_process(settings_list: dict, path: str, command: str, logfile:
         path (str): Path to folder.
         command (str): Command to execute after processing.
         logfile (str): Path to logfile.
+        update_time (int): Refresh every x minutes
     """
 
     print_to_file(logfile, f"{datetime.now()} Started watcher for {path}.")
@@ -145,35 +151,41 @@ def check_new_and_process(settings_list: dict, path: str, command: str, logfile:
     processed = {}
 
     while True:
-        print_to_file(logfile, f"{datetime.now()} Checking for new files.")
         new, processed = check_new(path, processed, logfile)
 
         if len(new) > 0:
-            file = os.path.abspath(os.path.join(path, new[0]))
+            file = os.path.abspath(new[0])
             print_to_file(logfile, f"{datetime.now()} New file {file}")
             children = wait_for_completion(file)
+            print_to_file(logfile, f"{datetime.now()} Children {children}")
+            try:
+                for settings in settings_list:
 
-            for settings in settings_list:
+                    if len(settings_list) > 1:
+                        print_to_file(
+                            logfile,
+                            f"{datetime.now()} Processing group {settings['suffix']}",
+                        )
 
-                if len(settings_list) > 1:
-                    print_to_file(
-                        logfile,
-                        f"{datetime.now()} Processing group {settings['suffix']}",
-                    )
+                    settings["files"] = file
 
-                settings["files"] = file
+                    args_ = aclass(**settings)
+                    _localize(args_)
 
-                args_ = aclass(**settings)
-                _localize(args_)
+                if command != "":
 
-            if command != "":
+                    if "$FILENAME" in command:
+                        to_execute = command[:]
+                        to_execute = to_execute.replace("$FILENAME", f'"{file}"')
 
-                if "$FILENAME" in command:
-                    command = command.replace("$FILENAME", f'"{file}"')
+                    print_to_file(logfile, f"{datetime.now()} Executing {to_execute}.")
 
-                print_to_file(logfile, f"{datetime.now()} Executing {command}.")
+                    subprocess.run(to_execute)
 
-                subprocess.run(command)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                print_to_file(logfile, f"{datetime.now()} Exception {e} occured.")
 
             processed[file] = True
 
@@ -181,8 +193,9 @@ def check_new_and_process(settings_list: dict, path: str, command: str, logfile:
                 processed[_] = True
 
             print_to_file(logfile, f"{datetime.now()} File {file} processed.")
+            print(f"{datetime.now()} File {file} processed.")
 
-        time.sleep(UPDATE_TIME)
+        time.sleep(update_time * 60)
 
 
 def watcher():
@@ -220,7 +233,7 @@ def watcher():
 
                 st.stop()
 
-        logfile = st.selectbox("Select logfile", df["logfile"])
+        logfile = st.selectbox("Select logfile", df["logfile"].iloc[::-1])
         with st.expander("Log"):
             with open(logfile, "r") as f:
                 text = f.readlines()
@@ -310,6 +323,9 @@ def watcher():
                 )
 
                 if col.checkbox("3D", key=f"3d_checkbox_{i}"):
+                    col.info("3D will set fit method to lq-3d.")
+
+                    settings[i]["methods"] = "lq-3d"
 
                     settings[i]["calib_file"] = col.text_input(
                         "Enter path to calibration file.", os.getcwd()
@@ -332,6 +348,10 @@ def watcher():
             else:
                 command = ""
 
+            update_time = st.number_input(
+                "Update time (scan every x-th minute):", DEFAULT_UPDATE_TIME
+            )
+
             logfile_dir = os.path.dirname(localize._db_filename())
             now_str = datetime.now().strftime("%Y-%m-%d %H_%M_%S")
             logfile = os.path.join(logfile_dir, f"{now_str}_watcher.log")
@@ -353,21 +373,23 @@ def watcher():
                     settings_selected["fit_method"] = settings[i]["methods"]
                     settings_selected["drift"] = settings[i]["undrift"]
                     if settings[i]["calib_file"]:
-                        settings_selected["zpath"] = settings[i]["calib_file"]
+                        settings_selected["zc"] = settings[i]["calib_file"]
                     if settings[i]["magnification_factor"]:
-                        settings_selected["magnification_factor"] = settings[i][
-                            "magnification_factor"
-                        ]
+                        settings_selected["mf"] = settings[i]["magnification_factor"]
 
                     settings_selected["database"] = True
-                    settings_selected["suffix"] = f"_pg_{i+1}"
+                    if n_columns == 1:
+                        suffix = ""
+                    else:
+                        suffix = f"_pg_{i+1}"
+                    settings_selected["suffix"] = suffix
                     settings_list.append(settings_selected)
 
                 st.write(settings_list)
 
                 p = Process(
                     target=check_new_and_process,
-                    args=(settings_list, folder, command, logfile),
+                    args=(settings_list, folder, command, logfile, update_time),
                 )
                 p.start()
 
