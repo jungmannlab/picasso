@@ -441,7 +441,7 @@ def get_file_summary(file, file_hdf, drift=None, len_mean=None, nena=None):
 
     summary["nena_nm"] = summary["nena_px"] * summary["pixelsize"]
 
-    summary["filename"] = file
+    summary["filename"] = os.path.normpath(file)
     summary["filename_hdf"] = file_hdf
     summary["file_created"] = datetime.fromtimestamp(os.path.getmtime(file))
     summary["entry_created"] = datetime.now()

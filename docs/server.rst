@@ -90,7 +90,7 @@ Creating the plots might, therefore, not be instantaneous.**
 Watcher
 ~~~~~~~
 - Set up a file watcher to process files in a folder with pre-defined settings automatically.
-- All raw files and new files that haven't been processed will be processed.
+- All new files and raw files that aren't yet in the database will be processed.
 - You can define different parameter groups so that a file will be processed with different settings.
 - You can also chain custom commands to the watcher.
 - The watcher will check for the following filetypes: ('.raw', '.ome.tif', '.ims')

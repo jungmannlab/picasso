@@ -5,7 +5,7 @@ from multiprocessing import Process
 import time
 from sqlalchemy import create_engine
 from picasso import localize
-from helper import fetch_watcher
+from helper import fetch_watcher, fetch_db
 import psutil
 import subprocess
 from datetime import datetime
@@ -38,12 +38,12 @@ def check_new(path: str, processed: dict, logfile: str):
     all_ = os.listdir(path)
     all_ = [os.path.join(path, _) for _ in all_]
 
-    new = [_ for _ in all_ if _ not in processed.keys() and _.endswith(FILETYPES)]
+    new = [_ for _ in all_ if os.path.normpath(_) not in processed.keys() and _.endswith(FILETYPES)]
     locs = [_ for _ in all_ if _.endswith("_locs.hdf5")]
 
     print_to_file(
         logfile,
-        f"{datetime.now()} Checking: {len(all_)} files, {len(new)} with unprocessed with valid ending and {len(locs)} `_locs.hdf5` files in {path}.",
+        f"{datetime.now()} Checking: {len(all_)} files, {len(new)} unprocessed with valid ending and {len(locs)} `_locs.hdf5` files in {path}.",
     )
 
     for _ in new:
@@ -133,7 +133,7 @@ def print_to_file(path, text):
 
 
 def check_new_and_process(
-    settings_list: dict, path: str, command: str, logfile: str, update_time: int
+    settings_list: dict, path: str, command: str, logfile: str, existing: list, update_time: int
 ):
     """
     Checks a folder for new files and processes them with defined settigns.
@@ -142,6 +142,7 @@ def check_new_and_process(
         path (str): Path to folder.
         command (str): Command to execute after processing.
         logfile (str): Path to logfile.
+        existing (list): existing files 
         update_time (int): Refresh every x minutes
     """
 
@@ -149,6 +150,9 @@ def check_new_and_process(
     print_to_file(logfile, f"{datetime.now()} Settings {settings_list}.")
 
     processed = {}
+
+    for _ in existing:
+        processed[_] = True
 
     while True:
         new, processed = check_new(path, processed, logfile)
@@ -207,7 +211,7 @@ def watcher():
         "- Set up a file watcher to process files in a folder with pre-defined settings automatically."
     )
     st.text(
-        "- All raw files and new files that haven't been processed will be processed."
+        "- All new files and raw files that aren't yet in the database will be processed."
     )
     st.text(
         "- You can define different parameter groups so that a file will be processed with different settings."
@@ -387,9 +391,16 @@ def watcher():
 
                 st.write(settings_list)
 
+                existing = fetch_db()
+
+                if len(existing) > 0:
+                    existing = existing['filename'].tolist()
+                else:
+                    existing = []
+
                 p = Process(
                     target=check_new_and_process,
-                    args=(settings_list, folder, command, logfile, update_time),
+                    args=(settings_list, folder, command, logfile, existing, update_time),
                 )
                 p.start()
 
