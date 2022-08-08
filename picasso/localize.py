@@ -393,7 +393,7 @@ def get_file_summary(file, file_hdf, drift=None, len_mean=None, nena=None):
     if file_hdf is None:
         base, ext = os.path.splitext(file)
         file_hdf = base + "_locs.hdf5"
-    
+
     locs, info = _io.load_locs(file_hdf)
 
     summary = {}
@@ -453,7 +453,7 @@ def _db_filename():
     home = os.path.expanduser("~")
     picasso_dir = os.path.join(home, ".picasso")
     os.makedirs(picasso_dir, exist_ok=True)
-    return os.path.abspath(os.path.join(picasso_dir, "app_048.db"))
+    return os.path.abspath(os.path.join(picasso_dir, "app_0410.db"))
 
 
 def save_file_summary(summary):
