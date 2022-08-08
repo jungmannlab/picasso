@@ -1,9 +1,9 @@
 Changelog
 =========
 
-Last change: 07-AUG-2022 MTS
+Last change: 08-AUG-2022 MTS
 
-0.4.6-9
+0.4.6-10
 -------
 - Logging for Watcher of Picasso Server
 - Mode for multiple parameter groups for Watcher
