@@ -3355,6 +3355,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         histogram displaying binary mask; displayed in ax3
     mask_blur : QDoubleSpinBox
         contains the blur value
+    mask_loaded : bool
+        True, if mask was loaded from an external file
     mask_thresh : QDoubleSpinBox
         contains the threshold value for masking
     paths : list
@@ -3427,7 +3429,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         mask_grid.addWidget(QtWidgets.QLabel("Blur"), 1, 0)
         self.mask_blur = QtWidgets.QDoubleSpinBox()
-        self.mask_blur.setRange(0, 999999)
+        self.mask_blur.setRange(0, 9999)
         self.mask_blur.setValue(1)
         self.mask_blur.setSingleStep(0.1)
         self.mask_blur.setDecimals(5)
@@ -3487,6 +3489,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.cached_oversampling = 0
         self.cached_blur = 0
         self.cached_thresh = 0
+        self.mask_loaded = False
 
     def init_dialog(self):
         """
@@ -3495,6 +3498,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         Loades localizations and metadata, updates plots.
         """
 
+        self.mask_loaded = False
         self.locs = self.window.view.locs
         self.paths = self.window.view.locs_paths
         self.infos = self.window.view.infos
@@ -3517,12 +3521,13 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             / self.disp_px_size.value()
         )
         viewport = ((0, 0), (self.y_max, self.x_max))
-        _, self.H = render.render(
+        _, H = render.render(
             locs, 
             oversampling=oversampling, 
             viewport=viewport, 
             blur_method=None,
         )
+        self.H = H / H.max()
 
     def blur_image(self):
         """ Blurs localizations using a Gaussian filter. """
@@ -3549,26 +3554,19 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             self, "Load mask", filter="*.npy"
         )
         if path:
+            self.mask_loaded = True # will block changing of the mask
             self.mask = np.load(path)
-            # adjust oversampling for mask
-            oversampling = 
-            self.disp_px_size.setValue(
-                self.window.display_settings_dlg.pixelsize.value()
-                / int((self.mask.shape[0] + 1) / self.y_max)
-            )
-            self.save_mask_button.setEnabled(True)
-            self.generate_image()
-            self.blur_image()
             # update plots without drawing a new mask
             self.update_plots(new_mask=False)
 
     def mask_image(self):
         """ Calculates binary mask based on threshold. """
 
-        mask = np.zeros(self.H_blur.shape, dtype=np.int8)
-        mask[self.H_blur > self.mask_thresh.value()] = 1
-        self.mask = mask
-        self.save_mask_button.setEnabled(True)
+        if not self.mask_loaded:
+            mask = np.zeros(self.H_blur.shape, dtype=np.int8)
+            mask[self.H_blur > self.mask_thresh.value()] = 1
+            self.mask = mask
+            self.save_mask_button.setEnabled(True)
 
     def update_plots(self, new_mask=True):
         """ 
@@ -3580,12 +3578,15 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             True if new mask is to be calculated
         """
 
+        if self.mask_blur.value() == 0.00000:
+            self.mask_blur.setValue(0.00001)
+
         if new_mask:
             if self.cached_oversampling:
                 self.cached_oversampling = 0
 
             if self.cached_blur: 
-                self.cached_oversampling = 0
+                self.cached_blur = 0
 
             if self.cached_thresh:
                 self.cached_thresh = 0
@@ -3646,10 +3647,10 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         """
 
         x_ind = (
-            np.floor(locs["x"] / self.x_max * self.H_blur.shape[0])
+            np.floor(locs["x"] / self.x_max * self.mask.shape[0])
         ).astype(int)
         y_ind = (
-            np.floor(locs["y"] / self.y_max * self.H_blur.shape[1])
+            np.floor(locs["y"] / self.y_max * self.mask.shape[1])
         ).astype(int)
 
         index = self.mask[y_ind, x_ind].astype(bool)
