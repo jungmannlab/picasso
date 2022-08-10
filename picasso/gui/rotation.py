@@ -198,7 +198,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.00001, 100000)
-        self.disp_px_size.setSingleStep(0.1)
+        self.disp_px_size.setSingleStep(1)
         self.disp_px_size.setDecimals(5)
         self.disp_px_size.setValue(self._disp_px_size)
         self.disp_px_size.setKeyboardTracking(False)
@@ -631,7 +631,9 @@ class AnimationDialog(QtWidgets.QDialog):
             )
 
         # get save file name
-        out_path = self.window.view_rot.paths[0] + "_video.mp4"
+        out_path = self.window.view_rot.paths[0].replace(
+            ".hdf5", "_video.mp4"
+        )
         name, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save animation", out_path, filter="*.mp4"
         )
@@ -648,7 +650,11 @@ class AnimationDialog(QtWidgets.QDialog):
                         ang=(angx[i], angy[i], angz[i]),
                         animation=True,
                     )
-                    qimage = qimage.scaled(500, 500)
+                    qimage = qimage.scaled(
+                        self.width(), 
+                        self.height(),
+                        QtCore.Qt.KeepAspectRatioByExpanding,
+                    )
                     qimage.save(path + "/frame_{}.png".format(i+1))
             except:
                 # if folder exists, ask if it should be used or deleted
@@ -670,7 +676,11 @@ class AnimationDialog(QtWidgets.QDialog):
                             ang=(angx[i], angy[i], angz[i]),
                             animation=True,
                         )
-                        qimage = qimage.scaled(500, 500)
+                        qimage = qimage.scaled(
+                            self.width(), 
+                            self.height(),
+                            QtCore.Qt.KeepAspectRatioByExpanding,
+                        )
                         qimage.save(path + "/frame_{}.png".format(i+1))
                 elif ret == m.Yes:
                     # use old frames
@@ -708,6 +718,12 @@ class ViewRotation(QtWidgets.QLabel):
         current rotation angle around y axis
     angz : float
         current rotation angle around z axis
+    block_x: boolean
+        True if rotate only around x axis
+    block_y: boolean
+        True if rotate only around y axis
+    block_z: boolean
+        True if rotate only around z axis
     display_angles : boolean
         True if current rotation angles are to be displayed
     display_legend : boolean
@@ -850,6 +866,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.infos = []
         self.paths = []
         self.group_color = []
+        self._size_hint = (512, 512)
         self._mode = "Rotate"
         self._rotation = []
         self._points = []
@@ -857,7 +874,16 @@ class ViewRotation(QtWidgets.QLabel):
         self.display_legend = False
         self.display_rotation = True
         self.display_angles = False
-        self.setMaximumSize(500, 500)
+        self.block_x = False
+        self.block_y = False
+        self.block_z = False
+        self.setFocusPolicy(QtCore.Qt.ClickFocus)
+
+    def sizeHint(self):
+        return QtCore.QSize(*self._size_hint)
+
+    def resizeEvent(self, event):
+        self.update_scene()
 
     def load_locs(self, update_window=False):
         """
@@ -1634,6 +1660,34 @@ class ViewRotation(QtWidgets.QLabel):
         self.load_locs() # pick locs in the new viewport
         self.update_scene(viewport=new_viewport)
 
+    def keyPressEvent(self, event):
+        if event.key() == 88: # x
+            self.block_x = True
+            self.block_y = False
+            self.block_z = False
+            event.accept()
+        elif event.key() == 89: # y
+            self.block_x = False
+            self.block_y = True
+            self.block_z = False
+            event.accept()
+        elif event.key() == 90: # z
+            self.block_x = False
+            self.block_y = False
+            self.block_z = True
+            event.accept()
+        else:
+            event.ignore()
+
+    def keyReleaseEvent(self, event):
+        if event.key() in [88, 89, 90]: # x, y or z
+            self.block_x = False
+            self.block_y = False
+            self.block_z = False
+            event.accept()
+        else:
+            event.ignore()
+
     def mouseMoveEvent(self, event):
         """
         Defines actions taken when moving mouse.
@@ -1672,11 +1726,15 @@ class ViewRotation(QtWidgets.QLabel):
                 # whether Ctrl/Command is pressed
                 modifiers = QtWidgets.QApplication.keyboardModifiers()
                 if modifiers == QtCore.Qt.ControlModifier:
-                    self.angy += float(2 * np.pi * rel_pos_x/width)
-                    self.angz += float(2 * np.pi * rel_pos_y/height)
+                    if not self.block_y:
+                        self.angz += float(2 * np.pi * rel_pos_y/height)
+                    if not self.block_z:
+                        self.angy += float(2 * np.pi * rel_pos_x/width)
                 else:
-                    self.angx += float(2 * np.pi * rel_pos_y/height)
-                    self.angy += float(2 * np.pi * rel_pos_x/width)
+                    if not self.block_x:
+                        self.angy += float(2 * np.pi * rel_pos_x/width)
+                    if not self.block_y:
+                        self.angx += float(2 * np.pi * rel_pos_y/height)
 
                 self.update_scene()
 
@@ -2250,8 +2308,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         tools_menu.addAction(rotate_tool_action)
 
         self.menus = [file_menu, view_menu, tools_menu]
-        self.setMinimumSize(500, 500)
-        self.setMaximumSize(500, 500)
+        self.setMinimumSize(100, 100)
         self.move(20,20)
 
     def move_pick(self, dx, dy):
@@ -2319,25 +2376,30 @@ class RotationWindow(QtWidgets.QMainWindow):
         later loading.
         """
 
-        if any(self.window.view.z_converted):
-            m = QtWidgets.QMessageBox()
-            m.setWindowTitle("z coordinates have been converted to pixels")
-            ret = m.question(
-                self,
-                "",
-                "Convert z back to nm? (old picasso format)",
-                m.Yes | m.No,
-            )
-            if ret == m.Yes:
-                pixelsize = self.window.display_settings_dlg.pixelsize.value()
-                for channel in range(len(self.view_rot.locs)):
-                    if self.view_rot.z_converted[channel]:
-                        self.view_rot.locs[channel].z *= pixelsize
-                        self.view_rot.z_converted[channel] = False
+        channel = self.window.view.get_channel_all_at_once(
+            "Save rotated localizations"
+        )
+
+        if channel is not None:
+            if any(self.window.view.z_converted):
+                m = QtWidgets.QMessageBox()
+                m.setWindowTitle("z coordinates have been converted to pixels")
+                ret = m.question(
+                    self,
+                    "",
+                    "Convert z back to nm? (old picasso format)",
+                    m.Yes | m.No,
+                )
+                if ret == m.Yes:
+                    pixelsize = self.window.display_settings_dlg.pixelsize.value()
+                    for i in range(len(self.view_rot.locs)):
+                        if self.view_rot.z_converted[i]:
+                            self.view_rot.locs[i].z *= pixelsize
+                            self.view_rot.z_converted[i] = False
             # rotation info
-            angx = self.view_rot.angx * 180 / np.pi
-            angy = self.view_rot.angy * 180 / np.pi
-            angz = self.view_rot.angz * 180 / np.pi
+            angx = int(self.view_rot.angx * 180 / np.pi)
+            angy = int(self.view_rot.angy * 180 / np.pi)
+            angz = int(self.view_rot.angz * 180 / np.pi)
             if self.view_rot.pick_shape == "Circle":
                 x, y = self.view_rot.pick
                 pick = [float(x), float(y)]
@@ -2364,34 +2426,27 @@ class RotationWindow(QtWidgets.QMainWindow):
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_arender",
+                    f"_arotated_{angx}_{angy}_{angz}.hdf5",
                 ) # get the save file suffix
                 if ok:
                     for channel in tqdm(range(len(self.view_rot.paths))):
                         base, ext = os.path.splitext(
                             self.view_rot.paths[channel]
                         )
-                        out_path = (
-                            base 
-                            + suffix 
-                            + "_rotated_{}_{}_{}.hdf5".format(
-                                int(angx), int(angy), int(angz)
-                            )
-                        ) # name of the saved files
+                        out_path = base + suffix # name of the saved files
                         info = self.view_rot.infos[channel] + new_info
                         io.save_locs(
                             out_path, self.window.view.locs[channel], info
                         )
             else: # one channel
-                base, ext = os.path.splitext(self.view_rot.paths[channel])
-                out_path = (
-                    base 
-                    + "_rotated_{}_{}_{}.hdf5".format(
-                        int(angx), int(angy), int(angz)
-                    ) # name of the save file
+                out_path = self.view_rot.paths[channel].replace(
+                    ".hdf5", f"_rotated_{angx}_{angy}_{angz}.hdf5"
+                )
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    self, "Save rotated localizations", out_path, filter="*hdf5"
                 )
                 info = self.view_rot.infos[channel] + new_info
-                io.save_locs(out_path, self.window.view.locs[channel], info)
+                io.save_locs(path, self.window.view.locs[channel], info)
 
     def closeEvent(self, event):
         """ Closes all children dialogs and self. """
