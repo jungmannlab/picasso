@@ -198,7 +198,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.00001, 100000)
-        self.disp_px_size.setSingleStep(0.1)
+        self.disp_px_size.setSingleStep(1)
         self.disp_px_size.setDecimals(5)
         self.disp_px_size.setValue(self._disp_px_size)
         self.disp_px_size.setKeyboardTracking(False)
