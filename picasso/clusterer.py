@@ -1365,7 +1365,7 @@ def cluster_properties_GPU2(
 		if temp > locs_frac[i]:
 			locs_frac[i] = temp
 
-def postprocess_clusters_GPU(cluster_id, min_locs, frame):
+def postprocess_clusters_GPU(cluster_id, min_locs, frame, fa):
 	"""
 	Filters clusters for minimum number of localizations and performs 
 	basic frame analysis to filter out "sticky events".
@@ -1442,7 +1442,10 @@ def postprocess_clusters_GPU(cluster_id, min_locs, frame):
 	mean_frame = d_mean_frame.copy_to_host()
 	locs_frac = d_locs_frac.copy_to_host()
 	n_frame = _np.int32(_np.max(frame))
-	true_cluster = find_true_clusters(mean_frame, locs_frac, n_frame)
+	if fa:
+		true_cluster = find_true_clusters(mean_frame, locs_frac, n_frame)
+	else:
+		true_cluster = _np.ones_like(cluster_id, dtype=_np.int8)
 
 	### return labels
 	cluster_id = d_cluster_id.copy_to_host()
@@ -1520,12 +1523,9 @@ def clusterer_GPU_2D(x, y, frame, radius, min_locs, fa):
 	# move array back to a cpu
 	cluster_id = d_cluster_id.copy_to_host()
 	### postprocess clusters
-	if fa:
-		cluster_id, true_cluster = postprocess_clusters_GPU(
-			cluster_id, min_locs, frame
-		)
-	else:
-		true_cluster = _np.ones_like(cluster_id, dtype=_np.int8)
+	cluster_id, true_cluster = postprocess_clusters_GPU(
+		cluster_id, min_locs, frame, fa
+	)
 	return get_labels(cluster_id, true_cluster)
 
 def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
@@ -1602,12 +1602,9 @@ def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
 	# move array back to a cpu
 	cluster_id = d_cluster_id.copy_to_host()
 	### postprocess clusters
-	if fa:
-		cluster_id, true_cluster = postprocess_clusters_GPU(
-			cluster_id, min_locs, frame
-		)
-	else:
-		true_cluster = _np.ones_like(cluster_id, dtype=_np.int8)
+	cluster_id, true_cluster = postprocess_clusters_GPU(
+		cluster_id, min_locs, frame, fa
+	)
 	return get_labels(cluster_id, true_cluster)
 
 def error_sums_wtd(x, w):
