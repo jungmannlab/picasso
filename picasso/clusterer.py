@@ -356,7 +356,7 @@ def get_labels(cluster_id, true_cluster):
 			labels[i] = cluster_id[i] - 1
 	return labels
 
-def clusterer_picked_2D(x, y, frame, radius, min_locs):
+def clusterer_picked_2D(x, y, frame, radius, min_locs, fa):
 	"""
 	Clusters picked localizations while storing distance matrix and 
 	returns labels for each localization (2D).
@@ -375,6 +375,8 @@ def clusterer_picked_2D(x, y, frame, radius, min_locs):
 		Clustering radius
 	min_locs : int
 		Minimum number of localizations in a cluster
+	fa : bool
+		True if perform basic frame analysis
 
 	Returns
 	-------
@@ -1446,7 +1448,7 @@ def postprocess_clusters_GPU(cluster_id, min_locs, frame):
 	cluster_id = d_cluster_id.copy_to_host()
 	return cluster_id, true_cluster	
 
-def clusterer_GPU_2D(x, y, frame, radius, min_locs):
+def clusterer_GPU_2D(x, y, frame, radius, min_locs, fa):
 	"""
 	Clusters all localizations using GPU (2D). Calculates distance 
 	between points on-demand.
@@ -1518,12 +1520,15 @@ def clusterer_GPU_2D(x, y, frame, radius, min_locs):
 	# move array back to a cpu
 	cluster_id = d_cluster_id.copy_to_host()
 	### postprocess clusters
-	cluster_id, true_cluster = postprocess_clusters_GPU(
-		cluster_id, min_locs, frame
-	)
+	if fa:
+		cluster_id, true_cluster = postprocess_clusters_GPU(
+			cluster_id, min_locs, frame
+		)
+	else:
+		true_cluster = _np.ones_like(cluster_id, dtype=_np.int8)
 	return get_labels(cluster_id, true_cluster)
 
-def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
+def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
 	"""
 	Clusters all localizations using GPU (3D). Calculates distance 
 	between points on-demand.
@@ -1597,9 +1602,12 @@ def clusterer_GPU_3D(x, y, z, frame, radius_xy, radius_z, min_locs):
 	# move array back to a cpu
 	cluster_id = d_cluster_id.copy_to_host()
 	### postprocess clusters
-	cluster_id, true_cluster = postprocess_clusters_GPU(
-		cluster_id, min_locs, frame
-	)
+	if fa:
+		cluster_id, true_cluster = postprocess_clusters_GPU(
+			cluster_id, min_locs, frame
+		)
+	else:
+		true_cluster = _np.ones_like(cluster_id, dtype=_np.int8)
 	return get_labels(cluster_id, true_cluster)
 
 def error_sums_wtd(x, w):

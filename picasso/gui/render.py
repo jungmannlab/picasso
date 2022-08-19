@@ -974,7 +974,7 @@ class PlotDialog(QtWidgets.QDialog):
             ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [nm]")
+            ax.set_zlabel("Z [Px]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1013,7 +1013,7 @@ class PlotDialog(QtWidgets.QDialog):
 
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [nm]")
+            ax.set_zlabel("Z [Px]")
 
             plt.gca().patch.set_facecolor("black")
             ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
@@ -1113,7 +1113,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [nm]")
+            ax.set_zlabel("Z [Px]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1202,7 +1202,7 @@ class PlotDialogIso(QtWidgets.QDialog):
 
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [nm]")
+            ax.set_zlabel("Z [Px]")
 
             ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
             ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
@@ -1415,7 +1415,7 @@ class ClsDlg3D(QtWidgets.QDialog):
 
         ax1.set_xlabel("X [Px]")
         ax1.set_ylabel("Y [Px]")
-        ax1.set_zlabel("Z [nm]")
+        ax1.set_zlabel("Z [Px]")
 
         ax2.set_xlabel("X [nm]")
         ax2.set_ylabel("Y [nm]")
@@ -1919,6 +1919,12 @@ class SMLMDialog3D(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
+        # perform basic frame analysis
+        self.frame_analysis = QtWidgets.QCheckBox(
+            "Perform basic frame analysis"
+        )
+        self.frame_analysis.setChecked(True)
+        grid.addWidget(self.frame_analysis, 4, 0, 1, 2)
 
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -1947,6 +1953,7 @@ class SMLMDialog3D(QtWidgets.QDialog):
             dialog.radius_z.value(),
             dialog.min_locs.value(),
             dialog.save_centers.isChecked(),
+            dialog.frame_analysis.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )    
 
@@ -1994,6 +2001,12 @@ class SMLMDialog2D(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 2, 0, 1, 2)
+        # perform basic frame analysis
+        self.frame_analysis = QtWidgets.QCheckBox(
+            "Perform basic frame analysis"
+        )
+        self.frame_analysis.setChecked(True)
+        grid.addWidget(self.frame_analysis, 3, 0, 1, 2)
 
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -2021,6 +2034,7 @@ class SMLMDialog2D(QtWidgets.QDialog):
             dialog.radius.value(),
             dialog.min_locs.value(),
             dialog.save_centers.isChecked(),
+            dialog.frame_analysis.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )  
 
@@ -5867,9 +5881,9 @@ class View(QtWidgets.QLabel):
         """
 
         if len(params) == 4: # 2D
-            radius, min_locs, save_centers, _ = params
+            radius, min_locs, sc, fa, _ = params
         else: # 3D
-            radius_xy, radius_z, min_locs, save_centers, _ = params
+            radius_xy, radius_z, min_locs, sc, fa, _ = params
 
         # cluster picked locs with cpu (distance matrix)
         if self.use_gpu is None: 
@@ -5948,6 +5962,7 @@ class View(QtWidgets.QLabel):
                             radius_xy,
                             radius_z,
                             min_locs,
+                            fa,
                         )
                     else:
                         labels = clusterer.clusterer_GPU_2D(
@@ -5956,6 +5971,7 @@ class View(QtWidgets.QLabel):
                             locs.frame,
                             radius,
                             min_locs,
+                            fa,
                         )
                 else: # gpu not found, cancel operation
                     message = (
@@ -6023,7 +6039,7 @@ class View(QtWidgets.QLabel):
         # save locs
         io.save_locs(path, clustered_locs, info)
         # save cluster centers
-        if save_centers:
+        if sc:
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
             clusterer.save_cluster_centers(path, clustered_locs, info, self)
 
