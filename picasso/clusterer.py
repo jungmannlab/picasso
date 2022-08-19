@@ -1397,58 +1397,58 @@ def postprocess_clusters_GPU(cluster_id, min_locs, frame, fa):
 	cluster_n_locs = _np.bincount(cluster_id)
 	cluster_id = check_cluster_size(cluster_n_locs, min_locs, cluster_id)
 
-	### renaming cluster ids
-	# move arrays to a gpu
-	d_cluster_id = _cuda.to_device(cluster_id)
-	clusters = _np.unique(cluster_id)
-	d_clusters = _cuda.to_device(clusters)
-	rename_clusters_GPU[grid_x, block](
-		d_cluster_id, d_clusters
-	)
-	_cuda.synchronize()
-
-	### cluster props 1
-	# move arrays to a gpu
-	n = len(clusters)
-	d_frame = _cuda.to_device(frame)
-	d_n_locs_cluster = _cuda.to_device(_np.zeros(n, dtype=_np.int32))
-	d_mean_frame = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
-	d_locs_in_window = _cuda.to_device(
-		_np.zeros((n, 21), dtype=_np.float32)
-	)
-	grid_n = len(clusters) // block + 1
-	cluster_properties_GPU1[grid_n, block](
-		d_cluster_id,
-		n,
-		d_frame,
-		d_n_locs_cluster,
-		d_mean_frame,
-		d_locs_in_window,
-	)
-	_cuda.synchronize()
-
-	### check cluster props 2
-	# move array to a gpu
-	d_locs_frac = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
-	cluster_properties_GPU2[grid_n, block](
-		d_locs_in_window, 
-		d_n_locs_cluster,
-		d_locs_frac,
-	)
-	_cuda.synchronize()
-
-	### check for true clusters
-	# move arrays back to a cpu
-	mean_frame = d_mean_frame.copy_to_host()
-	locs_frac = d_locs_frac.copy_to_host()
-	n_frame = _np.int32(_np.max(frame))
 	if fa:
+		### renaming cluster ids
+		# move arrays to a gpu
+		d_cluster_id = _cuda.to_device(cluster_id)
+		clusters = _np.unique(cluster_id)
+		d_clusters = _cuda.to_device(clusters)
+		rename_clusters_GPU[grid_x, block](
+			d_cluster_id, d_clusters
+		)
+		_cuda.synchronize()
+
+		### cluster props 1
+		# move arrays to a gpu
+		n = len(clusters)
+		d_frame = _cuda.to_device(frame)
+		d_n_locs_cluster = _cuda.to_device(_np.zeros(n, dtype=_np.int32))
+		d_mean_frame = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
+		d_locs_in_window = _cuda.to_device(
+			_np.zeros((n, 21), dtype=_np.float32)
+		)
+		grid_n = len(clusters) // block + 1
+		cluster_properties_GPU1[grid_n, block](
+			d_cluster_id,
+			n,
+			d_frame,
+			d_n_locs_cluster,
+			d_mean_frame,
+			d_locs_in_window,
+		)
+		_cuda.synchronize()
+
+		### check cluster props 2
+		# move array to a gpu
+		d_locs_frac = _cuda.to_device(_np.zeros(n, dtype=_np.float32))
+		cluster_properties_GPU2[grid_n, block](
+			d_locs_in_window, 
+			d_n_locs_cluster,
+			d_locs_frac,
+		)
+		_cuda.synchronize()
+
+		### check for true clusters
+		# move arrays back to a cpu
+		mean_frame = d_mean_frame.copy_to_host()
+		locs_frac = d_locs_frac.copy_to_host()
+		n_frame = _np.int32(_np.max(frame))
 		true_cluster = find_true_clusters(mean_frame, locs_frac, n_frame)
+		cluster_id = d_cluster_id.copy_to_host()
 	else:
 		true_cluster = _np.ones_like(cluster_id, dtype=_np.int8)
 
 	### return labels
-	cluster_id = d_cluster_id.copy_to_host()
 	return cluster_id, true_cluster	
 
 def clusterer_GPU_2D(x, y, frame, radius, min_locs, fa):
