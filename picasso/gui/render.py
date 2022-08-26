@@ -5953,7 +5953,8 @@ class View(QtWidgets.QLabel):
         if params[-3]:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            clusterer.save_cluster_centers(path, clustered_locs, info, self)
+            centers = clusterer.save_cluster_centers(clustered_locs)
+            io.save_locs(path, centers, info)
             status.close()
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
