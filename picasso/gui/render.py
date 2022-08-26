@@ -5820,12 +5820,6 @@ class View(QtWidgets.QLabel):
                 if ret == m.Yes:
                     self.convert_nm = True
 
-            if len(self._picks) == 0:
-                m = self.CPU_or_GPU_box()
-                self.use_gpu = m.exec()
-            else:
-                self.use_gpu = None
-
             if channel == len(self.locs_paths): # apply to all
                 # get saving name suffix
                 suffix, ok = QtWidgets.QInputDialog.getText(
@@ -5859,17 +5853,6 @@ class View(QtWidgets.QLabel):
         Performs SMLM clustering in a given channel with user-defined
         parameters and saves the result.
 
-        There are three modes of clustering, each in 2D and 3D versions:
-            * clusterer_picked - clusters locs in picks; distances 
-                between points are stored in a distance matrix. It is 
-                recommended that there are no more than 700 (2D) or 
-                600 (3D) locs in each pick.
-            * clusterer CPU - clusters all loaded locs with a CPU; 
-                distances are calculated on demand. May take a long 
-                time to finish
-            * clusterer GPU - clusters all loaded locs with a GPU;
-                distances are calculated on demand.
-
         Parameters
         ----------
         channel : int
@@ -5880,13 +5863,7 @@ class View(QtWidgets.QLabel):
             SMLM clustering parameters        
         """
 
-        if len(params) == 4: # 2D
-            radius, min_locs, sc, fa, _ = params
-        else: # 3D
-            radius_xy, radius_z, min_locs, sc, fa, _ = params
-
-        # cluster picked locs with cpu (distance matrix)
-        if self.use_gpu is None: 
+        if len(self._picks): # cluster only picked localizations
             clustered_locs = [] # list with picked locs after clustering
             picked_locs = self.picked_locs(channel, add_group=False)
             group_offset = 1
@@ -5897,30 +5874,15 @@ class View(QtWidgets.QLabel):
             for i in range(len(picked_locs)):
                 locs = picked_locs[i]
 
-                # keep group info if already present
-                if hasattr(locs, "group"):
-                    locs = lib.append_to_rec(
-                        locs, locs.group, "group_input"
-                    )
+                # save pick index as group_input
+                locs = lib.append_to_rec(
+                    locs,
+                    i * np.ones(len(locs), dtype=np.int32), 
+                    "pick_index",
+                )
+
                 if len(locs) > 0:
-                    if hasattr(locs, "z"):
-                        labels = clusterer.clusterer_picked_3D(
-                            locs.x,
-                            locs.y,
-                            locs.z,
-                            locs.frame,
-                            radius_xy,
-                            radius_z,
-                            min_locs,
-                        )
-                    else:
-                        labels = clusterer.clusterer_picked_2D(
-                            locs.x,
-                            locs.y,
-                            locs.frame,
-                            radius,
-                            min_locs,
-                        )
+                    labels = clusterer.cluster(locs, params)
 
                     temp_locs = lib.append_to_rec(
                         locs, labels, "group"
@@ -5951,59 +5913,8 @@ class View(QtWidgets.QLabel):
             else:
                 locs = self.all_locs[channel]
 
-            if self.use_gpu == 0: # use gpu
-                if cuda.is_available(): # gpu is available
-                    if hasattr(locs, "z"):
-                        labels = clusterer.clusterer_GPU_3D(
-                            locs.x,
-                            locs.y,
-                            locs.z,
-                            locs.frame,
-                            radius_xy,
-                            radius_z,
-                            min_locs,
-                            fa,
-                        )
-                    else:
-                        labels = clusterer.clusterer_GPU_2D(
-                            locs.x,
-                            locs.y,
-                            locs.frame,
-                            radius,
-                            min_locs,
-                            fa,
-                        )
-                else: # gpu not found, cancel operation
-                    message = (
-                        "Make sure your computer has a GPU installed"
-                        " and that you have the required software.\n"
-                        "To obtain it,  run 'conda install cudatoolkit'."
-                    )
-                    QtWidgets.QMessageBox.information(
-                        self, "GPU not found.", message
-                    )
-                    return
-            elif self.use_gpu == 1: # use cpu (distance calculated on demand)
-                if hasattr(locs, "z"):
-                    labels = clusterer.clusterer_CPU_3D(
-                        locs.x,
-                        locs.y,
-                        locs.z,
-                        locs.frame,
-                        radius_xy,
-                        radius_z,
-                        min_locs,
-                    )
-                else:
-                    labels = clusterer.clusterer_CPU_2D(
-                        locs.x,
-                        locs.y,
-                        locs.frame,
-                        radius,
-                        min_locs,
-                    )
-            else:
-                return
+            labels = clusterer.cluster(locs, params)
+
             clustered_locs = lib.append_to_rec(
                 locs, labels, "group"
             ) # add cluster id to locs
@@ -6017,16 +5928,16 @@ class View(QtWidgets.QLabel):
             new_info = {
                 "Generated by": "Picasso Render SMLM clusterer 3D",
                 "Number of clusters": len(np.unique(clustered_locs.group)),
-                "Clustering radius xy [cam. px]": radius_xy,
-                "Clustering radius z [cam. px]": radius_z,
-                "Min. cluster size": min_locs,
+                "Clustering radius xy [cam. px]": params[0],
+                "Clustering radius z [cam. px]": params[1],
+                "Min. cluster size": params[2],
             }            
         else:
             new_info = {
                 "Generated by": "Picasso Render SMLM clusterer 2D",
                 "Number of clusters": len(np.unique(clustered_locs.group)),
-                "Clustering radius [cam. px]": radius,
-                "Min. cluster size": min_locs,
+                "Clustering radius [cam. px]": params[0],
+                "Min. cluster size": params[1],
             }
         info = self.infos[channel] + [new_info]
         # check if z needs to be converted
@@ -6039,41 +5950,11 @@ class View(QtWidgets.QLabel):
         # save locs
         io.save_locs(path, clustered_locs, info)
         # save cluster centers
-        if sc:
+        if params[-3]:
+            status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
             clusterer.save_cluster_centers(path, clustered_locs, info, self)
-
-    def CPU_or_GPU_box(self):
-        """
-        Creates a message box with buttons to choose between 
-        CPU and GPU SMLM clustering.
-
-        Returns
-        -------
-        QtWidgets.QMessageBox
-            The specified message box
-        """
-
-        m = QtWidgets.QMessageBox(self)
-        m.setWindowTitle("Clusterer")
-        m.setWindowIcon(self.icon)
-        m.setText(
-            "Use GPU? \n"
-            "CPU clustering may take a long time to finish.\n"
-            "If CPU is preferred,  it is recommended to\n"
-            "cluster only picked localizations."
-        )
-        m.addButton(
-            QtWidgets.QPushButton("GPU"), QtWidgets.QMessageBox.YesRole
-        )
-        m.setDefaultButton(m.buttons()[0])
-        m.addButton(
-            QtWidgets.QPushButton("CPU"), QtWidgets.QMessageBox.NoRole
-        )
-        m.addButton(
-            QtWidgets.QPushButton("Cancel"), QtWidgets.QMessageBox.RejectRole
-        )
-        return m
+            status.close()
 
     def shifts_from_picked_coordinate(self, locs, coordinate):
         """
