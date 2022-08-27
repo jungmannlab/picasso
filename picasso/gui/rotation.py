@@ -883,6 +883,10 @@ class ViewRotation(QtWidgets.QLabel):
         return QtCore.QSize(*self._size_hint)
 
     def resizeEvent(self, event):
+        if self.width() % 2:
+            self.resize(self.width() + 1, self.height())
+        if self.height() % 2:
+            self.resize(self.width(), self.height() + 1)
         self.update_scene()
 
     def load_locs(self, update_window=False):
