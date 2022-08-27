@@ -6521,10 +6521,16 @@ class View(QtWidgets.QLabel):
         urls = event.mimeData().urls()
         paths = [_.toLocalFile() for _ in urls]
         extensions = [os.path.splitext(_)[1].lower() for _ in paths]
-        paths = [
-            path for path, ext in zip(paths, extensions) if ext == ".hdf5"
-        ]
-        self.add_multiple(paths)
+        if extensions == [".txt"]: # just one txt dropped
+            self.load_fov_drop(paths[0])
+        else:
+            paths = [
+                path 
+                for path, ext in zip(paths, extensions) 
+                if ext == ".hdf5"
+            ]
+            self.add_multiple(paths)
+
 
     def fit_in_view(self, autoscale=False):
         """ Updates scene with all locs shown. """
@@ -6663,37 +6669,6 @@ class View(QtWidgets.QLabel):
             else:
                 return None        
 
-    # def save_channel_pickprops(self, title="Choose a channel"):
-    #     """
-    #     Opens an input dialog to ask which channel to use in saving 
-    #     pick properties.
-    #     There is an option to save all channels.
-
-    #     Returns
-    #     None if no locs found or channel picked, int otherwise
-    #         Index of the chosen channel
-    #     """
-
-    #     n_channels = len(self.locs_paths)
-    #     if n_channels == 0:
-    #         return None
-    #     elif n_channels == 1:
-    #         return 0
-    #     elif len(self.locs_paths) > 1:
-    #         pathlist = list(self.locs_paths)
-    #         pathlist.append("Save all at once")
-    #         index, ok = QtWidgets.QInputDialog.getItem(
-    #             self,
-    #             "Save pick properties",
-    #             "Channel:",
-    #             pathlist,
-    #             editable=False,
-    #         )
-    #         if ok:
-    #             return pathlist.index(index)
-    #         else:
-    #             return None
-
     def get_channel3d(self, title="Choose a channel"):
         """
         Similar to View.get_channel, used in selecting 3D picks.
@@ -6783,6 +6758,33 @@ class View(QtWidgets.QLabel):
                 self.window.display_settings_dlg.min_blur_width.value()
             ),
         }
+
+    def load_fov_drop(self, path):
+        """
+        Checks if path is a fov .txt file (4 coordinates) and loads FOV.
+
+        Parameters
+        ----------
+        path : str
+            Path specifiying .txt file
+        """
+
+        try:
+            file = np.loadtxt(path)
+        except: # not a np array
+            return
+
+        if file.shape == (4,):
+            (x, y, w, h) = file
+            if w > 0 and h > 0:
+                viewport = [(y, x), (y + h, x + w)]
+                self.update_scene(viewport=viewport)
+                self.window.info_dialog.xy_label.setText(
+                    "{:.2f} / {:.2f} ".format(x, y)
+                )
+                self.window.info_dialog.wh_label.setText(
+                    "{:.2f} / {:.2f} pixel".format(w, h)
+                )
 
     def load_picks(self, path):
         """ 
