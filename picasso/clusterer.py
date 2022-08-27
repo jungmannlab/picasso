@@ -477,7 +477,7 @@ def cluster_center(grouplocs):
             lpz,
         )
     else:
-        results = (
+        result = (
             frame,
             x,
             y,
