@@ -1,5 +1,5 @@
 """
-Framework for creating a Picasso plugin. Any plugin should be moved to
+Template for creating a Picasso plugin. Any plugin should be moved to
 picasso/picasso/gui/plugins/
 Author:
 Date:
@@ -14,5 +14,12 @@ class Plugin():
 		self.name = "render" # change if the plugin works for another application
 		self.window = window
 
-	def execute():
-# Specify the functionalities of your plugin in the space below
+	def execute(self):
+		"""
+		This function is called when opening a GUI.
+
+		It should add buttons to the menu bar, connect such actions
+		to fucntions, etc.
+		"""
+
+		pass
