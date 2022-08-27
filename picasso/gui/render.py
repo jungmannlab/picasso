@@ -2282,22 +2282,19 @@ class TestClustererDialog(QtWidgets.QDialog):
                 return None
         elif clusterer_name == "SMLM":
             if hasattr(locs, "z"):
-                labels = clusterer.clusterer_picked_3D(
-                    X[:, 0], 
-                    X[:, 1], 
-                    X[:, 2], 
-                    locs.frame, 
-                    params["radius_xy"],
-                    params["radius_z"],
-                    params["min_cluster_size"],
+                X[:, 2] = X[:, 2] * params["radius_xy"] / params["radius_z"]
+                labels = clusterer._cluster(
+                    X, 
+                    params["radius_xy"], 
+                    params["min_cluster_size"], 
+                    locs.frame,
                 )
             else:
-                labels = clusterer.clusterer_picked_2D(
-                    X[:, 0], 
-                    X[:, 1], 
-                    locs.frame, 
-                    params["radius_xy"],
+                labels = clusterer._cluster(
+                    X, 
+                    params["radius_xy"], 
                     params["min_cluster_size"],
+                    locs.frame,
                 )                
         locs = self.assign_groups(locs, labels)
         self.view.group_color = self.window.view.get_group_color(locs)
