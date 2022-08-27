@@ -5607,7 +5607,6 @@ class View(QtWidgets.QLabel):
             "Radius [cam. px]": radius,
             "Minimum local density": min_density,
         }
-        self.infos[channel].append(dbscan_info)
         # convert z if needed
         if self.z_converted[channel]:
             m = QtWidgets.QMessageBox()
@@ -5623,13 +5622,14 @@ class View(QtWidgets.QLabel):
                     self.window.display_settings_dlg.pixelsize.value()
                 )
                 locs.z *= pixelsize
-        io.save_locs(path, locs, self.infos[channel])
+        io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
         status.close()
         if save_centers:
+            status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            clusterer.save_cluster_centers(
-                path, locs, self.infos[channel], self
-            )
+            centers = clusterer.save_cluster_centers(locs)
+            io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
+            status.close()
 
     def hdbscan(self):
         """
@@ -5724,7 +5724,6 @@ class View(QtWidgets.QLabel):
             "Min. samples": min_samples,
             "Intercluster distance": cluster_eps,
         }
-        self.infos[channel].append(hdbscan_info)
         # convert z if needed
         if self.z_converted[channel]:
             m = QtWidgets.QMessageBox()
@@ -5742,13 +5741,14 @@ class View(QtWidgets.QLabel):
                     self.window.display_settings_dlg.pixelsize.value()
                 )
                 locs.z *= pixelsize
-        io.save_locs(path, locs, self.infos[channel])
+        io.save_locs(path, locs, self.infos[channel] + [hdbscan_info])
         status.close()
         if save_centers:
+            status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            clusterer.save_cluster_centers(
-                path, locs, self.infos[channel], self
-            )
+            centers = clusterer.save_cluster_centers(locs)
+            io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
+            status.close()
 
     def smlm_clusterer(self):
         """

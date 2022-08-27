@@ -458,7 +458,11 @@ def cluster_center(grouplocs):
     # n_locs in cluster
     n = len(grouplocs)
     if hasattr(grouplocs, "z"):
-        z = _np.average(grouplocs.z, weights=1/((grouplocs.lpx*2)**2))
+    	# take lpz = 2 * mean(lpx, lpy)
+        z = _np.average(
+        	grouplocs.z, 
+        	weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
+        )
         lpz = 2 * lpx
         result = (
             frame,
