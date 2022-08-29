@@ -2080,13 +2080,6 @@ class TestClustererDialog(QtWidgets.QDialog):
     -------
     assign_groups(locs, labels)
         Filters out non-clustered locs and adds group column to locs
-    calculate_params()
-        Calls function for calculating recommended parameters for the
-        current clusterer
-    calculate_params_dbscan()
-        Finds NeNA and sets it as search radius
-    calculate_params_hdbscan
-        Not implemented yet.
     cluster(locs, params):
         Clusters locs using the chosen clusterer and its params
     get_cluster_params()
@@ -2154,25 +2147,19 @@ class TestClustererDialog(QtWidgets.QDialog):
             "Display non-clustered localizations"
         )
         self.display_all_locs.setChecked(False)
+        self.display_all_locs.stateChanged.connect(self.view.update_scene)
         parameters_grid.addWidget(self.display_all_locs, 2, 0, 1, 2)
-
-        # parameters - get recommended values
-        calculate_params_button = QtWidgets.QPushButton(
-            "Calculate recommended values"
-        )
-        calculate_params_button.clicked.connect(self.calculate_params)
-        parameters_grid.addWidget(calculate_params_button, 3, 0, 1, 2)
 
         # parameters - test
         test_button = QtWidgets.QPushButton("Test")
         test_button.clicked.connect(self.test_clusterer)
         test_button.setDefault(True)
-        parameters_grid.addWidget(test_button, 4, 0)
+        parameters_grid.addWidget(test_button, 3, 0)
 
         # display settings - return to full FOV
         full_fov = QtWidgets.QPushButton("Full FOV")
         full_fov.clicked.connect(self.get_full_fov)
-        parameters_grid.addWidget(full_fov, 4, 1)
+        parameters_grid.addWidget(full_fov, 3, 1)
 
         # view
         view_box = QtWidgets.QGroupBox("View")
@@ -2180,7 +2167,7 @@ class TestClustererDialog(QtWidgets.QDialog):
         view_grid = QtWidgets.QGridLayout(view_box)
         view_grid.addWidget(self.view)
 
-        # shortcuts for navigating in view
+        # shortcuts for navigating in View
         # arrows
         left_action = QtWidgets.QAction(self)
         left_action.setShortcut("Alt+A")
@@ -2212,34 +2199,6 @@ class TestClustererDialog(QtWidgets.QDialog):
         zoomout_action.setShortcut("Alt+-")
         zoomout_action.triggered.connect(self.view.zoom_out)
         self.addAction(zoomout_action)
-
-    def calculate_params(self):
-        """
-        Calls function for calculating recommended parameters for the
-        current clusterer.
-        """
-
-        clusterer_name = self.clusterer_name.currentText()
-        if clusterer_name == 'DBSCAN':
-            self.calculate_params_dbscan()
-        elif clusterer_name == 'HDBSCAN':
-            self.calculate_params_hdbscan()
-
-    def calculate_params_dbscan(self):
-        """ Finds NeNA and sets it as search radius. """
-
-        nena_lp = self.window.info_dialog.lp # nena loc precision
-        if not nena_lp: # if not calculated already
-            self.window.info_dialog.calculate_nena_lp()
-            nena_lp = self.window.info_dialog.lp
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        nena_lp /= pixelsize
-        self.test_dbscan_params.radius.setValue(nena_lp)
-
-    def calculate_params_hdbscan(self):
-        QtWidgets.QMessageBox.information(
-            self, "", "Not implemented for HDBSCAN yet."
-        )
 
     def cluster(self, locs, params):
         """ 
@@ -2297,7 +2256,8 @@ class TestClustererDialog(QtWidgets.QDialog):
                     locs.frame,
                 )                
         locs = self.assign_groups(locs, labels)
-        self.view.group_color = self.window.view.get_group_color(locs)
+        if len(locs):
+            self.view.group_color = self.window.view.get_group_color(locs)
         return locs
 
     def assign_groups(self, locs, labels):
@@ -2354,7 +2314,7 @@ class TestClustererDialog(QtWidgets.QDialog):
     def get_full_fov(self):
         """ Updates viewport in self.view. """
 
-        if self.view.viewport:
+        if self.view.locs is not None:
             self.view.viewport = self.view.get_full_fov()
             self.view.update_scene()
 
@@ -2661,45 +2621,47 @@ class TestClustererView(QtWidgets.QLabel):
     def update_scene(self):
         """ Renders localizations. """
 
-        if self.viewport is None:
-            self.viewport = self.get_full_fov()
+        if self.locs is not None:
 
-        # split locs according to their group colors
-        locs = self.split_locs()
+            if self.viewport is None:
+                self.viewport = self.get_full_fov()
 
-        # render kwargs
-        kwargs = {
-            'oversampling': self.get_optimal_oversampling(),
-            'viewport': self.viewport,
-            'blur_method': 'convolve',
-            'min_blur_width': 0,
-        }
+            # split locs according to their group colors
+            locs = self.split_locs()
 
-        # render images for all channels
-        images = [render.render(_, **kwargs)[1] for _ in locs]
+            # render kwargs
+            kwargs = {
+                'oversampling': self.get_optimal_oversampling(),
+                'viewport': self.viewport,
+                'blur_method': 'convolve',
+                'min_blur_width': 0,
+            }
 
-        # scale image 
-        images = self.scale_contrast(images)
+            # render images for all channels
+            images = [render.render(_, **kwargs)[1] for _ in locs]
 
-        # create image to display
-        Y, X = images.shape[1:]
-        bgra = np.zeros((Y, X, 4), dtype=np.float32)
-        colors = get_colors(images.shape[0])
-        for color, image in zip(colors, images): # color each channel
-            bgra[:, :, 0] += color[2] * image
-            bgra[:, :, 1] += color[1] * image
-            bgra[:, :, 2] += color[0] * image
-        bgra = np.minimum(bgra, 1)
-        bgra = self.view.to_8bit(bgra)
-        bgra[:, :, 3].fill(255) # black background
-        qimage = QtGui.QImage(
-            bgra.data, X, Y, QtGui.QImage.Format_RGB32
-        ).scaled(
-            self._size, 
-            self._size, 
-            QtCore.Qt.KeepAspectRatioByExpanding
-        )
-        self.setPixmap(QtGui.QPixmap.fromImage(qimage))
+            # scale image 
+            images = self.scale_contrast(images)
+
+            # create image to display
+            Y, X = images.shape[1:]
+            bgra = np.zeros((Y, X, 4), dtype=np.float32)
+            colors = get_colors(images.shape[0])
+            for color, image in zip(colors, images): # color each channel
+                bgra[:, :, 0] += color[2] * image
+                bgra[:, :, 1] += color[1] * image
+                bgra[:, :, 2] += color[0] * image
+            bgra = np.minimum(bgra, 1)
+            bgra = self.view.to_8bit(bgra)
+            bgra[:, :, 3].fill(255) # black background
+            qimage = QtGui.QImage(
+                bgra.data, X, Y, QtGui.QImage.Format_RGB32
+            ).scaled(
+                self._size, 
+                self._size, 
+                QtCore.Qt.KeepAspectRatioByExpanding
+            )
+            self.setPixmap(QtGui.QPixmap.fromImage(qimage))
 
     def split_locs(self):
         """
@@ -5645,7 +5607,6 @@ class View(QtWidgets.QLabel):
             "Radius [cam. px]": radius,
             "Minimum local density": min_density,
         }
-        self.infos[channel].append(dbscan_info)
         # convert z if needed
         if self.z_converted[channel]:
             m = QtWidgets.QMessageBox()
@@ -5661,13 +5622,14 @@ class View(QtWidgets.QLabel):
                     self.window.display_settings_dlg.pixelsize.value()
                 )
                 locs.z *= pixelsize
-        io.save_locs(path, locs, self.infos[channel])
+        io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
         status.close()
         if save_centers:
+            status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            clusterer.save_cluster_centers(
-                path, locs, self.infos[channel], self
-            )
+            centers = clusterer.find_cluster_centers(locs)
+            io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
+            status.close()
 
     def hdbscan(self):
         """
@@ -5762,7 +5724,6 @@ class View(QtWidgets.QLabel):
             "Min. samples": min_samples,
             "Intercluster distance": cluster_eps,
         }
-        self.infos[channel].append(hdbscan_info)
         # convert z if needed
         if self.z_converted[channel]:
             m = QtWidgets.QMessageBox()
@@ -5780,13 +5741,14 @@ class View(QtWidgets.QLabel):
                     self.window.display_settings_dlg.pixelsize.value()
                 )
                 locs.z *= pixelsize
-        io.save_locs(path, locs, self.infos[channel])
+        io.save_locs(path, locs, self.infos[channel] + [hdbscan_info])
         status.close()
         if save_centers:
+            status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            clusterer.save_cluster_centers(
-                path, locs, self.infos[channel], self
-            )
+            centers = clusterer.find_cluster_centers(locs)
+            io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
+            status.close()
 
     def smlm_clusterer(self):
         """
@@ -5875,7 +5837,7 @@ class View(QtWidgets.QLabel):
                 locs = lib.append_to_rec(
                     locs,
                     i * np.ones(len(locs), dtype=np.int32), 
-                    "pick_index",
+                    "group_input",
                 )
 
                 if len(locs) > 0:
@@ -5950,7 +5912,7 @@ class View(QtWidgets.QLabel):
         if params[-3]:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.save_cluster_centers(clustered_locs)
+            centers = clusterer.find_cluster_centers(clustered_locs)
             io.save_locs(path, centers, info)
             status.close()
 
@@ -6559,10 +6521,16 @@ class View(QtWidgets.QLabel):
         urls = event.mimeData().urls()
         paths = [_.toLocalFile() for _ in urls]
         extensions = [os.path.splitext(_)[1].lower() for _ in paths]
-        paths = [
-            path for path, ext in zip(paths, extensions) if ext == ".hdf5"
-        ]
-        self.add_multiple(paths)
+        if extensions == [".txt"]: # just one txt dropped
+            self.load_fov_drop(paths[0])
+        else:
+            paths = [
+                path 
+                for path, ext in zip(paths, extensions) 
+                if ext == ".hdf5"
+            ]
+            self.add_multiple(paths)
+
 
     def fit_in_view(self, autoscale=False):
         """ Updates scene with all locs shown. """
@@ -6701,37 +6669,6 @@ class View(QtWidgets.QLabel):
             else:
                 return None        
 
-    # def save_channel_pickprops(self, title="Choose a channel"):
-    #     """
-    #     Opens an input dialog to ask which channel to use in saving 
-    #     pick properties.
-    #     There is an option to save all channels.
-
-    #     Returns
-    #     None if no locs found or channel picked, int otherwise
-    #         Index of the chosen channel
-    #     """
-
-    #     n_channels = len(self.locs_paths)
-    #     if n_channels == 0:
-    #         return None
-    #     elif n_channels == 1:
-    #         return 0
-    #     elif len(self.locs_paths) > 1:
-    #         pathlist = list(self.locs_paths)
-    #         pathlist.append("Save all at once")
-    #         index, ok = QtWidgets.QInputDialog.getItem(
-    #             self,
-    #             "Save pick properties",
-    #             "Channel:",
-    #             pathlist,
-    #             editable=False,
-    #         )
-    #         if ok:
-    #             return pathlist.index(index)
-    #         else:
-    #             return None
-
     def get_channel3d(self, title="Choose a channel"):
         """
         Similar to View.get_channel, used in selecting 3D picks.
@@ -6821,6 +6758,33 @@ class View(QtWidgets.QLabel):
                 self.window.display_settings_dlg.min_blur_width.value()
             ),
         }
+
+    def load_fov_drop(self, path):
+        """
+        Checks if path is a fov .txt file (4 coordinates) and loads FOV.
+
+        Parameters
+        ----------
+        path : str
+            Path specifiying .txt file
+        """
+
+        try:
+            file = np.loadtxt(path)
+        except: # not a np array
+            return
+
+        if file.shape == (4,):
+            (x, y, w, h) = file
+            if w > 0 and h > 0:
+                viewport = [(y, x), (y + h, x + w)]
+                self.update_scene(viewport=viewport)
+                self.window.info_dialog.xy_label.setText(
+                    "{:.2f} / {:.2f} ".format(x, y)
+                )
+                self.window.info_dialog.wh_label.setText(
+                    "{:.2f} / {:.2f} pixel".format(w, h)
+                )
 
     def load_picks(self, path):
         """ 
