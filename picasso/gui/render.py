@@ -5627,7 +5627,7 @@ class View(QtWidgets.QLabel):
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.save_cluster_centers(locs)
+            centers = clusterer.find_cluster_centers(locs)
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
 
@@ -5746,7 +5746,7 @@ class View(QtWidgets.QLabel):
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.save_cluster_centers(locs)
+            centers = clusterer.find_cluster_centers(locs)
             io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
             status.close()
 
@@ -5837,7 +5837,7 @@ class View(QtWidgets.QLabel):
                 locs = lib.append_to_rec(
                     locs,
                     i * np.ones(len(locs), dtype=np.int32), 
-                    "pick_index",
+                    "group_input",
                 )
 
                 if len(locs) > 0:
@@ -5912,7 +5912,7 @@ class View(QtWidgets.QLabel):
         if params[-3]:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.save_cluster_centers(clustered_locs)
+            centers = clusterer.find_cluster_centers(clustered_locs)
             io.save_locs(path, centers, info)
             status.close()
 

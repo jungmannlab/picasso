@@ -17,7 +17,10 @@ import numpy as _np
 import math as _math
 import yaml as _yaml
 import pandas as _pd
-from scipy.spatial import KDTree as _KDTree
+from scipy.spatial import cKDTree as _cKDTree
+
+from . import lib as _lib
+
 from icecream import ic
 
 CLUSTER_CENTERS_DTYPE_2D = [
@@ -158,8 +161,8 @@ def _cluster(X, radius, min_locs, frame):
         assigned)
     """
 
-    ### build kdtree
-    tree = _KDTree(X)
+    ### build kdtree (use cKDTree in case user did not update scipy)
+    tree = _cKDTree(X)
 
     ### find neighbors for each point withing radius
     neighbors = tree.query_ball_tree(tree, radius)
@@ -336,7 +339,7 @@ def error_sums_wtd(x, w):
 
     return (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
 
-def save_cluster_centers(locs):
+def find_cluster_centers(locs):
     """
     Calculates cluster centers. 
 
@@ -346,6 +349,11 @@ def save_cluster_centers(locs):
     ----------
     locs : np.recarray
         Clustered localizations (contain group info)
+
+    Returns
+    -------
+    np.recarray
+        Cluster centers saved as localizations
     """
 
     # group locs by their cluster id (group)
@@ -409,6 +417,11 @@ def save_cluster_centers(locs):
             ),
             dtype=CLUSTER_CENTERS_DTYPE_2D,
         )
+
+    if hasattr(locs, "group_input"):
+        group_input = _np.array([_[-1] for _ in centers_])
+        centers = _lib.append_to_rec(centers, group_input, "group_input")
+
     return centers
 
 def cluster_center(grouplocs):
@@ -425,7 +438,7 @@ def cluster_center(grouplocs):
     
     Returns
     -------
-    tuple
+    list
         Attributes used for saving the given cluster as .hdf5
         (frame, x, y, etc)
     """
@@ -458,13 +471,13 @@ def cluster_center(grouplocs):
     # n_locs in cluster
     n = len(grouplocs)
     if hasattr(grouplocs, "z"):
-    	# take lpz = 2 * mean(lpx, lpy)
+        # take lpz = 2 * mean(lpx, lpy)
         z = _np.average(
-        	grouplocs.z, 
-        	weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
+            grouplocs.z, 
+            weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
         )
         lpz = 2 * lpx
-        result = (
+        result = [
             frame,
             x,
             y,
@@ -479,9 +492,9 @@ def cluster_center(grouplocs):
             n, 
             z, 
             lpz,
-        )
+        ]
     else:
-        result = (
+        result = [
             frame,
             x,
             y,
@@ -494,5 +507,9 @@ def cluster_center(grouplocs):
             ellipticity,
             net_gradient,
             n, 
-        )
+        ]
+
+    if hasattr(grouplocs, "group_input"):
+        result.append(_np.unique(grouplocs.group_input)[0]) # assumes only one group input!
+
     return result
