@@ -141,7 +141,6 @@ class HistWindow(PlotWindow):
         self.canvas.draw()
 
     def on_span_select(self, xmin, xmax):
-        print("span selected")
         self.locs = self.locs[np.isfinite(self.locs[self.field])]
         self.locs = self.locs[
             (self.locs[self.field] > xmin) & (self.locs[self.field] < xmax)
