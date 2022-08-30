@@ -12,6 +12,7 @@ import os.path as _ospath
 import os
 import sys
 import traceback
+import importlib, pkgutil
 from tqdm import tqdm
 import datetime
 from time import sleep
@@ -1155,7 +1156,7 @@ class Window(QtWidgets.QMainWindow):
         try:
             base, ext = os.path.splitext(path)
             with open(base + ".yaml", "r") as f:
-                self.model_info = yaml.load(f, Loader=yaml.FullLoader)
+                self.model_info = yaml.full_load(f)
                 self.classes.clear()
                 self.classes = self.model_info["Classes"]
                 self.model_loaded = True
@@ -1178,7 +1179,7 @@ class Window(QtWidgets.QMainWindow):
             try:
                 base, ext = os.path.splitext(path)
                 with open(base + ".yaml", "r") as f:
-                    self.model_info = yaml.load(f, Loader=yaml.FullLoader)
+                    self.model_info = yaml.full_load(f)
                     self.classes.clear()
                     self.classes = self.model_info["Classes"]
                     self.model_loaded = True
@@ -1315,6 +1316,23 @@ def main():
     icon_path = os.path.join(this_directory, "icons", "nanotron.ico")
     app.setWindowIcon(QIcon(icon_path))
     window = Window()
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "nanotron":
+            p.execute()
+            
     window.show()
 
     def excepthook(type, value, tback):

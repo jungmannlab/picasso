@@ -16,7 +16,10 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 import time
 import numpy as np
 import traceback
+import importlib, pkgutil
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
+from icecream import ic
+from collections import UserDict
 
 try:
     from pygpufit import gpufit as gf
@@ -117,7 +120,7 @@ class View(QtWidgets.QGraphicsView):
 
 class Scene(QtWidgets.QGraphicsScene):
     """
-    Scenes render indivdual frames and can be displayed in a `View` widget
+    Scenes render individual frames and can be displayed in a `View` widget
     """
 
     def __init__(self, window, parent=None):
@@ -135,7 +138,8 @@ class Scene(QtWidgets.QGraphicsScene):
         if not event.mimeData().hasUrls():
             return False
         path, extension = self.path_from_drop(event)
-        if extension.lower() not in [".raw", ".tif", ".ims"]:
+
+        if extension.lower() not in [".raw", ".tif", ".ims", ".nd2"]:
             return False
         return True
 
@@ -178,11 +182,26 @@ class OddSpinBox(QtWidgets.QSpinBox):
 
 
 class CamSettingComboBox(QtWidgets.QComboBox):
-    def __init__(self, cam_combos, camera, index):
+    """
+    Attributes:
+        cam_combos : dict
+            keys: possible cameras
+            values: list of CamSettingComboBoxes; one for each
+                sensitivity category, described in the CONFIG entry for the
+                respective camera.
+        camera : str
+            camera name this CamSettingComboBox belongs to
+        categories : list of str
+            the sensitivity categories of the camera
+        index : int
+            the index of sensitivity category this CamSettingComboBox belongs to
+    """
+    def __init__(self, cam_combos, camera, index, sensitivity_categories=[]):
         super().__init__()
         self.cam_combos = cam_combos
         self.camera = camera
         self.index = index
+        self.categories = sensitivity_categories
 
     def change_target_choices(self, index):
         cam_combos = self.cam_combos[self.camera]
@@ -194,6 +213,91 @@ class CamSettingComboBox(QtWidgets.QComboBox):
         target.clear()
         target.blockSignals(False)
         target.addItems(sorted(list(sensitivity.keys())))
+
+
+class CamSettingComboBoxDict(UserDict):
+    """Dictionary holding CamSettingComboBoxes for different cameras and
+    sensitivity categories.
+    keys: str
+        cameras
+    values: List of CamSettingComboBoxes, one for each sensitivity category
+        of this camera
+
+    further attributes:
+        sensitivity_categories : dict
+            keys: cameras
+            values: list of str: the categories
+    """
+    def __init__(self):
+        super().__init__()
+        self.sensitivity_categories = {}
+
+    def add_categories(self, cam, categories):
+        """Call this when setting combo boxes for a new camera, to accompany
+        it with the corresponding sensitivity categories.
+        """
+        self.sensitivity_categories[cam] = categories
+
+    def set_camcombo_value(self, cam, category, value):
+        """Sets the value of one combo box
+
+        Args:
+            cam : str
+                the camera to set
+            category : str
+                the category combo box to set
+            value : str
+                the value to set
+        """
+        cat_idx = self.sensitivity_categories[cam].index(category)
+        cam_combo = self.data[cam][cat_idx]
+        for index in range(cam_combo.count()):
+            if cam_combo.itemText(index) == value:
+                cam_combo.setCurrentIndex(index)
+                break
+
+    def set_camcombo_values(self, cam, values):
+        """Sets the values of all combo boxes of a camera
+
+        Args:
+            cam : str
+                the camera to set
+            values : dict
+                keys: sensitivity categories
+                values: the values to set
+        """
+        for i, cat in enumerate(self.sensitivity_categories[cam]):
+            if cat in values:
+                cam_combo = self.data[cam][i]
+                for index in range(cam_combo.count()):
+                    if cam_combo.itemText(index) == values[cat]:
+                        cam_combo.setCurrentIndex(index)
+                        break
+
+
+class EmissionComboBoxDict(UserDict):
+    """Dictionary holding ComboBoxes for different emission wavelenghts.
+    keys: str
+        cameras
+    values: ComboBoxes with wavelengths
+    """
+    def __init__(self):
+        super().__init__()
+
+    def set_emcombo_value(self, cam, wavelength):
+        """Sets the value of one combo box
+
+        Args:
+            cam : str
+                the camera to set
+            wavelength : str
+                the value to set
+        """
+        em_combo = self.data[cam]
+        for index in range(em_combo.count()):
+            if em_combo.itemText(index) == wavelength:
+                em_combo.setCurrentIndex(index)
+                break
 
 
 class PromptInfoDialog(QtWidgets.QDialog):
@@ -372,6 +476,11 @@ class ParametersDialog(QtWidgets.QDialog):
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
+        # Database addition
+        self.database_checkbox = QtWidgets.QCheckBox("Add to Database")
+        self.database_checkbox.setChecked(False)
+        identification_grid.addWidget(self.database_checkbox, 4, 1)
+
         # Camera:
         if "Cameras" in CONFIG:
             # Experiment settings
@@ -387,8 +496,8 @@ class ParametersDialog(QtWidgets.QDialog):
 
             self.cam_settings = QtWidgets.QStackedWidget()
             exp_grid.addWidget(self.cam_settings, 1, 0, 1, 2)
-            self.cam_combos = {}
-            self.emission_combos = {}
+            self.cam_combos = CamSettingComboBoxDict()
+            self.emission_combos = EmissionComboBoxDict()
             for cam in cameras:
                 cam_widget = QtWidgets.QWidget()
                 cam_grid = QtWidgets.QGridLayout(cam_widget)
@@ -399,6 +508,7 @@ class ParametersDialog(QtWidgets.QDialog):
                     if "Sensitivity Categories" in cam_config:
                         self.cam_combos[cam] = []
                         categories = cam_config["Sensitivity Categories"]
+                        self.cam_combos.add_categories(cam, categories)
                         for i, category in enumerate(categories):
                             row_count = cam_grid.rowCount()
                             cam_grid.addWidget(
@@ -499,6 +609,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.fit_method.addItems(
             ["LQ, Gaussian", "MLE, integrated Gaussian", "Average of ROI"]
         )
+        self.fit_method.setCurrentIndex(0)
         fit_grid.addWidget(self.fit_method, 1, 1)
         fit_stack = QtWidgets.QStackedWidget()
         fit_grid.addWidget(fit_stack, 2, 0, 1, 2)
@@ -665,7 +776,7 @@ class ParametersDialog(QtWidgets.QDialog):
         )
         if path:
             with open(path, "r") as f:
-                self.z_calibration = yaml.load(f)
+                self.z_calibration = yaml.full_load(f)
                 self.z_calibration_path = path
             self.z_calib_label.setAlignment(QtCore.Qt.AlignRight)
             self.z_calib_label.setText(os.path.basename(path))
@@ -1086,10 +1197,16 @@ class Window(QtWidgets.QMainWindow):
             dir = self.pwd
 
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self,
-            "Open image sequence",
-            directory=dir,
-            filter="All supported formats (*.raw *.tif *.tiff *.ims);;Raw files (*.raw);;Tiff images (*.tif *.tiff);; Imaris IMS (*.ims);;",
+            self, 
+            "Open image sequence", 
+            directory=dir, 
+            filter=(
+                "All supported formats (*.raw *.tif *.tiff *.nd2)"
+                ";;Raw files (*.raw)"
+                ";;Tiff images (*.tif *.tiff)"
+                ";;ImaRIS IMS (*.ims)"
+                ";;Nd2 files (*.nd2);;"
+            )
         )
         if path:
             self.pwd = path
@@ -1176,7 +1293,7 @@ class Window(QtWidgets.QMainWindow):
     def load_picks(self, path):
         try:
             with open(path, "r") as f:
-                regions = yaml.load(f)
+                regions = yaml.full_load(f)
             self._picks = regions["Centers"]
             maxframes = int(self.info[0]["Frames"])
             # ask for drift correction
@@ -1472,7 +1589,7 @@ class Window(QtWidgets.QMainWindow):
 
     def load_parameters(self, path):
         with open(path, "r") as file:
-            parameters = yaml.load(file)
+            parameters = yaml.full_load(file)
             self.parameters_dialog.box_spinbox.setValue(parameters["Box Size"])
             self.parameters_dialog.mng_spinbox.setValue(parameters["Min. Net Gradient"])
             self.status_bar.showMessage("Parameter file {} loaded.".format(path))
@@ -1574,6 +1691,7 @@ class Window(QtWidgets.QMainWindow):
             self.info,
             self.parameters_dialog.z_calibration,
             self.parameters_dialog.magnification_factor.value(),
+            self.parameters_dialog.pixelsize.value(),
         )
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
@@ -1858,12 +1976,20 @@ class FitZWorker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(np.recarray, float)
 
-    def __init__(self, locs, info, calibration, magnification_factor):
+    def __init__(
+        self, 
+        locs, 
+        info, 
+        calibration, 
+        magnification_factor,
+        pixelsize,
+    ):
         super().__init__()
         self.locs = locs
         self.info = info
         self.calibration = calibration
         self.magnification_factor = magnification_factor
+        self.pixelsize = pixelsize
 
     def run(self):
         t0 = time.time()
@@ -1873,6 +1999,7 @@ class FitZWorker(QtCore.QThread):
             self.info,
             self.calibration,
             self.magnification_factor,
+            self.pixelsize,
             filter=0,
             asynch=True,
         )
@@ -1944,6 +2071,23 @@ class QualityWorker(QtCore.QThread):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "localize":
+            p.execute()
+
     window.show()
 
     def excepthook(type, value, tback):
