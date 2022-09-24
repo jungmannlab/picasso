@@ -638,6 +638,15 @@ class AnimationDialog(QtWidgets.QDialog):
             self, "Save animation", out_path, filter="*.mp4"
         )
         if name:
+            # width and height for building the animation; must be even
+            # as many video players do not accept it otherwise
+            width = self.window.view_rot.width()
+            height = self.window.view_rot.height()
+            if width % 2 == 1:
+                width += 1
+            if height % 2 == 1:
+                height += 1
+
             # create temporary folder to store all frames
             base, ext = os.path.splitext(self.window.view_rot.paths[0])
             idx = [i for i, char in enumerate(base) if char == '/'][-1]
@@ -651,9 +660,9 @@ class AnimationDialog(QtWidgets.QDialog):
                         animation=True,
                     )
                     qimage = qimage.scaled(
-                        self.width(), 
-                        self.height(),
-                        QtCore.Qt.KeepAspectRatioByExpanding,
+                        width, 
+                        height,
+                        # QtCore.Qt.KeepAspectRatioByExpanding,
                     )
                     qimage.save(path + "/frame_{}.png".format(i+1))
             except:
@@ -677,8 +686,8 @@ class AnimationDialog(QtWidgets.QDialog):
                             animation=True,
                         )
                         qimage = qimage.scaled(
-                            self.width(), 
-                            self.height(),
+                            width,
+                            height,
                             QtCore.Qt.KeepAspectRatioByExpanding,
                         )
                         qimage.save(path + "/frame_{}.png".format(i+1))
@@ -883,10 +892,7 @@ class ViewRotation(QtWidgets.QLabel):
         return QtCore.QSize(*self._size_hint)
 
     def resizeEvent(self, event):
-        if self.width() % 2:
-            self.resize(self.width() + 1, self.height())
-        if self.height() % 2:
-            self.resize(self.width(), self.height() + 1)
+        ic(self.size())
         self.update_scene()
 
     def load_locs(self, update_window=False):
