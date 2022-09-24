@@ -156,7 +156,7 @@ def _render_setup(
     np.array 
         y coordinates to be rendered
     np.array
-        indeces of locs to be rendered
+        Indeces of locs to be rendered
     """
 
     n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
@@ -174,7 +174,25 @@ def _render_setup(
 @_numba.njit
 def _render_min_z(locs, x_min, x_max, y_min, y_max):
     """
-    Estimate minimum and maximum z for a given ROI
+    Estimates minimum and maximum z for a given ROI.
+
+    Parameters
+    ----------
+    locs : np.recarray
+        Localizations
+    y_min : float
+        Minimum y coordinate to be rendered (pixels)
+    x_min : float
+        Minimum x coordinate to be rendered (pixels)
+    y_max : float
+        Maximum y coordinate to be rendered (pixels)
+    x_max : float
+        Maximum x coordinate to be rendered (pixels)
+        
+    Returns
+    -------
+    tuple
+        Minimum and maximum z coordinates in the ROI
     """
     x = locs.x
     y = locs.y
