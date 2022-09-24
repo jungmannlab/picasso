@@ -10,6 +10,7 @@
 import csv
 from . import io as _io
 
+
 def saveInfo(filename, info):
     _io.save_info(filename, [info], default_flow_style=True)
 
@@ -126,9 +127,7 @@ def convertPlateIndexColor(plate, platename):
     ]
     structurecol = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
-    newplate = [
-        ["PLATE NAME", "PLATE POSITION", "OLIGO NAME", "SEQUENCE", "COLOR"]
-    ]
+    newplate = [["PLATE NAME", "PLATE POSITION", "OLIGO NAME", "SEQUENCE", "COLOR"]]
     for row in range(0, len(platerow)):
         for col in range(0, len(platecol)):
             if row < 8:

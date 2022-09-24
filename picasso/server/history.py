@@ -20,11 +20,25 @@ DEFAULT_PLOTS = [
 
 
 @st.cache
-def convert_df(df):
+def convert_df(df: pd.DataFrame):
+    """
+    Helper function to encode a dataframe as utf-8
+
+    Args:
+        df (pd.DataFrame): Dataframe to convert.
+    """
+
     return df.to_csv().encode("utf-8")
 
 
-def parse_input(input_):
+def parse_input(input_: str):
+    """
+    Parses an input string and looks for & and |.
+    Keywords with & will be added to an include list and keywords with | to an exclude list.
+
+    Args:
+        input_ (str): Input string
+    """
 
     token = ("&", "|")
 
@@ -61,7 +75,13 @@ def parse_input(input_):
     return to_add, to_exclude
 
 
-def filter_db(df_):
+def filter_db(df_: pd.DataFrame):
+    """
+    Utility function to create a user interface to filter a dataframe.
+
+    Args:
+        df_ (pd.DataFrame): Input dataframe.
+    """
 
     df = df_.copy()
     st.write("## Filter")
@@ -105,7 +125,19 @@ def filter_db(df_):
     return df
 
 
-def filter_by_tags(df, to_add, to_exclude):
+def filter_by_tags(df: pd.DataFrame, to_add: list, to_exclude: list):
+    """
+    Filters the entries of a dataframe according to an to_add and to_exclude list.
+    Rows will be removed according to their filename.
+
+    Args:
+        df (pd.DataFrame): Dataframe
+        to_add (list): keywords that should be in the filename.
+        to_exclude (list): keywords that should not be in the filename.
+
+    Returns:
+        _type_: _description_
+    """
 
     add = df["filename"].apply(lambda x: True if any(i in x for i in to_add) else False)
 
@@ -123,8 +155,13 @@ def filter_by_tags(df, to_add, to_exclude):
     return df[add & exclude]
 
 
-def check_group(filename, groups):
+def check_group(filename: str, groups: tuple):
+    """Check if a filename belongs to a group
 
+    Args:
+        filename (str): filename
+        groups (tuple): tuple with groups as strings
+    """
     found = "None"
     for g in groups:
         if g in filename:
@@ -134,6 +171,9 @@ def check_group(filename, groups):
 
 
 def history():
+    """
+    Streamlit page to show the file history.
+    """
     st.write("# History")
 
     df_ = fetch_db()
@@ -143,6 +183,7 @@ def history():
         options.remove("file_created")
 
         df = filter_db(df_)
+        df = df.reset_index(drop=True)
 
         c1, c2 = st.columns(2)
 
@@ -154,9 +195,7 @@ def history():
 
         df["file_created_date"] = df["file_created"].apply(lambda x: x.date())
 
-        df = df.drop_duplicates("file_created")
         df = df.sort_values("file_created", ascending=False)
-        df = df.set_index("file_created", drop=False)
 
         c2.write(df["group"].value_counts())
 
@@ -169,14 +208,23 @@ def history():
             else:
                 trendline = None
 
+        df["file_created_"] = df["file_created"].apply(lambda x: x.timestamp())
+        df["file_created_date"] = df["file_created"].apply(lambda x: x.date())
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             with st.spinner("Creating plots.."):
 
                 if plotmode == "Table":
-                    table = df[fields + ["filename"]]
+                    table = df
 
-                    st.write(table.style.bar(color="gray").format(precision=4))
+                    if st.checkbox("Barchart in column"):
+                        table_style = table.style.bar(color="lightgray")
+                        st.write(
+                            table_style.to_html(escape=False), unsafe_allow_html=True
+                        )
+                    else:
+                        st.dataframe(table)
 
                     csv = convert_df(table)
 
@@ -195,15 +243,23 @@ def history():
                         if plotmode == "Scatter":
                             fig = px.scatter(
                                 df,
-                                x="file_created",
+                                x="file_created_",
                                 y=field,
                                 color="group",
-                                hover_name="filename",
+                                hover_name="filename_hdf",
                                 hover_data=["file_created"],
                                 title=f"{field} - median {median_:.2f}",
                                 trendline=trendline,
                                 height=400,
                             )
+
+                            fig.update_xaxes(
+                                tickangle=45,
+                                tickmode="array",
+                                tickvals=df["file_created_"],
+                                ticktext=df["file_created_date"],
+                            )
+
                             st.plotly_chart(fig)
                         elif plotmode == "Box":
                             fig = px.box(
@@ -211,11 +267,12 @@ def history():
                                 x="file_created_date",
                                 y=field,
                                 color="group",
-                                hover_name="filename",
+                                hover_name="filename_hdf",
                                 hover_data=["file_created"],
                                 title=f"{field} - median {median_:.2f}",
                                 height=400,
                             )
+
                             st.plotly_chart(fig)
 
                         else:

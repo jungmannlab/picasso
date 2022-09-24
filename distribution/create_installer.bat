@@ -7,6 +7,8 @@ call conda create -n picasso_installer python=3.8 -y
 call conda activate picasso_installer
 call pip install pyinstaller==4.2
 cd %~dp0\..
+call DEL /F/Q/S dist > NUL
+call RMDIR /Q/S dist
 call pip install -r requirements.txt
 call python setup.py install
 cd %~dp0

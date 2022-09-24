@@ -172,6 +172,20 @@ def _render_setup(
     return image, n_pixel_y, n_pixel_x, x, y, in_view
 
 @_numba.njit
+def _render_min_z(locs, x_min, x_max, y_min, y_max):
+    """
+    Estimate minimum and maximum z for a given ROI
+    """
+    x = locs.x
+    y = locs.y
+    z = locs.z
+    in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
+
+    z = z[in_view]
+
+    return z.min(), z.max()
+
+@_numba.njit
 def _render_setup3d(
     locs, 
     oversampling, 
@@ -355,8 +369,8 @@ def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
             for j in range(j_min, j_max):
                 image[i, j] += _np.exp(
                     -(
-                        (j - x_ + 0.5) ** 2 / (2 * sx_ ** 2)
-                        + (i - y_ + 0.5) ** 2 / (2 * sy_ ** 2)
+                        (j - x_ + 0.5) ** 2 / (2 * sx_**2)
+                        + (i - y_ + 0.5) ** 2 / (2 * sy_**2)
                     )
                 ) / (2 * _np.pi * sx_ * sy_)
 

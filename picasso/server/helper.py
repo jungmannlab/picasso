@@ -2,20 +2,23 @@ import picasso.io
 import picasso.postprocess
 import os
 import numpy as np
+import sqlalchemy
 from sqlalchemy import create_engine
 import pandas as pd
 import streamlit as st
 import time
-
-
-def _db_filename():
-    home = os.path.expanduser("~")
-    return os.path.abspath(os.path.join(home, ".picasso", "app.db"))
+import subprocess
+import picasso.localize
+from picasso.localize import _db_filename
 
 
 def fetch_db():
+    """
+    Helper function to load the local database and return the files.
+    """
     try:
-        engine = create_engine("sqlite:///" + _db_filename(), echo=False)
+        DB_PATH = "sqlite:///" + _db_filename()
+        engine = create_engine(DB_PATH, echo=False)
         df = pd.read_sql_table("files", con=engine)
 
         df = df.sort_values("file_created")
@@ -26,10 +29,14 @@ def fetch_db():
 
 
 def fetch_watcher():
+    """
+    Helper function to load the local database and return running watchers.
+    """
     try:
         engine = create_engine("sqlite:///" + _db_filename(), echo=False)
         df = pd.read_sql_table("watcher", con=engine)
-    except ValueError:
+    except ValueError as e:
+        print(e)
         df = pd.DataFrame()
 
     return df
@@ -37,10 +44,10 @@ def fetch_watcher():
 
 def refresh(to_wait: int):
     """
-    Utility function that waits for a given amount and then restarts streamlit.
+    Utility function that waits for a given amount and then stops streamlit.
     """
     ref = st.empty()
     for i in range(to_wait):
         ref.write(f"Refreshing in {to_wait-i} s")
         time.sleep(1)
-    raise st.script_runner.RerunException(st.script_request_queue.RerunData(None))
+    st.stop()

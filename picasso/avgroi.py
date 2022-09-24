@@ -48,16 +48,14 @@ def fit_spots_parallel(spots, asynch=False):
     n_spots = len(spots)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_spots / n_tasks + 1)
-        if _ < n_spots % n_tasks
-        else int(n_spots / n_tasks)
+        int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(n_spots / n_tasks)
         for _ in range(n_tasks)
     ]
     start_indices = _np.cumsum([0] + spots_per_task[:-1])
     fs = []
     executor = _futures.ProcessPoolExecutor(n_workers)
     for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i: i + n_spots_task]))
+        fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
     if asynch:
         return fs
     with _tqdm(total=n_tasks, unit="task") as progress_bar:

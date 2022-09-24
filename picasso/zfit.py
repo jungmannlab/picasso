@@ -27,23 +27,13 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     n_frames = info[0]["Frames"]
     range = (n_frames - 1) * d
     frame_range = _np.arange(n_frames)
-    z_range = -(
-        frame_range * d - range / 2
-    )  # negative so that the first frames of
+    z_range = -(frame_range * d - range / 2)  # negative so that the first frames of
     # a bottom-to-up scan are positive z coordinates.
 
-    mean_sx = _np.array(
-        [_np.mean(locs.sx[locs.frame == _]) for _ in frame_range]
-    )
-    mean_sy = _np.array(
-        [_np.mean(locs.sy[locs.frame == _]) for _ in frame_range]
-    )
-    var_sx = _np.array(
-        [_np.var(locs.sx[locs.frame == _]) for _ in frame_range]
-    )
-    var_sy = _np.array(
-        [_np.var(locs.sy[locs.frame == _]) for _ in frame_range]
-    )
+    mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
+    mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
+    var_sx = _np.array([_np.var(locs.sx[locs.frame == _]) for _ in frame_range])
+    var_sy = _np.array([_np.var(locs.sy[locs.frame == _]) for _ in frame_range])
 
     keep_x = (locs.sx - mean_sx[locs.frame]) ** 2 < var_sx[locs.frame]
     keep_y = (locs.sy - mean_sy[locs.frame]) ** 2 < var_sy[locs.frame]
@@ -51,12 +41,8 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     locs = locs[keep]
 
     # Fits calibration curve to the mean of each frame
-    mean_sx = _np.array(
-        [_np.mean(locs.sx[locs.frame == _]) for _ in frame_range]
-    )
-    mean_sy = _np.array(
-        [_np.mean(locs.sy[locs.frame == _]) for _ in frame_range]
-    )
+    mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
+    mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
 
     # Fix nan
     mean_sx = interpolate_nan(mean_sx)
@@ -115,9 +101,7 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     _plt.subplot(233)
     _plt.plot(locs.z, locs.sx, ".", label="x", alpha=0.2)
     _plt.plot(locs.z, locs.sy, ".", label="y", alpha=0.2)
-    _plt.plot(
-        z_range, _np.polyval(cx, z_range), "0.3", lw=1.5, label="calibration"
-    )
+    _plt.plot(z_range, _np.polyval(cx, z_range), "0.3", lw=1.5, label="calibration")
     _plt.plot(z_range, _np.polyval(cy, z_range), "0.3", lw=1.5)
     _plt.xlim(z_range.min(), z_range.max())
     _plt.xlabel("Estimated z")
@@ -147,7 +131,7 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     _plt.ylabel("Occurence")
 
     ax = _plt.subplot(236)
-    square_deviation = deviation ** 2
+    square_deviation = deviation**2
     mean_square_deviation_frame = [
         _np.mean(square_deviation[locs.frame == _]) for _ in frame_range
     ]
@@ -162,7 +146,7 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
 
     if path is not None:
         dirname = path[0:-5]
-        _plt.savefig(dirname + ".png", format='png', dpi=300)
+        _plt.savefig(dirname + ".png", format="png", dpi=300)
 
     _plt.show()
 
@@ -178,9 +162,7 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
         _np.savetxt("cy.txt", cy, delimiter="/t")
         _np.savetxt("z_range.txt", z_range, delimiter="/t")
         _np.savetxt("locs_z.txt", locs.z, delimiter="/t")
-        _np.savetxt(
-            "z_range_locs_frame.txt", z_range[locs.frame], delimiter="/t"
-        )
+        _np.savetxt("z_range_locs_frame.txt", z_range[locs.frame], delimiter="/t")
         _np.savetxt("rmsd_frame.txt", rmsd_frame, delimiter="/t")
 
     # np.savetxt('test.out', x, delimiter=',')   # X is an array
@@ -215,8 +197,8 @@ def _fit_z_target(z, sx, sy, cx, cy):
         + cy[5] * z
         + cy[6]
     )
-    return (sx ** 0.5 - wx ** 0.5) ** 2 + (
-        sy ** 0.5 - wy ** 0.5
+    return (sx**0.5 - wx**0.5) ** 2 + (
+        sy**0.5 - wy**0.5
     ) ** 2  # Apparently this results in slightly more accurate z coordinates
     # (Huang et al. '08)
     # return (sx-wx)**2 + (sy-wy)**2
@@ -261,9 +243,7 @@ def fit_z_parallel(
     n_locs = len(locs)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_locs / n_tasks + 1)
-        if _ < n_locs % n_tasks
-        else int(n_locs / n_tasks)
+        int(n_locs / n_tasks + 1) if _ < n_locs % n_tasks else int(n_locs / n_tasks)
         for _ in range(n_tasks)
     ]
     start_indices = _np.cumsum([0] + spots_per_task[:-1])
@@ -273,7 +253,7 @@ def fit_z_parallel(
         fs.append(
             executor.submit(
                 fit_z,
-                locs[i: i + n_locs_task],
+                locs[i : i + n_locs_task],
                 info,
                 calibration,
                 magnification_factor,
@@ -297,6 +277,6 @@ def locs_from_futures(futures, filter=2):
 
 def filter_z_fits(locs, range):
     if range > 0:
-        rmsd = _np.sqrt(_np.nanmean(locs.d_zcalib ** 2))
+        rmsd = _np.sqrt(_np.nanmean(locs.d_zcalib**2))
         locs = locs[locs.d_zcalib <= range * rmsd]
     return locs

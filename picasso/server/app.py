@@ -1,29 +1,13 @@
 """
-
-General flow:
-
-SQL database to check and process new files
-(automatically / scheduled)
-Report performance metrics to DB
-This is drift an DNFL
-
-===
-MODULES
-
-new_job -> Add job to database (from new file)
-process_job -> process_
-
-
-
+Streamlit application to interface with the database
 """
 
-import streamlit as st
 import os
-from PIL import Image
-import sqlalchemy
 import socket
-from sqlalchemy import create_engine
+from PIL import Image
+import streamlit as st
 import pandas as pd
+from sqlalchemy import create_engine
 from datetime import datetime
 
 from picasso import localize
