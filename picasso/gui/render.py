@@ -53,6 +53,7 @@ try:
 except:
     HDBSCAN_IMPORTED = False
 
+matplotlib.use('agg')
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
 DEFAULT_OVERSAMPLING = 1.0
