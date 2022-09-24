@@ -6095,10 +6095,12 @@ class View(QtWidgets.QLabel):
             if t_dialog.point_picks.isChecked():
                 painter = QtGui.QPainter(image)
                 painter.setBrush(QtGui.QBrush(QtGui.QColor("yellow")))
+                painter.setPen(QtGui.QColor("yellow"))
 
                 # yellow is barely visible on white background
                 if self.window.dataset_dialog.wbackground.isChecked():
                     painter.setBrush(QtGui.QBrush(QtGui.QColor("red")))
+                    painter.setPen(QtGui.QColor("red"))
 
                 for i, pick in enumerate(self._picks):
 
@@ -6108,7 +6110,7 @@ class View(QtWidgets.QLabel):
 
                     # annotate picks
                     if t_dialog.pick_annotation.isChecked():
-                        painter.drawText(cx + 2, cy + 2, str(i))
+                        painter.drawText(cx + 20, cy + 20, str(i))
                 painter.end()
 
             # draw circles
