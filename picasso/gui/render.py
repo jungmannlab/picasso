@@ -7983,6 +7983,8 @@ class View(QtWidgets.QLabel):
                         self,
                         "Input Dialog",
                         "Enter maximum number of localizations:",
+                        max(loccount),
+                        minlocs,
                     )
                     if ok2:
                         progress = lib.ProgressDialog(
