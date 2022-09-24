@@ -53,7 +53,8 @@ try:
 except:
     HDBSCAN_IMPORTED = False
 
-matplotlib.use('agg')
+if sys.platform == "darwin": # plots do not work on mac os
+    matplotlib.use('agg')
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
 DEFAULT_OVERSAMPLING = 1.0
