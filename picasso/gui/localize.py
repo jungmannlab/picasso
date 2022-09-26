@@ -476,11 +476,6 @@ class ParametersDialog(QtWidgets.QDialog):
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
 
-        # Database addition
-        self.database_checkbox = QtWidgets.QCheckBox("Add to Database")
-        self.database_checkbox.setChecked(False)
-        identification_grid.addWidget(self.database_checkbox, 4, 1)
-
         # Camera:
         if "Cameras" in CONFIG:
             # Experiment settings
