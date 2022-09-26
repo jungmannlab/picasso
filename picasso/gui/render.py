@@ -10036,6 +10036,8 @@ class Window(QtWidgets.QMainWindow):
         Exports current view as .png or .tif
     export_multi()
         Asks the user to choose a type of export
+    export_roi_ims()
+        Exports current FOV to .ims
     export_ts()
         Exports locs as .csv for ThunderSTORM
     export_txt()
@@ -11011,9 +11013,8 @@ class Window(QtWidgets.QMainWindow):
                             print("File saved to {}".format(path))
 
     def export_roi_ims(self):
-        """
-        Export for ims
-        """
+        """ Exports current FOV to .ims """
+
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + ".ims"
 
