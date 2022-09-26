@@ -337,7 +337,6 @@ class Window(QtWidgets.QMainWindow):
         self.hist2d_windows = {}
         self.filter_log = {}
         self.locs = None
-        self.pwd = None
 
         # load user settings (working directory)
         settings = io.load_user_settings()
