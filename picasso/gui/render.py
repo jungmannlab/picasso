@@ -23,24 +23,18 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 import yaml
-import joblib
-import h5py
-from numba import cuda
 
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT \
     as NavigationToolbar
 
 from scipy.ndimage.filters import gaussian_filter
-from scipy.interpolate import interp1d
 from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans, DBSCAN
-from mpl_toolkits.mplot3d import axes3d
 from collections import Counter
-from h5py import File
 from tqdm import tqdm
 
 import colorsys
