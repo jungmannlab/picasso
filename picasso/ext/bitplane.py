@@ -279,11 +279,11 @@ if IMSWRITER:
             progress100 = int(progress * 100)
             if progress100 - self.mUserDataProgress >= 5:
                 self.mUserDataProgress = progress100
-                print(
-                    "User Progress {}, Bytes written: {}".format(
-                        self.mUserDataProgress, total_bytes_written
-                    )
-                )
+                # print(
+                #     "User Progress {}, Bytes written: {}".format(
+                #         self.mUserDataProgress, total_bytes_written
+                #     )
+                # )
 
     def numpy_to_imaris(
         array, filename, colors, oversampling, viewport, info, z_min, z_max, pixelsize
