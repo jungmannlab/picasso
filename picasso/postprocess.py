@@ -409,9 +409,9 @@ def pair_correlation(locs, info, bin_size, r_max):
     return bins_lower, dh / area
 
 
-def dbscan(locs, radius, min_density):
+def dbscan(locs, radius, min_density, pixelsize):
     if hasattr(locs, "z"):
-        X = _np.vstack((locs.x, locs.y, locs.z)).T
+        X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
     else:
         X = _np.vstack((locs.x, locs.y)).T
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
@@ -420,11 +420,11 @@ def dbscan(locs, radius, min_density):
     locs = locs[locs.group != -1]
     return locs
 
-def hdbscan(locs, min_cluster_size, min_samples, cluster_eps):
+def hdbscan(locs, min_cluster_size, min_samples, cluster_eps, pixelsize):
     from hdbscan import HDBSCAN as _HDBSCAN
 
     if hasattr(locs, "z"):
-        X = _np.vstack((locs.x, locs.y, locs.z)).T
+        X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
     else:
         X = _np.vstack((locs.x, locs.y)).T
     hdb = _HDBSCAN(

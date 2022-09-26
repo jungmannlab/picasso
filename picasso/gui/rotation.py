@@ -892,7 +892,6 @@ class ViewRotation(QtWidgets.QLabel):
         return QtCore.QSize(*self._size_hint)
 
     def resizeEvent(self, event):
-        ic(self.size())
         self.update_scene()
 
     def load_locs(self, update_window=False):
@@ -912,6 +911,10 @@ class ViewRotation(QtWidgets.QLabel):
         fast_render = False # should locs be reindexed
         if update_window:
             fast_render = True
+            # get pixelsize
+            self.pixelsize = (
+                self.window.window.display_settings_dlg.pixelsize.value()
+            )
             # update blur and colormap
             blur = (
                 self.window.window.display_settings_dlg.blur_buttongroup. \
@@ -940,7 +943,6 @@ class ViewRotation(QtWidgets.QLabel):
             self.viewport = self.fit_in_view_rotated(get_viewport=True)
             self.window.dataset_dialog = self.window.window.dataset_dialog
             self.paths = self.window.window.view.locs_paths
-            self.z_converted = self.window.window.view.z_converted
 
         # load locs in the pick and their metadata
         n_channels = len(self.paths)
@@ -949,8 +951,9 @@ class ViewRotation(QtWidgets.QLabel):
         for i in range(n_channels):
             temp = self.window.window.view.picked_locs(
                 i, add_group=False, fast_render=fast_render
-            )
-            self.locs.append(temp[0])
+            )[0] # only one pick, take the first element
+            temp.z /= self.pixelsize
+            self.locs.append(temp)
             self.infos.append(self.window.window.view.infos[i])
 
         # assign self.group_color if single channel and group info
@@ -2391,21 +2394,6 @@ class RotationWindow(QtWidgets.QMainWindow):
         )
 
         if channel is not None:
-            if any(self.window.view.z_converted):
-                m = QtWidgets.QMessageBox()
-                m.setWindowTitle("z coordinates have been converted to pixels")
-                ret = m.question(
-                    self,
-                    "",
-                    "Convert z back to nm? (old picasso format)",
-                    m.Yes | m.No,
-                )
-                if ret == m.Yes:
-                    pixelsize = self.window.display_settings_dlg.pixelsize.value()
-                    for i in range(len(self.view_rot.locs)):
-                        if self.view_rot.z_converted[i]:
-                            self.view_rot.locs[i].z *= pixelsize
-                            self.view_rot.z_converted[i] = False
             # rotation info
             angx = int(self.view_rot.angx * 180 / np.pi)
             angy = int(self.view_rot.angy * 180 / np.pi)

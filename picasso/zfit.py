@@ -209,7 +209,6 @@ def fit_z(
     info, 
     calibration, 
     magnification_factor, 
-    pixelsize,
     filter=2
 ):
     cx = _np.array(calibration["X Coefficients"])
@@ -223,7 +222,6 @@ def fit_z(
         z[i] = result.x
         square_d_zcalib[i] = result.fun
     z *= magnification_factor
-    z /= pixelsize # express all locs dtypes in px, not nm
     locs = _lib.append_to_rec(locs, z, "z")
     locs = _lib.append_to_rec(locs, _np.sqrt(square_d_zcalib), "d_zcalib")
     locs = _lib.ensure_sanity(locs, info)
@@ -235,7 +233,6 @@ def fit_z_parallel(
     info, 
     calibration, 
     magnification_factor, 
-    pixelsize,
     filter=2, 
     asynch=False,
 ):
@@ -257,7 +254,6 @@ def fit_z_parallel(
                 info,
                 calibration,
                 magnification_factor,
-                pixelsize,
                 filter=0,
             )
         )

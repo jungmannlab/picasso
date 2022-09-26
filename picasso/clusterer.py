@@ -275,7 +275,7 @@ def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
     
     return labels
 
-def cluster(locs, params):
+def cluster(locs, params, pixelsize):
     """
     Clusters localizations given user parameters using KDTree.
 
@@ -287,6 +287,8 @@ def cluster(locs, params):
         Localizations to be clustered
     params : tuple
         SMLM clustering parameters
+    pixelsize : int
+        Camera pixel size in nm
 
     Returns
     -------
@@ -300,7 +302,7 @@ def cluster(locs, params):
         labels = cluster_3D(
             locs.x,
             locs.y,
-            locs.z,
+            locs.z / pixelsize, # convert z coordinates from nm to px
             locs.frame,
             radius_xy,
             radius_z,

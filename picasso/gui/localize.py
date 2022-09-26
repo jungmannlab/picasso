@@ -1691,7 +1691,6 @@ class Window(QtWidgets.QMainWindow):
             self.info,
             self.parameters_dialog.z_calibration,
             self.parameters_dialog.magnification_factor.value(),
-            self.parameters_dialog.pixelsize.value(),
         )
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
@@ -1982,14 +1981,12 @@ class FitZWorker(QtCore.QThread):
         info, 
         calibration, 
         magnification_factor,
-        pixelsize,
     ):
         super().__init__()
         self.locs = locs
         self.info = info
         self.calibration = calibration
         self.magnification_factor = magnification_factor
-        self.pixelsize = pixelsize
 
     def run(self):
         t0 = time.time()
@@ -1999,7 +1996,6 @@ class FitZWorker(QtCore.QThread):
             self.info,
             self.calibration,
             self.magnification_factor,
-            self.pixelsize,
             filter=0,
             asynch=True,
         )
