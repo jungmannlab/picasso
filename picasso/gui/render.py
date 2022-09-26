@@ -24,6 +24,7 @@ import matplotlib.patches as patches
 import numpy as np
 import yaml
 import joblib
+import h5py
 from numba import cuda
 
 from matplotlib.backends.backend_qt5agg import FigureCanvas
@@ -47,6 +48,16 @@ import colorsys
 from .. import imageprocess, io, lib, postprocess, render, clusterer
 from .rotation import RotationWindow
 
+# PyImarisWrite works on windows only
+if sys.platform == "win32": 
+    from .. ext.bitplane import IMSWRITER
+    if IMSWRITER:
+        from .. ext.bitplane import numpy_to_imaris
+        from PyImarisWriter.ImarisWriterCtypes import *
+        from PyImarisWriter import PyImarisWriter as PW
+else:
+    IMSWRITER = False
+
 try:
     from hdbscan import HDBSCAN
     HDBSCAN_IMPORTED = True
@@ -55,6 +66,7 @@ except:
 
 if sys.platform == "darwin": # plots do not work on mac os
     matplotlib.use('agg')
+
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
 DEFAULT_OVERSAMPLING = 1.0
@@ -4932,6 +4944,8 @@ class View(QtWidgets.QLabel):
         Searches picks similar to the current picks
     picked_locs(channel)
         Returns picked localizations in the specified channel
+    read_colors()
+        Finds currently selected colors for multicolor rendering
     refold_groups()
         Refolds grouped locs across x axis
     relative_position(viewport_center, cursor_position)
@@ -8316,6 +8330,71 @@ class View(QtWidgets.QLabel):
         )
         return qimage
 
+
+    def read_colors(self, n_channels=None):
+        """
+        Finds currently selected colors for multicolor rendering.
+
+        Parameters
+        ----------
+        n_channels : int
+            Number of channels to be rendered. If None, it is taken
+            automatically as the number of locs files loaded.
+
+        Returns
+        -------
+        list
+            List of lists with RGB values from 0 to 1 for each channel.
+        """
+
+        if n_channels is None:
+            n_channels = len(self.locs)
+        colors = get_colors(n_channels) # automatic colors
+        # color each channel one by one
+        for i in range(len(self.locs)):
+            # change colors if not automatic coloring
+            if not self.window.dataset_dialog.auto_colors.isChecked():
+                # get color from Dataset Dialog
+                color = (
+                    self.window.dataset_dialog.colorselection[i].currentText()
+                )
+                # if default color
+                if color in self.window.dataset_dialog.default_colors:
+                    colors_array = np.array(
+                        self.window.dataset_dialog.default_colors, 
+                        dtype=object,
+                    )
+                    index = np.where(colors_array == color)[0][0]
+                    # assign color
+                    colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
+                # if hexadecimal is given
+                elif is_hexadecimal(color):
+                    colorstring = color.lstrip("#")
+                    rgbval = tuple(
+                        int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
+                    )
+                    # assign color
+                    colors[i] = rgbval
+                else:
+                    warning = (
+                        "The color selection not recognnised in the channel {}."
+                        "  Please choose one of the options provided or type "
+                        " the hexadecimal code for your color of choice,  "
+                        " starting with '#', e.g.  '#ffcdff' for pink.".format(
+                            self.window.dataset_dialog.checks[i].text()
+                        )
+                    )
+                    QtWidgets.QMessageBox.information(self, "Warning", warning)
+                    break
+
+            # reverse colors if white background
+            if self.window.dataset_dialog.wbackground.isChecked():
+                tempcolor = colors[i]
+                inverted = tuple([1 - _ for _ in tempcolor])
+                colors[i] = inverted
+
+        return colors
+
     def render_multi_channel(
         self,
         kwargs,
@@ -8366,8 +8445,6 @@ class View(QtWidgets.QLabel):
                     z_max = self.window.slicer_dialog.slicermax
                     in_view = (locs[i].z > z_min) & (locs[i].z <= z_max)
                     locs[i] = locs[i][in_view]
-
-        n_channels = len(locs)
         
         if use_cache: # used saved image
             n_locs = self.n_locs
@@ -8404,57 +8481,12 @@ class View(QtWidgets.QLabel):
         # array with rgb and alpha channels
         bgra = np.zeros((Y, X, 4), dtype=np.float32)
 
-        colors = get_colors(n_channels) # automatic colors
-        # color each channel one by one
-        for i in range(len(self.locs)):
-            # change colors if not automatic coloring
-            if not self.window.dataset_dialog.auto_colors.isChecked():
-                # get color from Dataset Dialog
-                color = (
-                    self.window.dataset_dialog.colorselection[i].currentText()
-                )
-                # if default color
-                if color in self.window.dataset_dialog.default_colors:
-                    colors_array = np.array(
-                        self.window.dataset_dialog.default_colors, 
-                        dtype=object,
-                    )
-                    index = np.where(colors_array == color)[0][0]
-                    # assign color
-                    colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
-                # if hexadecimal is given
-                elif is_hexadecimal(color):
-                    colorstring = color.lstrip("#")
-                    rgbval = tuple(
-                        int(colorstring[i: i + 2], 16) / 255 for i in (0, 2, 4)
-                    )
-                    # assign color
-                    colors[i] = rgbval
-                else:
-                    warning = (
-                        "The color selection not recognnised in the channel {}."
-                        "  Please choose one of the options provided or type "
-                        " the hexadecimal code for your color of choice,  "
-                        " starting with '#', e.g.  '#ffcdff' for pink.".format(
-                            self.window.dataset_dialog.checks[i].text()
-                        )
-                    )
-                    QtWidgets.QMessageBox.information(self, "Warning", warning)
-                    break
+        colors = self.read_colors(n_channels=len(locs))
 
-            # reverse colors if white background
-            if self.window.dataset_dialog.wbackground.isChecked():
-                tempcolor = colors[i]
-                inverted = tuple([1 - _ for _ in tempcolor])
-                colors[i] = inverted
-
-            # adjust for relative intensity from Dataset Dialog
+        # adjust for relative intensity from Dataset Dialog
+        for i in range(len(locs)):
             iscale = self.window.dataset_dialog.intensitysettings[i].value()
             image[i] = iscale * image[i]
-
-            # don't display if channel unchecked in Dataset Dialog
-            # if not self.window.dataset_dialog.checks[i].isChecked():
-            #     image[i] = 0 * image[i]
 
         # color rgb channels and store in bgra
         for color, image in zip(colors, image):
@@ -10143,6 +10175,9 @@ class Window(QtWidgets.QMainWindow):
         file_menu.addSeparator()
         export_multi_action = file_menu.addAction("Export localizations")
         export_multi_action.triggered.connect(self.export_multi)
+        if IMSWRITER:
+            export_ims_action = file_menu.addAction("Export ROI for Imaris")
+            export_ims_action.triggered.connect(self.export_roi_ims)
 
         file_menu.addSeparator()
         delete_action = file_menu.addAction("Remove all localizations")
@@ -10654,53 +10689,16 @@ class Window(QtWidgets.QMainWindow):
                         self, "Dataset error", "Data has no z. Export skipped."
                     )
 
-    def export_txt_imaris(self):
-        """ Exports locs as .txt for IMARIS. """
-
-        channel = self.view.get_channel(
-            "Save localizations as txt for IMARIS (x,y,z,frame,channel)"
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".imaris.txt"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save localizations as txt for IMARIS (x,y,z,frame,channel)",
-                out_path,
-                filter="*.imaris.txt",
-            )
-            if path:
-                locs = self.view.all_locs[channel]
-                channel = 0
-                tempdata_xyz = locs[["x", "y", "z", "frame"]].copy()
-                tempdata_xyz["x"] = tempdata_xyz["x"] * pixelsize
-                tempdata_xyz["y"] = tempdata_xyz["y"] * pixelsize
-                tempdata_xyz["z"] = tempdata_xyz["z"] * pixelsize
-                tempdata = np.array(tempdata_xyz.tolist())
-                tempdata = np.array(tempdata_xyz.tolist())
-                tempdata_channel = np.hstack(
-                    (tempdata, np.zeros((tempdata.shape[0], 1)) + channel)
-                )
-                np.savetxt(
-                    path,
-                    tempdata_channel,
-                    fmt=["%.1f", "%.1f", "%.1f", "%.1f", "%i"],
-                    newline="\r\n",
-                    delimiter="\t",
-                )
-
     def export_multi(self):
         """ Asks the user to choose a type of export. """
 
-        items = (
+        items = [
             ".txt for FRC (ImageJ)",
             ".txt for NIS",
-            ".txt for IMARIS",
             ".xyz for Chimera",
             ".3d for ViSP",
             ".csv for ThunderSTORM",
-        )
+        ]
         item, ok = QtWidgets.QInputDialog.getItem(
             self, "Select Export", "Formats", items, 0, False
         )
@@ -10709,8 +10707,6 @@ class Window(QtWidgets.QMainWindow):
                 self.export_txt()
             elif item == ".txt for NIS":
                 self.export_txt_nis()
-            elif item == ".txt for IMARIS":
-                self.export_txt_imaris()
             elif item == ".xyz for Chimera":
                 self.export_xyz_chimera()
             elif item == ".3d for ViSP":
@@ -11013,6 +11009,151 @@ class Window(QtWidgets.QMainWindow):
                                 delimiter=",",
                             )
                             print("File saved to {}".format(path))
+
+    def export_roi_ims(self):
+        """
+        Export for ims
+        """
+        base, ext = os.path.splitext(self.view.locs_paths[0])
+        out_path = base + ".ims"
+
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Export ROI as ims", out_path, filter="*.ims"
+        )
+
+        channel_base, ext_ = os.path.splitext(path)
+
+        if os.path.isfile(path):
+            os.remove(path)
+
+        if path:
+            status = lib.StatusDialog("Exporting ROIs..", self)
+
+            n_channels = len(self.view.locs_paths)
+            viewport = self.view.viewport
+            oversampling = (
+                self.display_settings_dlg.pixelsize.value()
+                / self.display_settings_dlg.disp_px_size.value()
+            )
+            maximum = self.display_settings_dlg.maximum.value()
+
+            pixelsize = self.display_settings_dlg.pixelsize.value() 
+
+            ims_fields = {
+                'ExtMin0':0,
+                'ExtMin1':0, 
+                'ExtMin2':-0.5, 
+                'ExtMax2':0.5,
+            }
+
+            for k,v in ims_fields.items():
+                try:
+                    val = self.view.infos[0][0][k]
+                    ims_fields[k] = None
+                except KeyError:
+                    pass
+
+            (y_min, x_min), (y_max, x_max) = viewport
+
+            z_mins = []
+            z_maxs = []
+            to_render = []
+
+            has_z = True
+
+            for channel in range(n_channels):
+                if self.dataset_dialog.checks[channel].isChecked():
+                    locs = self.view.locs[channel]
+
+                    in_view = (
+                        (locs.x > x_min) 
+                        & (locs.x <= x_max) 
+                        & (locs.y > y_min) 
+                        & (locs.y <= y_max)
+                    )
+
+                    add_dict = {}
+                    add_dict["Generated by"] = "Picasso Render (IMS Export)"
+
+                    for k,v in ims_fields.items():
+                        if v is not None:
+                            add_dict[k] = v
+
+                    info = self.view.infos[channel] + [add_dict]
+                    io.save_locs(
+                        f"{channel_base}_ch_{channel}.hdf5", 
+                        locs[in_view], 
+                        info,
+                    )
+
+                    if hasattr(locs, "z"):
+                        z_min = locs.z[in_view].min()
+                        z_max = locs.z[in_view].max()
+                        z_mins.append(z_min)
+                        z_maxs.append(z_max)
+                    else:
+                        has_z = False
+
+                    to_render.append(channel)
+
+            if not has_z:
+                if len(z_mins) > 0:
+                    raise NotImplementedError(
+                        "Can't export mixed files with and without z."
+                    )
+
+            if has_z:
+                z_min = min(z_mins)
+                z_max = max(z_maxs)
+            else:
+                z_min, z_max = 0, 0
+
+            print(f'Z dimensions {z_min} -> {z_max}')
+
+            start = time.time()
+
+            all_img = []
+            for idx, channel in enumerate(to_render):
+                locs = self.view.locs[channel]
+                if has_z:
+                    n, image = render.render_hist3d(
+                        locs, 
+                        oversampling, 
+                        y_min, x_min, y_max, x_max, z_min, z_max, 
+                        pixelsize,
+                    )
+                else:
+                    n, image = render.render_hist(
+                        locs, 
+                        oversampling, 
+                        y_min, x_min, y_max, x_max,
+                    )
+
+                image = image / maximum * 65535
+                data = image.astype('uint16')
+                data = np.rot90(np.fliplr(data))
+                all_img.append(data)
+
+            s_image = np.stack(all_img, axis=-1).T.copy()
+
+            colors = self.view.read_colors()
+            colors_ims = [PW.Color(*list(colors[_]), 1) for _ in to_render]
+
+            numpy_to_imaris(
+                s_image, 
+                path, 
+                colors_ims, 
+                oversampling, 
+                viewport, 
+                info, 
+                z_min, 
+                z_max, 
+                pixelsize,
+            )
+
+            end = time.time()
+            print(f"Took {end-start:.2f} seconds.")
+            status.close()
 
     def load_picks(self):
         """ Loads picks from a .yaml file. """

@@ -195,7 +195,7 @@ def identifications_from_futures(futures):
 
 
 def identify_async(movie, minimum_ng, box, roi=None):
-    "Use the user settings to define the number of workers that are being used"
+    # Use the user settings to define the number of workers that are being used
     settings = _io.load_user_settings()
 
     cpu_utilization = settings["Localize"]["cpu_utilization"]

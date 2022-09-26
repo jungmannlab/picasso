@@ -305,11 +305,7 @@ if IMSWRITER:
         y_min = viewport[0][0]
         y_max = viewport[1][0]
 
-        print(f"Original shape {array.shape}, {dtype}")
-
         np_data = array.copy()
-
-        print(f"Final shape {np_data.shape}")
 
         image_size = PW.ImageSize(x=x, y=y, z=z, c=c, t=1)
         dimension_sequence = PW.DimensionSequence("x", "y", "z", "c", "t")
@@ -362,8 +358,6 @@ if IMSWRITER:
 
         x_1 = (x_max) * pixelsize / 1000
         y_1 = (y_max) * pixelsize / 1000
-
-        print(f"Image size {image_size.x}; {image_size.y}. Pixelsize is {pixelsize}")
 
         # TODO: Later use GlobalExtMin to add
         # Todo: Check for z

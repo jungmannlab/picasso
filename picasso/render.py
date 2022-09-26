@@ -172,42 +172,11 @@ def _render_setup(
     return image, n_pixel_y, n_pixel_x, x, y, in_view
 
 @_numba.njit
-def _render_min_z(locs, x_min, x_max, y_min, y_max):
-    """
-    Estimates minimum and maximum z for a given ROI.
-
-    Parameters
-    ----------
-    locs : np.recarray
-        Localizations
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
-        
-    Returns
-    -------
-    tuple
-        Minimum and maximum z coordinates in the ROI
-    """
-    x = locs.x
-    y = locs.y
-    z = locs.z
-    in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
-
-    z = z[in_view]
-
-    return z.min(), z.max()
-
-@_numba.njit
 def _render_setup3d(
     locs, 
     oversampling, 
     y_min, x_min, y_max, x_max, z_min, z_max, 
+    pixelsize,
 ):
     """
     Finds coordinates to be rendered in 3D and sets up an empty image 
@@ -231,6 +200,8 @@ def _render_setup3d(
         Minimum z coordinate to be rendered (nm)
     z_max : float
         Maximum z coordinate to be rendered (nm)
+    pixelsize : float
+        Camera pixel size, used for converting z coordinates
 
     Returns
     -------
@@ -257,7 +228,7 @@ def _render_setup3d(
     n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min)))
     x = locs.x
     y = locs.y
-    z = locs.z
+    z = locs.z / pixelsize
     in_view = (
         (x > x_min)
         & (y > y_min)
@@ -634,6 +605,7 @@ def render_hist3d(
     locs, 
     oversampling, 
     y_min, x_min, y_max, x_max, z_min, z_max, 
+    pixelsize,
 ):
     """
     Renders locs in 3D with no blur.
@@ -657,6 +629,8 @@ def render_hist3d(
         Minimum z coordinate to be rendered (nm)
     z_max : float
         Maximum z coordinate to be rendered (nm)
+    pixelsize : float
+        Camera pixel size, used for converting z coordinates
 
     Returns
     -------
@@ -665,10 +639,15 @@ def render_hist3d(
     np.array
         Rendered 3D image
     """
+
+    z_min = z_min / pixelsize
+    z_max = z_max / pixelsize
+
     image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(
         locs, 
         oversampling, 
         y_min, x_min, y_max, x_max, z_min, z_max, 
+        pixelsize,
     )
     _fill3d(image, x, y, z)
     return len(x), image
