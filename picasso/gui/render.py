@@ -3637,8 +3637,13 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ).astype(int)
 
         index = self.mask[y_ind, x_ind].astype(bool)
-        self.index_locs.append(locs[index]) # locs in the mask
-        self.index_locs_out.append(locs[~index]) # locs outside the mask
+        locs_in = locs[index]
+        locs_in.sort(kind="mergesort", order="frame")
+        locs_out = locs[~index]
+        locs_out.sort(kind="mergesort", order="frame")
+
+        self.index_locs.append(locs_in) # locs in the mask
+        self.index_locs_out.append(locs_out) # locs outside the mask
 
         if (
             (
