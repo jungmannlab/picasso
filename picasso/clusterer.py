@@ -86,7 +86,9 @@ def _frame_analysis(frame, n_frames):
 
     # get maximum number of locs in a 1/20th of acquisition time
     n_locs = len(frame)
-    locs_binned = _np.histogram(frame.values, bins=21)[0]
+    locs_binned = _np.histogram(
+        frame.values, bins=np.linspace(0, n_frames, 21)
+    )[0]
     max_locs_bin = locs_binned.max()
 
     # test if frame analysis passed
