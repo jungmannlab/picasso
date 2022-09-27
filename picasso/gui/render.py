@@ -8483,7 +8483,7 @@ class View(QtWidgets.QLabel):
         colors = self.read_colors(n_channels=len(locs))
 
         # adjust for relative intensity from Dataset Dialog
-        for i in range(len(locs)):
+        for i in range(len(self.locs)):
             iscale = self.window.dataset_dialog.intensitysettings[i].value()
             image[i] = iscale * image[i]
 
