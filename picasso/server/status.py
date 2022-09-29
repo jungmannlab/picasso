@@ -1,5 +1,5 @@
 import streamlit as st
-from helper import fetch_db, refresh
+from helper import fetch_db
 from picasso import localize
 import pandas as pd
 from sqlalchemy import create_engine
@@ -13,12 +13,28 @@ def check_file(file):
     return os.path.isfile(file_hdf)
 
 
+def escape_markdown(text: str) -> str:
+    """Helper function to escape markdown in text.
+    Args:
+        text (str): Input text.
+    Returns:
+        str: Converted text to be used in markdown.
+    """
+    MD_SPECIAL_CHARS = "\`*_{}[]()#+-.!"
+    for char in MD_SPECIAL_CHARS:
+        text = text.replace(char, "\\" + char)
+    return text
+
+
 def status():
+    """
+    Streamlit page to show the status page.
+    """
     st.write("# Status")
 
     with st.expander("Getting started"):
         st.write(
-            f"Picasso server allows to monitor perfomance of your super resolution runs. By selecting `Add to Database` in localize, summary statistics of a run will be stored in a local database in the picasso user folder ({localize._db_filename()})."
+            f"Picasso server allows to monitor perfomance of your super resolution runs. By selecting `Add to Database` in localize, summary statistics of a run will be stored in a local database in the picasso user folder ({escape_markdown(localize._db_filename())})."
         )
         st.write(
             "- Status: Displays the current database status and documentation."
@@ -60,18 +76,25 @@ def status():
         if check_file(path) & path.endswith((".raw", ".ome.tif", ".ims")):
 
             if path not in df["filename"].tolist():
-                with st.spinner("Fetching data."):
-                    summary = localize.get_file_summary(path)
+                base, ext = os.path.splitext(path)
+                target = base+'_locs.hdf5'
+
+                if not os.path.isfile(target):
+                    st.error(f"File {target} does not exist.")
+                else:
+                    file_hdf = target
+
+                with st.spinner(f"Fetching summary from {file_hdf}."):
+                    summary = localize.get_file_summary(path, file_hdf=file_hdf)
                     st.write(summary)
-                    if st.button("Submit"):
+                    if st.button("Add to database"):
                         engine = create_engine(
                             "sqlite:///" + localize._db_filename(), echo=False
                         )
                         pd.DataFrame(summary.values(), summary.keys()).T.to_sql(
                             "files", con=engine, if_exists="append", index=False
                         )
-                        st.success("Submitted to DB")
-                        refresh(3)
+                        st.success("Submitted to DB. Please refresh page.")
             else:
                 st.error("File already in database.")
 
@@ -86,35 +109,36 @@ def status():
             pbar = st.progress(0)
 
             if st.button("Add files"):
-
                 current_file = st.empty()
                 all_df = []
                 for idx, file in enumerate(files):
-
                     current_file.text(f"Current file {file}.")
-
                     path_ = os.path.join(path, file)
-
                     if path_ not in df["filename"].tolist():
-
                         base, ext = os.path.splitext(path_)
                         file_hdf = base + "_locs.hdf5"
-
                         if os.path.isfile(file_hdf):
-                            summary = localize.get_file_summary(path_)
+                            summary = localize.get_file_summary(path_, file_hdf=file_hdf)
                             df_ = pd.DataFrame(summary.values(), summary.keys()).T
                             all_df.append(df_)
-
+                        else:
+                            st.error(f"File {target} does not exist.")
                     pbar.progress(int((idx + 1) / (n_files) * 100))
 
-                stack = pd.concat(all_df)
+                if len(all_df) > 0:
+                    stack = pd.concat(all_df)
 
-                engine = create_engine(
-                    "sqlite:///" + localize._db_filename(), echo=False
-                )
-                stack.to_sql("files", con=engine, if_exists="append", index=False)
+                    st.write(stack)
 
-                st.success(f"Submitted {len(stack)} entries to the DB.")
-                refresh(3)
+
+                    engine = create_engine(
+                        "sqlite:///" + localize._db_filename(), echo=False
+                    )
+                    stack.to_sql("files", con=engine, if_exists="append", index=False)
+
+                    st.success(f"Submitted {len(stack)} entries to the DB.")
+                    st.success("Submitted to DB. Please refresh page.")
+                else:
+                    st.warning('No files found in folder.')
         else:
             st.warning(f"Path is not valid or no locs found.")

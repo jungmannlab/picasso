@@ -37,12 +37,18 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             parent,
             QtCore.Qt.CustomizeWindowHint,
         )
+        self.initalized = None
+
+    def init(self):
         _dialogs.append(self)
         self.setMinimumDuration(500)
         self.setModal(True)
         self.app = QtCore.QCoreApplication.instance()
+        self.initalized = True
 
     def set_value(self, value):
+        if not self.initalized:
+            self.init()
         self.setValue(value)
         self.app.processEvents()
 
@@ -52,9 +58,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
 
 class StatusDialog(QtWidgets.QDialog):
     def __init__(self, description, parent):
-        super(StatusDialog, self).__init__(
-            parent, QtCore.Qt.CustomizeWindowHint
-        )
+        super(StatusDialog, self).__init__(parent, QtCore.Qt.CustomizeWindowHint)
         _dialogs.append(self)
         vbox = QtWidgets.QVBoxLayout(self)
         label = QtWidgets.QLabel(description)
@@ -145,8 +149,8 @@ def ensure_sanity(locs, info):
 def is_loc_at(x, y, locs, r):
     dx = locs.x - x
     dy = locs.y - y
-    r2 = r ** 2
-    return dx ** 2 + dy ** 2 < r2
+    r2 = r**2
+    return dx**2 + dy**2 < r2
 
 
 def locs_at(x, y, locs, r):
@@ -174,7 +178,7 @@ def check_if_in_rectangle(x, y, X, Y):
         for j in range(n_locs):
             y_loc = y[j]
             # only if loc is on level of rectangle side, its ray can hit:
-            if (y_corners_min <= y_loc <= y_corners_max):
+            if y_corners_min <= y_loc <= y_corners_max:
                 x_corner_1 = X[i]
                 # take the first if we're at the last side:
                 x_corner_2 = X[0] if i == 3 else X[i + 1]
@@ -191,10 +195,7 @@ def check_if_in_rectangle(x, y, X, Y):
 
 
 def locs_in_rectangle(locs, X, Y):
-    is_in_rectangle = check_if_in_rectangle(locs.x,
-                                            locs.y,
-                                            _np.array(X),
-                                            _np.array(Y))
+    is_in_rectangle = check_if_in_rectangle(locs.x, locs.y, _np.array(X), _np.array(Y))
     return locs[is_in_rectangle]
 
 

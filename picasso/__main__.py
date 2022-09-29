@@ -10,6 +10,7 @@
 """
 import os.path
 
+
 def picasso_logo():
     print("    ____  _____________   __________ ____ ")
     print("   / __ \\/  _/ ____/   | / ___/ ___// __ \\")
@@ -17,7 +18,6 @@ def picasso_logo():
     print(" / _____/ // /___/ ___ |___/ ___/ / /_/ / ")
     print("/_/   /___/\\____/_/  |_/____/____/\\____/  ")
     print("                                          ")
-
 
 
 def _average(args):
@@ -246,7 +246,7 @@ def _link(files, d_max, tolerance):
                 with File(cluster_path, "w") as clusters_file:
                     clusters_file.create_dataset("clusters", data=clusters)
             except Exception as e:
-                print(e)
+                print("No clusterfile found for updating.")
                 continue
 
 
@@ -309,13 +309,9 @@ def _clusterfilter(files, clusterfile, parameter, minval, maxval):
                     clusters[parameter] < maxval
                 )
                 if np.sum(selector) == 0:
-                    print(
-                        "Error: No localizations in range. Filtering aborted."
-                    )
+                    print("Error: No localizations in range. Filtering aborted.")
                 elif np.sum(selector) == len(selector):
-                    print(
-                        "Error: All localizations in range. Filtering aborted."
-                    )
+                    print("Error: All localizations in range. Filtering aborted.")
                 else:
                     print("Isolating locs.. Step 1: in range")
                     groups = clusters["groups"][selector]
@@ -325,9 +321,7 @@ def _clusterfilter(files, clusterfile, parameter, minval, maxval):
                             all_locs = locs[locs["group"] == group]
                             first = False
                         else:
-                            all_locs = np.append(
-                                all_locs, locs[locs["group"] == group]
-                            )
+                            all_locs = np.append(all_locs, locs[locs["group"] == group])
 
                     base, ext = os.path.splitext(path)
                     clusterfilter_info = {
@@ -351,9 +345,7 @@ def _clusterfilter(files, clusterfile, parameter, minval, maxval):
                             all_locs = locs[locs["group"] == group]
                             first = False
                         else:
-                            all_locs = np.append(
-                                all_locs, locs[locs["group"] == group]
-                            )
+                            all_locs = np.append(all_locs, locs[locs["group"] == group])
 
                     base, ext = os.path.splitext(path)
                     clusterfilter_info = {
@@ -418,12 +410,10 @@ def _undrift(files, segmentation, display=True, fromfile=None):
                 plt.show()
         else:
             print("Undrifting file {}".format(path))
-            drift, locs = postprocess.undrift(
-                locs, info, segmentation, display=display
-            )
+            drift, locs = postprocess.undrift(locs, info, segmentation, display=display)
 
-            undrift_info["Drift X"] = float(drift['x'].mean())
-            undrift_info["Drift Y"] = float(drift['y'].mean())
+            undrift_info["Drift X"] = float(drift["x"].mean())
+            undrift_info["Drift Y"] = float(drift["y"].mean())
 
         info.append(undrift_info)
         base, ext = os.path.splitext(path)
@@ -452,6 +442,7 @@ def _density(files, radius):
 
 def _dbscan(files, radius, min_density):
     import glob
+
     paths = glob.glob(files)
     if paths:
         from . import io, postprocess
@@ -471,11 +462,19 @@ def _dbscan(files, radius, min_density):
             io.save_locs(base + "_dbscan.hdf5", locs, info)
             with File(base + "_dbclusters.hdf5", "w") as clusters_file:
                 clusters_file.create_dataset("clusters", data=clusters)
-            print("Clustering executed. Results are saved in: \n" + base + "_dbscan.hdf5" +
-                  "\n" + base + "_dbclusters.hdf5")
+            print(
+                "Clustering executed. Results are saved in: \n"
+                + base
+                + "_dbscan.hdf5"
+                + "\n"
+                + base
+                + "_dbclusters.hdf5"
+            )
+
 
 def _hdbscan(files, min_cluster, min_samples):
     import glob
+
     paths = glob.glob(files)
     if paths:
         from . import io, postprocess
@@ -495,8 +494,14 @@ def _hdbscan(files, min_cluster, min_samples):
             io.save_locs(base + "_hdbscan.hdf5", locs, info)
             with File(base + "_hdbclusters.hdf5", "w") as clusters_file:
                 clusters_file.create_dataset("clusters", data=clusters)
-            print("Clustering executed. Results are saved in: \n" + base + "_hdbscan.hdf5" +
-                  "\n" + base + "_hdbclusters.hdf5")
+            print(
+                "Clustering executed. Results are saved in: \n"
+                + base
+                + "_hdbscan.hdf5"
+                + "\n"
+                + base
+                + "_hdbclusters.hdf5"
+            )
 
 
 def _nneighbor(files):
@@ -567,25 +572,27 @@ def _join(files, keep_index=True):
     import numpy as np
 
     locs, info = load_locs(files[0])
-    total_frames = info[0]['Frames']
+    total_frames = info[0]["Frames"]
     join_info = {"Generated by": "Picasso Join", "Files": [files[0]]}
     for path in files[1:]:
         locs_, info_ = load_locs(path)
         try:
-            n_frames = info[0]['Frames']
+            n_frames = info[0]["Frames"]
             total_frames += n_frames
             if not keep_index:
-                locs_['frame'] += total_frames-n_frames
+                locs_["frame"] += total_frames - n_frames
             locs = append(locs, locs_)
             join_info["Files"].append(path)
         except TypeError:
-            print("An error occured.\n"
-                  "Unable to join files."
-                  " Make sure they have the same columns.")
+            print(
+                "An error occured.\n"
+                "Unable to join files."
+                " Make sure they have the same columns."
+            )
     base, ext = splitext(files[0])
     info.append(join_info)
     if not keep_index:
-        info[0]['Frames'] = total_frames
+        info[0]["Frames"] = total_frames
     locs.sort(kind="mergesort", order="frame")
     locs = locs.view(np.recarray)
     save_locs(base + "_join.hdf5", locs, info)
@@ -604,9 +611,7 @@ def _groupprops(files):
             locs, info = load_locs(path)
             groups = groupprops(locs)
             base, ext = splitext(path)
-            save_datasets(
-                base + "_groupprops.hdf5", info, locs=locs, groups=groups
-            )
+            save_datasets(base + "_groupprops.hdf5", info, locs=locs, groups=groups)
 
 
 def _pair_correlation(files, bin_size, r_max):
@@ -627,17 +632,14 @@ def _pair_correlation(files, bin_size, r_max):
             plot(bins_lower - bin_size / 2, pc)
             xlabel("r (pixel)")
             ylabel("pair-correlation (pixel^-2)")
-            title(
-                "Pair-correlation. Bin size: {}, R max: {}".format(
-                    bin_size, r_max
-                )
-            )
+            title("Pair-correlation. Bin size: {}, R max: {}".format(bin_size, r_max))
             show()
 
 
 def _start_server():
     import streamlit as st
     import os
+
     print("                                          ")
     picasso_logo()
     print("                 server")
@@ -654,15 +656,14 @@ def _start_server():
     _this_file = os.path.abspath(__file__)
     _this_dir = os.path.dirname(_this_file)
 
-    file_path = os.path.join(_this_dir, 'server', 'app.py')
+    file_path = os.path.join(_this_dir, "server", "app.py")
 
-    #Check if streamlit credentials exists
-    ST_CREDENTIALS = os.path.join(ST_PATH, 'credentials.toml')
+    # Check if streamlit credentials exists
+    ST_CREDENTIALS = os.path.join(ST_PATH, "credentials.toml")
     if not os.path.isfile(ST_CREDENTIALS):
-        with open(ST_CREDENTIALS, 'w') as file:
+        with open(ST_CREDENTIALS, "w") as file:
             file.write("[general]\n")
             file.write('\nemail = ""')
-
 
     import sys
     from streamlit import cli as stcli
@@ -675,13 +676,21 @@ def _start_server():
     theme.append("--theme.font=sans serif")
     theme.append("--theme.primaryColor=#18212b")
 
-    args = ["streamlit", "run", file_path, "--global.developmentMode=false", "--server.port=8501", "--browser.gatherUsageStats=False"]
+    args = [
+        "streamlit",
+        "run",
+        file_path,
+        "--global.developmentMode=false",
+        "--server.port=8501",
+        "--browser.gatherUsageStats=False",
+    ]
 
-    #args.extend(theme)
+    # args.extend(theme)
 
     sys.argv = args
 
     sys.exit(stcli.main())
+
 
 def _nanotron(args):
     from glob import glob
@@ -707,8 +716,8 @@ def _nanotron(args):
                 locs, info = load_locs(path)
             except NoMetadataFileError:
                 continue
-            raise NotImplementedError #Todo: Include call to proper prediction routine
-            #predict(locs, info, **kwargs)
+            raise NotImplementedError  # Todo: Include call to proper prediction routine
+            # predict(locs, info, **kwargs)
 
 
 def _localize(args):
@@ -743,11 +752,7 @@ def _localize(args):
             raise Exception("GPUfit not installed. Aborting.")
 
     for index, element in enumerate(vars(args)):
-        print(
-            "{:<8} {:<15} {:<10}".format(
-                index + 1, element, getattr(args, element)
-            )
-        )
+        print("{:<8} {:<15} {:<10}".format(index + 1, element, getattr(args, element)))
     print("------------------------------------------")
 
     def check_consecutive_tif(filepath):
@@ -802,12 +807,12 @@ def _localize(args):
     save = False
     for path in paths:
         base, ext = _ospath.splitext(path)
-        if ext == '.raw':
-            if not _os.path.isfile(base+'.yaml'):
-                print('No yaml found for {}. Please enter:'.format(path))
+        if ext == ".raw":
+            if not _os.path.isfile(base + ".yaml"):
+                print("No yaml found for {}. Please enter:".format(path))
                 if not save:
                     info, save = prompt_info()
-                info_path = base+'.yaml'
+                info_path = base + ".yaml"
                 save_info(info_path, [info])
 
     if paths:
@@ -829,11 +834,14 @@ def _localize(args):
 
         if args.fit_method == "lq-3d" or args.fit_method == "lq-gpu-3d":
             from . import zfit
+
             print("------------------------------------------")
-            print('Fitting 3D')
+            print("Fitting 3D")
 
             if not os.path.isfile(args.zc):
-                print('Given path for calibration file not found. Please enter manually:')
+                print(
+                    "Given path for calibration file not found. Please enter manually:"
+                )
                 zpath = input("Path to *.yaml calibration file: ")
             else:
                 zpath = args.zc
@@ -848,13 +856,13 @@ def _localize(args):
                     z_calibration = yaml.load(f)
             except Exception as e:
                 print(e)
-                print('Error loading calibration file.')
+                print("Error loading calibration file.")
                 raise
 
         for i, path in enumerate(paths):
             print("------------------------------------------")
             print("------------------------------------------")
-            print("Processing {}, File {} of {}".format(path, i+1, len(paths)))
+            print("Processing {}, File {} of {}".format(path, i + 1, len(paths)))
             print("------------------------------------------")
             movie, info = load_movie(path)
             current, futures = identify_async(movie, min_net_gradient, box)
@@ -867,9 +875,7 @@ def _localize(args):
                     end="\r",
                 )
                 sleep(0.2)
-            print(
-                "Identifying in frame {:,} of {:,}".format(n_frames, n_frames)
-            )
+            print("Identifying in frame {:,} of {:,}".format(n_frames, n_frames))
             ids = identifications_from_futures(futures)
 
             if args.fit_method == "lq" or args.fit_method == "lq-3d":
@@ -888,16 +894,12 @@ def _localize(args):
                 n_spots = len(ids)
                 while current[0] < n_spots:
                     print(
-                        "Fitting spot {:,} of {:,}".format(
-                            current[0] + 1, n_spots
-                        ),
+                        "Fitting spot {:,} of {:,}".format(current[0] + 1, n_spots),
                         end="\r",
                     )
                     sleep(0.2)
                 print("Fitting spot {:,} of {:,}".format(n_spots, n_spots))
-                locs = locs_from_fits(
-                    ids, thetas, CRLBs, likelihoods, iterations, box
-                )
+                locs = locs_from_fits(ids, thetas, CRLBs, likelihoods, iterations, box)
 
             elif args.fit_method == "avg":
                 spots = get_spots(movie, ids, box, camera_info)
@@ -907,6 +909,11 @@ def _localize(args):
             else:
                 print("This should never happen...")
 
+            try:
+                px = args.pixelsize
+            except Exception as e:
+                px = None
+
             localize_info = {
                 "Generated by": "Picasso Localize",
                 "ROI": None,
@@ -914,14 +921,22 @@ def _localize(args):
                 "Min. Net Gradient": min_net_gradient,
                 "Convergence Criterion": convergence,
                 "Max. Iterations": max_iterations,
+                "Pixelsize": px,
+                "Fit method": args.fit_method
+
             }
 
             if args.fit_method == "lq-3d" or args.fit_method == "lq-gpu-3d":
                 print("------------------------------------------")
-                print("Fitting 3D...", end='')
-                fs = zfit.fit_z_parallel(locs, info, z_calibration,
-                                         magnification_factor,
-                                         filter=0, asynch=True)
+                print("Fitting 3D...", end="")
+                fs = zfit.fit_z_parallel(
+                    locs,
+                    info,
+                    z_calibration,
+                    magnification_factor,
+                    filter=0,
+                    asynch=True,
+                )
                 locs = zfit.locs_from_futures(fs, filter=0)
                 localize_info["Z Calibration Path"] = zpath
                 localize_info["Z Calibration"] = z_calibration
@@ -931,16 +946,33 @@ def _localize(args):
             info.append(localize_info)
 
             base, ext = splitext(path)
-            out_path = base + "_locs.hdf5"
+
+            try:
+                sfx = args.suffix
+            except Exception as e:
+                sfx = ""
+
+            out_path = f"{base}{sfx}_locs.hdf5"
             save_locs(out_path, locs, info)
             print("File saved to {}".format(out_path))
+
+            if hasattr(args, "database"):
+                CHECK_DB = args.database
+            else:
+                CHECK_DB = False
+
+            if CHECK_DB:
+                print("\n")
+                print("Assesing quality and adding to DB")
+                add_file_to_db(path, out_path)
+                print("Done.")
+                print("\n")
+
             if args.drift > 0:
                 print("Undrifting file:")
                 print("------------------------------------------")
                 try:
-                    _undrift(
-                        out_path, args.drift, display=False, fromfile=None
-                    )
+                    _undrift(out_path, args.drift, display=False, fromfile=None)
                 except Exception as e:
                     print(e)
                     print("Drift correction failed for {}".format(out_path))
@@ -988,15 +1020,9 @@ def _render(args):
         out_path = base + ".png"
         im_max = image.max() / 100
         if scaling == "yes":
-            imsave(
-                out_path, image,
-                vmin=vmin * im_max, vmax=vmax * im_max,
-                cmap=cmap
-            )
+            imsave(out_path, image, vmin=vmin * im_max, vmax=vmax * im_max, cmap=cmap)
         else:
-            imsave(
-                out_path, image, vmin=vmin, vmax=vmax, cmap=cmap
-            )
+            imsave(out_path, image, vmin=vmin, vmax=vmax, cmap=cmap)
         if not silent:
             startfile(out_path)
 
@@ -1016,20 +1042,20 @@ def _render(args):
         print("A total of {} files detected. Rendering.".format(len(paths)))
 
         for path in tqdm(paths):
-                locs_glob_map(
-                    render_many,
-                    path,
-                    args=(
-                        args.oversampling,
-                        args.blur_method,
-                        args.min_blur_width,
-                        args.vmin,
-                        args.vmax,
-                        args.scaling,
-                        cmap,
-                        True,
-                    ),
-                )
+            locs_glob_map(
+                render_many,
+                path,
+                args=(
+                    args.oversampling,
+                    args.blur_method,
+                    args.min_blur_width,
+                    args.vmin,
+                    args.vmax,
+                    args.scaling,
+                    cmap,
+                    True,
+                ),
+            )
 
     else:
         locs_glob_map(
@@ -1129,12 +1155,8 @@ def main():
     clusterfilter_parser.add_argument(
         "parameter", type=str, help="parameter to be filtered"
     )
-    clusterfilter_parser.add_argument(
-        "minval", type=float, help="lower boundary"
-    )
-    clusterfilter_parser.add_argument(
-        "maxval", type=float, help="upper boundary"
-    )
+    clusterfilter_parser.add_argument("minval", type=float, help="lower boundary")
+    clusterfilter_parser.add_argument("maxval", type=float, help="upper boundary")
 
     # undrift parser
     undrift_parser = subparsers.add_parser(
@@ -1190,10 +1212,7 @@ def main():
     density_parser.add_argument(
         "radius",
         type=float,
-        help=(
-            "maximal distance between to localizations"
-            " to be considered local"
-        ),
+        help=("maximal distance between to localizations" " to be considered local"),
     )
 
     # DBSCAN
@@ -1211,18 +1230,12 @@ def main():
     dbscan_parser.add_argument(
         "radius",
         type=float,
-        help=(
-            "maximal distance between to localizations"
-            " to be considered local"
-        ),
+        help=("maximal distance between to localizations" " to be considered local"),
     )
     dbscan_parser.add_argument(
         "density",
         type=int,
-        help=(
-            "minimum local density for localizations"
-            " to be assigned to a cluster"
-        ),
+        help=("minimum local density for localizations" " to be assigned to a cluster"),
     )
 
     # HDBSCAN
@@ -1240,16 +1253,12 @@ def main():
     hdbscan_parser.add_argument(
         "min_cluster",
         type=int,
-        help=(
-            "smallest size grouping that is considered a cluster"
-        ),
+        help=("smallest size grouping that is considered a cluster"),
     )
     hdbscan_parser.add_argument(
         "min_samples",
         type=int,
-        help=(
-            "the higher the more points are considered noise"
-        ),
+        help=("the higher the more points are considered noise"),
     )
 
     # Dark time
@@ -1280,7 +1289,8 @@ def main():
 
     # join
     join_parser = subparsers.add_parser(
-        "join", help="join hdf5 localization lists. frame numbers of consecutive files will be reindexed."
+        "join",
+        help="join hdf5 localization lists. frame numbers of consecutive files will be reindexed.",
     )
     join_parser.add_argument(
         "file", nargs="+", help="the hdf5 localization files to be joined"
@@ -1292,10 +1302,7 @@ def main():
     # group properties
     groupprops_parser = subparsers.add_parser(
         "groupprops",
-        help=(
-            "calculate kinetics "
-            "and various properties of localization groups"
-        ),
+        help=("calculate kinetics " "and various properties of localization groups"),
     )
     groupprops_parser.add_argument(
         "files",
@@ -1374,7 +1381,29 @@ def main():
         "-mf", "--mf", type=float, default=0, help="Magnification factor (only 3d)"
     )
     localize_parser.add_argument(
-        "-zc", "--zc", type=str, default='', help="Path to 3d calibration file (only 3d)"
+        "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
+    )
+    localize_parser.add_argument(
+        "-zc",
+        "--zc",
+        type=str,
+        default="",
+        help="Path to 3d calibration file (only 3d)",
+    )
+
+    localize_parser.add_argument(
+        "-sf",
+        "--suffix",
+        type=str,
+        default="",
+        help="Suffix to add to files",
+    )
+
+    localize_parser.add_argument(
+        "-db",
+        "--database",
+        action="store_true",
+        help="do not add to database",
     )
 
     # nneighbors
@@ -1456,11 +1485,9 @@ def main():
     # design
     subparsers.add_parser("design", help="design RRO DNA origami structures")
     # simulate
-    subparsers.add_parser(
-        "simulate", help="simulate single molecule fluorescence data"
-    )
+    subparsers.add_parser("simulate", help="simulate single molecule fluorescence data")
 
-        # nanotron
+    # nanotron
     nanotron_parser = subparsers.add_parser(
         "nanotron", help="segmentation with deep learning"
     )
@@ -1479,17 +1506,14 @@ def main():
     )
 
     # average
-    average_parser = subparsers.add_parser(
-        "average", help="particle averaging"
-    )
+    average_parser = subparsers.add_parser("average", help="particle averaging")
     average_parser.add_argument(
         "-o",
         "--oversampling",
         type=float,
         default=10,
         help=(
-            "oversampling of the super-resolution images"
-            " for alignment evaluation"
+            "oversampling of the super-resolution images" " for alignment evaluation"
         ),
     )
     average_parser.add_argument("-i", "--iterations", type=int, default=20)
@@ -1513,7 +1537,6 @@ def main():
 
     hdf2csv_parser = subparsers.add_parser("hdf2csv")
     hdf2csv_parser.add_argument("files")
-
 
     server_parser = subparsers.add_parser(
         "server", help="picasso server workflow management system"
@@ -1577,9 +1600,7 @@ def main():
                 args.maxval,
             )
         elif args.command == "undrift":
-            _undrift(
-                args.files, args.segmentation, args.nodisplay, args.fromfile
-            )
+            _undrift(args.files, args.segmentation, args.nodisplay, args.fromfile)
         elif args.command == "density":
             _density(args.files, args.radius)
         elif args.command == "dbscan":
@@ -1616,9 +1637,6 @@ def main():
             _start_server()
     else:
         parser.print_help()
-
-
-
 
 
 if __name__ == "__main__":

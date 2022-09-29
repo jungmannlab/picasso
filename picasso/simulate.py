@@ -49,9 +49,15 @@ def test_calculate_zpsf():
     z = _np.array([1, 2, 3, 4, 5, 6, 7])
     wx, wy = calculate_zpsf(z, cx, cy)
 
-    result = [4.90350522e+01,   7.13644987e+02,   5.52316597e+03,
-              2.61621620e+04,   9.06621337e+04,   2.54548124e+05,
-              6.14947219e+05]
+    result = [
+        4.90350522e01,
+        7.13644987e02,
+        5.52316597e03,
+        2.61621620e04,
+        9.06621337e04,
+        2.54548124e05,
+        6.14947219e05,
+    ]
 
     delta = wx - result
     assert sum(delta**2) < 0.001
@@ -83,7 +89,7 @@ def noisy_p(image, mu):
 
 
 def check_type(movie):
-    movie[movie >= (2 ** 16) - 1] = (2 ** 16) - 1
+    movie[movie >= (2**16) - 1] = (2**16) - 1
     movie = movie.astype("<u2")  # little-endian 16-bit unsigned int
     return movie
 
@@ -155,40 +161,30 @@ def paintgen(
             if onFrames == 1:  # CASE 1: all photons are emitted in one frame
                 photonsinframe[1 + tempFrame] = int(
                     _np.random.poisson(
-                        ((tempFrame + 1) * time - eventsum[i - 1])
-                        / time
-                        * photons
+                        ((tempFrame + 1) * time - eventsum[i - 1]) / time * photons
                     )
                 )
-            elif (
-                onFrames == 2
-            ):  # CASE 2: all photons are emitted in two frames
+            elif onFrames == 2:  # CASE 2: all photons are emitted in two frames
                 emittedphotons = (
                     ((tempFrame + 1) * time - eventsum[i - 1]) / time * photons
                 )
                 if j == 1:  # photons in first onframe
                     photonsinframe[1 + tempFrame] = int(
                         _np.random.poisson(
-                            ((tempFrame + 1) * time - eventsum[i - 1])
-                            / time
-                            * photons
+                            ((tempFrame + 1) * time - eventsum[i - 1]) / time * photons
                         )
                     )
                 else:  # photons in second onframe
                     photonsinframe[2 + tempFrame] = int(
                         _np.random.poisson(
-                            (eventsum[i] - (tempFrame + 1) * time)
-                            / time
-                            * photons
+                            (eventsum[i] - (tempFrame + 1) * time) / time * photons
                         )
                     )
             else:  # CASE 3: all photons are mitted in three or more frames
                 if j == 1:
                     photonsinframe[1 + tempFrame] = int(
                         _np.random.poisson(
-                            ((tempFrame + 1) * time - eventsum[i - 1])
-                            / time
-                            * photons
+                            ((tempFrame + 1) * time - eventsum[i - 1]) / time * photons
                         )
                     )  # Indexing starts with 0
                 elif j == onFrames:
@@ -200,17 +196,12 @@ def paintgen(
                         )
                     )
                 else:
-                    photonsinframe[tempFrame + j] = int(
-                        _np.random.poisson(photons)
-                    )
+                    photonsinframe[tempFrame + j] = int(_np.random.poisson(photons))
 
-        totalphotons = _np.sum(
-            photonsinframe[1 + tempFrame: tempFrame + 1 + onFrames]
-        )
+        totalphotons = _np.sum(photonsinframe[1 + tempFrame : tempFrame + 1 + onFrames])
         if totalphotons > photonbudget:
             photonsinframe[onFrames + tempFrame] = int(
-                photonsinframe[onFrames + tempFrame]
-                - (totalphotons - photonbudget)
+                photonsinframe[onFrames + tempFrame] - (totalphotons - photonbudget)
             )
 
     photonsinframe = photonsinframe[0:frames]
@@ -290,9 +281,7 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
         if photoncount > 0:
             mu = [bindingsitesx[i], bindingsitesy[i]]
             photonpos = _np.random.multivariate_normal(mu, cov, photoncount)
-            photonposframe[
-                n_photons_step[i]: n_photons_step[i + 1], :
-            ] = photonpos
+            photonposframe[n_photons_step[i] : n_photons_step[i + 1], :] = photonpos
 
     return photonposframe
 
@@ -365,7 +354,7 @@ def generatePositions(number, imagesize, frame, arrangement):
     Generate a set of positions where structures will be placed
     """
     if arrangement == 0:
-        spacing = int(_np.ceil((number ** 0.5)))
+        spacing = int(_np.ceil((number**0.5)))
         linpos = _np.linspace(frame, imagesize - frame, spacing)
         [xxgridpos, yygridpos] = _np.meshgrid(linpos, linpos)
         xxgridpos = _np.ravel(xxgridpos)
@@ -402,9 +391,7 @@ def incorporateStructure(structure, incorporation):
     """
     Returns a subset of the strucutre to reflect incorporation of stpales
     """
-    newstructure = structure[
-        :, (_np.random.rand(structure.shape[1]) < incorporation)
-    ]
+    newstructure = structure[:, (_np.random.rand(structure.shape[1]) < incorporation)]
     return newstructure
 
 
@@ -418,9 +405,7 @@ def randomExchange(pos):
     return newpos
 
 
-def prepareStructures(
-    structure, gridpos, orientation, number, incorporation, exchange
-):
+def prepareStructures(structure, gridpos, orientation, number, incorporation, exchange):
     """
     prepareStructures:
     Input positions, the structure definitionconsider rotation etc.

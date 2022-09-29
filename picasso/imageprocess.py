@@ -21,13 +21,13 @@ _plt.style.use("ggplot")
 def xcorr(imageA, imageB):
     FimageA = _fft.fft2(imageA)
     CFimageB = _np.conj(_fft.fft2(imageB))
-    return _fft.fftshift(
-        _np.real(_fft.ifft2((FimageA * CFimageB)))
-    ) / _np.sqrt(imageA.size)
+    return _fft.fftshift(_np.real(_fft.ifft2((FimageA * CFimageB)))) / _np.sqrt(
+        imageA.size
+    )
 
 
 def get_image_shift(imageA, imageB, box, roi=None, display=False):
-    """ Computes the shift from imageA to imageB """
+    """Computes the shift from imageA to imageB"""
     if (_np.sum(imageA) == 0) or (_np.sum(imageB) == 0):
         return 0, 0
     # Compute image correlation
@@ -50,12 +50,12 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
     # A quarter of the fit ROI
     fit_X = int(box / 2)
     # A coordinate grid for the fitting ROI
-    y, x = _np.mgrid[-fit_X: fit_X + 1, -fit_X: fit_X + 1]
+    y, x = _np.mgrid[-fit_X : fit_X + 1, -fit_X : fit_X + 1]
     # Find the brightest pixel and cut out the fit ROI
     y_max_, x_max_ = _np.unravel_index(XCorr.argmax(), XCorr.shape)
     FitROI = XCorr[
-        y_max_ - fit_X: y_max_ + fit_X + 1,
-        x_max_ - fit_X: x_max_ + fit_X + 1,
+        y_max_ - fit_X : y_max_ + fit_X + 1,
+        x_max_ - fit_X : x_max_ + fit_X + 1,
     ]
 
     dimensions = FitROI.shape
@@ -65,7 +65,7 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
     else:
         # The fit model
         def flat_2d_gaussian(a, xc, yc, s, b):
-            A = a * _np.exp(-0.5 * ((x - xc) ** 2 + (y - yc) ** 2) / s ** 2) + b
+            A = a * _np.exp(-0.5 * ((x - xc) ** 2 + (y - yc) ** 2) / s**2) + b
             return A.flatten()
 
         gaussian2d = _lmfit.Model(

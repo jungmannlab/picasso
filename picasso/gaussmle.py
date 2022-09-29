@@ -91,9 +91,7 @@ def _initial_parameters(spot, size):
 @_numba.jit(nopython=True, nogil=True)
 def _initial_theta_sigma(spot, size):
     theta = _np.zeros(5, dtype=_np.float32)
-    theta[0], theta[1], theta[2], theta[3], sx, sy = _initial_parameters(
-        spot, size
-    )
+    theta[0], theta[1], theta[2], theta[3], sx, sy = _initial_parameters(spot, size)
     theta[4] = (sx + sy) / 2
     return theta
 
@@ -101,15 +99,15 @@ def _initial_theta_sigma(spot, size):
 @_numba.jit(nopython=True, nogil=True)
 def _initial_theta_sigmaxy(spot, size):
     theta = _np.zeros(6, dtype=_np.float32)
-    theta[0], theta[1], theta[2], theta[3], theta[4], theta[
-        5
-    ] = _initial_parameters(spot, size)
+    theta[0], theta[1], theta[2], theta[3], theta[4], theta[5] = _initial_parameters(
+        spot, size
+    )
     return theta
 
 
 @_numba.vectorize(nopython=True)
 def _erf(x):
-    """ Currently not needed, but might be useful for a CUDA implementation """
+    """Currently not needed, but might be useful for a CUDA implementation"""
     ax = _np.abs(x)
     if ax < 0.5:
         t = x * x
@@ -136,8 +134,7 @@ def _erf(x):
                 (
                     (
                         (
-                            (-1.36864857382717e-07 * ax + 5.64195517478974e-01)
-                            * ax
+                            (-1.36864857382717e-07 * ax + 5.64195517478974e-01) * ax
                             + 7.21175825088309e00
                         )
                         * ax
@@ -156,10 +153,7 @@ def _erf(x):
             (
                 (
                     (
-                        (
-                            (1.0 * ax + 1.27827273196294e01) * ax
-                            + 7.70001529352295e01
-                        )
+                        ((1.0 * ax + 1.27827273196294e01) * ax + 7.70001529352295e01)
                         * ax
                         + 2.77585444743988e02
                     )
@@ -180,18 +174,12 @@ def _erf(x):
         x2 = x * x
         t = 1.0 / x2
         top = (
-            (
-                (2.10144126479064e00 * t + 2.62370141675169e01) * t
-                + 2.13688200555087e01
-            )
+            ((2.10144126479064e00 * t + 2.62370141675169e01) * t + 2.13688200555087e01)
             * t
             + 4.65807828718470e00
         ) * t + 2.82094791773523e-01
         bot = (
-            (
-                (9.41537750555460e01 * t + 1.87114811799590e02) * t
-                + 9.90191814623914e01
-            )
+            ((9.41537750555460e01 * t + 1.87114811799590e02) * t + 9.90191814623914e01)
             * t
             + 1.80124575948747e01
         ) * t + 1.0
@@ -207,9 +195,7 @@ def _erf(x):
 def _gaussian_integral(x, mu, sigma):
     sq_norm = 0.70710678118654757 / sigma  # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
-    return 0.5 * (
-        _math.erf((d + 0.5) * sq_norm) - _math.erf((d - 0.5) * sq_norm)
-    )
+    return 0.5 * (_math.erf((d + 0.5) * sq_norm) - _math.erf((d - 0.5) * sq_norm))
 
 
 @_numba.jit(nopython=True, nogil=True, cache=False)
@@ -222,7 +208,7 @@ def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
         -photons
         * ((d + 0.5) * a - (d - 0.5) * b)
         * PSFc
-        / (_np.sqrt(2.0 * _np.pi) * sigma ** 3)
+        / (_np.sqrt(2.0 * _np.pi) * sigma**3)
     )
     return dudt, d2udt2
 
@@ -235,24 +221,18 @@ def _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFc):
         -photons
         * (ax * (x + 0.5 - mu) - bx * (x - 0.5 - mu))
         * PSFc
-        / (_np.sqrt(2.0 * _np.pi) * sigma ** 2)
+        / (_np.sqrt(2.0 * _np.pi) * sigma**2)
     )
     d2udt2 = -2.0 * dudt / sigma - photons * (
         ax * (x + 0.5 - mu) ** 3 - bx * (x - 0.5 - mu) ** 3
-    ) * PSFc / (_np.sqrt(2.0 * _np.pi) * sigma ** 5)
+    ) * PSFc / (_np.sqrt(2.0 * _np.pi) * sigma**5)
     return dudt, d2udt2
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _derivative_gaussian_integral_2d_sigma(
-    x, y, mu, nu, sigma, photons, PSFx, PSFy
-):
-    dSx, ddSx = _derivative_gaussian_integral_1d_sigma(
-        x, mu, sigma, photons, PSFy
-    )
-    dSy, ddSy = _derivative_gaussian_integral_1d_sigma(
-        y, nu, sigma, photons, PSFx
-    )
+def _derivative_gaussian_integral_2d_sigma(x, y, mu, nu, sigma, photons, PSFx, PSFy):
+    dSx, ddSx = _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFy)
+    dSy, ddSy = _derivative_gaussian_integral_1d_sigma(y, nu, sigma, photons, PSFx)
     dudt = dSx + dSy
     d2udt2 = ddSx + ddSy
     return dudt, d2udt2
@@ -336,9 +316,7 @@ def gaussmle_async(spots, eps, max_it, method="sigma"):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _mlefit_sigma(
-    spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it
-):
+def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     n_params = 5
 
     spot = spots[index]
@@ -395,7 +373,7 @@ def _mlefit_sigma(
                 data = spot[ii, jj]
                 if model > 10e-3:
                     cf = data / model - 1
-                    df = data / model ** 2
+                    df = data / model**2
                 cf = _np.minimum(cf, 10e4)
                 df = _np.minimum(df, 10e4)
 
@@ -409,9 +387,7 @@ def _mlefit_sigma(
                 update = _np.sign(numerator[ll] * max_step[ll])
             else:
                 update = _np.minimum(
-                    _np.maximum(
-                        numerator[ll] / denominator[ll], -max_step[ll]
-                    ),
+                    _np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
                     max_step[ll],
                 )
             if kk < 5:
@@ -425,9 +401,7 @@ def _mlefit_sigma(
         theta[4] = _np.minimum(theta[4], size)
 
         # Check for convergence
-        if (_np.abs(old_x - theta[0]) < eps) and (
-            _np.abs(old_y - theta[1]) < eps
-        ):
+        if (_np.abs(old_x - theta[0]) < eps) and (_np.abs(old_y - theta[1]) < eps):
             break
         else:
             old_x = theta[0]
@@ -470,12 +444,7 @@ def _mlefit_sigma(
             if model > 0:
                 data = spot[ii, jj]
                 if data > 0:
-                    Div += (
-                        data * _np.log(model)
-                        - model
-                        - data * _np.log(data)
-                        + data
-                    )
+                    Div += data * _np.log(model) - model - data * _np.log(data) + data
                 else:
                     Div += -model
 
@@ -491,9 +460,7 @@ def _mlefit_sigma(
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _mlefit_sigmaxy(
-    spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it
-):
+def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
     n_params = 6
 
     spot = spots[index]
@@ -555,7 +522,7 @@ def _mlefit_sigmaxy(
                 data = spot[ii, jj]
                 if model > 10e-3:
                     cf = data / model - 1
-                    df = data / model ** 2
+                    df = data / model**2
                 cf = _np.minimum(cf, 10e4)
                 df = _np.minimum(df, 10e4)
 
@@ -572,9 +539,7 @@ def _mlefit_sigmaxy(
                 theta[ll] -= GAMMA[ll] * _np.sign(numerator[ll]) * max_step[ll]
             else:
                 theta[ll] -= GAMMA[ll] * _np.minimum(
-                    _np.maximum(
-                        numerator[ll] / denominator[ll], -max_step[ll]
-                    ),
+                    _np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
                     max_step[ll],
                 )
 
@@ -633,12 +598,7 @@ def _mlefit_sigmaxy(
             if model > 0:
                 data = spot[ii, jj]
                 if data > 0:
-                    Div += (
-                        data * _np.log(model)
-                        - model
-                        - data * _np.log(data)
-                        + data
-                    )
+                    Div += data * _np.log(model) - model - data * _np.log(data) + data
                 else:
                     Div += -model
 
@@ -652,9 +612,7 @@ def _mlefit_sigmaxy(
     CRLBs[index] = CRLB
 
 
-def locs_from_fits(
-    identifications, theta, CRLBs, likelihoods, iterations, box
-):
+def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
     box_offset = int(box / 2)
     y = theta[:, 0] + identifications.y - box_offset
     x = theta[:, 1] + identifications.x - box_offset

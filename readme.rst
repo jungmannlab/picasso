@@ -52,10 +52,13 @@ Sample instructions to create an environment and installation of packages with c
 
 1. Open the console and create a new conda environment: ``conda create --name picasso python=3.8``
 2. Activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
-3. Install using pip: ``pip install picassosr``.
-4. (Optional) If you want to use hdbscan install using conda: ``conda install hdbscan``.
-5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
-6. Continue with the installation of Picasso
+3. (Optional) For Mac systems (e.g. M1) install PyQt via conda: ``conda install -c anaconda pyqt``.
+4. Install using pip: ``pip install picassosr``.
+5. (Optional) If you want to use hdbscan install using pip: ``pip install hdbscan``.
+6. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
+7. Continue with the installation of Picasso
+
+Troubleshooting: In case installing via ``pip`` fails, try to install the failing packages via conda.
 
 Note that sometimes outdated packages can cause problems. As of version 0.3.0, Picasso switched from PyQt4 to PyQt5, so make sure to update PyQt. If you experience errors, please check whether your packages have the correct version (e.g., see issue #4). When using conda, make sure that you have the default package channel (e.g., see issue #30).
 
@@ -100,7 +103,7 @@ The individual modules of picasso can be started as follows:
 Using GPU for Fitting
 ^^^^^^^^^^^^^^^^^^^^^
 
-To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
+To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
 Example Usage
 -------------

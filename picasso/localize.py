@@ -26,6 +26,8 @@ import time
 from sqlalchemy import create_engine
 import pandas as pd
 
+MAX_LOCS = int(1e6)
+
 _C_FLOAT_POINTER = _ctypes.POINTER(_ctypes.c_float)
 LOCS_DTYPE = [
     ("frame", "u4"),
@@ -42,17 +44,29 @@ LOCS_DTYPE = [
     ("iterations", "i4"),
 ]
 
-MEAN_COLS = ['frame', 'x', 'y', 'photons', 'sx', 'sy', 'bg', 'lpx', 'lpy',
-           'ellipticity', 'net_gradient', 'z', 'd_zcalib']
-SET_COLS = ['Frames', 'Height', 'Width', 'Box Size', 'Min. Net Gradient', 'Pixelsize']
-DRIFT_COLS = ['Drift X', 'Drift Y']
+MEAN_COLS = [
+    "frame",
+    "x",
+    "y",
+    "photons",
+    "sx",
+    "sy",
+    "bg",
+    "lpx",
+    "lpy",
+    "ellipticity",
+    "net_gradient",
+    "z",
+    "d_zcalib",
+]
+SET_COLS = ["Frames", "Height", "Width", "Box Size", "Min. Net Gradient", "Pixelsize"]
 
 _plt.style.use("ggplot")
 
 
 @_numba.jit(nopython=True, nogil=True, cache=False)
 def local_maxima(frame, box):
-    """ Finds pixels with maximum value within a region of interest """
+    """Finds pixels with maximum value within a region of interest"""
     Y, X = frame.shape
     maxima_map = _np.zeros(frame.shape, _np.uint8)
     box_half = int(box / 2)
@@ -60,8 +74,8 @@ def local_maxima(frame, box):
     for i in range(box_half, Y - box_half_1):
         for j in range(box_half, X - box_half_1):
             local_frame = frame[
-                i - box_half: i + box_half + 1,
-                j - box_half: j + box_half + 1,
+                i - box_half : i + box_half + 1,
+                j - box_half : j + box_half + 1,
             ]
             flat_max = _np.argmax(local_frame)
             i_local_max = int(flat_max / box)
@@ -85,14 +99,10 @@ def net_gradient(frame, y, x, box, uy, ux):
     ng = _np.zeros(len(x), dtype=_np.float32)
     for i, (yi, xi) in enumerate(zip(y, x)):
         for k_index, k in enumerate(range(yi - box_half, yi + box_half + 1)):
-            for l_index, m in enumerate(
-                range(xi - box_half, xi + box_half + 1)
-            ):
+            for l_index, m in enumerate(range(xi - box_half, xi + box_half + 1)):
                 if not (k == yi and m == xi):
                     gy, gx = gradient_at(frame, k, m, i)
-                    ng[i] += (
-                        gy * uy[k_index, l_index] + gx * ux[k_index, l_index]
-                    )
+                    ng[i] += gy * uy[k_index, l_index] + gx * ux[k_index, l_index]
     return ng
 
 
@@ -106,7 +116,7 @@ def identify_in_image(image, minimum_ng, box):
     for i in range(box):
         val = box_half - i
         ux[:, i] = uy[i, :] = val
-    unorm = _np.sqrt(ux ** 2 + uy ** 2)
+    unorm = _np.sqrt(ux**2 + uy**2)
     ux /= unorm
     uy /= unorm
     ng = net_gradient(image, y, x, box, uy, ux)
@@ -120,7 +130,7 @@ def identify_in_image(image, minimum_ng, box):
 def identify_in_frame(frame, minimum_ng, box, roi=None):
     # print('start identifying in frame')
     if roi is not None:
-        frame = frame[roi[0][0]: roi[1][0], roi[0][1]: roi[1][1]]
+        frame = frame[roi[0][0] : roi[1][0], roi[0][1] : roi[1][1]]
     image = _np.float32(frame)  # otherwise numba goes crazy
     # print('start identifying in image')
     y, x, net_gradient = identify_in_image(image, minimum_ng, box)
@@ -185,20 +195,18 @@ def identifications_from_futures(futures):
 
 
 def identify_async(movie, minimum_ng, box, roi=None):
-    "Use the user settings to define the number of workers that are being used"
+    # Use the user settings to define the number of workers that are being used
     settings = _io.load_user_settings()
-    try:
-        cpu_utilization = settings["Localize"]["cpu_utilization"]
+
+    cpu_utilization = settings["Localize"]["cpu_utilization"]
+    if isinstance(cpu_utilization, float):
         if cpu_utilization >= 1:
             cpu_utilization = 1
-    except Exception as e:
-        print(e)
-        print(
-            "An Error occured. Setting cpu_utilization to 0.8"
-        )  # TODO at some point re-write this
+    else:
+        print("CPU utilization was not set. Setting to 0.8")
         cpu_utilization = 0.8
-        settings["Localize"]["cpu_utilization"] = cpu_utilization
-        _io.save_user_settings(settings)
+    settings["Localize"]["cpu_utilization"] = cpu_utilization
+    _io.save_user_settings(settings)
 
     n_workers = max(1, int(cpu_utilization * _multiprocessing.cpu_count()))
 
@@ -206,9 +214,7 @@ def identify_async(movie, minimum_ng, box, roi=None):
     current = [0]
     executor = _ThreadPoolExecutor(n_workers)
     f = [
-        executor.submit(
-            _identify_worker, movie, current, minimum_ng, box, roi, lock
-        )
+        executor.submit(_identify_worker, movie, current, minimum_ng, box, roi, lock)
         for _ in range(n_workers)
     ]
     executor.shutdown(wait=False)
@@ -235,20 +241,20 @@ def _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box):
     r = int(box / 2)
     spots = _np.zeros((n_spots, box, box), dtype=movie.dtype)
     for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
-        spots[id] = movie[frame, yc - r: yc + r + 1, xc - r: xc + r + 1]
+        spots[id] = movie[frame, yc - r : yc + r + 1, xc - r : xc + r + 1]
     return spots
 
 
 @_numba.jit(nopython=True, cache=False)
-def _cut_spots_frame(
-    frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots
-):
+def _cut_spots_frame(frame, frame_number, ids_frame, ids_x, ids_y, r, start, N, spots):
     for j in range(start, N):
         if ids_frame[j] > frame_number:
             break
+        if ids_frame[j] < frame_number:
+            break
         yc = ids_y[j]
         xc = ids_x[j]
-        spots[j] = frame[yc - r: yc + r + 1, xc - r: xc + r + 1]
+        spots[j] = frame[yc - r : yc + r + 1, xc - r : xc + r + 1]
     return j
 
 
@@ -342,7 +348,10 @@ def _cut_spots(movie, ids, box):
             output_dtypes=[movie.dtype], allow_rechunk=True).compute()
         return spots
     else:
-        """ Assumes that identifications are in order of frames! """
+        """Assumes that identifications are in order of frames!"""
+        
+        r = int(box / 2)
+        N = len(ids.frame)
         spots = _np.zeros((N, box, box), dtype=movie.dtype)
         spots = _cut_spots_framebyframe(
             movie, ids.frame, ids.x, ids.y, box, spots)
@@ -376,9 +385,7 @@ def fit(
     theta, CRLBs, likelihoods, iterations = _gaussmle.gaussmle(
         spots, eps, max_it, method=method
     )
-    return locs_from_fits(
-        identifications, theta, CRLBs, likelihoods, iterations, box
-    )
+    return locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box)
 
 
 def fit_async(
@@ -394,9 +401,7 @@ def fit_async(
     return _gaussmle.gaussmle_async(spots, eps, max_it, method=method)
 
 
-def locs_from_fits(
-    identifications, theta, CRLBs, likelihoods, iterations, box
-):
+def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
     box_offset = int(box / 2)
     y = theta[:, 0] + identifications.y - box_offset
     x = theta[:, 1] + identifications.x - box_offset
@@ -428,11 +433,68 @@ def localize(movie, info, parameters):
     identifications = identify(movie, parameters)
     return fit(movie, info, identifications, parameters["Box Size"])
 
-def get_file_summary(file):
 
-    base, ext = os.path.splitext(file)
+def check_nena(locs, info, callback=None):
+    # Nena
+    print('Calculating NeNA.. ', end ='')
+    locs = locs[0:MAX_LOCS]
+    try:
+        result, best_result = _postprocess.nena(locs, info, callback=callback)
+        nena_px = best_result
+    except Exception as e:
+        print(e)
+        nena_px = float("nan")
 
-    file_hdf = base + '_locs.hdf5'
+    print(f"{nena_px:.2f} px.")
+
+    return nena_px
+
+
+def check_kinetics(locs, info):
+    print("Linking.. ", end ='')
+    locs = locs[0:MAX_LOCS]
+    locs = _postprocess.link(locs, info=info)
+    # print('Dark Time')
+    # locs = _postprocess.compute_dark_times(locs)
+    len_mean = locs.len.mean()
+    # dark_mean = locs.dark.mean()
+    print(f"Mean lenght {len_mean:.2f} frames.")
+
+    return len_mean
+
+
+def check_drift(locs, info, callback=None):
+    steps = int(len(locs) // (MAX_LOCS))
+    steps = max(1, steps)
+
+    locs = locs[::steps]
+
+    n_frames = info[0]["Frames"]
+
+    segmentation = max(1, int(n_frames // 10))
+
+    print(f"Estimating drift with segmentation {segmentation}")
+    drift, locs = _postprocess.undrift(
+        locs,
+        info,
+        segmentation,
+        display=False,
+        rcc_callback=callback,
+    )
+
+    drift_x = float(drift["x"].mean())
+    drift_y = float(drift["y"].mean())
+
+    print(f"Drift is X: {drift_x:.2f}, Y: {drift_y:.2f}.")
+
+    return (drift_x, drift_y)
+
+
+def get_file_summary(file, file_hdf, drift=None, len_mean=None, nena=None):
+
+    if file_hdf is None:
+        base, ext = os.path.splitext(file)
+        file_hdf = base + "_locs.hdf5"
 
     locs, info = _io.load_locs(file_hdf)
 
@@ -440,11 +502,11 @@ def get_file_summary(file):
 
     for col in MEAN_COLS:
         try:
-            summary[col+'_mean'] = locs[col].mean()
-            summary[col+'_std'] = locs[col].std()
+            summary[col + "_mean"] = locs[col].mean()
+            summary[col + "_std"] = locs[col].std()
         except ValueError:
-            summary[col+'_mean'] = float('nan')
-            summary[col+'_std'] = float('nan')
+            summary[col + "_mean"] = float("nan")
+            summary[col + "_std"] = float("nan")
 
     for col in SET_COLS:
         col_ = col.lower()
@@ -455,59 +517,53 @@ def get_file_summary(file):
     for col in SET_COLS:
         col_ = col.lower()
         if col_ not in summary:
-            summary[col_] = float('nan')
+            summary[col_] = float("nan")
 
-    #Nena
-    try:
-        result, best_result = _postprocess.nena(locs, info)
-        summary['nena_px'] = best_result
-    except Exception as e:
-        print(e)
-        summary['nena_px'] = float('nan')
+    if nena is None:
+        summary["nena_px"] = check_nena(locs, info)
+    else:
+        summary["nena_px"] = nena
 
-    summary['n_locs'] = len(locs)
-    summary['locs_frame'] = len(locs)/summary['frames']
+    if len_mean is None:
+        len_mean = check_kinetics(locs, info)
+    else:
+        len_mean = len_mean
 
-    drift_path = os.path.join(base + '_locs_undrift.hdf5')
-    if os.path.isfile(drift_path):
-        locs, info = _io.load_locs(drift_path)
-        for col in DRIFT_COLS:
-            col_ = col.lower()
-            col_ = col_.replace(' ', '_')
-            for inf in info:
-                if col in inf:
-                    summary[col_] = inf[col]
+    if drift is None:
+        drift_x, drift_y = check_drift(locs, info)
+    else:
+        drift_x, drift_y = drift
 
-    for col in DRIFT_COLS:
-        col_ = col.lower()
-        col_ = col_.replace(' ', '_')
-        if col_ not in summary:
-            summary[col_] = float('nan')
+    summary["len_mean"] = len_mean
+    summary["n_locs"] = len(locs)
+    summary["locs_frame"] = len(locs) / summary["frames"]
 
-    summary['filename'] = file
-    summary['file_created'] = datetime.fromtimestamp(os.path.getmtime(file))
-    summary['entry_created'] = datetime.now()
+    summary["drift_x"] = drift_x
+    summary["drift_y"] = drift_y
+
+    summary["nena_nm"] = summary["nena_px"] * summary["pixelsize"]
+
+    summary["filename"] = os.path.normpath(file)
+    summary["filename_hdf"] = file_hdf
+    summary["file_created"] = datetime.fromtimestamp(os.path.getmtime(file))
+    summary["entry_created"] = datetime.now()
 
     return summary
 
+
 def _db_filename():
     home = os.path.expanduser("~")
-    return os.path.abspath(os.path.join(home, ".picasso", "app.db"))
+    picasso_dir = os.path.join(home, ".picasso")
+    os.makedirs(picasso_dir, exist_ok=True)
+    return os.path.abspath(os.path.join(picasso_dir, "app_0410.db"))
+
 
 def save_file_summary(summary):
-    engine = create_engine("sqlite:///"+_db_filename(), echo=False)
-    s  = pd.Series(summary, index=summary.keys()).to_frame().T
+    engine = create_engine("sqlite:///" + _db_filename(), echo=False)
+    s = pd.Series(summary, index=summary.keys()).to_frame().T
     s.to_sql("files", con=engine, if_exists="append", index=False)
 
-def add_file_to_db(file):
-    base, ext = os.path.splitext(file)
-    out_path = base + "_locs.hdf5"
 
-    try:
-        main._undrift(out_path, 1000, display=False, fromfile=None)
-    except Exception as e:
-        print(e)
-        print("Drift correction failed for {}".format(out_path))
-
-    summary = get_file_summary(file)
+def add_file_to_db(file, file_hdf, drift=None, len_mean=None, nena=None):
+    summary = get_file_summary(file, file_hdf, drift, len_mean, nena)
     save_file_summary(summary)

@@ -86,7 +86,9 @@ def _frame_analysis(frame, n_frames):
 
     # get maximum number of locs in a 1/20th of acquisition time
     n_locs = len(frame)
-    locs_binned = _np.histogram(frame.values, bins=21)[0]
+    locs_binned = _np.histogram(
+        frame.values, bins=_np.linspace(0, n_frames, 21)
+    )[0]
     max_locs_bin = locs_binned.max()
 
     # test if frame analysis passed
@@ -164,7 +166,7 @@ def _cluster(X, radius, min_locs, frame):
     ### build kdtree (use cKDTree in case user did not update scipy)
     tree = _cKDTree(X)
 
-    ### find neighbors for each point withing radius
+    ### find neighbors for each point within radius
     neighbors = tree.query_ball_tree(tree, radius)
 
     ### find local maxima, i.e., points with the most neighbors within
@@ -275,7 +277,7 @@ def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
     
     return labels
 
-def cluster(locs, params):
+def cluster(locs, params, pixelsize):
     """
     Clusters localizations given user parameters using KDTree.
 
@@ -287,6 +289,8 @@ def cluster(locs, params):
         Localizations to be clustered
     params : tuple
         SMLM clustering parameters
+    pixelsize : int
+        Camera pixel size in nm
 
     Returns
     -------
@@ -300,7 +304,7 @@ def cluster(locs, params):
         labels = cluster_3D(
             locs.x,
             locs.y,
-            locs.z,
+            locs.z / pixelsize, # convert z coordinates from nm to px
             locs.frame,
             radius_xy,
             radius_z,

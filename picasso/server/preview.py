@@ -10,13 +10,25 @@ import matplotlib.pyplot as plt
 
 
 @st.cache
-def load_file(path):
+def load_file(path: str):
+    """Loads localization from files. Cached version.
+
+    Args:
+        path (str): Path to file.
+    """
     locs, info = io.load_locs(path)
     return locs, info
 
 
 @st.cache
-def picasso_render(locs, viewport, oversampling):
+def picasso_render(locs: np.ndarray, viewport: tuple, oversampling: int):
+    """Helper function to render a viewport. Cached.
+
+    Args:
+        locs (np.ndarray): Record array with localization data.
+        viewport (tuple): Viewport as tuple.
+        oversampling (int): Oversampling.
+    """
     len_x, image = render.render(
         locs,
         viewport=viewport,
@@ -28,6 +40,9 @@ def picasso_render(locs, viewport, oversampling):
 
 
 def preview():
+    """
+    Streamlit page to preview a file.
+    """
     st.write("# Preview")
 
     st.write(
@@ -86,7 +101,8 @@ def preview():
 
                         # plt.imshow(image, cmap='hot', vmax=10)
                         fig, ax = plt.subplots()
-                        im = ax.imshow(image, cmap="hot", vmax=vmax)
+                        st.write(f"Image with dimensions {image.shape}")
+                        im = ax.imshow(image, cmap="hot", vmin=vmin, vmax=vmax)
                         # Hide grid lines
                         ax.grid(False)
 

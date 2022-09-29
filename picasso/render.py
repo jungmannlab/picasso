@@ -156,7 +156,7 @@ def _render_setup(
     np.array 
         y coordinates to be rendered
     np.array
-        indeces of locs to be rendered
+        Indeces of locs to be rendered
     """
 
     n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
@@ -176,6 +176,7 @@ def _render_setup3d(
     locs, 
     oversampling, 
     y_min, x_min, y_max, x_max, z_min, z_max, 
+    pixelsize,
 ):
     """
     Finds coordinates to be rendered in 3D and sets up an empty image 
@@ -199,6 +200,8 @@ def _render_setup3d(
         Minimum z coordinate to be rendered (nm)
     z_max : float
         Maximum z coordinate to be rendered (nm)
+    pixelsize : float
+        Camera pixel size, used for converting z coordinates
 
     Returns
     -------
@@ -225,7 +228,7 @@ def _render_setup3d(
     n_pixel_z = int(_np.ceil(oversampling * (z_max - z_min)))
     x = locs.x
     y = locs.y
-    z = locs.z
+    z = locs.z / pixelsize
     in_view = (
         (x > x_min)
         & (y > y_min)
@@ -355,8 +358,8 @@ def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
             for j in range(j_min, j_max):
                 image[i, j] += _np.exp(
                     -(
-                        (j - x_ + 0.5) ** 2 / (2 * sx_ ** 2)
-                        + (i - y_ + 0.5) ** 2 / (2 * sy_ ** 2)
+                        (j - x_ + 0.5) ** 2 / (2 * sx_**2)
+                        + (i - y_ + 0.5) ** 2 / (2 * sy_**2)
                     )
                 ) / (2 * _np.pi * sx_ * sy_)
 
@@ -602,6 +605,7 @@ def render_hist3d(
     locs, 
     oversampling, 
     y_min, x_min, y_max, x_max, z_min, z_max, 
+    pixelsize,
 ):
     """
     Renders locs in 3D with no blur.
@@ -625,6 +629,8 @@ def render_hist3d(
         Minimum z coordinate to be rendered (nm)
     z_max : float
         Maximum z coordinate to be rendered (nm)
+    pixelsize : float
+        Camera pixel size, used for converting z coordinates
 
     Returns
     -------
@@ -633,10 +639,15 @@ def render_hist3d(
     np.array
         Rendered 3D image
     """
+
+    z_min = z_min / pixelsize
+    z_max = z_max / pixelsize
+
     image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(
         locs, 
         oversampling, 
         y_min, x_min, y_max, x_max, z_min, z_max, 
+        pixelsize,
     )
     _fill3d(image, x, y, z)
     return len(x), image

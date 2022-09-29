@@ -13,16 +13,29 @@ import plotly.graph_objects as go
 
 
 @st.cache
-def load_file(path, file):
+def load_file(path: str):
+    """Loads a localization file and returns as pandas Dataframe.
+    Adds a column with the filename.
+
+    Args:
+        path (str): Path to localization file.
+        file (str): filename
+    """
+
     locs, info = io.load_locs(path)
     locs = pd.DataFrame(locs)
-    locs["file"] = file
+    locs["file"] = os.path.split(path)[-1]
     return locs, info
 
 
-def get_file_family(file):
+def get_file_family(file: str):
+    """Returns all files that belong to a parent file for picasso.
+    E.g. for a folder with 'file.hdf5' and 'file_undrift.hdf5',
+    when searching for 'file.hdf5', both files will be returned.
 
-    # Find files in familiy
+    Args:
+        file (str): Path to file.
+    """
     base = os.path.split(file)[1].split(".")[0]
     folder = os.path.dirname(file)
 
@@ -32,9 +45,13 @@ def get_file_family(file):
     return files, folder
 
 
-def locs_per_frame_plot(hdf_dict):
-    smooth = st.number_input("Smooth", value=100, min_value=1, max_value=1000)
+def locs_per_frame_plot(hdf_dict: dict):
+    """Plots the localizations per frame.
 
+    Args:
+        hdf_dict (dict): Dictionary with hdf summary information
+    """
+    smooth = st.number_input("Smooth", value=100, min_value=1, max_value=1000)
     summary = []
 
     for f, df in hdf_dict.items():
@@ -62,7 +79,13 @@ def locs_per_frame_plot(hdf_dict):
     st.plotly_chart(fig)
 
 
-def hist_plot(hdf_dict, locs):
+def hist_plot(hdf_dict: dict, locs: pd.DataFrame):
+    """Plots a histogram for a given hdf dictionary.
+
+    Args:
+        hdf_dict (dict): Dictionary with summary stats per file.
+        locs (pd.DataFrame): pandas Dataframe with localizations.
+    """
 
     c1, c2, c3, c4 = st.columns(4)
 
@@ -124,6 +147,7 @@ def hist_plot(hdf_dict, locs):
 
 
 def compare():
+    """Compare streamlit page."""
     st.write("# Compare")
 
     st.write(
@@ -146,18 +170,21 @@ def compare():
             for file in selected:
                 try:
                     c1, f1 = get_file_family(file)
-                    file_dict[file] = st.selectbox(
-                        f"Select hdf file for {file}", [None] + c1
+                    file_dict[file] = st.multiselect(
+                        f"Select hdf file for {file}",
+                        c1,
+                        None,
                     )
 
                     if file_dict[file] is not None:
-                        path = os.path.dirname(file)
+                        for _ in file_dict[file]:
+                            path = os.path.dirname(file)
 
-                        with st.spinner("Loading files"):
-                            locs, info = load_file(
-                                os.path.join(path, file_dict[file]), file_dict[file]
-                            )
-                            hdf_dict[file] = locs
+                            locs_filename = os.path.join(path, _)
+
+                            with st.spinner("Loading files"):
+                                locs, info = load_file(locs_filename)
+                                hdf_dict[locs_filename] = locs
                 except FileNotFoundError:
                     st.error(
                         f"File **{file}** was not found. Please check that this file exists."
