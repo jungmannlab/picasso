@@ -731,7 +731,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.quality_grid_labels = [
             QtWidgets.QLabel("Locs/Frame"),
             QtWidgets.QLabel("NeNA"),
-            QtWidgets.QLabel("Drift"),
+            QtWidgets.QLabel("Mean Drift"),
             QtWidgets.QLabel("Bright Time (Frames)"),
         ]
         for idx, _ in enumerate(self.quality_grid_labels):
