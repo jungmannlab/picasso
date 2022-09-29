@@ -10035,7 +10035,7 @@ class Window(QtWidgets.QMainWindow):
         Exports current view as .png or .tif
     export_multi()
         Asks the user to choose a type of export
-    export_roi_ims()
+    export_fov_ims()
         Exports current FOV to .ims
     export_ts()
         Exports locs as .csv for ThunderSTORM
@@ -10178,7 +10178,7 @@ class Window(QtWidgets.QMainWindow):
         export_multi_action.triggered.connect(self.export_multi)
         if IMSWRITER:
             export_ims_action = file_menu.addAction("Export ROI for Imaris")
-            export_ims_action.triggered.connect(self.export_roi_ims)
+            export_ims_action.triggered.connect(self.export_fov_ims)
 
         file_menu.addSeparator()
         delete_action = file_menu.addAction("Remove all localizations")
@@ -11011,14 +11011,14 @@ class Window(QtWidgets.QMainWindow):
                             )
                             print("File saved to {}".format(path))
 
-    def export_roi_ims(self):
+    def export_fov_ims(self):
         """ Exports current FOV to .ims """
 
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + ".ims"
 
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Export ROI as ims", out_path, filter="*.ims"
+            self, "Export FOV as ims", out_path, filter="*.ims"
         )
 
         channel_base, ext_ = os.path.splitext(path)
@@ -11108,10 +11108,6 @@ class Window(QtWidgets.QMainWindow):
             else:
                 z_min, z_max = 0, 0
 
-            print(f'Z dimensions {z_min} -> {z_max}')
-
-            start = time.time()
-
             all_img = []
             for idx, channel in enumerate(to_render):
                 locs = self.view.locs[channel]
@@ -11150,9 +11146,6 @@ class Window(QtWidgets.QMainWindow):
                 z_max, 
                 pixelsize,
             )
-
-            end = time.time()
-            print(f"Took {end-start:.2f} seconds.")
             status.close()
 
     def load_picks(self):

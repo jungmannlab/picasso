@@ -166,7 +166,7 @@ def _cluster(X, radius, min_locs, frame):
     ### build kdtree (use cKDTree in case user did not update scipy)
     tree = _cKDTree(X)
 
-    ### find neighbors for each point withing radius
+    ### find neighbors for each point within radius
     neighbors = tree.query_ball_tree(tree, radius)
 
     ### find local maxima, i.e., points with the most neighbors within
