@@ -1820,28 +1820,7 @@ class Window(QtWidgets.QMainWindow):
             self.fit(calibrate_z=calibrate_z)
         else:
             self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
-
-        if False:
-            if self.ims_all_checkbox:
-
-                self.fit_done = False
-
-                for file in self.file_family:
-                    print(f"Opening {file}")
-                    self.open(file)
-                    if self.identifications is not None and calibrate_z is True:
-                        self.fit(calibrate_z=calibrate_z)
-                    else:
-                        self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
-
-                    while not self.fit_done:
-                        time.sleep(1)
-            else:
-                if self.identifications is not None and calibrate_z is True:
-                    self.fit(calibrate_z=calibrate_z)
-                else:
-                    self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
-
+            
 
 class IdentificationWorker(QtCore.QThread):
 
