@@ -7089,8 +7089,8 @@ class View(QtWidgets.QLabel):
                 hasattr(self.locs[channel1], "z")
                 and hasattr(self.locs[channel2], "z")
             ):
-                z1 = self.locs[channel1].z * pixelsize
-                z2 = self.locs[channel2].z * pixelsize
+                z1 = self.locs[channel1].z
+                z2 = self.locs[channel2].z
             else: 
                 z1 = None
                 z2 = None
