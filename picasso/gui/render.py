@@ -4897,7 +4897,7 @@ class View(QtWidgets.QLabel):
         Opens an input dialog to ask for a channel
     get_channel3d()
         Similar to get_channel, used in selecting 3D picks
-    get_channel_all_at_once()
+    get_channel_all_seq()
         Similar to get_channel, adds extra index for applying to all
         channels
     get_group_color(locs)
@@ -5548,7 +5548,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for DBSCAN.
         """
 
-        channel = self.get_channel_all_at_once("Cluster")
+        channel = self.get_channel_all_seq("Cluster")
 
         # get DBSCAN parameters
         params = DbscanDialog.getParams()
@@ -5650,7 +5650,7 @@ class View(QtWidgets.QLabel):
             )
             return
 
-        channel = self.get_channel_all_at_once("Cluster")
+        channel = self.get_channel_all_seq("Cluster")
 
         # get HDBSCAN parameters
         params = HdbscanDialog.getParams()
@@ -5742,7 +5742,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for SMLM clustering
         """
 
-        channel = self.get_channel_all_at_once("Cluster")
+        channel = self.get_channel_all_seq("Cluster")
 
         # get clustering parameters
         if any([hasattr(_, "z") for _ in self.all_locs]):
@@ -6598,7 +6598,7 @@ class View(QtWidgets.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
-            pathlist.append("Apply to all at once")
+            pathlist.append("Apply to all sequentially")
             pathlist.append("Combine all channels")
             index, ok = QtWidgets.QInputDialog.getItem(
                 self,
@@ -6612,7 +6612,7 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def get_channel_all_at_once(self, title="Choose a channel"):
+    def get_channel_all_seq(self, title="Choose a channel"):
         """ 
         Opens an input dialog to ask for a channel. 
         Returns a channel index or None if no locs loaded.
@@ -6632,7 +6632,7 @@ class View(QtWidgets.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
-            pathlist.append("Apply to all at once")
+            pathlist.append("Apply to all sequentially")
             index, ok = QtWidgets.QInputDialog.getItem(
                 self,
                 "Save localizations",
@@ -8242,7 +8242,7 @@ class View(QtWidgets.QLabel):
     def remove_picked_locs(self):
         """ Gets channel for removing picked localizations. """
 
-        channel = self.get_channel_all_at_once("Remove picked localizations")
+        channel = self.get_channel_all_seq("Remove picked localizations")
         if channel is len(self.locs_paths): # apply to all channels
             for channel in range(len(self.locs)):
                 self._remove_picked_locs(channel)
@@ -11399,7 +11399,7 @@ class Window(QtWidgets.QMainWindow):
         Saves pick properties in a given channel (or all channels). 
         """
 
-        channel = self.view.get_channel_all_at_once("Save localizations")
+        channel = self.view.get_channel_all_seq("Save localizations")
         if channel is not None:
             if channel == len(self.view.locs_paths):
                 print("Save all at once.")
