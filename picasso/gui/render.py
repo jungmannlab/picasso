@@ -7157,7 +7157,8 @@ class View(QtWidgets.QLabel):
             locs = self.picked_locs(channel)
             locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
-            xvec = np.arange(max(locs["frame"]) + 1)
+            n_frames = self.infos[channel][0]["Frames"]
+            xvec = np.arange(n_frames)
             yvec = xvec[:] * 0
             yvec[locs["frame"]] = 1
             self.current_trace_x = xvec
@@ -7174,7 +7175,7 @@ class View(QtWidgets.QLabel):
             # frame vs x
             ax1.scatter(locs["frame"], locs["x"], s=2)
             ax1.set_title("X-pos vs frame")
-            ax1.set_xlim(0, (max(locs["frame"]) + 1))
+            ax1.set_xlim(0, n_frames)
             ax1.set_ylabel("X-pos [Px]")
 
             # frame vs y
@@ -7285,17 +7286,16 @@ class View(QtWidgets.QLabel):
         Opens self.pick_message_box to display information.
         """
 
-        print("Showing  traces")
-
         removelist = [] # picks to be removed
-
         channel = self.get_channel("Select traces")
+
         if channel is not None:
             if self._picks: # if there are picks present
                 params = {} # stores info about selecting picks
                 params["t0"] = time.time()
                 all_picked_locs = self.picked_locs(channel)
                 i = 0 # index of the currently shown pick
+                n_frames = self.infos[channel][0]["Frames"]
                 while i < len(self._picks):
                     fig = plt.figure(figsize=(5, 5))
                     fig.canvas.set_window_title("Trace")
@@ -7308,7 +7308,7 @@ class View(QtWidgets.QLabel):
                     ax2 = fig.add_subplot(312, sharex=ax1)
                     ax3 = fig.add_subplot(313, sharex=ax1)
 
-                    xvec = np.arange(max(locs["frame"]) + 1)
+                    xvec = np.arange(n_frames)
                     yvec = xvec[:] * 0
                     yvec[locs["frame"]] = 1
                     ax1.set_title(
@@ -7329,7 +7329,7 @@ class View(QtWidgets.QLabel):
                     ax1.set_ylabel("X-pos [Px]")
                     ax1.set_title("X-pos vs frame")
 
-                    ax1.set_xlim(0, (max(locs["frame"]) + 1))
+                    ax1.set_xlim(0, n_frames)
                     plt.setp(ax1.get_xticklabels(), visible=False)
 
                     ax2.scatter(locs["frame"], locs["y"], s=2)
