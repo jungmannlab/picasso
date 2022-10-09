@@ -163,14 +163,14 @@ def _cluster(X, radius, min_locs, frame):
         assigned)
     """
 
-    ### build kdtree (use cKDTree in case user did not update scipy)
+    ## build kdtree (use cKDTree in case user did not update scipy)
     tree = _cKDTree(X)
 
-    ### find neighbors for each point within radius
+    ## find neighbors for each point within radius
     neighbors = tree.query_ball_tree(tree, radius)
 
-    ### find local maxima, i.e., points with the most neighbors within
-    ### their neighborhood
+    ## find local maxima, i.e., points with the most neighbors within
+    ## their neighborhood
     lm = _np.zeros(X.shape[0], dtype=_np.int8)
     for i in range(len(lm)):
         idx = neighbors[i] # indeces of points that are neighbors of i
@@ -180,9 +180,9 @@ def _cluster(X, radius, min_locs, frame):
             if n == max([len(neighbors[_]) for _ in idx]):
                 lm[i] = 1
 
-    ### assign cluster labels to all points (-1 means no cluster)
-    ### if two local maxima are within radius from each other, combine
-    ### such clusters
+    ## assign cluster labels to all points (-1 means no cluster)
+    ## if two local maxima are within radius from each other, combine
+    ## such clusters
     labels = -1 * _np.ones(X.shape[0], dtype=_np.int32) # cluster labels
     lm_idx = _np.where(lm == 1)[0] # indeces of local maxima
     for count, i in enumerate(lm_idx): # for each local maximum
@@ -517,6 +517,6 @@ def cluster_center(grouplocs, separate_lp=False):
         ]
 
     if hasattr(grouplocs, "group_input"):
-        result.append(_np.unique(grouplocs.group_input)[0]) # assumes only one group input!
-
+        # assumes only one group input!
+        result.append(_np.unique(grouplocs.group_input)[0]) 
     return result
