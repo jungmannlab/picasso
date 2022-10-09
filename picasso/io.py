@@ -943,7 +943,7 @@ class TiffMultiMap(AbstractPicassoMovie):
             pattern = _re.compile(base + r"_(\d*).ome.tif")
         elif "NDTiffStack" in filename:
             # only one extension (.tif)
-            base, ext = _ospath.splitext(_ospath.splitext(self.path))  
+            base, ext = _ospath.splitext(self.path)  
             base = _re.escape(base)
             pattern = _re.compile(base + r"_(\d*).tif")
         entries = [_.path for _ in _os.scandir(self.dir) if _.is_file()]
