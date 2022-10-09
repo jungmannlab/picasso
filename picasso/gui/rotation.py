@@ -7,7 +7,7 @@
     Many functions are copied from gui.render.View to avoid circular import
 
     :author: Rafal Kowalewski, 2021-2022
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+    :copyright: Copyright (c) 2021 Jungmann Lab, MPI of Biochemistry
 """
 
 import os

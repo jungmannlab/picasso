@@ -143,6 +143,7 @@ Contributions & Copyright
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of
   Biochemistry
 | Copyright (c) 2020-2021 Maximilian Strauss
+| Copyright (c) 2022 Rafal Kowalewski
 
 Citing Picasso
 --------------

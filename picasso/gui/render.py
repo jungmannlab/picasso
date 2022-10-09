@@ -2,7 +2,8 @@
     gui/render
     ~~~~~~~~~~~~~~~~~~~~
     Graphical user interface for rendering localization images
-    :author: Joerg Schnitzbauer & Maximilian Strauss, 2017-2018
+    :author: Joerg Schnitzbauer & Maximilian Strauss 
+        & Rafal Kowalewski, 2017-2022
     :copyright: Copyright (c) 2017 Jungmann Lab, MPI of Biochemistry
 """
 import os
