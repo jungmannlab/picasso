@@ -2254,7 +2254,7 @@ class TestClustererDialog(QtWidgets.QDialog):
                 frame = locs.frame
             else:
                 frame = None
-                
+
             if hasattr(locs, "z"):
                 X[:, 2] = X[:, 2] * params["radius_xy"] / params["radius_z"]
                 labels = clusterer._cluster(
@@ -5868,6 +5868,7 @@ class View(QtWidgets.QLabel):
                 "Clustering radius xy [cam. px]": params[0],
                 "Clustering radius z [cam. px]": params[1],
                 "Min. cluster size": params[2],
+                "Performed basic frame analysis": params[-2],
             }            
         else:
             new_info = {
@@ -5875,6 +5876,7 @@ class View(QtWidgets.QLabel):
                 "Number of clusters": len(np.unique(clustered_locs.group)),
                 "Clustering radius [cam. px]": params[0],
                 "Min. cluster size": params[1],
+                "Performed basic frame analysis": params[-2],
             }
         info = self.infos[channel] + [new_info]
 
