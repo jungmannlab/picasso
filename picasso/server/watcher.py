@@ -38,12 +38,22 @@ def check_new(path: str, processed: dict, logfile: str):
     all_ = os.listdir(path)
     all_ = [os.path.join(path, _) for _ in all_]
 
-    new = [_ for _ in all_ if os.path.normpath(_) not in processed.keys() and _.endswith(FILETYPES)]
+    new = [
+        _ 
+        for _ in all_ 
+        if os.path.normpath(_) 
+        not in processed.keys() 
+        and _.endswith(FILETYPES)
+    ]
     locs = [_ for _ in all_ if _.endswith("_locs.hdf5")]
 
     print_to_file(
         logfile,
-        f"{datetime.now()} Checking: {len(all_)} files, {len(new)} unprocessed with valid ending and {len(locs)} `_locs.hdf5` files in {path}.",
+        (
+            f"{datetime.now()} Checking: {len(all_)} files,"
+            f"  {len(new)} unprocessed with valid ending and "
+            f"{len(locs)} `_locs.hdf5` files in {path}."
+        ),    
     )
 
     for _ in new:
@@ -85,12 +95,18 @@ def get_children_files(file: str, checked: list):
         checked (list): List with files that are already checked.
     """
     dir_ = os.path.dirname(file)
-    files_in_folder = [os.path.abspath(os.path.join(dir_, _)) for _ in os.listdir(dir_)]
+    files_in_folder = [
+        os.path.abspath(os.path.join(dir_, _)) 
+        for _ in os.listdir(dir_)
+    ]
     # Multiple ome tifs; Pos0.ome.tif', Pos0_1.ome.tif', Pos0_2.ome.tif'
     files_in_folder = [
         _
         for _ in files_in_folder
-        if _.startswith(file[:-8]) and _ not in checked and _.endswith(".ome.tif") and 'MMStack_Pos0' in _
+        if _.startswith(file[:-8]) 
+        and _ not in checked 
+        and _.endswith(".ome.tif") 
+        and 'MMStack_Pos0' in _
     ]
 
     for _ in files_in_folder:
@@ -133,7 +149,12 @@ def print_to_file(path, text):
 
 
 def check_new_and_process(
-    settings_list: dict, path: str, command: str, logfile: str, existing: list, update_time: int
+    settings_list: dict, 
+    path: str, 
+    command: str, 
+    logfile: str, 
+    existing: list, 
+    update_time: int,
 ):
     """
     Checks a folder for new files and processes them with defined settigns.
@@ -168,7 +189,10 @@ def check_new_and_process(
                     if len(settings_list) > 1:
                         print_to_file(
                             logfile,
-                            f"{datetime.now()} Processing group {settings['suffix']}",
+                            (
+                                f"{datetime.now()} Processing group "
+                                f" {settings['suffix']}"
+                            ),
                         )
 
                     settings["files"] = file
@@ -180,16 +204,23 @@ def check_new_and_process(
 
                     if "$FILENAME" in command:
                         to_execute = command[:]
-                        to_execute = to_execute.replace("$FILENAME", f'"{file}"')
+                        to_execute = to_execute.replace(
+                            "$FILENAME", f'"{file}"'
+                        )
 
-                    print_to_file(logfile, f"{datetime.now()} Executing {to_execute}.")
+                    print_to_file(
+                        logfile, 
+                        f"{datetime.now()} Executing {to_execute}."
+                    )
 
                     subprocess.run(to_execute)
 
             except KeyboardInterrupt:
                 raise
             except Exception as e:
-                print_to_file(logfile, f"{datetime.now()} Exception {e} occured.")
+                print_to_file(
+                    logfile, f"{datetime.now()} Exception {e} occured."
+                )
 
             processed[file] = True
 
@@ -208,16 +239,23 @@ def watcher():
     """
     st.write("# Watcher")
     st.text(
-        "- Set up a file watcher to process files in a folder with pre-defined settings automatically."
+        "- Set up a file watcher to process files in a folder with pre-defined"
+        "  settings automatically."
     )
     st.text(
-        "- All new files and raw files that aren't yet in the database will be processed."
+        "- All new files and raw files that aren't yet in the database will be"
+        "  processed."
     )
     st.text(
-        "- You can define different parameter groups so that a file will be processed with different settings."
+        "- You can define different parameter groups so that a file will be"
+        "  processed with different settings."
     )
-    st.text("- You can also chain custom commands to the watcher.")
-    st.text(f"- The watcher will check for the following filetypes: {FILETYPES}")
+    st.text(
+        "- You can also chain custom commands to the watcher."
+    )
+    st.text(
+        f"- The watcher will check for the following filetypes: {FILETYPES}"
+    )
 
     st.write("## Existing watchers")
     df_ = fetch_watcher()
@@ -231,7 +269,9 @@ def watcher():
                 engine = create_engine(
                     "sqlite:///" + localize._db_filename(), echo=False
                 )
-                df.to_sql("watcher", con=engine, if_exists="replace", index=False)
+                df.to_sql(
+                    "watcher", con=engine, if_exists="replace", index=False
+                )
 
                 st.success("Removed. Please refresh this page.")
 
@@ -256,13 +296,17 @@ def watcher():
 
             n_columns = int(
                 st.number_input(
-                    "Number of Parameter Groups", min_value=1, max_value=10, step=1
+                    "Number of Parameter Groups", 
+                    min_value=1, 
+                    max_value=10, 
+                    step=1,
                 )
             )
 
             if n_columns > 1:
                 st.text(
-                    "Parameter groups will be indiciated with a `pg` in the filename, e.g. `filename_pg_1_locs.hdf`"
+                    "Parameter groups will be indiciated with a `pg` in the"
+                    "  filename, e.g. `filename_pg_1_locs.hdf`"
                 )
 
             columns = st.columns(n_columns)
@@ -297,7 +341,7 @@ def watcher():
                     label="Baseline:", value=100, key=f"baseline_{i}"
                 )
                 settings[i]["sensitivity"] = col.number_input(
-                    label="Sensitivity:", value=1, key=f"sensitivity_{i}"
+                    label="Sensitivity:", value=1.0, key=f"sensitivity_{i}"
                 )
                 settings[i]["qe"] = col.number_input(
                     label="Quantum Efficiency:",
@@ -339,7 +383,9 @@ def watcher():
                         col.error("Not a valid file.")
 
                     settings[i]["magnification_factor"] = col.number_input(
-                        label="Magnification factor:", value=0.79, key=f"magfac_{i}"
+                        label="Magnification factor:", 
+                        value=0.79, 
+                        key=f"magfac_{i}",
                     )
                 else:
                     settings[i]["calib_file"] = None
@@ -368,10 +414,14 @@ def watcher():
                 for i in range(n_columns):
                     settings_selected = {}
                     settings_selected["box_side_length"] = settings[i]["box"]
-                    settings_selected["gradient"] = settings[i]["min_net_gradient"]
+                    settings_selected["gradient"] = (
+                        settings[i]["min_net_gradient"]
+                    )
                     settings_selected["gain"] = settings[i]["em_gain"]
                     settings_selected["baseline"] = settings[i]["baseline"]
-                    settings_selected["sensitivity"] = settings[i]["sensitivity"]
+                    settings_selected["sensitivity"] = (
+                        settings[i]["sensitivity"]
+                    )
                     settings_selected["qe"] = settings[i]["qe"]
                     settings_selected["pixelsize"] = settings[i]["pixelsize"]
                     settings_selected["fit_method"] = settings[i]["methods"]
@@ -379,7 +429,9 @@ def watcher():
                     if settings[i]["calib_file"]:
                         settings_selected["zc"] = settings[i]["calib_file"]
                     if settings[i]["magnification_factor"]:
-                        settings_selected["mf"] = settings[i]["magnification_factor"]
+                        settings_selected["mf"] = (
+                            settings[i]["magnification_factor"]
+                        )
 
                     settings_selected["database"] = True
                     if n_columns == 1:
@@ -400,7 +452,14 @@ def watcher():
 
                 p = Process(
                     target=check_new_and_process,
-                    args=(settings_list, folder, command, logfile, existing, update_time),
+                    args=(
+                        settings_list, 
+                        folder, 
+                        command, 
+                        logfile, 
+                        existing, 
+                        update_time,
+                    ),
                 )
                 p.start()
 
@@ -419,7 +478,9 @@ def watcher():
                 engine = create_engine(
                     "sqlite:///" + localize._db_filename(), echo=False
                 )
-                df.to_sql("watcher", con=engine, if_exists="append", index=False)
+                df.to_sql(
+                    "watcher", con=engine, if_exists="append", index=False
+                )
 
                 for reset in range(3):
                     display.success(f"Restarting in {3-reset}.")
