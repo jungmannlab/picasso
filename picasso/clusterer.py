@@ -428,7 +428,7 @@ def find_cluster_centers(locs):
 
     return centers
 
-def cluster_center(grouplocs):
+def cluster_center(grouplocs, separate_lp=False):
     """
     Finds cluster centers and their attributes.
 
@@ -439,6 +439,9 @@ def cluster_center(grouplocs):
     ----------
     grouplocs : pandas.SeriesGroupBy
         Localizations grouped by cluster ids
+    separate_lp : bool (default=False)
+        If True, localization precision in x and y will be calculated
+        separately. Otherwise, the mean of the two is taken
     
     Returns
     -------
@@ -466,9 +469,9 @@ def cluster_center(grouplocs):
         error_sums_wtd(grouplocs.y, grouplocs.lpy)
         / (len(grouplocs) - 1)
     )
-    # lpx and lpy should be the same
-    lpx = (lpx + lpy) / 2
-    lpy = lpx
+    if not separate_lp:
+        lpx = (lpx + lpy) / 2
+        lpy = lpx
     # other attributes
     ellipticity = sx / sy
     net_gradient = grouplocs.net_gradient.mean()
