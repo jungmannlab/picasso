@@ -2250,20 +2250,25 @@ class TestClustererDialog(QtWidgets.QDialog):
             else:
                 return None
         elif clusterer_name == "SMLM":
+            if params["frame_analysis"]:
+                frame = locs.frame
+            else:
+                frame = None
+                
             if hasattr(locs, "z"):
                 X[:, 2] = X[:, 2] * params["radius_xy"] / params["radius_z"]
                 labels = clusterer._cluster(
                     X, 
                     params["radius_xy"], 
                     params["min_cluster_size"], 
-                    locs.frame,
+                    frame,
                 )
             else:
                 labels = clusterer._cluster(
                     X, 
                     params["radius_xy"], 
                     params["min_cluster_size"],
-                    locs.frame,
+                    frame,
                 )                
         locs = self.assign_groups(locs, labels)
         if len(locs):
@@ -2319,6 +2324,7 @@ class TestClustererDialog(QtWidgets.QDialog):
             params["radius_xy"] = self.test_smlm_params.radius_xy.value()
             params["radius_z"] = self.test_smlm_params.radius_z.value()
             params["min_cluster_size"] = self.test_smlm_params.min_locs.value()
+            params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
         return params
 
     def get_full_fov(self):
@@ -2478,7 +2484,11 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.min_locs.setRange(1, 1e6)
         self.min_locs.setSingleStep(1)
         grid.addWidget(self.min_locs, 2, 1)
-        grid.setRowStretch(3, 1)
+
+        self.fa = QtWidgets.QCheckBox("Frame analysis")
+        self.fa.setChecked(True)
+        grid.addWidget(self.fa, 3, 0, 1, 2)
+        grid.setRowStretch(4, 1)
 
 class TestClustererView(QtWidgets.QLabel):
     """
