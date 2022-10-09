@@ -11373,14 +11373,14 @@ class Window(QtWidgets.QMainWindow):
 
         channel = self.view.get_channel_all_at_once("Save localizations")
         if channel is not None:
-            if channel is len(self.view.locs_paths):
+            if channel == len(self.view.locs_paths):
                 print("Save all at once.")
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_apicked",
+                    "_pickprops",
                 )
                 if ok:
                     for channel in tqdm(range(len(self.view.locs_paths))):
