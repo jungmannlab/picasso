@@ -7297,7 +7297,7 @@ class View(QtWidgets.QLabel):
                 i = 0 # index of the currently shown pick
                 n_frames = self.infos[channel][0]["Frames"]
                 while i < len(self._picks):
-                    fig = plt.figure(figsize=(5, 5))
+                    fig = plt.figure(figsize=(5, 5), constrained_layout=True)
                     fig.canvas.set_window_title("Trace")
                     pick = self._picks[i]
                     locs = all_picked_locs[i]
@@ -9552,8 +9552,14 @@ class View(QtWidgets.QLabel):
         )
         if hasattr(self.all_locs[0], "group"):
 
-            self.all_locs[0].x += np.mod(self.all_locs[0].group, n_square) * spacing
-            self.all_locs[0].y += np.floor(self.all_locs[0].group / n_square) * spacing
+            self.all_locs[0].x += (
+                np.mod(self.all_locs[0].group, n_square) 
+                * spacing
+            )
+            self.all_locs[0].y += (
+                np.floor(self.all_locs[0].group / n_square) 
+                * spacing
+            )
 
             mean_x = np.mean(self.locs[0].x)
             mean_y = np.mean(self.locs[0].y)
@@ -9575,8 +9581,18 @@ class View(QtWidgets.QLabel):
                 # Also unfold picks
                 groups = np.unique(self.all_locs[0].group)
 
-                shift_x = np.mod(groups, n_square) * spacing - mean_x + offset_x
-                shift_y = np.floor(groups / n_square) * spacing - mean_y + offset_y
+                shift_x = (
+                    np.mod(groups, n_square) 
+                    * spacing 
+                    - mean_x 
+                    + offset_x
+                )
+                shift_y = (
+                    np.floor(groups / n_square) 
+                    * spacing 
+                    - mean_y 
+                    + offset_y
+                )
 
                 for j in range(len(self._picks)):
                     for k in range(len(groups)):
