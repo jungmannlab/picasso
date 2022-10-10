@@ -7,7 +7,7 @@
     Many functions are copied from gui.render.View to avoid circular import
 
     :author: Rafal Kowalewski, 2021-2022
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+    :copyright: Copyright (c) 2021 Jungmann Lab, MPI of Biochemistry
 """
 
 import os
@@ -421,6 +421,12 @@ class AnimationDialog(QtWidgets.QDialog):
 
     def __init__(self, window):
         super().__init__(window)
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.icon = icon
+        self.setWindowIcon(icon)
+
         self.window = window
         self.setWindowTitle("Build an animation")
         self.setModal(False)
@@ -2224,7 +2230,12 @@ class RotationWindow(QtWidgets.QMainWindow):
 
     def __init__(self, window):
         super().__init__()
-        self.setWindowTitle("Rotation window")
+        self.setWindowTitle("Picasso: Render 3D")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.icon = icon
+        self.setWindowIcon(icon)
 
         self.window = window
         self.view_rot = ViewRotation(self)
@@ -2389,7 +2400,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         later loading.
         """
 
-        channel = self.window.view.get_channel_all_at_once(
+        channel = self.window.view.get_channel_all_seq(
             "Save rotated localizations"
         )
 
@@ -2403,7 +2414,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                 pick = [float(x), float(y)]
                 size = self.view_rot.pick_size
             else: # rectangle
-                (ys, xs), (ye, xe) = self.pick
+                (ys, xs), (ye, xe) = self.view_rot.pick
                 pick = [[float(ys), float(xs)], [float(ye), float(xe)]]
                 size = self.view_rot.pick_size
             new_info = [{

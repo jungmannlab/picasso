@@ -2,7 +2,8 @@
     gui/render
     ~~~~~~~~~~~~~~~~~~~~
     Graphical user interface for rendering localization images
-    :author: Joerg Schnitzbauer & Maximilian Strauss, 2017-2018
+    :author: Joerg Schnitzbauer & Maximilian Strauss 
+        & Rafal Kowalewski, 2017-2022
     :copyright: Copyright (c) 2017 Jungmann Lab, MPI of Biochemistry
 """
 import os
@@ -2250,20 +2251,25 @@ class TestClustererDialog(QtWidgets.QDialog):
             else:
                 return None
         elif clusterer_name == "SMLM":
+            if params["frame_analysis"]:
+                frame = locs.frame
+            else:
+                frame = None
+
             if hasattr(locs, "z"):
                 X[:, 2] = X[:, 2] * params["radius_xy"] / params["radius_z"]
                 labels = clusterer._cluster(
                     X, 
                     params["radius_xy"], 
                     params["min_cluster_size"], 
-                    locs.frame,
+                    frame,
                 )
             else:
                 labels = clusterer._cluster(
                     X, 
                     params["radius_xy"], 
                     params["min_cluster_size"],
-                    locs.frame,
+                    frame,
                 )                
         locs = self.assign_groups(locs, labels)
         if len(locs):
@@ -2319,6 +2325,7 @@ class TestClustererDialog(QtWidgets.QDialog):
             params["radius_xy"] = self.test_smlm_params.radius_xy.value()
             params["radius_z"] = self.test_smlm_params.radius_z.value()
             params["min_cluster_size"] = self.test_smlm_params.min_locs.value()
+            params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
         return params
 
     def get_full_fov(self):
@@ -2478,7 +2485,11 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.min_locs.setRange(1, 1e6)
         self.min_locs.setSingleStep(1)
         grid.addWidget(self.min_locs, 2, 1)
-        grid.setRowStretch(3, 1)
+
+        self.fa = QtWidgets.QCheckBox("Frame analysis")
+        self.fa.setChecked(True)
+        grid.addWidget(self.fa, 3, 0, 1, 2)
+        grid.setRowStretch(4, 1)
 
 class TestClustererView(QtWidgets.QLabel):
     """
@@ -4887,7 +4898,7 @@ class View(QtWidgets.QLabel):
         Opens an input dialog to ask for a channel
     get_channel3d()
         Similar to get_channel, used in selecting 3D picks
-    get_channel_all_at_once()
+    get_channel_all_seq()
         Similar to get_channel, adds extra index for applying to all
         channels
     get_group_color(locs)
@@ -5538,7 +5549,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for DBSCAN.
         """
 
-        channel = self.get_channel_all_at_once("Cluster")
+        channel = self.get_channel_all_seq("Cluster")
 
         # get DBSCAN parameters
         params = DbscanDialog.getParams()
@@ -5640,7 +5651,7 @@ class View(QtWidgets.QLabel):
             )
             return
 
-        channel = self.get_channel_all_at_once("Cluster")
+        channel = self.get_channel_all_seq("Cluster")
 
         # get HDBSCAN parameters
         params = HdbscanDialog.getParams()
@@ -5732,7 +5743,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for SMLM clustering
         """
 
-        channel = self.get_channel_all_at_once("Cluster")
+        channel = self.get_channel_all_seq("Cluster")
 
         # get clustering parameters
         if any([hasattr(_, "z") for _ in self.all_locs]):
@@ -5858,6 +5869,7 @@ class View(QtWidgets.QLabel):
                 "Clustering radius xy [cam. px]": params[0],
                 "Clustering radius z [cam. px]": params[1],
                 "Min. cluster size": params[2],
+                "Performed basic frame analysis": params[-2],
             }            
         else:
             new_info = {
@@ -5865,6 +5877,7 @@ class View(QtWidgets.QLabel):
                 "Number of clusters": len(np.unique(clustered_locs.group)),
                 "Clustering radius [cam. px]": params[0],
                 "Min. cluster size": params[1],
+                "Performed basic frame analysis": params[-2],
             }
         info = self.infos[channel] + [new_info]
 
@@ -6586,7 +6599,7 @@ class View(QtWidgets.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
-            pathlist.append("Apply to all at once")
+            pathlist.append("Apply to all sequentially")
             pathlist.append("Combine all channels")
             index, ok = QtWidgets.QInputDialog.getItem(
                 self,
@@ -6600,7 +6613,7 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def get_channel_all_at_once(self, title="Choose a channel"):
+    def get_channel_all_seq(self, title="Choose a channel"):
         """ 
         Opens an input dialog to ask for a channel. 
         Returns a channel index or None if no locs loaded.
@@ -6620,7 +6633,7 @@ class View(QtWidgets.QLabel):
             return 0
         elif len(self.locs_paths) > 1:
             pathlist = list(self.locs_paths)
-            pathlist.append("Apply to all at once")
+            pathlist.append("Apply to all sequentially")
             index, ok = QtWidgets.QInputDialog.getItem(
                 self,
                 "Save localizations",
@@ -7064,7 +7077,7 @@ class View(QtWidgets.QLabel):
 
         # ask how many nearest neighbors
         nn_count, ok = QtWidgets.QInputDialog.getInt(
-            self, "", "Number of nearest neighbors: ", 0, 1, 100
+            self, "Input Dialog", "Number of nearest neighbors: ", 0, 1, 100
         )
         if ok:
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
@@ -7077,8 +7090,8 @@ class View(QtWidgets.QLabel):
                 hasattr(self.locs[channel1], "z")
                 and hasattr(self.locs[channel2], "z")
             ):
-                z1 = self.locs[channel1].z * pixelsize
-                z2 = self.locs[channel2].z * pixelsize
+                z1 = self.locs[channel1].z
+                z2 = self.locs[channel2].z
             else: 
                 z1 = None
                 z2 = None
@@ -7145,7 +7158,8 @@ class View(QtWidgets.QLabel):
             locs = self.picked_locs(channel)
             locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
-            xvec = np.arange(max(locs["frame"]) + 1)
+            n_frames = self.infos[channel][0]["Frames"]
+            xvec = np.arange(n_frames)
             yvec = xvec[:] * 0
             yvec[locs["frame"]] = 1
             self.current_trace_x = xvec
@@ -7162,7 +7176,7 @@ class View(QtWidgets.QLabel):
             # frame vs x
             ax1.scatter(locs["frame"], locs["x"], s=2)
             ax1.set_title("X-pos vs frame")
-            ax1.set_xlim(0, (max(locs["frame"]) + 1))
+            ax1.set_xlim(0, n_frames)
             ax1.set_ylabel("X-pos [Px]")
 
             # frame vs y
@@ -7273,19 +7287,18 @@ class View(QtWidgets.QLabel):
         Opens self.pick_message_box to display information.
         """
 
-        print("Showing  traces")
-
         removelist = [] # picks to be removed
-
         channel = self.get_channel("Select traces")
+
         if channel is not None:
             if self._picks: # if there are picks present
                 params = {} # stores info about selecting picks
                 params["t0"] = time.time()
                 all_picked_locs = self.picked_locs(channel)
                 i = 0 # index of the currently shown pick
+                n_frames = self.infos[channel][0]["Frames"]
                 while i < len(self._picks):
-                    fig = plt.figure(figsize=(5, 5))
+                    fig = plt.figure(figsize=(5, 5), constrained_layout=True)
                     fig.canvas.set_window_title("Trace")
                     pick = self._picks[i]
                     locs = all_picked_locs[i]
@@ -7296,7 +7309,7 @@ class View(QtWidgets.QLabel):
                     ax2 = fig.add_subplot(312, sharex=ax1)
                     ax3 = fig.add_subplot(313, sharex=ax1)
 
-                    xvec = np.arange(max(locs["frame"]) + 1)
+                    xvec = np.arange(n_frames)
                     yvec = xvec[:] * 0
                     yvec[locs["frame"]] = 1
                     ax1.set_title(
@@ -7317,7 +7330,7 @@ class View(QtWidgets.QLabel):
                     ax1.set_ylabel("X-pos [Px]")
                     ax1.set_title("X-pos vs frame")
 
-                    ax1.set_xlim(0, (max(locs["frame"]) + 1))
+                    ax1.set_xlim(0, n_frames)
                     plt.setp(ax1.get_xticklabels(), visible=False)
 
                     ax2.scatter(locs["frame"], locs["y"], s=2)
@@ -8230,7 +8243,7 @@ class View(QtWidgets.QLabel):
     def remove_picked_locs(self):
         """ Gets channel for removing picked localizations. """
 
-        channel = self.get_channel_all_at_once("Remove picked localizations")
+        channel = self.get_channel_all_seq("Remove picked localizations")
         if channel is len(self.locs_paths): # apply to all channels
             for channel in range(len(self.locs)):
                 self._remove_picked_locs(channel)
@@ -9540,8 +9553,14 @@ class View(QtWidgets.QLabel):
         )
         if hasattr(self.all_locs[0], "group"):
 
-            self.all_locs[0].x += np.mod(self.all_locs[0].group, n_square) * spacing
-            self.all_locs[0].y += np.floor(self.all_locs[0].group / n_square) * spacing
+            self.all_locs[0].x += (
+                np.mod(self.all_locs[0].group, n_square) 
+                * spacing
+            )
+            self.all_locs[0].y += (
+                np.floor(self.all_locs[0].group / n_square) 
+                * spacing
+            )
 
             mean_x = np.mean(self.locs[0].x)
             mean_y = np.mean(self.locs[0].y)
@@ -9563,8 +9582,18 @@ class View(QtWidgets.QLabel):
                 # Also unfold picks
                 groups = np.unique(self.all_locs[0].group)
 
-                shift_x = np.mod(groups, n_square) * spacing - mean_x + offset_x
-                shift_y = np.floor(groups / n_square) * spacing - mean_y + offset_y
+                shift_x = (
+                    np.mod(groups, n_square) 
+                    * spacing 
+                    - mean_x 
+                    + offset_x
+                )
+                shift_y = (
+                    np.floor(groups / n_square) 
+                    * spacing 
+                    - mean_y 
+                    + offset_y
+                )
 
                 for j in range(len(self._picks)):
                     for k in range(len(groups)):
@@ -11371,16 +11400,16 @@ class Window(QtWidgets.QMainWindow):
         Saves pick properties in a given channel (or all channels). 
         """
 
-        channel = self.view.get_channel_all_at_once("Save localizations")
+        channel = self.view.get_channel_all_seq("Save localizations")
         if channel is not None:
-            if channel is len(self.view.locs_paths):
+            if channel == len(self.view.locs_paths):
                 print("Save all at once.")
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_apicked",
+                    "_pickprops",
                 )
                 if ok:
                     for channel in tqdm(range(len(self.view.locs_paths))):

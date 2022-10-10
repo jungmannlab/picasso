@@ -925,7 +925,7 @@ class TiffMap:
 
 class TiffMultiMap(AbstractPicassoMovie):
     """Implments a subclass of AbstractPicassoMovie for reading
-    ome tiff files created by MicroManager. Single files are
+    ome tif files created by MicroManager. Single files are
     maxed out at 4GB, so this class orchestrates reading from single files,
     accessed by TiffMap.
     """
@@ -933,13 +933,19 @@ class TiffMultiMap(AbstractPicassoMovie):
         super().__init__()
         self.path = _ospath.abspath(path)
         self.dir = _ospath.dirname(self.path)
-        base, ext = _ospath.splitext(
-            _ospath.splitext(self.path)[0]
-        )  # split two extensions as in .ome.tif
-        base = _re.escape(base)
-        pattern = _re.compile(
-            base + r"_(\d*).ome.tif"
-        )  # This matches the basename + an appendix of the file number
+        
+        # This matches the basename + an appendix of the file number
+        filename = _ospath.basename(self.path)
+        if ".ome." in filename: 
+            # split two extensions as in .ome.tif
+            base, ext = _ospath.splitext(_ospath.splitext(self.path)[0])  
+            base = _re.escape(base)
+            pattern = _re.compile(base + r"_(\d*).ome.tif")
+        elif "NDTiffStack" in filename:
+            # only one extension (.tif)
+            base, ext = _ospath.splitext(self.path)  
+            base = _re.escape(base)
+            pattern = _re.compile(base + r"_(\d*).tif")
         entries = [_.path for _ in _os.scandir(self.dir) if _.is_file()]
         matches = [_re.match(pattern, _) for _ in entries]
         matches = [_ for _ in matches if _ is not None]
@@ -1147,9 +1153,11 @@ def to_raw_combined(basename, paths):
 def get_movie_groups(paths):
     groups = {}
     if len(paths) > 0:
-        pattern = _re.compile(
-            r"(.*?)(_(\d*))?.ome.tif"
-        )  # This matches the basename + an opt appendix of the file number
+        # This matches the basename + an opt appendix of the file number
+        if ".ome." in self.path:
+            pattern = _re.compile(r"(.*?)(_(\d*))?.ome.tif")  
+        elif "NDTiffStack" in self.path:
+            pattern = _re.compile(r"(.*?)(_(\d*))?.tif")  
         matches = [_re.match(pattern, path) for path in paths]
         match_infos = [
             {"path": _.group(), "base": _.group(1), "index": _.group(3)}

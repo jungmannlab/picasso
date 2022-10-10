@@ -1239,42 +1239,7 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowTitle(
             "Picasso: Localize. File: {}".format(os.path.basename(path))
         )
-
-        # Loading a movie resets the quality check
-        # self.parameters_dialog.quality_check.setEnabled(False)
-
         self.parameters_dialog.reset_quality_check()
-
-        # if False:  # placeholder for filegroups
-        #     if path.endswith(".ims"):
-        #         dirname = os.path.dirname(path)
-        #         base, file = os.path.split(path)
-        #         file_family = [
-        #             _
-        #             for _ in os.listdir(dirname)
-        #             if _.startswith(file[:-5]) & _.endswith(".ims")
-        #         ]
-
-        #         self.file_family = [os.path.join(dirname, _) for _ in file_family]
-
-        #         file_family_short = [_[-6:-4] for _ in file_family]
-
-        #         file_family_short.sort()
-
-        #         if len(file_family_short) > 1:
-        #             if self.parameters_dialog.imsgrid:
-        #                 files_string = " ".join(file_family_short)
-        #                 self.ims_all_label.setText(files_string)
-        #             else:
-        #                 ims_groupbox = QtWidgets.QGroupBox("IMS Filegroup")
-        #                 ims_grid = QtWidgets.QGridLayout(ims_groupbox)
-        #                 files_string = " ".join(file_family_short)
-        #                 self.ims_all_label = QtWidgets.QLabel(files_string)
-        #                 self.ims_all_checkbox = QtWidgets.QCheckBox("Process all:")
-        #                 ims_grid.addWidget(self.ims_all_checkbox, 1, 1)
-        #                 ims_grid.addWidget(self.ims_all_label, 1, 2)
-        #                 self.parameters_dialog.vbox.addWidget(ims_groupbox)
-        #                 self.parameters_dialog.imsgrid = True
 
     def open_picks(self):
         if self.movie_path != []:
@@ -1820,28 +1785,7 @@ class Window(QtWidgets.QMainWindow):
             self.fit(calibrate_z=calibrate_z)
         else:
             self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
-
-        if False:
-            if self.ims_all_checkbox:
-
-                self.fit_done = False
-
-                for file in self.file_family:
-                    print(f"Opening {file}")
-                    self.open(file)
-                    if self.identifications is not None and calibrate_z is True:
-                        self.fit(calibrate_z=calibrate_z)
-                    else:
-                        self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
-
-                    while not self.fit_done:
-                        time.sleep(1)
-            else:
-                if self.identifications is not None and calibrate_z is True:
-                    self.fit(calibrate_z=calibrate_z)
-                else:
-                    self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
-
+            
 
 class IdentificationWorker(QtCore.QThread):
 
