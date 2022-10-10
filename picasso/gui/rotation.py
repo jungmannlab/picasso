@@ -2400,7 +2400,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         later loading.
         """
 
-        channel = self.window.view.get_channel_all_at_once(
+        channel = self.window.view.get_channel_all_seq(
             "Save rotated localizations"
         )
 
