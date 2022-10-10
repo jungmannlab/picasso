@@ -2414,7 +2414,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                 pick = [float(x), float(y)]
                 size = self.view_rot.pick_size
             else: # rectangle
-                (ys, xs), (ye, xe) = self.pick
+                (ys, xs), (ye, xe) = self.view_rot.pick
                 pick = [[float(ys), float(xs)], [float(ye), float(xe)]]
                 size = self.view_rot.pick_size
             new_info = [{
