@@ -34,7 +34,7 @@ def status():
 
     with st.expander("Getting started"):
         st.write(
-            f"Picasso server allows to monitor perfomance of your super resolution runs. By selecting `Add to Database` in localize, summary statistics of a run will be stored in a local database in the picasso user folder ({escape_markdown(localize._db_filename())})."
+            f"Picasso server allows to monitor perfomance of your super resolution runs. By selecting `Estimate and add to database` in localize, summary statistics of a run will be stored in a local database in the picasso user folder ({escape_markdown(localize._db_filename())})."
         )
         st.write(
             "- Status: Displays the current database status and documentation."
