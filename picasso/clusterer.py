@@ -130,7 +130,7 @@ def frame_analysis(labels, frame):
     frame_grouped = frame_pd.groupby(frame_pd.index)
 
     # perform frame analysis
-    true_cluster = frame_grouped.apply(_frame_analysis, frame.max())
+    true_cluster = frame_grouped.apply(_frame_analysis, frame.max()+1)
 
     # cluster ids that did not pass frame analysis
     discard = true_cluster.index[true_cluster == 0].values
@@ -185,15 +185,25 @@ def _cluster(X, radius, min_locs, frame):
     ## such clusters
     labels = -1 * _np.ones(X.shape[0], dtype=_np.int32) # cluster labels
     lm_idx = _np.where(lm == 1)[0] # indeces of local maxima
+
+    import time
+    t0 = time.time()
+
     for count, i in enumerate(lm_idx): # for each local maximum
-        for j in neighbors[i]: # for each of its neighbors
-            if labels[i] == -1: # if not clustered yet
-                if j == 0:
-                    labels[i] = count
-                labels[j] = count
-            else:
-                if labels[j] == -1:
-                    labels[j] = labels[i]
+        label = labels[i]
+        if label == -1: # if lm not assigned yet
+            labels[neighbors[i]] = count
+        else:
+            # indeces of locs that were not assigned to any cluster
+            idx = [
+                neighbors[i][_]
+                for _ in _np.where(labels[neighbors[i]] == -1)[0]
+            ]
+            if len(idx): # if such a loc exists, assign it to a cluster
+                labels[idx] = label
+
+    dt = time.time() - t0
+    print(f"time taken: {dt} seconds")
 
     if frame is not None:
         labels = frame_analysis(labels, frame)
