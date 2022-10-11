@@ -186,9 +186,6 @@ def _cluster(X, radius, min_locs, frame):
     labels = -1 * _np.ones(X.shape[0], dtype=_np.int32) # cluster labels
     lm_idx = _np.where(lm == 1)[0] # indeces of local maxima
 
-    import time
-    t0 = time.time()
-
     for count, i in enumerate(lm_idx): # for each local maximum
         label = labels[i]
         if label == -1: # if lm not assigned yet
@@ -201,9 +198,6 @@ def _cluster(X, radius, min_locs, frame):
             ]
             if len(idx): # if such a loc exists, assign it to a cluster
                 labels[idx] = label
-
-    dt = time.time() - t0
-    print(f"time taken: {dt} seconds")
 
     if frame is not None:
         labels = frame_analysis(labels, frame)
