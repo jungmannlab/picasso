@@ -238,23 +238,15 @@ def watcher():
     Streamlit page to show the watcher page.
     """
     st.write("# Watcher")
-    st.text(
-        "- Set up a file watcher to process files in a folder with pre-defined"
+    st.write(
+        " \n- Set up a file watcher to process files in a folder with pre-defined"
         "  settings automatically."
-    )
-    st.text(
-        "- All new files and raw files that aren't yet in the database will be"
+        " \n- All new files and raw files that aren't yet in the database will be"
         "  processed."
-    )
-    st.text(
-        "- You can define different parameter groups so that a file will be"
+        " \n- You can define different parameter groups so that a file will be"
         "  processed with different settings."
-    )
-    st.text(
-        "- You can also chain custom commands to the watcher."
-    )
-    st.text(
-        f"- The watcher will check for the following filetypes: {FILETYPES}"
+        " \n- You can also chain custom commands to the watcher."
+        f" \n- The watcher will check for the following filetypes: {FILETYPES}"
     )
 
     st.write("## Existing watchers")
