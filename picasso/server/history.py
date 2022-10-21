@@ -189,8 +189,8 @@ def history():
 
         fields = c1.multiselect("Fields to plot", options, DEFAULT_PLOTS)
         groups = c2.text_input(
-            "Enter tags to group (seperate by comma)"
-            "\nGroups will be color-coded."
+            "Enter tags to group (seperate by comma and no space)"
+            "\nGroups will be color-coded in scatter and box plots."
         )
         groups_ = groups.split(",")
 
