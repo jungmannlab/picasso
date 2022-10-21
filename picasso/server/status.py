@@ -77,7 +77,7 @@ def status():
 
             if path not in df["filename"].tolist():
                 base, ext = os.path.splitext(path)
-                target = base+'_locs.hdf5'
+                target = base + '_locs.hdf5'
 
                 if not os.path.isfile(target):
                     st.error(f"File {target} does not exist.")
