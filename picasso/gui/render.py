@@ -11463,7 +11463,6 @@ class Window(QtWidgets.QMainWindow):
 
             # save all channels one by one
             elif channel is (len(self.view.locs_paths)):
-                print("Save all at once.")
                 suffix, ok = QtWidgets.QInputDialog.getText(
                     self,
                     "Input Dialog",
@@ -11472,7 +11471,7 @@ class Window(QtWidgets.QMainWindow):
                     "_arender",
                 )
                 if ok:
-                    for channel in tqdm(range(len(self.view.locs_paths))):
+                    for channel in range(len(self.view.locs_paths)):
                         base, ext = os.path.splitext(
                             self.view.locs_paths[channel]
                         )
@@ -11488,7 +11487,7 @@ class Window(QtWidgets.QMainWindow):
                         io.save_locs(
                             out_path, self.view.all_locs[channel], info
                         )
-            # save a single channel
+            # save one channel only
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_render.hdf5"
@@ -11511,8 +11510,8 @@ class Window(QtWidgets.QMainWindow):
 
         channel = self.view.save_channel("Save picked localizations")
         if channel is not None:
+            # combine channels to one .hdf5
             if channel is (len(self.view.locs_paths) + 1):
-                print("Combine all channels")
                 base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + "_picked_multi.hdf5"
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -11523,12 +11522,23 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if path:
                     self.view.save_picked_locs_multi(path)
+            # save channels one by one
             elif channel is (len(self.view.locs_paths)):
-                print("Save all at once")
-                for channel in range(len(self.view.locs_paths)):
-                    base, ext = os.path.splitext(self.view.locs_paths[channel])
-                    out_path = base + "_apicked.hdf5"
-                    self.view.save_picked_locs(out_path, channel)
+                suffix, ok = QtWidgets.QInputDialog.getText(
+                    self,
+                    "Input Dialog",
+                    "Enter suffix",
+                    QtWidgets.QLineEdit.Normal,
+                    "_apicked",
+                )
+                if ok:
+                    for channel in range(len(self.view.locs_paths)):
+                        base, ext = os.path.splitext(
+                            self.view.locs_paths[channel]
+                        )
+                        out_path = base + suffix + ".hdf5"
+                        self.view.save_picked_locs(out_path, channel)
+            # save one channel only
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_picked.hdf5"
