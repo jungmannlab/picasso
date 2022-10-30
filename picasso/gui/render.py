@@ -4458,7 +4458,7 @@ class SlicerDialog(QtWidgets.QDialog):
     patches : list
         contains plt.artists used in creating histograms
     pick_slice : QDoubleSpinBox
-        contains slice thickness (pixels)
+        contains slice thickness (nm)
     separate_check : QCheckBox
         tick to save channels separately when exporting slice
     sl : QSlider
@@ -4476,7 +4476,7 @@ class SlicerDialog(QtWidgets.QDialog):
     window : QMainWindow
         instance of the main window
     zcoord : list
-        z coordinates of each channel of localization (pixels);
+        z coordinates of each channel of localization (nm);
         added when loading each channel (see View.add)
 
     Methods
@@ -4508,13 +4508,13 @@ class SlicerDialog(QtWidgets.QDialog):
         vbox.addWidget(slicer_groupbox)
         slicer_grid = QtWidgets.QGridLayout(slicer_groupbox)
         slicer_grid.addWidget(
-            QtWidgets.QLabel("Slice Thickness [pixels]:"), 0, 0
+            QtWidgets.QLabel("Slice Thickness [nm]:"), 0, 0
         )
         self.pick_slice = QtWidgets.QDoubleSpinBox()
-        self.pick_slice.setRange(0.0001, 999)
-        self.pick_slice.setValue(0.3846)
-        self.pick_slice.setSingleStep(0.001)
-        self.pick_slice.setDecimals(4)
+        self.pick_slice.setRange(0.01, 99999)
+        self.pick_slice.setValue(50)
+        self.pick_slice.setSingleStep(1)
+        self.pick_slice.setDecimals(2)
         self.pick_slice.setKeyboardTracking(False)
         self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
         slicer_grid.addWidget(self.pick_slice, 0, 1)
@@ -4528,7 +4528,7 @@ class SlicerDialog(QtWidgets.QDialog):
         self.sl.valueChanged.connect(self.on_slice_position_changed)
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
 
-        self.figure = plt.figure(figsize=(3, 3))
+        self.figure, self.ax = plt.subplots(1, figsize=(3, 3))
         self.canvas = FigureCanvas(self.figure)
         slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
 
@@ -4561,10 +4561,11 @@ class SlicerDialog(QtWidgets.QDialog):
 
         # slice thickness
         slice = self.pick_slice.value()
-        ax = self.figure.add_subplot(111)
+        # ax = self.figure.add_subplot(111)
 
-        # clear the plot
-        plt.cla()
+        # # clear the plot
+        # plt.cla()
+        self.ax.clear()
         n_channels = len(self.zcoord)
 
         # get colors for each channel (from dataset dialog)
@@ -4586,7 +4587,7 @@ class SlicerDialog(QtWidgets.QDialog):
         # plot histograms
         self.patches = []
         for i in range(len(self.zcoord)):
-            _, _, patches = plt.hist(
+            _, _, patches = self.ax.hist(
                 self.zcoord[i],
                 self.bins,
                 density=True,
@@ -4595,9 +4596,9 @@ class SlicerDialog(QtWidgets.QDialog):
             )
             self.patches.append(patches)
 
-        plt.xlabel("z-coordinate [pixels]")
-        plt.ylabel("Rel. frequency")
-        plt.title(r"$\mathrm{Histogram\ of\ Z:}$")
+        self.ax.set_xlabel("z-coordinate [nm]")
+        self.ax.set_ylabel("Rel. frequency")
+        self.ax.set_title(r"$\mathrm{Histogram\ of\ Z:}$")
         self.canvas.draw()
         self.sl.setMaximum(len(self.bins) - 2)
         self.sl.setValue(len(self.bins) / 2)
