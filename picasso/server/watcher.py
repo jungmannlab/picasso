@@ -39,10 +39,10 @@ def check_new(path: str, processed: dict, logfile: str):
     all_ = [os.path.join(path, _) for _ in all_]
 
     new = [
-        _ 
-        for _ in all_ 
-        if os.path.normpath(_) 
-        not in processed.keys() 
+        _
+        for _ in all_
+        if os.path.normpath(_)
+        not in processed.keys()
         and _.endswith(FILETYPES)
     ]
     locs = [_ for _ in all_ if _.endswith("_locs.hdf5")]
@@ -53,7 +53,7 @@ def check_new(path: str, processed: dict, logfile: str):
             f"{datetime.now()} Checking: {len(all_)} files,"
             f"  {len(new)} unprocessed with valid ending and "
             f"{len(locs)} `_locs.hdf5` files in {path}."
-        ),    
+        ),
     )
 
     for _ in new:
@@ -96,16 +96,16 @@ def get_children_files(file: str, checked: list):
     """
     dir_ = os.path.dirname(file)
     files_in_folder = [
-        os.path.abspath(os.path.join(dir_, _)) 
+        os.path.abspath(os.path.join(dir_, _))
         for _ in os.listdir(dir_)
     ]
     # Multiple ome tifs; Pos0.ome.tif', Pos0_1.ome.tif', Pos0_2.ome.tif'
     files_in_folder = [
         _
         for _ in files_in_folder
-        if _.startswith(file[:-8]) 
-        and _ not in checked 
-        and _.endswith(".ome.tif") 
+        if _.startswith(file[:-8])
+        and _ not in checked
+        and _.endswith(".ome.tif")
         and 'MMStack_Pos0' in _
     ]
 
@@ -149,11 +149,11 @@ def print_to_file(path, text):
 
 
 def check_new_and_process(
-    settings_list: dict, 
-    path: str, 
-    command: str, 
-    logfile: str, 
-    existing: list, 
+    settings_list: dict,
+    path: str,
+    command: str,
+    logfile: str,
+    existing: list,
     update_time: int,
 ):
     """
@@ -163,7 +163,7 @@ def check_new_and_process(
         path (str): Path to folder.
         command (str): Command to execute after processing.
         logfile (str): Path to logfile.
-        existing (list): existing files 
+        existing (list): existing files
         update_time (int): Refresh every x minutes
     """
 
@@ -179,7 +179,7 @@ def check_new_and_process(
         new, processed = check_new(path, processed, logfile)
 
         if len(new) > 0:
-            file = os.path.abspath(new[0])
+            file = os.path.abspath(new[0]) # todo: are the files are ordered alphabetically?
             print_to_file(logfile, f"{datetime.now()} New file {file}")
             children = wait_for_completion(file)
             print_to_file(logfile, f"{datetime.now()} Children {children}")
@@ -209,7 +209,7 @@ def check_new_and_process(
                         )
 
                     print_to_file(
-                        logfile, 
+                        logfile,
                         f"{datetime.now()} Executing {to_execute}."
                     )
 
@@ -280,17 +280,29 @@ def watcher():
 
     st.write("## New watcher")
     folder = st.text_input("Enter folder to watch.", os.getcwd())
+    folder_exists = False
 
     if not os.path.isdir(folder):
-        st.error("Not a valid path.")
+        folder_dir = os.path.dirname(folder)
+        if os.path.isdir(folder_dir):
+            # make the new folder
+            if st.button("Create a new folder?"):
+                os.mkdir(folder)
+                st.write("The folder was created.")
+                folder_exists = True
+        else:
+            st.error("Directory not found, new folder could not be created.")
     else:
+        folder_exists = True
+
+    if folder_exists:
         with st.expander("Settings"):
 
             n_columns = int(
                 st.number_input(
-                    "Number of Parameter Groups", 
-                    min_value=1, 
-                    max_value=10, 
+                    "Number of Parameter Groups",
+                    min_value=1,
+                    max_value=10,
                     step=1,
                 )
             )
@@ -375,8 +387,8 @@ def watcher():
                         col.error("Not a valid file.")
 
                     settings[i]["magnification_factor"] = col.number_input(
-                        label="Magnification factor:", 
-                        value=0.79, 
+                        label="Magnification factor:",
+                        value=0.79,
                         key=f"magfac_{i}",
                     )
                 else:
@@ -445,11 +457,11 @@ def watcher():
                 p = Process(
                     target=check_new_and_process,
                     args=(
-                        settings_list, 
-                        folder, 
-                        command, 
-                        logfile, 
-                        existing, 
+                        settings_list,
+                        folder,
+                        command,
+                        logfile,
+                        existing,
                         update_time,
                     ),
                 )
