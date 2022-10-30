@@ -25,6 +25,8 @@ class aclass:
 def check_new(path: str, processed: dict, logfile: str):
     """Check if files in a folder are not processed yet.
     Files are considered processed if they have a _locs.hdf5 file.
+    Paths to detected files are ordered alphabetically to allow for finding
+    of the children files later.
 
     Args:
         path (str): Folder to check.
@@ -64,6 +66,7 @@ def check_new(path: str, processed: dict, logfile: str):
                 new.remove(_)
                 break
 
+    new = sorted(new)
     return new, processed
 
 
