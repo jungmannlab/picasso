@@ -14,7 +14,7 @@ import sys
 DEFAULT_UPDATE_TIME = 1
 DEFAULT_RUNNING_TIME = 12
 
-FILETYPES = (".raw", ".ome.tif", ".ims")
+FILETYPES = (".raw", ".tif", ".ims")
 from picasso.__main__ import _localize
 from picasso.io import load_movie
 
@@ -118,14 +118,25 @@ def get_children_files(file: str, checked: list):
         for _ in os.listdir(dir_)
     ]
     # Multiple ome tifs; Pos0.ome.tif', Pos0_1.ome.tif', Pos0_2.ome.tif'
-    files_in_folder = [
-        _
-        for _ in files_in_folder
-        if _.startswith(file[:-8])
-        and _ not in checked
-        and _.endswith(".ome.tif")
-        and 'MMStack_Pos0' in _
-    ]
+    if file.endswith(".ome.tif"):
+        files_in_folder = [
+            _
+            for _ in files_in_folder
+            if _.startswith(file[:-8])
+            and _ not in checked
+            and _.endswith(".ome.tif")
+            and 'MMStack_Pos0' in _
+        ]
+    # Multiple NDTiffStack files
+    elif file.endswith(".tif"):
+        files_in_folder = [
+            _
+            for _ in files_in_folder
+            if _.startswith(file[:-4])
+            and _ not in checked
+            and _.endswith(".tif")
+            and 'NDTiffStack' in _
+        ]
 
     for _ in files_in_folder:
         wait_for_change(_)
@@ -433,7 +444,7 @@ def watcher():
             )
             running_time = st.number_input(
                 "Total running time (hours):",
-                DEFAULT_RUNNING_TIME,
+                value=DEFAULT_RUNNING_TIME,
                 min_value=1,
                 max_value=72,
             )
