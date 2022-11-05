@@ -1,10 +1,36 @@
 Changelog
 =========
 
-Last change: 08-AUG-2022 MTS
+Last change: 15-NOV-2022 MTS
+
+0.5.0
+-----
+- 3D rendering rotation window
+- Multiple .hdf5 files can be loaded when using File->Open
+- Localizations can be combined when saving
+- Render window restart (Remove all localizations)
+- Multiple pyplot colormaps available in Render
+- View->Files in Render substantially changed (many new colors, close button works, etc)
+- Changing Render's FOV with W, A, S and D
+- Render's FOV can be numerically changed, saved and loaded in View->Info
+- Pick similar is much faster
+- Remove localization in picks
+- Fast rendering (display a fraction of localizations)
+- .txt file with drift can be applied to localizations in Render
+- New clustering algorithm (SMLM clusterer)
+- Test clusterer window in Render
+- Nearest neighbor analysis in Render
+- Server's watcher is compatible with .tif files created by MicroManager on-time
+- Numerical filter in Filter
+- New file format in Localize - .nd2 
+- Localize can read NDTiffStack.tif files
+- Docstrings for Render
+- Plugins can be added to all Picasso modules
+- Many other improvements, bug fixes, etc.
+
 
 0.4.6-10
--------
+--------
 - Logging for Watcher of Picasso Server
 - Mode for multiple parameter groups for Watcher
 - Fix for installation on Mac systems
@@ -18,6 +44,7 @@ Last change: 08-AUG-2022 MTS
 - Fixed a bug where GPUFit was greyed out, added better installation instructions for GPUfit
 - More documentation
 - Added dockerfile
+
 
 0.4.1
 -----
