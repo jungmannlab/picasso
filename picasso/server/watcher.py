@@ -15,6 +15,7 @@ DEFAULT_UPDATE_TIME = 1
 
 FILETYPES = (".raw", ".ome.tif", ".ims")
 from picasso.__main__ import _localize
+from picasso.io import load_movie
 
 
 class aclass:
@@ -23,7 +24,9 @@ class aclass:
 
 
 def check_new(path: str, processed: dict, logfile: str):
-    """Check if files in a folder are not processed yet.
+    """Check if files in a folder and its direct subfolders are not 
+    processed yet.
+    Subfolders are checked for compatibilty with MicroManager.
     Files are considered processed if they have a _locs.hdf5 file.
     Paths to detected files are ordered alphabetically to allow for finding
     of the children files later.
@@ -37,8 +40,19 @@ def check_new(path: str, processed: dict, logfile: str):
         _type_: _description_
     """
 
+    # files directly in path
     all_ = os.listdir(path)
     all_ = [os.path.join(path, _) for _ in all_]
+
+    # list of paths to the direct subfolders in path
+    subfolders = [_ for _ in all_ if os.path.isdir(_)]
+
+    all_sub = []
+    for folder in subfolders:
+        files = os.listdir(folder)
+        all_sub += [os.path.join(folder, _) for _ in files]
+
+    all_ = all_ + all_sub
 
     new = [
         _
@@ -182,41 +196,43 @@ def check_new_and_process(
         new, processed = check_new(path, processed, logfile)
 
         if len(new) > 0:
-            file = os.path.abspath(new[0]) # todo: are the files are ordered alphabetically?
+            file = os.path.abspath(new[0])
             print_to_file(logfile, f"{datetime.now()} New file {file}")
             children = wait_for_completion(file)
             print_to_file(logfile, f"{datetime.now()} Children {children}")
             try:
-                for settings in settings_list:
+                # do not localize tif files with only a single frame
+                n_frames = len(load_movie(file)[0])
+                if n_frames > 1:
+                    for settings in settings_list:
+                        if len(settings_list) > 1:
+                            print_to_file(
+                                logfile,
+                                (
+                                    f"{datetime.now()} Processing group "
+                                    f" {settings['suffix']}"
+                                ),
+                            )
 
-                    if len(settings_list) > 1:
+                        settings["files"] = file
+
+                        args_ = aclass(**settings)
+                        _localize(args_)
+
+                    if command != "":
+
+                        if "$FILENAME" in command:
+                            to_execute = command[:]
+                            to_execute = to_execute.replace(
+                                "$FILENAME", f'"{file}"'
+                            )
+
                         print_to_file(
                             logfile,
-                            (
-                                f"{datetime.now()} Processing group "
-                                f" {settings['suffix']}"
-                            ),
+                            f"{datetime.now()} Executing {to_execute}."
                         )
 
-                    settings["files"] = file
-
-                    args_ = aclass(**settings)
-                    _localize(args_)
-
-                if command != "":
-
-                    if "$FILENAME" in command:
-                        to_execute = command[:]
-                        to_execute = to_execute.replace(
-                            "$FILENAME", f'"{file}"'
-                        )
-
-                    print_to_file(
-                        logfile,
-                        f"{datetime.now()} Executing {to_execute}."
-                    )
-
-                    subprocess.run(to_execute)
+                        subprocess.run(to_execute)
 
             except KeyboardInterrupt:
                 raise
