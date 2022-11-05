@@ -21,7 +21,7 @@ def load_file(path: str):
 
 
 @st.cache
-def picasso_render(locs: np.ndarray, viewport: tuple, oversampling: int):
+def picasso_render(locs: np.ndarray, viewport: tuple, oversampling: float):
     """Helper function to render a viewport. Cached.
 
     Args:
@@ -69,7 +69,7 @@ def preview():
                 st.write("## File preview")
 
                 st.info(
-                    "Perfmance Warning: This preview will render the full image, so it might be slow for large oversmapling."
+                    "Performance Warning: This preview will render the full image, so it might be slow for large oversmapling."
                 )
 
                 with st.spinner("Loading file"):
@@ -87,7 +87,7 @@ def preview():
                         c1, c2, c3 = st.columns(3)
 
                         oversampling = c1.number_input(
-                            "Oversampling", value=5, min_value=1, max_value=40
+                            "Oversampling", value=5.0, min_value=1, max_value=40
                         )
 
                         image = picasso_render(locs, viewport, oversampling)
