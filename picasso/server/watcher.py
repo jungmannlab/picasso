@@ -12,6 +12,7 @@ from datetime import datetime
 import sys
 
 DEFAULT_UPDATE_TIME = 1
+DEFAULT_RUNNING_TIME = 12
 
 FILETYPES = (".raw", ".ome.tif", ".ims")
 from picasso.__main__ import _localize
@@ -94,7 +95,7 @@ def wait_for_change(file: str):
     filesize = os.path.getsize(file)
     writing = True
     while writing:
-        time.sleep(2)
+        time.sleep(15)
         new_filesize = os.path.getsize(file)
         if filesize == new_filesize:
             writing = False
@@ -144,7 +145,7 @@ def wait_for_completion(file: str):
     if file.endswith(".ome.tif"):
         checked = [file]
 
-        time.sleep(2)
+        time.sleep(15)
 
         children = get_children_files(file, checked)
         checked.extend(children)
@@ -172,6 +173,7 @@ def check_new_and_process(
     logfile: str,
     existing: list,
     update_time: int,
+    running_time: int,
 ):
     """
     Checks a folder for new files and processes them with defined settigns.
@@ -182,7 +184,11 @@ def check_new_and_process(
         logfile (str): Path to logfile.
         existing (list): existing files
         update_time (int): Refresh every x minutes
+        running_time (int): Total running time, watcher turns off after that
     """
+
+    t0 = time.time()
+    running_time *= 3600 # convert to seconds
 
     print_to_file(logfile, f"{datetime.now()} Started watcher for {path}.")
     print_to_file(logfile, f"{datetime.now()} Settings {settings_list}.")
@@ -192,7 +198,7 @@ def check_new_and_process(
     for _ in existing:
         processed[_] = True
 
-    while True:
+    while dt < running_time:
         new, processed = check_new(path, processed, logfile)
 
         if len(new) > 0:
@@ -250,6 +256,7 @@ def check_new_and_process(
             print(f"{datetime.now()} File {file} processed.")
 
         time.sleep(update_time * 60)
+        dt = time.time() - t0
 
 
 def watcher():
@@ -424,6 +431,12 @@ def watcher():
             update_time = st.number_input(
                 "Update time (scan every x-th minute):", DEFAULT_UPDATE_TIME
             )
+            running_time = st.number_input(
+                "Total running time (hours):",
+                DEFAULT_RUNNING_TIME,
+                min_value=1,
+                max_value=72,
+            )
 
             logfile_dir = os.path.dirname(localize._db_filename())
             now_str = datetime.now().strftime("%Y-%m-%d %H_%M_%S")
@@ -482,6 +495,7 @@ def watcher():
                         logfile,
                         existing,
                         update_time,
+                        running_time,
                     ),
                 )
                 p.start()
