@@ -54,7 +54,7 @@ General
 ^^^^^^^
 Adjust the general display settings.
 
-Zooom
+Zoom
 +++++
 Set the magnification factor.
 

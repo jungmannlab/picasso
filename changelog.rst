@@ -19,6 +19,7 @@ Last change: 15-NOV-2022 MTS
 - .txt file with drift can be applied to localizations in Render
 - New clustering algorithm (SMLM clusterer)
 - Test clusterer window in Render
+- Option to calculate cluster centers
 - Nearest neighbor analysis in Render
 - Server's watcher is compatible with .tif files created by MicroManager on-time
 - Numerical filter in Filter

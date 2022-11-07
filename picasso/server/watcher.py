@@ -199,6 +199,7 @@ def check_new_and_process(
     """
 
     t0 = time.time()
+    dt = 0
     running_time *= 3600 # convert to seconds
 
     print_to_file(logfile, f"{datetime.now()} Started watcher for {path}.")
@@ -209,7 +210,7 @@ def check_new_and_process(
     for _ in existing:
         processed[_] = True
 
-    while dt < running_time:
+    while True:
         new, processed = check_new(path, processed, logfile)
 
         if len(new) > 0:
@@ -268,6 +269,7 @@ def check_new_and_process(
 
         time.sleep(update_time * 60)
         dt = time.time() - t0
+        print_to_file(logfile, f"{np.round(dt, 1)} seconds passed.")
 
 
 def watcher():
