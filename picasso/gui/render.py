@@ -5300,8 +5300,8 @@ class View(QtWidgets.QLabel):
             fit_in_view = len(self.locs) == 0
             paths = sorted(paths)
             pd = lib.ProgressDialog(
-                    "Loading channels", 0, len(paths), self
-                )
+                "Loading channels", 0, len(paths), self
+            )
             pd.setModal(False)
             pd.set_value(0)
             for i, path in enumerate(paths):

@@ -43,6 +43,15 @@ Picking of regions of interest
 7. (Optional) Statistics about each pick region can be saved by selecting ``File > Save pick properties``. The resulting HDF5 file is not a localization file. Instead, it holds a data set called ``groups`` in which the rows show statistical values for each pick region.
 8. (Optional) The picked positions and diameter itself can be saved by selecting ``File > Save pick regions``. Such saved pick information can also be loaded into ``Picasso: Render`` by selecting ``File > Load pick regions``.
 
+3D rotation window
+------------------
+
+The 3D rotation window allows the user to render 3D localization data. To use it, select a single pick region (``Tools > Pick``) and click ``View > Update rotation window``. Some of the display settings (colors, blur method, etc.) are automatically uploaded to the rotation window. 
+
+The user may perform multiple actions in the rotation window, including: saving rotated localizations, building animations (.mp4 format), rotating by a specified angle, etc.
+
+There are several things to keep in mind when using the rotation window. Firstly, using individual localization precision is very slow and is not recommended as a default blur method. Also, the size of the rotation window can be altered, however, if it becomes too large, rendering may start to lag.
+
 Dialogs
 -------
 
@@ -68,7 +77,7 @@ Click ``show minimap`` to display a minimap in the upper left corner to localize
 
 Contrast
 ^^^^^^^^
-Define the minimum and maximum density of the and select a colormap. Available colormaps are ['gray', hot', 'inferno', 'magma', 'plasma', 'viridis']. The selected colormap will be saved when closing render.
+Define the minimum and maximum density of the and select a colormap. Over 100 colormaps are available. The last option ``Custom`` requires the user to load their own ``.npy`` file containg a numpy array with a custom colormap. The selected colormap will be saved when closing render.
 
 Blur
 ^^^^
@@ -120,6 +129,10 @@ File
 Open [Ctrl+O]
 ^^^^^^^^^^^^^
 Open an .hdf5 file to open in render.
+
+Open rotated localizations [Ctrl+Shift+O]
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Opens localizations that were saved via the rotation window, see above.
 
 Save localizations [Ctrl+S]
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -184,6 +197,10 @@ Export as .3d for ViSP
 ++++++++++++++++++++++
 Export as .3d file to be used ViSP.
 
+Remove all localizations
+^^^^^^^^^^^^^^^^^^^^^^^^
+Removes all .hdf5 files loaded, restarts the render window.
+
 View
 ~~~~
 
@@ -215,6 +232,10 @@ Slice (3D)
 ^^^^^^^^^^
 Opens the slicer dialog which allows for slicing through 3D datasets.
 
+Update rotation window (3D) [Ctrl+Shift+R]
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Opens/updates rotation window, see above. Requires a single picked region of interest to be selected.
+
 Show info
 ^^^^^^^^^
 Shows info for the current dataset. See Info Dialog.
@@ -242,6 +263,14 @@ Define the settings of the tools, i.e., the radius of the pick and an option to 
 Pick similar (CTRL + Shift + P)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 Automatically identifies picks that are similar to the current picks.
+
+Remove localizations in picks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Remove localizations found in picked region(s) of interest. Can be applied to separate or all channels simultaneously.
+
+Move to pick
+^^^^^^^^^^^^
+Changes FoV to display a pick region specified by the user.
 
 Show trace (CTRL + R)
 ^^^^^^^^^^^^^^^^^^^^^
@@ -279,30 +308,17 @@ Subtract pick regions
 ^^^^^^^^^^^^^^^^^^^^^^
 Allows loading another pick regions file to subtract from the currently selected picks. Can be slow for a large number of picks.
 
-Show FRET traces
-^^^^^^^^^^^^^^^^
-Allows showing FRET traces for picks. This requires to have an acceptor and donor dataset loaded. Both channels should be aligned (i.e., via the ``Align channels (RCC or from picked)`` function). ``Show FRET traces`` will calculate a FRET intensity when two single-molecule events in one pick occur in the same frame and display a trace for these events. The intensity is calculated as I = I_A/(I_A+I_D). Here, I_A and I_D are the photon values of the localization minus the calculated background. Only FRET events > 0 and < 1 will be displayed. 
-
-Calculate FRET in picks
-^^^^^^^^^^^^^^^^^^^^^^^
-Allows calculating FRET for several picks. This requires to have an acceptor and donor dataset loaded. Both channels should be aligned (i.e., via the Align channels function). The FRET intensity is calculated when two single-molecule events in one pick occur in the same frame. The intensity is calculated as I = I_A/(I_A+I_D). Here, I_A and I_D are the photon values of the localization minus the calculated background. Only FRET events in a range of > 0 and < 1 are kept. 
-
-After calculation, a histogram of the FRET intensities is displayed. Additionally, all localizations with a valid FRET intensity are saved in an hdf5 file. The localizations have an additional column with the FRET intensities. This allows reloading the FRET-localizations in render. To color-code for FRET-intensity, use the render properties function and select FRET. Additionally, a txt document is saved containing a list of the FRET values as it was used to display the histogram.
-
-Note: In order to calculate meaningful FRET data, the selected picks should contain data in the donor and acceptor channel. To ensure this, a sample workflow could be as follows:
-- Align the channels via ``Align channels (RCC or from picked)``
-- Pick some regions in one channel (i.e., the donor channel)
-- Calculate the pick properties 
-- Adjust the ``Pick similar`` parameter accordingly and pick similar
-- Filter in the other channel (i.e., the acceptor channel) via ``Filter picks by locs`` to have at least a minimum number of localizations
-- Use the calculate FRET in picks function
-
 Cluster in pick (k-means)
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Allows performing k-means clustering in picks. Users can specify the number of clusters and deselect individual clusters. Picks can be kept or removed. After looping through all picks an hdf5 file with the cluster information can be saved.
 
 Mask image
 ^^^^^^^^^^
+Opens a dialog that allows the user to specify a mask for filtering localizations within and outside it.
+
+Fast rendering
+^^^^^^^^^^^^^^
+Allows the user to display only a fraction of localizations to speed up rendering.
 
 Postprocess
 ~~~~~~~~~~~
@@ -326,6 +342,10 @@ Undo previous drift correction (only 2D part). Can be pressed again to redo.
 Show drift
 ^^^^^^^^^^
 After drift correction, a drift file is created. If the drift file is present, the drift can be displayed with this option.
+
+Apply drift from an external file
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Applies drift from a user-specified. txt file. Keep in mind that the .txt drift files after consecutive undrifting rounds produce cumulative drift. Therefore, if 3 rounds of undrifing were performed, only the last file specifies the drift calculated in the 3 steps.
 
 Remove group info
 ^^^^^^^^^^^^^^^^^
@@ -353,16 +373,26 @@ Combines all localizations in each pick to one.
 
 Apply expressions to localizations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
 This tool allows you to apply expressions to localizations.
 
-dbscan
+DBSCAN
 ^^^^^^
 Cluster localizations with the dbscan clustering algorithm.
 
-hdbscan
+HDBSCAN
 ^^^^^^^
 Cluster localizations with the hdbscan clustering algorithm.
+
+SMLM clusterer
+^^^^^^^^^^^^^^
+
+Test clusterer
+^^^^^^^^^^^^^^
+Opens a dialog where different clustering parameters can be checked on the loaded dataset. Requires a single pick region of interest to be selected.
+
+Nearest Neighbor Analysis
+^^^^^^^^^^^^^^^^^^^^^^^^^
+Calculates distances to the ``k``-th nearest neighbors between two channels (can be the same channel). ``k`` is defined by the user. The distances are stored in nm as a .csv file.
 
 Examples
 ++++++++
