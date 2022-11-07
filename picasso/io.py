@@ -366,7 +366,7 @@ class ND2Movie(AbstractPicassoMovie):
             self.nd2data.metadata['num_frames'],
             self.nd2data.metadata['width'],
             self.nd2data.metadata['height'],
-            ]
+        ]
 
     def info(self):
         return self.meta
