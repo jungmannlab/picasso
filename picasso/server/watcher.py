@@ -12,11 +12,9 @@ from datetime import datetime
 import sys
 
 DEFAULT_UPDATE_TIME = 1
-DEFAULT_RUNNING_TIME = 12
 
-FILETYPES = (".raw", ".tif", ".ims")
+FILETYPES = (".raw", ".ome.tif", ".ims")
 from picasso.__main__ import _localize
-from picasso.io import load_movie
 
 
 class aclass:
@@ -25,12 +23,8 @@ class aclass:
 
 
 def check_new(path: str, processed: dict, logfile: str):
-    """Check if files in a folder and its direct subfolders are not 
-    processed yet.
-    Subfolders are checked for compatibilty with MicroManager.
+    """Check if files in a folder are not processed yet.
     Files are considered processed if they have a _locs.hdf5 file.
-    Paths to detected files are ordered alphabetically to allow for finding
-    of the children files later.
 
     Args:
         path (str): Folder to check.
@@ -41,36 +35,15 @@ def check_new(path: str, processed: dict, logfile: str):
         _type_: _description_
     """
 
-    # files directly in path
     all_ = os.listdir(path)
     all_ = [os.path.join(path, _) for _ in all_]
 
-    # list of paths to the direct subfolders in path
-    subfolders = [_ for _ in all_ if os.path.isdir(_)]
-
-    all_sub = []
-    for folder in subfolders:
-        files = os.listdir(folder)
-        all_sub += [os.path.join(folder, _) for _ in files]
-
-    all_ = all_ + all_sub
-
-    new = [
-        _
-        for _ in all_
-        if os.path.normpath(_)
-        not in processed.keys()
-        and _.endswith(FILETYPES)
-    ]
+    new = [_ for _ in all_ if os.path.normpath(_) not in processed.keys() and _.endswith(FILETYPES)]
     locs = [_ for _ in all_ if _.endswith("_locs.hdf5")]
 
     print_to_file(
         logfile,
-        (
-            f"{datetime.now()} Checking: {len(all_)} files,"
-            f"  {len(new)} unprocessed with valid ending and "
-            f"{len(locs)} `_locs.hdf5` files in {path}."
-        ),
+        f"{datetime.now()} Checking: {len(all_)} files, {len(new)} unprocessed with valid ending and {len(locs)} `_locs.hdf5` files in {path}.",
     )
 
     for _ in new:
@@ -81,7 +54,6 @@ def check_new(path: str, processed: dict, logfile: str):
                 new.remove(_)
                 break
 
-    new = sorted(new)
     return new, processed
 
 
@@ -95,7 +67,7 @@ def wait_for_change(file: str):
     filesize = os.path.getsize(file)
     writing = True
     while writing:
-        time.sleep(15)
+        time.sleep(2)
         new_filesize = os.path.getsize(file)
         if filesize == new_filesize:
             writing = False
@@ -113,30 +85,13 @@ def get_children_files(file: str, checked: list):
         checked (list): List with files that are already checked.
     """
     dir_ = os.path.dirname(file)
-    files_in_folder = [
-        os.path.abspath(os.path.join(dir_, _))
-        for _ in os.listdir(dir_)
-    ]
+    files_in_folder = [os.path.abspath(os.path.join(dir_, _)) for _ in os.listdir(dir_)]
     # Multiple ome tifs; Pos0.ome.tif', Pos0_1.ome.tif', Pos0_2.ome.tif'
-    if file.endswith(".ome.tif"):
-        files_in_folder = [
-            _
-            for _ in files_in_folder
-            if _.startswith(file[:-8])
-            and _ not in checked
-            and _.endswith(".ome.tif")
-            and 'MMStack_Pos0' in _
-        ]
-    # Multiple NDTiffStack files
-    elif file.endswith(".tif"):
-        files_in_folder = [
-            _
-            for _ in files_in_folder
-            if _.startswith(file[:-4])
-            and _ not in checked
-            and _.endswith(".tif")
-            and 'NDTiffStack' in _
-        ]
+    files_in_folder = [
+        _
+        for _ in files_in_folder
+        if _.startswith(file[:-8]) and _ not in checked and _.endswith(".ome.tif") and 'MMStack_Pos0' in _
+    ]
 
     for _ in files_in_folder:
         wait_for_change(_)
@@ -156,7 +111,7 @@ def wait_for_completion(file: str):
     if file.endswith(".ome.tif"):
         checked = [file]
 
-        time.sleep(15)
+        time.sleep(2)
 
         children = get_children_files(file, checked)
         checked.extend(children)
@@ -178,13 +133,7 @@ def print_to_file(path, text):
 
 
 def check_new_and_process(
-    settings_list: dict,
-    path: str,
-    command: str,
-    logfile: str,
-    existing: list,
-    update_time: int,
-    running_time: int,
+    settings_list: dict, path: str, command: str, logfile: str, existing: list, update_time: int
 ):
     """
     Checks a folder for new files and processes them with defined settigns.
@@ -193,13 +142,9 @@ def check_new_and_process(
         path (str): Path to folder.
         command (str): Command to execute after processing.
         logfile (str): Path to logfile.
-        existing (list): existing files
+        existing (list): existing files 
         update_time (int): Refresh every x minutes
-        running_time (int): Total running time, watcher turns off after that
     """
-
-    t0 = time.time()
-    running_time *= 3600 # convert to seconds
 
     print_to_file(logfile, f"{datetime.now()} Started watcher for {path}.")
     print_to_file(logfile, f"{datetime.now()} Settings {settings_list}.")
@@ -209,7 +154,7 @@ def check_new_and_process(
     for _ in existing:
         processed[_] = True
 
-    while dt < running_time:
+    while True:
         new, processed = check_new(path, processed, logfile)
 
         if len(new) > 0:
@@ -218,45 +163,33 @@ def check_new_and_process(
             children = wait_for_completion(file)
             print_to_file(logfile, f"{datetime.now()} Children {children}")
             try:
-                # do not localize tif files with only a single frame
-                n_frames = len(load_movie(file)[0])
-                if n_frames > 1:
-                    for settings in settings_list:
-                        if len(settings_list) > 1:
-                            print_to_file(
-                                logfile,
-                                (
-                                    f"{datetime.now()} Processing group "
-                                    f" {settings['suffix']}"
-                                ),
-                            )
+                for settings in settings_list:
 
-                        settings["files"] = file
-
-                        args_ = aclass(**settings)
-                        _localize(args_)
-
-                    if command != "":
-
-                        if "$FILENAME" in command:
-                            to_execute = command[:]
-                            to_execute = to_execute.replace(
-                                "$FILENAME", f'"{file}"'
-                            )
-
+                    if len(settings_list) > 1:
                         print_to_file(
                             logfile,
-                            f"{datetime.now()} Executing {to_execute}."
+                            f"{datetime.now()} Processing group {settings['suffix']}",
                         )
 
-                        subprocess.run(to_execute)
+                    settings["files"] = file
+
+                    args_ = aclass(**settings)
+                    _localize(args_)
+
+                if command != "":
+
+                    if "$FILENAME" in command:
+                        to_execute = command[:]
+                        to_execute = to_execute.replace("$FILENAME", f'"{file}"')
+
+                    print_to_file(logfile, f"{datetime.now()} Executing {to_execute}.")
+
+                    subprocess.run(to_execute)
 
             except KeyboardInterrupt:
                 raise
             except Exception as e:
-                print_to_file(
-                    logfile, f"{datetime.now()} Exception {e} occured."
-                )
+                print_to_file(logfile, f"{datetime.now()} Exception {e} occured.")
 
             processed[file] = True
 
@@ -267,7 +200,6 @@ def check_new_and_process(
             print(f"{datetime.now()} File {file} processed.")
 
         time.sleep(update_time * 60)
-        dt = time.time() - t0
 
 
 def watcher():
@@ -275,16 +207,17 @@ def watcher():
     Streamlit page to show the watcher page.
     """
     st.write("# Watcher")
-    st.write(
-        " \n- Set up a file watcher to process files in a folder with pre-defined"
-        "  settings automatically."
-        " \n- All new files and raw files that aren't yet in the database will be"
-        "  processed."
-        " \n- You can define different parameter groups so that a file will be"
-        "  processed with different settings."
-        " \n- You can also chain custom commands to the watcher."
-        f" \n- The watcher will check for the following filetypes: {FILETYPES}"
+    st.text(
+        "- Set up a file watcher to process files in a folder with pre-defined settings automatically."
     )
+    st.text(
+        "- All new files and raw files that aren't yet in the database will be processed."
+    )
+    st.text(
+        "- You can define different parameter groups so that a file will be processed with different settings."
+    )
+    st.text("- You can also chain custom commands to the watcher.")
+    st.text(f"- The watcher will check for the following filetypes: {FILETYPES}")
 
     st.write("## Existing watchers")
     df_ = fetch_watcher()
@@ -298,9 +231,7 @@ def watcher():
                 engine = create_engine(
                     "sqlite:///" + localize._db_filename(), echo=False
                 )
-                df.to_sql(
-                    "watcher", con=engine, if_exists="replace", index=False
-                )
+                df.to_sql("watcher", con=engine, if_exists="replace", index=False)
 
                 st.success("Removed. Please refresh this page.")
 
@@ -317,37 +248,21 @@ def watcher():
 
     st.write("## New watcher")
     folder = st.text_input("Enter folder to watch.", os.getcwd())
-    folder_exists = False
 
     if not os.path.isdir(folder):
-        folder_dir = os.path.dirname(folder)
-        if os.path.isdir(folder_dir):
-            # make the new folder
-            if st.button("Create a new folder?"):
-                os.mkdir(folder)
-                st.write("The folder was created.")
-                folder_exists = True
-        else:
-            st.error("Directory not found, new folder could not be created.")
+        st.error("Not a valid path.")
     else:
-        folder_exists = True
-
-    if folder_exists:
         with st.expander("Settings"):
 
             n_columns = int(
                 st.number_input(
-                    "Number of Parameter Groups",
-                    min_value=1,
-                    max_value=10,
-                    step=1,
+                    "Number of Parameter Groups", min_value=1, max_value=10, step=1
                 )
             )
 
             if n_columns > 1:
                 st.text(
-                    "Parameter groups will be indiciated with a `pg` in the"
-                    "  filename, e.g. `filename_pg_1_locs.hdf`"
+                    "Parameter groups will be indiciated with a `pg` in the filename, e.g. `filename_pg_1_locs.hdf`"
                 )
 
             columns = st.columns(n_columns)
@@ -382,7 +297,7 @@ def watcher():
                     label="Baseline:", value=100, key=f"baseline_{i}"
                 )
                 settings[i]["sensitivity"] = col.number_input(
-                    label="Sensitivity:", value=1.0, key=f"sensitivity_{i}"
+                    label="Sensitivity:", value=1, key=f"sensitivity_{i}"
                 )
                 settings[i]["qe"] = col.number_input(
                     label="Quantum Efficiency:",
@@ -424,9 +339,7 @@ def watcher():
                         col.error("Not a valid file.")
 
                     settings[i]["magnification_factor"] = col.number_input(
-                        label="Magnification factor:",
-                        value=0.79,
-                        key=f"magfac_{i}",
+                        label="Magnification factor:", value=0.79, key=f"magfac_{i}"
                     )
                 else:
                     settings[i]["calib_file"] = None
@@ -442,12 +355,6 @@ def watcher():
             update_time = st.number_input(
                 "Update time (scan every x-th minute):", DEFAULT_UPDATE_TIME
             )
-            running_time = st.number_input(
-                "Total running time (hours):",
-                value=DEFAULT_RUNNING_TIME,
-                min_value=1,
-                max_value=72,
-            )
 
             logfile_dir = os.path.dirname(localize._db_filename())
             now_str = datetime.now().strftime("%Y-%m-%d %H_%M_%S")
@@ -461,14 +368,10 @@ def watcher():
                 for i in range(n_columns):
                     settings_selected = {}
                     settings_selected["box_side_length"] = settings[i]["box"]
-                    settings_selected["gradient"] = (
-                        settings[i]["min_net_gradient"]
-                    )
+                    settings_selected["gradient"] = settings[i]["min_net_gradient"]
                     settings_selected["gain"] = settings[i]["em_gain"]
                     settings_selected["baseline"] = settings[i]["baseline"]
-                    settings_selected["sensitivity"] = (
-                        settings[i]["sensitivity"]
-                    )
+                    settings_selected["sensitivity"] = settings[i]["sensitivity"]
                     settings_selected["qe"] = settings[i]["qe"]
                     settings_selected["pixelsize"] = settings[i]["pixelsize"]
                     settings_selected["fit_method"] = settings[i]["methods"]
@@ -476,9 +379,7 @@ def watcher():
                     if settings[i]["calib_file"]:
                         settings_selected["zc"] = settings[i]["calib_file"]
                     if settings[i]["magnification_factor"]:
-                        settings_selected["mf"] = (
-                            settings[i]["magnification_factor"]
-                        )
+                        settings_selected["mf"] = settings[i]["magnification_factor"]
 
                     settings_selected["database"] = True
                     if n_columns == 1:
@@ -499,15 +400,7 @@ def watcher():
 
                 p = Process(
                     target=check_new_and_process,
-                    args=(
-                        settings_list,
-                        folder,
-                        command,
-                        logfile,
-                        existing,
-                        update_time,
-                        running_time,
-                    ),
+                    args=(settings_list, folder, command, logfile, existing, update_time),
                 )
                 p.start()
 
@@ -526,9 +419,7 @@ def watcher():
                 engine = create_engine(
                     "sqlite:///" + localize._db_filename(), echo=False
                 )
-                df.to_sql(
-                    "watcher", con=engine, if_exists="append", index=False
-                )
+                df.to_sql("watcher", con=engine, if_exists="append", index=False)
 
                 for reset in range(3):
                     display.success(f"Restarting in {3-reset}.")
