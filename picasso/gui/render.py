@@ -5145,34 +5145,34 @@ class View(QtWidgets.QLabel):
         groups = np.unique(locs.group)
         groupcopy = locs.group.copy()
 
-        # check if groups are consecutive
-        if set(groups) == set(range(min(groups), max(groups) + 1)):
-            if len(groups) > 5000:
-                choice = QtWidgets.QMessageBox.question(
-                    self,
-                    "Group question",
-                    (
-                        "Groups are not consecutive"
-                        " and more than 5000 groups detected."
-                        " Re-Index groups? This may take a while."
-                    ),
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                )
-                if choice == QtWidgets.QMessageBox.Yes:
-                    pb = lib.ProgressDialog(
-                        "Re-Indexing groups", 0, len(groups), self
-                    )
-                    pb.set_value(0)
-                    for i in tqdm(range(len(groups))):
-                        groupcopy[locs.group == groups[i]] = i
-                        pb.set_value(i)
-                    pb.close()
-            else:
-                for i in tqdm(range(len(groups))):
-                    groupcopy[locs.group == groups[i]] = i
-        else:
-            for i in range(len(groups)):
-                groupcopy[locs.group == groups[i]] = i
+        # # check if groups are consecutive
+        # if set(groups) == set(range(min(groups), max(groups) + 1)):
+        #     if len(groups) > 5000:
+        #         choice = QtWidgets.QMessageBox.question(
+        #             self,
+        #             "Group question",
+        #             (
+        #                 "Groups are not consecutive"
+        #                 " and more than 5000 groups detected."
+        #                 " Re-Index groups? This may take a while."
+        #             ),
+        #             QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+        #         )
+        #         if choice == QtWidgets.QMessageBox.Yes:
+        #             pb = lib.ProgressDialog(
+        #                 "Re-Indexing groups", 0, len(groups), self
+        #             )
+        #             pb.set_value(0)
+        #             for i in tqdm(range(len(groups))):
+        #                 groupcopy[locs.group == groups[i]] = i
+        #                 pb.set_value(i)
+        #             pb.close()
+        #     else:
+        #         for i in tqdm(range(len(groups))):
+        #             groupcopy[locs.group == groups[i]] = i
+        # else:
+        for i in range(len(groups)):
+            groupcopy[locs.group == groups[i]] = i
         np.random.shuffle(groups)
         groups %= N_GROUP_COLORS
         return groups[groupcopy]
