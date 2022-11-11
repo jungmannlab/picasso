@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 15-NOV-2022 MTS
+Last change: 11-NOV-2022 MTS
 
 0.5.0
 -----

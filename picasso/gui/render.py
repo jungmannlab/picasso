@@ -15,7 +15,7 @@ import os.path
 import importlib, pkgutil
 from glob import glob
 from math import ceil
-from icecream import ic
+# from icecream import ic
 from functools import partial
 
 import lmfit
@@ -5252,7 +5252,7 @@ class View(QtWidgets.QLabel):
                 [np.median(locs.lpx), np.median(locs.lpy)]
             )
             if hasattr(locs, "group"):
-                if len(self.group_color) == 0:
+                if len(self.group_color) == 0 and locs.group.size:
                     self.group_color = self.get_group_color(self.locs[0])
 
         # render the loaded file
@@ -5305,7 +5305,7 @@ class View(QtWidgets.QLabel):
             pd.set_value(0)
             pd.setModal(False)
             for i, path in enumerate(paths):
-                self.add(path, render=False)
+                self.add(path, render=False)     
                 pd.set_value(i+1)
             if len(self.locs):  # if loading was successful
                 if fit_in_view:
@@ -8550,7 +8550,7 @@ class View(QtWidgets.QLabel):
             )            
 
         # if locs have group identity (e.g. clusters)
-        if hasattr(locs, "group"):
+        if hasattr(locs, "group") and locs.group.size:
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
                 kwargs, locs=locs, autoscale=autoscale, use_cache=use_cache

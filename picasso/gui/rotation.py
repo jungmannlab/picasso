@@ -27,7 +27,7 @@ from numpy.lib.recfunctions import stack_arrays
 
 from .. import io, render
 
-from icecream import ic
+# from icecream import ic
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
