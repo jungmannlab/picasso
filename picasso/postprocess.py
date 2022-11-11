@@ -37,8 +37,6 @@ from tqdm import trange as _trange
 from numpy.lib.recfunctions import stack_arrays
 from sklearn.neighbors import NearestNeighbors as NN
 
-from icecream import ic
-
 
 def get_index_blocks(locs, info, size, callback=None):
     locs = _lib.ensure_sanity(locs, info)
