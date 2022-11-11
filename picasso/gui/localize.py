@@ -18,7 +18,7 @@ import numpy as np
 import traceback
 import importlib, pkgutil
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
-from icecream import ic
+# from icecream import ic
 from collections import UserDict
 
 try:
