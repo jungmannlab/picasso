@@ -21,7 +21,7 @@ from scipy.spatial import cKDTree as _cKDTree
 
 from . import lib as _lib
 
-from icecream import ic
+# from icecream import ic
 
 CLUSTER_CENTERS_DTYPE_2D = [
     ("frame", "u4"),

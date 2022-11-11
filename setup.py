@@ -14,7 +14,7 @@ setup(
     url="https://github.com/jungmannlab/picasso",
     long_description=long_description,
     long_description_content_type="text/x-rst",
-    packages=["picasso", "picasso.gui", "picasso.server", "picasso.ext"],
+    packages=["picasso", "picasso.gui", "picasso.gui.plugins", "picasso.server", "picasso.ext"],
     entry_points={
         "console_scripts": ["picasso=picasso.__main__:main"],
     },
