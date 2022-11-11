@@ -188,7 +188,10 @@ def history():
         c1, c2 = st.columns(2)
 
         fields = c1.multiselect("Fields to plot", options, DEFAULT_PLOTS)
-        groups = c2.text_input("Enter tags to group (seperate by comma)")
+        groups = c2.text_input(
+            "Enter tags to group (seperate by comma and no space)."
+            "\nGroups will be color-coded in scatter and box plots."
+        )
         groups_ = groups.split(",")
 
         df["group"] = df["filename"].apply(lambda x: check_group(x, groups_))

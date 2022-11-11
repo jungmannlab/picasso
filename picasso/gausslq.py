@@ -112,7 +112,9 @@ def _compute_model(theta, grid, size, model_x, model_y, model):
     model_x[:] = _gaussian(
         theta[0], theta[4], grid
     )  # sx and sy are wrong with integrated gaussian
-    model_y[:] = _gaussian(theta[1], theta[5], grid)
+    model_y[:] = _gaussian(
+        theta[1], theta[5], grid
+    )
     _outer(model_y, model_x, size, model, theta[2], theta[3])
     return model
 

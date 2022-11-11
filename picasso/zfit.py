@@ -204,7 +204,13 @@ def _fit_z_target(z, sx, sy, cx, cy):
     # return (sx-wx)**2 + (sy-wy)**2
 
 
-def fit_z(locs, info, calibration, magnification_factor, filter=2):
+def fit_z(
+    locs, 
+    info, 
+    calibration, 
+    magnification_factor, 
+    filter=2
+):
     cx = _np.array(calibration["X Coefficients"])
     cy = _np.array(calibration["Y Coefficients"])
     z = _np.zeros_like(locs.x)
@@ -223,7 +229,12 @@ def fit_z(locs, info, calibration, magnification_factor, filter=2):
 
 
 def fit_z_parallel(
-    locs, info, calibration, magnification_factor, filter=2, asynch=False
+    locs, 
+    info, 
+    calibration, 
+    magnification_factor, 
+    filter=2, 
+    asynch=False,
 ):
     n_workers = max(1, int(0.75 * _multiprocessing.cpu_count()))
     n_locs = len(locs)

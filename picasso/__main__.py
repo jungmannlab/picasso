@@ -761,19 +761,24 @@ def _localize(args):
         to not reconstruct all of them as load_movie automatically detects
         consecutive files. E.g. have a folder with file.ome.tif,
         file_1.ome.tif, file_2.ome.tif, will return only file.ome.tif
+        Or NDTiffStacks where files have format file.tif, file_1.tif, etc.
         """
         files = glob(filepath + "/*.tif")
         newlist = [_ospath.abspath(file) for file in files]
         for file in files:
             path = _ospath.abspath(file)
             directory = _ospath.dirname(path)
-            base, ext = _ospath.splitext(
-                _ospath.splitext(path)[0]
-            )  # split two extensions as in .ome.tif
-            base = _re.escape(base)
-            pattern = _re.compile(
-                base + r"_(\d*).ome.tif"
-            )  # This matches the basename + an appendix of the file number
+            if ".ome.tif" in path:
+                base, ext = _ospath.splitext(
+                    _ospath.splitext(path)[0]
+                )  # split two extensions as in .ome.tif
+                base = _re.escape(base)
+                # This matches the basename + an appendix of the file number
+                pattern = _re.compile(base + r"_(\d*).ome.tif")  
+            elif "NDTiffStack" in path:
+                base, ext = _ospath.splitext(path)
+                base = _re.escape(base)
+                pattern = _re.compile(base + r"_(\d*).tif")
             entries = [_.path for _ in _os.scandir(directory) if _.is_file()]
             matches = [_re.match(pattern, _) for _ in entries]
             matches = [_ for _ in matches if _ is not None]

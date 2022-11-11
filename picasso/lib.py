@@ -128,7 +128,6 @@ def append_to_rec(rec_array, data, name):
     )
     return rec_array
 
-
 def ensure_sanity(locs, info):
     # no inf or nan:
     locs = locs[

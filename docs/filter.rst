@@ -13,4 +13,6 @@ To display a histogram from values of one property, select the respective column
 
 Left-click and hold the mouse button down to drag a selection area in a 1D or 2D histogram. The selected area will be shaded in green. Each localization event with histogram properties outside the selected area is immediately removed from the localization list.
 
+In Picasso 0.5.0, an alternative approach was introduced: In the menu bar, click ``Filter`` > ``Filter``. A dialog is displayed where the user can numerically filter values for any of the columns. Click the ``Filter`` button in the dialog to remove localizations which do not fit in the input parameters.
+
 Save the filtered localization table by selecting ``File`` > ``Save``.

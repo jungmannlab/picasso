@@ -9,11 +9,8 @@
     :copyright: Copyright (c) 2016 Jungmann Lab,  MPI of Biochemistry
 """
 
-import glob
-import os
+import glob, os, sys, traceback, importlib, pkgutil
 import os.path as _ospath
-import sys
-import traceback
 from math import sqrt
 
 import matplotlib.patches as patches
@@ -554,7 +551,8 @@ class FoldingDialog(QtWidgets.QDialog):
         for i in range(rowCount - 3):
             iconc = float(self.table.item(i, 1).text())
             parts = int(self.table.item(i, 2).text())
-            self.writeTable(i, 3, str(iconc / parts * 1000))
+            content = _np.round((iconc / parts * 1000), decimals = 3)
+            self.writeTable(i, 3, str(content))
 
         # Calculate Volume based on pool and final concentration
         volume = _np.zeros(rowCount - 3)
@@ -562,7 +560,7 @@ class FoldingDialog(QtWidgets.QDialog):
             target = float(self.table.item(i, 4).text())
             pool = float(self.table.item(i, 3).text())
             volume[i] = target / pool * totalvolume
-            self.writeTable(i, 5, str(volume[i]))
+            self.writeTable(i, 5, str(_np.round(volume[i], decimals=3)))
         foldingbuffer = totalvolume / 10
 
         # Calculate Folding Buffer
@@ -571,7 +569,7 @@ class FoldingDialog(QtWidgets.QDialog):
         # Calculate remainging H20
         water = totalvolume - foldingbuffer - _np.sum(volume)
 
-        self.writeTable(rowCount - 3, 5, str(water))
+        self.writeTable(rowCount - 3, 5, str(_np.round(water, decimals=3)))
         if water < 0:
             self.table.item(rowCount - 3, 5).setBackground(QtGui.QColor("red"))
         else:
@@ -1479,6 +1477,23 @@ class MainWindow(QtWidgets.QWidget):
 def main():
     app = QtWidgets.QApplication(sys.argv)
     window = MainWindow()
+
+    from . import plugins
+
+    def iter_namespace(pkg):
+        return pkgutil.iter_modules(pkg.__path__, pkg.__name__ + ".")
+
+    plugins = [
+        importlib.import_module(name)
+        for finder, name, ispkg
+        in iter_namespace(plugins)
+    ]
+
+    for plugin in plugins:
+        p = plugin.Plugin(window)
+        if p.name == "design":
+            p.execute()
+
     window.show()
     sys.exit(app.exec_())
 

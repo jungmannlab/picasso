@@ -6,7 +6,7 @@ This section describes the different file format and name conventions used in Pi
 Movie Files
 -----------
 
-Picasso accepts two types of raw movie files: TIFF (preferably from μManager1) and raw binary data (file extension “.raw”).
+Picasso accepts three types of raw movie files: TIFF (preferably from μManager1), raw binary data (file extension “.raw”) and the Nikon format .nd2.
 
 When loading raw binary files, the user will be prompted for movie metadata such as the number of frames, number of pixels, etc. Alternatively, this metadata can be supplied by an accompanying metadata file with the same filename as the raw binary file, but with the extension .yaml. See ``YAML Metadata Files`` for more details.
 

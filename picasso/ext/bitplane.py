@@ -279,11 +279,11 @@ if IMSWRITER:
             progress100 = int(progress * 100)
             if progress100 - self.mUserDataProgress >= 5:
                 self.mUserDataProgress = progress100
-                print(
-                    "User Progress {}, Bytes written: {}".format(
-                        self.mUserDataProgress, total_bytes_written
-                    )
-                )
+                # print(
+                #     "User Progress {}, Bytes written: {}".format(
+                #         self.mUserDataProgress, total_bytes_written
+                #     )
+                # )
 
     def numpy_to_imaris(
         array, filename, colors, oversampling, viewport, info, z_min, z_max, pixelsize
@@ -305,11 +305,7 @@ if IMSWRITER:
         y_min = viewport[0][0]
         y_max = viewport[1][0]
 
-        print(f"Original shape {array.shape}, {dtype}")
-
         np_data = array.copy()
-
-        print(f"Final shape {np_data.shape}")
 
         image_size = PW.ImageSize(x=x, y=y, z=z, c=c, t=1)
         dimension_sequence = PW.DimensionSequence("x", "y", "z", "c", "t")
@@ -362,8 +358,6 @@ if IMSWRITER:
 
         x_1 = (x_max) * pixelsize / 1000
         y_1 = (y_max) * pixelsize / 1000
-
-        print(f"Image size {image_size.x}; {image_size.y}. Pixelsize is {pixelsize}")
 
         # TODO: Later use GlobalExtMin to add
         # Todo: Check for z

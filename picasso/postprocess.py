@@ -10,6 +10,7 @@
 
 import numpy as _np
 import numba as _numba
+import math as _math
 
 from sklearn.cluster import DBSCAN as _DBSCAN
 
@@ -17,6 +18,7 @@ from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
 from scipy.spatial import distance
 from scipy.spatial import ConvexHull
+# from icecream import ic
 
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
@@ -27,10 +29,15 @@ from collections import OrderedDict as _OrderedDict
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
+from . import clusterer as _clusterer
 from threading import Thread as _Thread
 import time as _time
 from tqdm import tqdm as _tqdm
+from tqdm import trange as _trange
 from numpy.lib.recfunctions import stack_arrays
+from sklearn.neighbors import NearestNeighbors as NN
+
+from icecream import ic
 
 
 def get_index_blocks(locs, info, size, callback=None):
@@ -48,25 +55,12 @@ def get_index_blocks(locs, info, size, callback=None):
     block_ends = _np.zeros((n_blocks_y, n_blocks_x), dtype=_np.uint32)
     K, L = block_starts.shape
     # Fill in block starts and ends
-    # We are running this in a thread with a nogil numba function.
-    # This helps updating a potential GUI with the callback.
-    if callback is not None:
-        callback(0)
-        counter = [0]
-    else:
-        counter = None
     thread = _Thread(
         target=_fill_index_blocks,
-        args=(block_starts, block_ends, x_index, y_index, counter),
+        args=(block_starts, block_ends, x_index, y_index),
     )
     thread.start()
-    if callback is not None:
-        while counter[0] < K:
-            callback(counter[0])
-            _time.sleep(0.1)
     thread.join()
-    if callback is not None:
-        callback(counter[0])
     return locs, size, x_index, y_index, block_starts, block_ends, K, L
 
 
@@ -81,43 +75,46 @@ def index_blocks_shape(info, size):
 def n_block_locs_at(x, y, size, K, L, block_starts, block_ends):
     x_index = _np.uint32(x / size)
     y_index = _np.uint32(y / size)
-    n_block_locs = 0
+    step = 0
     for k in range(y_index - 1, y_index + 2):
         if 0 < k < K:
             for l in range(x_index - 1, x_index + 2):
                 if 0 < l < L:
-                    n_block_locs += block_ends[k, l] - block_starts[k, l]
+                    if step == 0:
+                        n_block_locs = _np.uint32(block_ends[k][l] - block_starts[k][l])
+                        step = 1
+                    else:
+                        n_block_locs += _np.uint32(block_ends[k][l] - block_starts[k][l])
     return n_block_locs
 
 
 def get_block_locs_at(x, y, index_blocks):
-    locs, size, x_index, y_index, block_starts, block_ends, K, L = index_blocks
-    x_index = _np.uint32(x / size)  # is this really necessary?
-    y_index = _np.uint32(y / size)  # is this really necessary?
+    locs, size, _, _, block_starts, block_ends, K, L = index_blocks
+    x_index = _np.uint32(x / size)
+    y_index = _np.uint32(y / size) 
     indices = []
     for k in range(y_index - 1, y_index + 2):
-        if 0 < k < K:
+        if 0 <= k < K:
             for l in range(x_index - 1, x_index + 2):
-                if 0 < l < L:
-                    indices.append(list(range(block_starts[k, l], block_ends[k, l])))
+                if 0 <= l < L:
+                    indices.append(
+                        list(range(block_starts[k, l], block_ends[k, l]))
+                    )
     indices = list(_itertools.chain(*indices))
     return locs[indices]
 
-
-def _fill_index_blocks(block_starts, block_ends, x_index, y_index, counter=None):
+@_numba.jit(nopython=True, nogil=True)
+def _fill_index_blocks(
+    block_starts, block_ends, x_index, y_index
+):
     Y, X = block_starts.shape
     N = len(x_index)
     k = 0
-    if counter is not None:
-        counter[0] = 0
     for i in range(Y):
         for j in range(X):
             k = _fill_index_block(
                 block_starts, block_ends, N, x_index, y_index, i, j, k
             )
-        if counter is not None:
-            counter[0] = i + 1
-
 
 @_numba.jit(nopython=True, nogil=True)
 def _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k):
@@ -127,6 +124,127 @@ def _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k):
     block_ends[i, j] = k
     return k
 
+@_numba.jit(nopython=True, nogil=True, cache=True)
+def pick_similar(
+        x, y_shift, y_base,
+        min_n_locs, max_n_locs, min_rmsd, max_rmsd, 
+        x_r, y_r1, y_r2,
+        locs_xy, block_starts, block_ends, K, L,
+        x_similar, y_similar, r, d2,
+    ):
+    for i, x_grid in enumerate(x):
+        x_range = x_r[i]
+        # y_grid is shifted for odd columns
+        if i % 2:
+            y = y_shift
+            y_r = y_r1
+        else:
+            y = y_base
+            y_r = y_r2
+        for j, y_grid in enumerate(y):
+            y_range = y_r[j]
+            n_block_locs = _n_block_locs_at(
+                x_range, y_range, K, L, block_starts, block_ends
+            )
+            if n_block_locs >= min_n_locs:
+                block_locs_xy = _get_block_locs_at(
+                    x_range, y_range, 
+                    locs_xy, block_starts, block_ends, K, L,
+                )
+                picked_locs_xy = _locs_at(
+                    x_grid, y_grid, block_locs_xy, r
+                )
+                if picked_locs_xy.shape[1] > 1:
+                    # Move to COM peak
+                    x_test_old = x_grid
+                    y_test_old = y_grid
+                    x_test = _np.mean(picked_locs_xy[0])
+                    y_test = _np.mean(picked_locs_xy[1])
+                    count = 0
+                    while (
+                        _np.abs(x_test - x_test_old) > 1e-3
+                        or _np.abs(y_test - y_test_old) > 1e-3
+                    ):
+                        count += 1
+                        # skip the locs if the loop is too long
+                        if count > 500:
+                            break
+                        x_test_old = x_test
+                        y_test_old = y_test
+                        picked_locs_xy = _locs_at(
+                            x_test, y_test, block_locs_xy, r
+                        )
+                        x_test = _np.mean(picked_locs_xy[0])
+                        y_test = _np.mean(picked_locs_xy[1])
+                    if _np.all(
+                        (x_similar - x_test) ** 2
+                        + (y_similar - y_test) ** 2
+                        > d2
+                    ):
+                        if min_n_locs <= picked_locs_xy.shape[1] <= max_n_locs:
+                            if (
+                                min_rmsd
+                                <= _rmsd_at_com(picked_locs_xy)
+                                <= max_rmsd
+                            ):
+                                x_similar = _np.append(
+                                    x_similar, x_test
+                                )
+                                y_similar = _np.append(
+                                    y_similar, y_test
+                                )
+    return x_similar, y_similar
+
+@_numba.jit(nopython=True, nogil=True)
+def _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends, cache=True):
+    step = 0
+    for k in range(y_range - 1, y_range + 2):
+        if 0 < k < K:
+            for l in range(x_range - 1, x_range + 2):
+                if 0 < l < L:
+                    if step == 0:
+                        n_block_locs = _np.uint32(block_ends[k][l] - block_starts[k][l])
+                        step = 1
+                    else:
+                        n_block_locs += _np.uint32(block_ends[k][l] - block_starts[k][l])
+    return n_block_locs
+
+@_numba.jit(nopython=True, nogil=True, cache=True)
+def _get_block_locs_at(
+        x_range, y_range, locs_xy, 
+        block_starts, block_ends, K, L,
+    ):
+    step = 0
+    for k in range(y_range - 1, y_range + 2):
+        if 0 < k < K:
+            for l in range(x_range - 1, x_range + 2):
+                if 0 < l < L:
+                    if block_ends[k, l] - block_starts[k, l] > 0:
+                        # numba does not work if you attach arange to an empty list so the first step is different
+                        # this is because of dtype issues
+                        if step == 0:
+                            indices = _np.arange(float(block_starts[k, l]), float(block_ends[k, l]), 
+                                dtype=_np.uint32)
+                            step = 1
+                        else:
+                            indices = _np.concatenate((indices, 
+                                _np.arange(float(block_starts[k, l]), float(block_ends[k, l]), dtype=_np.uint32)
+                            ))
+    return locs_xy[:, indices]
+
+@_numba.jit(nopython=True, nogil=True, cache=True)
+def _locs_at(x, y, locs_xy, r):
+    dx = locs_xy[0] - x
+    dy = locs_xy[1] - y
+    r2 = r ** 2
+    is_picked = dx ** 2 + dy ** 2 < r2
+    return locs_xy[:, is_picked]
+
+@_numba.jit(nopython=True, nogil=True)
+def _rmsd_at_com(locs_xy):
+    com_x = _np.mean(locs_xy[0])
+    com_y = _np.mean(locs_xy[1])
+    return _np.sqrt(_np.mean((locs_xy[0] - com_x) ** 2 + (locs_xy[1] - com_y) ** 2))
 
 @_numba.jit(nopython=True, nogil=True)
 def _distance_histogram(
@@ -291,304 +409,33 @@ def pair_correlation(locs, info, bin_size, r_max):
     return bins_lower, dh / area
 
 
-def dbscan(locs, radius, min_density):
-    print("Identifying clusters...")
+def dbscan(locs, radius, min_density, pixelsize):
     if hasattr(locs, "z"):
-        print("z-coordinates detected")
-        pixelsize = int(input("Enter the pixelsize in nm/px:"))
-        locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y) & _np.isfinite(locs.z)]
         X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
-        db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
-        group = _np.int32(db.labels_)  # int32 for Origin compatiblity
-        locs = _lib.append_to_rec(locs, group, "group")
-        locs = locs[locs.group != -1]
-        print("Generating cluster information...")
-        groups = _np.unique(locs.group)
-        n_groups = len(groups)
-        mean_frame = _np.zeros(n_groups)
-        std_frame = _np.zeros(n_groups)
-        com_x = _np.zeros(n_groups)
-        com_y = _np.zeros(n_groups)
-        com_z = _np.zeros(n_groups)
-        std_x = _np.zeros(n_groups)
-        std_y = _np.zeros(n_groups)
-        std_z = _np.zeros(n_groups)
-        convex_hull = _np.zeros(n_groups)
-        volume = _np.zeros(n_groups)
-        n = _np.zeros(n_groups, dtype=_np.int32)
-        for i, group in enumerate(groups):
-            group_locs = locs[locs.group == i]
-            mean_frame[i] = _np.mean(group_locs.frame)
-            com_x[i] = _np.mean(group_locs.x)
-            com_y[i] = _np.mean(group_locs.y)
-            com_z[i] = _np.mean(group_locs.z)
-            std_frame[i] = _np.std(group_locs.frame)
-            std_x[i] = _np.std(group_locs.x)
-            std_y[i] = _np.std(group_locs.y)
-            std_z[i] = _np.std(group_locs.z)
-            n[i] = len(group_locs)
-            X_group = _np.stack(
-                [group_locs.x, group_locs.y, group_locs.z / pixelsize], axis=0
-            ).T
-            volume[i] = (
-                _np.power((std_x[i] + std_y[i] + (std_z[i] / pixelsize)) / 3 * 2, 3)
-                * _np.pi
-                * 4
-                / 3
-            )
-            try:
-                hull = ConvexHull(X_group)
-                convex_hull[i] = hull.volume
-            except Exception as e:
-                print(e)
-                convex_hull[i] = 0
-        clusters = _np.rec.array(
-            (
-                groups,
-                convex_hull,
-                volume,
-                mean_frame,
-                com_x,
-                com_y,
-                com_z,
-                std_frame,
-                std_x,
-                std_y,
-                std_z,
-                n,
-            ),
-            dtype=[
-                ("groups", groups.dtype),
-                ("convex_hull", "f4"),
-                ("volume", "f4"),
-                ("mean_frame", "f4"),
-                ("com_x", "f4"),
-                ("com_y", "f4"),
-                ("com_z", "f4"),
-                ("std_frame", "f4"),
-                ("std_x", "f4"),
-                ("std_y", "f4"),
-                ("std_z", "f4"),
-                ("n", "i4"),
-            ],
-        )
     else:
-        locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
         X = _np.vstack((locs.x, locs.y)).T
-        db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
-        group = _np.int32(db.labels_)  # int32 for Origin compatiblity
-        locs = _lib.append_to_rec(locs, group, "group")
-        locs = locs[locs.group != -1]
-        print("Generating cluster information...")
-        groups = _np.unique(locs.group)
-        n_groups = len(groups)
-        mean_frame = _np.zeros(n_groups)
-        std_frame = _np.zeros(n_groups)
-        com_x = _np.zeros(n_groups)
-        com_y = _np.zeros(n_groups)
-        std_x = _np.zeros(n_groups)
-        std_y = _np.zeros(n_groups)
-        convex_hull = _np.zeros(n_groups)
-        area = _np.zeros(n_groups)
-        n = _np.zeros(n_groups, dtype=_np.int32)
-        for i, group in enumerate(groups):
-            group_locs = locs[locs.group == i]
-            mean_frame[i] = _np.mean(group_locs.frame)
-            com_x[i] = _np.mean(group_locs.x)
-            com_y[i] = _np.mean(group_locs.y)
-            std_frame[i] = _np.std(group_locs.frame)
-            std_x[i] = _np.std(group_locs.x)
-            std_y[i] = _np.std(group_locs.y)
-            n[i] = len(group_locs)
-            X_group = _np.stack([group_locs.x, group_locs.y], axis=0).T
-            area[i] = _np.power((std_x[i] + std_y[i]), 2) * _np.pi
-            try:
-                hull = ConvexHull(X_group)
-                convex_hull[i] = hull.volume
-            except Exception as e:
-                print(e)
-                convex_hull[i] = 0
-        clusters = _np.rec.array(
-            (
-                groups,
-                convex_hull,
-                area,
-                mean_frame,
-                com_x,
-                com_y,
-                std_frame,
-                std_x,
-                std_y,
-                n,
-            ),
-            dtype=[
-                ("groups", groups.dtype),
-                ("convex_hull", "f4"),
-                ("area", "f4"),
-                ("mean_frame", "f4"),
-                ("com_x", "f4"),
-                ("com_y", "f4"),
-                ("std_frame", "f4"),
-                ("std_x", "f4"),
-                ("std_y", "f4"),
-                ("n", "i4"),
-            ],
-        )
-    return clusters, locs
+    db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
+    group = _np.int32(db.labels_)  # int32 for Origin compatiblity
+    locs = _lib.append_to_rec(locs, group, "group")
+    locs = locs[locs.group != -1]
+    return locs
 
-
-def hdbscan(locs, min_cluster_size, min_samples):
-
+def hdbscan(locs, min_cluster_size, min_samples, cluster_eps, pixelsize):
     from hdbscan import HDBSCAN as _HDBSCAN
 
-    print("Identifying clusters...")
     if hasattr(locs, "z"):
-        print("z-coordinates detected")
-        pixelsize = int(input("Enter the pixelsize in nm/px:"))
-        locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y) & _np.isfinite(locs.z)]
         X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
-        hdb = _HDBSCAN(min_samples=min_samples, min_cluster_size=min_cluster_size).fit(
-            X
-        )
-        group = _np.int32(hdb.labels_)  # int32 for Origin compatiblity
-        locs = _lib.append_to_rec(locs, group, "group")
-        locs = locs[locs.group != -1]
-        print("Generating cluster information...")
-        groups = _np.unique(locs.group)
-        n_groups = len(groups)
-        mean_frame = _np.zeros(n_groups)
-        std_frame = _np.zeros(n_groups)
-        com_x = _np.zeros(n_groups)
-        com_y = _np.zeros(n_groups)
-        com_z = _np.zeros(n_groups)
-        std_x = _np.zeros(n_groups)
-        std_y = _np.zeros(n_groups)
-        std_z = _np.zeros(n_groups)
-        convex_hull = _np.zeros(n_groups)
-        volume = _np.zeros(n_groups)
-        n = _np.zeros(n_groups, dtype=_np.int32)
-        for i, group in enumerate(groups):
-            group_locs = locs[locs.group == i]
-            mean_frame[i] = _np.mean(group_locs.frame)
-            com_x[i] = _np.mean(group_locs.x)
-            com_y[i] = _np.mean(group_locs.y)
-            com_z[i] = _np.mean(group_locs.z)
-            std_frame[i] = _np.std(group_locs.frame)
-            std_x[i] = _np.std(group_locs.x)
-            std_y[i] = _np.std(group_locs.y)
-            std_z[i] = _np.std(group_locs.z)
-            n[i] = len(group_locs)
-            X_group = _np.stack(
-                [group_locs.x, group_locs.y, group_locs.z / pixelsize], axis=0
-            ).T
-            volume[i] = (
-                _np.power((std_x[i] + std_y[i] + (std_z[i] / pixelsize)) / 3 * 2, 3)
-                * _np.pi
-                * 4
-                / 3
-            )
-            try:
-                hull = ConvexHull(X_group)
-                convex_hull[i] = hull.volume
-            except Exception as e:
-                print(e)
-                convex_hull[i] = 0
-        clusters = _np.rec.array(
-            (
-                groups,
-                convex_hull,
-                volume,
-                mean_frame,
-                com_x,
-                com_y,
-                com_z,
-                std_frame,
-                std_x,
-                std_y,
-                std_z,
-                n,
-            ),
-            dtype=[
-                ("groups", groups.dtype),
-                ("convex_hull", "f4"),
-                ("volume", "f4"),
-                ("mean_frame", "f4"),
-                ("com_x", "f4"),
-                ("com_y", "f4"),
-                ("com_z", "f4"),
-                ("std_frame", "f4"),
-                ("std_x", "f4"),
-                ("std_y", "f4"),
-                ("std_z", "f4"),
-                ("n", "i4"),
-            ],
-        )
     else:
-        locs = locs[_np.isfinite(locs.x) & _np.isfinite(locs.y)]
         X = _np.vstack((locs.x, locs.y)).T
-        hdb = _HDBSCAN(min_samples=min_samples, min_cluster_size=min_cluster_size).fit(
-            X
-        )
-        group = _np.int32(hdb.labels_)  # int32 for Origin compatiblity
-        locs = _lib.append_to_rec(locs, group, "group")
-        locs = locs[locs.group != -1]
-        print("Generating cluster information...")
-        groups = _np.unique(locs.group)
-        n_groups = len(groups)
-        mean_frame = _np.zeros(n_groups)
-        std_frame = _np.zeros(n_groups)
-        com_x = _np.zeros(n_groups)
-        com_y = _np.zeros(n_groups)
-        std_x = _np.zeros(n_groups)
-        std_y = _np.zeros(n_groups)
-        convex_hull = _np.zeros(n_groups)
-        area = _np.zeros(n_groups)
-        n = _np.zeros(n_groups, dtype=_np.int32)
-        for i, group in enumerate(groups):
-            group_locs = locs[locs.group == i]
-            mean_frame[i] = _np.mean(group_locs.frame)
-            com_x[i] = _np.mean(group_locs.x)
-            com_y[i] = _np.mean(group_locs.y)
-            std_frame[i] = _np.std(group_locs.frame)
-            std_x[i] = _np.std(group_locs.x)
-            std_y[i] = _np.std(group_locs.y)
-            n[i] = len(group_locs)
-            X_group = _np.stack([group_locs.x, group_locs.y], axis=0).T
-            area[i] = _np.power((std_x[i] + std_y[i]), 2) * _np.pi
-            try:
-                hull = ConvexHull(X_group)
-                convex_hull[i] = hull.volume
-            except Exception as e:
-                print(e)
-                convex_hull[i] = 0
-        clusters = _np.rec.array(
-            (
-                groups,
-                convex_hull,
-                area,
-                mean_frame,
-                com_x,
-                com_y,
-                std_frame,
-                std_x,
-                std_y,
-                n,
-            ),
-            dtype=[
-                ("groups", groups.dtype),
-                ("convex_hull", "f4"),
-                ("area", "f4"),
-                ("mean_frame", "f4"),
-                ("com_x", "f4"),
-                ("com_y", "f4"),
-                ("std_frame", "f4"),
-                ("std_x", "f4"),
-                ("std_y", "f4"),
-                ("n", "i4"),
-            ],
-        )
-    return clusters, locs
-
+    hdb = _HDBSCAN(
+        min_samples=min_samples, 
+        min_cluster_size=min_cluster_size,
+        cluster_selection_epsilon=cluster_eps,
+    ).fit(X)
+    group = _np.int32(hdb.labels_)  # int32 for Origin compatiblity
+    locs = _lib.append_to_rec(locs, group, "group")
+    locs = locs[locs.group != -1]
+    return locs
 
 @_numba.jit(nopython=True, nogil=True)
 def _local_density(
@@ -878,7 +725,6 @@ def cluster_combine_dist(locs):
 
     if hasattr(locs, "z"):
         print("XYZ")
-        pixelsize = int(input("Enter the pixelsize in nm/px:"))
 
         combined_locs = []
         for group in _tqdm(_np.unique(locs["group"])):
@@ -905,11 +751,11 @@ def cluster_combine_dist(locs):
                     [
                         cluster_locs.x,
                         cluster_locs.y,
-                        cluster_locs.z / pixelsize,
+                        cluster_locs.z,
                     ]
                 )
                 all_points = _np.array(
-                    [group_locs.x, group_locs.y, group_locs.z / pixelsize]
+                    [group_locs.x, group_locs.y, group_locs.z]
                 )
                 distances = distance.cdist(
                     ref_point.transpose(), all_points.transpose()
@@ -1224,7 +1070,7 @@ def link_loc_groups(locs, info, link_group, remove_ambiguous_lengths=True):
 
 def localization_precision(photons, s, bg, em):
     """
-    Calculates the theoretical localization preicision
+    Calculates the theoretical localization precision
     according to Mortensen et al., Nat Meth, 2010
     """
     s2 = s**2
@@ -1235,6 +1081,27 @@ def localization_precision(photons, s, bg, em):
     with _np.errstate(invalid="ignore"):
         return _np.sqrt(v)
 
+def n_segments(info, segmentation):
+    n_frames = info[0]["Frames"]
+    return int(_np.round(n_frames / segmentation))
+
+def segment(locs, info, segmentation, kwargs={}, callback=None):
+    Y = info[0]["Height"]
+    X = info[0]["Width"]
+    n_frames = info[0]["Frames"]
+    n_seg = n_segments(info, segmentation)
+    bounds = _np.linspace(0, n_frames - 1, n_seg + 1, dtype=_np.uint32)
+    segments = _np.zeros((n_seg, Y, X))
+    if callback is not None:
+        callback(0)
+    for i in _trange(n_seg, desc="Generating segments", unit="segments"):
+        segment_locs = locs[
+            (locs.frame >= bounds[i]) & (locs.frame < bounds[i + 1])
+        ]
+        _, segments[i] = _render.render(segment_locs, info, **kwargs)
+        if callback is not None:
+            callback(i + 1)
+    return bounds, segments
 
 def undrift(
     locs,
@@ -1244,7 +1111,7 @@ def undrift(
     segmentation_callback=None,
     rcc_callback=None,
 ):
-    bounds, segments = _render.segment(
+    bounds, segments = segment(
         locs,
         info,
         segmentation,
@@ -1348,7 +1215,7 @@ def groupprops(locs, callback=None):
 
 def calculate_fret(acc_locs, don_locs):
     """
-    Calculate the FRET efficiceny in picked regions, this is for one trace
+    Calculate the FRET efficiency in picked regions, this is for one trace
     """
     fret_dict = {}
     if len(acc_locs) == 0:
@@ -1394,3 +1261,27 @@ def calculate_fret(acc_locs, don_locs):
     fret_dict["maxframes"] = max_frames
 
     return fret_dict, f_locs
+
+def nn_analysis(
+    x1, x2, 
+    y1, y2, 
+    z1, z2,
+    nn_count, 
+    same_channel, 
+):
+    # coordinates are in nm
+    if z1 is not None: # 3D
+        input1 = _np.stack((x1, y1, z1)).T
+        input2 = _np.stack((x2, y2, z2)).T
+    else: # 2D
+        input1 = _np.stack((x1, y1)).T
+        input2 = _np.stack((x2, y2)).T
+    if same_channel:
+        model = NN(n_neighbors=nn_count+1)
+    else:
+        model = NN(n_neighbors=nn_count)
+    model.fit(input1)
+    nn, _ = model.kneighbors(input2)
+    if same_channel:
+        nn = nn[:, 1:] # ignore the zero distance
+    return nn
