@@ -1,7 +1,6 @@
 plugins
 =======
 
-
 Usage
 --------
 Starting in version 0.5.0, Picasso allows for creating plugins. These can be used only after Picasso installation via GitHub, see the `link <https://github.com/jungmannlab/picasso#:~:text=Via%20GitHub%3A,picasso%20localize.>`_.
