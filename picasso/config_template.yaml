@@ -89,6 +89,7 @@ Cameras:
         3-B489: 525
     Sensitivity: 0.47
   Simulation:
+    Pixelsize: 130
     Baseline: 0
     Sensitivity: 1.0
     Quantum Efficiency: 1.0
