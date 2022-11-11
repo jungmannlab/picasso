@@ -24,7 +24,7 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 
 Picasso 0.5.0
 -------------
-Picasso has introduced many changes, including 3D rotation window and new clustering algorithm in Render and reading of .nd2 files in Localize. Please check the changelog in the repository above to see all modifications.
+Picasso has introduced many changes, including 3D rotation window and a new clustering algorithm in Render and reading of .nd2 files in Localize. Please check the changelog in the repository above to see all modifications.
 
 Picasso 0.4.0
 -------------
