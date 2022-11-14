@@ -297,7 +297,7 @@ def watcher():
                     label="Baseline:", value=100, key=f"baseline_{i}"
                 )
                 settings[i]["sensitivity"] = col.number_input(
-                    label="Sensitivity:", value=1, key=f"sensitivity_{i}"
+                    label="Sensitivity:", value=1.0, key=f"sensitivity_{i}"
                 )
                 settings[i]["qe"] = col.number_input(
                     label="Quantum Efficiency:",
