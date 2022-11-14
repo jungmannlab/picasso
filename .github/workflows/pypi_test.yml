@@ -34,3 +34,4 @@ jobs:
           conda activate picasso
           picasso
           conda deactivate
+          
