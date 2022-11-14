@@ -1,1 +1,2 @@
-VERSION_NO = "0.4.11"
+<<<<<<< HEAD
+VERSION_NO = "0.5.0"
