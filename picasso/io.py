@@ -655,6 +655,7 @@ class ND2Movie(AbstractPicassoMovie):
             return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
 
         pm_info = info["Picasso Metadata"]
+        mm_info = info["nd2 Metadata"]
         cam_config = config["Cameras"][camera]
         if "Gain Property Name" in cam_config:
             raise NotImplementedError('extracting Gain from nd2 files is not implemented yet.')
@@ -1154,10 +1155,7 @@ def get_movie_groups(paths):
     groups = {}
     if len(paths) > 0:
         # This matches the basename + an opt appendix of the file number
-        if ".ome." in self.path:
-            pattern = _re.compile(r"(.*?)(_(\d*))?.ome.tif")  
-        elif "NDTiffStack" in self.path:
-            pattern = _re.compile(r"(.*?)(_(\d*))?.tif")  
+        pattern = _re.compile(r"(.*?)(_(\d*))?.ome.tif")
         matches = [_re.match(pattern, path) for path in paths]
         match_infos = [
             {"path": _.group(), "base": _.group(1), "index": _.group(3)}
