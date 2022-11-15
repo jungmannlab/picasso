@@ -736,7 +736,7 @@ class DatasetDialog(QtWidgets.QDialog):
                     )
                 break
 
-    def close_file(self, i):
+    def close_file(self, i, render=True):
         """
         Closes a given channel and delets all corresponding attributes.
         """
@@ -801,8 +801,9 @@ class DatasetDialog(QtWidgets.QDialog):
 
             # update the window and adjust the size of the 
             # Dataset Dialog
-            self.update_viewport()
-            self.adjustSize()
+            if render:
+                self.update_viewport()
+                self.adjustSize()
 
     def update_viewport(self):
         """ Updates the scene in the main window. """
@@ -3107,7 +3108,9 @@ class InfoDialog(QtWidgets.QDialog):
         movie_groupbox = QtWidgets.QGroupBox("Movie")
         vbox.addWidget(movie_groupbox)
         self.movie_grid = QtWidgets.QGridLayout(movie_groupbox)
-        self.movie_grid.addWidget(QtWidgets.QLabel("Median fit precision:"), 0, 0)
+        self.movie_grid.addWidget(
+            QtWidgets.QLabel("Median fit precision:"), 0, 0
+        )
         self.fit_precision = QtWidgets.QLabel("-")
         self.movie_grid.addWidget(self.fit_precision, 0, 1)
         self.movie_grid.addWidget(QtWidgets.QLabel("NeNA precision:"), 1, 0)
@@ -3157,7 +3160,9 @@ class InfoDialog(QtWidgets.QDialog):
         self.rmsd_z_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_z_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("Ignore dark times <="), row, 0)
+        self.picks_grid.addWidget(
+            QtWidgets.QLabel("Ignore dark times <="), row, 0
+        )
         self.max_dark_time = QtWidgets.QSpinBox()
         self.max_dark_time.setRange(0, 1e9)
         self.max_dark_time.setValue(1)
@@ -4121,7 +4126,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.scalebar_groupbox.toggled.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
-        scalebar_grid.addWidget(QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0)
+        scalebar_grid.addWidget(
+            QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
+        )
         self.scalebar = QtWidgets.QDoubleSpinBox()
         self.scalebar.setRange(0.0001, 100000)
         self.scalebar.setValue(500)
@@ -5679,7 +5686,10 @@ class View(QtWidgets.QLabel):
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
                     "Save clustered locs",
-                    self.locs_paths[channel].replace(".hdf5", "_clustered.hdf5"),
+                    self.locs_paths[channel].replace(
+                        ".hdf5", 
+                        "_clustered.hdf5"
+                    ),
                     filter="*.hdf5",
                 )
                 if path:
@@ -7530,7 +7540,9 @@ class View(QtWidgets.QLabel):
                         x_max = pick[0] + r
                         y_min = pick[1] - r
                         y_max = pick[1] + r
-                        ax.scatter(locs["x"], locs["y"], c=colors[channel], s=2)
+                        ax.scatter(
+                            locs["x"], locs["y"], c=colors[channel], s=2
+                        )
                         ax.set_xlabel("X [Px]")
                         ax.set_ylabel("Y [Px]")
                         ax.set_xlim([x_min, x_max])
@@ -8390,9 +8402,9 @@ class View(QtWidgets.QLabel):
                     colors[i] = rgbval
                 else:
                     warning = (
-                        "The color selection not recognnised in the channel {}."
-                        "  Please choose one of the options provided or type "
-                        " the hexadecimal code for your color of choice,  "
+                        "The color selection not recognnised in the channel "
+                        " {}.  Please choose one of the options provided or "
+                        " type the hexadecimal code for your color of choice, "
                         " starting with '#', e.g.  '#ffcdff' for pink.".format(
                             self.window.dataset_dialog.checks[i].text()
                         )

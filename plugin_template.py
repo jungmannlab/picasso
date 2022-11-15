@@ -10,7 +10,7 @@ import numpy as np
 
 # Do not change the part below unless stated otherwise
 class Plugin():
-    def __init___(self, window):
+    def __init__(self, window):
         self.name = "render" # change if the plugin works for another application
         self.window = window
 
