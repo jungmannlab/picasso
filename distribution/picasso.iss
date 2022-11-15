@@ -1,6 +1,7 @@
 [Setup]
 AppName=Picasso
 AppPublisher=Jungmann Lab, Max Planck Institute of Biochemistry
+
 AppVersion=0.5.2
 DefaultDirName={pf}\Picasso
 DefaultGroupName=Picasso
