@@ -1211,54 +1211,54 @@ def groupprops(locs, callback=None):
     return groups
 
 
-def calculate_fret(acc_locs, don_locs):
-    """
-    Calculate the FRET efficiency in picked regions, this is for one trace
-    """
-    fret_dict = {}
-    if len(acc_locs) == 0:
-        max_frames = _np.max(don_locs["frame"])
-    elif len(don_locs) == 0:
-        max_frames = _np.max(acc_locs["frame"])
-    else:
-        max_frames = _np.max([_np.max(acc_locs["frame"]), _np.max(don_locs["frame"])])
+# def calculate_fret(acc_locs, don_locs):
+#     """
+#     Calculate the FRET efficiency in picked regions, this is for one trace
+#     """
+#     fret_dict = {}
+#     if len(acc_locs) == 0:
+#         max_frames = _np.max(don_locs["frame"])
+#     elif len(don_locs) == 0:
+#         max_frames = _np.max(acc_locs["frame"])
+#     else:
+#         max_frames = _np.max([_np.max(acc_locs["frame"]), _np.max(don_locs["frame"])])
 
-    # Initialize a vector filled with zeros for the duration of the movie
-    xvec = _np.arange(max_frames + 1)
-    yvec = xvec[:] * 0
-    acc_trace = yvec.copy()
-    don_trace = yvec.copy()
-    # Fill vector with the photon numbers of events that happend
-    acc_trace[acc_locs["frame"]] = acc_locs["photons"] - acc_locs["bg"]
-    don_trace[don_locs["frame"]] = don_locs["photons"] - don_locs["bg"]
+#     # Initialize a vector filled with zeros for the duration of the movie
+#     xvec = _np.arange(max_frames + 1)
+#     yvec = xvec[:] * 0
+#     acc_trace = yvec.copy()
+#     don_trace = yvec.copy()
+#     # Fill vector with the photon numbers of events that happend
+#     acc_trace[acc_locs["frame"]] = acc_locs["photons"] - acc_locs["bg"]
+#     don_trace[don_locs["frame"]] = don_locs["photons"] - don_locs["bg"]
 
-    # Calculate the FRET efficiency
-    fret_trace = acc_trace / (acc_trace + don_trace)
-    # Only select FRET values between 0 and 1
-    selector = _np.logical_and(fret_trace > 0, fret_trace < 1)
+#     # Calculate the FRET efficiency
+#     fret_trace = acc_trace / (acc_trace + don_trace)
+#     # Only select FRET values between 0 and 1
+#     selector = _np.logical_and(fret_trace > 0, fret_trace < 1)
 
-    # Select the final fret events based on the 0 to 1 range
-    fret_events = fret_trace[selector]
-    fret_timepoints = _np.arange(len(fret_trace))[selector]
+#     # Select the final fret events based on the 0 to 1 range
+#     fret_events = fret_trace[selector]
+#     fret_timepoints = _np.arange(len(fret_trace))[selector]
 
-    f_locs = []
-    if len(fret_timepoints) > 0:
-        # Calculate FRET locs: Select the locs when FRET happens
-        sel_locs = []
-        for element in fret_timepoints:
-            sel_locs.append(don_locs[don_locs["frame"] == element])
+#     f_locs = []
+#     if len(fret_timepoints) > 0:
+#         # Calculate FRET locs: Select the locs when FRET happens
+#         sel_locs = []
+#         for element in fret_timepoints:
+#             sel_locs.append(don_locs[don_locs["frame"] == element])
 
-        f_locs = stack_arrays(sel_locs, asrecarray=True, usemask=False)
-        f_locs = _lib.append_to_rec(f_locs, _np.array(fret_events), "fret")
+#         f_locs = stack_arrays(sel_locs, asrecarray=True, usemask=False)
+#         f_locs = _lib.append_to_rec(f_locs, _np.array(fret_events), "fret")
 
-    fret_dict["fret_events"] = _np.array(fret_events)
-    fret_dict["fret_timepoints"] = fret_timepoints
-    fret_dict["acc_trace"] = acc_trace
-    fret_dict["don_trace"] = don_trace
-    fret_dict["frames"] = xvec
-    fret_dict["maxframes"] = max_frames
+#     fret_dict["fret_events"] = _np.array(fret_events)
+#     fret_dict["fret_timepoints"] = fret_timepoints
+#     fret_dict["acc_trace"] = acc_trace
+#     fret_dict["don_trace"] = don_trace
+#     fret_dict["frames"] = xvec
+#     fret_dict["maxframes"] = max_frames
 
-    return fret_dict, f_locs
+#     return fret_dict, f_locs
 
 def nn_analysis(
     x1, x2, 

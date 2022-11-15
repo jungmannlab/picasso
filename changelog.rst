@@ -1,7 +1,12 @@
 Changelog
 =========
 
-Last change: 11-NOV-2022 MTS
+Last change: 15-NOV-2022 MTS
+
+0.5.1 - 0.5.3
+-------------
+- Sensitivity is a float number in Server: Watcher
+- Bug fixes
 
 0.5.0
 -----
