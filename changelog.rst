@@ -1,11 +1,12 @@
 Changelog
 =========
 
-Last change: 15-NOV-2022 MTS
+Last change: 17-NOV-2022 MTS
 
-0.5.1 - 0.5.3
+0.5.1 - 0.5.4
 -------------
 - Sensitivity is a float number in Server: Watcher
+- One-click-installer available
 - Bug fixes
 
 0.5.0
@@ -30,7 +31,7 @@ Last change: 15-NOV-2022 MTS
 - New file format in Localize - .nd2 
 - Localize can read NDTiffStack.tif files
 - Docstrings for Render
-- Plugins can be added to all Picasso modules
+- `Plugins <https://picassosr.readthedocs.io/en/latest/plugins.html>`_ can be added to all Picasso modules
 - Many other improvements, bug fixes, etc.
 
 
