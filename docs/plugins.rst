@@ -25,10 +25,12 @@ PyPI
 One click installer
 ~~~~~~~~~~~~~~~~~~~
 **NOTE**: This may lead to issues if Picasso is installed, as the plugin scripts will remain in the ``plugins`` folder upon deinstallation. After deinstalltion, the ``Picasso`` folder needs to be deleted manually.
+
 - Find the location where you installed Picasso. By default, it is ``C:/Program Files/Picasso``.
 - Go to the following subfolder in the `Picasso` directory: ``picasso/gui/plugins``.
 - Copy the plugin(s) to this folder.
 - The plugin(s) should automatically be loaded after double-clicking the respective desktop shortcuts.
+
 **NOTE**: Plugins added in this distribution will not be able to use packages that are not installed automatically (from the file ``requirements.txt``).
 
 For developers
