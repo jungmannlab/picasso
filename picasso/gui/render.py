@@ -624,7 +624,7 @@ class DatasetDialog(QtWidgets.QDialog):
         self.closebuttons.append(p)
         self.closebuttons[-1].setAutoDefault(False)
         self.closebuttons[-1].clicked.connect(
-            partial(self.close_file, p.objectName())
+            partial(self.close_file, p.objectName(), True)
         )
 
         # create the self.colorselection widget
