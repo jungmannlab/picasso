@@ -418,7 +418,7 @@ def dbscan(locs, radius, min_density, pixelsize):
     locs = locs[locs.group != -1]
     return locs
 
-def hdbscan(locs, min_cluster_size, min_samples, cluster_eps, pixelsize):
+def hdbscan(locs, min_cluster_size, min_samples, pixelsize, cluster_eps=0):
     from hdbscan import HDBSCAN as _HDBSCAN
 
     if hasattr(locs, "z"):
