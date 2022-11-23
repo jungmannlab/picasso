@@ -2055,10 +2055,6 @@ class TestClustererDialog(QtWidgets.QDialog):
     The user needs to pick a single region of interest using the Pick
     tool. Use Alt + {W, A, S, D, -, =} to change field of view. 
 
-    Calculating recommended values works for DBSCAN only. Search radius
-    is taken to be NeNA precision across the whole image. Please keep
-    in mind that this value does not have to be the optimal one.
-
     ...
 
     Attributes
@@ -4087,7 +4083,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene)
         blur_grid.addWidget(
-            QtWidgets.QLabel("Min.  Blur (cam.  pixel):"), 5, 0, 1, 1
+            QtWidgets.QLabel("Min. Blur (cam. pixel):"), 5, 0, 1, 1
         )
         self.min_blur_width = QtWidgets.QDoubleSpinBox()
         self.min_blur_width.setRange(0, 999999)
@@ -8253,6 +8249,7 @@ class View(QtWidgets.QLabel):
         else:
             self.add_picks(new_picks)
 
+    @check_pick
     def remove_picked_locs(self):
         """ Gets channel for removing picked localizations. """
 
@@ -11453,7 +11450,7 @@ class Window(QtWidgets.QMainWindow):
                 out_path = base + "_multi.hdf5"
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
-                    "Save picked localizations",
+                    "Save localizations",
                     out_path,
                     filter="*.hdf5",
                 )
