@@ -91,6 +91,31 @@ def get_colors(n_channels):
     colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
     return colors
 
+def get_spectral_colors(n_channels):
+    """
+    Creates a list with rgb channels for each of the channels used in
+    rendering property using the spectral colormap, see:
+    https://matplotlib.org/stable/tutorials/colors/colormaps.html
+
+    Parameters
+    ----------
+    n_channels : int
+        Number of locs channels
+
+    Returns
+    -------
+    list
+        Contains tuples with rgb channels
+    """
+
+    # array of shape (256, 3) with rbh channels with 256 colors
+    base = plt.get_cmap('Spectral')(np.arange(256))[:, :3]
+    # indeces to draw from base
+    idx = np.linspace(0, 255, n_channels).astype(int)
+    # extract the colors of interest
+    colors = base[idx]
+    return colors
+
 def is_hexadecimal(text):
     """ 
     Checks if text represents a hexadecimal code for rgb, e.g. #ff02d4.
@@ -8415,6 +8440,10 @@ class View(QtWidgets.QLabel):
                 inverted = tuple([1 - _ for _ in tempcolor])
                 colors[i] = inverted
 
+        # use the spectral colormap for rendering properties
+        if self.x_render_state:
+            colors = get_spectral_colors(n_channels)
+
         return colors
 
     def render_multi_channel(
@@ -8836,7 +8865,7 @@ class View(QtWidgets.QLabel):
         min_val = self.window.display_settings_dlg.minimum_render.value()
         max_val = self.window.display_settings_dlg.maximum_render.value()
 
-        colors = get_colors(n_colors)
+        colors = get_spectral_colors(n_colors)
 
         fig1 = plt.figure(figsize=(5, 1))
 
