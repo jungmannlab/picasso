@@ -467,7 +467,7 @@ class ND2Movie(AbstractPicassoMovie):
             mmmeta['optics'] = self.nikontext_to_dict(text_info['optics'])
         except:
             pass
-        
+
         mmmeta['custom_data'] = nd2file.custom_data
         mmmeta['attributes'] = nd2file.attributes._asdict()
         mmmeta['metadata'] = self.nd2metadata_to_dict(nd2file.metadata)
