@@ -393,8 +393,9 @@ class ND2Movie(AbstractPicassoMovie):
         info['Acquisition Comments'] = ''
 
         mm_info = self.metadata_to_dict(nd2file)
-        camera_name = mm_info.get('description', {}).get(
-                'Metadata', {}).get('Camera Name', 'None')
+        camera_name = str(
+            mm_info.get('description', {}).get(
+                'Metadata', {}).get('Camera Name', 'None'))
         info['Camera'] = camera_name
 
         # simulate micro manager camera data for loading config values
@@ -408,16 +409,19 @@ class ND2Movie(AbstractPicassoMovie):
         #     'Name': 'Filter'
         #     'Emission Wavelengths':
         #         '2 (560)': 560
-        readout_rate = mm_info.get(
+        readout_rate = str(
+            mm_info.get(
                 'description', {}).get('Metadata', {}).get(
-                'Camera Settings', {}).get('Readout Rate', 'None')
-        readout_mode = mm_info.get(
+                'Camera Settings', {}).get('Readout Rate', 'None'))
+        readout_mode = str(
+            mm_info.get(
                 'description', {}).get('Metadata', {}).get(
-                'Camera Settings', {}).get('Readout Mode', 'None')
-        filter = mm_info.get(
+                'Camera Settings', {}).get('Readout Mode', 'None'))
+        filter = str(
+            mm_info.get(
                 'description', {}).get('Metadata', {}).get(
                 'Camera Settings', {}).get('Microscope Settings', {}).get(
-                'Nikon Ti2, FilterChanger(Turret-Lo)', 'None')
+                'Nikon Ti2, FilterChanger(Turret-Lo)', 'None'))
 
         sensitivity_category = 'PixelReadoutRate'
         info["Micro-Manager Metadata"] = {
@@ -447,11 +451,23 @@ class ND2Movie(AbstractPicassoMovie):
         mmmeta = {}
 
         text_info = nd2file.text_info
-        mmmeta['capturing'] = self.nikontext_to_dict(text_info['capturing'])
-        mmmeta['AcquisitionDate'] = text_info['date']
-        mmmeta['description'] = self.nikontext_to_dict(text_info['description'])
-        mmmeta['optics'] = self.nikontext_to_dict(text_info['optics'])
-
+        try:
+            mmmeta['capturing'] = self.nikontext_to_dict(text_info['capturing'])
+        except:
+            pass
+        try:
+            mmmeta['AcquisitionDate'] = text_info['date']
+        except:
+            pass
+        try:
+            mmmeta['description'] = self.nikontext_to_dict(text_info['description'])
+        except:
+            pass
+        try:
+            mmmeta['optics'] = self.nikontext_to_dict(text_info['optics'])
+        except:
+            pass
+        
         mmmeta['custom_data'] = nd2file.custom_data
         mmmeta['attributes'] = nd2file.attributes._asdict()
         mmmeta['metadata'] = self.nd2metadata_to_dict(nd2file.metadata)
