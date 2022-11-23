@@ -1005,7 +1005,9 @@ class PlotDialog(QtWidgets.QDialog):
             colors[
                 colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
             ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
-            ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
+            ax.scatter(
+                locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
+            )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
             ax.set_zlabel("Z [Px]")
@@ -1144,7 +1146,9 @@ class PlotDialogIso(QtWidgets.QDialog):
                 colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
             ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
 
-            ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
+            ax.scatter(
+                locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
+            )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
             ax.set_zlabel("Z [Px]")
@@ -1316,7 +1320,9 @@ class ClsDlg3D(QtWidgets.QDialog):
             self,
         )
         self.layout_grid.addWidget(self.buttons, 10, 0, 1, 3)
-        self.layout_grid.addWidget(QtWidgets.QLabel("No clusters:"), 10, 3, 1, 1)
+        self.layout_grid.addWidget(
+            QtWidgets.QLabel("No clusters:"), 10, 3, 1, 1
+        )
 
         self.n_clusters_spin = QtWidgets.QSpinBox()
 
@@ -3155,7 +3161,9 @@ class InfoDialog(QtWidgets.QDialog):
         self.picks_grid.addWidget(QtWidgets.QLabel("# Picks:"), 0, 0)
         self.n_picks = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_picks, 0, 1)
-        compute_pick_info_button = QtWidgets.QPushButton("Calculate info below")
+        compute_pick_info_button = QtWidgets.QPushButton(
+            "Calculate info below"
+        )
         compute_pick_info_button.clicked.connect(
             self.window.view.update_pick_info_long
         )
@@ -3201,7 +3209,9 @@ class InfoDialog(QtWidgets.QDialog):
         self.dark_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("# Units per pick:"), row, 0)
+        self.picks_grid.addWidget(
+            QtWidgets.QLabel("# Units per pick:"), row, 0
+        )
         self.units_per_pick = QtWidgets.QSpinBox()
         self.units_per_pick.setRange(1, 1e6)
         self.units_per_pick.setValue(1)
