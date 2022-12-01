@@ -1,7 +1,14 @@
 Changelog
 =========
 
-Last change: 17-NOV-2022 MTS
+Last change: 01-DEC-2022 MTS
+
+0.5.5
+-----
+- Cluster info is saved in ``_cluster_centers.hdf5`` files which are created when ``Save cluster centers`` box is ticked
+- Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, area/volume and convex hull
+- ``gist_rainbow`` is used for rendering properties
+- Bug fixes
 
 0.5.1 - 0.5.4
 -------------

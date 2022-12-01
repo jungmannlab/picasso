@@ -15,7 +15,7 @@ import os.path
 import importlib, pkgutil
 from glob import glob
 from math import ceil
-# from icecream import ic
+from icecream import ic
 from functools import partial
 
 import lmfit
@@ -89,6 +89,31 @@ def get_colors(n_channels):
 
     hues = np.arange(0, 1, 1 / n_channels)
     colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+    return colors
+
+def get_render_properties_colors(n_channels):
+    """
+    Creates a list with rgb channels for each of the channels used in
+    rendering property using the gist_rainbow colormap, see:
+    https://matplotlib.org/stable/tutorials/colors/colormaps.html
+
+    Parameters
+    ----------
+    n_channels : int
+        Number of locs channels
+
+    Returns
+    -------
+    list
+        Contains tuples with rgb channels
+    """
+
+    # array of shape (256, 3) with rbh channels with 256 colors
+    base = plt.get_cmap('gist_rainbow')(np.arange(256))[:, :3]
+    # indeces to draw from base
+    idx = np.linspace(0, 255, n_channels).astype(int)
+    # extract the colors of interest
+    colors = base[idx]
     return colors
 
 def is_hexadecimal(text):
@@ -624,7 +649,7 @@ class DatasetDialog(QtWidgets.QDialog):
         self.closebuttons.append(p)
         self.closebuttons[-1].setAutoDefault(False)
         self.closebuttons[-1].clicked.connect(
-            partial(self.close_file, p.objectName())
+            partial(self.close_file, p.objectName(), True)
         )
 
         # create the self.colorselection widget
@@ -980,7 +1005,9 @@ class PlotDialog(QtWidgets.QDialog):
             colors[
                 colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
             ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
-            ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
+            ax.scatter(
+                locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
+            )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
             ax.set_zlabel("Z [Px]")
@@ -1119,7 +1146,9 @@ class PlotDialogIso(QtWidgets.QDialog):
                 colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
             ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
 
-            ax.scatter(locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2)
+            ax.scatter(
+                locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
+            )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
             ax.set_zlabel("Z [Px]")
@@ -1291,7 +1320,9 @@ class ClsDlg3D(QtWidgets.QDialog):
             self,
         )
         self.layout_grid.addWidget(self.buttons, 10, 0, 1, 3)
-        self.layout_grid.addWidget(QtWidgets.QLabel("No clusters:"), 10, 3, 1, 1)
+        self.layout_grid.addWidget(
+            QtWidgets.QLabel("No clusters:"), 10, 3, 1, 1
+        )
 
         self.n_clusters_spin = QtWidgets.QSpinBox()
 
@@ -1749,7 +1780,7 @@ class DbscanDialog(QtWidgets.QDialog):
         self.radius = QtWidgets.QDoubleSpinBox()
         self.radius.setRange(0.001, 1e6)
         self.radius.setValue(0.1)
-        self.radius.setDecimals(3)
+        self.radius.setDecimals(4)
         self.radius.setSingleStep(0.001)
         grid.addWidget(self.radius, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
@@ -2054,10 +2085,6 @@ class TestClustererDialog(QtWidgets.QDialog):
 
     The user needs to pick a single region of interest using the Pick
     tool. Use Alt + {W, A, S, D, -, =} to change field of view. 
-
-    Calculating recommended values works for DBSCAN only. Search radius
-    is taken to be NeNA precision across the whole image. Please keep
-    in mind that this value does not have to be the optimal one.
 
     ...
 
@@ -3134,7 +3161,9 @@ class InfoDialog(QtWidgets.QDialog):
         self.picks_grid.addWidget(QtWidgets.QLabel("# Picks:"), 0, 0)
         self.n_picks = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_picks, 0, 1)
-        compute_pick_info_button = QtWidgets.QPushButton("Calculate info below")
+        compute_pick_info_button = QtWidgets.QPushButton(
+            "Calculate info below"
+        )
         compute_pick_info_button.clicked.connect(
             self.window.view.update_pick_info_long
         )
@@ -3180,7 +3209,9 @@ class InfoDialog(QtWidgets.QDialog):
         self.dark_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("# Units per pick:"), row, 0)
+        self.picks_grid.addWidget(
+            QtWidgets.QLabel("# Units per pick:"), row, 0
+        )
         self.units_per_pick = QtWidgets.QSpinBox()
         self.units_per_pick.setRange(1, 1e6)
         self.units_per_pick.setValue(1)
@@ -4087,7 +4118,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene)
         blur_grid.addWidget(
-            QtWidgets.QLabel("Min.  Blur (cam.  pixel):"), 5, 0, 1, 1
+            QtWidgets.QLabel("Min. Blur (cam. pixel):"), 5, 0, 1, 1
         )
         self.min_blur_width = QtWidgets.QDoubleSpinBox()
         self.min_blur_width.setRange(0, 999999)
@@ -4216,15 +4247,17 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
                         "Colormap must be of shape (256,  4)\n"
                         f"The loaded colormap has shape {cmap.shape}"
                     )
-                    self.colormap.setCurrentIndex(0)
+                    self.colormap.setCurrentText("magma")
                 elif not np.all((cmap >= 0) & (cmap <= 1)):
                     raise ValueError(
                         "All elements of the colormap must be between\n"
                         "0 and 1"
                     )
-                    self.colormap.setCurrentIndex(0)
+                    self.colormap.setCurrentText("magma")
                 else:
                     self.window.view.custom_cmap = cmap
+            else:
+                self.colormap.setCurrentText("magma")
         self.update_scene()
 
     def on_disp_px_changed(self, value):
@@ -5312,7 +5345,10 @@ class View(QtWidgets.QLabel):
             pd.set_value(0)
             pd.setModal(False)
             for i, path in enumerate(paths):
-                self.add(path, render=False)     
+                try:
+                    self.add(path, render=False)
+                except:
+                    pass
                 pd.set_value(i+1)
             if len(self.locs):  # if loading was successful
                 if fit_in_view:
@@ -5619,12 +5655,14 @@ class View(QtWidgets.QLabel):
         else: 
             locs = self.all_locs[channel]
 
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+
         # perform DBSCAN in a channel
         locs = postprocess.dbscan(
             locs, 
             radius, 
             min_density,
-            self.window.display_settings_dlg.pixelsize.value(),
+            pixelsize,
         )
         dbscan_info = {
             "Generated by": "Picasso DBSCAN",
@@ -5638,7 +5676,7 @@ class View(QtWidgets.QLabel):
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.find_cluster_centers(locs)
+            centers = clusterer.find_cluster_centers(locs, pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
 
@@ -5724,13 +5762,15 @@ class View(QtWidgets.QLabel):
         else: 
             locs = self.all_locs[channel]
 
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+
         # perform HDBSCAN for each channel
         locs = postprocess.hdbscan(
             locs,
             min_cluster, 
             min_samples, 
+            pixelsize,
             cluster_eps,
-            self.window.display_settings_dlg.pixelsize.value(),
         )
         hdbscan_info = {
             "Generated by": "Picasso HDBSCAN",
@@ -5745,7 +5785,7 @@ class View(QtWidgets.QLabel):
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.find_cluster_centers(locs)
+            centers = clusterer.find_cluster_centers(locs, pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
             status.close()
 
@@ -5898,7 +5938,7 @@ class View(QtWidgets.QLabel):
         if params[-3]:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.find_cluster_centers(clustered_locs)
+            centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
             io.save_locs(path, centers, info)
             status.close()
 
@@ -8253,6 +8293,7 @@ class View(QtWidgets.QLabel):
         else:
             self.add_picks(new_picks)
 
+    @check_pick
     def remove_picked_locs(self):
         """ Gets channel for removing picked localizations. """
 
@@ -8417,6 +8458,10 @@ class View(QtWidgets.QLabel):
                 tempcolor = colors[i]
                 inverted = tuple([1 - _ for _ in tempcolor])
                 colors[i] = inverted
+
+        # use the gist_rainbow colormap for rendering properties
+        if self.x_render_state:
+            colors = get_render_properties_colors(n_channels)
 
         return colors
 
@@ -8839,7 +8884,7 @@ class View(QtWidgets.QLabel):
         min_val = self.window.display_settings_dlg.minimum_render.value()
         max_val = self.window.display_settings_dlg.maximum_render.value()
 
-        colors = get_colors(n_colors)
+        colors = get_render_properties_colors(n_colors)
 
         fig1 = plt.figure(figsize=(5, 1))
 
@@ -10471,9 +10516,13 @@ class Window(QtWidgets.QMainWindow):
         """
 
         settings = io.load_user_settings()
-        settings["Render"][
-            "Colormap"
-        ] = self.display_settings_dlg.colormap.currentText()
+        current_colormap = self.display_settings_dlg.colormap.currentText()
+        if current_colormap == "Custom":
+            try: # change colormap to the one saved the last time
+                current_colormap = settings["Render"]["Colormap"]
+            except: # otherwise, save magma
+                current_colormap = "magma"
+        settings["Render"]["Colormap"] = current_colormap
         if self.view.locs_paths != []:
             settings["Render"]["PWD"] = os.path.dirname(
                 self.view.locs_paths[0]
@@ -11453,7 +11502,7 @@ class Window(QtWidgets.QMainWindow):
                 out_path = base + "_multi.hdf5"
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
-                    "Save picked localizations",
+                    "Save localizations",
                     out_path,
                     filter="*.hdf5",
                 )

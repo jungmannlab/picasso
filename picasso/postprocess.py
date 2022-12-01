@@ -17,7 +17,6 @@ from sklearn.cluster import DBSCAN as _DBSCAN
 from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
 from scipy.spatial import distance
-from scipy.spatial import ConvexHull
 # from icecream import ic
 
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
@@ -418,7 +417,7 @@ def dbscan(locs, radius, min_density, pixelsize):
     locs = locs[locs.group != -1]
     return locs
 
-def hdbscan(locs, min_cluster_size, min_samples, cluster_eps, pixelsize):
+def hdbscan(locs, min_cluster_size, min_samples, pixelsize, cluster_eps=0):
     from hdbscan import HDBSCAN as _HDBSCAN
 
     if hasattr(locs, "z"):
