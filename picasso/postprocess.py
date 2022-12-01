@@ -17,7 +17,6 @@ from sklearn.cluster import DBSCAN as _DBSCAN
 from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
 from scipy.spatial import distance
-from scipy.spatial import ConvexHull
 # from icecream import ic
 
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
