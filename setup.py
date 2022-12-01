@@ -8,7 +8,7 @@ with open("readme.rst", encoding="utf-8") as readme_file:
 
 setup(
     name="picassosr",
-    version="0.5.5",
+    version="0.5.6",
     author="Joerg Schnitzbauer, Maximilian T. Strauss, Rafal Kowalewski",
     author_email=("joschnitzbauer@gmail.com, straussmaximilian@gmail.com, rafalkowalewski998@gmail.com"),
     url="https://github.com/jungmannlab/picasso",
