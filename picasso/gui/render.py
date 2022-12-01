@@ -5343,7 +5343,10 @@ class View(QtWidgets.QLabel):
             pd.set_value(0)
             pd.setModal(False)
             for i, path in enumerate(paths):
-                self.add(path, render=False)     
+                try:
+                    self.add(path, render=False)
+                except:
+                    pass
                 pd.set_value(i+1)
             if len(self.locs):  # if loading was successful
                 if fit_in_view:
