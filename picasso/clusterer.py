@@ -18,13 +18,15 @@ import math as _math
 import yaml as _yaml
 import pandas as _pd
 from scipy.spatial import cKDTree as _cKDTree
+from scipy.spatial import ConvexHull as _ConvexHull
 
 from . import lib as _lib
 
 # from icecream import ic
 
 CLUSTER_CENTERS_DTYPE_2D = [
-    ("frame", "u4"),
+    ("frame", "f4"),
+    ("std_frame", "f4"),
     ("x", "f4"),
     ("y", "f4"),
     ("photons", "f4"),
@@ -36,9 +38,12 @@ CLUSTER_CENTERS_DTYPE_2D = [
     ("ellipticity", "f4"),
     ("net_gradient", "f4"),
     ("n", "u4"),
+    ("area", "f4"),
+    ("convexhull", "f4"),
 ] 
 CLUSTER_CENTERS_DTYPE_3D = [
-    ("frame", "u4"),
+    ("frame", "f4"),
+    ("std_frame", "f4"),
     ("x", "f4"),
     ("y", "f4"),
     ("z", "f4"),
@@ -52,7 +57,9 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("ellipticity", "f4"),
     ("net_gradient", "f4"),
     ("n", "u4"),
-] # for saving cluster centers# for saving cluster centers
+    ("volume", "f4"),
+    ("convexhull", "f4")
+] # for saving cluster centers
 
 
 def _frame_analysis(frame, n_frames):
@@ -347,7 +354,7 @@ def error_sums_wtd(x, w):
 
     return (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
 
-def find_cluster_centers(locs):
+def find_cluster_centers(locs, pixelsize):
     """
     Calculates cluster centers. 
 
@@ -357,6 +364,8 @@ def find_cluster_centers(locs):
     ----------
     locs : np.recarray
         Clustered localizations (contain group info)
+    pixelsize : float
+        Camera pixel size (used for finding volume and 3D convex hull)
 
     Returns
     -------
@@ -369,28 +378,32 @@ def find_cluster_centers(locs):
     grouplocs = locs_pd.groupby(locs_pd.group)
 
     # get cluster centers
-    centers_ = grouplocs.apply(cluster_center).values
+    centers_ = grouplocs.apply(cluster_center, pixelsize).values
 
     # convert to recarray and save
     frame = _np.array([_[0] for _ in centers_])
-    x = _np.array([_[1] for _ in centers_])
-    y = _np.array([_[2] for _ in centers_])
-    photons = _np.array([_[3] for _ in centers_])
-    sx = _np.array([_[4] for _ in centers_])
-    sy = _np.array([_[5] for _ in centers_])
-    bg = _np.array([_[6] for _ in centers_])
-    lpx = _np.array([_[7] for _ in centers_])
-    lpy = _np.array([_[8] for _ in centers_])
-    ellipticity = _np.array([_[9] for _ in centers_])
-    net_gradient = _np.array([_[10] for _ in centers_])
-    n = _np.array([_[11] for _ in centers_])
+    std_frame = _np.array([_[1] for _ in centers_])
+    x = _np.array([_[2] for _ in centers_])
+    y = _np.array([_[3] for _ in centers_])
+    photons = _np.array([_[4] for _ in centers_])
+    sx = _np.array([_[5] for _ in centers_])
+    sy = _np.array([_[6] for _ in centers_])
+    bg = _np.array([_[7] for _ in centers_])
+    lpx = _np.array([_[8] for _ in centers_])
+    lpy = _np.array([_[9] for _ in centers_])
+    ellipticity = _np.array([_[10] for _ in centers_])
+    net_gradient = _np.array([_[11] for _ in centers_])
+    n = _np.array([_[12] for _ in centers_])
 
     if hasattr(locs, "z"):
-        z = _np.array([_[12] for _ in centers_])
-        lpz = _np.array([_[13] for _ in centers_])
+        z = _np.array([_[13] for _ in centers_])
+        lpz = _np.array([_[14] for _ in centers_])
+        volume = _np.array([_[15] for _ in centers_])
+        convexhull = _np.array([_[16] for _ in centers_])
         centers = _np.rec.array(
             (
                 frame,
+                std_frame,
                 x,
                 y,
                 z,
@@ -404,13 +417,18 @@ def find_cluster_centers(locs):
                 ellipticity,
                 net_gradient,
                 n,
+                volume,
+                convexhull,
             ),
             dtype=CLUSTER_CENTERS_DTYPE_3D,
         )
     else:
+        area = _np.array([_[13] for _ in centers_])
+        convexhull = _np.array([_[14] for _ in centers_])
         centers = _np.rec.array(
             (
                 frame,
+                std_frame,
                 x,
                 y,
                 photons,
@@ -422,6 +440,8 @@ def find_cluster_centers(locs):
                 ellipticity,
                 net_gradient,
                 n,
+                area,
+                convexhull,
             ),
             dtype=CLUSTER_CENTERS_DTYPE_2D,
         )
@@ -432,7 +452,7 @@ def find_cluster_centers(locs):
 
     return centers
 
-def cluster_center(grouplocs, separate_lp=False):
+def cluster_center(grouplocs, pixelsize, separate_lp=False):
     """
     Finds cluster centers and their attributes.
 
@@ -443,6 +463,8 @@ def cluster_center(grouplocs, separate_lp=False):
     ----------
     grouplocs : pandas.SeriesGroupBy
         Localizations grouped by cluster ids
+    pixelsize : float
+        Camera pixel size (used for finding volume and 3D convex hull)
     separate_lp : bool (default=False)
         If True, localization precision in x and y will be calculated
         separately. Otherwise, the mean of the two is taken
@@ -454,11 +476,14 @@ def cluster_center(grouplocs, separate_lp=False):
         (frame, x, y, etc)
     """
 
-    # mean frame
+    # mean and std frame
     frame = grouplocs.frame.mean()
+    std_frame = grouplocs.frame.std()
     # average x and y, weighted by lpx, lpy
     x = _np.average(grouplocs.x, weights=1/(grouplocs.lpx)**2)
     y = _np.average(grouplocs.y, weights=1/(grouplocs.lpy)**2)
+    std_x = grouplocs.x.std()
+    std_y = grouplocs.y.std()
     # mean values
     photons = grouplocs.photons.mean()
     sx = grouplocs.sx.mean()
@@ -487,9 +512,21 @@ def cluster_center(grouplocs, separate_lp=False):
             grouplocs.z, 
             weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
         )
+        std_z = grouplocs.z.std() / pixelsize
         lpz = 2 * lpx
+        volume = _np.power((std_x + std_y + std_z) / 3 * 2, 3) * 4.18879
+        try:
+            X = _np.stack(
+                (grouplocs.x, grouplocs.y, grouplocs.z / pixelsize),
+                axis=0,
+            ).T
+            hull = _ConvexHull(X)
+            convexhull = hull.volume
+        except:
+            convexhull = 0
         result = [
             frame,
+            std_frame,
             x,
             y,
             photons,
@@ -503,10 +540,20 @@ def cluster_center(grouplocs, separate_lp=False):
             n, 
             z, 
             lpz,
+            volume,
+            convexhull,
         ]
     else:
+        area = _np.power(std_x + std_y, 2) * _np.pi
+        try:
+            X = _np.stack((grouplocs.x, grouplocs.y), axis=0).T
+            hull = _ConvexHull(X)
+            convexhull = hull.volume
+        except:
+            convexhull = 0
         result = [
             frame,
+            std_frame,
             x,
             y,
             photons,
@@ -517,7 +564,9 @@ def cluster_center(grouplocs, separate_lp=False):
             lpy,
             ellipticity,
             net_gradient,
-            n, 
+            n,
+            area,
+            convexhull,
         ]
 
     if hasattr(grouplocs, "group_input"):
