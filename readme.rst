@@ -60,7 +60,7 @@ Sample instructions to create an environment and installation of packages with c
 4. Install using pip: ``pip install picassosr``.
 5. (Optional) If you want to use hdbscan install using pip: ``pip install hdbscan``.
 6. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
-7. Continue with the installation of Picasso
+7. Continue with the installation of Picasso (see the **Instalation (continued)** tab below)
 
 Troubleshooting: In case installing via ``pip`` fails, try to install the failing packages via conda.
 
@@ -68,14 +68,19 @@ Note that sometimes outdated packages can cause problems. As of version 0.3.0, P
 
 .. _installation-1:
 
-Installation
-^^^^^^^^^^^^
+Installation (continued)
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+There are two approaches to install Picasso. Firstly, ``pip`` can be used to download Picasso release from `PyPI <https://pypi.org/>`_. Alternatively, the GitHub repo can be directly cloned to your computer. Please see the instructions below for details.
+
 Via PyPI:
+'''''''''
 
 1. Install using pip: ``pip install picassosr``.
 2. Launch via calling one of the modules, e.g. ``picasso localize``.
 
 Via GitHub:
+'''''''''''
 
 1. Open the console, ``cd`` to the directory where you want to install and run ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
 2. Change to the downloaded directory ``cd picasso``
@@ -84,15 +89,21 @@ Via GitHub:
 
 Updating
 ^^^^^^^^
-To update Picasso from GitHub use the following commands:
+If Picasso was installed from PyPI, run the following command:
+''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
+
+``pip install --upgrade picassosr``
+
+If Picasso was cloned from the GitHub repo, use the following commands:
+'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 1. Move to the Picasso folder with the terminal, activate environment.
 2. Update with git: ``git pull``.
 3. Update the environment: ``pip install --upgrade -r requirements.txt``.
 4. Run installation ``python setup.py install``.
 
-Optional for windows users
-^^^^^^^^^^^^^^^^^^^^^^^^^^
+Creating shortcuts on Windows (optional)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Run the PowerShell script “createShortcuts.ps1” in the gui directory. This should be doable by right-clicking on the script and choosing “Run with PowerShell”. Alternatively, run the command
 ``powershell ./createShortcuts.ps1`` in the command line. Use the generated shortcuts in the top level directory to start GUI components. Users can drag these shortcuts to their Desktop, Start Menu or Task Bar.
@@ -104,8 +115,8 @@ The individual modules of picasso can be started as follows:
 1. Open the console, activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
 2. Start the picasso modules via ``python -m picasso ..``, e.g. ``python -m picasso render`` for the render module
 
-Using GPU for Fitting
-^^^^^^^^^^^^^^^^^^^^^
+Using GPU for Fitting (optional)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
