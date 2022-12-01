@@ -25,6 +25,7 @@ from . import lib as _lib
 # from icecream import ic
 
 CLUSTER_CENTERS_DTYPE_2D = [
+    ("group", "i4"),
     ("frame", "f4"),
     ("std_frame", "f4"),
     ("x", "f4"),
@@ -42,6 +43,7 @@ CLUSTER_CENTERS_DTYPE_2D = [
     ("convexhull", "f4"),
 ] 
 CLUSTER_CENTERS_DTYPE_3D = [
+    ("group", "i4"),
     ("frame", "f4"),
     ("std_frame", "f4"),
     ("x", "f4"),
@@ -58,7 +60,7 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("net_gradient", "f4"),
     ("n", "u4"),
     ("volume", "f4"),
-    ("convexhull", "f4")
+    ("convexhull", "f4"),
 ] # for saving cluster centers
 
 
@@ -378,7 +380,8 @@ def find_cluster_centers(locs, pixelsize):
     grouplocs = locs_pd.groupby(locs_pd.group)
 
     # get cluster centers
-    centers_ = grouplocs.apply(cluster_center, pixelsize).values
+    res = grouplocs.apply(cluster_center, pixelsize)
+    centers_ = res.values
 
     # convert to recarray and save
     frame = _np.array([_[0] for _ in centers_])
@@ -402,6 +405,7 @@ def find_cluster_centers(locs, pixelsize):
         convexhull = _np.array([_[16] for _ in centers_])
         centers = _np.rec.array(
             (
+                res.index.values, # group id
                 frame,
                 std_frame,
                 x,
@@ -427,6 +431,7 @@ def find_cluster_centers(locs, pixelsize):
         convexhull = _np.array([_[14] for _ in centers_])
         centers = _np.rec.array(
             (
+                res.index.values, # group id
                 frame,
                 std_frame,
                 x,
