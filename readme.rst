@@ -71,7 +71,7 @@ Note that sometimes outdated packages can cause problems. As of version 0.3.0, P
 Installation (continued)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
-There are two approaches to install Picasso. Firstly, ``pip`` can be used to download Picasso release from `PyPI <https://pypi.org/>`_. Alternatively, the GitHub repo can be directly cloned to your computer. Please see the instructions below for details.
+There are two approaches to installing Picasso. Firstly, ``pip`` can be used to download Picasso release from `PyPI <https://pypi.org/project/picassosr/>`_. Alternatively, the GitHub repo can be directly cloned to your computer. Please see the instructions below for details.
 
 Via PyPI:
 '''''''''
