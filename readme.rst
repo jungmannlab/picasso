@@ -34,7 +34,7 @@ Picasso now has a server-based workflow management-system. Check out `here <http
 Installation
 ------------
 
-Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows. Here you will also find the Nature Protocols legacy version. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X), please follow the advanced installation instructions.
+Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows. Here you will also find the Nature Protocols legacy version. For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X), please follow the advanced installation instructions below.
 
 Advanced installation for Python programmers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
