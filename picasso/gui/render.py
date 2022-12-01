@@ -15,7 +15,7 @@ import os.path
 import importlib, pkgutil
 from glob import glob
 from math import ceil
-# from icecream import ic
+from icecream import ic
 from functools import partial
 
 import lmfit
@@ -91,10 +91,10 @@ def get_colors(n_channels):
     colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
     return colors
 
-def get_spectral_colors(n_channels):
+def get_render_properties_colors(n_channels):
     """
     Creates a list with rgb channels for each of the channels used in
-    rendering property using the spectral colormap, see:
+    rendering property using the gist_rainbow colormap, see:
     https://matplotlib.org/stable/tutorials/colors/colormaps.html
 
     Parameters
@@ -109,7 +109,7 @@ def get_spectral_colors(n_channels):
     """
 
     # array of shape (256, 3) with rbh channels with 256 colors
-    base = plt.get_cmap('Spectral')(np.arange(256))[:, :3]
+    base = plt.get_cmap('gist_rainbow')(np.arange(256))[:, :3]
     # indeces to draw from base
     idx = np.linspace(0, 255, n_channels).astype(int)
     # extract the colors of interest
@@ -4247,15 +4247,17 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
                         "Colormap must be of shape (256,  4)\n"
                         f"The loaded colormap has shape {cmap.shape}"
                     )
-                    self.colormap.setCurrentIndex(0)
+                    self.colormap.setCurrentText("magma")
                 elif not np.all((cmap >= 0) & (cmap <= 1)):
                     raise ValueError(
                         "All elements of the colormap must be between\n"
                         "0 and 1"
                     )
-                    self.colormap.setCurrentIndex(0)
+                    self.colormap.setCurrentText("magma")
                 else:
                     self.window.view.custom_cmap = cmap
+            else:
+                self.colormap.setCurrentText("magma")
         self.update_scene()
 
     def on_disp_px_changed(self, value):
@@ -8457,9 +8459,9 @@ class View(QtWidgets.QLabel):
                 inverted = tuple([1 - _ for _ in tempcolor])
                 colors[i] = inverted
 
-        # use the spectral colormap for rendering properties
+        # use the gist_rainbow colormap for rendering properties
         if self.x_render_state:
-            colors = get_spectral_colors(n_channels)
+            colors = get_render_properties_colors(n_channels)
 
         return colors
 
@@ -8882,7 +8884,7 @@ class View(QtWidgets.QLabel):
         min_val = self.window.display_settings_dlg.minimum_render.value()
         max_val = self.window.display_settings_dlg.maximum_render.value()
 
-        colors = get_spectral_colors(n_colors)
+        colors = get_render_properties_colors(n_colors)
 
         fig1 = plt.figure(figsize=(5, 1))
 
@@ -10514,9 +10516,13 @@ class Window(QtWidgets.QMainWindow):
         """
 
         settings = io.load_user_settings()
-        settings["Render"][
-            "Colormap"
-        ] = self.display_settings_dlg.colormap.currentText()
+        current_colormap = self.display_settings_dlg.colormap.currentText()
+        if current_colormap == "Custom":
+            try: # change colormap to the one saved the last time
+                current_colormap = settings["Render"]["Colormap"]
+            except: # otherwise, save magma
+                current_colormap = "magma"
+        settings["Render"]["Colormap"] = current_colormap
         if self.view.locs_paths != []:
             settings["Render"]["PWD"] = os.path.dirname(
                 self.view.locs_paths[0]
