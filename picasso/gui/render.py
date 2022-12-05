@@ -1010,7 +1010,7 @@ class PlotDialog(QtWidgets.QDialog):
             )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [Px]")
+            ax.set_zlabel("Z [nm]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1049,7 +1049,7 @@ class PlotDialog(QtWidgets.QDialog):
 
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [Px]")
+            ax.set_zlabel("Z [nm]")
 
             plt.gca().patch.set_facecolor("black")
             ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
@@ -1151,7 +1151,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [Px]")
+            ax.set_zlabel("Z [nm]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1188,7 +1188,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             # AXES 3
             ax3.scatter(locs["x"], locs["z"], c=colors, cmap="jet", s=2)
             ax3.set_xlabel("X [Px]")
-            ax3.set_ylabel("Z [Px]")
+            ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1203,7 +1203,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             # AXES 4
             ax4.scatter(locs["y"], locs["z"], c=colors, cmap="jet", s=2)
             ax4.set_xlabel("Y [Px]")
-            ax4.set_ylabel("Z [Px]")
+            ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
                 np.mean(locs["y"]) - 3 * np.std(locs["y"]),
                 np.mean(locs["y"]) + 3 * np.std(locs["y"]),
@@ -1240,7 +1240,7 @@ class PlotDialogIso(QtWidgets.QDialog):
 
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [Px]")
+            ax.set_zlabel("Z [nm]")
 
             ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
             ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
@@ -1262,7 +1262,7 @@ class PlotDialogIso(QtWidgets.QDialog):
 
             # AXES 3
             ax3.set_xlabel("X [Px]")
-            ax3.set_ylabel("Z [Px]")
+            ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1276,7 +1276,7 @@ class PlotDialogIso(QtWidgets.QDialog):
 
             # AXES 4
             ax4.set_xlabel("Y [Px]")
-            ax4.set_ylabel("Z [Px]")
+            ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
                 np.mean(locs["y"]) - 3 * np.std(locs["y"]),
                 np.mean(locs["y"]) + 3 * np.std(locs["y"]),
@@ -7316,7 +7316,7 @@ class View(QtWidgets.QLabel):
                 "Keep pick No: {} of {} ?\n"
                 "Picks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \n"
                 "Time elapsed: {:.2f} Minutes, "
-                "Picks per Minute: {:.2f}"
+                " Picks per Minute: {:.2f}"
             ).format(
                 params["i"] + 1,
                 params["n_total"],
@@ -7351,7 +7351,7 @@ class View(QtWidgets.QLabel):
 
     def select_traces(self):
         """ 
-        Lets user to select picks based on their traces.
+        Lets the user to select picks based on their traces.
         Opens self.pick_message_box to display information.
         """
 
@@ -7410,6 +7410,7 @@ class View(QtWidgets.QLabel):
                     ax3.set_title("Localizations")
                     ax3.set_xlabel("Frames")
                     ax3.set_ylabel("ON")
+                    ax3.set_yticks([0, 1])
 
                     fig.canvas.draw()
                     width, height = fig.canvas.get_width_height()
