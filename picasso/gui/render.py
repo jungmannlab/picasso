@@ -3106,6 +3106,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.setWindowTitle("Info")
         self.setModal(False)
         self.lp = None
+        self.nena_calculated = False
         self.change_fov = ChangeFOV(self.window)
         vbox = QtWidgets.QVBoxLayout(self)
         # Display
@@ -3251,27 +3252,43 @@ class InfoDialog(QtWidgets.QDialog):
             locs = self.window.view.locs[channel]
             info = self.window.view.infos[channel]
 
-            # modify the movie grid
-            self.nena_button.setParent(None)
-            self.movie_grid.removeWidget(self.nena_button)
+            # calculate nena
             progress = lib.ProgressDialog(
                 "Calculating NeNA precision", 0, 100, self
             )
             result_lp = postprocess.nena(locs, info, progress.set_value)
+
+            # modify the movie grid
+            if not self.nena_calculated: # if nena calculated first time
+                self.nena_button.setParent(None)
+                self.movie_grid.removeWidget(self.nena_button)
+            else:
+                self.movie_grid.removeWidget(self.nena_label)
+                self.movie_grid.removeWidget(self.show_plot_button)
+
             self.nena_label = QtWidgets.QLabel()
             self.movie_grid.addWidget(self.nena_label, 1, 1)
             self.nena_result, self.lp = result_lp
             self.lp *= self.window.display_settings_dlg.pixelsize.value()
             self.nena_label.setText("{:.3} nm".format(self.lp))
-            show_plot_button = QtWidgets.QPushButton("Show plot")
-            self.movie_grid.addWidget(
-                show_plot_button, self.movie_grid.rowCount() - 1, 2
-            )
 
             # Nena plot
             self.nena_window = NenaPlotWindow(self)
             self.nena_window.plot(self.nena_result)
-            show_plot_button.clicked.connect(self.nena_window.show)
+
+            self.show_plot_button = QtWidgets.QPushButton("Show plot")
+            self.show_plot_button.clicked.connect(self.nena_window.show)
+            self.movie_grid.addWidget(self.show_plot_button, 0, 2)
+            
+            if not self.nena_calculated:
+                # add recalculate nena
+                recalculate_nena = QtWidgets.QPushButton("Recalculate NeNA")
+                recalculate_nena.clicked.connect(self.calculate_nena_lp)
+                recalculate_nena.setDefault(False)
+                recalculate_nena.setAutoDefault(False)
+                self.movie_grid.addWidget(recalculate_nena, 1, 2)
+
+            self.nena_calculated = True
 
     def calibrate_influx(self):
         """ Calculates influx rate (1/frames). """
@@ -10216,6 +10233,7 @@ class Window(QtWidgets.QMainWindow):
             self.display_settings_dlg,
             self.dataset_dialog,
             self.info_dialog,
+            self.info_dialog.change_fov,
             self.mask_settings_dialog,
             self.tools_settings_dialog,
             self.slicer_dialog,
