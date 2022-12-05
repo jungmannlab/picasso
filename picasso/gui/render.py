@@ -7258,6 +7258,7 @@ class View(QtWidgets.QLabel):
             ax3.set_title("Localizations")
             ax3.set_xlabel("Frames")
             ax3.set_ylabel("ON")
+            ax3.set_yticks([0, 1])
             ax3.set_ylim([-0.1, 1.1])
 
             self.export_trace_button = QtWidgets.QPushButton("Export (*.csv)")
@@ -7349,6 +7350,7 @@ class View(QtWidgets.QLabel):
 
         return msgBox
 
+    @check_pick
     def select_traces(self):
         """ 
         Lets the user to select picks based on their traces.
@@ -7366,16 +7368,18 @@ class View(QtWidgets.QLabel):
                 i = 0 # index of the currently shown pick
                 n_frames = self.infos[channel][0]["Frames"]
                 while i < len(self._picks):
-                    fig = plt.figure(figsize=(5, 5), constrained_layout=True)
+                    fig, (ax1, ax2, ax3) = plt.subplots(
+                        3, 1, figsize=(5, 5), constrained_layout=True
+                    )
                     fig.canvas.set_window_title("Trace")
                     pick = self._picks[i]
                     locs = all_picked_locs[i]
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
                     # essentialy the same plotting as in self.show_trace
-                    ax1 = fig.add_subplot(311)
-                    ax2 = fig.add_subplot(312, sharex=ax1)
-                    ax3 = fig.add_subplot(313, sharex=ax1)
+                    # ax1 = fig.add_subplot(311)
+                    # ax2 = fig.add_subplot(312, sharex=ax1)
+                    # ax3 = fig.add_subplot(313, sharex=ax1)
 
                     xvec = np.arange(n_frames)
                     yvec = xvec[:] * 0
