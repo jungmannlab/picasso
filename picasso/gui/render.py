@@ -15,8 +15,9 @@ import os.path
 import importlib, pkgutil
 from glob import glob
 from math import ceil
-# from icecream import ic
 from functools import partial
+
+# from icecream import ic
 
 import lmfit
 import matplotlib 
@@ -2191,16 +2192,29 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.display_all_locs.stateChanged.connect(self.view.update_scene)
         parameters_grid.addWidget(self.display_all_locs, 3, 0, 1, 2)
 
+        # parameters - xy, xz, yz projections
+        xy_proj = QtWidgets.QPushButton("XY projection")
+        xy_proj.clicked.connect(self.on_xy_proj)
+        parameters_grid.addWidget(xy_proj, 4, 0, 1, 2)
+
+        xz_proj = QtWidgets.QPushButton("XZ projection")
+        xz_proj.clicked.connect(self.on_xz_proj)
+        parameters_grid.addWidget(xz_proj, 5, 0)
+
+        yz_proj = QtWidgets.QPushButton("YZ projection")
+        yz_proj.clicked.connect(self.on_yz_proj)
+        parameters_grid.addWidget(yz_proj, 5, 1)
+
         # parameters - test
         test_button = QtWidgets.QPushButton("Test")
         test_button.clicked.connect(self.test_clusterer)
         test_button.setDefault(True)
-        parameters_grid.addWidget(test_button, 4, 0)
+        parameters_grid.addWidget(test_button, 6, 0)
 
         # display settings - return to full FOV
         full_fov = QtWidgets.QPushButton("Full FOV")
         full_fov.clicked.connect(self.get_full_fov)
-        parameters_grid.addWidget(full_fov, 4, 1)
+        parameters_grid.addWidget(full_fov, 6, 1)
 
         # view
         view_box = QtWidgets.QGroupBox("View")
@@ -2240,6 +2254,24 @@ class TestClustererDialog(QtWidgets.QDialog):
         zoomout_action.setShortcut("Alt+-")
         zoomout_action.triggered.connect(self.view.zoom_out)
         self.addAction(zoomout_action)
+
+    def on_xy_proj(self):
+        self.view.ang = None
+        self.view.update_scene()
+
+    def on_xz_proj(self):
+        if self.view.locs is not None and hasattr(self.view.locs, "z"):
+            self.view.ang = [1.5708, 0, 0] # 90 deg rotation
+        else:
+            self.view.ang = None
+        self.view.update_scene()
+
+    def on_yz_proj(self):
+        if self.view.locs is not None and hasattr(self.view.locs, "z"):
+            self.view.ang = [0, 1.5708, 0] # 90 deg rotation
+        else:
+            self.view.ang = None
+        self.view.update_scene()
 
     def cluster(self, locs, params):
         """ 
@@ -2382,6 +2414,8 @@ class TestClustererDialog(QtWidgets.QDialog):
         # extract picked locs
         self.channel = self.window.view.get_channel("Test clusterer")
         locs = self.window.view.picked_locs(self.channel)[0]
+        if hasattr(locs, "z"):
+            locs.z /= self.window.display_settings_dlg.pixelsize.value()
         # cluster picked locs
         self.view.locs = self.cluster(locs, params)
         # update viewport if pick has changed
@@ -2586,6 +2620,7 @@ class TestClustererView(QtWidgets.QLabel):
         self.view = dialog.window.view
         self.viewport = None
         self.locs = None
+        self.ang = None
         self._size = 500
         self.setMinimumSize(self._size, self._size)
         self.setMaximumSize(self._size, self._size)
@@ -2693,6 +2728,7 @@ class TestClustererView(QtWidgets.QLabel):
                 'viewport': self.viewport,
                 'blur_method': blur_method,
                 'min_blur_width': 0,
+                'ang': self.ang,
             }
 
             # render images for all channels
