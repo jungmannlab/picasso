@@ -1,4 +1,30 @@
 Cameras:
+  Andor Zyla 4.2 Plus:
+    Pixelsize: 130
+    Baseline: 100
+    Quantum Efficiency:
+      525: 0.8
+      595: 0.82
+      700: 0.74
+    Sensitivity Categories:
+      - PixelReadoutRate
+      - Sensitivity/DynamicRange
+    Sensitivity:
+      540 MHz - fastest readout:
+        12-bit (high well capacity): 7.18
+        12-bit (low noise): 0.29
+        16-bit (low noise & high well capacity): 0.46
+      200 MHz - lowest noise:
+        12-bit (high well capacity): 7.0
+        12-bit (low noise): 0.26
+        16-bit (low noise & high well capacity): 0.45
+    Channel Device:
+      # This information is used to automatically set the emission wavelength based on MicroManager metadata
+      Name: FilterTurret1-Label
+      Emission Wavelengths:
+        1-TIRF 488: 525
+        2-TIRF 560: 595
+        3-TIRF 640: 700   
   Andor iXon X-9603:
     Baseline: 200
     Gain Property Name: Gain
