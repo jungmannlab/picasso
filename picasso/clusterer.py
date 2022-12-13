@@ -518,7 +518,7 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
             weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
         )
         std_z = grouplocs.z.std() / pixelsize
-        lpz = 2 * lpx
+        lpz = std_z
         volume = _np.power((std_x + std_y + std_z) / 3 * 2, 3) * 4.18879
         try:
             X = _np.stack(
