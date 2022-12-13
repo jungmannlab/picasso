@@ -2149,7 +2149,7 @@ class TestClustererDialog(QtWidgets.QDialog):
         layout.addWidget(
             QtWidgets.QLabel(
                 "Pick a region of interest and test different clustering\n"
-                "parameters.\n\n"
+                "algorithms and parameters.\n\n"
                 "Use shortcuts Alt + {W, A, S, D, -, =} to change FOV.\n"
             ), 0, 0
         )
@@ -2178,24 +2178,29 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.test_smlm_params = TestSMLMParams(self)
         parameters_stack.addWidget(self.test_smlm_params)
 
-        # parameters - display mode
+        # parameters - display modes
+        self.one_pixel_blur = QtWidgets.QCheckBox("One pixel blur")
+        self.one_pixel_blur.setChecked(False)
+        self.one_pixel_blur.stateChanged.connect(self.view.update_scene)
+        parameters_grid.addWidget(self.one_pixel_blur, 2, 0, 1, 2)
+
         self.display_all_locs = QtWidgets.QCheckBox(
             "Display non-clustered localizations"
         )
         self.display_all_locs.setChecked(False)
         self.display_all_locs.stateChanged.connect(self.view.update_scene)
-        parameters_grid.addWidget(self.display_all_locs, 2, 0, 1, 2)
+        parameters_grid.addWidget(self.display_all_locs, 3, 0, 1, 2)
 
         # parameters - test
         test_button = QtWidgets.QPushButton("Test")
         test_button.clicked.connect(self.test_clusterer)
         test_button.setDefault(True)
-        parameters_grid.addWidget(test_button, 3, 0)
+        parameters_grid.addWidget(test_button, 4, 0)
 
         # display settings - return to full FOV
         full_fov = QtWidgets.QPushButton("Full FOV")
         full_fov.clicked.connect(self.get_full_fov)
-        parameters_grid.addWidget(full_fov, 3, 1)
+        parameters_grid.addWidget(full_fov, 4, 1)
 
         # view
         view_box = QtWidgets.QGroupBox("View")
@@ -2679,10 +2684,14 @@ class TestClustererView(QtWidgets.QLabel):
             locs = self.split_locs()
 
             # render kwargs
+            if self.dialog.one_pixel_blur.isChecked():
+                blur_method = 'smooth'
+            else:
+                blur_method = 'convolve'
             kwargs = {
                 'oversampling': self.get_optimal_oversampling(),
                 'viewport': self.viewport,
-                'blur_method': 'convolve',
+                'blur_method': blur_method,
                 'min_blur_width': 0,
             }
 
