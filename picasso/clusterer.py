@@ -4,7 +4,6 @@
 
     Clusterer optimized for DNA PAINT in CPU and GPU versions.
 
-
     Based on the work of Thomas Schlichthaerle and Susanne Reinhardt.
     :authors: Thomas Schlichthaerle, Susanne Reinhardt, 
         Rafal Kowalewski, 2020-2022
@@ -30,6 +29,8 @@ CLUSTER_CENTERS_DTYPE_2D = [
     ("std_frame", "f4"),
     ("x", "f4"),
     ("y", "f4"),
+    ("std_x", "f4"),
+    ("std_y", "f4"),
     ("photons", "f4"),
     ("sx", "f4"),
     ("sy", "f4"),
@@ -48,6 +49,8 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("std_frame", "f4"),
     ("x", "f4"),
     ("y", "f4"),
+    ("std_x", "f4"),
+    ("std_y", "f4"),
     ("z", "f4"),
     ("photons", "f4"),
     ("sx", "f4"),
@@ -55,7 +58,7 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("bg", "f4"),
     ("lpx", "f4"),
     ("lpy", "f4"),
-    ("lpz", "f4"),
+    ("std_z", "f4"),
     ("ellipticity", "f4"),
     ("net_gradient", "f4"),
     ("n", "u4"),
@@ -388,21 +391,23 @@ def find_cluster_centers(locs, pixelsize):
     std_frame = _np.array([_[1] for _ in centers_])
     x = _np.array([_[2] for _ in centers_])
     y = _np.array([_[3] for _ in centers_])
-    photons = _np.array([_[4] for _ in centers_])
-    sx = _np.array([_[5] for _ in centers_])
-    sy = _np.array([_[6] for _ in centers_])
-    bg = _np.array([_[7] for _ in centers_])
-    lpx = _np.array([_[8] for _ in centers_])
-    lpy = _np.array([_[9] for _ in centers_])
-    ellipticity = _np.array([_[10] for _ in centers_])
-    net_gradient = _np.array([_[11] for _ in centers_])
-    n = _np.array([_[12] for _ in centers_])
+    std_x = _np.array([_[4] for _ in centers_])
+    std_y = _np.array([_[5] for _ in centers_])
+    photons = _np.array([_[6] for _ in centers_])
+    sx = _np.array([_[7] for _ in centers_])
+    sy = _np.array([_[8] for _ in centers_])
+    bg = _np.array([_[9] for _ in centers_])
+    lpx = _np.array([_[10] for _ in centers_])
+    lpy = _np.array([_[11] for _ in centers_])
+    ellipticity = _np.array([_[12] for _ in centers_])
+    net_gradient = _np.array([_[13] for _ in centers_])
+    n = _np.array([_[14] for _ in centers_])
 
     if hasattr(locs, "z"):
-        z = _np.array([_[13] for _ in centers_])
-        lpz = _np.array([_[14] for _ in centers_])
-        volume = _np.array([_[15] for _ in centers_])
-        convexhull = _np.array([_[16] for _ in centers_])
+        z = _np.array([_[15] for _ in centers_])
+        std_z = _np.array([_[16] for _ in centers_])
+        volume = _np.array([_[17] for _ in centers_])
+        convexhull = _np.array([_[18] for _ in centers_])
         centers = _np.rec.array(
             (
                 res.index.values, # group id
@@ -410,6 +415,8 @@ def find_cluster_centers(locs, pixelsize):
                 std_frame,
                 x,
                 y,
+                std_x,
+                std_y,
                 z,
                 photons,
                 sx,
@@ -417,7 +424,7 @@ def find_cluster_centers(locs, pixelsize):
                 bg,
                 lpx,
                 lpy,
-                lpz,
+                std_z,
                 ellipticity,
                 net_gradient,
                 n,
@@ -436,6 +443,8 @@ def find_cluster_centers(locs, pixelsize):
                 std_frame,
                 x,
                 y,
+                std_x,
+                std_y,
                 photons,
                 sx,
                 sy,
@@ -512,13 +521,12 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
     # n_locs in cluster
     n = len(grouplocs)
     if hasattr(grouplocs, "z"):
-        # take lpz = 2 * mean(lpx, lpy)
         z = _np.average(
             grouplocs.z, 
             weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
-        )
+        ) # take lpz = 2 * mean(lpx, lpy)
         std_z = grouplocs.z.std() / pixelsize
-        lpz = std_z
+        # lpz = std_z
         volume = _np.power((std_x + std_y + std_z) / 3 * 2, 3) * 4.18879
         try:
             X = _np.stack(
@@ -534,6 +542,8 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
             std_frame,
             x,
             y,
+            std_x,
+            std_y,
             photons,
             sx,
             sy,
@@ -543,8 +553,9 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
             ellipticity,
             net_gradient,
             n, 
-            z, 
-            lpz,
+            z,
+            std_z,
+            # lpz,
             volume,
             convexhull,
         ]
@@ -561,6 +572,8 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
             std_frame,
             x,
             y,
+            std_x,
+            std_y,
             photons,
             sx,
             sy,

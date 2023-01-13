@@ -1,12 +1,12 @@
 Changelog
 =========
 
-Last change: 05-DEC-2022 MTS
+Last change: 13-JAN-2023 MTS
 
-0.5.5 - 0.5.7
+0.5.5 - 0.5.8
 -------------
 - Cluster info is saved in ``_cluster_centers.hdf5`` files which are created when ``Save cluster centers`` box is ticked
-- Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, area/volume and convex hull
+- Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, std in x,y and z, area/volume and convex hull
 - ``gist_rainbow`` is used for rendering properties
 - NeNA can be calculated many times
 - Bug fixes

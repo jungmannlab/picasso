@@ -4203,7 +4203,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         # Camera_parameters
         camera_groupbox = QtWidgets.QGroupBox("Camera")
         self.camera_grid = QtWidgets.QGridLayout(camera_groupbox)
-        self.camera_grid.addWidget(QtWidgets.QLabel("Pixel Size:"), 0, 0)
+        self.camera_grid.addWidget(QtWidgets.QLabel("Pixel Size (nm):"), 0, 0)
         self.pixelsize = QtWidgets.QDoubleSpinBox()
         self.pixelsize.setRange(1, 100000)
         self.pixelsize.setValue(130)
