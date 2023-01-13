@@ -2192,29 +2192,34 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.display_all_locs.stateChanged.connect(self.view.update_scene)
         parameters_grid.addWidget(self.display_all_locs, 3, 0, 1, 2)
 
+        self.display_centers = QtWidgets.QCheckBox("Display cluster centers")
+        self.display_centers.setChecked(False)
+        self.display_centers.stateChanged.connect(self.view.update_scene)
+        parameters_grid.addWidget(self.display_centers, 4, 0, 1, 2)
+
         # parameters - xy, xz, yz projections
         xy_proj = QtWidgets.QPushButton("XY projection")
         xy_proj.clicked.connect(self.on_xy_proj)
-        parameters_grid.addWidget(xy_proj, 4, 0, 1, 2)
+        parameters_grid.addWidget(xy_proj, 5, 0, 1, 2)
 
         xz_proj = QtWidgets.QPushButton("XZ projection")
         xz_proj.clicked.connect(self.on_xz_proj)
-        parameters_grid.addWidget(xz_proj, 5, 0)
+        parameters_grid.addWidget(xz_proj, 6, 0)
 
         yz_proj = QtWidgets.QPushButton("YZ projection")
         yz_proj.clicked.connect(self.on_yz_proj)
-        parameters_grid.addWidget(yz_proj, 5, 1)
+        parameters_grid.addWidget(yz_proj, 6, 1)
 
         # parameters - test
         test_button = QtWidgets.QPushButton("Test")
         test_button.clicked.connect(self.test_clusterer)
         test_button.setDefault(True)
-        parameters_grid.addWidget(test_button, 6, 0)
+        parameters_grid.addWidget(test_button, 7, 0)
 
         # display settings - return to full FOV
         full_fov = QtWidgets.QPushButton("Full FOV")
         full_fov.clicked.connect(self.get_full_fov)
-        parameters_grid.addWidget(full_fov, 6, 1)
+        parameters_grid.addWidget(full_fov, 7, 1)
 
         # view
         view_box = QtWidgets.QGroupBox("View")
@@ -2418,6 +2423,11 @@ class TestClustererDialog(QtWidgets.QDialog):
             locs.z /= self.window.display_settings_dlg.pixelsize.value()
         # cluster picked locs
         self.view.locs = self.cluster(locs, params)
+        # calculate cluster centers
+        self.view.centers = clusterer.find_cluster_centers(
+            self.view.locs,
+            self.window.display_settings_dlg.pixelsize.value(),
+        )
         # update viewport if pick has changed
         if self.pick_changed():
             self.view.viewport = self.view.get_full_fov()
@@ -2589,9 +2599,8 @@ class TestClustererView(QtWidgets.QLabel):
     shift_viewport(dx, dy)
         Moves viewport by a specified amount
     split_locs()
-        Splits self.locs into a list. It has either two (all 
-        clustered locs and all picked locs) or N_GROUP_COLORS elements
-        (each one for a group color)
+        Splits self.locs into a list. It has either two, three or 
+        N_GROUP_COLORS elements (each for one group color).
     to_down()
         Shifts viewport downwards
     to_left()
@@ -2759,17 +2768,36 @@ class TestClustererView(QtWidgets.QLabel):
 
     def split_locs(self):
         """
-        Splits self.locs into a list. It has either two (all 
-        clustered locs and all picked locs) or N_GROUP_COLORS elements
-        (each one for a group color).
+        Splits self.locs into a list. It has either two, three or 
+        N_GROUP_COLORS elements (each for one group color).
         """
 
-        if self.dialog.display_all_locs.isChecked():
-            # two channels, all locs and clustered locs
+        if (
+            self.dialog.display_all_locs.isChecked()
+            and not self.dialog.display_centers.isChecked()
+        ): # two channels, all locs and clustered locs
             channel = self.dialog.channel
             locs = [
                 self.dialog.window.view.picked_locs(channel)[0],
                 self.locs,
+            ]
+        elif (
+            not self.dialog.display_all_locs.isChecked()
+            and self.dialog.display_centers.isChecked()
+        ): # two channels, clustered locs and cluster centers
+            locs = [
+                self.locs,
+                self.centers,
+            ]
+        elif(
+            self.dialog.display_all_locs.isChecked()
+            and self.dialog.display_centers.isChecked()
+        ): # three channels, all locs, clustered locs and cluster centers
+            channel = self.dialog.channel
+            locs = [
+                self.dialog.window.view.picked_locs(channel)[0],
+                self.locs,
+                self.centers,
             ]
         else:
             # multiple channels, each for one group color

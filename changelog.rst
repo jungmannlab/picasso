@@ -9,6 +9,7 @@ Last change: 13-JAN-2023 MTS
 - Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, std in x,y and z, area/volume and convex hull
 - ``gist_rainbow`` is used for rendering properties
 - NeNA can be calculated many times
+- Cluster centers display in Test Clusterer window (Render)
 - Bug fixes
 
 0.5.1 - 0.5.4
