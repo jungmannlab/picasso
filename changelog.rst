@@ -10,6 +10,7 @@ Last change: 20-JAN-2023 MTS
 - ``gist_rainbow`` is used for rendering properties
 - NeNA can be calculated many times
 - Cluster centers display in Test Clusterer window (Render)
+- Render group information is faster (e.g., clustered data)
 - Bug fixes
 
 0.5.1 - 0.5.4
