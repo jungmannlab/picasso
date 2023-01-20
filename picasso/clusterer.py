@@ -10,11 +10,7 @@
     :copyright: Copyright (c) 2022 Jungmann Lab, MPI of Biochemistry
 """
 
-import os as _os
-
 import numpy as _np
-import math as _math
-import yaml as _yaml
 import pandas as _pd
 from scipy.spatial import cKDTree as _cKDTree
 from scipy.spatial import ConvexHull as _ConvexHull

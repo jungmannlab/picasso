@@ -970,7 +970,7 @@ def rotation_matrix(angx, angy, angz):
     Returns
     -------
     scipy.spatial.transform.Rotation
-        Scipy method that can be applied to rotate an Nx3 np.array
+        Scipy class that can be applied to rotate an Nx3 np.array
     """
 
     rot_mat_x = _np.array(

@@ -1,9 +1,9 @@
 Changelog
 =========
 
-Last change: 13-JAN-2023 MTS
+Last change: 20-JAN-2023 MTS
 
-0.5.5 - 0.5.8
+0.5.5 - 0.5.7
 -------------
 - Cluster info is saved in ``_cluster_centers.hdf5`` files which are created when ``Save cluster centers`` box is ticked
 - Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, std in x,y and z, area/volume and convex hull
