@@ -39,7 +39,7 @@ Check out the `Picasso release page <https://github.com/jungmannlab/picasso/rele
 Advanced installation for Python programmers
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso’s internal routines in custom Python programs. For windows, one is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
+As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso’s internal routines in custom Python programs. For windows, it is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
 
 Requirements
 ^^^^^^^^^^^^
@@ -57,10 +57,9 @@ Sample instructions to create an environment and installation of packages with c
 1. Open the console and create a new conda environment: ``conda create --name picasso python=3.8``
 2. Activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
 3. (Optional) For Mac systems (e.g. M1) install PyQt via conda: ``conda install -c anaconda pyqt``.
-4. Install using pip: ``pip install picassosr``.
-5. (Optional) If you want to use hdbscan install using pip: ``pip install hdbscan``.
-6. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
-7. Continue with the installation of Picasso (see the **Instalation (continued)** tab below)
+4. (Optional) If you want to use hdbscan install using pip: ``pip install hdbscan``.
+5. (Optional) If you plan to compile your own installer additionally install Pyinstaller: ``pip install pyinstaller``
+6. Continue with the installation of Picasso (see the **Instalation (continued)** tab below)
 
 Troubleshooting: In case installing via ``pip`` fails, try to install the failing packages via conda.
 
