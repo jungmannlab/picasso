@@ -44,7 +44,7 @@ Other installation modes (Python 3.8)
 As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso’s internal routines in custom Python programs. Those can be imported by running, for example, ``from picasso import io`` to use input/output functions from Picasso. For windows, it is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
 
 Via PyPI
-''''''''
+^^^^^^^^
 
 1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.8``
 2. Activate the environment: ``conda activate picasso``.
@@ -52,7 +52,7 @@ Via PyPI
 4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc.
 
 For Developers
-''''''''''''''
+^^^^^^^^^^^^^^
 
 If you wish to use your local version of Picasso with your own modifications:
 
@@ -74,21 +74,22 @@ If you wish to use your local version of Picasso with your own modifications:
 Currently, Picasso does not support package creation on Mac OS. If you wish to run your modified Picasso code, simply go to your ``picasso`` directory and run ``python -m picasso render``, ``python -m picasso localize``, etc.
 
 Optional packages
-'''''''''''''''''
+^^^^^^^^^^^^^^^^^
 
 Regardless of whether Picasso was installed via PyPI or by cloning the GitHub repository, some packages may be additionally installed to allow extra functionality:
 
-- ``pip install hdbscan`` for clustering with `HDBSCAN <https://hdbscan.readthedocs.io/en/latest/index.html>`_`.
-- ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>_`.
+- ``pip install hdbscan`` for clustering with `HDBSCAN <https://hdbscan.readthedocs.io/en/latest/index.html>`__.
+- ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>__`.
 
 Updating
 ^^^^^^^^
+
 If Picasso was installed from PyPI, run the following command:
 ''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 ``pip install --upgrade picassosr``
 
-If Picasso was cloned from the GitHub repo, use the following commands:
+If Picasso was cloned from the GitHub repository, use the following commands:
 '''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 1. Move to the ``picasso`` folder with the terminal, activate environment.
@@ -96,8 +97,8 @@ If Picasso was cloned from the GitHub repo, use the following commands:
 3. Update the environment: ``pip install --upgrade -r requirements.txt``.
 4. (*Windows only*)Run installation ``python setup.py install``.
 
-Creating shortcuts on Windows (optional)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Creating shortcuts on Windows (*optional*)
+----------------------------------------
 
 Run the PowerShell script “createShortcuts.ps1” in the gui directory. This should be doable by right-clicking on the script and choosing “Run with PowerShell”. Alternatively, run the command
 ``powershell ./createShortcuts.ps1`` in the command line. Use the generated shortcuts in the top level directory to start GUI components. Users can drag these shortcuts to their Desktop, Start Menu or Task Bar.
