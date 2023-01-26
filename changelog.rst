@@ -1,16 +1,21 @@
 Changelog
 =========
 
-Last change: 20-JAN-2023 MTS
+Last change: 26-JAN-2023 MTS
 
-0.5.5 - 0.5.7
+0.5.7
+-----
+- Updated installation instructions
+- Render group information is faster (e.g., clustered data)
+- Cluster centers display in Test Clusterer window (Render)
+- Cluster centers contain info about std in x,y and z
+
+0.5.5 - 0.5.6
 -------------
 - Cluster info is saved in ``_cluster_centers.hdf5`` files which are created when ``Save cluster centers`` box is ticked
-- Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, std in x,y and z, area/volume and convex hull
+- Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, area/volume and convex hull
 - ``gist_rainbow`` is used for rendering properties
 - NeNA can be calculated many times
-- Cluster centers display in Test Clusterer window (Render)
-- Render group information is faster (e.g., clustered data)
 - Bug fixes
 
 0.5.1 - 0.5.4
