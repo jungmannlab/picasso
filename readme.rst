@@ -78,8 +78,8 @@ Optional packages
 
 Regardless of whether Picasso was installed via PyPI or by cloning the GitHub repository, some packages may be additionally installed to allow extra functionality:
 
-- ``pip install hdbscan`` for clustering with `HDBSCAN <https://hdbscan.readthedocs.io/en/latest/index.html>`__.
-- ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>__`.
+- ``pip install hdbscan`` for clustering with `HDBSCAN <https://hdbscan.readthedocs.io/en/latest/index.html>`_.
+- ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`_.
 
 Updating
 ^^^^^^^^
