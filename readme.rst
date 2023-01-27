@@ -13,7 +13,7 @@ Picasso
    :alt: CI
 
 .. image:: https://static.pepy.tech/personalized-badge/picassosr?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads
-   :target: https://pepy.tech/project/picassosr
+ :target: https://pepy.tech/project/picassosr
 
 .. image:: main_render.png
    :scale: 100 %
@@ -64,12 +64,14 @@ If you wish to use your local version of Picasso with your own modifications:
 6. You can modify Picasso code from here.
 
 *Windows*
+'''''''''
 
 7. If you wish to create a *local* Picasso package to use it in other Python scripts (that includes your changes), run ``python setup.py install``. 
 8. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc.
 9. Remember that in order to update changes in Picasso code, you need to repeat step 7.
 
 *Mac*
+'''''
 
 Currently, Picasso does not support package creation on Mac OS. If you wish to run your modified Picasso code, simply go to your ``picasso`` directory and run ``python -m picasso render``, ``python -m picasso localize``, etc.
 
@@ -78,19 +80,19 @@ Optional packages
 
 Regardless of whether Picasso was installed via PyPI or by cloning the GitHub repository, some packages may be additionally installed to allow extra functionality:
 
-- ``pip install hdbscan`` for clustering with `HDBSCAN <https://hdbscan.readthedocs.io/en/latest/index.html>`_.
-- ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`_.
+- ``pip install hdbscan`` for clustering with `HDBSCAN <https://hdbscan.readthedocs.io/en/latest/index.html>`__.
+- ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`__.
+
+To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
 Updating
 ^^^^^^^^
 
 If Picasso was installed from PyPI, run the following command:
-''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 ``pip install --upgrade picassosr``
 
 If Picasso was cloned from the GitHub repository, use the following commands:
-'''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''''
 
 1. Move to the ``picasso`` folder with the terminal, activate environment.
 2. Update with git: ``git pull``.
@@ -98,18 +100,14 @@ If Picasso was cloned from the GitHub repository, use the following commands:
 4. (*Windows only*)Run installation ``python setup.py install``.
 
 Creating shortcuts on Windows (*optional*)
-----------------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Run the PowerShell script “createShortcuts.ps1” in the gui directory. This should be doable by right-clicking on the script and choosing “Run with PowerShell”. Alternatively, run the command
 ``powershell ./createShortcuts.ps1`` in the command line. Use the generated shortcuts in the top level directory to start GUI components. Users can drag these shortcuts to their Desktop, Start Menu or Task Bar.
 
-Using GPU for Fitting (optional)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
-
 Example Usage
 -------------
+
 Besides using the GUI, you can use picasso like any other Python module. Consider the following example:::
 
   from picasso import io, postprocess
@@ -138,9 +136,8 @@ If you have a feature request or a bug report, please post it as an issue on the
 Contributions & Copyright
 -------------------------
 
-| Contributors: Joerg Schnitzbauer, Maximilian Strauss, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
-| Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of
-  Biochemistry
+| Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
+| Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of Biochemistry
 | Copyright (c) 2020-2021 Maximilian Strauss
 | Copyright (c) 2022 Rafal Kowalewski
 
