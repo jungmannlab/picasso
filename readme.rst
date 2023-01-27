@@ -13,7 +13,7 @@ Picasso
    :alt: CI
 
 .. image:: https://static.pepy.tech/personalized-badge/picassosr?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads
- :target: https://pepy.tech/project/picassosr
+   :target: https://pepy.tech/project/picassosr
 
 .. image:: main_render.png
    :scale: 100 %
@@ -102,13 +102,6 @@ Creating shortcuts on Windows (*optional*)
 
 Run the PowerShell script “createShortcuts.ps1” in the gui directory. This should be doable by right-clicking on the script and choosing “Run with PowerShell”. Alternatively, run the command
 ``powershell ./createShortcuts.ps1`` in the command line. Use the generated shortcuts in the top level directory to start GUI components. Users can drag these shortcuts to their Desktop, Start Menu or Task Bar.
-
-.. Using Picasso as a module
-.. ^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. The individual modules of picasso can be started as follows:
-.. 1. Open the console, activate the environment: ``source activate picasso`` for Linux / Mac Os X or ``activate picasso`` for Windows.
-.. 2. Start the picasso modules via ``python -m picasso ..``, e.g. ``python -m picasso render`` for the render module
 
 Using GPU for Fitting (optional)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
