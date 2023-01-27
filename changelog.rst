@@ -6,8 +6,9 @@ Last change: 26-JAN-2023 MTS
 0.5.7
 -----
 - Updated installation instructions
+- (H)DBSCAN available from cmd (bug fix)
 - Render group information is faster (e.g., clustered data)
-- Cluster centers display in Test Clusterer window (Render)
+- Test Clusterer window (Render) has multiple updates, e.g., different projections, cluster centers display
 - Cluster centers contain info about std in x,y and z
 
 0.5.5 - 0.5.6

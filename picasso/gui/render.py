@@ -35,7 +35,7 @@ from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from sklearn.metrics.pairwise import euclidean_distances
-from sklearn.cluster import KMeans, DBSCAN
+from sklearn.cluster import KMeans
 from collections import Counter
 from tqdm import tqdm
 
@@ -2299,25 +2299,23 @@ class TestClustererDialog(QtWidgets.QDialog):
         # for converting z coordinates
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
-        if hasattr(locs, "z"):
-            X = np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
-        else:
-            X = np.vstack((locs.x, locs.y)).T
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            clusterer_ = DBSCAN(
-                eps=params["radius"], 
-                min_samples=params["min_samples"],
-            ).fit(X)
-            labels = clusterer_.labels_
+            locs = clusterer.dbscan(
+                locs, 
+                params["radius"],
+                params["min_samples"],
+                pixelsize,
+            )
         elif clusterer_name == "HDBSCAN":
             if HDBSCAN_IMPORTED:
-                clusterer_ = HDBSCAN(
-                    min_samples=params["min_samples"], 
-                    min_cluster_size=params["min_cluster_size"],
-                    cluster_selection_epsilon=params["intercluster_radius"],
-                ).fit(X)
-                labels = clusterer_.labels_
+                locs = clusterer.hdbscan(
+                    locs,
+                    params["min_cluster_size"],
+                    params["min_samples"],
+                    pixelsize,
+                    params["intercluster_radius"]
+                )
             else:
                 return None
         elif clusterer_name == "SMLM":
@@ -2327,47 +2325,27 @@ class TestClustererDialog(QtWidgets.QDialog):
                 frame = None
 
             if hasattr(locs, "z"):
-                X[:, 2] = X[:, 2] * params["radius_xy"] / params["radius_z"]
-                labels = clusterer._cluster(
-                    X, 
-                    params["radius_xy"], 
-                    params["min_cluster_size"], 
-                    frame,
-                )
-            else:
-                labels = clusterer._cluster(
-                    X, 
-                    params["radius_xy"], 
+                params_c = [
+                    params["radius_xy"],
+                    params["radius_z"],
                     params["min_cluster_size"],
+                    None,
+                    params["frame_analysis"],
+                    None,
+                ]
+            else:
+                params_c = [
+                    params["radius_xy"],
+                    params["min_cluster_size"],
+                    None,
                     frame,
-                )                
-        locs = self.assign_groups(locs, labels)
+                    None,
+                ]
+
+            locs = clusterer.cluster(locs, params_c, pixelsize)
+          
         if len(locs):
             self.view.group_color = self.window.view.get_group_color(locs)
-        return locs
-
-    def assign_groups(self, locs, labels):
-        """ 
-        Filters out non-clustered locs and adds group column to locs. 
-
-        Parameters
-        ----------
-        locs : np.recarray
-            Contains all picked localizations from a given channel
-        labels : np.array
-            Contains cluster indeces in scikit-learn format, i.e.
-            -1 means no cluster, other integers are cluster ids.
-
-        Returns
-        -------
-        np.recarray
-            Contains localizations that were clustered, with "group"
-            dtype specifying cluster indeces
-        """
-
-        group = np.int32(labels)
-        locs = lib.append_to_rec(locs, group, "group")
-        locs = locs[locs.group != -1]
         return locs
 
     def get_cluster_params(self):
@@ -5715,7 +5693,7 @@ class View(QtWidgets.QLabel):
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         # perform DBSCAN in a channel
-        locs = postprocess.dbscan(
+        locs = clusterer.dbscan(
             locs, 
             radius, 
             min_density,
@@ -5822,7 +5800,7 @@ class View(QtWidgets.QLabel):
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         # perform HDBSCAN for each channel
-        locs = postprocess.hdbscan(
+        locs = clusterer.hdbscan(
             locs,
             min_cluster, 
             min_samples, 
@@ -5928,19 +5906,13 @@ class View(QtWidgets.QLabel):
                 )
 
                 if len(locs) > 0:
-                    labels = clusterer.cluster(locs, params, pixelsize)
+                    temp_locs = clusterer.cluster(locs, params, pixelsize)
 
-                    temp_locs = lib.append_to_rec(
-                        locs, labels, "group"
-                    ) # add cluster id to locs
-
-                    # -1 means no cluster assigned to a loc
-                    temp_locs = temp_locs[temp_locs.group != -1]
                     if len(temp_locs) > 0:
                         # make sure each picks produces unique cluster ids
                         temp_locs.group += group_offset
                         clustered_locs.append(temp_locs)
-                        group_offset += np.max(labels) + 1
+                        group_offset += np.max(temp_locs.group) + 1
                 pd.set_value(i + 1)
             clustered_locs = stack_arrays(
                 clustered_locs, asrecarray=True, usemask=False
@@ -5959,14 +5931,7 @@ class View(QtWidgets.QLabel):
             else:
                 locs = self.all_locs[channel]
 
-            labels = clusterer.cluster(locs, params, pixelsize)
-
-            clustered_locs = lib.append_to_rec(
-                locs, labels, "group"
-            ) # add cluster id to locs
-
-            # -1 means no cluster assigned to a loc
-            clustered_locs = clustered_locs[clustered_locs.group != -1]
+            clustered_locs = clusterer.cluster(locs, params, pixelsize)
             status.close()
 
         # saving
