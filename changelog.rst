@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 26-JAN-2023 MTS
+Last change: 08-FEB-2023 MTS
 
 0.5.7
 -----
@@ -11,6 +11,7 @@ Last change: 26-JAN-2023 MTS
 - Test Clusterer window (Render) has multiple updates, e.g., different projections, cluster centers display
 - Cluster centers contain info about std in x,y and z
 - Number of CPU cores used in multiprocessing limited at 60
+- Updated 3D rendering and clustering documentation
 
 0.5.5 - 0.5.6
 -------------

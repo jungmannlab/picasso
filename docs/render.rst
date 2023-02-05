@@ -50,6 +50,8 @@ The 3D rotation window allows the user to render 3D localization data. To use it
 
 The user may perform multiple actions in the rotation window, including: saving rotated localizations, building animations (.mp4 format), rotating by a specified angle, etc.
 
+Rotation around z-axis is available by pressing Ctrl/Command. Rotation axis can be frozen by pressing x/y/z to freeze around the corresponding axes (to freeze around the z-axis, Ctrl/Command must be pressed as well).
+
 There are several things to keep in mind when using the rotation window. Firstly, using individual localization precision is very slow and is not recommended as a default blur method. Also, the size of the rotation window can be altered, however, if it becomes too large, rendering may start to lag.
 
 Dialogs
@@ -373,7 +375,10 @@ Combines all localizations in each pick to one.
 
 Apply expressions to localizations
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-This tool allows you to apply expressions to localizations.
+This tool allows you to apply expressions to localizations, for example:
+
+- ``x +=1`` will shift all localization by one to the right
+- ``x +=1;y+=1`` will shift all localization by one to the right and one up.
 
 DBSCAN
 ^^^^^^
@@ -385,6 +390,7 @@ Cluster localizations with the hdbscan clustering algorithm.
 
 SMLM clusterer
 ^^^^^^^^^^^^^^
+Cluster localizations with the custom algorithm designed for SMLM. In short, localizations with the maximum number of neighboring localizations within a user-defined radius are chosen as cluster centers, around which all localizations withing the given radius belong to one cluster. If two or more such clusters overlap, they are combined.
 
 Test clusterer
 ^^^^^^^^^^^^^^
@@ -393,11 +399,6 @@ Opens a dialog where different clustering parameters can be checked on the loade
 Nearest Neighbor Analysis
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Calculates distances to the ``k``-th nearest neighbors between two channels (can be the same channel). ``k`` is defined by the user. The distances are stored in nm as a .csv file.
-
-Examples
-++++++++
-- ``x +=1`` will shift all localization by one to the right
-- ``x +=1;y+=1`` will shift all localization by one to the right and one up.
 
 Notes
 +++++
