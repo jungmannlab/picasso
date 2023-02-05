@@ -17,8 +17,6 @@ from glob import glob
 from math import ceil
 from functools import partial
 
-# from icecream import ic
-
 import lmfit
 import matplotlib 
 import matplotlib.pyplot as plt
@@ -45,19 +43,16 @@ from .. import imageprocess, io, lib, postprocess, render, clusterer
 from .rotation import RotationWindow
 
 # PyImarisWrite works on windows only
-if sys.platform == "win32": 
-    from .. ext.bitplane import IMSWRITER
-    if IMSWRITER:
-        from .. ext.bitplane import numpy_to_imaris
-        from PyImarisWriter.ImarisWriterCtypes import *
-        from PyImarisWriter import PyImarisWriter as PW
-else:
-    IMSWRITER = False
+from ..ext.bitplane import IMSWRITER
+if IMSWRITER:
+    from .. ext.bitplane import numpy_to_imaris
+    from PyImarisWriter.ImarisWriterCtypes import *
+    from PyImarisWriter import PyImarisWriter as PW
 
 try:
     from hdbscan import HDBSCAN
     HDBSCAN_IMPORTED = True
-except:
+except ModuleNotFoundError:
     HDBSCAN_IMPORTED = False
 
 if sys.platform == "darwin": # plots do not work on mac os
@@ -2755,8 +2750,12 @@ class TestClustererView(QtWidgets.QLabel):
             and not self.dialog.display_centers.isChecked()
         ): # two channels, all locs and clustered locs
             channel = self.dialog.channel
+            all_locs = self.dialog.window.view.picked_locs(channel)[0]
+            all_locs.z /= (
+                self.dialog.window.display_settings_dlg.pixelsize.value()
+            )
             locs = [
-                self.dialog.window.view.picked_locs(channel)[0],
+                all_locs,
                 self.locs,
             ]
         elif (
@@ -2767,16 +2766,20 @@ class TestClustererView(QtWidgets.QLabel):
                 self.locs,
                 self.centers,
             ]
-        elif(
+        elif (
             self.dialog.display_all_locs.isChecked()
             and self.dialog.display_centers.isChecked()
         ): # three channels, all locs, clustered locs and cluster centers
             channel = self.dialog.channel
+            all_locs = self.dialog.window.view.picked_locs(channel)[0]
+            all_locs.z /= (
+                self.dialog.window.display_settings_dlg.pixelsize.value()
+            )
             locs = [
-                self.dialog.window.view.picked_locs(channel)[0],
+                all_locs,
                 self.locs,
                 self.centers,
-            ]
+            ]  
         else:
             # multiple channels, each for one group color
             locs = [
