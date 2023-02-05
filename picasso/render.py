@@ -714,8 +714,11 @@ def render_gaussian(
         )
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
-        # for now, let lpz be twice the mean of lpx and lpy (todo):
-        lpz = 2 * _np.mean(_np.stack((locs.lpx, locs.lpy)), axis=0)
+        # for now, let lpz be twice the mean of lpx and lpy (TODO):
+        if hasattr(locs, "lpz"):
+            lpz = locs.lpz #NOTE: lpz must be in the same units as lpx
+        else:
+            lpz = 2 * _np.mean(_np.stack((locs.lpx, locs.lpy)), axis=0)
         blur_depth = oversampling * _np.maximum(lpz, min_blur_width)
 
         sy = blur_height[in_view]
@@ -790,8 +793,11 @@ def render_gaussian_iso(
         )
         blur_width = oversampling * _np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * _np.maximum(locs.lpy, min_blur_width)
-        # for now, let lpz be twice the mean of lpx and lpy
-        lpz = 2 * _np.mean(_np.stack((locs.lpx, locs.lpy)), axis=0)
+        # for now, let lpz be twice the mean of lpx and lpy (TODO):
+        if hasattr(locs, "lpz"):
+            lpz = locs.lpz #NOTE: lpz must be in the same units as lpx
+        else:
+            lpz = 2 * _np.mean(_np.stack((locs.lpx, locs.lpy)), axis=0)
         blur_depth = oversampling * _np.maximum(lpz, min_blur_width)
 
         sy = (blur_height[in_view] + blur_width[in_view]) / 2
