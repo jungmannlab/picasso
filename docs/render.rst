@@ -390,7 +390,9 @@ Cluster localizations with the hdbscan clustering algorithm.
 
 SMLM clusterer
 ^^^^^^^^^^^^^^
-Cluster localizations with the custom algorithm designed for SMLM. In short, localizations with the maximum number of neighboring localizations within a user-defined radius are chosen as cluster centers, around which all localizations withing the given radius belong to one cluster. If two or more such clusters overlap, they are combined.
+Cluster localizations with the custom algorithm designed for SMLM. In short, localizations with the maximum number of neighboring localizations within a user-defined radius are chosen as cluster centers, around which all localizations withing the given radius belong to one cluster. If two or more such clusters overlap, they are combined. 
+
+*NOTE:* it is highly recommended to remove any fiducial markers before clustering, to lower clustering time, given they are of no interest to the user. To do that, the markers can be picked and removed using ``Tools > Remove localizations in picks``.
 
 Test clusterer
 ^^^^^^^^^^^^^^
