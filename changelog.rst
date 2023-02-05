@@ -10,6 +10,7 @@ Last change: 26-JAN-2023 MTS
 - Render group information is faster (e.g., clustered data)
 - Test Clusterer window (Render) has multiple updates, e.g., different projections, cluster centers display
 - Cluster centers contain info about std in x,y and z
+- Number of CPU cores used in multiprocessing limited at 60
 
 0.5.5 - 0.5.6
 -------------

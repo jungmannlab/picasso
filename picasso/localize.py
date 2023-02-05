@@ -208,7 +208,9 @@ def identify_async(movie, minimum_ng, box, roi=None):
     settings["Localize"]["cpu_utilization"] = cpu_utilization
     _io.save_user_settings(settings)
 
-    n_workers = max(1, int(cpu_utilization * _multiprocessing.cpu_count()))
+    n_workers = min(
+        60, max(1, int(0.75 * _multiprocessing.cpu_count()))
+    ) # Python crashes when using >64 cores
 
     lock = _threading.Lock()
     current = [0]

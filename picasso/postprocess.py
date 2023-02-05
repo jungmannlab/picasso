@@ -290,7 +290,9 @@ def distance_histogram(locs, info, bin_size, r_max):
         locs, info, r_max
     )
     N = len(locs)
-    n_threads = _multiprocessing.cpu_count()
+    n_threads = min(
+        60, max(1, int(0.75 * _multiprocessing.cpu_count()))
+    ) # Python crashes when using >64 cores
     chunk = int(N / n_threads)
     starts = range(0, N, chunk)
     args = [
@@ -441,7 +443,9 @@ def compute_local_density(locs, info, radius):
         locs, info, radius
     )
     N = len(locs)
-    n_threads = _multiprocessing.cpu_count()
+    n_threads = min(
+        60, max(1, int(0.75 * _multiprocessing.cpu_count()))
+    ) # Python crashes when using >64 cores
     chunk = int(N / n_threads)
     starts = range(0, N, chunk)
     args = [
