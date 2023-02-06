@@ -26,13 +26,13 @@ Photon conversion update
 -----------------------------
 In the next Picasso update **(0.5.8)** the formula for conversion of raw data to photons will be changed and **this will affect the calculate localization precision** as the number of photons changes.
 
-Until version *0.5.7*, the formula was: :math:`\\frac{(raw_data - baseline) * sensitivity}{gain * QE}`, where :math:`QE` is quantum efficiency of the camera. In the new version it will be changed too:
+Until version *0.5.7*, the formula was: :math:`\frac{(\text{raw_data} - \text{baseline}) * \text{sensitivity}}{\text{gain} * \text{QE}}`, where :math:`\text{QE}` is quantum efficiency of the camera. In the new version it will be changed too:
 
 .. math::
 
-   \\frac{(raw_data - baseline) * sensitivity}{gain}
+   \frac{(raw_data - baseline) * sensitivity}{gain}
 
-**that is, quantum effiency will be ignored.**
+**i.e., quantum effiency will be ignored.**
 
 For backward compatibility, quantum efficiency will be kept in Picasso Localize, however, it will have no effect on the new photon conversion formula.
 
