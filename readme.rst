@@ -22,15 +22,15 @@ Picasso
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
-Localization precision update
+Photon conversion update
 -----------------------------
-In the next Picasso update **(0.5.8)** the formula for conversion of raw data to photons will be changed and this will affect the calculate localization precision as the number of photons changes.
+In the next Picasso update **(0.5.8)** the formula for conversion of raw data to photons will be changed and **this will affect the calculate localization precision** as the number of photons changes.
 
-Until version *0.5.7*, the formula was: :math:`\frac{(raw_data - baseline) * sensitivity}{gain * QE}`, where :math:`QE` is quantum efficiency of the camera. In the new version it will be changed too:
+Until version *0.5.7*, the formula was: :math:`\\frac{(raw_data - baseline) * sensitivity}{gain * QE}`, where :math:`QE` is quantum efficiency of the camera. In the new version it will be changed too:
 
 .. math::
 
-   \frac{(raw_data - baseline) * sensitivity}{gain}
+   \\frac{(raw_data - baseline) * sensitivity}{gain}
 
 **that is, quantum effiency will be ignored.**
 
