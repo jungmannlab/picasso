@@ -24,11 +24,11 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 
 Photon conversion update
 -----------------------------
-In the next Picasso update **(0.5.8)** the formula for conversion of raw data to photons will be changed and **this will affect the calculate localization precision** as the number of photons changes.
+In the next Picasso update **(0.5.8)** the formula for conversion of raw data to photons will be changed and **this will affect the calculated localization precision** as the number of photons changes.
 
-Until version *0.5.7*, the formula was: :math:`\\frac{(\\text{raw_data} - \\text{baseline}) * \\text{sensitivity}}{\\text{gain} * \\text{QE}}`, where :math:`\\text{QE}` is quantum efficiency of the camera. In the new version it will be changed too:
+Until version *0.5.7*, the formula was: :latex:`\\frac{(\\text{raw_data} - \\text{baseline}) * \\text{sensitivity}}{\\text{gain} * \\text{QE}}`, where :math:`\\text{QE}` is quantum efficiency of the camera. In the new version it will be changed too:
 
-.. math::
+.. latex::
 
    \frac{(raw_data - baseline) * sensitivity}{gain}
 
