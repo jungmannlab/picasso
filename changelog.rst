@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 08-FEB-2023 MTS
+Last change: 07-FEB-2023 MTS
 
 0.5.7
 -----
@@ -10,10 +10,10 @@ Last change: 08-FEB-2023 MTS
 - Render group information is faster (e.g., clustered data)
 - Test Clusterer window (Render) has multiple updates, e.g., different projections, cluster centers display
 - Cluster centers contain info about std in x,y and z
-- If localization precision in z-axis is provided, it will be rendered when using ``Individual localization precision`` and ``Individual localization precision (iso)``. *NOTE:* the column must be named ``lpz`` and have the same units as ``lpx`` and ``lpy``.
+- If localization precision in z-axis is provided, it will be rendered when using ``Individual localization precision`` and ``Individual localization precision (iso)``. **NOTE:** the column must be named ``lpz`` and have the same units as ``lpx`` and ``lpy``.
 - Number of CPU cores used in multiprocessing limited at 60
 - Updated 3D rendering and clustering documentation
-- Other bug fixes
+- Bug fixes
 
 0.5.5 - 0.5.6
 -------------
