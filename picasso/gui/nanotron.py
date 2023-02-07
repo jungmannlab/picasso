@@ -270,7 +270,9 @@ class Predictor(QtCore.QThread):
 
         lock = threading.Lock()
 
-        n_workers = multiprocessing.cpu_count()
+        n_workers = min(
+            60, max(1, int(0.75 * multiprocessing.cpu_count()))
+        ) # Python crashes when using >64 cores
 
         current = [0]
         finished = [0]

@@ -15,7 +15,6 @@ import os.path
 import importlib, pkgutil
 from glob import glob
 from math import ceil
-# from icecream import ic
 from functools import partial
 
 import lmfit
@@ -34,7 +33,7 @@ from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from sklearn.metrics.pairwise import euclidean_distances
-from sklearn.cluster import KMeans, DBSCAN
+from sklearn.cluster import KMeans
 from collections import Counter
 from tqdm import tqdm
 
@@ -44,19 +43,16 @@ from .. import imageprocess, io, lib, postprocess, render, clusterer
 from .rotation import RotationWindow
 
 # PyImarisWrite works on windows only
-if sys.platform == "win32": 
-    from .. ext.bitplane import IMSWRITER
-    if IMSWRITER:
-        from .. ext.bitplane import numpy_to_imaris
-        from PyImarisWriter.ImarisWriterCtypes import *
-        from PyImarisWriter import PyImarisWriter as PW
-else:
-    IMSWRITER = False
+from ..ext.bitplane import IMSWRITER
+if IMSWRITER:
+    from .. ext.bitplane import numpy_to_imaris
+    from PyImarisWriter.ImarisWriterCtypes import *
+    from PyImarisWriter import PyImarisWriter as PW
 
 try:
     from hdbscan import HDBSCAN
     HDBSCAN_IMPORTED = True
-except:
+except ModuleNotFoundError:
     HDBSCAN_IMPORTED = False
 
 if sys.platform == "darwin": # plots do not work on mac os
@@ -1010,7 +1006,7 @@ class PlotDialog(QtWidgets.QDialog):
             )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [Px]")
+            ax.set_zlabel("Z [nm]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1049,7 +1045,7 @@ class PlotDialog(QtWidgets.QDialog):
 
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [Px]")
+            ax.set_zlabel("Z [nm]")
 
             plt.gca().patch.set_facecolor("black")
             ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
@@ -1151,7 +1147,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             )
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [Px]")
+            ax.set_zlabel("Z [nm]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1188,7 +1184,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             # AXES 3
             ax3.scatter(locs["x"], locs["z"], c=colors, cmap="jet", s=2)
             ax3.set_xlabel("X [Px]")
-            ax3.set_ylabel("Z [Px]")
+            ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1203,7 +1199,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             # AXES 4
             ax4.scatter(locs["y"], locs["z"], c=colors, cmap="jet", s=2)
             ax4.set_xlabel("Y [Px]")
-            ax4.set_ylabel("Z [Px]")
+            ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
                 np.mean(locs["y"]) - 3 * np.std(locs["y"]),
                 np.mean(locs["y"]) + 3 * np.std(locs["y"]),
@@ -1240,7 +1236,7 @@ class PlotDialogIso(QtWidgets.QDialog):
 
             ax.set_xlabel("X [Px]")
             ax.set_ylabel("Y [Px]")
-            ax.set_zlabel("Z [Px]")
+            ax.set_zlabel("Z [nm]")
 
             ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
             ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
@@ -1262,7 +1258,7 @@ class PlotDialogIso(QtWidgets.QDialog):
 
             # AXES 3
             ax3.set_xlabel("X [Px]")
-            ax3.set_ylabel("Z [Px]")
+            ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
                 np.mean(locs["x"]) + 3 * np.std(locs["x"]),
@@ -1276,7 +1272,7 @@ class PlotDialogIso(QtWidgets.QDialog):
 
             # AXES 4
             ax4.set_xlabel("Y [Px]")
-            ax4.set_ylabel("Z [Px]")
+            ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
                 np.mean(locs["y"]) - 3 * np.std(locs["y"]),
                 np.mean(locs["y"]) + 3 * np.std(locs["y"]),
@@ -2149,7 +2145,7 @@ class TestClustererDialog(QtWidgets.QDialog):
         layout.addWidget(
             QtWidgets.QLabel(
                 "Pick a region of interest and test different clustering\n"
-                "parameters.\n\n"
+                "algorithms and parameters.\n\n"
                 "Use shortcuts Alt + {W, A, S, D, -, =} to change FOV.\n"
             ), 0, 0
         )
@@ -2178,24 +2174,47 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.test_smlm_params = TestSMLMParams(self)
         parameters_stack.addWidget(self.test_smlm_params)
 
-        # parameters - display mode
+        # parameters - display modes
+        self.one_pixel_blur = QtWidgets.QCheckBox("One pixel blur")
+        self.one_pixel_blur.setChecked(False)
+        self.one_pixel_blur.stateChanged.connect(self.view.update_scene)
+        parameters_grid.addWidget(self.one_pixel_blur, 2, 0, 1, 2)
+
         self.display_all_locs = QtWidgets.QCheckBox(
             "Display non-clustered localizations"
         )
         self.display_all_locs.setChecked(False)
         self.display_all_locs.stateChanged.connect(self.view.update_scene)
-        parameters_grid.addWidget(self.display_all_locs, 2, 0, 1, 2)
+        parameters_grid.addWidget(self.display_all_locs, 3, 0, 1, 2)
+
+        self.display_centers = QtWidgets.QCheckBox("Display cluster centers")
+        self.display_centers.setChecked(False)
+        self.display_centers.stateChanged.connect(self.view.update_scene)
+        parameters_grid.addWidget(self.display_centers, 4, 0, 1, 2)
+
+        # parameters - xy, xz, yz projections
+        xy_proj = QtWidgets.QPushButton("XY projection")
+        xy_proj.clicked.connect(self.on_xy_proj)
+        parameters_grid.addWidget(xy_proj, 5, 0, 1, 2)
+
+        xz_proj = QtWidgets.QPushButton("XZ projection")
+        xz_proj.clicked.connect(self.on_xz_proj)
+        parameters_grid.addWidget(xz_proj, 6, 0)
+
+        yz_proj = QtWidgets.QPushButton("YZ projection")
+        yz_proj.clicked.connect(self.on_yz_proj)
+        parameters_grid.addWidget(yz_proj, 6, 1)
 
         # parameters - test
         test_button = QtWidgets.QPushButton("Test")
         test_button.clicked.connect(self.test_clusterer)
         test_button.setDefault(True)
-        parameters_grid.addWidget(test_button, 3, 0)
+        parameters_grid.addWidget(test_button, 7, 0)
 
         # display settings - return to full FOV
         full_fov = QtWidgets.QPushButton("Full FOV")
         full_fov.clicked.connect(self.get_full_fov)
-        parameters_grid.addWidget(full_fov, 3, 1)
+        parameters_grid.addWidget(full_fov, 7, 1)
 
         # view
         view_box = QtWidgets.QGroupBox("View")
@@ -2236,6 +2255,24 @@ class TestClustererDialog(QtWidgets.QDialog):
         zoomout_action.triggered.connect(self.view.zoom_out)
         self.addAction(zoomout_action)
 
+    def on_xy_proj(self):
+        self.view.ang = None
+        self.view.update_scene()
+
+    def on_xz_proj(self):
+        if self.view.locs is not None and hasattr(self.view.locs, "z"):
+            self.view.ang = [1.5708, 0, 0] # 90 deg rotation
+        else:
+            self.view.ang = None
+        self.view.update_scene()
+
+    def on_yz_proj(self):
+        if self.view.locs is not None and hasattr(self.view.locs, "z"):
+            self.view.ang = [0, 1.5708, 0] # 90 deg rotation
+        else:
+            self.view.ang = None
+        self.view.update_scene()
+
     def cluster(self, locs, params):
         """ 
         Clusters locs using the chosen clusterer. 
@@ -2257,25 +2294,23 @@ class TestClustererDialog(QtWidgets.QDialog):
         # for converting z coordinates
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
-        if hasattr(locs, "z"):
-            X = np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
-        else:
-            X = np.vstack((locs.x, locs.y)).T
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            clusterer_ = DBSCAN(
-                eps=params["radius"], 
-                min_samples=params["min_samples"],
-            ).fit(X)
-            labels = clusterer_.labels_
+            locs = clusterer.dbscan(
+                locs, 
+                params["radius"],
+                params["min_samples"],
+                pixelsize,
+            )
         elif clusterer_name == "HDBSCAN":
             if HDBSCAN_IMPORTED:
-                clusterer_ = HDBSCAN(
-                    min_samples=params["min_samples"], 
-                    min_cluster_size=params["min_cluster_size"],
-                    cluster_selection_epsilon=params["intercluster_radius"],
-                ).fit(X)
-                labels = clusterer_.labels_
+                locs = clusterer.hdbscan(
+                    locs,
+                    params["min_cluster_size"],
+                    params["min_samples"],
+                    pixelsize,
+                    params["intercluster_radius"]
+                )
             else:
                 return None
         elif clusterer_name == "SMLM":
@@ -2285,47 +2320,27 @@ class TestClustererDialog(QtWidgets.QDialog):
                 frame = None
 
             if hasattr(locs, "z"):
-                X[:, 2] = X[:, 2] * params["radius_xy"] / params["radius_z"]
-                labels = clusterer._cluster(
-                    X, 
-                    params["radius_xy"], 
-                    params["min_cluster_size"], 
-                    frame,
-                )
-            else:
-                labels = clusterer._cluster(
-                    X, 
-                    params["radius_xy"], 
+                params_c = [
+                    params["radius_xy"],
+                    params["radius_z"],
                     params["min_cluster_size"],
+                    None,
+                    params["frame_analysis"],
+                    None,
+                ]
+            else:
+                params_c = [
+                    params["radius_xy"],
+                    params["min_cluster_size"],
+                    None,
                     frame,
-                )                
-        locs = self.assign_groups(locs, labels)
+                    None,
+                ]
+
+            locs = clusterer.cluster(locs, params_c, pixelsize)
+          
         if len(locs):
             self.view.group_color = self.window.view.get_group_color(locs)
-        return locs
-
-    def assign_groups(self, locs, labels):
-        """ 
-        Filters out non-clustered locs and adds group column to locs. 
-
-        Parameters
-        ----------
-        locs : np.recarray
-            Contains all picked localizations from a given channel
-        labels : np.array
-            Contains cluster indeces in scikit-learn format, i.e.
-            -1 means no cluster, other integers are cluster ids.
-
-        Returns
-        -------
-        np.recarray
-            Contains localizations that were clustered, with "group"
-            dtype specifying cluster indeces
-        """
-
-        group = np.int32(labels)
-        locs = lib.append_to_rec(locs, group, "group")
-        locs = locs[locs.group != -1]
         return locs
 
     def get_cluster_params(self):
@@ -2377,8 +2392,15 @@ class TestClustererDialog(QtWidgets.QDialog):
         # extract picked locs
         self.channel = self.window.view.get_channel("Test clusterer")
         locs = self.window.view.picked_locs(self.channel)[0]
+        if hasattr(locs, "z"):
+            locs.z /= self.window.display_settings_dlg.pixelsize.value()
         # cluster picked locs
         self.view.locs = self.cluster(locs, params)
+        # calculate cluster centers
+        self.view.centers = clusterer.find_cluster_centers(
+            self.view.locs,
+            self.window.display_settings_dlg.pixelsize.value(),
+        )
         # update viewport if pick has changed
         if self.pick_changed():
             self.view.viewport = self.view.get_full_fov()
@@ -2550,9 +2572,8 @@ class TestClustererView(QtWidgets.QLabel):
     shift_viewport(dx, dy)
         Moves viewport by a specified amount
     split_locs()
-        Splits self.locs into a list. It has either two (all 
-        clustered locs and all picked locs) or N_GROUP_COLORS elements
-        (each one for a group color)
+        Splits self.locs into a list. It has either two, three or 
+        N_GROUP_COLORS elements (each for one group color).
     to_down()
         Shifts viewport downwards
     to_left()
@@ -2581,6 +2602,7 @@ class TestClustererView(QtWidgets.QLabel):
         self.view = dialog.window.view
         self.viewport = None
         self.locs = None
+        self.ang = None
         self._size = 500
         self.setMinimumSize(self._size, self._size)
         self.setMaximumSize(self._size, self._size)
@@ -2679,11 +2701,16 @@ class TestClustererView(QtWidgets.QLabel):
             locs = self.split_locs()
 
             # render kwargs
+            if self.dialog.one_pixel_blur.isChecked():
+                blur_method = 'smooth'
+            else:
+                blur_method = 'convolve'
             kwargs = {
                 'oversampling': self.get_optimal_oversampling(),
                 'viewport': self.viewport,
-                'blur_method': 'convolve',
+                'blur_method': blur_method,
                 'min_blur_width': 0,
+                'ang': self.ang,
             }
 
             # render images for all channels
@@ -2714,18 +2741,45 @@ class TestClustererView(QtWidgets.QLabel):
 
     def split_locs(self):
         """
-        Splits self.locs into a list. It has either two (all 
-        clustered locs and all picked locs) or N_GROUP_COLORS elements
-        (each one for a group color).
+        Splits self.locs into a list. It has either two, three or 
+        N_GROUP_COLORS elements (each for one group color).
         """
 
-        if self.dialog.display_all_locs.isChecked():
-            # two channels, all locs and clustered locs
+        if (
+            self.dialog.display_all_locs.isChecked()
+            and not self.dialog.display_centers.isChecked()
+        ): # two channels, all locs and clustered locs
             channel = self.dialog.channel
+            all_locs = self.dialog.window.view.picked_locs(channel)[0]
+            all_locs.z /= (
+                self.dialog.window.display_settings_dlg.pixelsize.value()
+            )
             locs = [
-                self.dialog.window.view.picked_locs(channel)[0],
+                all_locs,
                 self.locs,
             ]
+        elif (
+            not self.dialog.display_all_locs.isChecked()
+            and self.dialog.display_centers.isChecked()
+        ): # two channels, clustered locs and cluster centers
+            locs = [
+                self.locs,
+                self.centers,
+            ]
+        elif (
+            self.dialog.display_all_locs.isChecked()
+            and self.dialog.display_centers.isChecked()
+        ): # three channels, all locs, clustered locs and cluster centers
+            channel = self.dialog.channel
+            all_locs = self.dialog.window.view.picked_locs(channel)[0]
+            all_locs.z /= (
+                self.dialog.window.display_settings_dlg.pixelsize.value()
+            )
+            locs = [
+                all_locs,
+                self.locs,
+                self.centers,
+            ]  
         else:
             # multiple channels, each for one group color
             locs = [
@@ -3106,6 +3160,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.setWindowTitle("Info")
         self.setModal(False)
         self.lp = None
+        self.nena_calculated = False
         self.change_fov = ChangeFOV(self.window)
         vbox = QtWidgets.QVBoxLayout(self)
         # Display
@@ -3251,27 +3306,43 @@ class InfoDialog(QtWidgets.QDialog):
             locs = self.window.view.locs[channel]
             info = self.window.view.infos[channel]
 
-            # modify the movie grid
-            self.nena_button.setParent(None)
-            self.movie_grid.removeWidget(self.nena_button)
+            # calculate nena
             progress = lib.ProgressDialog(
                 "Calculating NeNA precision", 0, 100, self
             )
             result_lp = postprocess.nena(locs, info, progress.set_value)
+
+            # modify the movie grid
+            if not self.nena_calculated: # if nena calculated first time
+                self.nena_button.setParent(None)
+                self.movie_grid.removeWidget(self.nena_button)
+            else:
+                self.movie_grid.removeWidget(self.nena_label)
+                self.movie_grid.removeWidget(self.show_plot_button)
+
             self.nena_label = QtWidgets.QLabel()
             self.movie_grid.addWidget(self.nena_label, 1, 1)
             self.nena_result, self.lp = result_lp
             self.lp *= self.window.display_settings_dlg.pixelsize.value()
             self.nena_label.setText("{:.3} nm".format(self.lp))
-            show_plot_button = QtWidgets.QPushButton("Show plot")
-            self.movie_grid.addWidget(
-                show_plot_button, self.movie_grid.rowCount() - 1, 2
-            )
 
             # Nena plot
             self.nena_window = NenaPlotWindow(self)
             self.nena_window.plot(self.nena_result)
-            show_plot_button.clicked.connect(self.nena_window.show)
+
+            self.show_plot_button = QtWidgets.QPushButton("Show plot")
+            self.show_plot_button.clicked.connect(self.nena_window.show)
+            self.movie_grid.addWidget(self.show_plot_button, 0, 2)
+            
+            if not self.nena_calculated:
+                # add recalculate nena
+                recalculate_nena = QtWidgets.QPushButton("Recalculate NeNA")
+                recalculate_nena.clicked.connect(self.calculate_nena_lp)
+                recalculate_nena.setDefault(False)
+                recalculate_nena.setAutoDefault(False)
+                self.movie_grid.addWidget(recalculate_nena, 1, 2)
+
+            self.nena_calculated = True
 
     def calibrate_influx(self):
         """ Calculates influx rate (1/frames). """
@@ -4141,7 +4212,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         # Camera_parameters
         camera_groupbox = QtWidgets.QGroupBox("Camera")
         self.camera_grid = QtWidgets.QGridLayout(camera_groupbox)
-        self.camera_grid.addWidget(QtWidgets.QLabel("Pixel Size:"), 0, 0)
+        self.camera_grid.addWidget(QtWidgets.QLabel("Pixel Size (nm):"), 0, 0)
         self.pixelsize = QtWidgets.QDoubleSpinBox()
         self.pixelsize.setRange(1, 100000)
         self.pixelsize.setValue(130)
@@ -5182,40 +5253,7 @@ class View(QtWidgets.QLabel):
             Array with int group color index for each loc
         """
 
-        groups = np.unique(locs.group)
-        groupcopy = locs.group.copy()
-
-        # check if groups are consecutive
-        if set(groups) == set(range(min(groups), max(groups) + 1)):
-            if len(groups) > 5000:
-                choice = QtWidgets.QMessageBox.question(
-                    self,
-                    "Group question",
-                    (
-                        "Groups are not consecutive"
-                        " and more than 5000 groups detected."
-                        " Re-Index groups? This may take a while."
-                    ),
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
-                )
-                if choice == QtWidgets.QMessageBox.Yes:
-                    pb = lib.ProgressDialog(
-                        "Re-Indexing groups", 0, len(groups), self
-                    )
-                    pb.set_value(0)
-                    for i in tqdm(range(len(groups))):
-                        groupcopy[locs.group == groups[i]] = i
-                        pb.set_value(i)
-                    pb.close()
-            else:
-                for i in tqdm(range(len(groups))):
-                    groupcopy[locs.group == groups[i]] = i
-        else:
-            for i in range(len(groups)):
-                groupcopy[locs.group == groups[i]] = i
-        np.random.shuffle(groups)
-        groups %= N_GROUP_COLORS
-        return groups[groupcopy]
+        return locs.group.astype(int) % N_GROUP_COLORS
 
     def add(self, path, render=True):
         """
@@ -5658,7 +5696,7 @@ class View(QtWidgets.QLabel):
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         # perform DBSCAN in a channel
-        locs = postprocess.dbscan(
+        locs = clusterer.dbscan(
             locs, 
             radius, 
             min_density,
@@ -5765,7 +5803,7 @@ class View(QtWidgets.QLabel):
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         # perform HDBSCAN for each channel
-        locs = postprocess.hdbscan(
+        locs = clusterer.hdbscan(
             locs,
             min_cluster, 
             min_samples, 
@@ -5871,19 +5909,13 @@ class View(QtWidgets.QLabel):
                 )
 
                 if len(locs) > 0:
-                    labels = clusterer.cluster(locs, params, pixelsize)
+                    temp_locs = clusterer.cluster(locs, params, pixelsize)
 
-                    temp_locs = lib.append_to_rec(
-                        locs, labels, "group"
-                    ) # add cluster id to locs
-
-                    # -1 means no cluster assigned to a loc
-                    temp_locs = temp_locs[temp_locs.group != -1]
                     if len(temp_locs) > 0:
                         # make sure each picks produces unique cluster ids
                         temp_locs.group += group_offset
                         clustered_locs.append(temp_locs)
-                        group_offset += np.max(labels) + 1
+                        group_offset += np.max(temp_locs.group) + 1
                 pd.set_value(i + 1)
             clustered_locs = stack_arrays(
                 clustered_locs, asrecarray=True, usemask=False
@@ -5902,14 +5934,7 @@ class View(QtWidgets.QLabel):
             else:
                 locs = self.all_locs[channel]
 
-            labels = clusterer.cluster(locs, params, pixelsize)
-
-            clustered_locs = lib.append_to_rec(
-                locs, labels, "group"
-            ) # add cluster id to locs
-
-            # -1 means no cluster assigned to a loc
-            clustered_locs = clustered_locs[clustered_locs.group != -1]
+            clustered_locs = clusterer.cluster(locs, params, pixelsize)
             status.close()
 
         # saving
@@ -7241,6 +7266,7 @@ class View(QtWidgets.QLabel):
             ax3.set_title("Localizations")
             ax3.set_xlabel("Frames")
             ax3.set_ylabel("ON")
+            ax3.set_yticks([0, 1])
             ax3.set_ylim([-0.1, 1.1])
 
             self.export_trace_button = QtWidgets.QPushButton("Export (*.csv)")
@@ -7299,7 +7325,7 @@ class View(QtWidgets.QLabel):
                 "Keep pick No: {} of {} ?\n"
                 "Picks removed: {} Picks kept: {} Keep Ratio: {:.2f} % \n"
                 "Time elapsed: {:.2f} Minutes, "
-                "Picks per Minute: {:.2f}"
+                " Picks per Minute: {:.2f}"
             ).format(
                 params["i"] + 1,
                 params["n_total"],
@@ -7332,9 +7358,10 @@ class View(QtWidgets.QLabel):
 
         return msgBox
 
+    @check_pick
     def select_traces(self):
         """ 
-        Lets user to select picks based on their traces.
+        Lets the user to select picks based on their traces.
         Opens self.pick_message_box to display information.
         """
 
@@ -7349,16 +7376,18 @@ class View(QtWidgets.QLabel):
                 i = 0 # index of the currently shown pick
                 n_frames = self.infos[channel][0]["Frames"]
                 while i < len(self._picks):
-                    fig = plt.figure(figsize=(5, 5), constrained_layout=True)
+                    fig, (ax1, ax2, ax3) = plt.subplots(
+                        3, 1, figsize=(5, 5), constrained_layout=True
+                    )
                     fig.canvas.set_window_title("Trace")
                     pick = self._picks[i]
                     locs = all_picked_locs[i]
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
                     # essentialy the same plotting as in self.show_trace
-                    ax1 = fig.add_subplot(311)
-                    ax2 = fig.add_subplot(312, sharex=ax1)
-                    ax3 = fig.add_subplot(313, sharex=ax1)
+                    # ax1 = fig.add_subplot(311)
+                    # ax2 = fig.add_subplot(312, sharex=ax1)
+                    # ax3 = fig.add_subplot(313, sharex=ax1)
 
                     xvec = np.arange(n_frames)
                     yvec = xvec[:] * 0
@@ -7393,6 +7422,7 @@ class View(QtWidgets.QLabel):
                     ax3.set_title("Localizations")
                     ax3.set_xlabel("Frames")
                     ax3.set_ylabel("ON")
+                    ax3.set_yticks([0, 1])
 
                     fig.canvas.draw()
                     width, height = fig.canvas.get_width_height()
@@ -10216,6 +10246,7 @@ class Window(QtWidgets.QMainWindow):
             self.display_settings_dlg,
             self.dataset_dialog,
             self.info_dialog,
+            self.info_dialog.change_fov,
             self.mask_settings_dialog,
             self.tools_settings_dialog,
             self.slicer_dialog,

@@ -1,13 +1,26 @@
 Changelog
 =========
 
-Last change: 01-DEC-2022 MTS
+Last change: 07-FEB-2023 MTS
+
+0.5.7
+-----
+- Updated installation instructions
+- (H)DBSCAN available from cmd (bug fix)
+- Render group information is faster (e.g., clustered data)
+- Test Clusterer window (Render) has multiple updates, e.g., different projections, cluster centers display
+- Cluster centers contain info about std in x,y and z
+- If localization precision in z-axis is provided, it will be rendered when using ``Individual localization precision`` and ``Individual localization precision (iso)``. **NOTE:** the column must be named ``lpz`` and have the same units as ``lpx`` and ``lpy``.
+- Number of CPU cores used in multiprocessing limited at 60
+- Updated 3D rendering and clustering documentation
+- Bug fixes
 
 0.5.5 - 0.5.6
 -------------
 - Cluster info is saved in ``_cluster_centers.hdf5`` files which are created when ``Save cluster centers`` box is ticked
 - Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, area/volume and convex hull
 - ``gist_rainbow`` is used for rendering properties
+- NeNA can be calculated many times
 - Bug fixes
 
 0.5.1 - 0.5.4

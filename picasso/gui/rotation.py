@@ -2100,7 +2100,7 @@ class ViewRotation(QtWidgets.QLabel):
                         self.window.window.display_settings_dlg.pixelsize.value()
                         / optimal_oversampling
                     )
-        else:
+        else: # if animating, the message box may appear
             oversampling = float(
                 self.window.window.display_settings_dlg.pixelsize.value()
                 / self.window.display_settings_dlg.disp_px_size.value()

@@ -290,7 +290,9 @@ def distance_histogram(locs, info, bin_size, r_max):
         locs, info, r_max
     )
     N = len(locs)
-    n_threads = _multiprocessing.cpu_count()
+    n_threads = min(
+        60, max(1, int(0.75 * _multiprocessing.cpu_count()))
+    ) # Python crashes when using >64 cores
     chunk = int(N / n_threads)
     starts = range(0, N, chunk)
     args = [
@@ -405,35 +407,6 @@ def pair_correlation(locs, info, bin_size, r_max):
     area = _np.pi * bin_size * (2 * bins_lower + bin_size)
     return bins_lower, dh / area
 
-
-def dbscan(locs, radius, min_density, pixelsize):
-    if hasattr(locs, "z"):
-        X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
-    else:
-        X = _np.vstack((locs.x, locs.y)).T
-    db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
-    group = _np.int32(db.labels_)  # int32 for Origin compatiblity
-    locs = _lib.append_to_rec(locs, group, "group")
-    locs = locs[locs.group != -1]
-    return locs
-
-def hdbscan(locs, min_cluster_size, min_samples, pixelsize, cluster_eps=0):
-    from hdbscan import HDBSCAN as _HDBSCAN
-
-    if hasattr(locs, "z"):
-        X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
-    else:
-        X = _np.vstack((locs.x, locs.y)).T
-    hdb = _HDBSCAN(
-        min_samples=min_samples, 
-        min_cluster_size=min_cluster_size,
-        cluster_selection_epsilon=cluster_eps,
-    ).fit(X)
-    group = _np.int32(hdb.labels_)  # int32 for Origin compatiblity
-    locs = _lib.append_to_rec(locs, group, "group")
-    locs = locs[locs.group != -1]
-    return locs
-
 @_numba.jit(nopython=True, nogil=True)
 def _local_density(
     locs, radius, x_index, y_index, block_starts, block_ends, start, chunk
@@ -465,13 +438,14 @@ def _local_density(
         density[i] = di
     return density
 
-
 def compute_local_density(locs, info, radius):
     locs, x_index, y_index, block_starts, block_ends, K, L = get_index_blocks(
         locs, info, radius
     )
     N = len(locs)
-    n_threads = _multiprocessing.cpu_count()
+    n_threads = min(
+        60, max(1, int(0.75 * _multiprocessing.cpu_count()))
+    ) # Python crashes when using >64 cores
     chunk = int(N / n_threads)
     starts = range(0, N, chunk)
     args = [

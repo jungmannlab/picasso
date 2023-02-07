@@ -236,7 +236,9 @@ def fit_z_parallel(
     filter=2, 
     asynch=False,
 ):
-    n_workers = max(1, int(0.75 * _multiprocessing.cpu_count()))
+    n_workers = min(
+        60, max(1, int(0.75 * _multiprocessing.cpu_count()))
+    ) # Python crashes when using >64 cores
     n_locs = len(locs)
     n_tasks = 100 * n_workers
     spots_per_task = [

@@ -89,6 +89,12 @@ hdbscan
 -------
 Cluster localizations with the hdbscan clustering algorithm.
 
+smlm_cluster
+------------
+Cluster localizations with the custom SMLM clustering algorithm.
+
+The algorithm finds localizations with the most neighbors within a specified radius and finds clusters based on such "local maxima".
+
 dark
 ----
 Compute the dark time for grouped localizations.
