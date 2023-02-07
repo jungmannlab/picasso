@@ -2,8 +2,7 @@
     picasso.clusterer
     ~~~~~~~~~~~~~~~~~
 
-    Clusterer optimized for DNA PAINT in CPU and GPU versions.
-
+    Clusterer optimized for DNA PAINT, as well as DBSCAN and HDBSCAN.
 
     Based on the work of Thomas Schlichthaerle and Susanne Reinhardt.
     :authors: Thomas Schlichthaerle, Susanne Reinhardt, 
@@ -11,14 +10,11 @@
     :copyright: Copyright (c) 2022 Jungmann Lab, MPI of Biochemistry
 """
 
-import os as _os
-
 import numpy as _np
-import math as _math
-import yaml as _yaml
 import pandas as _pd
 from scipy.spatial import cKDTree as _cKDTree
 from scipy.spatial import ConvexHull as _ConvexHull
+from sklearn.cluster import DBSCAN as _DBSCAN
 
 from . import lib as _lib
 
@@ -30,6 +26,8 @@ CLUSTER_CENTERS_DTYPE_2D = [
     ("std_frame", "f4"),
     ("x", "f4"),
     ("y", "f4"),
+    ("std_x", "f4"),
+    ("std_y", "f4"),
     ("photons", "f4"),
     ("sx", "f4"),
     ("sy", "f4"),
@@ -48,6 +46,8 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("std_frame", "f4"),
     ("x", "f4"),
     ("y", "f4"),
+    ("std_x", "f4"),
+    ("std_y", "f4"),
     ("z", "f4"),
     ("photons", "f4"),
     ("sx", "f4"),
@@ -55,7 +55,7 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("bg", "f4"),
     ("lpx", "f4"),
     ("lpy", "f4"),
-    ("lpz", "f4"),
+    ("std_z", "f4"),
     ("ellipticity", "f4"),
     ("net_gradient", "f4"),
     ("n", "u4"),
@@ -148,7 +148,7 @@ def frame_analysis(labels, frame):
 
     return labels
 
-def _cluster(X, radius, min_locs, frame):
+def _cluster(X, radius, min_locs, frame=None):
     """
     Clusters points given by X with a given clustering radius and 
     minimum number of localizaitons withing that radius using KDTree
@@ -161,7 +161,7 @@ def _cluster(X, radius, min_locs, frame):
         Clustering radius
     min_locs : int
         Minimum number of localizations in a cluster
-    frame : np.array
+    frame : np.array (default=None)
         Frame number of each localization. If None, no frame analysis
         is performed
 
@@ -334,7 +334,159 @@ def cluster(locs, params, pixelsize):
             min_locs,
             fa
         )
-    return labels
+    locs = extract_valid_labels(locs, labels)
+    return locs
+
+def _dbscan(X, radius, min_density):
+    """ 
+    Finds DBSCAN cluster labels, given data points and parameters.
+    
+    Parameters
+    ----------
+    X : np.array
+        Array of shape (N, D), with N being the number of data points
+        and D the number of dimensions.
+    radius : float
+        DBSCAN search radius, often referred to as "epsilon"
+    min_density : int
+        Number of points within radius to consider a given point a core
+        sample
+
+    Returns
+    -------
+    labels : np.array
+        Cluster labels for each point. Shape: (N,). -1 means no cluster
+        assigned.
+    """
+
+    db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
+    return db.labels_.astype(_np.int32)
+
+def dbscan(locs, radius, min_density, pixelsize):
+    """
+    Performs DBSCAN on localizations.
+    
+    Paramters
+    ---------
+    locs : np.recarray
+        Localizations to be clustered
+    radius : float
+        DBSCAN search radius, often referred to as "epsilon"
+    min_density : int
+        Number of localizations within radius to consider a given point 
+        a core sample
+    pixelsize : int
+        Camera pixel size in nm
+    
+    Returns
+    -------
+    locs : np.recarray
+        Clustered localizations; cluster labels are assigned to the
+        "group" column    
+    """
+    
+    if hasattr(locs, "z"):
+        X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
+    else:
+        X = _np.vstack((locs.x, locs.y)).T
+    labels = _dbscan(X, radius, min_density)
+    locs = extract_valid_labels(locs, labels)
+    return locs
+
+def _hdbscan(X, min_cluster_size, min_samples, cluster_eps=0):
+    """
+    Finds HDBSCAN cluster labels, given data points and parameters.
+
+    Parameters
+    ----------
+    X : np.array
+        Array of shape (N, D), with N being the number of data points
+        and D the number of dimensions.
+    min_cluster_size : int
+        Minimum number of points in cluster
+    min_samples : int
+        Number of points within radius to consider a given point a core
+        sample
+    cluster_eps : float (default=0.)
+        Distance threshold. Clusters below this value will be merged
+    
+    Returns
+    -------
+    labels : np.array
+        Cluster labels for each point. Shape: (N,). -1 means no cluster
+        assigned.
+    """
+    
+    from hdbscan import HDBSCAN as _HDBSCAN
+    hdb = _HDBSCAN(
+        min_samples=min_samples, 
+        min_cluster_size=min_cluster_size,
+        cluster_selection_epsilon=cluster_eps,
+    ).fit(X)
+    return hdb.labels_.astype(_np.int32)
+
+def hdbscan(locs, min_cluster_size, min_samples, pixelsize, cluster_eps=0.):
+    """
+    Performs HDBSCAN on localizations.
+    
+    Paramters
+    ---------
+    locs : np.recarray
+        Localizations to be clustered
+    min_cluster_size : int
+        Minimum number of localizations in cluster
+    min_samples : int
+        Number of localizations within radius to consider a given point 
+        a core sample
+    pixelsize : int
+        Camera pixel size in nm
+    cluster_eps : float (default=0.)
+        Distance threshold. Clusters below this value will be merged
+    
+    Returns
+    -------
+    locs : np.recarray
+        Clustered localizations; cluster labels are assigned to the
+        "group" column    
+    """
+
+    if hasattr(locs, "z"):
+        X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
+    else:
+        X = _np.vstack((locs.x, locs.y)).T
+    labels = _hdbscan(
+        X, min_cluster_size, min_samples, cluster_eps=cluster_eps
+    )
+    locs = extract_valid_labels(locs, labels)
+    return locs
+
+def extract_valid_labels(locs, labels):
+    """
+    Extracts localizations based on clustering results.
+
+    Localizations that were not clustered are excluded.
+
+    Parameters
+    ----------
+    locs : np.recarray
+        Localizations used for clustering
+    labels : np.array
+        Array of cluster labels for each localization. -1 means no
+        cluster assignment.
+
+    Returns
+    -------
+    locs : np.recarray
+        Localization list with "group" column appended, providing
+        cluster label. 
+    """
+    
+    # add cluster id to locs, as "group"
+    locs = _lib.append_to_rec(locs, labels, "group")
+
+    # -1 means no cluster assigned to a loc
+    locs = locs[locs.group != -1]
+    return locs
 
 def error_sums_wtd(x, w):
     """ 
@@ -388,21 +540,23 @@ def find_cluster_centers(locs, pixelsize):
     std_frame = _np.array([_[1] for _ in centers_])
     x = _np.array([_[2] for _ in centers_])
     y = _np.array([_[3] for _ in centers_])
-    photons = _np.array([_[4] for _ in centers_])
-    sx = _np.array([_[5] for _ in centers_])
-    sy = _np.array([_[6] for _ in centers_])
-    bg = _np.array([_[7] for _ in centers_])
-    lpx = _np.array([_[8] for _ in centers_])
-    lpy = _np.array([_[9] for _ in centers_])
-    ellipticity = _np.array([_[10] for _ in centers_])
-    net_gradient = _np.array([_[11] for _ in centers_])
-    n = _np.array([_[12] for _ in centers_])
+    std_x = _np.array([_[4] for _ in centers_])
+    std_y = _np.array([_[5] for _ in centers_])
+    photons = _np.array([_[6] for _ in centers_])
+    sx = _np.array([_[7] for _ in centers_])
+    sy = _np.array([_[8] for _ in centers_])
+    bg = _np.array([_[9] for _ in centers_])
+    lpx = _np.array([_[10] for _ in centers_])
+    lpy = _np.array([_[11] for _ in centers_])
+    ellipticity = _np.array([_[12] for _ in centers_])
+    net_gradient = _np.array([_[13] for _ in centers_])
+    n = _np.array([_[14] for _ in centers_])
 
     if hasattr(locs, "z"):
-        z = _np.array([_[13] for _ in centers_])
-        lpz = _np.array([_[14] for _ in centers_])
-        volume = _np.array([_[15] for _ in centers_])
-        convexhull = _np.array([_[16] for _ in centers_])
+        z = _np.array([_[15] for _ in centers_])
+        std_z = _np.array([_[16] for _ in centers_])
+        volume = _np.array([_[17] for _ in centers_])
+        convexhull = _np.array([_[18] for _ in centers_])
         centers = _np.rec.array(
             (
                 res.index.values, # group id
@@ -410,6 +564,8 @@ def find_cluster_centers(locs, pixelsize):
                 std_frame,
                 x,
                 y,
+                std_x,
+                std_y,
                 z,
                 photons,
                 sx,
@@ -417,7 +573,7 @@ def find_cluster_centers(locs, pixelsize):
                 bg,
                 lpx,
                 lpy,
-                lpz,
+                std_z,
                 ellipticity,
                 net_gradient,
                 n,
@@ -436,6 +592,8 @@ def find_cluster_centers(locs, pixelsize):
                 std_frame,
                 x,
                 y,
+                std_x,
+                std_y,
                 photons,
                 sx,
                 sy,
@@ -512,14 +670,15 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
     # n_locs in cluster
     n = len(grouplocs)
     if hasattr(grouplocs, "z"):
-        # take lpz = 2 * mean(lpx, lpy)
         z = _np.average(
             grouplocs.z, 
             weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
-        )
-        std_z = grouplocs.z.std() / pixelsize
-        lpz = 2 * lpx
-        volume = _np.power((std_x + std_y + std_z) / 3 * 2, 3) * 4.18879
+        ) # take lpz = 2 * mean(lpx, lpy)
+        std_z = grouplocs.z.std()
+        # lpz = std_z
+        volume = _np.power(
+            (std_x + std_y + std_z / pixelsize) / 3 * 2, 3
+        ) * 4.18879
         try:
             X = _np.stack(
                 (grouplocs.x, grouplocs.y, grouplocs.z / pixelsize),
@@ -534,6 +693,8 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
             std_frame,
             x,
             y,
+            std_x,
+            std_y,
             photons,
             sx,
             sy,
@@ -543,8 +704,9 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
             ellipticity,
             net_gradient,
             n, 
-            z, 
-            lpz,
+            z,
+            std_z,
+            # lpz,
             volume,
             convexhull,
         ]
@@ -561,6 +723,8 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
             std_frame,
             x,
             y,
+            std_x,
+            std_y,
             photons,
             sx,
             sy,

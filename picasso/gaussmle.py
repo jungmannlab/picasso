@@ -283,7 +283,9 @@ def gaussmle_async(spots, eps, max_it, method="sigma"):
     CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
     likelihoods = _np.zeros(N, dtype=_np.float32)
     iterations = _np.zeros(N, dtype=_np.int32)
-    n_workers = max(1, int(0.75 * _multiprocessing.cpu_count()))
+    n_workers = min(
+        60, max(1, int(0.75 * _multiprocessing.cpu_count()))
+    ) # Python crashes when using >64 cores
     lock = _threading.Lock()
     current = [0]
     if method == "sigma":
