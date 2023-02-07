@@ -32,7 +32,7 @@ Until version *0.5.7*, the formula was:
 
 *(RAW_DATA - BASELINE) x SENSITIVITY / GAIN*
 
-**i.e., quantum effiency will be ignored.**
+**i.e., quantum effiency will be removed.**
 
 For backward compatibility, quantum efficiency will be kept in Picasso Localize, however, it will have no effect on the new photon conversion formula.
 
