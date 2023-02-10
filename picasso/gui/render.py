@@ -87,7 +87,7 @@ def get_colors(n_channels):
     colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
     return colors
 
-def get_render_properties_colors(n_channels):
+def get_render_properties_colors(n_channels, cmap='gist_rainbow'):
     """
     Creates a list with rgb channels for each of the channels used in
     rendering property using the gist_rainbow colormap, see:
@@ -96,16 +96,18 @@ def get_render_properties_colors(n_channels):
     Parameters
     ----------
     n_channels : int
-        Number of locs channels
+        Number of locs channels.
+    cmap : str
+        Colormap name.
 
     Returns
     -------
-    list
-        Contains tuples with rgb channels
+    colors : list of tuples
+        Contains tuples with rgb channels.
     """
 
     # array of shape (256, 3) with rbh channels with 256 colors
-    base = plt.get_cmap('gist_rainbow')(np.arange(256))[:, :3]
+    base = plt.get_cmap(cmap)(np.arange(256))[:, :3]
     # indeces to draw from base
     idx = np.linspace(0, 255, n_channels).astype(int)
     # extract the colors of interest
