@@ -23,16 +23,17 @@ A collection of tools for painting super-resolution images. The Picasso software
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
 Photon conversion update
------------------------------
-In the next Picasso update **(0.5.8)** the formula for conversion of raw data to photons will be changed **affecting localization precision calculated** as the number of photons changes.
+------------------------
+In the Picasso update **(0.5.8)** the formula for conversion of raw data to photons was changed **affecting localization precision calculated** as the number of photons differs.
 
 Until version *0.5.7*, the formula was: 
 
-*(RAW_DATA - BASELINE) x SENSITIVITY / (GAIN x QE)*, where QE is quantum efficiency of the camera. In the new version it will be changed too:
+*(RAW_DATA - BASELINE) x SENSITIVITY / (GAIN x QE)*, where QE is quantum efficiency of the camera. In the *0.5.8* it was changed to:
 
 *(RAW_DATA - BASELINE) x SENSITIVITY / GAIN*
 
-**i.e., quantum effiency will be removed.**
+**i.e., quantum effiency was removed.** Thus, the estimate of the localization precision better approximates the true precision.
+
 
 For backward compatibility, quantum efficiency will be kept in Picasso Localize, however, it will have no effect on the new photon conversion formula.
 

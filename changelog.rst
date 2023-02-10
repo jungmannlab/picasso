@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 07-FEB-2023 MTS
+Last change: 10-FEB-2023 MTS
+
+0.5.8
+-----
+- Remove quantum efficiency when converting raw data into photons in Localize
 
 0.5.7
 -----
