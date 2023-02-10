@@ -760,7 +760,6 @@ def _localize(args):
         locs_from_fits,
         add_file_to_db,
     )
-
     from os.path import splitext, isdir
     from time import sleep
     from . import gausslq, avgroi
@@ -851,6 +850,10 @@ def _localize(args):
     if paths:
         box = args.box_side_length
         min_net_gradient = args.gradient
+        roi = args.roi
+        if roi is not None:
+            y_min, x_min, y_max, x_max = roi
+            roi = [[y_min, x_min], [y_max, x_max]]
         camera_info = {}
         camera_info["baseline"] = args.baseline
         camera_info["sensitivity"] = args.sensitivity
@@ -898,7 +901,7 @@ def _localize(args):
             print("Processing {}, File {} of {}".format(path, i + 1, len(paths)))
             print("------------------------------------------")
             movie, info = load_movie(path)
-            current, futures = identify_async(movie, min_net_gradient, box)
+            current, futures = identify_async(movie, min_net_gradient, box, roi=roi)
             n_frames = len(movie)
             while current[0] < n_frames:
                 print(
@@ -1436,6 +1439,17 @@ def main():
         help="segmentation size for subsequent RCC, 0 to deactivate",
     )
     localize_parser.add_argument(
+        "-r",
+        "--roi",
+        type=int,
+        nargs=4,
+        default=None,
+        help=(
+            "ROI (y_min, x_min, y_max, x_max) in camera pixels;\n"
+            "note the origin of the image is in the top left corner"
+        ),
+    )
+    localize_parser.add_argument(
         "-bl", "--baseline", type=int, default=0, help="camera baseline"
     )
     localize_parser.add_argument(
@@ -1468,7 +1482,7 @@ def main():
         default="",
         help="Suffix to add to files",
     )
-
+    
     localize_parser.add_argument(
         "-db",
         "--database",

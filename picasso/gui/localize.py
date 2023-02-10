@@ -104,6 +104,7 @@ class View(QtWidgets.QGraphicsView):
                     self.mapToScene(self.roi_end),
                 )
                 self.roi = list([[int(_.y()), int(_.x())] for _ in roi_points])
+                print(self.roi)
             self.window.draw_frame()
         elif event.button() == QtCore.Qt.RightButton:
             self.pan = False
