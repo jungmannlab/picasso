@@ -97,7 +97,7 @@ def get_render_properties_colors(n_channels, cmap='gist_rainbow'):
     ----------
     n_channels : int
         Number of locs channels.
-    cmap : str
+    cmap : str (default='gist_rainbow')
         Colormap name.
 
     Returns
