@@ -22,13 +22,21 @@ Picasso
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
+
+Picasso 0.6.0
+-------------
+
+RESI
+~~~~
+RESI dialog added to Picasso Render, allowing for substatial boost in spatial resolution, see `here <linktoresipublication>`_.
+
 Photon conversion update
-------------------------
-In the Picasso update **(0.5.8)** the formula for conversion of raw data to photons was changed **affecting localization precision calculated** as the number of photons differs.
+~~~~~~~~~~~~~~~~~~~~~~~~
+The formula for conversion of raw data to photons was changed **affecting localization precision calculated** as the number of photons differs.
 
 Until version *0.5.7*, the formula was: 
 
-*(RAW_DATA - BASELINE) x SENSITIVITY / (GAIN x QE)*, where QE is quantum efficiency of the camera. In the *0.5.8* it was changed to:
+*(RAW_DATA - BASELINE) x SENSITIVITY / (GAIN x QE)*, where QE is quantum efficiency of the camera. In Picasso *0.6.0* it was changed to:
 
 *(RAW_DATA - BASELINE) x SENSITIVITY / GAIN*
 
