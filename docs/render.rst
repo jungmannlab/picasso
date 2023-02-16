@@ -57,17 +57,17 @@ There are several things to keep in mind when using the rotation window. Firstly
 RESI
 ----
 .. image:: ../docs/render_resi.png
-   :scale: 60 %
+   :scale: 30 %
    :alt: UML Render
 
 
 In Picasso 0.6.0, a new RESI (Resolution Enhancement by Sequential Imaging) dialog was introduced. It allows for a substantial resolution boost by sequential imaging of a single target with multiple labels with Exchange-PAINT (*to be published*).
 
-To use RESI in Picasso Render, prepare your individual RESI channels (localization, undrifting, filtering and **alignment**). Load such localization lists into Render and open ``Postprocess > RESI``. The dialog shown above will appear. Clustering parameters can be defined for each RESI channel individually, although it is possible to apply the same parameters to all channels by clicking ``Apply the same clustering parameters to all channels``, which will copy the clustering parameters from the first row and paste it to all other channels.
+To use RESI, prepare your individual RESI channels (localization, undrifting, filtering and **alignment**). Load such localization lists into Picasso Render and open ``Postprocess > RESI``. The dialog shown above will appear. Clustering parameters can be defined for each RESI channel individually, although it is possible to apply the same parameters to all channels by clicking ``Apply the same clustering parameters to all channels``, which will copy the clustering parameters from the first row and paste it to all other channels.
 
-Next, the user needs to specify whether or not to save clustered localizations or cluster centers from each of the RESI channels individually, and to apply basic frame analysis (to minimize the effect of sticking events).
+Next, the user needs to specify whether or not to save clustered localizations or cluster centers from each of the RESI channels individually, and whether to apply basic frame analysis (to minimize the effect of sticking events).
 
-Upon clicking ``Perform RESI analysis``, each of the loaded channels is clustered, cluster centers are extracted and are combined from all RESI channels to create the final RESI file.
+Upon clicking ``Perform RESI analysis``, each of the loaded channels is clustered, cluster centers are extracted and combined from all RESI channels to create the final RESI file.
 
 Dialogs
 -------

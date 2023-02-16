@@ -6,7 +6,7 @@ Last change: 16-FEB-2023 MTS
 0.6.0
 -----
 - New RESI (Resolution Enhancement by Sequential Imaging) dialog in Picasso Render allowing for a substantial resolution boost, (*to be published*)
-- Remove quantum efficiency when converting raw data into photons in Localize
+- Remove quantum efficiency when converting raw data into photons in Picasso Localize
 - Input ROI using command-line ``picasso localize``, see `here <https://picassosr.readthedocs.io/en/latest/cmd.html>`_.
 
 0.5.7
