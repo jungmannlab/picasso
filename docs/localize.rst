@@ -9,7 +9,9 @@ Localize allows performing super-resolution reconstruction of image stacks. For 
 
 - MLE, integrated Gaussian (based on `Smith et al., 2014 <https://www.ncbi.nlm.nih.gov/pmc/articles/PMC2862147/>`_.)
 - LQ, Gaussian (least squares)
-- Average of ROI
+- Average of ROI (finds summed intensity of spots)
+
+**Please note:** Picasso Localize supports five file formats: ``.ome.tif``, ``NDTiffStack`` with extension ``.tif``, ``.raw``, ``.ims`` and ``.nd2``. If your file has the extension ``.tiff`` or ``.ome.tiff``, it cannot be read. Usually it is enough to change the extension to ``.ome.tif``, i.e., remove the last letter.
 
 Identification and fitting of single-molecule spots
 ---------------------------------------------------

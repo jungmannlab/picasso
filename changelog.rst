@@ -1,7 +1,13 @@
 Changelog
 =========
 
-Last change: 07-FEB-2023 MTS
+Last change: 16-FEB-2023 MTS
+
+0.6.0
+-----
+- New RESI dialog in Picasso Render allowing for a substantial resolution boost, see `here <linktoresipublication>`_.
+- Remove quantum efficiency when converting raw data into photons in Localize
+- Input ROI using command-line ``picasso localize``, see `here <https://picassosr.readthedocs.io/en/latest/cmd.html>`_.
 
 0.5.7
 -----

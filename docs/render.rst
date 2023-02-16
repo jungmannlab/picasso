@@ -26,7 +26,7 @@ Redundant cross-correlation drift correction
 Marker-based drift correction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. In ``Picasso: Render``, pick drift markers as described in ``Picking of regions of interest``. Use the ``Pick similar`` option to automatically detect a large number of drift markers similar to a few manually selected ones.
+1. In ``Picasso: Render``, pick drift markers as described in **Picking of regions of interest**. Use the ``Pick similar`` option to automatically detect a large number of drift markers similar to a few manually selected ones.
 2. If the structures used as drift markers have an intrinsic size larger than the precision of individual localizations (e.g., DNA origami, large protein complexes), it is critical to select a large number of structures. Otherwise, the statistic for calculating the drift in each frame (the mean displacement of localization to the structure's center of mass) is not valid.
 3. Select ``Postprocess > Undrift from picked`` to compute and apply the drift correction.
 4. (Optional) Save the drift-corrected localizations by selecting ``File > Save localizations``.
@@ -53,6 +53,21 @@ The user may perform multiple actions in the rotation window, including: saving 
 Rotation around z-axis is available by pressing Ctrl/Command. Rotation axis can be frozen by pressing x/y/z to freeze around the corresponding axes (to freeze around the z-axis, Ctrl/Command must be pressed as well).
 
 There are several things to keep in mind when using the rotation window. Firstly, using individual localization precision is very slow and is not recommended as a default blur method. Also, the size of the rotation window can be altered, however, if it becomes too large, rendering may start to lag.
+
+RESI
+----
+.. image:: ../docs/render_resi.png
+   :scale: 50 %
+   :alt: UML Render
+
+
+In Picasso 0.6.0, a new RESI dialog was introduced. It allows for a substantial resolution boost by sequential imaging of a single target with multiple labels with Exchange-PAINT, see `here <linktoresipublication>`_.
+
+To use RESI in Picasso Render, prepare your individual RESI channels (localization, undrifting, filtering and **alignment**). Load such localization lists into Render and open ``Postprocess > RESI``. The dialog shown above will appear. Clustering parameters can be defined for each RESI channel individually, although it is possible to apply the same parameters to all channels by clicking ``Apply the same clustering parameters to all channels``, which will copy the clustering parameters from the first row and paste it to all other channels.
+
+Next, the user needs to specify whether or not to save clustered localizations or cluster centers from each of the RESI channels individually, and to apply basic frame analysis (to minimize the effect of sticking events).
+
+Upon clicking ``Perform RESI analysis``, each of the loaded channels is clustered, cluster centers are extracted and are combined from all RESI channels to create the final RESI file.
 
 Dialogs
 -------

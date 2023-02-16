@@ -18,7 +18,6 @@ import numpy as np
 import traceback
 import importlib, pkgutil
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
-# from icecream import ic
 from collections import UserDict
 
 try:
@@ -431,7 +430,7 @@ class ParametersDialog(QtWidgets.QDialog):
         identification_grid.addWidget(self.box_spinbox, 0, 1)
 
         # Min. Net Gradient
-        identification_grid.addWidget(QtWidgets.QLabel("Min. Net Gradient:"), 1, 0)
+        identification_grid.addWidget(QtWidgets.QLabel("Min.  Net Gradient:"), 1, 0)
         self.mng_spinbox = QtWidgets.QSpinBox()
         self.mng_spinbox.setRange(0, 1e9)
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
@@ -470,11 +469,26 @@ class ParametersDialog(QtWidgets.QDialog):
         self.mng_max_spinbox.valueChanged.connect(self.on_mng_max_changed)
         hbox.addWidget(self.mng_max_spinbox)
 
+        # # ROI
+        # identification_grid.addWidget(
+        #     QtWidgets.QLabel("ROI (y_min,x_min,y_max,x_max):"), 4, 0,
+        # )
+        # self.roi_edit = QtWidgets.QLineEdit()
+        # regex = r"\d+,\d+,\d+,\d+" # regex for 4 integers separated by commas
+        # validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
+        # self.roi_edit.setValidator(validator)
+        # self.roi_edit.editingFinished.connect(self.on_roi_edit_finished)
+        # identification_grid.addWidget(self.roi_edit, 4, 1)
+        # #TODO: signal when roi_edit is changed: change self.roi and draw rectangle?
+        # #TODO: validate that the input numbers lie within the whole FOV
+        # #TODO: when roi is changed with mouseReleaseEvent in View, change the values displayed here!
+        # #TODO: what about nan?
+
         self.preview_checkbox = QtWidgets.QCheckBox("Preview")
         self.preview_checkbox.setTristate(False)
-        # self.preview_checkbox.setChecked(True)
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
+        # identification_grid.addWidget(self.preview_checkbox, 5, 0)
 
         # Camera:
         if "Cameras" in CONFIG:
@@ -759,6 +773,22 @@ class ParametersDialog(QtWidgets.QDialog):
         for idx, _ in enumerate(self.quality_grid_values):
             _.setVisible(False)
             _.setText("")
+    
+    # def on_roi_edit_finished(self):
+    #     from icecream import ic # TODO:delete
+    #     text = self.roi_edit.text().split(",")
+    #     y_min, x_min, y_max, x_max = [int(_) for _ in text]
+    #     # update roi
+    #     self.window.view.roi = [[y_min, x_min], [y_max, x_max]]
+    #     # draw rectangle TODO use self.window.view.rubberband
+    #     self.window.view.rubberband.setGeometry(
+    #         QtCore.QRect(x_min, y_min, x_max-x_min, y_max-y_min)
+    #     )
+    #     self.window.view.rubberband.show()
+    #     #TOOD: incorrect indeces, (wrong place for the box,)
+    #     #TODO: box dispaperast afte rcllicking on View
+    #     #TODO: use map to scene??, idk
+    #     self.window.draw_frame()
 
     def on_fit_method_changed(self, state):
         if self.fit_method.currentText() == "LQ, Gaussian":
