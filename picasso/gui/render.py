@@ -3984,8 +3984,7 @@ class RESIDialog(QtWidgets.QDialog):
         super().__init__()
         self.setWindowTitle("RESI")
         this_directory = os.path.dirname(os.path.realpath(__file__))
-        gui_directory = os.path.dirname(this_directory)
-        icon_path = os.path.join(gui_directory, "icons", "render.ico")
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
 

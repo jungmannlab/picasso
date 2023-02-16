@@ -26,9 +26,9 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 Picasso 0.6.0
 -------------
 
-RESI
-~~~~
-RESI dialog added to Picasso Render, allowing for substatial boost in spatial resolution, see `here <linktoresipublication>`_.
+RESI (Resolution Enhancement by Sequential Imaging)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+RESI dialog added to Picasso Render, allowing for substatial boost in spatial resolution (*to be published*).
 
 Photon conversion update
 ~~~~~~~~~~~~~~~~~~~~~~~~
