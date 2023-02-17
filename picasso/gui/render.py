@@ -87,7 +87,7 @@ def get_colors(n_channels):
     colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
     return colors
 
-def get_render_properties_colors(n_channels):
+def get_render_properties_colors(n_channels, cmap='gist_rainbow'):
     """
     Creates a list with rgb channels for each of the channels used in
     rendering property using the gist_rainbow colormap, see:
@@ -96,16 +96,18 @@ def get_render_properties_colors(n_channels):
     Parameters
     ----------
     n_channels : int
-        Number of locs channels
+        Number of locs channels.
+    cmap : str (default='gist_rainbow')
+        Colormap name.
 
     Returns
     -------
-    list
-        Contains tuples with rgb channels
+    colors : list of tuples
+        Contains tuples with rgb channels.
     """
 
     # array of shape (256, 3) with rbh channels with 256 colors
-    base = plt.get_cmap('gist_rainbow')(np.arange(256))[:, :3]
+    base = plt.get_cmap(cmap)(np.arange(256))[:, :3]
     # indeces to draw from base
     idx = np.linspace(0, 255, n_channels).astype(int)
     # extract the colors of interest
@@ -708,9 +710,9 @@ class DatasetDialog(QtWidgets.QDialog):
             if self.warning:
                 text = (
                     "The number of channels passed the number of default "
-                    " colors.  In case you would like to use your own color, "
+                    " colors. In case you would like to use your own color, "
                     " please insert the color's hexadecimal expression,"
-                    "  starting with '#',  e.g.  '#ffcdff' for pink or choose"
+                    " starting with '#', e.g. '#ffcdff' for pink or choose"
                     " the automatic coloring in the Files dialog."
                 )
                 QtWidgets.QMessageBox.information(self, "Warning", text)
@@ -3928,6 +3930,336 @@ class PickToolRectangleSettings(QtWidgets.QWidget):
         self.grid.setRowStretch(1, 1)
 
 
+class RESIDialog(QtWidgets.QDialog):
+    """ RESI dialog.
+
+    Allows for clustering multiple channels with user-defined
+    clustering parameters using the SMLM clusterer; saves cluster 
+    centers in a single .hdf5 file that contains an extra column with 
+    resi channel ids and a metadata .yaml file.
+
+    ...
+
+    Attributes
+    ----------
+    apply_fa : QCheckBox
+        If checked, apply basic frame analysis (just like in the case
+        of SMLM clustering)
+    locs : list of np.recarrays
+        List of localization lists that are loaded in the main window
+        when opening the RESI dialog.
+    min_locs : list of QSpinBoxes
+        List of widgets holding minimum number of localizations used in
+        SMLM clusterer.
+    n_dim : int
+        Dimensionality of loaded localizations (2 or 3).
+    n_channels : int
+        Number of channels used in RESI analysis.
+    paths : list of strings
+        Paths to localization lists used for RESI analysis.
+    radius_xy : list of QDoubleSpinBoxes
+        List of widgets holding radius in x and y used in SMLM 
+        clusterer.
+    radius_z : list of QDoubleSpinBoxes
+        List of widgets holding radius in z used in SMLM clusterer.
+        Only applied when 3D data is loaded. Otherwise is not used.
+    save_cluster_centers : QCheckBox
+        If checked, saves cluster centers for each loaded localization
+        list while performing RESI analysis.
+    save_clustered_locs : QCheckBox
+        If checked, saves clustered localizations for each loaded 
+        localization list while performing RESI analysis.
+    window : QMainWindow
+        Instance of the main Picasso Render window.
+
+    Methods
+    -------
+    on_same_params_clicked()
+        Sets all clustering parameters to have the same value as in
+        the first row.
+    perform_resi()
+        Performs RESI and saves RESI cluster centers. Saves clustered 
+        localizations and cluster centers if requested. 
+    """
+
+    def __init__(self, window):
+        super().__init__()
+        self.setWindowTitle("RESI")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+
+        self.window = window
+        self.locs = window.view.locs
+        self.n_channels = len(self.locs)
+        self.paths = window.view.locs_paths
+        self.ndim = 2
+        if all([hasattr(_, "z") for _ in self.locs]):
+            self.ndim = 3
+
+        self.radius_xy = []
+        self.radius_z = []
+        self.min_locs = []
+
+        ### layout ###
+        vbox = QtWidgets.QVBoxLayout(self)
+
+        ## clustering parameters - apply the same to all channels
+        params_box = QtWidgets.QGroupBox("")
+        vbox.addWidget(params_box)
+        params_grid = QtWidgets.QGridLayout(params_box)
+
+        same_params = QtWidgets.QPushButton(
+            "Apply the same clustering parameters to all channels"
+        )
+        same_params.setAutoDefault(False)
+        same_params.clicked.connect(self.on_same_params_clicked)
+        params_grid.addWidget(same_params, 0, 0, 1, 4)
+
+        ## clustering parameters - labels
+        params_grid.addWidget(QtWidgets.QLabel("RESI channel"), 2, 0)
+        if self.ndim == 2:
+            params_grid.addWidget(
+                QtWidgets.QLabel("Radius\n[cam. pixel]"), 2, 1
+            )
+            params_grid.addWidget(
+                QtWidgets.QLabel("Min # localizations"), 2, 2, 1, 2
+            )
+        else:
+            params_grid.addWidget(
+                QtWidgets.QLabel("Radius xy\n[cam. pixel]"), 2, 1
+            )
+            params_grid.addWidget(
+                QtWidgets.QLabel("Radius z\n[cam. pixel]"), 2, 2
+            )
+            params_grid.addWidget(
+                QtWidgets.QLabel("Min # localizations"), 2, 3
+            )
+
+        ## clustering parameters - values
+        for i in range(self.n_channels):
+            channel_name = self.window.dataset_dialog.checks[i].text()
+            count = params_grid.rowCount()
+
+            r_xy = QtWidgets.QDoubleSpinBox()
+            r_xy.setRange(0.0001, 1e3)
+            r_xy.setDecimals(4)
+            r_xy.setValue(0.1)
+            r_xy.setSingleStep(0.01)
+            self.radius_xy.append(r_xy)
+
+            r_z = QtWidgets.QDoubleSpinBox()
+            r_z.setRange(0.0001, 1e3)
+            r_z.setDecimals(4)
+            r_z.setValue(0.25)
+            r_z.setSingleStep(0.01)
+            self.radius_z.append(r_z)
+
+            min_locs = QtWidgets.QSpinBox()
+            min_locs.setRange(1, 1e6)
+            min_locs.setValue(10)
+            min_locs.setSingleStep(1)
+            self.min_locs.append(min_locs)
+
+            params_grid.addWidget(QtWidgets.QLabel(channel_name), count, 0)
+            params_grid.addWidget(r_xy, count, 1)
+            if self.ndim == 3:
+                params_grid.addWidget(r_z, count, 2)
+                params_grid.addWidget(min_locs, count, 3)
+            else:
+                params_grid.addWidget(min_locs, count, 2, 1, 2)
+
+        ## perform clustering
+        # what to save
+        self.save_clustered_locs = QtWidgets.QCheckBox(
+            "Save clustered localizations\nof individual channels"
+        )
+        self.save_clustered_locs.setChecked(False)
+        params_grid.addWidget(
+            self.save_clustered_locs, params_grid.rowCount(), 0, 1, 2
+        )
+        # individual cluster centers
+        self.save_cluster_centers = QtWidgets.QCheckBox(
+            "Save cluster centers\nof individual channels"
+        )
+        self.save_cluster_centers.setChecked(False)
+        params_grid.addWidget(
+            self.save_cluster_centers, params_grid.rowCount()-1, 2, 1, 2
+        )
+        # apply basic frame analysis
+        self.apply_fa = QtWidgets.QCheckBox(
+            "Apply frame analysis\nto clustered localizations"
+        )
+        self.apply_fa.setChecked(True)
+        params_grid.addWidget(self.apply_fa, params_grid.rowCount(), 0, 1, 2)
+
+        ## perform resi button
+        resi_button = QtWidgets.QPushButton("Perform RESI analysis")
+        resi_button.clicked.connect(self.perform_resi)
+        params_grid.addWidget(resi_button, params_grid.rowCount()-1, 2, 1, 2)
+
+    def on_same_params_clicked(self):
+        """ Sets all clustering parameters to have the same value as in
+        the first row.
+        """
+        
+        for r_xy, r_z, m in zip(self.radius_xy, self.radius_z, self.min_locs):
+            r_xy.setValue(self.radius_xy[0].value())
+            r_z.setValue(self.radius_z[0].value())
+            m.setValue(self.min_locs[0].value())
+
+    def perform_resi(self):
+        """ Performs RESI analysis on loaded localizations, using 
+        user-defined clustering parameters.
+        """
+
+        ### Sanity check if more than one channel is present
+        if self.n_channels < 2:
+            message = (
+                "RESI relies on sequential imaging to assure sufficient"
+                " sparsity of the binding sites. Thus, it requires at least"
+                " two localization lists to be loaded.\n"
+                "If you wish to extract cluster centers, please use\n"
+                "Postprocess > Clustering > SMLM Clusterer"
+            )
+            QtWidgets.QMessageBox.information(self, "Warning", message)
+            return
+        
+        ### Prepare data
+        # extract clustering parameters
+        r_xy = [_.value() for _ in self.radius_xy]
+        r_z = [_.value() for _ in self.radius_z]
+        min_locs = [_.value() for _ in self.min_locs]
+
+        # get camera pixel size
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+
+        # saving: path and info for the resi file, suffices for saving
+        # clustered localizations and cluster centers if requested
+        suffix_locs = None # suffix added to clustered locs
+        suffix_centers = None # suffix added to cluster centers
+        apply_fa = self.apply_fa.isChecked() # apply basic frame analysis?
+
+        resi_path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self.window,
+            "Save RESI cluster centers",
+            self.paths[0].replace(".hdf5", "_resi.hdf5"),
+            filter="*.hdf5",
+        )
+        info = self.window.view.infos[0]
+        new_info = {
+            "Paths to RESI channels": self.paths,
+            "Clustering radius xy [cam. pixels] for each channel": r_xy,
+            "Min. number of locs in a cluster for each channel": min_locs,
+            "Basic frame analysis": apply_fa,
+        }
+        if self.ndim == 3:
+            new_info[
+                "Clustering radius z [cam. pixels] for each channel"
+             ] = r_z
+        resi_info = info + [new_info]
+
+        if resi_path:
+            ok1 = False
+            if self.save_clustered_locs.isChecked():
+                suffix_locs, ok1 = QtWidgets.QInputDialog.getText(
+                    self,
+                    "",
+                    "Enter suffix for saving clustered localizations",
+                    QtWidgets.QLineEdit.Normal,
+                    "_clustered",
+                )
+            ok2 = False
+            if self.save_cluster_centers.isChecked():
+                suffix_centers, ok2 = QtWidgets.QInputDialog.getText(
+                    self,
+                    "",
+                    "Enter suffix for saving cluster centers",
+                    QtWidgets.QLineEdit.Normal,
+                    "_cluster_centers",
+                )
+
+            ### Perform RESI            
+            progress = lib.ProgressDialog(
+                "Performing RESI analysis...", 0, self.n_channels, self.window
+            )
+            progress.set_value(0)
+            progress.show()
+
+            resi_channels = [] # holds each channel's cluster centers
+            for i, locs in enumerate(self.locs):
+                # cluster each channel using SMLM clusterer
+                if self.ndim == 3:
+                    params = [r_xy[i], r_z[i], min_locs[i], 0, apply_fa, 0]
+                else:
+                    params = [r_xy[i], min_locs[i], 0, apply_fa, 0]
+
+                clustered_locs = clusterer.cluster(locs, params, pixelsize)
+
+                # save clustered localizations if requested
+                if ok1:
+                    new_info = {
+                        "Clustering radius xy [cam. pixels]": r_xy[i],
+                        "Min. number of locs": min_locs[i],
+                        "Basic frame analysis": apply_fa,
+                    }
+                    if self.ndim == 3:
+                        new_info["Clustering radius z [cam. pixels]"] = r_z[i]
+                    io.save_locs(
+                        self.paths[i].replace(
+                            ".hdf5", f"{suffix_locs}.hdf5"
+                        ),
+                        clustered_locs,
+                        self.window.view.infos[i] + [new_info],
+                    )
+
+                # extract cluster centers for each channel
+                centers = clusterer.find_cluster_centers(
+                    clustered_locs, pixelsize
+                )
+                # save cluster centers if requested
+                if ok2:
+                    new_info = {
+                        "Clustering radius xy [cam. pixels]": r_xy[i],
+                        "Min. number of locs": min_locs[i],
+                        "Basic frame analysis": apply_fa,
+                    }
+                    if self.ndim == 3:
+                        new_info["Clustering radius z [cam. pixels]"] = r_z[i]
+                    io.save_locs(
+                        self.paths[i].replace(
+                            ".hdf5", f"{suffix_centers}.hdf5"
+                        ),
+                        centers,
+                        self.window.view.infos[i] + [new_info],
+                    )
+                # append resi channel id 
+                centers = lib.append_to_rec(
+                    centers, 
+                    i*np.ones(len(centers), dtype=np.int8),
+                    "resi_channel_id",
+                )
+                resi_channels.append(centers)
+                progress.set_value(i)
+            progress.close()
+
+            # combine resi cluster centers from all channels
+            all_resi = stack_arrays(
+                resi_channels, 
+                asrecarray=True, 
+                usemask=False, 
+                autoconvert=True,
+            )
+            # discard group info from resi cluster centers
+            all_resi = lib.remove_from_rec(all_resi, "group")
+            # sort like all Picasso localization lists
+            all_resi.sort(kind="mergesort", order="frame")
+
+            # save resi cluster centers
+            io.save_locs(resi_path, all_resi, resi_info)
+
+
 class ToolsSettingsDialog(QtWidgets.QDialog):
     """
     A dialog class to customize picks - vary shape and size, annotate,
@@ -4315,7 +4647,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
                 cmap = np.load(path)
                 if cmap.shape != (256, 4):
                     raise ValueError(
-                        "Colormap must be of shape (256,  4)\n"
+                        "Colormap must be of shape (256, 4)\n"
                         f"The loaded colormap has shape {cmap.shape}"
                     )
                     self.colormap.setCurrentText("magma")
@@ -8474,9 +8806,9 @@ class View(QtWidgets.QLabel):
                 else:
                     warning = (
                         "The color selection not recognnised in the channel "
-                        " {}.  Please choose one of the options provided or "
+                        " {}Please choose one of the options provided or "
                         " type the hexadecimal code for your color of choice, "
-                        " starting with '#', e.g.  '#ffcdff' for pink.".format(
+                        " starting with '#', e.g. '#ffcdff' for pink.".format(
                             self.window.dataset_dialog.checks[i].text()
                         )
                     )
@@ -9748,7 +10080,7 @@ class View(QtWidgets.QLabel):
         """ Called when evaluating picks statistics in Info Dialog. """
 
         if len(self._picks) == 0:
-            warning = "No picks found.  Please pick first."
+            warning = "No picks foundPlease pick first."
             QtWidgets.QMessageBox.information(self, "Warning", warning)
             return
 
@@ -10505,6 +10837,10 @@ class Window(QtWidgets.QMainWindow):
         postprocess_menu.addSeparator()
         nn_action = postprocess_menu.addAction("Nearest Neighbor Analysis")
         nn_action.triggered.connect(self.view.nearest_neighbor)
+
+        postprocess_menu.addSeparator()
+        resi_action = postprocess_menu.addAction("RESI")
+        resi_action.triggered.connect(self.open_resi_dialog)
 
         self.load_user_settings()        
 
@@ -11293,7 +11629,7 @@ class Window(QtWidgets.QMainWindow):
             if path:
                 self.view.subtract_picks(path)
         else:
-            warning = "No picks found.  Please pick first."
+            warning = "No picks found. Please pick first."
             QtWidgets.QMessageBox.information(self, "Warning", warning)
 
     def load_user_settings(self):
@@ -11723,6 +12059,11 @@ class Window(QtWidgets.QMainWindow):
             )
         except AttributeError:
             pass
+
+    def open_resi_dialog(self):
+        resi_dialog = RESIDialog(self)
+        self.dialogs.append(resi_dialog)
+        resi_dialog.show()
 
 
 def main():

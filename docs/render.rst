@@ -26,7 +26,7 @@ Redundant cross-correlation drift correction
 Marker-based drift correction
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. In ``Picasso: Render``, pick drift markers as described in ``Picking of regions of interest``. Use the ``Pick similar`` option to automatically detect a large number of drift markers similar to a few manually selected ones.
+1. In ``Picasso: Render``, pick drift markers as described in **Picking of regions of interest**. Use the ``Pick similar`` option to automatically detect a large number of drift markers similar to a few manually selected ones.
 2. If the structures used as drift markers have an intrinsic size larger than the precision of individual localizations (e.g., DNA origami, large protein complexes), it is critical to select a large number of structures. Otherwise, the statistic for calculating the drift in each frame (the mean displacement of localization to the structure's center of mass) is not valid.
 3. Select ``Postprocess > Undrift from picked`` to compute and apply the drift correction.
 4. (Optional) Save the drift-corrected localizations by selecting ``File > Save localizations``.
@@ -53,6 +53,21 @@ The user may perform multiple actions in the rotation window, including: saving 
 Rotation around z-axis is available by pressing Ctrl/Command. Rotation axis can be frozen by pressing x/y/z to freeze around the corresponding axes (to freeze around the z-axis, Ctrl/Command must be pressed as well).
 
 There are several things to keep in mind when using the rotation window. Firstly, using individual localization precision is very slow and is not recommended as a default blur method. Also, the size of the rotation window can be altered, however, if it becomes too large, rendering may start to lag.
+
+RESI
+----
+.. image:: ../docs/render_resi.png
+   :width: 374
+   :alt: UML Render RESI
+
+
+In Picasso 0.6.0, a new RESI (Resolution Enhancement by Sequential Imaging) dialog was introduced. It allows for a substantial resolution boost by sequential imaging of a single target with multiple labels with Exchange-PAINT (*to be published*).
+
+To use RESI, prepare your individual RESI channels (localization, undrifting, filtering and **alignment**). Load such localization lists into Picasso Render and open ``Postprocess > RESI``. The dialog shown above will appear. Each channel will be clustered using the SMLM clusterer (other clustering algorithms could be applied as well although only the SMLM clusterer is implemented for RESI in Picasso). Clustering parameters can be defined for each RESI channel individually, although it is possible to apply the same parameters to all channels by clicking ``Apply the same clustering parameters to all channels``, which will copy the clustering parameters from the first row and paste it to all other channels.
+
+Next, the user needs to specify whether or not to save clustered localizations or cluster centers from each of the RESI channels individually, and whether to apply basic frame analysis (to minimize the effect of sticking events). For the explanation of the parameters, see `SMLM clusterer <https://picassosr.readthedocs.io/en/latest/render.html#smlm-clusterer>`_.
+
+Upon clicking ``Perform RESI analysis``, each of the loaded channels is clustered, cluster centers are extracted and combined from all RESI channels to create the final RESI file.
 
 Dialogs
 -------
@@ -378,7 +393,11 @@ Apply expressions to localizations
 This tool allows you to apply expressions to localizations, for example:
 
 - ``x +=1`` will shift all localization by one to the right
-- ``x +=1;y+=1`` will shift all localization by one to the right and one up.
+- ``x +=1; y+=1`` will shift all localization by one to the right and one up.
+- ``flip x z`` will exchange the x-axis with y-axis if z localizations are present (side projection), similar for ``flip y z``.
+- ``spiral r n`` will plot each localization over the time of the movie in a spiral with radius r and n number of turns (e.g., to detect repetitive binding), ``uspiral`` to reverse.
+
+**NOTE:** using two variables in one statement is not supported (e.g. ``x = y``) To filter localizations use picasso filter.
 
 DBSCAN
 ^^^^^^
@@ -390,9 +409,16 @@ Cluster localizations with the hdbscan clustering algorithm.
 
 SMLM clusterer
 ^^^^^^^^^^^^^^
-Cluster localizations with the custom algorithm designed for SMLM. In short, localizations with the maximum number of neighboring localizations within a user-defined radius are chosen as cluster centers, around which all localizations withing the given radius belong to one cluster. If two or more such clusters overlap, they are combined. 
+Cluster localizations with the custom algorithm designed for SMLM. In short, localizations with the maximum number of neighboring localizations within a user-defined radius are chosen as cluster centers, around which all localizations within the given radius belong to one cluster. If two or more local maxima are within the radius, the clusters are merged.
 
-*NOTE:* it is highly recommended to remove any fiducial markers before clustering, to lower clustering time, given they are of no interest to the user. To do that, the markers can be picked and removed using ``Tools > Remove localizations in picks``.
+SMLM clusterer requires three (or four if 3D data is processed) arguments:
+
+- Radius: final size of the clusters.
+- Radius z (3D only): final size of the clusters in the z axis. If the value is different from radius in xy plane, clusters have ellipsoidal shape. Radius z can have a different value to account for a difference in localization precision in lateral and axial directions.
+- Min. locs: minimum number of localizations in a cluster.
+- Basic frame analysis: If True, each cluster is checked for its value of mean frame (if it is within the first or the last 20% of the total acquisition time, it is discarded). Moreover, localizations inside each cluster are split into 20 time bins (across the whole acquisition time). If a single time bin contains more than 80% of localizations per cluster, the cluster is discarded.
+
+**Note to all clustering algorithms:** it is highly recommended to remove any fiducial markers before clustering, to lower clustering time, given they are of no interest to the user. To do that, the markers can be picked and removed using ``Tools > Remove localizations in picks``.
 
 Test clusterer
 ^^^^^^^^^^^^^^
@@ -401,12 +427,3 @@ Opens a dialog where different clustering parameters can be checked on the loade
 Nearest Neighbor Analysis
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 Calculates distances to the ``k``-th nearest neighbors between two channels (can be the same channel). ``k`` is defined by the user. The distances are stored in nm as a .csv file.
-
-Notes
-+++++
-Using two variables in one statement is not supported (e.g. ``x = y``) To filter localizations use picasso filter.
-
-Additional commands
-+++++++++++++++++++
-``flip x z`` will exchange the x-axis with y-axis if z localizations are present (side projection), similar for ``flip y z``.
-``spiral r n`` will plot each localization over the time of the movie in a spiral with radius r and n number of turns (e.g., to detect repetitive binding), ``uspiral`` to reverse.

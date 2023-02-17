@@ -191,6 +191,8 @@ def load_movie(path, prompt_info=None, progress=None):
         return load_ims(path, prompt_info=prompt_info)
     elif ext == '.nd2':
         return load_nd2(path)
+    elif ext == ".tiff":
+        print("Extension .tiff not supported, please use .ome.tif instead.")
 
 def load_info(path, qt_parent=None):
     path_base, path_extension = _ospath.splitext(path)

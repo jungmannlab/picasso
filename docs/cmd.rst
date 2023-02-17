@@ -27,6 +27,7 @@ The reconstruction parameters can be specified by adding respective arguments. I
    ‘-a’, ‘–fit-method’, choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"], default=‘mle’ 
    ‘-g’, ‘–gradient’, type=int, default=5000, help=‘minimum net gradient’
    ‘-d’, ‘–drift’, type=int, default=1000, help=‘segmentation size for subsequent RCC, 0 to deactivate’
+   ‘-r’, ‘-roi‘, type=int, nargs=4, default=None, help=‘ROI (y_min, x_min, y_max, x_max) in camera pixels’
    ‘-bl’, ‘–baseline’, type=int, default=0, help=‘camera baseline’
    ‘-s’, ‘–sensitivity’, type=int, default=1, help=‘camera sensitivity’
    ‘-ga’, ‘–gain’, type=int, default=1, help=‘camera gain’

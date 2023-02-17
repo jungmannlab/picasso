@@ -18,10 +18,7 @@ from sklearn.cluster import DBSCAN as _DBSCAN
 
 from . import lib as _lib
 
-# from icecream import ic
-
 CLUSTER_CENTERS_DTYPE_2D = [
-    ("group", "i4"),
     ("frame", "f4"),
     ("std_frame", "f4"),
     ("x", "f4"),
@@ -39,9 +36,9 @@ CLUSTER_CENTERS_DTYPE_2D = [
     ("n", "u4"),
     ("area", "f4"),
     ("convexhull", "f4"),
+    ("group", "i4"),
 ] 
 CLUSTER_CENTERS_DTYPE_3D = [
-    ("group", "i4"),
     ("frame", "f4"),
     ("std_frame", "f4"),
     ("x", "f4"),
@@ -61,7 +58,8 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("n", "u4"),
     ("volume", "f4"),
     ("convexhull", "f4"),
-] # for saving cluster centers
+    ("group", "i4"),
+]
 
 
 def _frame_analysis(frame, n_frames):
@@ -110,6 +108,7 @@ def _frame_analysis(frame, n_frames):
 
     return passed
 
+
 def frame_analysis(labels, frame):
     """
     Performs basic frame analysis on clustered localizations.
@@ -147,6 +146,7 @@ def frame_analysis(labels, frame):
     labels[_np.isin(labels, discard)] = -1
 
     return labels
+
 
 def _cluster(X, radius, min_locs, frame=None):
     """
@@ -208,10 +208,18 @@ def _cluster(X, radius, min_locs, frame=None):
             if len(idx): # if such a loc exists, assign it to a cluster
                 labels[idx] = label
 
+    ## check for number of locs per cluster to be above min_locs
+    values, counts = _np.unique(labels, return_counts=True)
+    # labels to discard if has fewer locs than min_locs
+    to_discard = values[counts < min_locs]
+    # substitute this with -1
+    labels[_np.isin(labels, to_discard)] = -1
+
     if frame is not None:
         labels = frame_analysis(labels, frame)
 
     return labels
+
 
 def cluster_2D(x, y, frame, radius, min_locs, fa):
     """
@@ -247,6 +255,7 @@ def cluster_2D(x, y, frame, radius, min_locs, fa):
     labels = _cluster(X, radius, min_locs, frame)
 
     return labels
+
 
 def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
     """
@@ -289,6 +298,7 @@ def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
     labels = _cluster(X, radius, min_locs, frame)
     
     return labels
+
 
 def cluster(locs, params, pixelsize):
     """
@@ -337,6 +347,7 @@ def cluster(locs, params, pixelsize):
     locs = extract_valid_labels(locs, labels)
     return locs
 
+
 def _dbscan(X, radius, min_density):
     """ 
     Finds DBSCAN cluster labels, given data points and parameters.
@@ -361,6 +372,7 @@ def _dbscan(X, radius, min_density):
 
     db = _DBSCAN(eps=radius, min_samples=min_density).fit(X)
     return db.labels_.astype(_np.int32)
+
 
 def dbscan(locs, radius, min_density, pixelsize):
     """
@@ -393,6 +405,7 @@ def dbscan(locs, radius, min_density, pixelsize):
     locs = extract_valid_labels(locs, labels)
     return locs
 
+
 def _hdbscan(X, min_cluster_size, min_samples, cluster_eps=0):
     """
     Finds HDBSCAN cluster labels, given data points and parameters.
@@ -424,6 +437,7 @@ def _hdbscan(X, min_cluster_size, min_samples, cluster_eps=0):
         cluster_selection_epsilon=cluster_eps,
     ).fit(X)
     return hdb.labels_.astype(_np.int32)
+
 
 def hdbscan(locs, min_cluster_size, min_samples, pixelsize, cluster_eps=0.):
     """
@@ -460,6 +474,7 @@ def hdbscan(locs, min_cluster_size, min_samples, pixelsize, cluster_eps=0.):
     locs = extract_valid_labels(locs, labels)
     return locs
 
+
 def extract_valid_labels(locs, labels):
     """
     Extracts localizations based on clustering results.
@@ -488,6 +503,7 @@ def extract_valid_labels(locs, labels):
     locs = locs[locs.group != -1]
     return locs
 
+
 def error_sums_wtd(x, w):
     """ 
     Function used for finding localization precision for cluster 
@@ -507,6 +523,7 @@ def error_sums_wtd(x, w):
     """
 
     return (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
+
 
 def find_cluster_centers(locs, pixelsize):
     """
@@ -559,7 +576,6 @@ def find_cluster_centers(locs, pixelsize):
         convexhull = _np.array([_[18] for _ in centers_])
         centers = _np.rec.array(
             (
-                res.index.values, # group id
                 frame,
                 std_frame,
                 x,
@@ -579,6 +595,7 @@ def find_cluster_centers(locs, pixelsize):
                 n,
                 volume,
                 convexhull,
+                res.index.values, # group id
             ),
             dtype=CLUSTER_CENTERS_DTYPE_3D,
         )
@@ -587,7 +604,6 @@ def find_cluster_centers(locs, pixelsize):
         convexhull = _np.array([_[14] for _ in centers_])
         centers = _np.rec.array(
             (
-                res.index.values, # group id
                 frame,
                 std_frame,
                 x,
@@ -605,6 +621,7 @@ def find_cluster_centers(locs, pixelsize):
                 n,
                 area,
                 convexhull,
+                res.index.values, # group id
             ),
             dtype=CLUSTER_CENTERS_DTYPE_2D,
         )
@@ -614,6 +631,7 @@ def find_cluster_centers(locs, pixelsize):
         centers = _lib.append_to_rec(centers, group_input, "group_input")
 
     return centers
+
 
 def cluster_center(grouplocs, pixelsize, separate_lp=False):
     """
