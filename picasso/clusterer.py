@@ -208,6 +208,13 @@ def _cluster(X, radius, min_locs, frame=None):
             if len(idx): # if such a loc exists, assign it to a cluster
                 labels[idx] = label
 
+    ## check for number of locs per cluster to be above min_locs
+    values, counts = _np.unique(labels, return_counts=True)
+    # labels to discard if has fewer locs than min_locs
+    to_discard = values[counts < min_locs]
+    # substitute this with -1
+    labels[_np.isin(labels, to_discard)] = -1
+
     if frame is not None:
         labels = frame_analysis(labels, frame)
 
