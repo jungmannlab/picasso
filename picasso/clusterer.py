@@ -19,7 +19,6 @@ from sklearn.cluster import DBSCAN as _DBSCAN
 from . import lib as _lib
 
 CLUSTER_CENTERS_DTYPE_2D = [
-    ("group", "i4"),
     ("frame", "f4"),
     ("std_frame", "f4"),
     ("x", "f4"),
@@ -37,9 +36,9 @@ CLUSTER_CENTERS_DTYPE_2D = [
     ("n", "u4"),
     ("area", "f4"),
     ("convexhull", "f4"),
+    ("group", "i4"),
 ] 
 CLUSTER_CENTERS_DTYPE_3D = [
-    ("group", "i4"),
     ("frame", "f4"),
     ("std_frame", "f4"),
     ("x", "f4"),
@@ -59,7 +58,8 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("n", "u4"),
     ("volume", "f4"),
     ("convexhull", "f4"),
-] # for saving cluster centers
+    ("group", "i4"),
+]
 
 
 def _frame_analysis(frame, n_frames):
@@ -569,7 +569,6 @@ def find_cluster_centers(locs, pixelsize):
         convexhull = _np.array([_[18] for _ in centers_])
         centers = _np.rec.array(
             (
-                res.index.values, # group id
                 frame,
                 std_frame,
                 x,
@@ -589,6 +588,7 @@ def find_cluster_centers(locs, pixelsize):
                 n,
                 volume,
                 convexhull,
+                res.index.values, # group id
             ),
             dtype=CLUSTER_CENTERS_DTYPE_3D,
         )
@@ -597,7 +597,6 @@ def find_cluster_centers(locs, pixelsize):
         convexhull = _np.array([_[14] for _ in centers_])
         centers = _np.rec.array(
             (
-                res.index.values, # group id
                 frame,
                 std_frame,
                 x,
@@ -615,6 +614,7 @@ def find_cluster_centers(locs, pixelsize):
                 n,
                 area,
                 convexhull,
+                res.index.values, # group id
             ),
             dtype=CLUSTER_CENTERS_DTYPE_2D,
         )
