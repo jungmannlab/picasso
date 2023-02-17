@@ -57,8 +57,8 @@ There are several things to keep in mind when using the rotation window. Firstly
 RESI
 ----
 .. image:: ../docs/render_resi.png
-   :scale: 30 %
-   :alt: UML Render
+   :width: 374
+   :alt: UML Render RESI
 
 
 In Picasso 0.6.0, a new RESI (Resolution Enhancement by Sequential Imaging) dialog was introduced. It allows for a substantial resolution boost by sequential imaging of a single target with multiple labels with Exchange-PAINT (*to be published*).
