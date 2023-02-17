@@ -412,6 +412,7 @@ SMLM clusterer
 Cluster localizations with the custom algorithm designed for SMLM. In short, localizations with the maximum number of neighboring localizations within a user-defined radius are chosen as cluster centers, around which all localizations within the given radius belong to one cluster. If two or more such clusters overlap, they are combined. 
 
 SMLM clusterer requires three (or four if 3D data is processed) arguments:
+
 - Radius: final size of the clusters.
 - Radius z (3D only): final size of the clusters in the z axis. If the value is different from radius in xy plane, clusters have ellipsoidal shape. Radius z can have a different value to account for a difference in localization precision in lateral and axial directions.
 - Min. locs: minimum number of localizations in a cluster.
