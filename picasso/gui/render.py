@@ -3951,6 +3951,8 @@ class RESIDialog(QtWidgets.QDialog):
     min_locs : list of QSpinBoxes
         List of widgets holding minimum number of localizations used in
         SMLM clusterer.
+    n_dim : int
+        Dimensionality of loaded localizations (2 or 3).
     n_channels : int
         Number of channels used in RESI analysis.
     paths : list of strings
@@ -3992,6 +3994,9 @@ class RESIDialog(QtWidgets.QDialog):
         self.locs = window.view.locs
         self.n_channels = len(self.locs)
         self.paths = window.view.locs_paths
+        self.ndim = 2
+        if all([hasattr(_, "z") for _ in self.locs]):
+            self.ndim = 3
 
         self.radius_xy = []
         self.radius_z = []
@@ -4014,34 +4019,44 @@ class RESIDialog(QtWidgets.QDialog):
 
         ## clustering parameters - labels
         params_grid.addWidget(QtWidgets.QLabel("RESI channel"), 2, 0)
-        params_grid.addWidget(QtWidgets.QLabel("Radius xy\n[cam.  pixel]"), 2, 1)
-        params_grid.addWidget(
-            QtWidgets.QLabel(
-                "Radius z\n[cam.  pixel]\n(applied to 3D only)"
-            ), 2, 2,
-        )
-        params_grid.addWidget(QtWidgets.QLabel("Min # localizations"), 2, 3)
+        if self.ndim == 2:
+            params_grid.addWidget(
+                QtWidgets.QLabel("Radius\n[cam.  pixel]"), 2, 1
+            )
+            params_grid.addWidget(
+                QtWidgets.QLabel("Min # localizations"), 2, 2, 1, 2
+            )
+        else:
+            params_grid.addWidget(
+                QtWidgets.QLabel("Radius xy\n[cam.  pixel]"), 2, 1
+            )
+            params_grid.addWidget(
+                QtWidgets.QLabel("Radius z\n[cam.  pixel]"), 2, 2
+            )
+            params_grid.addWidget(
+                QtWidgets.QLabel("Min # localizations"), 2, 3
+            )
 
         ## clustering parameters - values
         for i in range(self.n_channels):
             channel_name = self.window.dataset_dialog.checks[i].text()
             count = params_grid.rowCount()
 
-            r_xy = QtWidgets.QDoubleSpinBox(self)
+            r_xy = QtWidgets.QDoubleSpinBox()
             r_xy.setRange(0.0001, 1e3)
             r_xy.setDecimals(4)
             r_xy.setValue(0.1)
             r_xy.setSingleStep(0.01)
             self.radius_xy.append(r_xy)
 
-            r_z = QtWidgets.QDoubleSpinBox(self)
+            r_z = QtWidgets.QDoubleSpinBox()
             r_z.setRange(0.0001, 1e3)
             r_z.setDecimals(4)
             r_z.setValue(0.25)
             r_z.setSingleStep(0.01)
             self.radius_z.append(r_z)
 
-            min_locs = QtWidgets.QSpinBox(self)
+            min_locs = QtWidgets.QSpinBox()
             min_locs.setRange(1, 1e6)
             min_locs.setValue(10)
             min_locs.setSingleStep(1)
@@ -4049,13 +4064,16 @@ class RESIDialog(QtWidgets.QDialog):
 
             params_grid.addWidget(QtWidgets.QLabel(channel_name), count, 0)
             params_grid.addWidget(r_xy, count, 1)
-            params_grid.addWidget(r_z, count, 2)
-            params_grid.addWidget(min_locs, count, 3)
+            if self.ndim == 3:
+                params_grid.addWidget(r_z, count, 2)
+                params_grid.addWidget(min_locs, count, 3)
+            else:
+                params_grid.addWidget(min_locs, count, 2, 1, 2)
 
         ## perform clustering
         # what to save
         self.save_clustered_locs = QtWidgets.QCheckBox(
-            "Save individual channels'\nclustered localizations"
+            "Save clustered localizations\nof individual channels"
         )
         self.save_clustered_locs.setChecked(False)
         params_grid.addWidget(
@@ -4063,7 +4081,7 @@ class RESIDialog(QtWidgets.QDialog):
         )
         # individual cluster centers
         self.save_cluster_centers = QtWidgets.QCheckBox(
-            "Save individual channels' cluster\ncenters"
+            "Save cluster centers\nof individual channels"
         )
         self.save_cluster_centers.setChecked(False)
         params_grid.addWidget(
@@ -4093,7 +4111,7 @@ class RESIDialog(QtWidgets.QDialog):
 
     def perform_resi(self):
         """ Performs RESI analysis on loaded localizations, using 
-        user-defined parameters.
+        user-defined clustering parameters.
         """
 
         ### Sanity check if more than one channel is present
@@ -4108,8 +4126,6 @@ class RESIDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.information(self, "Warning", message)
             return
         
-        
-
         ### Prepare data
         # extract clustering parameters
         r_xy = [_.value() for _ in self.radius_xy]
@@ -4124,9 +4140,6 @@ class RESIDialog(QtWidgets.QDialog):
         suffix_locs = None # suffix added to clustered locs
         suffix_centers = None # suffix added to cluster centers
         apply_fa = self.apply_fa.isChecked() # apply basic frame analysis?
-        ndim = 2 # number of dimensions used in clustering
-        if all([hasattr(_, "z") for _ in self.locs]):
-            ndim = 3
 
         resi_path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self.window,
@@ -4141,21 +4154,23 @@ class RESIDialog(QtWidgets.QDialog):
             "Min. number of locs in a cluster for each channel": min_locs,
             "Basic frame analysis": apply_fa,
         }
-        if ndim == 3:
+        if self.ndim == 3:
             new_info[
                 "Clustering radius z [cam. pixels] for each channel"
              ] = r_z
         resi_info = info + [new_info]
 
         if resi_path:
+            ok1 = False
             if self.save_clustered_locs.isChecked():
                 suffix_locs, ok1 = QtWidgets.QInputDialog.getText(
                     self,
                     "",
-                    "Enter suffix for saving clustered locs",
+                    "Enter suffix for saving clustered localizations",
                     QtWidgets.QLineEdit.Normal,
                     "_clustered",
                 )
+            ok2 = False
             if self.save_cluster_centers.isChecked():
                 suffix_centers, ok2 = QtWidgets.QInputDialog.getText(
                     self,
@@ -4165,7 +4180,7 @@ class RESIDialog(QtWidgets.QDialog):
                     "_cluster_centers",
                 )
 
-            ### Perform RESI
+            ### Perform RESI            
             progress = lib.ProgressDialog(
                 "Performing RESI analysis...", 0, self.n_channels, self.window
             )
@@ -4175,7 +4190,7 @@ class RESIDialog(QtWidgets.QDialog):
             resi_channels = [] # holds each channel's cluster centers
             for i, locs in enumerate(self.locs):
                 # cluster each channel using SMLM clusterer
-                if ndim == 3:
+                if self.ndim == 3:
                     params = [r_xy[i], r_z[i], min_locs[i], 0, apply_fa, 0]
                 else:
                     params = [r_xy[i], min_locs[i], 0, apply_fa, 0]
@@ -4183,13 +4198,13 @@ class RESIDialog(QtWidgets.QDialog):
                 clustered_locs = clusterer.cluster(locs, params, pixelsize)
 
                 # save clustered localizations if requested
-                if suffix_locs is not None:
+                if ok1:
                     new_info = {
                         "Clustering radius xy [cam. pixels]": r_xy[i],
                         "Min. number of locs": min_locs[i],
                         "Basic frame analysis": apply_fa,
                     }
-                    if ndim == 3:
+                    if self.ndim == 3:
                         new_info["Clustering radius z [cam. pixels]"] = r_z[i]
                     io.save_locs(
                         self.paths[i].replace(
@@ -4204,13 +4219,13 @@ class RESIDialog(QtWidgets.QDialog):
                     clustered_locs, pixelsize
                 )
                 # save cluster centers if requested
-                if suffix_centers is not None:
+                if ok2:
                     new_info = {
                         "Clustering radius xy [cam. pixels]": r_xy[i],
                         "Min. number of locs": min_locs[i],
                         "Basic frame analysis": apply_fa,
                     }
-                    if ndim == 3:
+                    if self.ndim == 3:
                         new_info["Clustering radius z [cam. pixels]"] = r_z[i]
                     io.save_locs(
                         self.paths[i].replace(
