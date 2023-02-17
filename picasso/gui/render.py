@@ -4117,9 +4117,9 @@ class RESIDialog(QtWidgets.QDialog):
         ### Sanity check if more than one channel is present
         if self.n_channels < 2:
             message = (
-                "RESI relies on acquiring data from multiple acquisitions."
-                " Thus, it requires at least two localization lists to be"
-                " loaded.\n"
+                "RESI relies on sequential imaging to assure sufficient"
+                " sparsity of the binding sites. Thus, it requires at least"
+                " two localization lists to be loaded.\n"
                 "If you wish to extract cluster centers, please use\n"
                 "Postprocess > Clustering > SMLM Clusterer"
             )
