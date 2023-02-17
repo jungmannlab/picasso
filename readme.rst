@@ -32,11 +32,13 @@ RESI dialog added to Picasso Render, allowing for substatial boost in spatial re
 
 Photon conversion update
 ~~~~~~~~~~~~~~~~~~~~~~~~
-The formula for conversion of raw data to photons was changed **affecting localization precision calculated** as the number of photons differs.
+The formula for conversion of raw data to photons was changed, resulting in different numbers of photons and thus **affecting the localization precision** accordingly.
 
 Until version *0.5.7*, the formula was: 
 
-*(RAW_DATA - BASELINE) x SENSITIVITY / (GAIN x QE)*, where QE is quantum efficiency of the camera. In Picasso *0.6.0* it was changed to:
+*(RAW_DATA - BASELINE) x SENSITIVITY / (GAIN x QE)*, where QE is quantum efficiency of the camera. 
+
+In Picasso *0.6.0* it was changed to:
 
 *(RAW_DATA - BASELINE) x SENSITIVITY / GAIN*
 
