@@ -710,9 +710,9 @@ class DatasetDialog(QtWidgets.QDialog):
             if self.warning:
                 text = (
                     "The number of channels passed the number of default "
-                    " colors.  In case you would like to use your own color, "
+                    " colors. In case you would like to use your own color, "
                     " please insert the color's hexadecimal expression,"
-                    "  starting with '#',  e.g.  '#ffcdff' for pink or choose"
+                    " starting with '#', e.g. '#ffcdff' for pink or choose"
                     " the automatic coloring in the Files dialog."
                 )
                 QtWidgets.QMessageBox.information(self, "Warning", text)
@@ -4021,17 +4021,17 @@ class RESIDialog(QtWidgets.QDialog):
         params_grid.addWidget(QtWidgets.QLabel("RESI channel"), 2, 0)
         if self.ndim == 2:
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius\n[cam.  pixel]"), 2, 1
+                QtWidgets.QLabel("Radius\n[cam. pixel]"), 2, 1
             )
             params_grid.addWidget(
                 QtWidgets.QLabel("Min # localizations"), 2, 2, 1, 2
             )
         else:
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius xy\n[cam.  pixel]"), 2, 1
+                QtWidgets.QLabel("Radius xy\n[cam. pixel]"), 2, 1
             )
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius z\n[cam.  pixel]"), 2, 2
+                QtWidgets.QLabel("Radius z\n[cam. pixel]"), 2, 2
             )
             params_grid.addWidget(
                 QtWidgets.QLabel("Min # localizations"), 2, 3
@@ -4118,9 +4118,9 @@ class RESIDialog(QtWidgets.QDialog):
         if self.n_channels < 2:
             message = (
                 "RESI relies on acquiring data from multiple acquisitions."
-                " Thus,  it requires at least two localization lists to be"
+                " Thus, it requires at least two localization lists to be"
                 " loaded.\n"
-                "If you wish to extract cluster centers,  please use\n"
+                "If you wish to extract cluster centers, please use\n"
                 "Postprocess > Clustering > SMLM Clusterer"
             )
             QtWidgets.QMessageBox.information(self, "Warning", message)
@@ -4647,7 +4647,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
                 cmap = np.load(path)
                 if cmap.shape != (256, 4):
                     raise ValueError(
-                        "Colormap must be of shape (256,  4)\n"
+                        "Colormap must be of shape (256, 4)\n"
                         f"The loaded colormap has shape {cmap.shape}"
                     )
                     self.colormap.setCurrentText("magma")
@@ -8806,9 +8806,9 @@ class View(QtWidgets.QLabel):
                 else:
                     warning = (
                         "The color selection not recognnised in the channel "
-                        " {}.  Please choose one of the options provided or "
+                        " {}Please choose one of the options provided or "
                         " type the hexadecimal code for your color of choice, "
-                        " starting with '#', e.g.  '#ffcdff' for pink.".format(
+                        " starting with '#', e.g. '#ffcdff' for pink.".format(
                             self.window.dataset_dialog.checks[i].text()
                         )
                     )
@@ -10080,7 +10080,7 @@ class View(QtWidgets.QLabel):
         """ Called when evaluating picks statistics in Info Dialog. """
 
         if len(self._picks) == 0:
-            warning = "No picks found.  Please pick first."
+            warning = "No picks foundPlease pick first."
             QtWidgets.QMessageBox.information(self, "Warning", warning)
             return
 
@@ -11629,7 +11629,7 @@ class Window(QtWidgets.QMainWindow):
             if path:
                 self.view.subtract_picks(path)
         else:
-            warning = "No picks found.  Please pick first."
+            warning = "No picks found. Please pick first."
             QtWidgets.QMessageBox.information(self, "Warning", warning)
 
     def load_user_settings(self):
