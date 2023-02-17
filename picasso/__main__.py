@@ -779,7 +779,10 @@ def _localize(args):
             raise Exception("GPUfit not installed. Aborting.")
 
     for index, element in enumerate(vars(args)):
-        print("{:<8} {:<15} {:<10}".format(index + 1, element, getattr(args, element)))
+        try:
+            print("{:<8} {:<15} {:<10}".format(index + 1, element, getattr(args, element)))
+        except TypeError: # if None is default value
+            print("{:<8} {:<15} {}".format(index + 1, element, "None"))
     print("------------------------------------------")
 
     def check_consecutive_tif(filepath):
@@ -848,6 +851,7 @@ def _localize(args):
                 save_info(info_path, [info])
 
     if paths:
+        print(args)
         box = args.box_side_length
         min_net_gradient = args.gradient
         roi = args.roi

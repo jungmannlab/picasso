@@ -27,6 +27,7 @@ def test_localize():
     args.sensitivity = 1
     args.gain = 1
     args.qe = 1
+    args.roi = None
     args.drift = 100
 
     for fit_method in ["mle"]:
