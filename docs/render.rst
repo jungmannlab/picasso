@@ -409,7 +409,7 @@ Cluster localizations with the hdbscan clustering algorithm.
 
 SMLM clusterer
 ^^^^^^^^^^^^^^
-Cluster localizations with the custom algorithm designed for SMLM. In short, localizations with the maximum number of neighboring localizations within a user-defined radius are chosen as cluster centers, around which all localizations within the given radius belong to one cluster. If two or more such clusters overlap, they are combined. 
+Cluster localizations with the custom algorithm designed for SMLM. In short, localizations with the maximum number of neighboring localizations within a user-defined radius are chosen as cluster centers, around which all localizations within the given radius belong to one cluster. If two or more local maxima are within the radius, the clusters are merged.
 
 SMLM clusterer requires three (or four if 3D data is processed) arguments:
 
