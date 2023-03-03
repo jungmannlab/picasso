@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 16-FEB-2023 MTS
+Last change: 03-MAR-2023 MTS
+
+0.6.1
+-----
+- Allow loading individual .tif files like in Picasso v0.4.11
 
 0.6.0
 -----
