@@ -149,8 +149,8 @@ class Scene(QtWidgets.QGraphicsScene):
             event.ignore()
 
     def dropEvent(self, event):
-        """Loads  when dropped into the scene"""
-        path, extension = self.path_from_drop(event)
+        """Loads when dropped into the scene."""
+        path, ext = self.path_from_drop(event)
         self.window.open(path)
 
 
@@ -1228,9 +1228,9 @@ class Window(QtWidgets.QMainWindow):
             "Open image sequence", 
             directory=dir, 
             filter=(
-                "All supported formats (*.raw *.tif *.tiff *.nd2)"
+                "All supported formats (*.raw *.tif *.tif *.nd2 *.ims)"
                 ";;Raw files (*.raw)"
-                ";;Tiff images (*.tif *.tiff)"
+                ";;Tif images (*.tif)"
                 ";;ImaRIS IMS (*.ims)"
                 ";;Nd2 files (*.nd2);;"
             )

@@ -965,6 +965,13 @@ class TiffMultiMap(AbstractPicassoMovie):
             base, ext = _ospath.splitext(self.path)  
             base = _re.escape(base)
             pattern = _re.compile(base + r"_(\d*).tif")
+        else: #TODO: give the warning that .tif files are not accepted and only .ome.tif is?
+            message = (
+                'Picasso Localize does not support ".tif" files.\n'
+                'Instead, please rename your files such that they end'
+                ' with ".ome.tif".'
+            )
+            raise NameError(message)
         entries = [_.path for _ in _os.scandir(self.dir) if _.is_file()]
         matches = [_re.match(pattern, _) for _ in entries]
         matches = [_ for _ in matches if _ is not None]
