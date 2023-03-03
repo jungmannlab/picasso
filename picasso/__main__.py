@@ -798,17 +798,17 @@ def _localize(args):
         for file in files:
             path = _ospath.abspath(file)
             directory = _ospath.dirname(path)
-            if ".ome.tif" in path:
+            if "NDTiffStack" in path:
+                base, ext = _ospath.splitext(path)
+                base = _re.escape(base)
+                pattern = _re.compile(base + r"_(\d*).tif")
+            else:
                 base, ext = _ospath.splitext(
                     _ospath.splitext(path)[0]
                 )  # split two extensions as in .ome.tif
                 base = _re.escape(base)
                 # This matches the basename + an appendix of the file number
                 pattern = _re.compile(base + r"_(\d*).ome.tif")  
-            elif "NDTiffStack" in path:
-                base, ext = _ospath.splitext(path)
-                base = _re.escape(base)
-                pattern = _re.compile(base + r"_(\d*).tif")
             entries = [_.path for _ in _os.scandir(directory) if _.is_file()]
             matches = [_re.match(pattern, _) for _ in entries]
             matches = [_ for _ in matches if _ is not None]
