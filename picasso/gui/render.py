@@ -4251,7 +4251,11 @@ class RESIDialog(QtWidgets.QDialog):
                 usemask=False, 
                 autoconvert=True,
             )
-            # discard group info from resi cluster centers
+            # change the group name in all_resi
+            all_resi = all_resi.astype([
+                ("cluster_id", d[1]) if d[0]=="group" else d
+                for d in all_resi.dtype.descr
+            ])
             all_resi = lib.remove_from_rec(all_resi, "group")
             # sort like all Picasso localization lists
             all_resi.sort(kind="mergesort", order="frame")

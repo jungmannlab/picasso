@@ -28,7 +28,7 @@ Picasso 0.6.0
 
 RESI (Resolution Enhancement by Sequential Imaging)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-RESI dialog added to Picasso Render, allowing for substatial boost in spatial resolution (*to be published*).
+RESI dialog added to Picasso Render, allowing for substantial boost in spatial resolution (*to be published*).
 
 Photon conversion update
 ~~~~~~~~~~~~~~~~~~~~~~~~

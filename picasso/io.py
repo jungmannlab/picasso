@@ -955,16 +955,16 @@ class TiffMultiMap(AbstractPicassoMovie):
         
         # This matches the basename + an appendix of the file number
         filename = _ospath.basename(self.path)
-        if ".ome." in filename: 
-            # split two extensions as in .ome.tif
-            base, ext = _ospath.splitext(_ospath.splitext(self.path)[0])  
-            base = _re.escape(base)
-            pattern = _re.compile(base + r"_(\d*).ome.tif")
-        elif "NDTiffStack" in filename:
+        if "NDTiffStack" in filename: 
             # only one extension (.tif)
             base, ext = _ospath.splitext(self.path)  
             base = _re.escape(base)
             pattern = _re.compile(base + r"_(\d*).tif")
+        else:
+            # split two extensions as in .ome.tif
+            base, ext = _ospath.splitext(_ospath.splitext(self.path)[0])  
+            base = _re.escape(base)
+            pattern = _re.compile(base + r"_(\d*).ome.tif")
         entries = [_.path for _ in _os.scandir(self.dir) if _.is_file()]
         matches = [_re.match(pattern, _) for _ in entries]
         matches = [_ for _ in matches if _ is not None]
