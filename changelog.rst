@@ -1,11 +1,12 @@
 Changelog
 =========
 
-Last change: 03-MAR-2023 MTS
+Last change: 25-MAR-2023 MTS
 
 0.6.1
 -----
-- Allow loading individual .tif files like in Picasso v0.4.11
+- Localize GUI allows for numerical ROI input in the Parameters Dialog
+- Allow loading individual .tif files as in Picasso v0.4.11
 
 0.6.0
 -----
