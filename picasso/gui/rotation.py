@@ -665,7 +665,7 @@ class AnimationDialog(QtWidgets.QDialog):
                     qimage = qimage.scaled(
                         width, 
                         height,
-                        QtCore.Qt.KeepAspectRatioByExpanding,
+                        # QtCore.Qt.KeepAspectRatioByExpanding,
                     )
                     qimage.save(path + "/frame_{}.png".format(i+1))
             except:
@@ -691,7 +691,7 @@ class AnimationDialog(QtWidgets.QDialog):
                         qimage = qimage.scaled(
                             width,
                             height,
-                            QtCore.Qt.KeepAspectRatioByExpanding,
+                            # QtCore.Qt.KeepAspectRatioByExpanding,
                         )
                         qimage.save(path + "/frame_{}.png".format(i+1))
                 elif ret == m.Yes:
