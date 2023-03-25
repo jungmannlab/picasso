@@ -2335,7 +2335,7 @@ class TestClustererDialog(QtWidgets.QDialog):
                     params["radius_xy"],
                     params["min_cluster_size"],
                     None,
-                    frame,
+                    params["frame_analysis"],
                     None,
                 ]
 
@@ -2753,9 +2753,10 @@ class TestClustererView(QtWidgets.QLabel):
         ): # two channels, all locs and clustered locs
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
-            all_locs.z /= (
-                self.dialog.window.display_settings_dlg.pixelsize.value()
-            )
+            if hasattr(all_locs, "z"):
+                all_locs.z /= (
+                    self.dialog.window.display_settings_dlg.pixelsize.value()
+                )
             locs = [
                 all_locs,
                 self.locs,
@@ -2774,9 +2775,10 @@ class TestClustererView(QtWidgets.QLabel):
         ): # three channels, all locs, clustered locs and cluster centers
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
-            all_locs.z /= (
-                self.dialog.window.display_settings_dlg.pixelsize.value()
-            )
+            if hasattr(all_locs, "z"):
+                all_locs.z /= (
+                    self.dialog.window.display_settings_dlg.pixelsize.value()
+                )
             locs = [
                 all_locs,
                 self.locs,
