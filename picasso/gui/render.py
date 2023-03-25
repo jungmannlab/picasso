@@ -7720,14 +7720,9 @@ class View(QtWidgets.QLabel):
                     locs = all_picked_locs[i]
                     locs = stack_arrays(locs, asrecarray=True, usemask=False)
 
-                    # essentialy the same plotting as in self.show_trace
-                    # ax1 = fig.add_subplot(311)
-                    # ax2 = fig.add_subplot(312, sharex=ax1)
-                    # ax3 = fig.add_subplot(313, sharex=ax1)
-
                     xvec = np.arange(n_frames)
-                    yvec = xvec[:] * 0
-                    yvec[locs["frame"]] = 1
+                    yvec = np.ones_like(xvec, dtype=float) * -1
+                    yvec[locs["frame"]] = locs["x"]
                     ax1.set_title(
                         "Scatterplot of Pick "
                         + str(i + 1)
@@ -7742,18 +7737,24 @@ class View(QtWidgets.QLabel):
                         + str(len(self._picks))
                         + "."
                     )
-                    ax1.scatter(locs["frame"], locs["x"], s=2)
+                    ax1.scatter(xvec, yvec, s=2)
                     ax1.set_ylabel("X-pos [Px]")
                     ax1.set_title("X-pos vs frame")
-
-                    ax1.set_xlim(0, n_frames)
+                    if locs.size:
+                        ax1.set_ylim(yvec[yvec>0].min(), yvec.max())
                     plt.setp(ax1.get_xticklabels(), visible=False)
 
-                    ax2.scatter(locs["frame"], locs["y"], s=2)
+                    yvec = np.ones_like(xvec, dtype=float) * -1
+                    yvec[locs["frame"]] = locs["y"]
+                    ax2.scatter(xvec, yvec, s=2)
                     ax2.set_title("Y-pos vs frame")
                     ax2.set_ylabel("Y-pos [Px]")
+                    if locs.size:
+                        ax2.set_ylim(yvec[yvec>0].min(), yvec.max())
                     plt.setp(ax2.get_xticklabels(), visible=False)
 
+                    yvec = xvec[:] * 0
+                    yvec[locs["frame"]] = 1
                     ax3.plot(xvec, yvec)
                     ax3.set_title("Localizations")
                     ax3.set_xlabel("Frames")
