@@ -19,11 +19,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PyQt5 import QtCore, QtGui, QtWidgets
-from tqdm import tqdm
 
 from numpy.lib.recfunctions import stack_arrays
 
 from .. import io, render
+from ..lib import StatusDialog, ProgressDialog
 
 # from icecream import ic
 
@@ -654,9 +654,13 @@ class AnimationDialog(QtWidgets.QDialog):
             # create temporary folder to store all frames
             base = os.path.dirname(self.window.view_rot.paths[0])
             path = os.path.join(base, "animation_frames")
+            progress = ProgressDialog(
+                "Rendering frames", 0, len(angx), self.window
+            )
+            progress.set_value(0)
             try:
                 os.mkdir(path)
-                for i in tqdm(range(len(angx))):
+                for i in range(len(angx)):
                     qimage = self.window.view_rot.render_scene(
                         viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
                         ang=(angx[i], angy[i], angz[i]),
@@ -668,6 +672,7 @@ class AnimationDialog(QtWidgets.QDialog):
                         # QtCore.Qt.KeepAspectRatioByExpanding,
                     )
                     qimage.save(path + "/frame_{}.png".format(i+1))
+                    progress.set_value(i+1)
             except:
                 # if folder exists, ask if it should be used or deleted
                 m = QtWidgets.QMessageBox()
@@ -682,7 +687,7 @@ class AnimationDialog(QtWidgets.QDialog):
                     # use new frames (render each one) and save
                     for file in os.listdir(path):
                         os.remove(os.path.join(path, file))
-                    for i in tqdm(range(len(angx))):
+                    for i in range(len(angx)):
                         qimage = self.window.view_rot.render_scene(
                             viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
                             ang=(angx[i], angy[i], angz[i]),
@@ -694,11 +699,13 @@ class AnimationDialog(QtWidgets.QDialog):
                             # QtCore.Qt.KeepAspectRatioByExpanding,
                         )
                         qimage.save(path + "/frame_{}.png".format(i+1))
+                        progress.set_value(i+1)
                 elif ret == m.Yes:
                     # use old frames
-                    pass
+                    progress.set_value(len(angx))
                 
             # build a video and save it
+            status = StatusDialog("Creating the video...", self.window)
             image_files = [
                 os.path.join(path, img)
                 for img in os.listdir(path)
@@ -712,6 +719,7 @@ class AnimationDialog(QtWidgets.QDialog):
             for file in os.listdir(path):
                 os.remove(os.path.join(path, file))
             os.rmdir(path)
+            status.close()
             
 
 class ViewRotation(QtWidgets.QLabel):
@@ -2452,7 +2460,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     f"_arotated_{angx}_{angy}_{angz}",
                 ) # get the save file suffix
                 if ok:
-                    for channel in tqdm(range(len(self.view_rot.paths))):
+                    for channel in range(len(self.view_rot.paths)):
                         base, ext = os.path.splitext(
                             self.view_rot.paths[channel]
                         )
