@@ -7,6 +7,7 @@ Last change: 25-MAR-2023 MTS
 -----
 - Localize GUI allows for numerical ROI input in the Parameters Dialog
 - Allow loading individual .tif files as in Picasso v0.4.11
+- RESI localizations have the new column ``cluster_id``
 
 0.6.0
 -----
