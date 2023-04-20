@@ -9,6 +9,7 @@ Last change: 25-MAR-2023 MTS
 - Allow loading individual .tif files as in Picasso v0.4.11
 - RESI localizations have the new column ``cluster_id``
 - Building animation shows progress (Render 3D)
+- Export current view in Render saves metadata; An extra image is saved with a scalebar if the user did not set it
 - Bug fixes
 
 0.6.0

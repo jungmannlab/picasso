@@ -2991,7 +2991,7 @@ class ChangeFOV(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Change field of view")
+        self.setWindowTitle("Change FOV")
         self.setModal(False)
         self.layout = QtWidgets.QGridLayout()
         self.setLayout(self.layout)
@@ -3000,7 +3000,7 @@ class ChangeFOV(QtWidgets.QDialog):
         self.x_box.setKeyboardTracking(False)
         self.x_box.setRange(-100, 1e6)
         self.layout.addWidget(self.x_box, 0, 1)
-        self.layout.addWidget(QtWidgets.QLabel("Y :"), 1, 0)
+        self.layout.addWidget(QtWidgets.QLabel("Y:"), 1, 0)
         self.y_box = QtWidgets.QDoubleSpinBox()
         self.y_box.setKeyboardTracking(False)
         self.y_box.setRange(-100, 1e6)
@@ -9109,20 +9109,11 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         path : str 
-            Path for saving picks' properties
+            Path for saving picks' properties.
         channel : int
-            Channel of locs to be saved
-
-        Raises
-        ------
-        NotImplementedError
-            If rectangular pick is chosen
+            Channel of locs to be saved.
         """
 
-        if self._pick_shape == "Rectangle":
-            raise NotImplementedError(
-                "Rectangular pick not implemented yet."
-            )
         picked_locs = self.picked_locs(channel)
         pick_diameter = self.window.tools_settings_dialog.pick_diameter.value()
         r_max = min(pick_diameter, 1)
@@ -10489,6 +10480,8 @@ class Window(QtWidgets.QMainWindow):
         Exports the whole field of view as .png or .tif
     export_current()
         Exports current view as .png or .tif
+    export_current_info()
+        Exports info about the current view in .yaml file
     export_multi()
         Asks the user to choose a type of export
     export_fov_ims()
@@ -10916,8 +10909,53 @@ class Window(QtWidgets.QMainWindow):
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
         if path:
+            scalebar = self.display_settings_dlg.scalebar_groupbox.isChecked()
+            if not scalebar:
+                self.display_settings_dlg.scalebar_groupbox.setChecked(True)
+                qimage_scale = self.view.draw_scalebar(self.view.qimage)
+                new_path, ext = os.path.splitext(path)
+                new_path = new_path + "_scalebar" + ext
+                qimage_scale.save(new_path)
+                self.display_settings_dlg.scalebar_groupbox.setChecked(False)
             self.view.qimage.save(path)
+            self.export_current_info(path)
         self.view.setMinimumSize(1, 1)
+
+    def export_current_info(self, path):
+        """ Exports information about the current file in .yaml 
+        format. 
+        
+        Parameters
+        ----------
+        path : str
+            Path for saving the original image with .png or .tif
+            extension
+        """
+
+        path, ext = os.path.splitext(path)
+        path = path + ".yaml"
+
+        fov_info = [
+            self.info_dialog.change_fov.x_box.value(),
+            self.info_dialog.change_fov.y_box.value(),
+            self.info_dialog.change_fov.w_box.value(),
+            self.info_dialog.change_fov.h_box.value(),
+        ]
+        d = self.display_settings_dlg
+
+        info = {
+            "FOV (X, Y, Width, Height)": fov_info,
+            "Zoom": d.zoom.value(),
+            "Display Pixel Size (nm)": d.disp_px_size.value(),
+            "Min. Density": d.minimum.value(),
+            "Max. Density": d.maximum.value(),
+            "Colormap": d.colormap.currentText(),
+            "Blur Method": d.blur_methods[d.blur_buttongroup.checkedButton()],
+            "Scalebar Length (nm)": d.scalebar.value(),
+            "Localizations Loaded": self.view.locs_paths,
+        }
+
+        io.save_info(path, [info])
 
     def export_complete(self):
         """ Exports the whole field of view as .png or .tif. """
