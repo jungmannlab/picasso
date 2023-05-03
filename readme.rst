@@ -164,7 +164,7 @@ Contributions & Copyright
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of Biochemistry
 | Copyright (c) 2020-2021 Maximilian Strauss
-| Copyright (c) 2022 Rafal Kowalewski
+| Copyright (c) 2022-2023 Rafal Kowalewski
 
 Citing Picasso
 --------------
