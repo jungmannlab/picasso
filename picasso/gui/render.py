@@ -57,8 +57,8 @@ except ModuleNotFoundError:
 
 if sys.platform == "darwin": # plots do not work on mac os
     matplotlib.use('agg')
-
 matplotlib.rcParams.update({"axes.titlesize": "large"})
+
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -87,6 +87,7 @@ def get_colors(n_channels):
     colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
     return colors
 
+
 def get_render_properties_colors(n_channels, cmap='gist_rainbow'):
     """
     Creates a list with rgb channels for each of the channels used in
@@ -113,6 +114,7 @@ def get_render_properties_colors(n_channels, cmap='gist_rainbow'):
     # extract the colors of interest
     colors = base[idx]
     return colors
+
 
 def is_hexadecimal(text):
     """ 
@@ -145,6 +147,7 @@ def is_hexadecimal(text):
                     return True
     return False
 
+
 def fit_cum_exp(data):
     """ 
     Returns an lmfit Model class fitted to a 3-parameter cumulative
@@ -163,6 +166,7 @@ def fit_cum_exp(data):
     result = lib.CumulativeExponentialModel.fit(y, params, x=data)
     return result
 
+
 def kinetic_rate_from_fit(data):
     """ Finds the mean dark time from the lmfit fitted Model. """
 
@@ -176,7 +180,9 @@ def kinetic_rate_from_fit(data):
         rate = np.nanmean(data)
     return rate
 
+
 estimate_kinetic_rate = kinetic_rate_from_fit
+
 
 def check_pick(f):
     """ Decorator verifying if there is at least one pick. """
@@ -192,6 +198,7 @@ def check_pick(f):
             return f(args[0])
 
     return wrapper
+
 
 def check_picks(f):
     """ Decorator verifying if there are at least two picks. """

@@ -25,7 +25,7 @@ from numpy.lib.recfunctions import stack_arrays
 from .. import io, render
 from ..lib import StatusDialog, ProgressDialog
 
-# from icecream import ic
+# from icecream import ic #TODO: delete
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -289,8 +289,8 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         }
 
         # camera
-        self.pixelsize = QtWidgets.QDoubleSpinBox()
-        self.pixelsize.setValue(130)
+        # self.pixelsize = QtWidgets.QDoubleSpinBox()
+        # self.pixelsize.setValue(130)
         
         # scalebar
         self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
@@ -1178,14 +1178,14 @@ class ViewRotation(QtWidgets.QLabel):
                 kwargs, locs=locs, ang=ang, autoscale=autoscale
             )
 
-        if ang is None: # if build animation
+        if ang is None: # if not build animation
             n_locs, image = render.render(
                 locs, 
                 **kwargs, 
                 info=self.infos[0], 
                 ang=(self.angx, self.angy, self.angz), 
             )
-        else: # if not build animation
+        else: # if build animation
             n_locs, image = render.render(
                 locs, 
                 **kwargs, 
@@ -1265,7 +1265,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.qimage = self.draw_legend(self.qimage)
         self.qimage = self.draw_rotation(self.qimage)
         self.qimage = self.draw_rotation_angles(self.qimage)
-        self.qimage = self.draw_points(self.qimage)
+        self.qimage = self.draw_points(self.qimage)        
 
         # convert to pixmap
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
@@ -1287,13 +1287,12 @@ class ViewRotation(QtWidgets.QLabel):
         """
 
         if self.window.display_settings_dlg.scalebar_groupbox.isChecked():
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            pixelsize = self.window.window.display_settings_dlg.pixelsize.value()
             scalebar = self.window.display_settings_dlg.scalebar.value()
             length_camerapxl = scalebar / pixelsize
             length_displaypxl = int(
                 round(self.width() * length_camerapxl / self.viewport_width())
             )
-            # height = max(int(round(0.15 * length_displaypxl)), 1)
             height = 10
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
@@ -1481,7 +1480,7 @@ class ViewRotation(QtWidgets.QLabel):
         ox = []
         oy = []
         oldpoint = []
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.window.display_settings_dlg.pixelsize.value()
         for point in self._points:
             if oldpoint != []:
                 ox, oy = self.map_to_view(*oldpoint)
