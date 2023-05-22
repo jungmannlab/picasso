@@ -23,29 +23,13 @@ A collection of tools for painting super-resolution images. The Picasso software
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
 
+Picasso 0.6.1
+-------------
+In previous version, the rotation window (3D Render) showed an incorrect length of the scalebar. This has been fixed.
+
 Picasso 0.6.0
 -------------
-
-RESI (Resolution Enhancement by Sequential Imaging)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-RESI dialog added to Picasso Render, allowing for substatial boost in spatial resolution (*to be published*).
-
-Photon conversion update
-~~~~~~~~~~~~~~~~~~~~~~~~
-The formula for conversion of raw data to photons was changed, resulting in different numbers of photons and thus **affecting the localization precision** accordingly.
-
-Until version *0.5.7*, the formula was: 
-
-*(RAW_DATA - BASELINE) x SENSITIVITY / (GAIN x QE)*, where QE is quantum efficiency of the camera. 
-
-In Picasso *0.6.0* it was changed to:
-
-*(RAW_DATA - BASELINE) x SENSITIVITY / GAIN*
-
-**i.e., quantum effiency was removed.** Thus, the estimate of the localization precision better approximates the true precision.
-
-
-For backward compatibility, quantum efficiency will be kept in Picasso Localize, however, it will have no effect on the new photon conversion formula.
+RESI dialog added to Picasso Render, allowing for substantial boost in spatial resolution (*Reinhardt, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9).
 
 Picasso 0.5.0
 -------------
@@ -164,7 +148,7 @@ Contributions & Copyright
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of Biochemistry
 | Copyright (c) 2020-2021 Maximilian Strauss
-| Copyright (c) 2022 Rafal Kowalewski
+| Copyright (c) 2022-2023 Rafal Kowalewski
 
 Citing Picasso
 --------------

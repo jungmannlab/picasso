@@ -1,10 +1,10 @@
 [Setup]
 AppName=Picasso
 AppPublisher=Jungmann Lab, Max Planck Institute of Biochemistry
-AppVersion=0.6.0
+AppVersion=0.6.1
 DefaultDirName={pf}\Picasso
 DefaultGroupName=Picasso
-OutputBaseFilename="Picasso-Windows-64bit-0.6.0"
+OutputBaseFilename="Picasso-Windows-64bit-0.6.1"
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 

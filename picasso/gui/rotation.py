@@ -13,21 +13,19 @@
 import os
 import colorsys
 import re
-from time import sleep
 from functools import partial
 
-import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PyQt5 import QtCore, QtGui, QtWidgets
-from tqdm import tqdm
 
 from numpy.lib.recfunctions import stack_arrays
 
 from .. import io, render
+from ..lib import StatusDialog, ProgressDialog
 
-# from icecream import ic
+# from icecream import ic #TODO: delete
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -291,8 +289,8 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         }
 
         # camera
-        self.pixelsize = QtWidgets.QDoubleSpinBox()
-        self.pixelsize.setValue(130)
+        # self.pixelsize = QtWidgets.QDoubleSpinBox()
+        # self.pixelsize.setValue(130)
         
         # scalebar
         self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
@@ -654,9 +652,12 @@ class AnimationDialog(QtWidgets.QDialog):
                 height += 1
 
             # create temporary folder to store all frames
-            base, ext = os.path.splitext(self.window.view_rot.paths[0])
-            idx = [i for i, char in enumerate(base) if char == '/'][-1]
-            path = base[:idx] + "/animation_frames"
+            base = os.path.dirname(self.window.view_rot.paths[0])
+            path = os.path.join(base, "animation_frames")
+            progress = ProgressDialog(
+                "Rendering frames", 0, len(angx), self.window
+            )
+            progress.set_value(0)
             try:
                 os.mkdir(path)
                 for i in range(len(angx)):
@@ -671,6 +672,7 @@ class AnimationDialog(QtWidgets.QDialog):
                         # QtCore.Qt.KeepAspectRatioByExpanding,
                     )
                     qimage.save(path + "/frame_{}.png".format(i+1))
+                    progress.set_value(i+1)
             except:
                 # if folder exists, ask if it should be used or deleted
                 m = QtWidgets.QMessageBox()
@@ -694,14 +696,16 @@ class AnimationDialog(QtWidgets.QDialog):
                         qimage = qimage.scaled(
                             width,
                             height,
-                            QtCore.Qt.KeepAspectRatioByExpanding,
+                            # QtCore.Qt.KeepAspectRatioByExpanding,
                         )
                         qimage.save(path + "/frame_{}.png".format(i+1))
+                        progress.set_value(i+1)
                 elif ret == m.Yes:
                     # use old frames
-                    pass
+                    progress.set_value(len(angx))
                 
             # build a video and save it
+            status = StatusDialog("Creating the video...", self.window)
             image_files = [
                 os.path.join(path, img)
                 for img in os.listdir(path)
@@ -715,6 +719,7 @@ class AnimationDialog(QtWidgets.QDialog):
             for file in os.listdir(path):
                 os.remove(os.path.join(path, file))
             os.rmdir(path)
+            status.close()
             
 
 class ViewRotation(QtWidgets.QLabel):
@@ -1173,14 +1178,14 @@ class ViewRotation(QtWidgets.QLabel):
                 kwargs, locs=locs, ang=ang, autoscale=autoscale
             )
 
-        if ang is None: # if build animation
+        if ang is None: # if not build animation
             n_locs, image = render.render(
                 locs, 
                 **kwargs, 
                 info=self.infos[0], 
                 ang=(self.angx, self.angy, self.angz), 
             )
-        else: # if not build animation
+        else: # if build animation
             n_locs, image = render.render(
                 locs, 
                 **kwargs, 
@@ -1257,13 +1262,10 @@ class ViewRotation(QtWidgets.QLabel):
         )
         # draw scalebar, legend, rotation and measuring points
         self.qimage = self.draw_scalebar(self.qimage)
-        if self.display_legend:
-            self.qimage = self.draw_legend(self.qimage)
-        if self.display_rotation:
-            self.qimage = self.draw_rotation(self.qimage)
-        if self.display_angles:
-            self.qimage = self.draw_rotation_angles(self.qimage)
-        self.qimage = self.draw_points(self.qimage)
+        self.qimage = self.draw_legend(self.qimage)
+        self.qimage = self.draw_rotation(self.qimage)
+        self.qimage = self.draw_rotation_angles(self.qimage)
+        self.qimage = self.draw_points(self.qimage)        
 
         # convert to pixmap
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
@@ -1285,13 +1287,12 @@ class ViewRotation(QtWidgets.QLabel):
         """
 
         if self.window.display_settings_dlg.scalebar_groupbox.isChecked():
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            pixelsize = self.window.window.display_settings_dlg.pixelsize.value()
             scalebar = self.window.display_settings_dlg.scalebar.value()
             length_camerapxl = scalebar / pixelsize
             length_displaypxl = int(
                 round(self.width() * length_camerapxl / self.viewport_width())
             )
-            # height = max(int(round(0.15 * length_displaypxl)), 1)
             height = 10
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
@@ -1338,22 +1339,23 @@ class ViewRotation(QtWidgets.QLabel):
             Image with the drawn legend
         """
 
-        n_channels = len(self.locs)
-        painter = QtGui.QPainter(image)
-        x = 12
-        y = 20
-        dy = 20
-        for i in range(n_channels):
-            if self.window.dataset_dialog.checks[i].isChecked():
-                palette = self.window.dataset_dialog.colordisp_all[i].palette()
-                color = palette.color(QtGui.QPalette.Window)
-                painter.setPen(QtGui.QColor(color))
-                font = painter.font()
-                font.setPixelSize(12)
-                painter.setFont(font)
-                text = self.window.dataset_dialog.checks[i].text()
-                painter.drawText(QtCore.QPoint(x, y), text)
-                y += dy
+        if self.display_legend:
+            n_channels = len(self.locs)
+            painter = QtGui.QPainter(image)
+            x = 12
+            y = 20
+            dy = 20
+            for i in range(n_channels):
+                if self.window.dataset_dialog.checks[i].isChecked():
+                    palette = self.window.dataset_dialog.colordisp_all[i].palette()
+                    color = palette.color(QtGui.QPalette.Window)
+                    painter.setPen(QtGui.QColor(color))
+                    font = painter.font()
+                    font.setPixelSize(12)
+                    painter.setFont(font)
+                    text = self.window.dataset_dialog.checks[i].text()
+                    painter.drawText(QtCore.QPoint(x, y), text)
+                    y += dy
         return image
 
     def draw_rotation(self, image):
@@ -1373,83 +1375,84 @@ class ViewRotation(QtWidgets.QLabel):
             Image with the drawn legend
         """
 
-        painter = QtGui.QPainter(image)
-        length = 30
-        width = 2
-        x = 50
-        y = self.height() - 50
-        center = QtCore.QPoint(x, y)
+        if self.display_rotation:
+            painter = QtGui.QPainter(image)
+            length = 30
+            width = 2
+            x = 50
+            y = self.height() - 50
+            center = QtCore.QPoint(x, y)
 
-        #set the ends of the x line
-        xx = length
-        xy = 0
-        xz = 0
+            #set the ends of the x line
+            xx = length
+            xy = 0
+            xz = 0
 
-        #set the ends of the y line
-        yx = 0
-        yy = length
-        yz = 0
+            #set the ends of the y line
+            yx = 0
+            yy = length
+            yz = 0
 
-        #set the ends of the z line
-        zx = 0
-        zy = 0
-        zz = length
+            #set the ends of the z line
+            zx = 0
+            zy = 0
+            zz = length
 
-        #rotate these points
-        coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
-        R = render.rotation_matrix(self.angx, self.angy, self.angz)
-        coordinates = R.apply(coordinates)
-        (xx, xy, xz) = coordinates[0]
-        (yx, yy, yz) = coordinates[1]
-        (zx, zy, zz) = coordinates[2]
+            #rotate these points
+            coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
+            R = render.rotation_matrix(self.angx, self.angy, self.angz)
+            coordinates = R.apply(coordinates)
+            (xx, xy, xz) = coordinates[0]
+            (yx, yy, yz) = coordinates[1]
+            (zx, zy, zz) = coordinates[2]
 
-        # translate the x and y coordinates of the end points towards 
-        # bottom right edge of the window
-        xx += x
-        xy += y
-        yx += x
-        yy += y
-        zx += x
-        zy += y
+            # translate the x and y coordinates of the end points towards 
+            # bottom right edge of the window
+            xx += x
+            xy += y
+            yx += x
+            yy += y
+            zx += x
+            zy += y
 
-        #set the points at the ends of the lines
-        point_x = QtCore.QPoint(xx, xy)
-        point_y = QtCore.QPoint(yx, yy)
-        point_z = QtCore.QPoint(zx, zy)
-        line_x = QtCore.QLine(center, point_x)
-        line_y = QtCore.QLine(center, point_y)
-        line_z = QtCore.QLine(center, point_z)
-        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(1, 0, 0, 1)))
-        painter.drawLine(line_x)
-        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 1, 1)))
-        painter.drawLine(line_y)
-        painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 0, 1)))
-        painter.drawLine(line_z)
+            #set the points at the ends of the lines
+            point_x = QtCore.QPoint(xx, xy)
+            point_y = QtCore.QPoint(yx, yy)
+            point_z = QtCore.QPoint(zx, zy)
+            line_x = QtCore.QLine(center, point_x)
+            line_y = QtCore.QLine(center, point_y)
+            line_z = QtCore.QLine(center, point_z)
+            painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(1, 0, 0, 1)))
+            painter.drawLine(line_x)
+            painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 1, 1)))
+            painter.drawLine(line_y)
+            painter.setPen(QtGui.QPen(QtGui.QColor.fromRgbF(0, 1, 0, 1)))
+            painter.drawLine(line_z)
         return image
 
     def draw_rotation_angles(self, image):
         """ 
         Draws text displaying current rotation angles in degrees. 
         """
-        
-        image = image.copy()
-        [angx, angy, angz] = [
-            int(np.round(_ * 180 / np.pi, 0)) 
-            for _ in [self.angx, self.angy, self.angz]
-        ]
-        text = f"{angx} {angy} {angz}"
-        x = self.width() - len(text) * 7.5 - 10
-        y = self.height() - 20      
-        painter = QtGui.QPainter(image)
-        font = painter.font()
-        font.setPixelSize(12)
-        painter.setFont(font)
-        painter.setPen(QtGui.QColor("white"))
-        if self.window.dataset_dialog.wbackground.isChecked():
-            painter.setPen(QtGui.QColor("black"))
-        painter.drawText(QtCore.QPoint(x, y), text)
-        return image
 
+        if self.display_angles:        
+            image = image.copy()
+            [angx, angy, angz] = [
+                int(np.round(_ * 180 / np.pi, 0)) 
+                for _ in [self.angx, self.angy, self.angz]
+            ]
+            text = f"{angx} {angy} {angz}"
+            x = self.width() - len(text) * 7.5 - 10
+            y = self.height() - 20      
+            painter = QtGui.QPainter(image)
+            font = painter.font()
+            font.setPixelSize(12)
+            painter.setFont(font)
+            painter.setPen(QtGui.QColor("white"))
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setPen(QtGui.QColor("black"))
+            painter.drawText(QtCore.QPoint(x, y), text)
+        return image
 
     def draw_points(self, image):
         """
@@ -1477,7 +1480,7 @@ class ViewRotation(QtWidgets.QLabel):
         ox = []
         oy = []
         oldpoint = []
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.window.display_settings_dlg.pixelsize.value()
         for point in self._points:
             if oldpoint != []:
                 ox, oy = self.map_to_view(*oldpoint)
@@ -2456,7 +2459,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     f"_arotated_{angx}_{angy}_{angz}",
                 ) # get the save file suffix
                 if ok:
-                    for channel in tqdm(range(len(self.view_rot.paths))):
+                    for channel in range(len(self.view_rot.paths)):
                         base, ext = os.path.splitext(
                             self.view_rot.paths[channel]
                         )

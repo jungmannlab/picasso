@@ -440,13 +440,12 @@ def _density(files, radius):
             io.save_locs(base + "_density.hdf5", locs, info)
 
 
-def _dbscan(files, radius, min_density):
+def _dbscan(files, radius, min_density, pixelsize):
     import glob
 
     paths = glob.glob(files)
     if paths:
         from . import io, clusterer
-        pixelsize = int(input("Enter the camera pixelsize in nm: "))
 
         for path in paths:
             print("Loading {} ...".format(path))
@@ -469,13 +468,12 @@ def _dbscan(files, radius, min_density):
             )
 
 
-def _hdbscan(files, min_cluster, min_samples):
+def _hdbscan(files, min_cluster, min_samples, pixelsize):
     import glob
 
     paths = glob.glob(files)
     if paths:
         from . import io, clusterer
-        pixelsize = int(input("Enter the camera pixelsize in nm: "))
 
         for path in paths:
             print("Loading {} ...".format(path))
@@ -497,13 +495,14 @@ def _hdbscan(files, min_cluster, min_samples):
                 f"{base}_hdbclusters.hdf5"
             )
 
-def _smlm_clusterer(files, radius, min_locs, basic_fa=False, radius_z=None):
+def _smlm_clusterer(
+        files, radius, min_locs, pixelsize, basic_fa=False, radius_z=None
+    ):
     import glob
 
     paths = glob.glob(files)
     if paths:
         from . import io, clusterer
-        pixelsize = int(input("Enter the camera pixelsize in nm: "))
         if radius_z is not None: # 3D
             params = [radius, radius_z, min_locs, 0, basic_fa, 0]
         else: # 2D
@@ -798,17 +797,17 @@ def _localize(args):
         for file in files:
             path = _ospath.abspath(file)
             directory = _ospath.dirname(path)
-            if ".ome.tif" in path:
+            if "NDTiffStack" in path:
+                base, ext = _ospath.splitext(path)
+                base = _re.escape(base)
+                pattern = _re.compile(base + r"_(\d*).tif")
+            else:
                 base, ext = _ospath.splitext(
                     _ospath.splitext(path)[0]
                 )  # split two extensions as in .ome.tif
                 base = _re.escape(base)
                 # This matches the basename + an appendix of the file number
                 pattern = _re.compile(base + r"_(\d*).ome.tif")  
-            elif "NDTiffStack" in path:
-                base, ext = _ospath.splitext(path)
-                base = _re.escape(base)
-                pattern = _re.compile(base + r"_(\d*).tif")
             entries = [_.path for _ in _os.scandir(directory) if _.is_file()]
             matches = [_re.match(pattern, _) for _ in entries]
             matches = [_ for _ in matches if _ is not None]
@@ -1277,6 +1276,11 @@ def main():
         type=int,
         help=("minimum local density for localizations" " to be assigned to a cluster"),
     )
+    dbscan_parser.add_argument(
+        "pixelsize",
+        type=int,
+        help=("camera pixel size in nm (used for 3D localizations only)"),
+    )
 
     # HDBSCAN
     hdbscan_parser = subparsers.add_parser(
@@ -1300,6 +1304,11 @@ def main():
         type=int,
         help=("the higher the more points are considered noise"),
     )
+    hdbscan_parser.add_argument(
+        "pixelsize",
+        type=int,
+        help=("camera pixel size in nm (used for 3D localizations only)"),
+    )
 
     # SMLM clusterer
     smlm_cluster_parser = subparsers.add_parser(
@@ -1322,6 +1331,11 @@ def main():
         "min_locs",
         type=int,
         help=("minimum number of localizations in a cluster"),
+    )
+    smlm_cluster_parser.add_argument(
+        "pixelsize",
+        type=int,
+        help=("camera pixel size in nm (used for 3D localizations only)"),
     )
     smlm_cluster_parser.add_argument(
         "basic_fa",
@@ -1692,14 +1706,15 @@ def main():
         elif args.command == "density":
             _density(args.files, args.radius)
         elif args.command == "dbscan":
-            _dbscan(args.files, args.radius, args.density)
+            _dbscan(args.files, args.radius, args.density, args.pixelsize)
         elif args.command == "hdbscan":
-            _hdbscan(args.files, args.min_cluster, args.min_samples)
+            _hdbscan(args.files, args.min_cluster, args.min_samples, args.pixelsize)
         elif args.command == "smlm_cluster":
             _smlm_clusterer(
                 args.files,
                 args.radius,
                 args.min_locs,
+                args.pixelsize,
                 args.basic_fa,
                 args.radius_z,
             )

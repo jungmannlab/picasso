@@ -58,9 +58,10 @@ class View(QtWidgets.QGraphicsView):
         self.vscrollbar = self.verticalScrollBar()
         self.rubberband = RubberBand(self)
         self.roi = None
+        self.numeric_roi = False
 
     def mousePressEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
+        if event.button() == QtCore.Qt.LeftButton and not self.numeric_roi:
             self.roi_origin = QtCore.QPoint(event.pos())
             self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, QtCore.QSize()))
             self.rubberband.show()
@@ -74,7 +75,7 @@ class View(QtWidgets.QGraphicsView):
             event.ignore()
 
     def mouseMoveEvent(self, event):
-        if event.buttons() == QtCore.Qt.LeftButton:
+        if event.buttons() == QtCore.Qt.LeftButton and not self.numeric_roi:
             self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, event.pos()))
         if self.pan:
             self.hscrollbar.setValue(
@@ -90,19 +91,25 @@ class View(QtWidgets.QGraphicsView):
             event.ignore()
 
     def mouseReleaseEvent(self, event):
-        if event.button() == QtCore.Qt.LeftButton:
+        if event.button() == QtCore.Qt.LeftButton and not self.numeric_roi:
             self.roi_end = QtCore.QPoint(event.pos())
             dx = abs(self.roi_end.x() - self.roi_origin.x())
             dy = abs(self.roi_end.y() - self.roi_origin.y())
             if dx < 10 or dy < 10:
                 self.roi = None
                 self.rubberband.hide()
+                self.window.parameters_dialog.roi_edit.setText("")
             else:
                 roi_points = (
                     self.mapToScene(self.roi_origin),
                     self.mapToScene(self.roi_end),
                 )
-                self.roi = list([[int(_.y()), int(_.x())] for _ in roi_points])
+                self.roi = [[int(_.y()), int(_.x())] for _ in roi_points]
+                (y_min, x_min), (y_max, x_max) = self.roi
+                self.window.parameters_dialog.roi_edit.setText(
+                    f"{y_min},{x_min},{y_max},{x_max}"
+                )
+                self.numeric_roi = False
             self.window.draw_frame()
         elif event.button() == QtCore.Qt.RightButton:
             self.pan = False
@@ -149,8 +156,8 @@ class Scene(QtWidgets.QGraphicsScene):
             event.ignore()
 
     def dropEvent(self, event):
-        """Loads  when dropped into the scene"""
-        path, extension = self.path_from_drop(event)
+        """Loads when dropped into the scene."""
+        path, ext = self.path_from_drop(event)
         self.window.open(path)
 
 
@@ -469,20 +476,17 @@ class ParametersDialog(QtWidgets.QDialog):
         self.mng_max_spinbox.valueChanged.connect(self.on_mng_max_changed)
         hbox.addWidget(self.mng_max_spinbox)
 
-        # # ROI
-        # identification_grid.addWidget(
-        #     QtWidgets.QLabel("ROI (y_min,x_min,y_max,x_max):"), 4, 0,
-        # )
-        # self.roi_edit = QtWidgets.QLineEdit()
-        # regex = r"\d+,\d+,\d+,\d+" # regex for 4 integers separated by commas
-        # validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
-        # self.roi_edit.setValidator(validator)
-        # self.roi_edit.editingFinished.connect(self.on_roi_edit_finished)
-        # identification_grid.addWidget(self.roi_edit, 4, 1)
-        # #TODO: signal when roi_edit is changed: change self.roi and draw rectangle?
-        # #TODO: validate that the input numbers lie within the whole FOV
-        # #TODO: when roi is changed with mouseReleaseEvent in View, change the values displayed here!
-        # #TODO: what about nan?
+        # ROI
+        identification_grid.addWidget(
+            QtWidgets.QLabel("ROI (y_min,x_min,y_max,x_max):"), 5, 0,
+        )
+        self.roi_edit = QtWidgets.QLineEdit()
+        regex = r"\d+,\d+,\d+,\d+" # regex for 4 integers separated by commas
+        validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
+        self.roi_edit.setValidator(validator)
+        self.roi_edit.editingFinished.connect(self.on_roi_edit_finished)
+        self.roi_edit.textChanged.connect(self.on_roi_edit_changed)
+        identification_grid.addWidget(self.roi_edit, 5, 1)
 
         self.preview_checkbox = QtWidgets.QCheckBox("Preview")
         self.preview_checkbox.setTristate(False)
@@ -670,10 +674,7 @@ class ParametersDialog(QtWidgets.QDialog):
         z_grid = QtWidgets.QGridLayout(z_groupbox)
         z_grid.addWidget(
             QtWidgets.QLabel("Non-integrated Gaussian fitting is recommend! (LQ)"),
-            0,
-            0,
-            1,
-            2,
+            0, 0, 1, 2,
         )
         load_z_calib = QtWidgets.QPushButton("Load calibration")
         load_z_calib.setAutoDefault(False)
@@ -767,28 +768,36 @@ class ParametersDialog(QtWidgets.QDialog):
         self.quality_check.setEnabled(False)
         self.quality_check.setVisible(True)
 
-        for idx, _ in enumerate(self.quality_grid_labels):
+        for _ in self.quality_grid_labels:
             _.setVisible(False)
 
-        for idx, _ in enumerate(self.quality_grid_values):
+        for _ in self.quality_grid_values:
             _.setVisible(False)
             _.setText("")
-    
-    # def on_roi_edit_finished(self):
-    #     from icecream import ic # TODO:delete
-    #     text = self.roi_edit.text().split(",")
-    #     y_min, x_min, y_max, x_max = [int(_) for _ in text]
-    #     # update roi
-    #     self.window.view.roi = [[y_min, x_min], [y_max, x_max]]
-    #     # draw rectangle TODO use self.window.view.rubberband
-    #     self.window.view.rubberband.setGeometry(
-    #         QtCore.QRect(x_min, y_min, x_max-x_min, y_max-y_min)
-    #     )
-    #     self.window.view.rubberband.show()
-    #     #TOOD: incorrect indeces, (wrong place for the box,)
-    #     #TODO: box dispaperast afte rcllicking on View
-    #     #TODO: use map to scene??, idk
-    #     self.window.draw_frame()
+
+    def on_roi_edit_changed(self):
+        if self.roi_edit.text() == "":
+            self.window.view.numeric_roi = False            
+            self.window.view.roi = None
+            self.window.view.rubberband.hide()
+            self.window.draw_frame()
+
+    def on_roi_edit_finished(self):
+        text = self.roi_edit.text().split(",")
+        y_min, x_min, y_max, x_max = [int(_) for _ in text]
+        # update roi
+        self.window.view.roi = [[y_min, x_min], [y_max, x_max]]
+        # draw the rectangle roi
+        topleft_xy = self.window.view.mapFromScene(x_min, y_min)
+        bottomright_xy = self.window.view.mapFromScene(x_max, y_max)
+        topleft = QtCore.QPoint(topleft_xy.x(), topleft_xy.y())
+        bottomright = QtCore.QPoint(bottomright_xy.x(), bottomright_xy.y())
+        self.window.view.rubberband.setGeometry(
+            QtCore.QRect(topleft, bottomright)
+        )
+        self.window.view.rubberband.show()
+        self.window.draw_frame()
+        self.window.view.numeric_roi = True
 
     def on_fit_method_changed(self, state):
         if self.fit_method.currentText() == "LQ, Gaussian":
@@ -1228,9 +1237,9 @@ class Window(QtWidgets.QMainWindow):
             "Open image sequence", 
             directory=dir, 
             filter=(
-                "All supported formats (*.raw *.tif *.tiff *.nd2)"
+                "All supported formats (*.raw *.tif *.tif *.nd2 *.ims)"
                 ";;Raw files (*.raw)"
-                ";;Tiff images (*.tif *.tiff)"
+                ";;Tif images (*.tif)"
                 ";;ImaRIS IMS (*.ims)"
                 ";;Nd2 files (*.nd2);;"
             )
