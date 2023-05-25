@@ -212,13 +212,15 @@ class CamSettingComboBox(QtWidgets.QComboBox):
     def change_target_choices(self, index):
         cam_combos = self.cam_combos[self.camera]
         sensitivity = CONFIG["Cameras"][self.camera]["Sensitivity"]
+        print('sensitivity', sensitivity)
         for i in range(self.index + 1):
             sensitivity = sensitivity[cam_combos[i].currentText()]
-        target = cam_combos[self.index + 1]
-        target.blockSignals(True)
-        target.clear()
-        target.blockSignals(False)
-        target.addItems(sorted(list(sensitivity.keys())))
+        if len(cam_combos) > self.index + 1:
+            target = cam_combos[self.index + 1]
+            target.blockSignals(True)
+            target.clear()
+            target.blockSignals(False)
+            target.addItems(sorted(list(sensitivity.keys())))
 
 
 class CamSettingComboBoxDict(UserDict):
