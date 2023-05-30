@@ -198,7 +198,12 @@ def identify_async(movie, minimum_ng, box, roi=None):
     # Use the user settings to define the number of workers that are being used
     settings = _io.load_user_settings()
 
-    cpu_utilization = settings["Localize"]["cpu_utilization"]
+    # avoid the problem when cpu_utilization is not set
+    try:
+        cpu_utilization = settings["Localize"]["cpu_utilization"]
+    except KeyError:
+        cpu_utilization = 0.8
+
     if isinstance(cpu_utilization, float):
         if cpu_utilization >= 1:
             cpu_utilization = 1
