@@ -896,7 +896,9 @@ class TiffMap:
                 if readout == 84720485:  # Acquisition comments
                     count = self.read("L")
                     readout = self.file.read(4 * count).strip(b"\0")
-                    comments = _json.loads(readout.decode())["Summary"].split("\n")
+                    readout_s = readout.decode()
+                    readout_s = readout_s[readout_s.index('{'):-readout_s[::-1].index('}')]
+                    comments = _json.loads(readout_s)["Summary"].split("\n")
                     break
 
         info["Micro-Manager Acquisiton Comments"] = comments
