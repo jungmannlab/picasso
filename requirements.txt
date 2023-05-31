@@ -1,11 +1,18 @@
+<<<<<<< HEAD
 PyQt5  # also: conda install pyqt qtpy
+=======
+PyQt5
+>>>>>>> feature_SensitivityConfig-AcqComm
 numpy==1.24.3
 h5py>=2.10.0
 matplotlib==3.3.2
 numba==0.57.0
 scipy==1.10.1
 pandas==2.0.1
+<<<<<<< HEAD
 dask==2023.4.1
+=======
+>>>>>>> feature_SensitivityConfig-AcqComm
 pyyaml==5.3.1
 scikit-learn==1.2.2
 colorama==0.4.4
