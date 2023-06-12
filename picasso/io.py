@@ -896,7 +896,7 @@ class TiffMap:
                 if readout == 84720485:  # Acquisition comments
                     count = self.read("L")
                     readout = self.file.read(4 * count).strip(b"\0")
-                    readout_s = readout.decode()
+                    readout_s = readout.decode() + ' '  # for generality in indexing in line below
                     readout_s = readout_s[readout_s.index('{'):-readout_s[::-1].index('}')]
                     comments = _json.loads(readout_s)["Summary"].split("\n")
                     break
