@@ -22,7 +22,6 @@ from . import postprocess as _postprocess
 from . import __main__ as main
 import os
 from datetime import datetime
-import time
 from sqlalchemy import create_engine
 import pandas as pd
 
@@ -371,7 +370,7 @@ def _to_photons(spots, camera_info):
     sensitivity = camera_info["sensitivity"]
     gain = camera_info["gain"]
     qe = camera_info["qe"]
-    # since v0.5.8: remove quantum efficiency to better reflect precision
+    # since v0.6.0: remove quantum efficiency to better reflect precision
     return (spots - baseline) * sensitivity / (gain)
 
 
