@@ -31,14 +31,9 @@ Picasso 0.6.0
 -------------
 RESI dialog added to Picasso Render, allowing for substantial boost in spatial resolution (*Reinhardt, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9).
 
-Picasso 0.5.0
--------------
-Picasso has introduced many changes, including 3D rotation window and a new clustering algorithm in Render and reading of .nd2 files in Localize. Please check the `changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_ to see all modifications.
-
-Picasso 0.4.0
--------------
-Picasso now has a server-based workflow management-system. Check out `here <https://picassosr.readthedocs.io/en/latest/server.html>`__.
-
+Previous versions
+-----------------
+To see all changes introduced in previous versions, click `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
 
 Installation
 ------------
