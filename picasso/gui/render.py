@@ -6763,8 +6763,8 @@ class View(QtWidgets.QLabel):
             painter = QtGui.QPainter(image)
             # initial positions
             x = 12
-            y = 20
-            dy = 20 # space between names
+            y = 26
+            dy = 24 # space between names
             for i in range(n_channels):
                 if self.window.dataset_dialog.checks[i].isChecked():
                     painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
@@ -6772,7 +6772,7 @@ class View(QtWidgets.QLabel):
                     color = colordisp.palette().color(QtGui.QPalette.Window)
                     painter.setPen(QtGui.QPen(color))
                     font = painter.font()
-                    font.setPixelSize(12)
+                    font.setPixelSize(16)
                     painter.setFont(font)
                     text = self.window.dataset_dialog.checks[i].text()
                     painter.drawText(QtCore.QPoint(x, y), text)

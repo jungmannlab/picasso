@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 22-MAY-2023 MTS
+Last change: 01-JUL-2023 MTS
+
+0.6.2
+-----
+- Picasso Render legend displays larger font
 
 0.6.1
 -----
