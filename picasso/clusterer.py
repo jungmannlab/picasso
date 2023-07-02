@@ -514,7 +514,7 @@ def error_sums_wtd(x, w):
     x : float
         x or y coordinate of the cluster center
     w : float
-        weight (localization precision squared)
+        weight (inverse localization precision squared)
 
     Returns
     -------

@@ -178,7 +178,7 @@ def fit_spots_parallel(spots, asynch=False):
         fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
     if asynch:
         return fs
-    with _tqdm(total=n_tasks, unit="task") as progress_bar:
+    with _tqdm(desc="LQ fitting", total=n_tasks, unit="task") as progress_bar:
         for f in _futures.as_completed(fs):
             progress_bar.update()
     return fits_from_futures(fs)

@@ -12049,6 +12049,7 @@ class Window(QtWidgets.QMainWindow):
         for dialog in self.dialogs:
             dialog.close()
         self.menu_bar.clear() #otherwise the menu bar is doubled
+        self.setWindowTitle("Picasso: Render")
         self.initUI(plugins_loaded=True)
 
     def rot_win(self):
