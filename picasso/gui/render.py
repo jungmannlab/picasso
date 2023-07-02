@@ -2415,14 +2415,10 @@ class TestClustererDialog(QtWidgets.QDialog):
             self.view.viewport = self.view.get_full_fov()
         if self.view.locs is None:
             message = (
-                "No HDBSCAN detected. Please install\n"
-                "the python package HDBSCAN*."
+                "No HDBSCAN detected.\nPlease install the python package"
+                " HDBSCAN (pip install hdbscan)."
             )
-            QtWidgets.QMessageBox.information(
-                self,
-                "No HDBSCAN",
-                message,
-            )
+            QtWidgets.QMessageBox.information(self, "No HDBSCAN", message)
             return
         # render clustered locs
         self.view.update_scene()
@@ -2701,57 +2697,61 @@ class TestClustererView(QtWidgets.QLabel):
     def update_scene(self):
         """ Renders localizations. """
 
-        if self.locs is not None:
+        if not len(self.locs):
+            self.setText("No clusters found with the current settings.")
+            return
 
-            if self.viewport is None:
-                self.viewport = self.get_full_fov()
+        if self.viewport is None:
+            self.viewport = self.get_full_fov()
 
-            # split locs according to their group colors
-            locs = self.split_locs()
+        # split locs according to their group colors
+        locs = self.split_locs()
 
-            # render kwargs
-            if self.dialog.one_pixel_blur.isChecked():
-                blur_method = 'smooth'
-            else:
-                blur_method = 'convolve'
-            kwargs = {
-                'oversampling': self.get_optimal_oversampling(),
-                'viewport': self.viewport,
-                'blur_method': blur_method,
-                'min_blur_width': 0,
-                'ang': self.ang,
-            }
+        # render kwargs
+        if self.dialog.one_pixel_blur.isChecked():
+            blur_method = 'smooth'
+        else:
+            blur_method = 'convolve'
+        kwargs = {
+            'oversampling': self.get_optimal_oversampling(),
+            'viewport': self.viewport,
+            'blur_method': blur_method,
+            'min_blur_width': 0,
+            'ang': self.ang,
+        }
 
-            # render images for all channels
-            images = [render.render(_, **kwargs)[1] for _ in locs]
+        # render images for all channels
+        images = [render.render(_, **kwargs)[1] for _ in locs]
 
-            # scale image 
-            images = self.scale_contrast(images)
+        # scale image 
+        images = self.scale_contrast(images)
 
-            # create image to display
-            Y, X = images.shape[1:]
-            bgra = np.zeros((Y, X, 4), dtype=np.float32)
-            colors = get_colors(images.shape[0])
-            for color, image in zip(colors, images): # color each channel
-                bgra[:, :, 0] += color[2] * image
-                bgra[:, :, 1] += color[1] * image
-                bgra[:, :, 2] += color[0] * image
-            bgra = np.minimum(bgra, 1)
-            bgra = self.view.to_8bit(bgra)
-            bgra[:, :, 3].fill(255) # black background
-            qimage = QtGui.QImage(
-                bgra.data, X, Y, QtGui.QImage.Format_RGB32
-            ).scaled(
-                self._size, 
-                self._size, 
-                QtCore.Qt.KeepAspectRatioByExpanding
-            )
-            self.setPixmap(QtGui.QPixmap.fromImage(qimage))
+        # create image to display
+        Y, X = images.shape[1:]
+        bgra = np.zeros((Y, X, 4), dtype=np.float32)
+        colors = get_colors(images.shape[0])
+        for color, image in zip(colors, images): # color each channel
+            bgra[:, :, 0] += color[2] * image
+            bgra[:, :, 1] += color[1] * image
+            bgra[:, :, 2] += color[0] * image
+        bgra = np.minimum(bgra, 1)
+        bgra = self.view.to_8bit(bgra)
+        bgra[:, :, 3].fill(255) # black background
+        qimage = QtGui.QImage(
+            bgra.data, X, Y, QtGui.QImage.Format_RGB32
+        ).scaled(
+            self._size, 
+            self._size, 
+            QtCore.Qt.KeepAspectRatioByExpanding
+        )
+        self.setPixmap(QtGui.QPixmap.fromImage(qimage))
 
     def split_locs(self):
         """
-        Splits self.locs into a list. It has either two, three or 
-        N_GROUP_COLORS elements (each for one group color).
+        Splits self.locs into a list that specifies either separate
+        channels (all localizations, clusters and cluster centers) or
+        it separates clustered localizations by color (based on group,
+        i.e., the cluster id).
         """
 
         if (
@@ -2853,6 +2853,8 @@ class TestClustererView(QtWidgets.QLabel):
             Specifies viewport
         """
 
+        if not len(self.locs):
+            return
         x_min = np.min(self.locs.x) - 1
         x_max = np.max(self.locs.x) + 1
         y_min = np.min(self.locs.y) - 1

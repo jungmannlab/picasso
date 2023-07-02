@@ -61,7 +61,6 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("group", "i4"),
 ]
 
-
 def _frame_analysis(frame, n_frames):
     """
     Verifies which clusters pass basic frame analysis.
@@ -300,7 +299,7 @@ def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
     return labels
 
 
-def cluster(locs, params, pixelsize):
+def cluster(locs, params, pixelsize=None):
     """
     Clusters localizations given user parameters using KDTree.
 
@@ -312,8 +311,8 @@ def cluster(locs, params, pixelsize):
         Localizations to be clustered
     params : tuple
         SMLM clustering parameters
-    pixelsize : int
-        Camera pixel size in nm
+    pixelsize : int (default=None)
+        Camera pixel size in nm. Only needed for 3D clustering.
 
     Returns
     -------
@@ -323,6 +322,11 @@ def cluster(locs, params, pixelsize):
     """
 
     if hasattr(locs, "z"): # 3D
+        if pixelsize is None:
+            raise ValueError(
+                "Camera pixel size must be specified as an integer for 3D"
+                " clustering."
+            )
         radius_xy, radius_z, min_locs, _, fa, _ = params
         labels = cluster_3D(
             locs.x,
@@ -374,7 +378,7 @@ def _dbscan(X, radius, min_density):
     return db.labels_.astype(_np.int32)
 
 
-def dbscan(locs, radius, min_density, pixelsize):
+def dbscan(locs, radius, min_density, pixelsize=None):
     """
     Performs DBSCAN on localizations.
     
@@ -398,6 +402,11 @@ def dbscan(locs, radius, min_density, pixelsize):
     """
     
     if hasattr(locs, "z"):
+        if pixelsize is None:
+            raise ValueError(
+                "Camera pixel size must be specified as an integer for 3D"
+                " clustering."
+            )
         X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
     else:
         X = _np.vstack((locs.x, locs.y)).T
@@ -439,7 +448,9 @@ def _hdbscan(X, min_cluster_size, min_samples, cluster_eps=0):
     return hdb.labels_.astype(_np.int32)
 
 
-def hdbscan(locs, min_cluster_size, min_samples, pixelsize, cluster_eps=0.):
+def hdbscan(
+    locs, min_cluster_size, min_samples, cluster_eps=0.0, pixelsize=None
+):
     """
     Performs HDBSCAN on localizations.
     
@@ -465,6 +476,11 @@ def hdbscan(locs, min_cluster_size, min_samples, pixelsize, cluster_eps=0.):
     """
 
     if hasattr(locs, "z"):
+        if pixelsize is None:
+            raise ValueError(
+                "Camera pixel size must be specified as an integer for 3D"
+                " clustering."
+            )
         X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
     else:
         X = _np.vstack((locs.x, locs.y)).T
@@ -525,7 +541,7 @@ def error_sums_wtd(x, w):
     return (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
 
 
-def find_cluster_centers(locs, pixelsize):
+def find_cluster_centers(locs, pixelsize=None):
     """
     Calculates cluster centers. 
 
@@ -535,8 +551,9 @@ def find_cluster_centers(locs, pixelsize):
     ----------
     locs : np.recarray
         Clustered localizations (contain group info)
-    pixelsize : float
-        Camera pixel size (used for finding volume and 3D convex hull)
+    pixelsize : int (default=None)
+        Camera pixel size (used for finding volume and 3D convex hull).
+        Only required for 3D localizations.
 
     Returns
     -------
@@ -633,7 +650,7 @@ def find_cluster_centers(locs, pixelsize):
     return centers
 
 
-def cluster_center(grouplocs, pixelsize, separate_lp=False):
+def cluster_center(grouplocs, pixelsize=None, separate_lp=False):
     """
     Finds cluster centers and their attributes.
 
@@ -644,8 +661,9 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
     ----------
     grouplocs : pandas.SeriesGroupBy
         Localizations grouped by cluster ids
-    pixelsize : float
-        Camera pixel size (used for finding volume and 3D convex hull)
+    pixelsize : int (default=None)
+        Camera pixel size (used for finding volume and 3D convex hull).
+        Only required for 3D localizations.
     separate_lp : bool (default=False)
         If True, localization precision in x and y will be calculated
         separately. Otherwise, the mean of the two is taken
@@ -688,6 +706,11 @@ def cluster_center(grouplocs, pixelsize, separate_lp=False):
     # n_locs in cluster
     n = len(grouplocs)
     if hasattr(grouplocs, "z"):
+        if pixelsize is None:
+            raise ValueError(
+                "Camera pixel size must be specified as an integer for 3D"
+                " cluster centers calculation."
+            )
         z = _np.average(
             grouplocs.z, 
             weights=1/((grouplocs.lpx+grouplocs.lpy)**2),

@@ -6,6 +6,8 @@ Last change: 01-JUL-2023 MTS
 0.6.2
 -----
 - Picasso Render legend displays larger font
+- Picasso Render Test Clusterer displays info when no clusters found instead of throwing an error
+- Calling clustering functions from ``picasso.clusterer`` does not require camera pixel size. Same applies for the corresponding functions in CMD. *Only if 3D localizations are used, the pixel size must be provided.*
 
 0.6.1
 -----
