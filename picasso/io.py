@@ -419,6 +419,10 @@ class ND2Movie(AbstractPicassoMovie):
             mm_info.get(
                 'description', {}).get('Metadata', {}).get(
                 'Camera Settings', {}).get('Readout Mode', 'None'))
+        conversion_gain = str(
+            mm_info.get(
+                'description', {}).get('Metadata', {}).get(
+                'Camera Settings', {}).get('Conversion Gain', 'None'))
         filter = str(
             mm_info.get(
                 'description', {}).get('Metadata', {}).get(
@@ -429,13 +433,14 @@ class ND2Movie(AbstractPicassoMovie):
         sensitivity_category2 = 'Sensitivity/DynamicRange'
         info["Micro-Manager Metadata"] = {
             camera_name + '-' + sensitivity_category: readout_rate,
-            camera_name + '-' + sensitivity_category2: readout_mode,
+            camera_name + '-' + sensitivity_category2: readout_mode + ' ' + conversion_gain,
             'Filter': filter,
             }
         info["Picasso Metadata"] = {
             'Camera': camera_name,
             'PixelReadoutRate': readout_rate,
             'ReadoutMode': readout_mode,
+            'ConversionGain': conversion_gain,
             'Filter': filter,
         }
         info["nd2 Metadata"] = mm_info
