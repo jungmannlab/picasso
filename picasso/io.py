@@ -426,8 +426,10 @@ class ND2Movie(AbstractPicassoMovie):
                 'Nikon Ti2, FilterChanger(Turret-Lo)', 'None'))
 
         sensitivity_category = 'PixelReadoutRate'
+        sensitivity_category2 = 'Sensitivity/DynamicRange'
         info["Micro-Manager Metadata"] = {
-            camera_name+'-'+sensitivity_category: readout_rate,
+            camera_name + '-' + sensitivity_category: readout_rate,
+            camera_name + '-' + sensitivity_category2: readout_mode,
             'Filter': filter,
             }
         info["Picasso Metadata"] = {
