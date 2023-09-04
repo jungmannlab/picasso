@@ -889,7 +889,7 @@ class DatasetDialog(QtWidgets.QDialog):
             ".hdf5", "_colors.txt"
         )
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save colors to", out_path, filter="*txt"
+            self, "Save colors to", out_path, filter="*.txt"
         )
         if path:
             with open(path, "w") as file:
@@ -10094,7 +10094,7 @@ class View(QtWidgets.QLabel):
         """ Called when evaluating picks statistics in Info Dialog. """
 
         if len(self._picks) == 0:
-            warning = "No picks foundPlease pick first."
+            warning = "No picks found. Please pick first."
             QtWidgets.QMessageBox.information(self, "Warning", warning)
             return
 
