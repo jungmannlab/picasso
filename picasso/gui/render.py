@@ -2347,9 +2347,14 @@ class TestClustererDialog(QtWidgets.QDialog):
                 ]
 
             locs = clusterer.cluster(locs, params_c, pixelsize)
-          
+        
         if len(locs):
             self.view.group_color = self.window.view.get_group_color(locs)
+
+        # scale z axis if applicable
+        if hasattr(locs, "z"):
+            locs.z /= pixelsize
+        
         return locs
 
     def get_cluster_params(self):
