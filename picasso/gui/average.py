@@ -184,7 +184,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         grid.addWidget(QtWidgets.QLabel("Iterations:"), 1, 0)
         self.iterations = QtWidgets.QSpinBox()
-        self.iterations.setRange(0, 1e7)
+        self.iterations.setRange(0, int(1e7))
         self.iterations.setValue(10)
         grid.addWidget(self.iterations, 1, 1)
 
@@ -242,10 +242,17 @@ class View(QtWidgets.QLabel):
             self.locs, self.info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
+        if not hasattr(self.locs, "group"):
+            message = (
+                 "Loaded file contains no group information. Please load"
+                 " localizations that were picked."
+            )
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
         groups = np.unique(self.locs.group)
         n_groups = len(groups)
         n_locs = len(self.locs)
-        self.group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
+        self.group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=bool)
         progress = lib.ProgressDialog("Creating group index", 0, len(groups), self)
         progress.set_value(0)
         for i, group in enumerate(groups):

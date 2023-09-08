@@ -1,7 +1,13 @@
 Changelog
 =========
 
-Last change: 01-JUL-2023 MTS
+Last change: 06-SEP-2023 MTS
+
+0.6.3
+-----
+- Picasso runs on Python 3.10 (jump from Python 3.7-3.8)
+- New installation instructions
+- Dependencies updated, meaning that M1 should have no problems with old versions of SciPy, etc.
 
 0.6.2
 -----

@@ -943,7 +943,7 @@ class TiffMap:
 
 
 class TiffMultiMap(AbstractPicassoMovie):
-    """Implments a subclass of AbstractPicassoMovie for reading
+    """Implements a subclass of AbstractPicassoMovie for reading
     ome tif files created by MicroManager. Single files are
     maxed out at 4GB, so this class orchestrates reading from single files,
     accessed by TiffMap.
