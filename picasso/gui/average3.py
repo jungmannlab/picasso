@@ -605,7 +605,7 @@ class Window(QtWidgets.QMainWindow):
                 n_groups = len(groups)
                 n_locs = len(locs)
 
-                group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=np.bool)
+                group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=bool)
                 progress = lib.ProgressDialog(
                     "Creating group index", 0, len(groups), self
                 )
@@ -1607,21 +1607,21 @@ class Window(QtWidgets.QMainWindow):
                         alignimage = np.zeros(image.shape)
                         # CREATE ALIGNIMAGE
                         if alignaxis == "zz":
-                            alignimage[np.int(alignimage.shape[0] / 2), :] += 2
-                            alignimage[np.int(alignimage.shape[0] / 2) + 1, :] += 1
-                            alignimage[np.int(alignimage.shape[0] / 2) - 1, :] += 1
+                            alignimage[np.int64(alignimage.shape[0] / 2), :] += 2
+                            alignimage[np.int64(alignimage.shape[0] / 2) + 1, :] += 1
+                            alignimage[np.int64(alignimage.shape[0] / 2) - 1, :] += 1
                         elif alignaxis == "zy":
-                            alignimage[:, np.int(alignimage.shape[0] / 2)] += 2
-                            alignimage[:, np.int(alignimage.shape[0] / 2) + 1] += 1
-                            alignimage[:, np.int(alignimage.shape[0] / 2) - 1] += 1
+                            alignimage[:, np.int64(alignimage.shape[0] / 2)] += 2
+                            alignimage[:, np.int64(alignimage.shape[0] / 2) + 1] += 1
+                            alignimage[:, np.int64(alignimage.shape[0] / 2) - 1] += 1
                         elif alignaxis == "y":
-                            alignimage[:, np.int(alignimage.shape[1] / 2)] += 2
-                            alignimage[:, np.int(alignimage.shape[1] / 2) - 1] += 1
-                            alignimage[:, np.int(alignimage.shape[1] / 2) + 1] += 1
+                            alignimage[:, np.int64(alignimage.shape[1] / 2)] += 2
+                            alignimage[:, np.int64(alignimage.shape[1] / 2) - 1] += 1
+                            alignimage[:, np.int64(alignimage.shape[1] / 2) + 1] += 1
                         elif alignaxis == "x":
-                            alignimage[np.int(alignimage.shape[0] / 2), :] += 2
-                            alignimage[np.int(alignimage.shape[0] / 2) + 1, :] += 1
-                            alignimage[np.int(alignimage.shape[0] / 2) - 1, :] += 1
+                            alignimage[np.int64(alignimage.shape[0] / 2), :] += 2
+                            alignimage[np.int64(alignimage.shape[0] / 2) + 1, :] += 1
+                            alignimage[np.int64(alignimage.shape[0] / 2) - 1, :] += 1
 
                     all_corr[k, j] = np.sum(np.multiply(alignimage, image))
 

@@ -11,15 +11,14 @@
 
 import numba as _numba
 import numpy as _np
+from lmfit import Model as _Model
 from numpy.lib.recfunctions import append_fields as _append_fields
 from numpy.lib.recfunctions import drop_fields as _drop_fields
 import collections as _collections
 import glob as _glob
 import os.path as _ospath
 from picasso import io as _io
-from PyQt5 import QtGui, QtCore, QtWidgets
-from lmfit import Model as _Model
-
+from PyQt5 import QtCore, QtWidgets
 
 # A global variable where we store all open progress and status dialogs.
 # In case of an exception, we close them all,

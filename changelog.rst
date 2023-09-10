@@ -1,7 +1,16 @@
 Changelog
 =========
 
-Last change: 22-MAY-2023 MTS
+Last change: 08-SEP-2023 MTS
+
+0.6.2
+-----
+- Picasso runs on Python 3.10 (jump from Python 3.7-3.8)
+- New installation instructions
+- Dependencies updated, meaning that M1 should have no problems with old versions of SciPy, etc.
+- Picasso Render legend displays larger font
+- Picasso Render Test Clusterer displays info when no clusters found instead of throwing an error
+- Calling clustering functions from ``picasso.clusterer`` does not require camera pixel size. Same applies for the corresponding functions in CMD. *Only if 3D localizations are used, the pixel size must be provided.*
 
 0.6.1
 -----

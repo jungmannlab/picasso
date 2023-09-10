@@ -201,7 +201,6 @@ def _fit_z_target(z, sx, sy, cx, cy):
         sy**0.5 - wy**0.5
     ) ** 2  # Apparently this results in slightly more accurate z coordinates
     # (Huang et al. '08)
-    # return (sx-wx)**2 + (sy-wy)**2
 
 
 def fit_z(

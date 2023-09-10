@@ -436,7 +436,7 @@ class train_dialog(QtWidgets.QDialog):
         train_parameter_grid.addWidget(QtWidgets.QLabel("Iterations:"), 0, 0)
         self.iterations = QtWidgets.QSpinBox()
         self.iterations.resize(100, 50)
-        self.iterations.setRange(0, 1e4)
+        self.iterations.setRange(0, int(1e4))
         self.iterations.setValue(400)
         train_parameter_grid.addWidget(self.iterations, 0, 1)
         train_parameter_grid.addWidget(QtWidgets.QLabel("Learning Rate:"), 1, 0)
@@ -789,7 +789,7 @@ class train_dialog(QtWidgets.QDialog):
             msgBox.setWindowTitle("Warning")
             msgBox.setText("No all data sets loaded or names defined")
             msgBox.setInformativeText(
-                "Check if all names are set up correct."
+                "Check if all names are set up correctly."
                 " Duplicate names are not valid."
             )
             msgBox.exec_()
