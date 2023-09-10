@@ -1351,7 +1351,7 @@ class ViewRotation(QtWidgets.QLabel):
                     color = palette.color(QtGui.QPalette.Window)
                     painter.setPen(QtGui.QColor(color))
                     font = painter.font()
-                    font.setPixelSize(12)
+                    font.setPixelSize(16)
                     painter.setFont(font)
                     text = self.window.dataset_dialog.checks[i].text()
                     painter.drawText(QtCore.QPoint(x, y), text)
@@ -1378,7 +1378,6 @@ class ViewRotation(QtWidgets.QLabel):
         if self.display_rotation:
             painter = QtGui.QPainter(image)
             length = 30
-            width = 2
             x = 50
             y = self.height() - 50
             center = QtCore.QPoint(x, y)
@@ -1401,7 +1400,7 @@ class ViewRotation(QtWidgets.QLabel):
             #rotate these points
             coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
             R = render.rotation_matrix(self.angx, self.angy, self.angz)
-            coordinates = R.apply(coordinates)
+            coordinates = R.apply(coordinates).astype(int)
             (xx, xy, xz) = coordinates[0]
             (yx, yy, yz) = coordinates[1]
             (zx, zy, zz) = coordinates[2]
@@ -1442,7 +1441,7 @@ class ViewRotation(QtWidgets.QLabel):
                 for _ in [self.angx, self.angy, self.angz]
             ]
             text = f"{angx} {angy} {angz}"
-            x = self.width() - len(text) * 7.5 - 10
+            x = self.width() - len(text) * 8 - 10
             y = self.height() - 20      
             painter = QtGui.QPainter(image)
             font = painter.font()
@@ -1486,10 +1485,10 @@ class ViewRotation(QtWidgets.QLabel):
                 ox, oy = self.map_to_view(*oldpoint)
             cx, cy = self.map_to_view(*point)
             painter.drawPoint(cx, cy)
-            painter.drawLine(cx, cy, cx + d / 2, cy)
-            painter.drawLine(cx, cy, cx, cy + d / 2)
-            painter.drawLine(cx, cy, cx - d / 2, cy)
-            painter.drawLine(cx, cy, cx, cy - d / 2)
+            painter.drawLine(cx, cy, int(cx + d / 2), cy)
+            painter.drawLine(cx, cy, cx, int(cy + d / 2))
+            painter.drawLine(cx, cy, int(cx - d / 2), cy)
+            painter.drawLine(cx, cy, cx, int(cy - d / 2))
             if oldpoint != []:
                 painter.drawLine(cx, cy, ox, oy)
                 font = painter.font()
@@ -1511,7 +1510,9 @@ class ViewRotation(QtWidgets.QLabel):
                     / 100
                 )
                 painter.drawText(
-                    (cx + ox) / 2 + d, (cy + oy) / 2 + d, str(distance) + " nm"
+                    int((cx + ox) / 2 + d), 
+                    int((cy + oy) / 2 + d), 
+                    str(distance) + " nm",
                 )
             oldpoint = point
         painter.end()
@@ -1836,7 +1837,7 @@ class ViewRotation(QtWidgets.QLabel):
 
         cx = self.width() * (x - self.viewport[0][1]) / self.viewport_width()
         cy = self.height() * (y - self.viewport[0][0]) / self.viewport_height()
-        return cx, cy
+        return int(cx), int(cy)
 
     def pan_relative(self, dy, dx):
         """ 

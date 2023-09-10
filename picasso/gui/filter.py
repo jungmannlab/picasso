@@ -11,7 +11,7 @@
 
 import sys, traceback, importlib, pkgutil
 from PyQt5 import QtCore, QtGui, QtWidgets
-from matplotlib.backends.backend_qt4agg import (
+from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg,
     NavigationToolbar2QT,
 )
@@ -21,8 +21,6 @@ from matplotlib.colors import LogNorm
 import numpy as np
 import os.path
 from .. import io, lib
-
-# from icecream import ic
 
 plt.style.use("ggplot")
 
@@ -135,7 +133,7 @@ class HistWindow(PlotWindow):
             self.on_span_select,
             "horizontal",
             useblit=True,
-            rectprops=dict(facecolor="green", alpha=0.2),
+            props=dict(facecolor="green", alpha=0.2),
         )
         self.canvas.draw()
 
@@ -169,7 +167,6 @@ class Hist2DWindow(PlotWindow):
         y = y[valid]
         # Prepare the figure
         self.figure.clear()
-        # self.canvas.figure = self.figure
         axes = self.figure.add_subplot(111)
         # Start hist2 version
         bins_x = lib.calculate_optimal_bins(x, 1000)
@@ -189,7 +186,7 @@ class Hist2DWindow(PlotWindow):
             axes,
             self.on_rect_select,
             useblit=False,
-            rectprops=dict(facecolor="green", alpha=0.2, fill=True),
+            props=dict(facecolor="green", alpha=0.2, fill=True),
         )
         self.canvas.draw()
 

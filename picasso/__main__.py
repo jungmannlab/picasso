@@ -440,7 +440,7 @@ def _density(files, radius):
             io.save_locs(base + "_density.hdf5", locs, info)
 
 
-def _dbscan(files, radius, min_density, pixelsize):
+def _dbscan(files, radius, min_density, pixelsize=None):
     import glob
 
     paths = glob.glob(files)
@@ -468,7 +468,7 @@ def _dbscan(files, radius, min_density, pixelsize):
             )
 
 
-def _hdbscan(files, min_cluster, min_samples, pixelsize):
+def _hdbscan(files, min_cluster, min_samples, pixelsize=None):
     import glob
 
     paths = glob.glob(files)
@@ -496,7 +496,7 @@ def _hdbscan(files, min_cluster, min_samples, pixelsize):
             )
 
 def _smlm_clusterer(
-        files, radius, min_locs, pixelsize, basic_fa=False, radius_z=None
+        files, radius, min_locs, pixelsize=None, basic_fa=False, radius_z=None
     ):
     import glob
 
@@ -1279,7 +1279,8 @@ def main():
     dbscan_parser.add_argument(
         "pixelsize",
         type=int,
-        help=("camera pixel size in nm (used for 3D localizations only)"),
+        help=("camera pixel size in nm (required for 3D localizations only)"),
+        default=None,
     )
 
     # HDBSCAN
@@ -1307,7 +1308,8 @@ def main():
     hdbscan_parser.add_argument(
         "pixelsize",
         type=int,
-        help=("camera pixel size in nm (used for 3D localizations only)"),
+        help=("camera pixel size in nm (required for 3D localizations only)"),
+        default=None,
     )
 
     # SMLM clusterer
@@ -1335,7 +1337,8 @@ def main():
     smlm_cluster_parser.add_argument(
         "pixelsize",
         type=int,
-        help=("camera pixel size in nm (used for 3D localizations only)"),
+        help=("camera pixel size in nm (required for 3D localizations only)"),
+        default=None,
     )
     smlm_cluster_parser.add_argument(
         "basic_fa",
