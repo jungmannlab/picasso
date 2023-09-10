@@ -9,7 +9,7 @@ pyyaml==6.0.1
 scikit-learn==1.3
 tqdm==4.62.0
 lmfit==1.0.2
-streamlit==1.11.1
+streamlit==1.26.0
 moviepy==1.0.3
 nd2==0.7.2
 sqlalchemy==1.4.22
