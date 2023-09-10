@@ -24,7 +24,7 @@ jobs:
       - name: Test pip installation 
         shell: bash -l {0}
         run: |
-          conda create -n picasso python=3.8 -y
+          conda create -n picasso python=3.10 -y
           conda activate picasso
           pip install picassosr
           conda deactivate
