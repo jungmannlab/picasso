@@ -10901,7 +10901,7 @@ class Window(QtWidgets.QMainWindow):
             base, ext = os.path.splitext(self.view.locs_paths[0])
         except AttributeError:
             return
-        out_path = base + ".png"
+        out_path = base + "_view.png"
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
@@ -10939,6 +10939,7 @@ class Window(QtWidgets.QMainWindow):
             self.info_dialog.change_fov.h_box.value(),
         ]
         d = self.display_settings_dlg
+        colors = [_.currentText() for _ in self.dataset_dialog.colorselection]
 
         info = {
             "FOV (X, Y, Width, Height)": fov_info,
@@ -10950,6 +10951,7 @@ class Window(QtWidgets.QMainWindow):
             "Blur Method": d.blur_methods[d.blur_buttongroup.checkedButton()],
             "Scalebar Length (nm)": d.scalebar.value(),
             "Localizations Loaded": self.view.locs_paths,
+            "Colors": colors,
         }
 
         io.save_info(path, [info])
