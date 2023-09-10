@@ -14,6 +14,6 @@ moviepy==1.0.3
 nd2==0.7.2
 sqlalchemy==1.4.22
 plotly-express==0.4.1
-watchdog==2.1.4
+watchdog==3.0.0
 psutil==5.9.5
 nd2reader==3.3.0
