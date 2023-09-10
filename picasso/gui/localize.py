@@ -211,7 +211,6 @@ class CamSettingComboBox(QtWidgets.QComboBox):
     def change_target_choices(self, index):
         cam_combos = self.cam_combos[self.camera]
         sensitivity = CONFIG["Cameras"][self.camera]["Sensitivity"]
-        print('sensitivity', sensitivity)
         for i in range(self.index + 1):
             sensitivity = sensitivity[cam_combos[i].currentText()]
         if len(cam_combos) > self.index + 1:
@@ -1388,8 +1387,6 @@ class Window(QtWidgets.QMainWindow):
         try:
             locs, info = io.load_locs(path)
 
-            print(locs)
-            print(info)
             max_frames = int(self.info[0]["Frames"])
             n_frames, ok = QtWidgets.QInputDialog.getInteger(
                 self,

@@ -4388,7 +4388,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         contains the camera pixel size (nm)
     render_check : QCheckBox
         tick to activate parameter rendering
-    scalebar : QDoubleSpinBox
+    scalebar : QSpinBox
         contains the scale bar's length (nm)
     scalebar_groupbox : QGroupBox
         group with options for customizing scale bar, tick to display
@@ -4568,8 +4568,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         scalebar_grid.addWidget(
             QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
         )
-        self.scalebar = QtWidgets.QDoubleSpinBox()
-        self.scalebar.setRange(0.0001, 100000)
+        self.scalebar = QtWidgets.QSpinBox()
+        self.scalebar.setRange(1, 100000)
         self.scalebar.setValue(500)
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.update_scene)
@@ -10901,7 +10901,7 @@ class Window(QtWidgets.QMainWindow):
             base, ext = os.path.splitext(self.view.locs_paths[0])
         except AttributeError:
             return
-        out_path = base + ".png"
+        out_path = base + "_view.png"
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
@@ -10939,6 +10939,7 @@ class Window(QtWidgets.QMainWindow):
             self.info_dialog.change_fov.h_box.value(),
         ]
         d = self.display_settings_dlg
+        colors = [_.currentText() for _ in self.dataset_dialog.colorselection]
 
         info = {
             "FOV (X, Y, Width, Height)": fov_info,
@@ -10950,6 +10951,7 @@ class Window(QtWidgets.QMainWindow):
             "Blur Method": d.blur_methods[d.blur_buttongroup.checkedButton()],
             "Scalebar Length (nm)": d.scalebar.value(),
             "Localizations Loaded": self.view.locs_paths,
+            "Colors": colors,
         }
 
         io.save_info(path, [info])

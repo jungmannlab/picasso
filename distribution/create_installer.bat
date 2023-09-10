@@ -3,7 +3,7 @@ call DEL /F/Q/S dist > NUL
 call RMDIR /Q/S build
 call RMDIR /Q/S dist
 call conda env remove -n picasso_installer
-call conda create -n picasso_installer python=3.8 -y
+call conda create -n picasso_installer python=3.10 -y
 call conda activate picasso_installer
 call pip install pyinstaller==4.2
 cd %~dp0\..
