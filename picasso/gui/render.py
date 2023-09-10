@@ -4388,7 +4388,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         contains the camera pixel size (nm)
     render_check : QCheckBox
         tick to activate parameter rendering
-    scalebar : QDoubleSpinBox
+    scalebar : QSpinBox
         contains the scale bar's length (nm)
     scalebar_groupbox : QGroupBox
         group with options for customizing scale bar, tick to display
@@ -4568,8 +4568,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         scalebar_grid.addWidget(
             QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
         )
-        self.scalebar = QtWidgets.QDoubleSpinBox()
-        self.scalebar.setRange(0.0001, 100000)
+        self.scalebar = QtWidgets.QSpinBox()
+        self.scalebar.setRange(1, 100000)
         self.scalebar.setValue(500)
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.update_scene)

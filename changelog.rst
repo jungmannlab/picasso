@@ -13,6 +13,7 @@ Last change: 08-SEP-2023 MTS
 - Calling clustering functions from ``picasso.clusterer`` does not require camera pixel size. Same applies for the corresponding functions in CMD. *Only if 3D localizations are used, the pixel size must be provided.*
 - HDBSCAN is installed by default since it is distributed within the new version of ``scikit-learn 1.3.0``
 - Screenshot ``.yaml`` file contains the list of colors used in the current rendering
+- Render scale bar allows only integer values (i.e., no decimals)
 
 0.6.1
 -----
