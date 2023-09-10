@@ -8,10 +8,13 @@ Last change: 08-SEP-2023 MTS
 - Picasso runs on Python 3.10 (jump from Python 3.7-3.8)
 - New installation instructions
 - Dependencies updated, meaning that M1 should have no problems with old versions of SciPy, etc.
+- Localize: arbitrary number of sensitivity categories
 - Picasso Render legend displays larger font
 - Picasso Render Test Clusterer displays info when no clusters found instead of throwing an error
 - Calling clustering functions from ``picasso.clusterer`` does not require camera pixel size. Same applies for the corresponding functions in CMD. *Only if 3D localizations are used, the pixel size must be provided.*
 - HDBSCAN is installed by default since it is distributed within the new version of ``scikit-learn 1.3.0``
+- Screenshot ``.yaml`` file contains the list of colors used in the current rendering
+- Render scale bar allows only integer values (i.e., no decimals)
 
 0.6.1
 -----
