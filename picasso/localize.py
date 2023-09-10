@@ -127,27 +127,18 @@ def identify_in_image(image, minimum_ng, box):
 
 
 def identify_in_frame(frame, minimum_ng, box, roi=None):
-    # print('start identifying in frame')
     if roi is not None:
         frame = frame[roi[0][0] : roi[1][0], roi[0][1] : roi[1][1]]
     image = _np.float32(frame)  # otherwise numba goes crazy
-    # print('start identifying in image')
     y, x, net_gradient = identify_in_image(image, minimum_ng, box)
-    # print('done identifying in image')
     if roi is not None:
         y += roi[0][0]
         x += roi[0][1]
-    # print('done identifying in frame')
     return y, x, net_gradient
 
 def identify_frame(frame, minimum_ng, box, frame_number, roi=None, resultqueue=None):
-    # print('start identifying frame')
     y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
-    # print('got result of "in frame"')
-    # print('result x', x)
-    # print('len {:d}'.format(len(x)))
     frame = frame_number * _np.ones(len(x))
-    # print('done identifying frame')
     result = _np.rec.array(
         (frame, x, y, net_gradient),
         dtype=[("frame", "i"), ("x", "i"), ("y", "i"), ("net_gradient", "f4")],
@@ -228,7 +219,6 @@ def identify_async(movie, minimum_ng, box, roi=None):
 
 
 def identify(movie, minimum_ng, box, threaded=True):
-    print('threaded', threaded)
     if threaded:
         current, futures = identify_async(movie, minimum_ng, box)
         identifications = [_.result() for _ in futures]
@@ -436,7 +426,6 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
 
 
 def localize(movie, info, parameters):
-    print("localizing")
     identifications = identify(movie, parameters)
     return fit(movie, info, identifications, parameters["Box Size"])
 
@@ -461,10 +450,7 @@ def check_kinetics(locs, info):
     print("Linking.. ", end ='')
     locs = locs[0:MAX_LOCS]
     locs = _postprocess.link(locs, info=info)
-    # print('Dark Time')
-    # locs = _postprocess.compute_dark_times(locs)
     len_mean = locs.len.mean()
-    # dark_mean = locs.dark.mean()
     print(f"Mean lenght {len_mean:.2f} frames.")
 
     return len_mean
