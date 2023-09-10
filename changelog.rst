@@ -1,18 +1,33 @@
 Changelog
 =========
 
-Last change: 25-MAR-2023 MTS
+Last change: 08-SEP-2023 MTS
+
+0.6.2
+-----
+- Picasso runs on Python 3.10 (jump from Python 3.7-3.8)
+- New installation instructions
+- Dependencies updated, meaning that M1 should have no problems with old versions of SciPy, etc.
+- Picasso Render legend displays larger font
+- Picasso Render Test Clusterer displays info when no clusters found instead of throwing an error
+- Calling clustering functions from ``picasso.clusterer`` does not require camera pixel size. Same applies for the corresponding functions in CMD. *Only if 3D localizations are used, the pixel size must be provided.*
+- HDBSCAN is installed by default since it is distributed within the new version of ``scikit-learn 1.3.0``
 
 0.6.1
 -----
+- **Measuring in the 3D window (Measure and Scalebar) fixed (previous versions did not convert the value correctly)**
 - Localize GUI allows for numerical ROI input in the Parameters Dialog
 - Allow loading individual .tif files as in Picasso v0.4.11
 - RESI localizations have the new column ``cluster_id``
+- Building animation shows progress (Render 3D)
+- Export current view in Render saves metadata; An extra image is saved with a scalebar if the user did not set it
+- Clustering in command window requires camera pixel size to be input (instead of inserting one after calling the function)
+- Bug fixes
 
 0.6.0
 -----
-- New RESI (Resolution Enhancement by Sequential Imaging) dialog in Picasso Render allowing for a substantial resolution boost, (*to be published*)
-- Remove quantum efficiency when converting raw data into photons in Picasso Localize
+- New RESI (Resolution Enhancement by Sequential Imaging) dialog in Picasso Render allowing for a substantial resolution boost, (*Reinhardt, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9)
+- **Remove quantum efficiency when converting raw data into photons in Picasso Localize**
 - Input ROI using command-line ``picasso localize``, see `here <https://picassosr.readthedocs.io/en/latest/cmd.html>`_.
 
 0.5.7

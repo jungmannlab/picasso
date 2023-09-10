@@ -15,9 +15,10 @@ import numpy as _np
 import numba as _numba
 import scipy.signal as _signal
 from scipy.spatial.transform import Rotation as _Rotation
-# from icecream import ic
+
 
 _DRAW_MAX_SIGMA = 3
+
 
 def render(
     locs,
@@ -119,6 +120,7 @@ def render(
     else:
         raise Exception("blur_method not understood.")
 
+
 @_numba.njit
 def _render_setup(
     locs, 
@@ -170,6 +172,7 @@ def _render_setup(
     y = oversampling * (y - y_min)
     image = _np.zeros((n_pixel_y, n_pixel_x), dtype=_np.float32)
     return image, n_pixel_y, n_pixel_x, x, y, in_view
+
 
 @_numba.njit
 def _render_setup3d(
@@ -262,6 +265,7 @@ def _render_setup3d(
 #     image = _np.zeros((n_pixel_x, n_pixel_z), dtype=_np.float32)
 #     return image, n_pixel_z, n_pixel_x, x, z, in_view
 
+
 @_numba.njit
 def _fill(image, x, y):
     """
@@ -282,6 +286,7 @@ def _fill(image, x, y):
     y = y.astype(_np.int32)
     for i, j in zip(x, y):
         image[j, i] += 1
+
 
 @_numba.njit
 def _fill3d(image, x, y, z):
@@ -308,6 +313,7 @@ def _fill3d(image, x, y, z):
     z += _np.min(z) # because z takes also negative values
     for i, j, k in zip(x, y, z):
         image[j, i, k] += 1
+
 
 @_numba.njit
 def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
@@ -362,6 +368,7 @@ def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
                         + (i - y_ + 0.5) ** 2 / (2 * sy_**2)
                     )
                 ) / (2 * _np.pi * sx_ * sy_)
+
 
 @_numba.njit
 def _fill_gaussian_rot(
@@ -483,6 +490,7 @@ def _fill_gaussian_rot(
                         / (((2*_np.pi) ** 3 * dcr) ** 0.5)
                     )
 
+
 @_numba.njit
 def inverse_3x3(a):
     """
@@ -518,6 +526,7 @@ def inverse_3x3(a):
 
     return c    
 
+
 @_numba.njit
 def determinant_3x3(a):
     """
@@ -541,6 +550,7 @@ def determinant_3x3(a):
         - a[0,1] * (a[1,0] * a[2,2] - a[2,0] * a[1,2]) 
         + a[0,2] * (a[1,0] * a[2,1] - a[2,0] * a[1,1])
     )
+
 
 def render_hist(
     locs, 
@@ -592,6 +602,7 @@ def render_hist(
     _fill(image, x, y)
     return len(x), image
 
+
 # @_numba.jit(nopython=True, nogil=True)
 # def render_histz(locs, oversampling, x_min, z_min, x_max, z_max):
 #     image, n_pixel_z, n_pixel_x, x, z, in_view = _render_setupz(
@@ -599,6 +610,7 @@ def render_hist(
 #     )
 #     _fill(image, z, x)
 #     return len(x), image
+
 
 @_numba.jit(nopython=True, nogil=True)
 def render_hist3d(
@@ -651,6 +663,7 @@ def render_hist3d(
     )
     _fill3d(image, x, y, z)
     return len(x), image
+
 
 def render_gaussian(
     locs, 
@@ -731,6 +744,7 @@ def render_gaussian(
 
     return len(x), image
 
+
 def render_gaussian_iso(
     locs, 
     oversampling, 
@@ -810,6 +824,7 @@ def render_gaussian_iso(
 
     return len(x), image
 
+
 def render_convolve(
     locs, 
     oversampling, 
@@ -876,6 +891,7 @@ def render_convolve(
         )
         return n, _fftconvolve(image, blur_width, blur_height)
 
+
 def render_smooth(
     locs, 
     oversampling, 
@@ -933,6 +949,7 @@ def render_smooth(
         _fill(image, x, y)
         return n, _fftconvolve(image, 1, 1)
 
+
 def _fftconvolve(image, blur_width, blur_height): 
     """
     Blurs (convolves) 2D image using fast fourier transform.
@@ -959,6 +976,7 @@ def _fftconvolve(image, blur_width, blur_height):
     kernel = _np.outer(kernel_y, kernel_x)
     kernel /= kernel.sum()
     return _signal.fftconvolve(image, kernel, mode="same")
+
 
 def rotation_matrix(angx, angy, angz):
     """
@@ -1002,6 +1020,7 @@ def rotation_matrix(angx, angy, angz):
     ) # rotation matrix around z axis
     rot_mat = rot_mat_x @ rot_mat_y @ rot_mat_z
     return _Rotation.from_matrix(rot_mat)
+
 
 def locs_rotation(
     locs, 

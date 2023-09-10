@@ -21,7 +21,7 @@ Identification and fitting of single-molecule spots
 3. To adjust spot identification and fit parameters, open the ``Parameters`` dialog (select ``Analyze`` > ``Parameters``).
 4. In the ``Identification`` group, set the ``Box side length`` to the rounded integer value of 6 × σ + 1, where σ is the standard deviation of the PSF. In an optimized microscope setup, σ is one pixel, and the respective ``Box side length`` should be set to 7. The value of ``Min. net gradient`` specifies a minimum threshold above which spots should be considered for fitting. The net gradient value of a spot is roughly proportional to its intensity, independent of its local background. By checking ``Preview``, the spots identified with the current settings will be marked in the displayed frame. Adjust ``Min. net gradient`` to a value at which only spots are detected (no background).
 5. (Optional) The ``Identification`` group contains an extra box to input the region of interest (ROI) that is to be considered during identification (units in camera pixels). Alternatively, the ROI can be selected with clicking on the display with the left mouse button and dragging the displayed rectangle.
-6. In the ``Photon conversion`` group, adjust ``EM Gain``, ``Baseline``, ``Sensitivity`` and ``Quantum Efficiency`` according to your camera specifications and the experimental conditions. Set ``EM Gain`` to 1 for conventional output amplification. ``Baseline`` is the average dark camera count. ``Sensitivity`` is the conversion factor (electrons per analog-to-digital (A/D) count) and ``Quantum Efficiency`` should be set according to the average emission wavelength. These parameters are critical to converting camera counts to photons correctly. The quality of the upcoming maximum likelihood fit strongly depends on a Poisson photon noise model, and thus on the absolute photon count. For simulated data, generated with ``Picasso: Simulate``, set the parameters as follows: ``EM Gain`` = 1, ``Baseline`` = 0, ``Sensitivity`` = 1, ``Quantum Efficiency`` = 1.
+6. In the ``Photon conversion`` group, adjust ``EM Gain``, ``Baseline``, ``Sensitivity`` and ``Quantum Efficiency`` according to your camera specifications and the experimental conditions. Set ``EM Gain`` to 1 for conventional output amplification. ``Baseline`` is the average dark camera count. ``Sensitivity`` is the conversion factor (electrons per analog-to-digital (A/D) count). ``Quantum Efficiency`` is not used since version 0.6.0 and is kept for backward compatibility only. These parameters are critical to converting camera counts to photons correctly. The quality of the upcoming maximum likelihood fit strongly depends on a Poisson photon noise model, and thus on the absolute photon count. For simulated data, generated with ``Picasso: Simulate``, set the parameters as follows: ``EM Gain`` = 1, ``Baseline`` = 0, ``Sensitivity`` = 1.
 7. From the menu bar, select ``Analyze`` > ``Localize (Identify & Fit)`` to start spot identification and fitting in all movie frames. The status of this computation is displayed in the window's status bar. After completion, the fit results will be saved in a new file in the same folder as the movie, in which the filename is the base name of the movie file with the extension ``_locs.hdf5``. Furthermore, information about the movie and analysis procedure will be saved in an accompanying file with the extension ``_locs.yaml``; this file can be inspected using a text editor.
 
 Camera Config
@@ -29,8 +29,8 @@ Camera Config
 
 Picasso can remember default cameras and will use saved camera parameters. In order to use camera configs, create a file named ``config.yaml`` in the picasso folder. To start with a template, modify ``config_template.yaml`` that can be found in the folder per default. Picasso will compare the entries with Micro-Manager-Metadata and match the sensitivity values. If no matching entries can be found (e.g., if the file was not created with Micro-Manager) the config file will still be used to create a dropdown menu to select the different categories. The camera config can also be used to define a default camera that will always be used. Indentions are used for definitions.
 
-Example 1: Default Camera
-~~~~~~~~~~~~~~~~~~~~~~~~~
+Example: Default Camera
+~~~~~~~~~~~~~~~~~~~~~~~
 
 ::
 
@@ -40,22 +40,7 @@ Example 1: Default Camera
        Sensitivity: 0.5
        Quantum Efficiency: 1.0
 
-If there is only one camera entry, picasso will create a dropdown menu that has always selected this camera. ### Example 2: Default Camera with different settings Consider a camera that is used for different wavelengths and has different quantum efficiencies:
-
-::
-
-   Cameras:
-     Camera1:
-       Baseline: 100
-       Sensitivity: 1
-       Quantum Efficiency:
-         525: 0.5
-         595: 0.6
-         700: 0.7
-
-This will create a dropdown menu labeled “Emission Wavelength” were the user can select the corresponding entry that will change the sensitivity parameter.
-
-Picasso will search for the following entries in the config.yaml:
+If there is only one camera entry, picasso will create a dropdown menu that has always selected this camera. 
 
 Gain
 ^^^^
@@ -101,26 +86,7 @@ Here, two Sensitivity Categories are given ``PixelReadoutRate`` and ``Sensitivit
 Quantum Efficiency
 ^^^^^^^^^^^^^^^^^^
 
-If the string ``Quantum Efficiency`` can be found in the config, picasso will search for a value for the key named ``Channel Device`` in the Micro-Manager metadata and match if found.
-
-::
-
-   Cameras:
-     Camera_1:
-       Baseline: 100
-       Quantum Efficiency:
-         525: 0.5
-         595: 0.6
-         700: 0.7
-       Channel Device:
-         Name: TIFilterBlock1-Label
-         Emission Wavelengths:
-           1-R640: 700
-           2-G561: 595
-           3-B489: 525
-       Sensitivity: 0.47
-
-Picasso will search for the entry ``TIFilterBlock1-Label`` in the Micro-Manager Metadata. If this would be ``1-G561``, the Emission-Wavelength of ``595`` will be used to determine the Quantum Efficiency (here 0.6).
+This feature is not used since Picasso 0.6.0. It is kept for backward compatibility only.
 
 Several Cameras
 ^^^^^^^^^^^^^^^

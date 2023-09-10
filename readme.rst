@@ -23,38 +23,17 @@ A collection of tools for painting super-resolution images. The Picasso software
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
 
+Picasso 0.6.1
+-------------
+In previous version, the rotation window (3D Render) showed an incorrect length of the scalebar. This has been fixed.
+
 Picasso 0.6.0
 -------------
+RESI dialog added to Picasso Render, allowing for substantial boost in spatial resolution (*Reinhardt, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9).
 
-RESI (Resolution Enhancement by Sequential Imaging)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-RESI dialog added to Picasso Render, allowing for substantial boost in spatial resolution (*to be published*).
-
-Photon conversion update
-~~~~~~~~~~~~~~~~~~~~~~~~
-The formula for conversion of raw data to photons was changed, resulting in different numbers of photons and thus **affecting the localization precision** accordingly.
-
-Until version *0.5.7*, the formula was: 
-
-*(RAW_DATA - BASELINE) x SENSITIVITY / (GAIN x QE)*, where QE is quantum efficiency of the camera. 
-
-In Picasso *0.6.0* it was changed to:
-
-*(RAW_DATA - BASELINE) x SENSITIVITY / GAIN*
-
-**i.e., quantum effiency was removed.** Thus, the estimate of the localization precision better approximates the true precision.
-
-
-For backward compatibility, quantum efficiency will be kept in Picasso Localize, however, it will have no effect on the new photon conversion formula.
-
-Picasso 0.5.0
--------------
-Picasso has introduced many changes, including 3D rotation window and a new clustering algorithm in Render and reading of .nd2 files in Localize. Please check the `changelog <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_ to see all modifications.
-
-Picasso 0.4.0
--------------
-Picasso now has a server-based workflow management-system. Check out `here <https://picassosr.readthedocs.io/en/latest/server.html>`__.
-
+Previous versions
+-----------------
+To see all changes introduced in previous versions, click `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
 
 Installation
 ------------
@@ -63,7 +42,7 @@ Check out the `Picasso release page <https://github.com/jungmannlab/picasso/rele
 
 For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X), please follow the advanced installation instructions below.
 
-Other installation modes (Python 3.8)
+Other installation modes (Python 3.10)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso’s internal routines in custom Python programs. Those can be imported by running, for example, ``from picasso import io`` (see the "Example usage" tab below) to use input/output functions from Picasso. For windows, it is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
@@ -71,7 +50,7 @@ As an alternative to the stand-alone program for end-users, Picasso can be insta
 Via PyPI
 ^^^^^^^^
 
-1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.8``
+1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
 2. Activate the environment: ``conda activate picasso``.
 3. Install Picasso package using: ``pip install picassosr``.
 4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc.
@@ -81,7 +60,7 @@ For Developers
 
 If you wish to use your local version of Picasso with your own modifications:
 
-1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.8``
+1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
 2. Activate the environment: ``conda activate picasso``.
 3. Change to the directory of choice using ``cd``.
 4. Clone this GitHub repository by running ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
@@ -105,7 +84,6 @@ Optional packages
 
 Regardless of whether Picasso was installed via PyPI or by cloning the GitHub repository, some packages may be additionally installed to allow extra functionality:
 
-- ``pip install hdbscan`` for clustering with `HDBSCAN <https://hdbscan.readthedocs.io/en/latest/index.html>`__.
 - ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`__.
 
 To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
@@ -164,7 +142,7 @@ Contributions & Copyright
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of Biochemistry
 | Copyright (c) 2020-2021 Maximilian Strauss
-| Copyright (c) 2022 Rafal Kowalewski
+| Copyright (c) 2022-2023 Rafal Kowalewski
 
 Citing Picasso
 --------------

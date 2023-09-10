@@ -21,8 +21,7 @@ from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
 from collections import UserDict
 
 try:
-    from pygpufit import gpufit as gf
-
+    from pygpufit import gpufit
     gpufit_installed = True
 except ImportError:
     gpufit_installed = False
@@ -41,8 +40,8 @@ class RubberBand(QtWidgets.QRubberBand):
         color = QtGui.QColor(QtCore.Qt.blue)
         painter.setPen(QtGui.QPen(color))
         rect = event.rect()
-        rect.setHeight(rect.height() - 1)
-        rect.setWidth(rect.width() - 1)
+        rect.setHeight(int(rect.height() - 1))
+        rect.setWidth(int(rect.width() - 1))
         painter.drawRect(rect)
 
 
@@ -184,7 +183,7 @@ class OddSpinBox(QtWidgets.QSpinBox):
     def on_editing_finished(self):
         value = self.value()
         if value % 2 == 0:
-            self.setValue(value + 1)
+            self.setValue(int(value + 1))
 
 
 class CamSettingComboBox(QtWidgets.QComboBox):
@@ -337,15 +336,15 @@ class PromptInfoDialog(QtWidgets.QDialog):
         grid.addWidget(self.dtype, 1, 1)
         grid.addWidget(QtWidgets.QLabel("Frames:"), 2, 0)
         self.frames = QtWidgets.QSpinBox()
-        self.frames.setRange(1, 1e9)
+        self.frames.setRange(1, int(1e9))
         grid.addWidget(self.frames, 2, 1)
         grid.addWidget(QtWidgets.QLabel("Height:"), 3, 0)
         self.movie_height = QtWidgets.QSpinBox()
-        self.movie_height.setRange(1, 1e9)
+        self.movie_height.setRange(1, int(1e9))
         grid.addWidget(self.movie_height, 3, 1)
         grid.addWidget(QtWidgets.QLabel("Width"), 4, 0)
         self.movie_width = QtWidgets.QSpinBox()
-        self.movie_width.setRange(1, 1e9)
+        self.movie_width.setRange(1, int(1e9))
         grid.addWidget(self.movie_width, 4, 1)
         self.save = QtWidgets.QCheckBox("Save info to yaml file")
         self.save.setChecked(True)
@@ -441,7 +440,7 @@ class ParametersDialog(QtWidgets.QDialog):
         # Min. Net Gradient
         identification_grid.addWidget(QtWidgets.QLabel("Min.  Net Gradient:"), 1, 0)
         self.mng_spinbox = QtWidgets.QSpinBox()
-        self.mng_spinbox.setRange(0, 1e9)
+        self.mng_spinbox.setRange(0, int(1e9))
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
         self.mng_spinbox.setKeyboardTracking(False)
         self.mng_spinbox.valueChanged.connect(self.on_mng_spinbox_changed)
@@ -575,7 +574,7 @@ class ParametersDialog(QtWidgets.QDialog):
         # EM Gain
         photon_grid.addWidget(QtWidgets.QLabel("EM Gain:"), 0, 0)
         self.gain = QtWidgets.QSpinBox()
-        self.gain.setRange(1, 1e6)
+        self.gain.setRange(1, int(1e6))
         self.gain.setValue(1)
         photon_grid.addWidget(self.gain, 0, 1)
 
@@ -643,7 +642,7 @@ class ParametersDialog(QtWidgets.QDialog):
         mle_grid.addWidget(self.convergence_criterion, 0, 1)
         mle_grid.addWidget(QtWidgets.QLabel("Max. iterations:"), 1, 0)
         self.max_it = QtWidgets.QSpinBox()
-        self.max_it.setRange(1, 1e6)
+        self.max_it.setRange(1, int(1e6))
         self.max_it.setValue(1000)
         mle_grid.addWidget(self.max_it, 1, 1)
 
@@ -1005,14 +1004,14 @@ class ContrastDialog(QtWidgets.QDialog):
         grid.addWidget(black_label, 0, 0)
         self.black_spinbox = QtWidgets.QSpinBox()
         self.black_spinbox.setKeyboardTracking(False)
-        self.black_spinbox.setRange(0, 999999)
+        self.black_spinbox.setRange(1, 999999)
         self.black_spinbox.valueChanged.connect(self.on_contrast_changed)
         grid.addWidget(self.black_spinbox, 0, 1)
         white_label = QtWidgets.QLabel("White:")
         grid.addWidget(white_label, 1, 0)
         self.white_spinbox = QtWidgets.QSpinBox()
         self.white_spinbox.setKeyboardTracking(False)
-        self.white_spinbox.setRange(0, 999999)
+        self.white_spinbox.setRange(1, 999999)
         self.white_spinbox.valueChanged.connect(self.on_contrast_changed)
         grid.addWidget(self.white_spinbox, 1, 1)
         self.auto_checkbox = QtWidgets.QCheckBox("Auto")
@@ -1313,8 +1312,8 @@ class Window(QtWidgets.QMainWindow):
 
             for element in self._picks:
                 # drifted:
-                xloc = np.ones((maxframes,), dtype=np.float) * element[0]
-                yloc = np.ones((maxframes,), dtype=np.float) * element[1]
+                xloc = np.ones((maxframes,), dtype=float) * element[0]
+                yloc = np.ones((maxframes,), dtype=float) * element[1]
                 if driftpath:
                     xloc += drift[:, 1]
                     yloc += drift[:, 0]
@@ -1408,8 +1407,8 @@ class Window(QtWidgets.QMainWindow):
             for element in locs:
                 currframe = element["frame"]
                 if currframe > n_frames and currframe < (max_frames - n_frames):
-                    xloc = np.ones((2 * n_frames + 1,), dtype=np.float) * element["x"]
-                    yloc = np.ones((2 * n_frames + 1,), dtype=np.float) * element["y"]
+                    xloc = np.ones((2 * n_frames + 1,), dtype=float) * element["x"]
+                    yloc = np.ones((2 * n_frames + 1,), dtype=float) * element["y"]
                     frames = np.arange(currframe - n_frames, currframe + n_frames + 1)
                     gradient = np.ones(2 * n_frames + 1) + 100
                     n_id_all = np.ones(2 * n_frames + 1) + n_id

@@ -618,7 +618,9 @@ class Window(QtWidgets.QMainWindow):
 
         sindex += -2
 
-        importDesignButton = QtWidgets.QPushButton("Import structure from design")
+        importDesignButton = QtWidgets.QPushButton(
+            "Import structure from Picasso: Design"
+        )
         importDesignButton.clicked.connect(self.importDesign)
         sgrid.addWidget(importDesignButton, 15 + sindex, 0, 1, 3)
 
@@ -982,7 +984,7 @@ class Window(QtWidgets.QMainWindow):
 
     def simulate(self):
         exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
-        exchangeroundstoSim = exchangeroundstoSim.astype(_np.int)
+        exchangeroundstoSim = exchangeroundstoSim.astype(int)
 
         noexchangecolors = len(set(exchangeroundstoSim))
         exchangecolors = list(set(exchangeroundstoSim))
@@ -1109,8 +1111,8 @@ class Window(QtWidgets.QMainWindow):
                 bindingsitesx = partstruct[0, :]
 
                 nosites = len(bindingsitesx)  # number of binding sites in image
-                photondist = _np.zeros((nosites, frames), dtype=_np.int)
-                spotkinetics = _np.zeros((nosites, 4), dtype=_np.float)
+                photondist = _np.zeros((nosites, frames), dtype=int)
+                spotkinetics = _np.zeros((nosites, 4), dtype=float)
 
                 timetrace = {}
 
@@ -1134,7 +1136,7 @@ class Window(QtWidgets.QMainWindow):
                         + " %"
                     )
                     self.statusBar().showMessage(outputmsg)
-                    self.mainpbar.setValue(_np.round(i / nosites * 1000) / 10)
+                    self.mainpbar.setValue(int(_np.round(i / nosites * 1000) / 10))
 
                 self.statusBar().showMessage("Converting to image ... ")
                 onevents = self.vectorToString(spotkinetics[:, 0])
@@ -1301,7 +1303,7 @@ class Window(QtWidgets.QMainWindow):
                         )
 
                         self.statusBar().showMessage(outputmsg)
-                        self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
+                        self.mainpbar.setValue(int(_np.round(runner / frames * 1000) / 10))
                         app.processEvents()
 
                     movie = simulate.noisy_p(movie, background)
@@ -1398,16 +1400,16 @@ class Window(QtWidgets.QMainWindow):
             handleex = _np.asarray((info[0]["Structure.HandleEx"]).split(","))
             handless = _np.asarray((info[0]["Structure.HandleStruct"]).split(","))
 
-            handlexx = handlexx.astype(_np.float)
-            handleyy = handleyy.astype(_np.float)
-            handleex = handleex.astype(_np.float)
-            handless = handless.astype(_np.float)
+            handlexx = handlexx.astype(float)
+            handleyy = handleyy.astype(float)
+            handleex = handleex.astype(float)
+            handless = handless.astype(float)
 
-            handleex = handleex.astype(_np.int)
-            handless = handless.astype(_np.int)
+            handleex = handleex.astype(int)
+            handless = handless.astype(int)
 
             handle3d = _np.asarray((info[0]["Structure.Handle3d"]).split(","))
-            handle3d = handle3d.astype(_np.float)
+            handle3d = handle3d.astype(float)
             structure = _np.array([handlexx, handleyy, handleex, handless, handle3d])
 
             self.structurecombo.setCurrentIndex(2)

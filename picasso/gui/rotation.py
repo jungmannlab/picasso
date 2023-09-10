@@ -19,13 +19,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
 from PyQt5 import QtCore, QtGui, QtWidgets
-from tqdm import tqdm
 
 from numpy.lib.recfunctions import stack_arrays
 
 from .. import io, render
+from ..lib import StatusDialog, ProgressDialog
 
-# from icecream import ic
+# from icecream import ic #TODO: delete
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -289,8 +289,8 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         }
 
         # camera
-        self.pixelsize = QtWidgets.QDoubleSpinBox()
-        self.pixelsize.setValue(130)
+        # self.pixelsize = QtWidgets.QDoubleSpinBox()
+        # self.pixelsize.setValue(130)
         
         # scalebar
         self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
@@ -654,9 +654,13 @@ class AnimationDialog(QtWidgets.QDialog):
             # create temporary folder to store all frames
             base = os.path.dirname(self.window.view_rot.paths[0])
             path = os.path.join(base, "animation_frames")
+            progress = ProgressDialog(
+                "Rendering frames", 0, len(angx), self.window
+            )
+            progress.set_value(0)
             try:
                 os.mkdir(path)
-                for i in tqdm(range(len(angx))):
+                for i in range(len(angx)):
                     qimage = self.window.view_rot.render_scene(
                         viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
                         ang=(angx[i], angy[i], angz[i]),
@@ -668,6 +672,7 @@ class AnimationDialog(QtWidgets.QDialog):
                         # QtCore.Qt.KeepAspectRatioByExpanding,
                     )
                     qimage.save(path + "/frame_{}.png".format(i+1))
+                    progress.set_value(i+1)
             except:
                 # if folder exists, ask if it should be used or deleted
                 m = QtWidgets.QMessageBox()
@@ -682,7 +687,7 @@ class AnimationDialog(QtWidgets.QDialog):
                     # use new frames (render each one) and save
                     for file in os.listdir(path):
                         os.remove(os.path.join(path, file))
-                    for i in tqdm(range(len(angx))):
+                    for i in range(len(angx)):
                         qimage = self.window.view_rot.render_scene(
                             viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
                             ang=(angx[i], angy[i], angz[i]),
@@ -694,11 +699,13 @@ class AnimationDialog(QtWidgets.QDialog):
                             # QtCore.Qt.KeepAspectRatioByExpanding,
                         )
                         qimage.save(path + "/frame_{}.png".format(i+1))
+                        progress.set_value(i+1)
                 elif ret == m.Yes:
                     # use old frames
-                    pass
+                    progress.set_value(len(angx))
                 
             # build a video and save it
+            status = StatusDialog("Creating the video...", self.window)
             image_files = [
                 os.path.join(path, img)
                 for img in os.listdir(path)
@@ -712,6 +719,7 @@ class AnimationDialog(QtWidgets.QDialog):
             for file in os.listdir(path):
                 os.remove(os.path.join(path, file))
             os.rmdir(path)
+            status.close()
             
 
 class ViewRotation(QtWidgets.QLabel):
@@ -1170,14 +1178,14 @@ class ViewRotation(QtWidgets.QLabel):
                 kwargs, locs=locs, ang=ang, autoscale=autoscale
             )
 
-        if ang is None: # if build animation
+        if ang is None: # if not build animation
             n_locs, image = render.render(
                 locs, 
                 **kwargs, 
                 info=self.infos[0], 
                 ang=(self.angx, self.angy, self.angz), 
             )
-        else: # if not build animation
+        else: # if build animation
             n_locs, image = render.render(
                 locs, 
                 **kwargs, 
@@ -1257,7 +1265,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.qimage = self.draw_legend(self.qimage)
         self.qimage = self.draw_rotation(self.qimage)
         self.qimage = self.draw_rotation_angles(self.qimage)
-        self.qimage = self.draw_points(self.qimage)
+        self.qimage = self.draw_points(self.qimage)        
 
         # convert to pixmap
         self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
@@ -1279,13 +1287,12 @@ class ViewRotation(QtWidgets.QLabel):
         """
 
         if self.window.display_settings_dlg.scalebar_groupbox.isChecked():
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            pixelsize = self.window.window.display_settings_dlg.pixelsize.value()
             scalebar = self.window.display_settings_dlg.scalebar.value()
             length_camerapxl = scalebar / pixelsize
             length_displaypxl = int(
                 round(self.width() * length_camerapxl / self.viewport_width())
             )
-            # height = max(int(round(0.15 * length_displaypxl)), 1)
             height = 10
             painter = QtGui.QPainter(image)
             painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
@@ -1344,7 +1351,7 @@ class ViewRotation(QtWidgets.QLabel):
                     color = palette.color(QtGui.QPalette.Window)
                     painter.setPen(QtGui.QColor(color))
                     font = painter.font()
-                    font.setPixelSize(12)
+                    font.setPixelSize(16)
                     painter.setFont(font)
                     text = self.window.dataset_dialog.checks[i].text()
                     painter.drawText(QtCore.QPoint(x, y), text)
@@ -1371,7 +1378,6 @@ class ViewRotation(QtWidgets.QLabel):
         if self.display_rotation:
             painter = QtGui.QPainter(image)
             length = 30
-            width = 2
             x = 50
             y = self.height() - 50
             center = QtCore.QPoint(x, y)
@@ -1394,7 +1400,7 @@ class ViewRotation(QtWidgets.QLabel):
             #rotate these points
             coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
             R = render.rotation_matrix(self.angx, self.angy, self.angz)
-            coordinates = R.apply(coordinates)
+            coordinates = R.apply(coordinates).astype(int)
             (xx, xy, xz) = coordinates[0]
             (yx, yy, yz) = coordinates[1]
             (zx, zy, zz) = coordinates[2]
@@ -1435,7 +1441,7 @@ class ViewRotation(QtWidgets.QLabel):
                 for _ in [self.angx, self.angy, self.angz]
             ]
             text = f"{angx} {angy} {angz}"
-            x = self.width() - len(text) * 7.5 - 10
+            x = self.width() - len(text) * 8 - 10
             y = self.height() - 20      
             painter = QtGui.QPainter(image)
             font = painter.font()
@@ -1473,16 +1479,16 @@ class ViewRotation(QtWidgets.QLabel):
         ox = []
         oy = []
         oldpoint = []
-        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        pixelsize = self.window.window.display_settings_dlg.pixelsize.value()
         for point in self._points:
             if oldpoint != []:
                 ox, oy = self.map_to_view(*oldpoint)
             cx, cy = self.map_to_view(*point)
             painter.drawPoint(cx, cy)
-            painter.drawLine(cx, cy, cx + d / 2, cy)
-            painter.drawLine(cx, cy, cx, cy + d / 2)
-            painter.drawLine(cx, cy, cx - d / 2, cy)
-            painter.drawLine(cx, cy, cx, cy - d / 2)
+            painter.drawLine(cx, cy, int(cx + d / 2), cy)
+            painter.drawLine(cx, cy, cx, int(cy + d / 2))
+            painter.drawLine(cx, cy, int(cx - d / 2), cy)
+            painter.drawLine(cx, cy, cx, int(cy - d / 2))
             if oldpoint != []:
                 painter.drawLine(cx, cy, ox, oy)
                 font = painter.font()
@@ -1504,7 +1510,9 @@ class ViewRotation(QtWidgets.QLabel):
                     / 100
                 )
                 painter.drawText(
-                    (cx + ox) / 2 + d, (cy + oy) / 2 + d, str(distance) + " nm"
+                    int((cx + ox) / 2 + d), 
+                    int((cy + oy) / 2 + d), 
+                    str(distance) + " nm",
                 )
             oldpoint = point
         painter.end()
@@ -1829,7 +1837,7 @@ class ViewRotation(QtWidgets.QLabel):
 
         cx = self.width() * (x - self.viewport[0][1]) / self.viewport_width()
         cy = self.height() * (y - self.viewport[0][0]) / self.viewport_height()
-        return cx, cy
+        return int(cx), int(cy)
 
     def pan_relative(self, dy, dx):
         """ 
@@ -2452,7 +2460,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     f"_arotated_{angx}_{angy}_{angz}",
                 ) # get the save file suffix
                 if ok:
-                    for channel in tqdm(range(len(self.view_rot.paths))):
+                    for channel in range(len(self.view_rot.paths)):
                         base, ext = os.path.splitext(
                             self.view_rot.paths[channel]
                         )
