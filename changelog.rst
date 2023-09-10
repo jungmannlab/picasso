@@ -11,6 +11,7 @@ Last change: 08-SEP-2023 MTS
 - Picasso Render legend displays larger font
 - Picasso Render Test Clusterer displays info when no clusters found instead of throwing an error
 - Calling clustering functions from ``picasso.clusterer`` does not require camera pixel size. Same applies for the corresponding functions in CMD. *Only if 3D localizations are used, the pixel size must be provided.*
+- HDBSCAN is installed by default since it is distributed within the new version of ``scikit-learn 1.3.0``
 
 0.6.1
 -----
