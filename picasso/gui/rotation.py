@@ -151,7 +151,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         pixel the minimum color of the colormap should be applied
     disp_px_size : QDoubleSpinBox
         contains the size of super-resolution pixels in nm
-    scalebar : QDoubleSpinBox
+    scalebar : QSpinBox
         contains the scale bar's length (nm)
     scalebar_groupbox : QGroupBox
         group with options for customizing scale bar, tick to display
@@ -302,8 +302,8 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         scalebar_grid.addWidget(
             QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
         )
-        self.scalebar = QtWidgets.QDoubleSpinBox()
-        self.scalebar.setRange(0.0001, 10000000000)
+        self.scalebar = QtWidgets.QSpinBox()
+        self.scalebar.setRange(1, 100000)
         self.scalebar.setValue(500)
         self.scalebar.setKeyboardTracking(False)
         self.scalebar.valueChanged.connect(self.render_scene)
