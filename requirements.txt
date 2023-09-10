@@ -12,7 +12,7 @@ lmfit==1.0.2
 streamlit==1.11.1
 moviepy==1.0.3
 nd2==0.7.2
-sqlalchemy==1.4.22
+sqlalchemy==2.0.20
 plotly-express==0.4.1
 watchdog==2.1.4
 psutil==5.9.5
