@@ -211,13 +211,15 @@ class CamSettingComboBox(QtWidgets.QComboBox):
     def change_target_choices(self, index):
         cam_combos = self.cam_combos[self.camera]
         sensitivity = CONFIG["Cameras"][self.camera]["Sensitivity"]
+        print('sensitivity', sensitivity)
         for i in range(self.index + 1):
             sensitivity = sensitivity[cam_combos[i].currentText()]
-        target = cam_combos[self.index + 1]
-        target.blockSignals(True)
-        target.clear()
-        target.blockSignals(False)
-        target.addItems(sorted(list(sensitivity.keys())))
+        if len(cam_combos) > self.index + 1:
+            target = cam_combos[self.index + 1]
+            target.blockSignals(True)
+            target.clear()
+            target.blockSignals(False)
+            target.addItems(sorted(list(sensitivity.keys())))
 
 
 class CamSettingComboBoxDict(UserDict):
@@ -598,7 +600,7 @@ class ParametersDialog(QtWidgets.QDialog):
         photon_grid.addWidget(QtWidgets.QLabel("Quantum Efficiency:"), 3, 0)
         self.qe = QtWidgets.QDoubleSpinBox()
         self.qe.setRange(0, 1)
-        self.qe.setValue(0.9)
+        self.qe.setValue(1)
         self.qe.setDecimals(2)
         self.qe.setSingleStep(0.1)
         photon_grid.addWidget(self.qe, 3, 1)
