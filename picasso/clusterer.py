@@ -439,7 +439,7 @@ def _hdbscan(X, min_cluster_size, min_samples, cluster_eps=0):
         assigned.
     """
     
-    from hdbscan import HDBSCAN as _HDBSCAN
+    from sklearn.cluster import HDBSCAN as _HDBSCAN
     hdb = _HDBSCAN(
         min_samples=min_samples, 
         min_cluster_size=min_cluster_size,

@@ -48,12 +48,6 @@ if IMSWRITER:
     from PyImarisWriter.ImarisWriterCtypes import *
     from PyImarisWriter import PyImarisWriter as PW
 
-try:
-    from hdbscan import HDBSCAN
-    HDBSCAN_IMPORTED = True
-except ModuleNotFoundError:
-    HDBSCAN_IMPORTED = False
-
 if sys.platform == "darwin": # plots do not work on mac os
     matplotlib.use('agg')
 matplotlib.rcParams.update({"axes.titlesize": "large"})
@@ -2308,16 +2302,13 @@ class TestClustererDialog(QtWidgets.QDialog):
                 pixelsize,
             )
         elif clusterer_name == "HDBSCAN":
-            if HDBSCAN_IMPORTED:
-                locs = clusterer.hdbscan(
-                    locs,
-                    params["min_cluster_size"],
-                    params["min_samples"],
-                    pixelsize,
-                    params["intercluster_radius"]
-                )
-            else:
-                return None
+            locs = clusterer.hdbscan(
+                locs,
+                params["min_cluster_size"],
+                params["min_samples"],
+                pixelsize,
+                params["intercluster_radius"]
+            )
         elif clusterer_name == "SMLM":
             if params["frame_analysis"]:
                 frame = locs.frame
@@ -6068,18 +6059,6 @@ class View(QtWidgets.QLabel):
         """
         Gets channel, parameters and path for HDBSCAN.
         """
-
-        if not HDBSCAN_IMPORTED: # no hdbscan package found
-            message = (
-                "No HDBSCAN detected. Please install\n"
-                "the python package HDBSCAN*."
-            )
-            QtWidgets.QMessageBox.information(
-                self,
-                "No HDBSCAN",
-                message,
-            )
-            return
 
         channel = self.get_channel_all_seq("Cluster")
 
