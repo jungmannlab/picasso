@@ -1,0 +1,41 @@
+version: 2
+updates:
+- package-ecosystem: pip
+  directory: "/"
+  schedule:
+    interval: daily
+    time: "04:00"
+  open-pull-requests-limit: 10
+  ignore:
+  - dependency-name: matplotlib
+    versions:
+    - 3.3.4
+    - 3.4.0
+  - dependency-name: scipy
+    versions:
+    - 1.6.0
+    - 1.6.1
+    - 1.6.2
+  - dependency-name: numba
+    versions:
+    - 0.53.0
+  - dependency-name: tqdm
+    versions:
+    - 4.56.0
+    - 4.56.1
+    - 4.56.2
+    - 4.57.0
+    - 4.58.0
+    - 4.59.0
+  - dependency-name: h5py
+    versions:
+    - 3.1.0
+    - 3.2.0
+  - dependency-name: numpy
+    versions:
+    - 1.19.5
+    - 1.20.0
+    - 1.20.1
+  - dependency-name: scikit-learn
+    versions:
+    - 0.24.1
