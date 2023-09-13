@@ -24,4 +24,3 @@ copy dist\picassow\picassow.exe dist\picasso\picassow.exe
 copy dist\picassow\picassow.exe.manifest dist\picasso\picassow.exe.manifest
 
 call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" picasso_innoinstaller.iss
-`
