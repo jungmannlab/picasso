@@ -43,7 +43,7 @@ Check out the `Picasso release page <https://github.com/jungmannlab/picasso/rele
 For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X), please follow the advanced installation instructions below.
 
 Other installation modes (Python 3.10)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso’s internal routines in custom Python programs. Those can be imported by running, for example, ``from picasso import io`` (see the "Example usage" tab below) to use input/output functions from Picasso. For windows, it is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
 

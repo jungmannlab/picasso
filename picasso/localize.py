@@ -173,7 +173,6 @@ def _identify_worker(movie, current, minimum_ng, box, roi, lock):
         identifications.append(
             identify_by_frame_number(movie, minimum_ng, box, index, roi, lock)
         )
-    return identifications
 
 
 def identifications_from_futures(futures):
