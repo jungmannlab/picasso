@@ -549,9 +549,7 @@ class ND2Movie(AbstractPicassoMovie):
             axints = chans[i]['volume']['axesInterpretation']
             chans[i]['volume']['axesInterpretation'] = [None]*len(axints)
             for j, axes_inter in enumerate(axints):
-                chans[i]['volume']['axesInterpretation'][j] = {}
-                for k, v in axes_inter.__dict__.items():
-                    chans[i]['volume']['axesInterpretation'][j][str(k)] = str(v)
+                chans[i]['volume']['axesInterpretation'][j] = axes_inter
         out['channels'] = chans
         return out
 
