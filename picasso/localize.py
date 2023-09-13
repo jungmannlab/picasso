@@ -195,7 +195,7 @@ def identify_async(movie, minimum_ng, box, roi=None):
 
     if isinstance(cpu_utilization, float):
         if cpu_utilization >= 1:
-            cpu_utilization = 1
+            cpu_utilization = 0.8
     else:
         print("CPU utilization was not set. Setting to 0.8")
         cpu_utilization = 0.8
