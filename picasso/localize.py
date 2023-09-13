@@ -333,8 +333,8 @@ def _cut_spots(movie, ids, box):
     N = len(ids.frame)
     if isinstance(movie, _np.ndarray):
         return _cut_spots_numba(movie, ids.frame, ids.x, ids.y, box)
-    # elif isinstance(movie, _io.ND2Movie):
-    elif movie.use_dask:
+    elif isinstance(movie, _io.ND2Movie) and movie.use_dask:
+    # elif movie.use_dask:
         """ Assumes that identifications are in order of frames! """
         spots = _np.zeros((N, box, box), dtype=movie.dtype)
         spots = _da.apply_gufunc(
