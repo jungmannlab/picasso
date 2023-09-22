@@ -2,7 +2,7 @@ PyQt5
 numpy==1.24.3
 h5py>=3.3.0
 matplotlib==3.7.3
-numba==0.57.1
+numba==0.58.0
 scipy==1.11.2
 pandas==2.1.0
 pyyaml==6.0.1
