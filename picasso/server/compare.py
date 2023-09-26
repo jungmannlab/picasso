@@ -12,7 +12,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 
-@st.cache
+@st.cache_data
 def load_file(path: str):
     """Loads a localization file and returns as pandas Dataframe.
     Adds a column with the filename.

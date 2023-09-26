@@ -664,8 +664,9 @@ def _pair_correlation(files, bin_size, r_max):
 
 
 def _start_server():
-    import streamlit as st
     import os
+    import sys
+    from streamlit.web import cli as stcli
 
     print("                                          ")
     picasso_logo()
@@ -691,9 +692,6 @@ def _start_server():
         with open(ST_CREDENTIALS, "w") as file:
             file.write("[general]\n")
             file.write('\nemail = ""')
-
-    import sys
-    from streamlit import cli as stcli
 
     theme = []
 

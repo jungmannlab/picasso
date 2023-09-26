@@ -19,7 +19,7 @@ DEFAULT_PLOTS = [
 ]
 
 
-@st.cache
+@st.cache_data
 def convert_df(df: pd.DataFrame):
     """
     Helper function to encode a dataframe as utf-8
