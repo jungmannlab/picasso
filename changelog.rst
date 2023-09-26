@@ -25,7 +25,7 @@ Last change: 08-SEP-2023 MTS
 - RESI localizations have the new column ``cluster_id``
 - Building animation shows progress (Render 3D)
 - Export current view in Render saves metadata; An extra image is saved with a scalebar if the user did not set it
-- Clustering in command window requires camera pixel size to be input (instead of inserting one after calling the function)
+- (**Not applicable in 0.6.2**) Clustering in command window requires camera pixel size to be input (instead of inserting one after calling the function)
 - Bug fixes
 
 0.6.0

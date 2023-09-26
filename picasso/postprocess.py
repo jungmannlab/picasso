@@ -10,14 +10,10 @@
 
 import numpy as _np
 import numba as _numba
-import math as _math
-
-from sklearn.cluster import DBSCAN as _DBSCAN
 
 from scipy import interpolate as _interpolate
 from scipy.special import iv as _iv
 from scipy.spatial import distance
-# from icecream import ic
 
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
@@ -28,9 +24,7 @@ from collections import OrderedDict as _OrderedDict
 from . import lib as _lib
 from . import render as _render
 from . import imageprocess as _imageprocess
-from . import clusterer as _clusterer
 from threading import Thread as _Thread
-import time as _time
 from tqdm import tqdm as _tqdm
 from tqdm import trange as _trange
 from numpy.lib.recfunctions import stack_arrays
