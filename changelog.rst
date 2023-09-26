@@ -6,6 +6,7 @@ Last change: 26-SEP-2023 MTS
 0.6.3
 -----
 - Dependencies updated
+- Bug fixes due to Python 3.10 and PyQt5
 
 0.6.2
 -----

@@ -9,7 +9,7 @@ from picasso import render
 import matplotlib.pyplot as plt
 
 
-@st.cache
+@st.cache_data
 def load_file(path: str):
     """Loads localization from files. Cached version.
 
@@ -20,7 +20,7 @@ def load_file(path: str):
     return locs, info
 
 
-@st.cache
+@st.cache_data
 def picasso_render(locs: np.ndarray, viewport: tuple, oversampling: float):
     """Helper function to render a viewport. Cached.
 
@@ -87,7 +87,7 @@ def preview():
                         c1, c2, c3 = st.columns(3)
 
                         oversampling = c1.number_input(
-                            "Oversampling", value=5.0, min_value=1, max_value=40
+                            "Oversampling", value=5.0, min_value=1., max_value=40.
                         )
 
                         image = picasso_render(locs, viewport, oversampling)
