@@ -744,7 +744,7 @@ class Window(QtWidgets.QMainWindow):
 
         qimage = qimage.scaled(
             self.viewxy.width(),
-            np.round(self.viewxy.height() * Y / X),
+            int(np.round(self.viewxy.height() * Y / X)),
             QtCore.Qt.KeepAspectRatioByExpanding,
         )
         pixmap = QtGui.QPixmap.fromImage(qimage)
@@ -805,7 +805,7 @@ class Window(QtWidgets.QMainWindow):
 
         qimage = qimage.scaled(
             self.viewxy.width(),
-            np.round(self.viewxy.height() * Y / X),
+            int(np.round(self.viewxy.height() * Y / X)),
             QtCore.Qt.KeepAspectRatioByExpanding,
         )
         pixmap = QtGui.QPixmap.fromImage(qimage)

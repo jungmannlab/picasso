@@ -1,7 +1,12 @@
 Changelog
 =========
 
-Last change: 08-SEP-2023 MTS
+Last change: 26-SEP-2023 MTS
+
+0.6.3
+-----
+- Dependencies updated
+- Bug fixes due to Python 3.10 and PyQt5
 
 0.6.2
 -----
@@ -21,11 +26,11 @@ Last change: 08-SEP-2023 MTS
 -----
 - **Measuring in the 3D window (Measure and Scalebar) fixed (previous versions did not convert the value correctly)**
 - Localize GUI allows for numerical ROI input in the Parameters Dialog
-- Allow loading individual .tif files as in Picasso v0.4.11
+- Allow loading individual .tif files as in Picasso v0.4.11``
 - RESI localizations have the new column ``cluster_id``
 - Building animation shows progress (Render 3D)
 - Export current view in Render saves metadata; An extra image is saved with a scalebar if the user did not set it
-- Clustering in command window requires camera pixel size to be input (instead of inserting one after calling the function)
+- (**Not applicable in 0.6.2**) Clustering in command window requires camera pixel size to be input (instead of inserting one after calling the function)
 - Bug fixes
 
 0.6.0

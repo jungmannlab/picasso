@@ -358,8 +358,8 @@ def _to_photons(spots, camera_info):
     baseline = camera_info["baseline"]
     sensitivity = camera_info["sensitivity"]
     gain = camera_info["gain"]
-    qe = camera_info["qe"]
     # since v0.6.0: remove quantum efficiency to better reflect precision
+    # qe = camera_info["qe"]
     return (spots - baseline) * sensitivity / (gain)
 
 
