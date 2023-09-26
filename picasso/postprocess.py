@@ -896,7 +896,7 @@ def _get_next_loc_index_in_link_group(
                 if dx2 <= d_max_2:
                     dy2 = (current_y - y[j]) ** 2
                     if dy2 <= d_max_2:
-                        if _np.sqrt(dx2 + dy2) <= d_max:
+                        if dx2 + dy2 <= d_max_2:
                             return j
     return -1
 
