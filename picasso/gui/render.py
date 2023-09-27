@@ -10054,7 +10054,7 @@ class View(QtWidgets.QLabel):
                 diameter = int(self.width() * diameter / self.viewport_width())
                 # remote desktop crashes sometimes for high diameter
                 if diameter < 100:
-                    pixmap_size = ceil(diameter)
+                    pixmap_size = ceil(diameter) + 1
                     pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
                     pixmap.fill(QtCore.Qt.transparent)
                     painter = QtGui.QPainter(pixmap)

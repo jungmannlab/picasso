@@ -3,7 +3,7 @@ call DEL /F/Q/S dist > NUL
 call RMDIR /Q/S build
 call RMDIR /Q/S dist
 
-call cd %~dp0\..\..\..
+call cd %~dp0\..\..
 
 call conda create -n picasso_installer python=3.10 -y
 call conda activate picasso_installer
