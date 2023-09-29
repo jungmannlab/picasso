@@ -11,7 +11,7 @@ tqdm==4.66.1
 lmfit==1.2.2
 streamlit==1.27.0
 moviepy==1.0.3
-nd2==0.7.2
+nd2==0.7.3
 sqlalchemy==2.0.21
 plotly-express==0.4.1
 watchdog==3.0.0
