@@ -3,6 +3,10 @@ Changelog
 
 Last change: 26-SEP-2023 MTS
 
+0.6.4
+-----
+- Fix RCC error for Render GUI (one click installer) (remove tqdm from GUI)
+
 0.6.3
 -----
 - Dependencies updated

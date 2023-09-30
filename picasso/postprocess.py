@@ -1057,9 +1057,12 @@ def segment(locs, info, segmentation, kwargs={}, callback=None):
     n_seg = n_segments(info, segmentation)
     bounds = _np.linspace(0, n_frames - 1, n_seg + 1, dtype=_np.uint32)
     segments = _np.zeros((n_seg, Y, X))
-    if callback is not None:
+    if callback is None:
+        it = _trange(n_seg, desc="Generating segments", unit="segments")
+    else:
         callback(0)
-    for i in _trange(n_seg, desc="Generating segments", unit="segments"):
+        it = range(n_seg)
+    for i in it:
         segment_locs = locs[
             (locs.frame >= bounds[i]) & (locs.frame < bounds[i + 1])
         ]

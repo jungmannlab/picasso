@@ -3,7 +3,7 @@ call DEL /F/Q/S dist > NUL
 call RMDIR /Q/S build
 call RMDIR /Q/S dist
 
-call cd %~dp0\..\..\..
+call cd %~dp0\..\..
 
 call conda create -n picasso_installer python=3.10 -y
 call conda activate picasso_installer
@@ -11,7 +11,7 @@ call conda activate picasso_installer
 call python setup.py sdist bdist_wheel
 
 call cd release/one_click_windows_gui
-call pip install "../../dist/picassosr-0.6.3-py3-none-any.whl"
+call pip install "../../dist/picassosr-0.6.4-py3-none-any.whl"
 
 call pip install pyinstaller==5.7
 call pyinstaller ../pyinstaller/picasso.spec -y --clean
