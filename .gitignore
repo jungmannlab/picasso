@@ -77,6 +77,9 @@ target/
 # Mac Desktop Service Store
 **/.DS_Store
 
+# vscode settings
+.vscode/
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
