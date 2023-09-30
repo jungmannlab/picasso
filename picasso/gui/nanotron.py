@@ -13,7 +13,6 @@ import os
 import sys
 import traceback
 import importlib, pkgutil
-from tqdm import tqdm
 import datetime
 from time import sleep
 
@@ -94,9 +93,7 @@ class Generator(QtCore.QThread):
 
             export_path = _ospath.dirname(self.export_paths[id]) + "/"
 
-            for c, pick in enumerate(
-                tqdm(np.unique(locs.group), desc="Prepare class " + str(label))
-            ):
+            for c, pick in enumerate(np.unique(locs.group)):
 
                 pick_img = nanotron.roi_to_img(
                     locs=locs,

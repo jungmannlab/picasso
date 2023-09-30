@@ -110,18 +110,25 @@ def rcc(segments, max_shift=None, callback=None):
     shifts_y = _np.zeros((n_segments, n_segments))
     n_pairs = int(n_segments * (n_segments - 1) / 2)
     flag = 0
-    with _tqdm(
-        total=n_pairs, desc="Correlating image pairs", unit="pairs"
-    ) as progress_bar:
-        if callback is not None:
-            callback(0)
+    if callback is None:
+        with _tqdm(
+            total=n_pairs, desc="Correlating image pairs", unit="pairs"
+        ) as progress_bar:
+            for i in range(n_segments - 1):
+                for j in range(i + 1, n_segments):
+                    progress_bar.update()
+                    shifts_y[i, j], shifts_x[i, j] = get_image_shift(
+                        segments[i], segments[j], 5, max_shift
+                    )
+                    flag += 1
+    else:
+        callback(0)
         for i in range(n_segments - 1):
             for j in range(i + 1, n_segments):
-                progress_bar.update()
                 shifts_y[i, j], shifts_x[i, j] = get_image_shift(
                     segments[i], segments[j], 5, max_shift
                 )
                 flag += 1
-                if callback is not None:
-                    callback(flag)
+                callback(flag)
+        
     return _lib.minimize_shifts(shifts_x, shifts_y)

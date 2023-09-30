@@ -25,7 +25,6 @@ from .. import io, lib, render
 from numpy.lib.recfunctions import stack_arrays
 
 from cmath import rect, phase
-from tqdm import tqdm
 
 import scipy.ndimage.filters
 import importlib, pkgutil
@@ -874,7 +873,7 @@ class Window(QtWidgets.QMainWindow):
             plt.plot(element)
         n_groups = self.group_index[0].shape[0]
         print("Translating..")
-        for i in tqdm(range(n_groups)):
+        for i in range(n_groups):
             self.status_bar.showMessage("Group {} / {}.".format(i, n_groups))
             self.translate_group(signalimg, i, translateaxis)
 
@@ -1221,7 +1220,7 @@ class Window(QtWidgets.QMainWindow):
         CF_image_avg = image
 
         print("Convolving..")
-        for i in tqdm(range(n_groups)):
+        for i in range(n_groups):
             self.status_bar.showMessage("Group {} / {}.".format(i, n_groups))
             self.rotatexy_convolution_group(CF_image_avg, angles, i, rotaxis, proplane)
         self.updateLayout()
@@ -1360,7 +1359,7 @@ class Window(QtWidgets.QMainWindow):
         # image_half = n_pixel / 2
 
         print("Rotating..")
-        for i in tqdm(range(n_groups)):
+        for i in range(n_groups):
             self.status_bar.showMessage("Group {} / {}.".format(i, n_groups))
             self.align_group(CF_image_avg, angles, i, rotaxis, proplane)
         self.updateLayout()
@@ -1485,7 +1484,7 @@ class Window(QtWidgets.QMainWindow):
         n_channels = len(image)
 
         print("Calculating score..")
-        for i in tqdm(range(n_groups)):
+        for i in range(n_groups):
             channel_score = []
             for j in range(n_channels):
                 if self.dataset_dialog.checks[j].isChecked():
