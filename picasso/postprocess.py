@@ -1167,9 +1167,12 @@ def groupprops(locs, callback=None):
     groups = _np.recarray(n, formats=formats, names=names)
     if callback is not None:
         callback(0)
-    for i, group_id in enumerate(
-        _tqdm(group_ids, desc="Calculating group statistics", unit="Groups")
-    ):
+        it = enumerate(group_ids)
+    else:
+        it = enumerate(_tqdm(
+            group_ids, desc="Calculating group statistics", unit="Groups"
+        ))
+    for i, group_id in it:
         group_locs = locs[locs.group == group_id]
         groups["group"][i] = group_id
         groups["n_events"][i] = len(group_locs)

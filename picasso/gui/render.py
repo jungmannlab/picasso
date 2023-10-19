@@ -2387,7 +2387,10 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # make sure one pick is present
         if len(self.window.view._picks) != 1:
-            raise ValueError("Choose only one pick region")
+            # display qt warning
+            message = "Choose only one pick region"
+            QtWidgets.QMessageBox.information(self, "No pick", message)
+            return
         # get clustering parameters
         params = self.get_cluster_params()
         # extract picked locs
@@ -8284,7 +8287,9 @@ class View(QtWidgets.QLabel):
             progress = lib.ProgressDialog(
                 "Calculating pick properties", 0, n_groups, self
             )
-            pick_props = postprocess.groupprops(out_locs)
+            pick_props = postprocess.groupprops(
+                out_locs, callback=progress.set_value
+            )
             n_units = self.window.info_dialog.calculate_n_units(dark)
             pick_props = lib.append_to_rec(pick_props, n_units, "n_units")
             influx = self.window.info_dialog.influx_rate.value()
@@ -9140,9 +9145,14 @@ class View(QtWidgets.QLabel):
             progress.set_value(i + 1)
         out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
         n_groups = len(picked_locs)
-        progress = lib.StatusDialog("Calculating pick properties", self)
+        progress = lib.ProgressDialog(
+            "Calculating pick properties", 0, n_groups, self
+        )
+        progress.show()
         # get mean and std of each dtype (x, y, photons, etc)
-        pick_props = postprocess.groupprops(out_locs)
+        pick_props = postprocess.groupprops(
+            out_locs, callback=progress.set_value
+        )
         progress.close()
         # QPAINT estimate of number of binding sites 
         n_units = self.window.info_dialog.calculate_n_units(dark)
