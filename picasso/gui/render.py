@@ -34,7 +34,6 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
 from collections import Counter
-from tqdm import tqdm
 
 import colorsys
 
@@ -5119,7 +5118,7 @@ class SlicerDialog(QtWidgets.QDialog):
                     progress.show()
 
                     # save each channel one by one
-                    for i in tqdm(range(self.sl.maximum() + 1)):
+                    for i in range(self.sl.maximum() + 1):
                         self.sl.setValue(i)
                         out_path = (
                             base
@@ -5157,7 +5156,7 @@ class SlicerDialog(QtWidgets.QDialog):
                 progress.set_value(0)
                 progress.show()
 
-                for i in tqdm(range(self.sl.maximum() + 1)):
+                for i in range(self.sl.maximum() + 1):
                     self.sl.setValue(i)
                     out_path = (
                         base
@@ -9318,7 +9317,7 @@ class View(QtWidgets.QLabel):
                 )
                 pb.set_value(0)
                 # assign locs by color
-                for i in tqdm(range(colors + 1)):
+                for i in range(colors + 1):
                     x_locs.append(self.locs[0][self.x_color == i])
                     pb.set_value(i + 1)
                 pb.close()
@@ -11891,7 +11890,7 @@ class Window(QtWidgets.QMainWindow):
                     "_pickprops",
                 )
                 if ok:
-                    for channel in tqdm(range(len(self.view.locs_paths))):
+                    for channel in range(len(self.view.locs_paths)):
                         base, ext = os.path.splitext(
                             self.view.locs_paths[channel]
                         )
