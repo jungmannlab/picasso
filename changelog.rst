@@ -1,16 +1,19 @@
 Changelog
 =========
 
-Last change: 26-SEP-2023 MTS
+Last change: 22-OCT-2023 MTS
 
-0.6.4
------
-- Fix RCC error for Render GUI (one click installer) (remove tqdm from GUI)
-
-0.6.3
------
+0.6.3 - 0.6.5
+-------------
 - Dependencies updated
-- Bug fixes due to Python 3.10 and PyQt5
+- Bug fixes due to Python 3.10 and PyQt5 (listed below)
+- Fix RCC error for Render GUI (one click installer) (remove tqdm from GUI)
+- Fix save pick properties bug in Picasso Render GUI (one click installer)
+- Fix render render properties bug in Picasso Render GUI (one click installer)
+- Fix animation building in Picasso Render GUI (one click installer)
+- Fix test clusterer HDBSCAN bug
+- Fix .nd2 localized files info loading (full loader changed to unsafe loader)
+- Fix rare bug with pick similar zero division error
 
 0.6.2
 -----
@@ -55,16 +58,16 @@ Last change: 26-SEP-2023 MTS
 - Updated 3D rendering and clustering documentation
 - Bug fixes
 
-0.5.5 - 0.5.6
--------------
+0.5.5-6
+-------
 - Cluster info is saved in ``_cluster_centers.hdf5`` files which are created when ``Save cluster centers`` box is ticked
 - Cluster centers contain info about group, mean frame (saved as ``frame``), standard deviation frame, area/volume and convex hull
 - ``gist_rainbow`` is used for rendering properties
 - NeNA can be calculated many times
 - Bug fixes
 
-0.5.1 - 0.5.4
--------------
+0.5.1-4
+-------
 - Sensitivity is a float number in Server: Watcher
 - One-click-installer available
 - Bug fixes
