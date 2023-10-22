@@ -2306,7 +2306,7 @@ class TestClustererDialog(QtWidgets.QDialog):
                 params["min_cluster_size"],
                 params["min_samples"],
                 pixelsize,
-                params["intercluster_radius"]
+                params["intercluster_radius"],
             )
         elif clusterer_name == "SMLM":
             if params["frame_analysis"]:

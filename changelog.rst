@@ -11,6 +11,7 @@ Last change: 19-OCT-2023 MTS
 - Fix save pick properties bug in Picasso Render GUI (one click installer)
 - Fix render render properties bug in Picasso Render GUI (one click installer)
 - Fix animation building in Picasso Render GUI (one click installer)
+- Fix test clusterer HDBSCAN bug
 
 0.6.2
 -----
