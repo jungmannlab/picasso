@@ -10756,7 +10756,9 @@ class Window(QtWidgets.QMainWindow):
         )
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
 
-        filter_picks_action = tools_menu.addAction("Filter picks by locs")
+        filter_picks_action = tools_menu.addAction(
+            "Filter picks by number of locs"
+        )
         filter_picks_action.triggered.connect(self.view.filter_picks)
 
         pickadd_action = tools_menu.addAction("Subtract pick regions")
