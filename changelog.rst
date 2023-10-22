@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 19-OCT-2023 MTS
+Last change: 22-OCT-2023 MTS
 
 0.6.3 - 0.6.5
 -------------
@@ -12,6 +12,7 @@ Last change: 19-OCT-2023 MTS
 - Fix render render properties bug in Picasso Render GUI (one click installer)
 - Fix animation building in Picasso Render GUI (one click installer)
 - Fix test clusterer HDBSCAN bug
+- Fix .nd2 localized files info loading (full loader changed to unsafe loader)
 
 0.6.2
 -----

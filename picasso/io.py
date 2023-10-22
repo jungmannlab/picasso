@@ -198,7 +198,7 @@ def load_info(path, qt_parent=None):
     filename = path_base + ".yaml"
     try:
         with open(filename, "r") as info_file:
-            info = list(_yaml.load_all(info_file, Loader=_yaml.FullLoader))
+            info = list(_yaml.load_all(info_file, Loader=_yaml.UnsafeLoader))
     except FileNotFoundError as e:
         print("\nAn error occured. Could not find metadata file:\n{}".format(filename))
         if qt_parent is not None:
