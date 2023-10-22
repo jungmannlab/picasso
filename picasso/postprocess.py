@@ -165,8 +165,11 @@ def pick_similar(
                         picked_locs_xy = _locs_at(
                             x_test, y_test, block_locs_xy, r
                         )
-                        x_test = _np.mean(picked_locs_xy[0])
-                        y_test = _np.mean(picked_locs_xy[1])
+                        if picked_locs_xy.shape[1] > 1:
+                            x_test = _np.mean(picked_locs_xy[0])
+                            y_test = _np.mean(picked_locs_xy[1])
+                        else:
+                            break
                     if _np.all(
                         (x_similar - x_test) ** 2
                         + (y_similar - y_test) ** 2
@@ -1167,9 +1170,12 @@ def groupprops(locs, callback=None):
     groups = _np.recarray(n, formats=formats, names=names)
     if callback is not None:
         callback(0)
-    for i, group_id in enumerate(
-        _tqdm(group_ids, desc="Calculating group statistics", unit="Groups")
-    ):
+        it = enumerate(group_ids)
+    else:
+        it = enumerate(_tqdm(
+            group_ids, desc="Calculating group statistics", unit="Groups"
+        ))
+    for i, group_id in it:
         group_locs = locs[locs.group == group_id]
         groups["group"][i] = group_id
         groups["n_events"][i] = len(group_locs)

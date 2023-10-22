@@ -449,7 +449,7 @@ def _hdbscan(X, min_cluster_size, min_samples, cluster_eps=0):
 
 
 def hdbscan(
-    locs, min_cluster_size, min_samples, cluster_eps=0.0, pixelsize=None
+    locs, min_cluster_size, min_samples, pixelsize=None, cluster_eps=0.0
 ):
     """
     Performs HDBSCAN on localizations.
@@ -463,7 +463,7 @@ def hdbscan(
     min_samples : int
         Number of localizations within radius to consider a given point 
         a core sample
-    pixelsize : int
+    pixelsize : int (default=None)
         Camera pixel size in nm
     cluster_eps : float (default=0.)
         Distance threshold. Clusters below this value will be merged
@@ -478,7 +478,7 @@ def hdbscan(
     if hasattr(locs, "z"):
         if pixelsize is None:
             raise ValueError(
-                "Camera pixel size must be specified as an integer for 3D"
+                "Camera pixel size (nm) must be specified as an integer for 3D"
                 " clustering."
             )
         X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T

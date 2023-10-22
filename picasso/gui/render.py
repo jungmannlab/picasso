@@ -34,7 +34,6 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
 from collections import Counter
-from tqdm import tqdm
 
 import colorsys
 
@@ -2307,7 +2306,7 @@ class TestClustererDialog(QtWidgets.QDialog):
                 params["min_cluster_size"],
                 params["min_samples"],
                 pixelsize,
-                params["intercluster_radius"]
+                params["intercluster_radius"],
             )
         elif clusterer_name == "SMLM":
             if params["frame_analysis"]:
@@ -2387,7 +2386,10 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # make sure one pick is present
         if len(self.window.view._picks) != 1:
-            raise ValueError("Choose only one pick region")
+            # display qt warning
+            message = "Choose only one pick region"
+            QtWidgets.QMessageBox.information(self, "No pick", message)
+            return
         # get clustering parameters
         params = self.get_cluster_params()
         # extract picked locs
@@ -5116,7 +5118,7 @@ class SlicerDialog(QtWidgets.QDialog):
                     progress.show()
 
                     # save each channel one by one
-                    for i in tqdm(range(self.sl.maximum() + 1)):
+                    for i in range(self.sl.maximum() + 1):
                         self.sl.setValue(i)
                         out_path = (
                             base
@@ -5154,7 +5156,7 @@ class SlicerDialog(QtWidgets.QDialog):
                 progress.set_value(0)
                 progress.show()
 
-                for i in tqdm(range(self.sl.maximum() + 1)):
+                for i in range(self.sl.maximum() + 1):
                     self.sl.setValue(i)
                     out_path = (
                         base
@@ -8284,7 +8286,9 @@ class View(QtWidgets.QLabel):
             progress = lib.ProgressDialog(
                 "Calculating pick properties", 0, n_groups, self
             )
-            pick_props = postprocess.groupprops(out_locs)
+            pick_props = postprocess.groupprops(
+                out_locs, callback=progress.set_value
+            )
             n_units = self.window.info_dialog.calculate_n_units(dark)
             pick_props = lib.append_to_rec(pick_props, n_units, "n_units")
             influx = self.window.info_dialog.influx_rate.value()
@@ -8452,6 +8456,7 @@ class View(QtWidgets.QLabel):
         NotImplementedError
             If pick shape is rectangle
         """
+
         if self._pick_shape == "Rectangle":
             raise NotImplementedError(
                 "Pick similar not implemented for rectangle picks"
@@ -8481,7 +8486,7 @@ class View(QtWidgets.QLabel):
             mean_rmsd = np.mean(rmsd)
             std_n_locs = np.std(n_locs)
             std_rmsd = np.std(rmsd)
-            min_n_locs = mean_n_locs - std_range * std_n_locs
+            min_n_locs = max(2, mean_n_locs - std_range * std_n_locs)
             max_n_locs = mean_n_locs + std_range * std_n_locs
             min_rmsd = mean_rmsd - std_range * std_rmsd
             max_rmsd = mean_rmsd + std_range * std_rmsd
@@ -9140,9 +9145,14 @@ class View(QtWidgets.QLabel):
             progress.set_value(i + 1)
         out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
         n_groups = len(picked_locs)
-        progress = lib.StatusDialog("Calculating pick properties", self)
+        progress = lib.ProgressDialog(
+            "Calculating pick properties", 0, n_groups, self
+        )
+        progress.show()
         # get mean and std of each dtype (x, y, photons, etc)
-        pick_props = postprocess.groupprops(out_locs)
+        pick_props = postprocess.groupprops(
+            out_locs, callback=progress.set_value
+        )
         progress.close()
         # QPAINT estimate of number of binding sites 
         n_units = self.window.info_dialog.calculate_n_units(dark)
@@ -9308,7 +9318,7 @@ class View(QtWidgets.QLabel):
                 )
                 pb.set_value(0)
                 # assign locs by color
-                for i in tqdm(range(colors + 1)):
+                for i in range(colors + 1):
                     x_locs.append(self.locs[0][self.x_color == i])
                     pb.set_value(i + 1)
                 pb.close()
@@ -10746,7 +10756,9 @@ class Window(QtWidgets.QMainWindow):
         )
         plotpick3d_iso_action.triggered.connect(self.view.show_pick_3d_iso)
 
-        filter_picks_action = tools_menu.addAction("Filter picks by locs")
+        filter_picks_action = tools_menu.addAction(
+            "Filter picks by number of locs"
+        )
         filter_picks_action.triggered.connect(self.view.filter_picks)
 
         pickadd_action = tools_menu.addAction("Subtract pick regions")
@@ -11881,7 +11893,7 @@ class Window(QtWidgets.QMainWindow):
                     "_pickprops",
                 )
                 if ok:
-                    for channel in tqdm(range(len(self.view.locs_paths))):
+                    for channel in range(len(self.view.locs_paths)):
                         base, ext = os.path.splitext(
                             self.view.locs_paths[channel]
                         )

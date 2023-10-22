@@ -713,7 +713,7 @@ class AnimationDialog(QtWidgets.QDialog):
             ] # paths to each frame
             image_files.sort(key=natural_keys) # sort frames
             video = ImageSequenceClip(image_files, fps=self.fps.value())
-            video.write_videofile(name)
+            video.write_videofile(name, logger=None)
 
             # delete animation frames
             for file in os.listdir(path):
