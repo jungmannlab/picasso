@@ -9,8 +9,8 @@ Last change: 19-OCT-2023 MTS
 - Bug fixes due to Python 3.10 and PyQt5 (listed below)
 - Fix RCC error for Render GUI (one click installer) (remove tqdm from GUI)
 - Fix save pick properties bug in Picasso Render GUI (one click installer)
-- 
-
+- Fix render render properties bug in Picasso Render GUI (one click installer)
+- Fix animation building in Picasso Render GUI (one click installer)
 
 0.6.2
 -----
