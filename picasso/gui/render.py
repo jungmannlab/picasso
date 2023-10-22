@@ -8456,6 +8456,7 @@ class View(QtWidgets.QLabel):
         NotImplementedError
             If pick shape is rectangle
         """
+
         if self._pick_shape == "Rectangle":
             raise NotImplementedError(
                 "Pick similar not implemented for rectangle picks"
@@ -8485,7 +8486,7 @@ class View(QtWidgets.QLabel):
             mean_rmsd = np.mean(rmsd)
             std_n_locs = np.std(n_locs)
             std_rmsd = np.std(rmsd)
-            min_n_locs = mean_n_locs - std_range * std_n_locs
+            min_n_locs = max(2, mean_n_locs - std_range * std_n_locs)
             max_n_locs = mean_n_locs + std_range * std_n_locs
             min_rmsd = mean_rmsd - std_range * std_rmsd
             max_rmsd = mean_rmsd + std_range * std_rmsd

@@ -13,6 +13,7 @@ Last change: 22-OCT-2023 MTS
 - Fix animation building in Picasso Render GUI (one click installer)
 - Fix test clusterer HDBSCAN bug
 - Fix .nd2 localized files info loading (full loader changed to unsafe loader)
+- Fix rare bug with pick similar zero division error
 
 0.6.2
 -----

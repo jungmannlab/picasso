@@ -165,8 +165,11 @@ def pick_similar(
                         picked_locs_xy = _locs_at(
                             x_test, y_test, block_locs_xy, r
                         )
-                        x_test = _np.mean(picked_locs_xy[0])
-                        y_test = _np.mean(picked_locs_xy[1])
+                        if picked_locs_xy.shape[1] > 1:
+                            x_test = _np.mean(picked_locs_xy[0])
+                            y_test = _np.mean(picked_locs_xy[1])
+                        else:
+                            break
                     if _np.all(
                         (x_similar - x_test) ** 2
                         + (y_similar - y_test) ** 2
