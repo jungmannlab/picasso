@@ -2287,7 +2287,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         rotation_action.triggered.connect(self.view_rot.rotation_input)
         rotation_action.setShortcut("Ctrl+Shift+R")
 
-        delete_rotation_action = view_menu.addAction("Remove rotation")
+        delete_rotation_action = view_menu.addAction("Reset rotation")
         delete_rotation_action.triggered.connect(self.view_rot.delete_rotation)
         delete_rotation_action.setShortcut("Ctrl+Shift+W")
         fit_in_view_action = view_menu.addAction("Fit image to window")

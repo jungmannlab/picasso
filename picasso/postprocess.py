@@ -1038,8 +1038,8 @@ def link_loc_groups(locs, info, link_group, remove_ambiguous_lengths=True):
 
 def localization_precision(photons, s, bg, em):
     """
-    Calculates the theoretical localization precision
-    according to Mortensen et al., Nat Meth, 2010
+    Calculates the theoretical localization precision according to
+    Mortensen et al., Nat Meth, 2010 for a 2D unweighted Gaussian fit.
     """
     s2 = s**2
     sa2 = s2 + 1 / 12

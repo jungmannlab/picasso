@@ -1,9 +1,9 @@
 Changelog
 =========
 
-Last change: 22-OCT-2023 MTS
+Last change: 07-NOV-2023 MTS
 
-0.6.3 - 0.6.5
+0.6.3 - 0.6.6
 -------------
 - Dependencies updated
 - Bug fixes due to Python 3.10 and PyQt5 (listed below)
@@ -14,6 +14,7 @@ Last change: 22-OCT-2023 MTS
 - Fix test clusterer HDBSCAN bug
 - Fix .nd2 localized files info loading (full loader changed to unsafe loader)
 - Fix rare bug with pick similar zero division error
+- Update installation instructions
 
 0.6.2
 -----

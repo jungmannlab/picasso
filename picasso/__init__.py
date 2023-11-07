@@ -3,7 +3,7 @@
     ~~~~~~~~~~~~~~~~~~~~
 
     :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, Rafal Kowalewski 2016-2023
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+    :copyright: Copyright (c) 2016-2023 Jungmann Lab, MPI of Biochemistry
 """
 import os.path as _ospath
 import yaml as _yaml
