@@ -15,6 +15,7 @@ Last change: 07-NOV-2023 MTS
 - Fix .nd2 localized files info loading (full loader changed to unsafe loader)
 - Fix rare bug with pick similar zero division error
 - Update installation instructions
+- Added readthedocs requirements file (only for developers)
 
 0.6.2
 -----
