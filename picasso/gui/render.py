@@ -37,7 +37,7 @@ from collections import Counter
 
 import colorsys
 
-from .. import imageprocess, io, lib, postprocess, render, clusterer
+from .. import imageprocess, io, lib, postprocess, render, clusterer, __version__
 from .rotation import RotationWindow
 
 # PyImarisWrite works on windows only
@@ -10554,7 +10554,7 @@ class Window(QtWidgets.QMainWindow):
         """
 
         # general
-        self.setWindowTitle("Picasso: Render")
+        self.setWindowTitle(f"Picasso v{__version__}: Render")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
         icon = QtGui.QIcon(icon_path)
@@ -12049,7 +12049,7 @@ class Window(QtWidgets.QMainWindow):
         for dialog in self.dialogs:
             dialog.close()
         self.menu_bar.clear() #otherwise the menu bar is doubled
-        self.setWindowTitle("Picasso: Render")
+        self.setWindowTitle(f"Picasso v{__version__}: Render")
         self.initUI(plugins_loaded=True)
 
     def rot_win(self):
