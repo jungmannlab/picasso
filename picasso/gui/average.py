@@ -20,7 +20,7 @@ import numpy as np
 import scipy
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, render
+from .. import io, lib, render, __version__
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -336,7 +336,7 @@ class View(QtWidgets.QLabel):
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Picasso: Average")
+        self.setWindowTitle(f"Picasso v{__version__}: Average")
         self.resize(512, 512)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "average.ico")

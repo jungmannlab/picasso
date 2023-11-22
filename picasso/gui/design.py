@@ -21,7 +21,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
 from .. import io as _io
 from .. import design, design_sequences
-from .. import lib
+from .. import lib, __version__
 
 BASE_SEQUENCES = design_sequences.base_sequences
 PAINT_SEQUENCES = design_sequences.paint_sequences
@@ -1420,7 +1420,7 @@ class Window(QtWidgets.QMainWindow):
 class MainWindow(QtWidgets.QWidget):
     def __init__(self):
         super(MainWindow, self).__init__()
-        self.setWindowTitle("Picasso: Design")
+        self.setWindowTitle(f"Picasso v{__version__}: Design")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "design.ico")
         icon = QtGui.QIcon(icon_path)

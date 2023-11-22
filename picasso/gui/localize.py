@@ -17,7 +17,7 @@ import time
 import numpy as np
 import traceback
 import importlib, pkgutil
-from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
+from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi, __version__
 from collections import UserDict
 
 try:
@@ -1046,7 +1046,7 @@ class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         # Init GUI
-        self.setWindowTitle("Picasso: Localize")
+        self.setWindowTitle(f"Picasso v{__version__}: Localize")
 
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "localize.ico")
