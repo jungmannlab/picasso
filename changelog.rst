@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 07-NOV-2023 MTS
+Last change: 05-DEC-2023 MTS
 
 0.6.3 - 0.6.6
 -------------
@@ -16,6 +16,7 @@ Last change: 07-NOV-2023 MTS
 - Fix rare bug with pick similar zero division error
 - Update installation instructions
 - Added readthedocs requirements file (only for developers)
+- No blur applied when padding in Picasso: Render (increases speed of rendering)
 
 0.6.2
 -----

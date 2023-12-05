@@ -7099,9 +7099,12 @@ class View(QtWidgets.QLabel):
         """
 
         # blur method
-        blur_button = (
-            self.window.display_settings_dlg.blur_buttongroup.checkedButton()
-        )
+        if self._pan: # no blur when panning
+            blur_method = None
+        else: # selected method
+            blur_method = self.window.display_settings_dlg.blur_methods[
+                self.window.display_settings_dlg.blur_buttongroup.checkedButton()
+            ]
 
         # oversampling
         optimal_oversampling = (
@@ -7140,9 +7143,7 @@ class View(QtWidgets.QLabel):
         return {
             "oversampling": oversampling,
             "viewport": viewport,
-            "blur_method": self.window.display_settings_dlg.blur_methods[
-                blur_button
-            ],
+            "blur_method": blur_method,
             "min_blur_width": float(
                 self.window.display_settings_dlg.min_blur_width.value()
             ),
@@ -7411,6 +7412,7 @@ class View(QtWidgets.QLabel):
                 self._pan = False
                 self.setCursor(QtCore.Qt.ArrowCursor)
                 event.accept()
+                self.update_scene()
             else:
                 event.ignore()
         elif self._mode == "Pick":
