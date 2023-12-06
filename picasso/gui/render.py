@@ -48,7 +48,7 @@ if IMSWRITER:
     from PyImarisWriter import PyImarisWriter as PW
 
 if sys.platform == "darwin": # plots do not work on mac os
-    matplotlib.use('agg')
+    matplotlib.use('Qt5Agg')
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
 
