@@ -1797,8 +1797,7 @@ class Window(QtWidgets.QMainWindow):
                 "Z Calibration Path"
             ] = self.parameters_dialog.z_calibration_path
             localize_info["Z Calibration"] = self.parameters_dialog.z_calibration
-        info = self.info + [localize_info]
-
+        info = self.info + [localize_info | self.camera_info]
         if self.parameters_dialog.calib_astig_checkbox.isChecked():
             print("Correcting astigmatism...")
 
