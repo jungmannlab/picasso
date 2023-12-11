@@ -20,7 +20,7 @@ from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
 import numpy as np
 import os.path
-from .. import io, lib
+from .. import io, lib, __version__
 
 plt.style.use("ggplot")
 
@@ -292,7 +292,7 @@ class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         # Init GUI
-        self.setWindowTitle("Picasso: Filter")
+        self.setWindowTitle(f"Picasso v{__version__}: Filter")
         self.resize(1100, 750)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "filter.ico")

@@ -34,7 +34,7 @@ import yaml
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import QIcon
 
-from .. import io, lib, render, nanotron
+from .. import io, lib, render, nanotron, __version__
 
 DEFAULT_MODEL_PATH = _ospath.join(os.sep, "picasso", "model", "default_model.sav")
 default_model = False
@@ -890,7 +890,7 @@ class View(QtWidgets.QLabel):
 class Window(QtWidgets.QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Picasso: nanoTRON")
+        self.setWindowTitle(f"Picasso v{__version__}: nanoTRON")
         self.resize(768, 512)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         self.icon_path = os.path.join(this_directory, "icons", "nanotron.ico")
