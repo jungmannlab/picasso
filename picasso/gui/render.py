@@ -7009,7 +7009,7 @@ class View(QtWidgets.QLabel):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
+        elif n_channels > 1:
             pathlist = list(self.locs_paths)
             pathlist.append("Apply to all sequentially")
             pathlist.append("Combine all channels")
