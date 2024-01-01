@@ -12,20 +12,19 @@
 
 import os
 import colorsys
-import re
 from functools import partial
 
 import numpy as np
 import matplotlib.pyplot as plt
-from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+# from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
+import imageio
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from numpy.lib.recfunctions import stack_arrays
 
 from .. import io, render
-from ..lib import StatusDialog, ProgressDialog
+from ..lib import ProgressDialog
 
-# from icecream import ic #TODO: delete
 
 DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 0.5
@@ -33,44 +32,6 @@ N_GROUP_COLORS = 8
 SHIFT = 0.1
 ZOOM = 9 / 7
 
-def atoi(text):
-    """ 
-    Converts string to digit if it represents an integer.
-
-    Parameters
-    ----------
-    text : str
-        String to be converted
-
-    Returns
-    -------
-    int or str
-        int if text represents a digit, text otherwise
-    """
-
-    return int(text) if text.isdigit() else text
-
-def natural_keys(text):
-    """
-    Splits text into three parts:
-        * str ending with "/frame_"
-        * int with frame index
-        * ".png"
-    Using this key, frames' paths can be sorted by their index
-    
-    Parameters
-    ----------
-    text : str
-        String to be split and converted
-
-    Returns
-    -------
-    list
-        Text split into several parts, where strings representing
-        digits are converted to int
-    """
-
-    return [atoi(c) for c in re.split('([0-9]+)', text)]
 
 def get_colors(n_channels):
     """ 
@@ -651,75 +612,31 @@ class AnimationDialog(QtWidgets.QDialog):
             if height % 2 == 1:
                 height += 1
 
-            # create temporary folder to store all frames
-            base = os.path.dirname(self.window.view_rot.paths[0])
-            path = os.path.join(base, "animation_frames")
+            # render all frames and save in RAM
+            video_writer = imageio.get_writer(name, fps=self.fps.value())
             progress = ProgressDialog(
                 "Rendering frames", 0, len(angx), self.window
             )
             progress.set_value(0)
-            try:
-                os.mkdir(path)
-                for i in range(len(angx)):
-                    qimage = self.window.view_rot.render_scene(
-                        viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
-                        ang=(angx[i], angy[i], angz[i]),
-                        animation=True,
-                    )
-                    qimage = qimage.scaled(
-                        width, 
-                        height,
-                        # QtCore.Qt.KeepAspectRatioByExpanding,
-                    )
-                    qimage.save(path + "/frame_{}.png".format(i+1))
-                    progress.set_value(i+1)
-            except:
-                # if folder exists, ask if it should be used or deleted
-                m = QtWidgets.QMessageBox()
-                m.setWindowTitle("Frames already exist")
-                ret = m.question(
-                    self,
-                    "",
-                    "Use the existing frames folder?",
-                    m.Yes | m.No,
+            for i in range(len(angx)):
+                qimage = self.window.view_rot.render_scene(
+                    viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
+                    ang=(angx[i], angy[i], angz[i]),
+                    animation=True,
                 )
-                if ret == m.No:
-                    # use new frames (render each one) and save
-                    for file in os.listdir(path):
-                        os.remove(os.path.join(path, file))
-                    for i in range(len(angx)):
-                        qimage = self.window.view_rot.render_scene(
-                            viewport=[(ymin[i], xmin[i]), (ymax[i], xmax[i])],
-                            ang=(angx[i], angy[i], angz[i]),
-                            animation=True,
-                        )
-                        qimage = qimage.scaled(
-                            width,
-                            height,
-                            # QtCore.Qt.KeepAspectRatioByExpanding,
-                        )
-                        qimage.save(path + "/frame_{}.png".format(i+1))
-                        progress.set_value(i+1)
-                elif ret == m.Yes:
-                    # use old frames
-                    progress.set_value(len(angx))
-                
-            # build a video and save it
-            status = StatusDialog("Creating the video...", self.window)
-            image_files = [
-                os.path.join(path, img)
-                for img in os.listdir(path)
-                if img.endswith(".png")
-            ] # paths to each frame
-            image_files.sort(key=natural_keys) # sort frames
-            video = ImageSequenceClip(image_files, fps=self.fps.value())
-            video.write_videofile(name, logger=None)
+                qimage = qimage.scaled(width, height)
 
-            # delete animation frames
-            for file in os.listdir(path):
-                os.remove(os.path.join(path, file))
-            os.rmdir(path)
-            status.close()
+                # convert to a np.array and append
+                ptr = qimage.bits()
+                ptr.setsize(height * width * 4)
+                frame = np.frombuffer(ptr, np.uint8).reshape((width, height, 4))
+                frame = frame[:, :, :3]
+                frame = frame[:, :, ::-1] # invert RGB to BGR
+
+                video_writer.append_data(frame)
+                progress.set_value(i+1)
+            progress.close()
+            video_writer.close()
             
 
 class ViewRotation(QtWidgets.QLabel):

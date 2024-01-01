@@ -11,6 +11,7 @@ Last change: 05-DEC-2023 MTS
 - Camera settings saved in the .yaml file after localization
 - Picasso: Design has the speed optimized extension sequences (Strauss and Jungmann, Nature Methods, 2020)
 - Change matplotlib backend for macOS (bug fix with some plots being unavailable)
+- Build animation does not trigger antivirus, which could delete Picasso (one click installer)
 
 0.6.3 - 0.6.5
 -------------
