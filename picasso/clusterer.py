@@ -385,14 +385,15 @@ def dbscan(locs, radius, min_density, pixelsize=None):
     Paramters
     ---------
     locs : np.recarray
-        Localizations to be clustered
+        Localizations to be clustered.
     radius : float
-        DBSCAN search radius, often referred to as "epsilon"
+        DBSCAN search radius, often referred to as "epsilon". Same units
+        as locs.
     min_density : int
         Number of localizations within radius to consider a given point 
-        a core sample
-    pixelsize : int
-        Camera pixel size in nm
+        a core sample.
+    pixelsize : int (default=None)
+        Camera pixel size in nm. Only needed for 3D.
     
     Returns
     -------

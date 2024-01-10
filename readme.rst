@@ -53,7 +53,7 @@ Via PyPI
 1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
 2. Activate the environment: ``conda activate picasso``.
 3. Install Picasso package using: ``pip install picassosr``.
-4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc.
+4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
 
 For Developers
 ^^^^^^^^^^^^^^
@@ -65,19 +65,9 @@ If you wish to use your local version of Picasso with your own modifications:
 3. Change to the directory of choice using ``cd``.
 4. Clone this GitHub repository by running ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
 5. Open the Picasso directory: ``cd picasso``.
-6. You can modify Picasso code from here.
-
-*Windows*
-'''''''''
-
-7. If you wish to create a *local* Picasso package to use it in other Python scripts (that includes your changes), run ``python setup.py install``. 
-8. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc.
-9. Remember that in order to update changes in Picasso code, you need to repeat step 7.
-
-*Mac*
-'''''
-
-Currently, Picasso does not support package creation on Mac OS. If you wish to run your modified Picasso code, simply go to your ``picasso`` directory and run ``python -m picasso render``, ``python -m picasso localize``, etc.
+6. You can modify Picasso code in this directory.
+7. To create a *local* Picasso package to use it in other Python scripts, run ``pip install -e .``. When you change the code in the ``picasso`` directory, the changes will be reflected in the package.
+8. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
 
 Optional packages
 ^^^^^^^^^^^^^^^^^
@@ -86,8 +76,7 @@ Regardless of whether Picasso was installed via PyPI or by cloning the GitHub re
 
 - ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`__.
 - *(Windows only)* ``pip install PyImarisWriter==0.7.0`` to enable .ims files in Localize and Render. Note that ``PyImarisWriter`` has been tested only on Windows.
-
-To enable GPU fitting, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
+- To enable ``GPU fitting``, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
 Updating
 ^^^^^^^^
@@ -95,13 +84,6 @@ Updating
 If Picasso was installed from PyPI, run the following command:
 
 ``pip install --upgrade picassosr``
-
-If Picasso was cloned from the GitHub repository, use the following commands:
-
-1. Move to the ``picasso`` folder with the terminal, activate environment.
-2. Update with git: ``git pull``.
-3. Update the environment: ``pip install --upgrade -r requirements.txt``.
-4. (*Windows only*)Run installation ``python setup.py install``.
 
 Creating shortcuts on Windows (*optional*)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -135,7 +117,7 @@ Check picasso/samples/ for Jupyter Notebooks that show how to interact with the 
 Contributing
 ------------
 
-If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. You can find more guidelines for contributing `here <https://github.com/jungmannlab/picasso/blob/master/CONTRIBUTING.rst>`__. I will gladly guide you through the codebase and credit you accordingly. Additionally, you can check out the ``Projects``-page on GitHub.  You can also contact me via picasso@jungmannlab.org.
+If you have a feature request or a bug report, please post it as an issue on the GitHub issue tracker. If you want to contribute, put a PR for it. You can find more guidelines for contributing `here <https://github.com/jungmannlab/picasso/blob/master/CONTRIBUTING.rst>`__. We will gladly guide you through the codebase and credit you accordingly. Additionally, you can check out the ``Projects``-page on GitHub.  You can also contact us via picasso@jungmannlab.org.
 
 Contributions & Copyright
 -------------------------
