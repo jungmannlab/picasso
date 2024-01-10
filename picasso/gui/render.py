@@ -5698,7 +5698,9 @@ class View(QtWidgets.QLabel):
         self.window.dataset_dialog.add_entry(path)
 
         self.window.setWindowTitle(
-            "Picasso: Render. File: {}".format(os.path.basename(path))
+            "Picasso v{}: Render. File: {}".format(
+                __version__, os.path.basename(path)
+            )
         )
 
         # fast rendering add channel
