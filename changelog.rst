@@ -1,10 +1,10 @@
 Changelog
 =========
 
-Last change: 05-DEC-2023 MTS
+Last change: 10-JAN-2024 MTS
 
-0.6.6
------
+0.6.6 - 0.6.7
+-------------
 - GUI modules display the Picasso version number in the title bar
 - Added readthedocs requirements file (only for developers)
 - No blur applied when padding in Picasso: Render (increases speed of rendering)
