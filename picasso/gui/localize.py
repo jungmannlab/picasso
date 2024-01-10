@@ -17,7 +17,7 @@ import time
 import numpy as np
 import traceback
 import importlib, pkgutil
-from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi
+from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi, __version__
 from collections import UserDict
 
 try:
@@ -1046,7 +1046,7 @@ class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         # Init GUI
-        self.setWindowTitle("Picasso: Localize")
+        self.setWindowTitle(f"Picasso v{__version__}: Localize")
 
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "localize.ico")
@@ -1797,8 +1797,7 @@ class Window(QtWidgets.QMainWindow):
                 "Z Calibration Path"
             ] = self.parameters_dialog.z_calibration_path
             localize_info["Z Calibration"] = self.parameters_dialog.z_calibration
-        info = self.info + [localize_info]
-
+        info = self.info + [localize_info | self.camera_info]
         if self.parameters_dialog.calib_astig_checkbox.isChecked():
             print("Correcting astigmatism...")
 

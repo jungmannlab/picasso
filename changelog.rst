@@ -1,7 +1,17 @@
 Changelog
 =========
 
-Last change: 22-OCT-2023 MTS
+Last change: 05-DEC-2023 MTS
+
+0.6.6
+-----
+- GUI modules display the Picasso version number in the title bar
+- Added readthedocs requirements file (only for developers)
+- No blur applied when padding in Picasso: Render (increases speed of rendering)
+- Camera settings saved in the .yaml file after localization
+- Picasso: Design has the speed optimized extension sequences (Strauss and Jungmann, Nature Methods, 2020)
+- Change matplotlib backend for macOS (bug fix with some plots being unavailable)
+- Build animation does not trigger antivirus, which could delete Picasso (one click installer only)
 
 0.6.3 - 0.6.5
 -------------
@@ -14,6 +24,7 @@ Last change: 22-OCT-2023 MTS
 - Fix test clusterer HDBSCAN bug
 - Fix .nd2 localized files info loading (full loader changed to unsafe loader)
 - Fix rare bug with pick similar zero division error
+- Update installation instructions
 
 0.6.2
 -----

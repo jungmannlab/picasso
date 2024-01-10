@@ -37,7 +37,7 @@ from collections import Counter
 
 import colorsys
 
-from .. import imageprocess, io, lib, postprocess, render, clusterer
+from .. import imageprocess, io, lib, postprocess, render, clusterer, __version__
 from .rotation import RotationWindow
 
 # PyImarisWrite works on windows only
@@ -48,7 +48,7 @@ if IMSWRITER:
     from PyImarisWriter import PyImarisWriter as PW
 
 if sys.platform == "darwin": # plots do not work on mac os
-    matplotlib.use('agg')
+    matplotlib.use('Qt5Agg')
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
 
@@ -5698,7 +5698,9 @@ class View(QtWidgets.QLabel):
         self.window.dataset_dialog.add_entry(path)
 
         self.window.setWindowTitle(
-            "Picasso: Render. File: {}".format(os.path.basename(path))
+            "Picasso v{}: Render. File: {}".format(
+                __version__, os.path.basename(path)
+            )
         )
 
         # fast rendering add channel
@@ -7009,7 +7011,7 @@ class View(QtWidgets.QLabel):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
+        elif n_channels > 1:
             pathlist = list(self.locs_paths)
             pathlist.append("Apply to all sequentially")
             pathlist.append("Combine all channels")
@@ -7099,9 +7101,12 @@ class View(QtWidgets.QLabel):
         """
 
         # blur method
-        blur_button = (
-            self.window.display_settings_dlg.blur_buttongroup.checkedButton()
-        )
+        if self._pan: # no blur when panning
+            blur_method = None
+        else: # selected method
+            blur_method = self.window.display_settings_dlg.blur_methods[
+                self.window.display_settings_dlg.blur_buttongroup.checkedButton()
+            ]
 
         # oversampling
         optimal_oversampling = (
@@ -7140,9 +7145,7 @@ class View(QtWidgets.QLabel):
         return {
             "oversampling": oversampling,
             "viewport": viewport,
-            "blur_method": self.window.display_settings_dlg.blur_methods[
-                blur_button
-            ],
+            "blur_method": blur_method,
             "min_blur_width": float(
                 self.window.display_settings_dlg.min_blur_width.value()
             ),
@@ -7411,6 +7414,7 @@ class View(QtWidgets.QLabel):
                 self._pan = False
                 self.setCursor(QtCore.Qt.ArrowCursor)
                 event.accept()
+                self.update_scene()
             else:
                 event.ignore()
         elif self._mode == "Pick":
@@ -10554,7 +10558,7 @@ class Window(QtWidgets.QMainWindow):
         """
 
         # general
-        self.setWindowTitle("Picasso: Render")
+        self.setWindowTitle(f"Picasso v{__version__}: Render")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
         icon = QtGui.QIcon(icon_path)
@@ -12049,7 +12053,7 @@ class Window(QtWidgets.QMainWindow):
         for dialog in self.dialogs:
             dialog.close()
         self.menu_bar.clear() #otherwise the menu bar is doubled
-        self.setWindowTitle("Picasso: Render")
+        self.setWindowTitle(f"Picasso v{__version__}: Render")
         self.initUI(plugins_loaded=True)
 
     def rot_win(self):

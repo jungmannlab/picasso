@@ -32,7 +32,7 @@ from scipy.stats import norm
 import os.path as _ospath
 
 from .. import io as _io
-from .. import lib, simulate
+from .. import lib, simulate, __version__
 
 
 def fitFuncBg(x, a, b):
@@ -116,7 +116,7 @@ CY_DEFAULT = [
 class Window(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Picasso: Simulate")
+        self.setWindowTitle(f"Picasso v{__version__}: Simulate")
         self.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
