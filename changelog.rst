@@ -1,9 +1,9 @@
 Changelog
 =========
 
-Last change: 10-JAN-2024 MTS
+Last change: 18-JAN-2024 MTS
 
-0.6.6 - 0.6.7
+0.6.6 - 0.6.8
 -------------
 - GUI modules display the Picasso version number in the title bar
 - Added readthedocs requirements file (only for developers)
@@ -12,6 +12,7 @@ Last change: 10-JAN-2024 MTS
 - Picasso: Design has the speed optimized extension sequences (Strauss and Jungmann, Nature Methods, 2020)
 - Change matplotlib backend for macOS (bug fix with some plots being unavailable)
 - Build animation does not trigger antivirus, which could delete Picasso (one click installer only)
+- Bug fix: 2D cluster centers area and convex hull are saved correctly
 
 0.6.3 - 0.6.5
 -------------

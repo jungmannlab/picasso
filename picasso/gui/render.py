@@ -6055,7 +6055,7 @@ class View(QtWidgets.QLabel):
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
+            centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)     
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
 
