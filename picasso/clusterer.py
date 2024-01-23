@@ -618,8 +618,8 @@ def find_cluster_centers(locs, pixelsize=None):
             dtype=CLUSTER_CENTERS_DTYPE_3D,
         )
     else:
-        area = _np.array([_[13] for _ in centers_])
-        convexhull = _np.array([_[14] for _ in centers_])
+        area = _np.array([_[15] for _ in centers_])
+        convexhull = _np.array([_[16] for _ in centers_])
         centers = _np.rec.array(
             (
                 frame,
