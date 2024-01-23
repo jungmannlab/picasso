@@ -6417,14 +6417,14 @@ class View(QtWidgets.QLabel):
             alpha = np.arctan((end_y - start_y) / (end_x - start_x))
         dx = width * np.sin(alpha) / 2
         dy = width * np.cos(alpha) / 2
-        x1 = int(start_x - dx)
-        x2 = int(start_x + dx)
-        x4 = int(end_x - dx)
-        x3 = int(end_x + dx)
-        y1 = int(start_y + dy)
-        y2 = int(start_y - dy)
-        y4 = int(end_y + dy)
-        y3 = int(end_y - dy)
+        x1 = float(start_x - dx)
+        x2 = float(start_x + dx)
+        x4 = float(end_x - dx)
+        x3 = float(end_x + dx)
+        y1 = float(start_y + dy)
+        y2 = float(start_y - dy)
+        y4 = float(end_y + dy)
+        y3 = float(end_y - dy)
         return [x1, x2, x3, x4], [y1, y2, y3, y4]
 
     def get_pick_rectangle_polygon(

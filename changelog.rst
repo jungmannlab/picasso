@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 18-JAN-2024 MTS
+Last change: 23-JAN-2024 MTS
 
 0.6.6 - 0.6.8
 -------------
@@ -11,9 +11,10 @@ Last change: 18-JAN-2024 MTS
 - Camera settings saved in the .yaml file after localization
 - Picasso: Design has the speed optimized extension sequences (Strauss and Jungmann, Nature Methods, 2020)
 - Change matplotlib backend for macOS (bug fix with some plots being unavailable)
-- Build animation does not trigger antivirus, which could delete Picasso (one click installer only)
+- .tiff files can be loaded to Localize directly, *although the support may limited!*
+- Bug fix: build animation does not trigger antivirus, which could delete Picasso (one click installer only)
 - Bug fix: 2D cluster centers area and convex hull are saved correctly
-- .tiff files can be loaded to Localize directly, although the support may limited!
+- Bug fix: rectangular picks
 
 0.6.3 - 0.6.5
 -------------
