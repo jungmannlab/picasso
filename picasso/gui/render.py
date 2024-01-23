@@ -3315,7 +3315,7 @@ class InfoDialog(QtWidgets.QDialog):
             progress = lib.ProgressDialog(
                 "Calculating NeNA precision", 0, 100, self
             )
-            result_lp = postprocess.nena(locs, info, progress.set_value)
+            result_lp = postprocess.nena(locs.copy(), info, progress.set_value)
 
             # modify the movie grid
             if not self.nena_calculated: # if nena calculated first time
