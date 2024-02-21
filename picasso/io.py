@@ -184,7 +184,7 @@ def load_movie(path, prompt_info=None, progress=None):
     ext = ext.lower()
     if ext == ".raw":
         return load_raw(path, prompt_info=prompt_info)
-    elif ext == ".tif":
+    elif ext == ".tif" or ext == ".tiff":
         return load_tif(path)
     elif ext == ".ims":
         return load_ims(path, prompt_info=prompt_info)

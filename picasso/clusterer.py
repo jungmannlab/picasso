@@ -385,14 +385,15 @@ def dbscan(locs, radius, min_density, pixelsize=None):
     Paramters
     ---------
     locs : np.recarray
-        Localizations to be clustered
+        Localizations to be clustered.
     radius : float
-        DBSCAN search radius, often referred to as "epsilon"
+        DBSCAN search radius, often referred to as "epsilon". Same units
+        as locs.
     min_density : int
         Number of localizations within radius to consider a given point 
-        a core sample
-    pixelsize : int
-        Camera pixel size in nm
+        a core sample.
+    pixelsize : int (default=None)
+        Camera pixel size in nm. Only needed for 3D.
     
     Returns
     -------
@@ -617,8 +618,8 @@ def find_cluster_centers(locs, pixelsize=None):
             dtype=CLUSTER_CENTERS_DTYPE_3D,
         )
     else:
-        area = _np.array([_[13] for _ in centers_])
-        convexhull = _np.array([_[14] for _ in centers_])
+        area = _np.array([_[15] for _ in centers_])
+        convexhull = _np.array([_[16] for _ in centers_])
         centers = _np.rec.array(
             (
                 frame,

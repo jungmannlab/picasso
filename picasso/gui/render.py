@@ -3315,7 +3315,7 @@ class InfoDialog(QtWidgets.QDialog):
             progress = lib.ProgressDialog(
                 "Calculating NeNA precision", 0, 100, self
             )
-            result_lp = postprocess.nena(locs, info, progress.set_value)
+            result_lp = postprocess.nena(locs.copy(), info, progress.set_value)
 
             # modify the movie grid
             if not self.nena_calculated: # if nena calculated first time
@@ -5698,7 +5698,9 @@ class View(QtWidgets.QLabel):
         self.window.dataset_dialog.add_entry(path)
 
         self.window.setWindowTitle(
-            "Picasso: Render. File: {}".format(os.path.basename(path))
+            "Picasso v{}: Render. File: {}".format(
+                __version__, os.path.basename(path)
+            )
         )
 
         # fast rendering add channel
@@ -6053,7 +6055,7 @@ class View(QtWidgets.QLabel):
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_cluster_centers.hdf5")
-            centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
+            centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)     
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
 
@@ -6415,14 +6417,14 @@ class View(QtWidgets.QLabel):
             alpha = np.arctan((end_y - start_y) / (end_x - start_x))
         dx = width * np.sin(alpha) / 2
         dy = width * np.cos(alpha) / 2
-        x1 = int(start_x - dx)
-        x2 = int(start_x + dx)
-        x4 = int(end_x - dx)
-        x3 = int(end_x + dx)
-        y1 = int(start_y + dy)
-        y2 = int(start_y - dy)
-        y4 = int(end_y + dy)
-        y3 = int(end_y - dy)
+        x1 = float(start_x - dx)
+        x2 = float(start_x + dx)
+        x4 = float(end_x - dx)
+        x3 = float(end_x + dx)
+        y1 = float(start_y + dy)
+        y2 = float(start_y - dy)
+        y4 = float(end_y + dy)
+        y3 = float(end_y - dy)
         return [x1, x2, x3, x4], [y1, y2, y3, y4]
 
     def get_pick_rectangle_polygon(
@@ -7009,7 +7011,7 @@ class View(QtWidgets.QLabel):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
+        elif n_channels > 1:
             pathlist = list(self.locs_paths)
             pathlist.append("Apply to all sequentially")
             pathlist.append("Combine all channels")
@@ -7099,9 +7101,12 @@ class View(QtWidgets.QLabel):
         """
 
         # blur method
-        blur_button = (
-            self.window.display_settings_dlg.blur_buttongroup.checkedButton()
-        )
+        if self._pan: # no blur when panning
+            blur_method = None
+        else: # selected method
+            blur_method = self.window.display_settings_dlg.blur_methods[
+                self.window.display_settings_dlg.blur_buttongroup.checkedButton()
+            ]
 
         # oversampling
         optimal_oversampling = (
@@ -7140,9 +7145,7 @@ class View(QtWidgets.QLabel):
         return {
             "oversampling": oversampling,
             "viewport": viewport,
-            "blur_method": self.window.display_settings_dlg.blur_methods[
-                blur_button
-            ],
+            "blur_method": blur_method,
             "min_blur_width": float(
                 self.window.display_settings_dlg.min_blur_width.value()
             ),
@@ -7411,6 +7414,7 @@ class View(QtWidgets.QLabel):
                 self._pan = False
                 self.setCursor(QtCore.Qt.ArrowCursor)
                 event.accept()
+                self.update_scene()
             else:
                 event.ignore()
         elif self._mode == "Pick":
