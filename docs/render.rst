@@ -35,7 +35,7 @@ Picking of regions of interest
 ------------------------------
 
 1. Manual selection. Open ``Picasso: Render`` and load the localization HDF5 file to be processed.
-2. Switch the active tool by selecting ``Tools > Pick``. The mouse cursor will now change to a circle. Alternatively, open ``Tools > Tools Settings`` to change the shape into a rectangle.
+2. Switch the active tool by selecting ``Tools > Pick``. The mouse cursor will now change to a circle. Alternatively, open ``Tools > Tools Settings`` to change the shape into a rectangle. Lastly, choosing ``Polygon`` allows for drawing polygons of any shape.
 3. Set the size of the pick circle by adjusting the ``Diameter`` field in the tool settings dialog (``Tools > Tools Settings``). Alternatively, choose ``Width`` for a rectangular shape.
 4. Pick regions of interest using the circular mouse cursor by clicking the left mouse button. All localizations within the circle will be selected for further processing.
 5. (Optional) Automated region of interest selection. Select ``Tools > Pick similar`` to automatically detect and pick structures that have similar numbers of localizations and RMS deviation (RMSD) from their center of mass than already-picked structures. The upper and lower thresholds for these similarity measures are the respective standard deviations of already-picked regions, scaled by a tunable factor. This factor can be adjusted using the field ``Tools > Tools Settings > Pick similar ± range``. To display the mean and standard deviation of localization number and RMSD for currently picked regions, select ``View > Show info`` and click ``Calculate info below``.
@@ -157,7 +157,7 @@ Save the localizations that are currently loaded in render to an hdf5 file.
 
 Save picked localizations [Ctrl+Shift+S]
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-Save the localizations that are within a picked region (yellow circle or rectangle). Each pick will get a different group number. To display the group number in Render, select ``Annotate picks`` in Tools/Tools Settings.
+Save the localizations that are within a picked region (yellow circle, rectangle or polygon). Each pick will get a different group number. To display the group number in Render, select ``Annotate picks`` in Tools/Tools Settings.
 In case of rectangular picks, the saved localizations file will contain new columns `x_pick_rot` and `y_pick_rot`, which are localization coordinates into the coordinate system of the pick rectangle (coordinate (0,0) is where the rectangle was started to be drawn, and `y_pick_rot` is in the direction of the drawn line.)
 These columns can be used to plot density profiles of localizations along the rectangle dimensions easily (e.g., with "Filter").
 
@@ -267,7 +267,7 @@ Selects the zoom tool. The mouse can now be used for zoom and pan.
 
 Pick (CTRL + P)
 ^^^^^^^^^^^^^^^
-Selects the pick tool. The mouse can now be used for picking localizations. The user can set the pick shape in the `Tools settings` (CTRL + T) dialog. The default shape is Circle with the diameter to be set. For rectangles, the user draws the length, while the width is controlled via a parameter for all drawn rectangles, similar to the diameter for circular picks.
+Selects the pick tool. The mouse can now be used for picking localizations. The user can set the pick shape in the `Tools settings` (CTRL + T) dialog. The default shape is Circle with the diameter to be set. For rectangles, the user draws the length, while the width is controlled via a parameter for all drawn rectangles, similar to the diameter for circular picks. For a polygonal pick, the user clicks with the left button to draw the desired polygon. The right button deletes the last selected vertex. The polygon can be close by clicking with the left button on the starting vertex.
 
 Measure (CTRL + M)
 ^^^^^^^^^^^^^^^^^^

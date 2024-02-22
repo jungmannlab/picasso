@@ -157,6 +157,31 @@ def locs_at(x, y, locs, r):
     return locs[is_picked]
 
 
+def polygon_area(X, Y):
+    """Finds the area of a polygon defined by corners X and Y.
+    
+    Parameters
+    ----------
+    X : numpy.1darray
+        x-coordinates of the polygon corners.
+    Y : numpy.1darray
+        y-coordinates of the polygon corners.
+    
+    Returns
+    -------
+    area : float
+        Area of the polygon.
+    """
+
+    n_corners = len(X)
+    area = 0
+    for i in range(n_corners):
+        j = (i + 1) % n_corners # next corner
+        area += X[i] * Y[j] - X[j] * Y[i]
+    area = abs(area) / 2
+    return area
+
+
 @_numba.jit(nopython=True)
 def check_if_in_polygon(x, y, X, Y):
     """Checks if points (x, y) are in polygon defined by corners (X, Y).
@@ -188,8 +213,10 @@ def check_if_in_polygon(x, y, X, Y):
         count = 0
         for j in range(n_polygon):
             j_next = (j + 1) % n_polygon
-            if ((Y[j] > y[i]) != (Y[j_next] > y[i])) and \
-                    (x[i] < X[j] + (X[j_next] - X[j]) * (y[i] - Y[j]) / (Y[j_next] - Y[j])):
+            if (
+                ((Y[j] > y[i]) != (Y[j_next] > y[i])) and
+                (x[i] < X[j] + (X[j_next] - X[j]) * (y[i] - Y[j]) / (Y[j_next] - Y[j]))
+            ):
                 count += 1
         if count % 2 == 1:
             is_in_polygon[i] = True
