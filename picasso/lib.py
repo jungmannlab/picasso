@@ -158,13 +158,94 @@ def locs_at(x, y, locs, r):
 
 
 @_numba.jit(nopython=True)
+def check_if_in_polygon(x, y, X, Y):
+    """Checks if points (x, y) are in polygon defined by corners (X, Y).
+    Uses the ray casting algorithm, see check_if_in_rectangle for 
+    details.
+    
+    Parameters
+    ----------
+    x : numpy.1darray
+        x-coordinates of points.
+    y : numpy.1darray
+        y-coordinates of points.
+    X : numpy.1darray
+        x-coordinates of polygon corners.
+    Y : numpy.1darray
+        y-coordinates of polygon corners.
+    
+    Returns
+    ------- 
+    is_in_polygon : numpy.ndarray
+        Boolean array indicating if point is in polygon.
+    """
+
+    n_locs = len(x)
+    n_polygon = len(X)
+    is_in_polygon = _np.zeros(n_locs, dtype=_np.bool_)
+
+    for i in range(n_locs):
+        count = 0
+        for j in range(n_polygon):
+            j_next = (j + 1) % n_polygon
+            if ((Y[j] > y[i]) != (Y[j_next] > y[i])) and \
+                    (x[i] < X[j] + (X[j_next] - X[j]) * (y[i] - Y[j]) / (Y[j_next] - Y[j])):
+                count += 1
+        if count % 2 == 1:
+            is_in_polygon[i] = True
+
+    return is_in_polygon
+
+
+def locs_in_polygon(locs, X, Y):
+    """Returns localizations in polygon defined by corners (X, Y).
+    
+    Parameters
+    ----------
+    locs : numpy.recarray
+        Localizations.
+    X : list
+        x-coordinates of polygon corners.
+    Y : list
+        y-coordinates of polygon corners.
+    
+    Returns
+    -------
+    picked_locs : numpy.recarray
+        Localizations in polygon.
+    """
+
+    is_in_polygon = check_if_in_polygon(
+        locs.x, locs.y, _np.array(X), _np.array(Y)
+    )
+    return locs[is_in_polygon]
+
+
+@_numba.jit(nopython=True)
 def check_if_in_rectangle(x, y, X, Y):
     """
     Checks if locs with coordinates (x, y) are in rectangle with corners (X, Y)
     by counting the number of rectangle sides which are hit by a ray
     originating from each loc to the right. If the number of hit rectangle
     sides is odd, then the loc is in the rectangle
+
+    Parameters
+    ----------
+    x : numpy.1darray
+        x-coordinates of points.
+    y : numpy.1darray
+        y-coordinates of points.
+    X : numpy.1darray
+        x-coordinates of polygon corners.
+    Y : numpy.1darray
+        y-coordinates of polygon corners.
+    
+    Returns
+    ------- 
+    is_in_polygon : numpy.ndarray
+        Boolean array indicating if point is in polygon.
     """
+
     n_locs = len(x)
     ray_hits_rectangle_side = _np.zeros((n_locs, 4))
     for i in range(4):
@@ -194,7 +275,9 @@ def check_if_in_rectangle(x, y, X, Y):
 
 
 def locs_in_rectangle(locs, X, Y):
-    is_in_rectangle = check_if_in_rectangle(locs.x, locs.y, _np.array(X), _np.array(Y))
+    is_in_rectangle = check_if_in_rectangle(
+        locs.x, locs.y, _np.array(X), _np.array(Y)
+    )
     return locs[is_in_rectangle]
 
 
