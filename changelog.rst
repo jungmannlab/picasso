@@ -6,6 +6,7 @@ Last change: 22-FEB-2024 MTS
 0.6.9
 -----
 - Added the option to draw polygon picks in Picasso: Render
+- Save pick properties in Picasso: Render saves areas of picked regions in nm^2
 
 0.6.6 - 0.6.8
 -------------
