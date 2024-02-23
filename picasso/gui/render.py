@@ -57,6 +57,7 @@ INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
 N_GROUP_COLORS = 8
 N_Z_COLORS = 32
+POLYGON_POINTER_SIZE = 16 # must be even
 
 
 def get_colors(n_channels):
@@ -4308,7 +4309,7 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
 
         pick_grid.addWidget(QtWidgets.QLabel("Shape:"), 1, 0)
         self.pick_shape = QtWidgets.QComboBox()
-        self.pick_shape.addItems(["Circle", "Rectangle"])
+        self.pick_shape.addItems(["Circle", "Rectangle", "Polygon"])
         pick_grid.addWidget(self.pick_shape, 1, 1)
         pick_stack = QtWidgets.QStackedWidget()
         pick_grid.addWidget(pick_stack, 2, 0, 1, 2)
@@ -4324,6 +4325,10 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
         self.pick_rectangle_settings = PickToolRectangleSettings(window, self)
         pick_stack.addWidget(self.pick_rectangle_settings)
         self.pick_width = self.pick_rectangle_settings.pick_width
+
+        # Polygon
+        self.pick_polygon_settings = QtWidgets.QWidget()
+        pick_stack.addWidget(self.pick_polygon_settings)
 
         self.pick_annotation = QtWidgets.QCheckBox("Annotate picks")
         self.pick_annotation.stateChanged.connect(self.update_scene_with_cache)
@@ -5293,6 +5298,9 @@ class View(QtWidgets.QLabel):
         Adds a pick at a given position
     add_point(position)
         Adds a point at a given position for measuring distances
+    add_polygon_point(point_movie, point_screen)
+        Adds a new point to the polygon or closes the current 
+        polygon.
     add_picks(positions)
         Adds several picks
     adjust_viewport_to_view(viewport)
@@ -5356,6 +5364,8 @@ class View(QtWidgets.QLabel):
         Finds group color index for each localization
     get_index_blocks(channel)
         Calls self.index_locs if not calculated earlier
+    get_pick_polygon_corners(pick)
+        Returns X and Y coordinates of a pick polygon
     get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width)
         Finds the positions of a rectangular pick's corners
     get_pick_rectangle_polygon(start_x, start_y, end_x, end_y, width)
@@ -5399,6 +5409,8 @@ class View(QtWidgets.QLabel):
         Assigns attributes and updates scene if new pick shape chosen
     pan_relative(dy, dx)
         Moves viewport by a given relative distance
+    pick_areas()
+        Finds the areas of all current picks in nm^2.
     pick_message_box(params)
         Returns a message box for selecting picks
     pick_similar()
@@ -5414,6 +5426,8 @@ class View(QtWidgets.QLabel):
         center
     remove_points()
         Removes all distance measurement points
+    remove_polygon_point()
+        Removes the last point from the last polygon
     remove_picks(position)
         Deletes picks at a given position
     remove_picked_locs()
@@ -5758,6 +5772,34 @@ class View(QtWidgets.QLabel):
         self._points.append(position)
         if update_scene:
             self.update_scene()
+
+    def add_polygon_point(self, point_movie, point_screen, update_scene=True):
+        """Adds a new point to the polygon or closes the current 
+        polygon."""
+
+        if len(self._picks) == 0:
+            self._picks.append([point_movie])
+        else:
+            # check if the polygon is to be closed or if a new point is
+            # to be added
+            if len(self._picks[-1]) < 3: # cannot close polygon yet
+                self._picks[-1].append(point_movie)
+            else:
+                # check the distance between the current point and the 
+                # starting point of the currently drawn polygon
+                start_point = self.map_to_view(*self._picks[-1][0])
+                distance2 = (
+                    (point_screen.x() - start_point[0]) ** 2
+                    + (point_screen.y() - start_point[1]) ** 2
+                )
+                # close the polygon
+                if distance2 < POLYGON_POINTER_SIZE ** 2: 
+                    self._picks[-1].append(self._picks[-1][0])
+                    self._picks.append([])
+                else: # add a new point
+                    self._picks[-1].append(point_movie)
+        self.update_pick_info_short()
+        self.update_scene(picks_only=True)
 
     def adjust_viewport_to_view(self, viewport):
         """
@@ -6396,6 +6438,18 @@ class View(QtWidgets.QLabel):
         else:
             event.ignore()
 
+    def get_pick_polygon_corners(self, pick):
+        """Returns X and Y coordinates of a pick polygon.
+        
+        Returns None, None if the pick is not a closed polygon."""
+
+        if len(pick) < 3 or pick[0] != pick[-1]:
+            return None, None
+        else:
+            X = [_[0] for _ in pick]
+            Y = [_[1] for _ in pick]
+            return X, Y
+
     def get_pick_rectangle_corners(
         self, start_x, start_y, end_x, end_y, width
     ):
@@ -6453,18 +6507,17 @@ class View(QtWidgets.QLabel):
         return p
 
     def draw_picks(self, image):
-        """ 
-        Draws all current picks onto rendered locs.
+        """Draws all current picks onto rendered locs.
         
         Parameters
         ----------
         image : QImage
-            Image containing rendered localizations
+            Image containing rendered localizations.
 
         Returns
         -------
         QImage
-            Image with the drawn picks
+            Image with the drawn picks.
         """
 
         image = image.copy()
@@ -6551,6 +6604,40 @@ class View(QtWidgets.QLabel):
                 # annotate picks
                 if t_dialog.pick_annotation.isChecked():
                     painter.drawText(*most_right, str(i))
+            painter.end()
+
+        # polygon - circles at the corners connected by lines
+        elif self._pick_shape == "Polygon":
+            painter = QtGui.QPainter(image)
+            painter.setPen(QtGui.QColor("yellow"))
+
+            # yellow is barely visible on white background
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setPen(QtGui.QColor("red"))
+
+            # draw corners and lines
+            for i, pick in enumerate(self._picks):
+                oldpoint = []
+                for point in pick:
+                    cx, cy = self.map_to_view(*point)
+                    painter.drawEllipse(
+                        QtCore.QPoint(cx, cy), 
+                        int(POLYGON_POINTER_SIZE / 2), 
+                        int(POLYGON_POINTER_SIZE / 2),
+                    )
+                    if oldpoint != []: # draw the line
+                        ox, oy = self.map_to_view(*oldpoint)
+                        painter.drawLine(cx, cy, ox, oy)
+                    oldpoint = point
+
+                # annotate picks
+                if len(pick):
+                    if t_dialog.pick_annotation.isChecked():
+                        painter.drawText(
+                            cx + int(POLYGON_POINTER_SIZE / 2) + 10, 
+                            cy + int(POLYGON_POINTER_SIZE / 2) + 10, 
+                            str(i),
+                        )
             painter.end()
         return image
 
@@ -6956,7 +7043,7 @@ class View(QtWidgets.QLabel):
                     x_max = x + 1.4 * r
                     y_min = y - 1.4 * r
                     y_max = y + 1.4 * r
-                else:
+                elif self._pick_shape == "Rectangle":
                     (xs, ys), (xe, ye) = self._picks[pick_no]
                     xc = np.mean([xs, xe])
                     yc = np.mean([ys, ye])
@@ -6966,6 +7053,12 @@ class View(QtWidgets.QLabel):
                     x_max = max(X) + (0.2 * (max(X) - xc))
                     y_min = min(Y) - (0.2 * (yc - min(Y)))
                     y_max = max(Y) + (0.2 * (max(Y) - yc))
+                elif self._pick_shape == "Polygon":
+                    X, Y = self.get_pick_polygon_corners(self._picks[pick_no])
+                    x_min = min(X) - 0.2 * (max(X) - min(X))
+                    x_max = max(X) + 0.2 * (max(X) - min(X))
+                    y_min = min(Y) - 0.2 * (max(Y) - min(Y))
+                    y_max = max(Y) + 0.2 * (max(Y) - min(Y))
                 viewport = [(y_min, x_min), (y_max, x_max)] 
                 self.update_scene(viewport=viewport)
 
@@ -7224,6 +7317,8 @@ class View(QtWidgets.QLabel):
             self.window.tools_settings_dialog.pick_width.setValue(
                 regions["Width"]
             )
+        elif loaded_shape == "Polygon":
+            self._picks = regions["Vertices"]
         else:
             raise ValueError("Unrecognized pick shape")
 
@@ -7248,9 +7343,9 @@ class View(QtWidgets.QLabel):
             Rectangular picks have not been implemented yet
         """
 
-        if self._pick_shape == "Rectangle":
+        if self._pick_shape != "Circle":
             raise NotImplementedError(
-                "Subtracting picks not implemented for rectangle picks"
+                "Subtracting picks implemented for circular picks only."
             )
         oldpicks = self._picks.copy()
 
@@ -7280,7 +7375,7 @@ class View(QtWidgets.QLabel):
             self.update_scene(picks_only=True)
 
     def map_to_movie(self, position):
-        """ Converts coordinates from display units to camera units. """
+        """Converts coordinates from display units to camera units. """
 
         x_rel = position.x() / self.width()
         x_movie = x_rel * self.viewport_width() + self.viewport[0][1]
@@ -7289,7 +7384,7 @@ class View(QtWidgets.QLabel):
         return x_movie, y_movie
 
     def map_to_view(self, x, y):
-        """ Converts coordinates from camera units to display units. """
+        """Converts coordinates from camera units to display units. """
 
         cx = self.width() * (x - self.viewport[0][1]) / self.viewport_width()
         cy = self.height() * (y - self.viewport[0][0]) / self.viewport_height()
@@ -7447,6 +7542,14 @@ class View(QtWidgets.QLabel):
                     event.accept()
                 else:
                     event.ignore()
+            elif self._pick_shape == "Polygon":
+                # add a point to the polygon
+                if event.button() == QtCore.Qt.LeftButton:
+                    point_movie = self.map_to_movie(event.pos())
+                    self.add_polygon_point(point_movie, event.pos())
+                # remove the last point from the polygon
+                elif event.button() == QtCore.Qt.RightButton:
+                    self.remove_polygon_point()
         elif self._mode == "Measure":
             if event.button() == QtCore.Qt.LeftButton:
                 # add measure point
@@ -7826,9 +7929,9 @@ class View(QtWidgets.QLabel):
         Opens self.pick_message_box to display information.
         """
 
-        if self._pick_shape == "Rectangle":
+        if self._pick_shape != "Circle":
             raise NotImplementedError(
-                "Not implemented for rectangular picks"
+                "Implemented for circular picks only."
             )
         channel = self.get_channel3d("Select Channel")
 
@@ -8445,6 +8548,40 @@ class View(QtWidgets.QLabel):
         if self.index_blocks[channel] is None or fast_render:
             self.index_locs(channel, fast_render=fast_render)
         return self.index_blocks[channel]
+    
+    @check_pick
+    def pick_areas(self):
+        """Finds the areas of all current picks in nm^2.
+        
+        Returns
+        -------
+        areas : np.1darray
+            Areas of all picks.
+        """
+
+        if self._pick_shape == "Circle":
+            d = self.window.tools_settings_dialog.pick_diameter.value()
+            r = d / 2
+            areas = np.ones(len(self._picks)) * np.pi * r ** 2
+        elif self._pick_shape == "Rectangle":
+            w = self.window.tools_settings_dialog.pick_width.value()
+            areas = np.zeros(len(self._picks))
+            for i, pick in enumerate(self._picks):
+                (xs, ys), (xe, ye) = pick
+                areas[i] = w * np.sqrt((xe - xs) ** 2 + (ye - ys) ** 2)
+        elif self._pick_shape == "Polygon":
+            areas = np.zeros(len(self._picks))
+            for i, pick in enumerate(self._picks):
+                if len(pick) < 3 or pick[0] != pick[-1]: # not a closed polygon
+                    areas[i] = 0
+                    continue
+                X, Y = self.get_pick_polygon_corners(pick)
+                areas[i] = lib.polygon_area(X, Y)
+            areas = areas[areas > 0] # remove open polygons
+
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        areas *= pixelsize ** 2
+        return areas
 
     @check_picks
     def pick_similar(self):
@@ -8461,9 +8598,9 @@ class View(QtWidgets.QLabel):
             If pick shape is rectangle
         """
 
-        if self._pick_shape == "Rectangle":
+        if self._pick_shape != "Circle":
             raise NotImplementedError(
-                "Pick similar not implemented for rectangle picks"
+                "Pick similar implemented for circular picks only."
             )
         channel = self.get_channel("Pick similar")
         if channel is not None:
@@ -8621,6 +8758,29 @@ class View(QtWidgets.QLabel):
                     group_locs.sort(kind="mergesort", order="frame")
                     picked_locs.append(group_locs)
                     progress.set_value(i + 1)
+            elif self._pick_shape == "Polygon":
+                if fast_render:
+                    channel_locs = self.locs[channel]
+                else:
+                    channel_locs = self.all_locs[channel]
+                for i, pick in enumerate(self._picks):
+                    X, Y = self.get_pick_polygon_corners(pick)
+                    if X is None:
+                        progress.set_value(i + 1)
+                        continue
+                    group_locs = channel_locs[channel_locs.x > min(X)]
+                    group_locs = group_locs[group_locs.x < max(X)]
+                    group_locs = group_locs[group_locs.y > min(Y)]
+                    group_locs = group_locs[group_locs.y < max(Y)]
+                    group_locs = lib.locs_in_polygon(group_locs, X, Y)
+                    if add_group:
+                        group = i * np.ones(len(group_locs), dtype=np.int32)
+                        group_locs = lib.append_to_rec(
+                            group_locs, group, "group"
+                        )
+                    group_locs.sort(kind="mergesort", order="frame")
+                    picked_locs.append(group_locs)
+                    progress.set_value(i + 1)
 
             return picked_locs
 
@@ -8713,6 +8873,28 @@ class View(QtWidgets.QLabel):
         # fast rendering
         self.window.fast_render_dialog.sample_locs()
         self.update_scene()
+
+    def remove_polygon_point(self):
+        """Removes the last point from the last polygon, if there is 
+        only one point, the whole polygon is removed."""
+
+        if len(self._picks) == 0:
+            return
+        else: # if a polygon is present
+            # if no point are present in the last polygon, remove the
+            # point from the last polygon
+            if len(self._picks[-1]) == 0:
+                self._picks.pop() # remove the last polygon
+                # remove the last point of the previous polygon:
+                if len(self._picks): 
+                    self._picks[-1].pop() 
+            # if there is only one point, remove the polygon
+            elif len(self._picks[-1]) == 1: 
+                self._picks.pop()
+            else: # remove the last point only
+                self._picks[-1].pop()    
+            self.update_pick_info_short()
+            self.update_scene(picks_only=True)        
 
     def remove_points(self):
         """ Removes all distance measurement points. """
@@ -9157,6 +9339,9 @@ class View(QtWidgets.QLabel):
         pick_props = postprocess.groupprops(
             out_locs, callback=progress.set_value
         )
+        # add the area of the picks to the properties
+        areas = self.pick_areas()
+        pick_props = lib.append_to_rec(pick_props, areas, "pick_area_nm2")
         progress.close()
         # QPAINT estimate of number of binding sites 
         n_units = self.window.info_dialog.calculate_n_units(dark)
@@ -9180,23 +9365,29 @@ class View(QtWidgets.QLabel):
             Path for saving pick regions
         """
 
+        picks = {}
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            picks = {
-                "Diameter": float(d),
-                "Centers": [[float(_[0]), float(_[1])] for _ in self._picks],
-            }
+            picks["Diameter"] = float(d)
+            picks["Centers"] = [[float(_[0]), float(_[1])] for _ in self._picks]
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
-            picks = {
-                "Width": float(w),
-                "Center-Axis-Points": [
-                    [
-                        [float(s[0]), float(s[1])], 
-                        [float(e[0]), float(e[1])],
-                    ] for s, e in self._picks
-                ],
-            }
+            picks["Width"] = float(w)
+            picks["Center-Axis-Points"] = [
+                [
+                    [float(s[0]), float(s[1])], 
+                    [float(e[0]), float(e[1])],
+                ] for s, e in self._picks
+            ]
+        elif self._pick_shape == "Polygon":
+            vertices = []
+            for pick in self._picks:
+                # vertices.append([])
+                if len(pick):
+                    vertices.append([])
+                    for vertex in pick:
+                        vertices[-1].append([float(vertex[0]), float(vertex[1])])
+            picks["Vertices"] = vertices
         picks["Shape"] = self._pick_shape
         with open(path, "w") as f:
             yaml.dump(picks, f)
@@ -9422,7 +9613,7 @@ class View(QtWidgets.QLabel):
 
     def on_pick_shape_changed(self, pick_shape_index):
         """
-        If new shape is chosen, asks user to delete current picks,  
+        If a new shape is chosen, asks user to delete current picks,  
         assigns attributes and updates scene.
 
         Parameters
@@ -9926,9 +10117,9 @@ class View(QtWidgets.QLabel):
                 groups = np.unique(self.all_locs[0].group)
 
                 if self._picks:
-                    if self._pick_shape == "Rectangle":
+                    if self._pick_shape != "Circle":
                         raise NotImplementedError(
-                            "Unfolding not implemented for rectangle picks"
+                            "Unfolding implemented for circular picks only."
                         )
                     for j in range(len(self._picks)):
                         for i in range(len(groups) - 1):
@@ -10004,9 +10195,9 @@ class View(QtWidgets.QLabel):
             self.all_locs[0].y += offset_y
 
             if self._picks:
-                if self._pick_shape == "Rectangle":
+                if self._pick_shape != "Circle":
                     raise NotImplementedError(
-                        "Not implemented for rectangle picks"
+                        "Implemented for circular picks only."
                     )
                 # Also unfold picks
                 groups = np.unique(self.all_locs[0].group)
@@ -10084,6 +10275,20 @@ class View(QtWidgets.QLabel):
                     self.unsetCursor()
             elif self._pick_shape == "Rectangle":
                 self.unsetCursor()
+            elif self._pick_shape == "Polygon":
+                diameter = POLYGON_POINTER_SIZE
+                pixmap_size = ceil(diameter) + 1
+                pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
+                pixmap.fill(QtCore.Qt.transparent)
+                painter = QtGui.QPainter(pixmap)
+                painter.setPen(QtGui.QColor("white"))
+                if self.window.dataset_dialog.wbackground.isChecked():
+                    painter.setPen(QtGui.QColor("black"))
+                offset = int((pixmap_size - diameter) / 2)
+                painter.drawEllipse(offset, offset, diameter, diameter)
+                painter.end()
+                cursor = QtGui.QCursor(pixmap)
+                self.setCursor(cursor)
 
     def update_pick_info_long(self):
         """ Called when evaluating picks statistics in Info Dialog. """
@@ -10093,8 +10298,8 @@ class View(QtWidgets.QLabel):
             QtWidgets.QMessageBox.information(self, "Warning", warning)
             return
 
-        if self._pick_shape == "Rectangle":
-            warning = "Not supported for rectangular picks."
+        if self._pick_shape != "Circle":
+            warning = "Supported for circular picks only."
             QtWidgets.QMessageBox.information(self, "Warning", warning)
             return
 
@@ -12059,10 +12264,14 @@ class Window(QtWidgets.QMainWindow):
     def rot_win(self):
         """ Opens/updates RotationWindow. """
 
-        if len(self.view._picks) == 0:
-            raise ValueError("Pick a region to rotate.")
-        elif len(self.view._picks) > 1:
-            raise ValueError("Pick only one region.")
+        if self.view._pick_shape == "Polygon":
+            if len(self.view._picks) != 2 or len(self.view._picks[1]):
+                raise ValueError("Pick only one region.")
+        else:
+            if len(self.view._picks) == 0:
+                raise ValueError("Pick a region to rotate.")
+            elif len(self.view._picks) > 1:
+                raise ValueError("Pick only one region.")
         self.window_rot.view_rot.load_locs(update_window=True)
         self.window_rot.show()
         self.window_rot.view_rot.update_scene(autoscale=True)

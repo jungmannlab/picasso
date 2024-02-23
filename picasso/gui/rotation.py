@@ -862,9 +862,13 @@ class ViewRotation(QtWidgets.QLabel):
             if self.pick_shape == "Circle":
                 self.pick_size = self.window.window. \
                     tools_settings_dialog.pick_diameter.value()
-            else:
+            elif self.pick_shape == "Rectangle":
                 self.pick_size = self.window.window. \
                     tools_settings_dialog.pick_width.value()
+            elif self.pick_shape == "Polygon":
+                self.pick_size = None
+            else:
+                print("This should never happen.")
 
             # update view, dataset_dialog for multichannel data and 
             # paths
@@ -1521,12 +1525,18 @@ class ViewRotation(QtWidgets.QLabel):
             x_max = x + r
             y_min = y - r
             y_max = y + r
-        else:
+        elif self.pick_shape == "Rectangle":
             w = self.pick_size
             (xs, ys), (xe, ye) = self.pick
             X, Y = self.window.window.view.get_pick_rectangle_corners(
                 xs, ys, xe, ye, w
             )
+            x_min = min(X)
+            x_max = max(X)
+            y_min = min(Y)
+            y_max = max(Y)
+        elif self.pick_shape == "Polygon":
+            X, Y = self.window.window.view.get_pick_polygon_corners(self.pick)
             x_min = min(X)
             x_max = max(X)
             y_min = min(Y)
@@ -2273,7 +2283,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             y = self.window.view._picks[0][1]
             self.window.view._picks = [(x + dx, y + dy)] # main window
             self.view_rot.pick = (x + dx, y + dy) # view rotation
-        else: # rectangle
+        elif self.view_rot.pick_shape == "Rectangle": 
             (xs, ys), (xe, ye) = self.window.view._picks[0]
             self.window.view._picks = [(
                 (xs + dx, ys + dy), 
@@ -2283,6 +2293,13 @@ class RotationWindow(QtWidgets.QMainWindow):
                 (xs + dx, ys + dy), 
                 (xe + dx, ye + dy),
             ) # view rotation
+        elif self.view_rot.pick_shape == "Polygon": 
+            new_pick = []
+            for point in self.window.view._picks[0]:
+                new_pick.append((point[0] + dx, point[1] + dy))
+            self.window.view._picks = [new_pick] + [] # main window
+            self.view_rot.pick = new_pick # view rotation
+
         self.window.view.update_scene() # update scene in main window
 
     def save_channel_multi(self, title="Choose a channel"):
