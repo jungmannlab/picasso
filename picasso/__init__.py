@@ -8,7 +8,7 @@
 import os.path as _ospath
 import yaml as _yaml
 
-__version__ = "0.6.8"
+__version__ = "0.6.9"
 
 _this_file = _ospath.abspath(__file__)
 _this_dir = _ospath.dirname(_this_file)
