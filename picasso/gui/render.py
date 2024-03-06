@@ -3647,7 +3647,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         # get name for saving mask
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save mask to", "mask.png" ,filter="*.png;;*.npy"
+            self, "Save mask to","mask.png", filter="*.png;;*.npy"
         )
         if path:
             plt.imsave(path, self.mask, cmap='gray')
