@@ -1145,6 +1145,10 @@ class Window(QtWidgets.QMainWindow):
         # save_parameters_action.setShortcut('Ctrl+Shift+S')
         # save_parameters_action.triggered.connect(self.save_parameters)
         # file_menu.addAction(save_parameters_action)
+        file_menu.addSeparator()
+        export_current_action = file_menu.addAction("Export current view")
+        export_current_action.setShortcut("Ctrl+E")
+        export_current_action.triggered.connect(self.export_current)
 
         """ View """
         view_menu = menu_bar.addMenu("View")
@@ -1787,6 +1791,25 @@ class Window(QtWidgets.QMainWindow):
             )
             if path:
                 self.save_spots(path)
+
+    def export_current(self):
+        """ Exports current view as .png or .tif. """
+
+        try:
+            base, ext = os.path.splitext(self.movie_path)
+        except AttributeError:
+            return
+        out_path = base + "_view.png"
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save image", out_path, filter="*.png;;*.tif"
+        )
+        if path:
+            qimage = QtGui.QImage(self.view.viewport().size(), QtGui.QImage.Format_RGB32)
+            painter = QtGui.QPainter(qimage)
+            self.view.render(painter)
+            painter.end()
+            qimage.save(path)
+        self.view.setMinimumSize(1, 1)
 
     def save_locs(self, path):
         localize_info = self.last_identification_info.copy()
