@@ -3643,16 +3643,18 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.H_blur = H_blur # image to be displayed in self.ax2
 
     def save_mask(self):
-        """ Saves binary mask to a .png and .npy format """
+        """ Saves binary mask to a .npy and .png format."""
 
-        # get name for saving mask
+        directory, file_name = os.path.split(self.paths[0])
+        base, ext = os.path.splitext(file_name)
+        name_mask = base + "_mask"
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save mask to","mask.png", filter="*.png;;*.npy"
+            self, "Save mask to", name_mask, filter="*.npy"
         )
         if path:
-            plt.imsave(path, self.mask, cmap='gray')
-            npy_path = os.path.splitext(path)[0] + ".npy"
-            np.save(npy_path, self.mask)
+            np.save(path, self.mask)
+            png_path = base + "_mask" + ".png"
+            plt.imsave(png_path, self.mask, cmap='gray')
 
     def load_mask(self):
         """ Loads binary mask from .npy format. """
@@ -3751,7 +3753,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         Parameters
         ----------
         locs : np.recarray
-            Localizations to be masked
+            Localizations to lure masked
         """
 
         x_ind = (
