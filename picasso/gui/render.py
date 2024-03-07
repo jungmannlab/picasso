@@ -3753,7 +3753,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         Parameters
         ----------
         locs : np.recarray
-            Localizations to lure masked
+            Localizations to be masked
         """
 
         x_ind = (
