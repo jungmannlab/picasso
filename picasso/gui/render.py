@@ -3531,7 +3531,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.disp_px_size.setSingleStep(10)
         self.disp_px_size.setKeyboardTracking(False)
         self.disp_px_size.valueChanged.connect(self.update_plots)
-        mask_grid.addWidget(self.disp_px_size, 0, 1)
+        mask_grid.addWidget(self.disp_px_size, 0, 1, 1, 2)
 
         mask_grid.addWidget(QtWidgets.QLabel("Blur"), 1, 0)
         self.mask_blur = QtWidgets.QDoubleSpinBox()
@@ -3541,7 +3541,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.mask_blur.setDecimals(5)
         self.mask_blur.setKeyboardTracking(False)
         self.mask_blur.valueChanged.connect(self.update_plots)
-        mask_grid.addWidget(self.mask_blur, 1, 1)
+        mask_grid.addWidget(self.mask_blur, 1, 1, 1, 2)
 
         mask_grid.addWidget(QtWidgets.QLabel("Threshold"), 2, 0)
         self.mask_thresh = QtWidgets.QDoubleSpinBox()
@@ -3551,7 +3551,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.mask_thresh.setDecimals(5)
         self.mask_thresh.setKeyboardTracking(False)
         self.mask_thresh.valueChanged.connect(self.update_plots)
-        mask_grid.addWidget(self.mask_thresh, 2, 1)
+        mask_grid.addWidget(self.mask_thresh, 2, 1, 1, 2)
 
         gridspec_dict = {
             'bottom': 0.05, 
@@ -3564,7 +3564,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             ((self.ax1, self.ax2), (self.ax3, self.ax4)),
         ) = plt.subplots(2, 2, figsize=(6, 6), gridspec_kw=gridspec_dict)
         self.canvas = FigureCanvas(self.figure)
-        mask_grid.addWidget(self.canvas, 3, 0, 1, 2)
+        mask_grid.addWidget(self.canvas, 3, 0, 1, 3)
 
         self.save_all = QtWidgets.QCheckBox("Mask all channels")
         self.save_all.setChecked(False)
@@ -3581,6 +3581,12 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.save_mask_button.clicked.connect(self.save_mask)
         mask_grid.addWidget(self.save_mask_button, 5, 1)
 
+        self.save_blur_button = QtWidgets.QPushButton("Save Blur")
+        self.save_blur_button.setEnabled(False)
+        self.save_blur_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.save_blur_button.clicked.connect(self.save_blur)
+        mask_grid.addWidget(self.save_blur_button, 5, 2)
+
         mask_button = QtWidgets.QPushButton("Mask")
         mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
         mask_button.clicked.connect(self.mask_locs)
@@ -3590,7 +3596,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.save_button.setEnabled(False)
         self.save_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_button.clicked.connect(self.save_locs)
-        mask_grid.addWidget(self.save_button, 6, 1)
+        mask_grid.addWidget(self.save_button, 6, 1, 1, 2)
 
         self.cached_oversampling = 0
         self.cached_blur = 0
@@ -3641,6 +3647,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         H_blur = gaussian_filter(self.H, sigma=self.mask_blur.value())
         H_blur = H_blur / np.max(H_blur)
         self.H_blur = H_blur # image to be displayed in self.ax2
+        self.save_blur_button.setEnabled(True)
 
     def save_mask(self):
         """ Saves binary mask to a .npy and .png format."""
@@ -3655,6 +3662,17 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             np.save(path, self.mask)
             png_path = base + "_mask" + ".png"
             plt.imsave(png_path, self.mask, cmap='gray')
+
+    def save_blur(self):
+        """Save blurred image to a png. format."""
+        directory, file_name = os.path.split(self.paths[0])
+        base, ext = os.path.splitext(file_name)
+        name_blur = base + "_blur"
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save blur to", name_blur, filter="*.png"
+        )
+        if path:
+            plt.imsave(path, self.H_blur, cmap=self.cmap)
 
     def load_mask(self):
         """ Loads binary mask from .npy format. """
