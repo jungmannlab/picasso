@@ -6050,7 +6050,7 @@ class View(QtWidgets.QLabel):
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_clustered",
+                    "_dbscan",
                 )
                 if ok:
                     for channel in range(len(self.locs_paths)):
@@ -6063,7 +6063,7 @@ class View(QtWidgets.QLabel):
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
                     "Save clustered locs",
-                    self.locs_paths[channel].replace(".hdf5", "_clustered.hdf5"),
+                    self.locs_paths[channel].replace(".hdf5", "_dbscan.hdf5"),
                     filter="*.hdf5",
                 )
                 if path:
@@ -6118,7 +6118,7 @@ class View(QtWidgets.QLabel):
         status.close()
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_cluster_centers.hdf5")
+            path = path.replace(".hdf5", "_centers.hdf5")
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)     
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
@@ -6142,7 +6142,7 @@ class View(QtWidgets.QLabel):
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_clustered",
+                    "_hdbscan",
                 )
                 if ok:
                     for channel in range(len(self.locs_paths)):
@@ -6157,7 +6157,7 @@ class View(QtWidgets.QLabel):
                     "Save clustered locs",
                     self.locs_paths[channel].replace(
                         ".hdf5", 
-                        "_clustered.hdf5"
+                        "_hdbscan.hdf5"
                     ),
                     filter="*.hdf5",
                 )
@@ -6215,7 +6215,7 @@ class View(QtWidgets.QLabel):
         status.close()
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_cluster_centers.hdf5")
+            path = path.replace(".hdf5", "_centers.hdf5")
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
             status.close()
@@ -6359,7 +6359,7 @@ class View(QtWidgets.QLabel):
         # save cluster centers
         if params[-3]:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_cluster_centers.hdf5")
+            path = path.replace(".hdf5", "_centers.hdf5")
             centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
             io.save_locs(path, centers, info)
             status.close()
