@@ -59,6 +59,8 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     calibration = {
         "X Coefficients": [float(_) for _ in cx],
         "Y Coefficients": [float(_) for _ in cy],
+        "Number of frames": int(n_frames),
+        "Step size in nm": float(d),
     }
     if path is not None:
         with open(path, "w") as f:
