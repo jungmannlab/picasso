@@ -1804,11 +1804,12 @@ class Window(QtWidgets.QMainWindow):
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
         if path:
-            qimage = QtGui.QImage(self.view.viewport().size(), QtGui.QImage.Format_RGB32)
+            qimage = QtGui.QImage(self.view.size(), QtGui.QImage.Format_RGB32)
             painter = QtGui.QPainter(qimage)
             self.view.render(painter)
             painter.end()
             qimage.save(path)
+            # self.view.scene().save_image(path)
         self.view.setMinimumSize(1, 1)
 
     def save_locs(self, path):

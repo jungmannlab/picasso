@@ -3582,7 +3582,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.save_mask_button.clicked.connect(self.save_mask)
         mask_grid.addWidget(self.save_mask_button, 5, 1)
 
-        self.save_blur_button = QtWidgets.QPushButton("Save Blur")
+        self.save_blur_button = QtWidgets.QPushButton("Save Blurred")
         self.save_blur_button.setEnabled(False)
         self.save_blur_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_blur_button.clicked.connect(self.save_blur)
@@ -3661,8 +3661,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         )
         if path:
             np.save(path, self.mask)
-            png_path = base + "_mask" + ".png"
-            plt.imsave(png_path, self.mask, cmap='gray')
+            png_path = path.replace(".npy", ".png")
+            plt.imsave(png_path, self.mask, cmap="gray")
 
     def save_blur(self):
         """Save blurred image to a png. format."""
