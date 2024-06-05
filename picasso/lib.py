@@ -14,6 +14,7 @@ import numpy as _np
 from lmfit import Model as _Model
 from numpy.lib.recfunctions import append_fields as _append_fields
 from numpy.lib.recfunctions import drop_fields as _drop_fields
+from numpy.lib.recfunctions import stack_arrays as _stack_arrays
 import collections as _collections
 import glob as _glob
 import os.path as _ospath
@@ -125,7 +126,36 @@ def append_to_rec(rec_array, data, name):
         usemask=False,
         asrecarray=True,
     )
-    return rec_array
+
+
+def merge_locs(locs_list, increment_frames=True):
+    """Merges localization lists into one file. Can increment frames
+    to avoid overlapping frames.
+    
+    Parameters
+    ----------
+    locs_list : list of np.rec.arrays
+        List of localization lists to be merged.
+    increment_frames : bool (default=True)
+        If True, increments frames of each localization list by the
+        maximum frame number of the previous localization list. Useful
+        when the localization lists are from different movies but 
+        represent the same stack.
+    
+    Returns
+    locs : np.rec.array
+        Merged localizations.
+    """
+
+    if increment_frames:
+        last_frame = 0
+        for i, locs in enumerate(locs_list):
+            locs["frame"] += last_frame
+            last_frame = locs["frame"][-1].max()
+            locs_list[i] = locs    
+    locs = _stack_arrays(locs_list, usemask=False, asrecarray=True)
+    return locs
+
 
 def ensure_sanity(locs, info):
     # no inf or nan:
