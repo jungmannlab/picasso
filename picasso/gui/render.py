@@ -11195,6 +11195,8 @@ class Window(QtWidgets.QMainWindow):
             "Scalebar Length (nm)": d.scalebar.value(),
             "Localizations Loaded": self.view.locs_paths,
             "Colors": colors,
+            "Display pixel size (nm)": d.disp_px_size.value(),
+            "Min. blur (cam. px)": d.min_blur_width.value(),
         }
 
         io.save_info(path, [info])
@@ -11215,6 +11217,7 @@ class Window(QtWidgets.QMainWindow):
             viewport = [(0, 0), (movie_height, movie_width)]
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage.save(path)
+            self.export_current_info(path)
 
     def export_txt(self):
         """ 
