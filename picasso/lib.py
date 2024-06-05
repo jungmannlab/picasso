@@ -389,3 +389,116 @@ def locs_glob_map(func, pattern, args=[], kwargs={}, extension=""):
             out_path = base + "_" + extension + ".hdf5"
             locs, info = result
             _io.save_locs(out_path, locs, info)
+
+
+def get_pick_polygon_corners(pick):
+    """Returns X and Y coordinates of a pick polygon.
+        
+    Returns None, None if the pick is not a closed polygon."""
+
+    if len(pick) < 3 or pick[0] != pick[-1]:
+        return None, None
+    else:
+        X = [_[0] for _ in pick]
+        Y = [_[1] for _ in pick]
+        return X, Y
+
+
+def get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width):
+        """Finds the positions of corners of a rectangular pick.
+        Rectangular pick is defined by:
+            [(start_x, start_y), (end_x, end_y)]
+        and its width. (all values in camera pixels)
+
+        Returns
+        -------
+        corners : tuple
+            Contains corners' x and y coordinates in two lists
+        """
+
+        if end_x == start_x:
+            alpha = _np.pi / 2
+        else:
+            alpha = _np.arctan((end_y - start_y) / (end_x - start_x))
+        dx = width * _np.sin(alpha) / 2
+        dy = width * _np.cos(alpha) / 2
+        x1 = float(start_x - dx)
+        x2 = float(start_x + dx)
+        x4 = float(end_x - dx)
+        x3 = float(end_x + dx)
+        y1 = float(start_y + dy)
+        y2 = float(start_y - dy)
+        y4 = float(end_y + dy)
+        y3 = float(end_y - dy)
+        corners = ([x1, x2, x3, x4], [y1, y2, y3, y4])
+        return corners
+
+
+def pick_areas_circle(picks, r):
+    """Returns pick areas for each pick in picks.
+    
+    Parameters
+    ----------
+    picks : list
+        List of picks, each pick is a list of x and y coordinates.
+    r : float
+        Pick radius.
+    
+    Returns
+    -------
+    areas : np.1darray
+        Pick areas, same units as r.
+    """
+
+    areas = _np.ones(len(picks)) * _np.pi * r**2
+    return areas
+
+
+def pick_areas_polygon(picks):
+    """Returns pick areas for each pick in picks.
+    
+    Parameters
+    ----------
+    picks : list
+        List of picks, each pick is a list of coordinates of the 
+        polygon corners.
+    
+    Returns
+    -------
+    areas : np.1darray
+        Pick areas.
+    """
+
+    areas = _np.zeros(len(picks))
+    for i, pick in enumerate(picks):
+        if len(pick) < 3 or pick[0] != pick[-1]: # not a closed polygon
+            areas[i] = 0
+            continue
+        X, Y = get_pick_polygon_corners(pick)
+        areas[i] = polygon_area(X, Y)
+    areas = areas[areas > 0] # remove open polygons
+    return areas
+
+
+def pick_areas_rectangle(picks, w):
+    """Returns pick areas for each pick in picks.
+    
+    Parameters
+    ----------
+    picks : list
+        List of picks, each pick is a list of coordinates of the 
+        rectangle corners.
+    w : float
+        Pick width.
+    
+    Returns
+    -------
+    areas : np.1darray
+        Pick areas, same units as w.
+    """
+
+    areas = _np.zeros(len(picks))
+    for i, pick in enumerate(picks):
+        (xs, ys), (xe, ye) = pick
+        areas[i] = w * _np.sqrt((xe - xs) ** 2 + (ye - ys) ** 2)
+    return areas
