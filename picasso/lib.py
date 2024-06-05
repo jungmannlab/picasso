@@ -28,6 +28,8 @@ _dialogs = []
 
 
 class ProgressDialog(QtWidgets.QProgressDialog):
+    """ProgressDialog displays a progress dialog with a progress bar."""
+
     def __init__(self, description, minimum, maximum, parent):
         super().__init__(
             description,
@@ -57,6 +59,8 @@ class ProgressDialog(QtWidgets.QProgressDialog):
 
 
 class StatusDialog(QtWidgets.QDialog):
+    """StatusDialog displays the description string in a dialog."""
+
     def __init__(self, description, parent):
         super(StatusDialog, self).__init__(parent, QtCore.Qt.CustomizeWindowHint)
         _dialogs.append(self)
@@ -83,6 +87,8 @@ class AutoDict(_collections.defaultdict):
 
 
 def cancel_dialogs():
+    """Closes all open dialogs."""
+
     dialogs = [_ for _ in _dialogs]
     for dialog in dialogs:
         if isinstance(dialog, ProgressDialog):
@@ -100,6 +106,21 @@ CumulativeExponentialModel = _Model(cumulative_exponential)
 
 
 def calculate_optimal_bins(data, max_n_bins=None):
+    """Calculates the optimal bins for display.
+    
+    Parameters
+    ----------
+    data : numpy.1darray
+        Data to be binned.
+    max_n_bins : int (default=None)
+        Maximum number of bins.
+    
+    Returns
+    -------
+    bins : numpy.1darray
+        Bins for display.
+    """
+    
     iqr = _np.subtract(*_np.percentile(data, [75, 25]))
     bin_size = 2 * iqr * len(data) ** (-1 / 3)
     if data.dtype.kind in ("u", "i") and bin_size < 1:
@@ -112,13 +133,31 @@ def calculate_optimal_bins(data, max_n_bins=None):
         return None
     if max_n_bins and n_bins > max_n_bins:
         n_bins = max_n_bins
-    return _np.linspace(bin_min, data.max(), n_bins)
+    bins = _np.linspace(bin_min, data.max(), n_bins)
+    return bins
 
 
 def append_to_rec(rec_array, data, name):
+    """Appends a new column to the existing np.recarray.
+    
+    Parameters
+    ----------
+    rec_array : np.rec.array
+        Recarray to which the new column is appended.
+    data : np.1darray
+        Data to be appended.
+    name : str
+        Name of the new column.
+    
+    Returns
+    -------
+    rec_array : np.rec.array
+        Recarray with the new column.
+    """
+    
     if hasattr(rec_array, name):
         rec_array = remove_from_rec(rec_array, name)
-    return _append_fields(
+    rec_array = _append_fields(
         rec_array,
         name,
         data,
@@ -126,6 +165,7 @@ def append_to_rec(rec_array, data, name):
         usemask=False,
         asrecarray=True,
     )
+    return rec_array
 
 
 def merge_locs(locs_list, increment_frames=True):
@@ -158,6 +198,22 @@ def merge_locs(locs_list, increment_frames=True):
 
 
 def ensure_sanity(locs, info):
+    """Ensures that localizations are within the image dimensions
+    and have positive localization precisions.
+    
+    Parameters
+    ----------
+    locs : np.rec.array
+        Localizations list.
+    info : list of dicts
+        Localization metadata.
+    
+    Returns
+    -------
+    locs : np.rec.array
+        Localizations that pass the sanity checks.
+    """
+    
     # no inf or nan:
     locs = locs[
         _np.all(
@@ -176,40 +232,55 @@ def ensure_sanity(locs, info):
 
 
 def is_loc_at(x, y, locs, r):
-    dx = locs.x - x
-    dy = locs.y - y
-    r2 = r**2
-    return dx**2 + dy**2 < r2
-
-
-def locs_at(x, y, locs, r):
-    is_picked = is_loc_at(x, y, locs, r)
-    return locs[is_picked]
-
-
-def polygon_area(X, Y):
-    """Finds the area of a polygon defined by corners X and Y.
+    """Checks if localizations are at position (x, y) within radius r.
     
     Parameters
     ----------
-    X : numpy.1darray
-        x-coordinates of the polygon corners.
-    Y : numpy.1darray
-        y-coordinates of the polygon corners.
+    x : float
+        x-coordinate of the position.
+    y : float
+        y-coordinate of the position.
+    locs : np.rec.array
+        Localizations list.
+    r : float
+        Radius.
     
     Returns
     -------
-    area : float
-        Area of the polygon.
+    is_picked : np.ndarray
+        Boolean array indicating if localization is at position.
+    """
+    
+    dx = locs.x - x
+    dy = locs.y - y
+    r2 = r**2
+    is_picked = dx**2 + dy**2 < r2
+    return is_picked
+
+
+def locs_at(x, y, locs, r):
+    """Returns localizations at position (x, y) within radius r.
+
+    Parameters
+    ----------
+    x : float
+        x-coordinate of the position.
+    y : float
+        y-coordinate of the position.
+    locs : np.rec.array
+        Localizations list.
+    r : float   
+        Radius.
+
+    Returns 
+    -------
+    picked_locs : np.rec.array
+        Localizations at position.
     """
 
-    n_corners = len(X)
-    area = 0
-    for i in range(n_corners):
-        j = (i + 1) % n_corners # next corner
-        area += X[i] * Y[j] - X[j] * Y[i]
-    area = abs(area) / 2
-    return area
+    is_picked = is_loc_at(x, y, locs, r)
+    picked_locs = locs[is_picked]
+    return picked_locs
 
 
 @_numba.jit(nopython=True)
@@ -332,13 +403,52 @@ def check_if_in_rectangle(x, y, X, Y):
 
 
 def locs_in_rectangle(locs, X, Y):
+    """Returns localizations in rectangle defined by corners (X, Y).
+    
+    Parameters
+    ----------
+    locs : numpy.recarray
+        Localizations list.
+    X : list
+        x-coordinates of rectangle corners.
+    Y : list
+        y-coordinates of rectangle corners.
+    
+    Returns
+    -------
+    picked_locs : numpy.recarray
+        Localizations in rectangle.
+    """
+    
     is_in_rectangle = check_if_in_rectangle(
         locs.x, locs.y, _np.array(X), _np.array(Y)
     )
-    return locs[is_in_rectangle]
+    picked_locs = locs[is_in_rectangle]
+    return picked_locs
 
 
 def minimize_shifts(shifts_x, shifts_y, shifts_z=None):
+    """Minimizes shifts in x, y, and z directions. Used for drift correction.
+    
+    Parameters
+    ---------- 
+    shifts_x : numpy.2darray
+        Shifts in x direction.
+    shifts_y : numpy.2darray
+        Shifts in y direction.
+    shifts_z : numpy.2darray (default=None)
+        Shifts in z direction.
+        
+    Returns
+    -------
+    shift_y : numpy.1darray
+        Minimized shifts in y direction.
+    shift_x : numpy.1darray
+        Minimized shifts in x direction.
+    shift_z : numpy.1darray (optional)
+        Minimized shifts in z direction if shifts_z is not None.
+    """
+    
     n_channels = shifts_x.shape[0]
     n_pairs = int(n_channels * (n_channels - 1) / 2)
     n_dims = 2 if shifts_z is None else 3
@@ -364,11 +474,29 @@ def minimize_shifts(shifts_x, shifts_y, shifts_z=None):
 
 
 def n_futures_done(futures):
+    """Returns the number of finished futures, used in multiprocessing."""
+
     return sum([_.done() for _ in futures])
 
 
 def remove_from_rec(rec_array, name):
-    return _drop_fields(rec_array, name, usemask=False, asrecarray=True)
+    """Removes a column from the existing np.recarray.
+
+    Parameters
+    ----------
+    rec_array : np.rec.array
+        Recarray from which the column is removed.
+    name : str
+        Name of the column to be removed.
+    
+    Returns
+    -------
+    rec_array : np.rec.array
+        Recarray without the column.
+    """
+
+    rec_array = _drop_fields(rec_array, name, usemask=False, asrecarray=True)
+    return rec_array
 
 
 def locs_glob_map(func, pattern, args=[], kwargs={}, extension=""):
@@ -452,6 +580,31 @@ def pick_areas_circle(picks, r):
 
     areas = _np.ones(len(picks)) * _np.pi * r**2
     return areas
+
+
+def polygon_area(X, Y):
+    """Finds the area of a polygon defined by corners X and Y.
+    
+    Parameters
+    ----------
+    X : numpy.1darray
+        x-coordinates of the polygon corners.
+    Y : numpy.1darray
+        y-coordinates of the polygon corners.
+    
+    Returns
+    -------
+    area : float
+        Area of the polygon.
+    """
+
+    n_corners = len(X)
+    area = 0
+    for i in range(n_corners):
+        j = (i + 1) % n_corners # next corner
+        area += X[i] * Y[j] - X[j] * Y[i]
+    area = abs(area) / 2
+    return area
 
 
 def pick_areas_polygon(picks):
