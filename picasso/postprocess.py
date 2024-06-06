@@ -94,6 +94,7 @@ def get_block_locs_at(x, y, index_blocks):
     indices = list(_itertools.chain(*indices))
     return locs[indices]
 
+
 @_numba.jit(nopython=True, nogil=True)
 def _fill_index_blocks(
     block_starts, block_ends, x_index, y_index
@@ -107,6 +108,7 @@ def _fill_index_blocks(
                 block_starts, block_ends, N, x_index, y_index, i, j, k
             )
 
+
 @_numba.jit(nopython=True, nogil=True)
 def _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k):
     block_starts[i, j] = k
@@ -114,6 +116,144 @@ def _fill_index_block(block_starts, block_ends, N, x_index, y_index, i, j, k):
         k += 1
     block_ends[i, j] = k
     return k
+
+
+def picked_locs(
+    locs, info, picks, pick_shape, pick_size=None, add_group=True, callback=None
+):
+    """Finds picked localizations.
+    
+    Parameters
+    ----------
+    locs : np.recarray
+        Localization list.
+    info : list of dicts
+        Metadata of the localizations list.
+    picks : list
+        List of picks.
+    pick_shape : {'Circle', 'Rectangle', 'Polygon'}
+        Shape of the pick.
+    pick_size : float (default=None)
+        Size of the pick. Radius for the circles, width for the 
+        rectangles, None for the polygons.
+    add_group : boolean (default=True)
+        True if group id should be added to locs. Each pick will be
+        assigned a different id.
+    callback : function (default=None)
+        Function to display progress. If "console", tqdm is used to
+        display the progress. If None, no progress is displayed.
+
+    Returns
+    -------
+    picked_locs : list of np.recarrays 
+        List of np.recarrays, each containing locs from one pick.
+    """
+
+    if len(picks):
+        picked_locs = []
+        if callback == "console":
+            progress = _tqdm(range(len(picks)), desc="Picking locs", unit="pick")
+
+        if pick_shape == "Circle":
+            index_blocks = get_index_blocks(locs, info, pick_size)
+            for i, pick in enumerate(picks):
+                x, y = pick
+                block_locs = get_block_locs_at(
+                    x, y, index_blocks
+                )
+                group_locs = _lib.locs_at(x, y, block_locs, pick_size)
+                if add_group:
+                    group = i * _np.ones(len(group_locs), dtype=_np.int32)
+                    group_locs = _lib.append_to_rec(
+                        group_locs, group, "group"
+                    )
+                group_locs.sort(kind="mergesort", order="frame")
+                picked_locs.append(group_locs)
+
+                if callback == "console":
+                    progress.update(1)
+                elif callback is not None:
+                    callback(i + 1)
+
+        elif pick_shape == "Rectangle":
+            for i, pick in enumerate(picks):
+                (xs, ys), (xe, ye) = pick
+                X, Y = _lib.get_pick_rectangle_corners(
+                    xs, ys, xe, ye, pick_size
+                )
+                x_min = min(X)
+                x_max = max(X)
+                y_min = min(Y)
+                y_max = max(Y)
+                group_locs = locs[locs.x > x_min]
+                group_locs = group_locs[group_locs.x < x_max]
+                group_locs = group_locs[group_locs.y > y_min]
+                group_locs = group_locs[group_locs.y < y_max]
+                group_locs = _lib.locs_in_rectangle(group_locs, X, Y)
+                # store rotated coordinates in x_rot and y_rot
+                angle = 0.5 *_np.pi - _np.arctan2((ye - ys), (xe - xs))
+                x_shifted = group_locs.x - xs
+                y_shifted = group_locs.y - ys
+                x_pick_rot = x_shifted * _np.cos(
+                    angle
+                ) - y_shifted * _np.sin(angle)
+                y_pick_rot = x_shifted * _np.sin(
+                    angle
+                ) + y_shifted * _np.cos(angle)
+                group_locs = _lib.append_to_rec(
+                    group_locs, x_pick_rot, "x_pick_rot"
+                )
+                group_locs = _lib.append_to_rec(
+                    group_locs, y_pick_rot, "y_pick_rot"
+                )
+                if add_group:
+                    group = i * _np.ones(len(group_locs), dtype=_np.int32)
+                    group_locs = _lib.append_to_rec(
+                        group_locs, group, "group"
+                    )
+                group_locs.sort(kind="mergesort", order="frame")
+                picked_locs.append(group_locs)
+
+                if callback == "console":
+                    progress.update(1)
+                elif callback is not None:
+                    callback(i + 1)
+
+        elif pick_shape == "Polygon":
+            for i, pick in enumerate(picks):
+                X, Y = _lib.get_pick_polygon_corners(pick)
+                if X is None:
+                    if callback == "console":
+                        progress.update(1)
+                    elif callback is not None:
+                        callback(i + 1)
+                    continue
+                group_locs = locs[locs.x > min(X)]
+                group_locs = group_locs[group_locs.x < max(X)]
+                group_locs = group_locs[group_locs.y > min(Y)]
+                group_locs = group_locs[group_locs.y < max(Y)]
+                group_locs = _lib.locs_in_polygon(group_locs, X, Y)
+                if add_group:
+                    group = i * _np.ones(len(group_locs), dtype=_np.int32)
+                    group_locs = _lib.append_to_rec(
+                        group_locs, group, "group"
+                    )
+                group_locs.sort(kind="mergesort", order="frame")
+                picked_locs.append(group_locs)
+
+                if callback == "console":
+                    progress.update(1)
+                elif callback is not None:
+                    callback(i + 1)
+
+        else:
+            raise ValueError(
+                "Invalid pick shape. Please choose from 'Circle', 'Rectangle', "
+                "'Polygon'."
+            )
+        
+        return picked_locs
+
 
 @_numba.jit(nopython=True, nogil=True, cache=True)
 def pick_similar(
@@ -189,6 +329,7 @@ def pick_similar(
                                 )
     return x_similar, y_similar
 
+
 @_numba.jit(nopython=True, nogil=True)
 def _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends, cache=True):
     step = 0
@@ -202,6 +343,7 @@ def _n_block_locs_at(x_range, y_range, K, L, block_starts, block_ends, cache=Tru
                     else:
                         n_block_locs += _np.uint32(block_ends[k][l] - block_starts[k][l])
     return n_block_locs
+
 
 @_numba.jit(nopython=True, nogil=True, cache=True)
 def _get_block_locs_at(
@@ -226,6 +368,7 @@ def _get_block_locs_at(
                             ))
     return locs_xy[:, indices]
 
+
 @_numba.jit(nopython=True, nogil=True, cache=True)
 def _locs_at(x, y, locs_xy, r):
     dx = locs_xy[0] - x
@@ -234,11 +377,13 @@ def _locs_at(x, y, locs_xy, r):
     is_picked = dx ** 2 + dy ** 2 < r2
     return locs_xy[:, is_picked]
 
+
 @_numba.jit(nopython=True, nogil=True)
 def _rmsd_at_com(locs_xy):
     com_x = _np.mean(locs_xy[0])
     com_y = _np.mean(locs_xy[1])
     return _np.sqrt(_np.mean((locs_xy[0] - com_x) ** 2 + (locs_xy[1] - com_y) ** 2))
+
 
 @_numba.jit(nopython=True, nogil=True)
 def _distance_histogram(

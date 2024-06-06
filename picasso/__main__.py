@@ -165,15 +165,17 @@ def _hdf2csv(path):
         paths = glob(path)
     if paths:
         import os.path
+        from .io import load_locs
 
         for path in _tqdm(paths):
             base, ext = os.path.splitext(path)
             if ext == ".hdf5":
                 print("Converting {}".format(path))
                 out_path = base + ".csv"
-                locs = pd.read_hdf(path)
+                locs = load_locs(path)[0]
+                df = pd.DataFrame(locs)
                 print("A total of {} rows loaded".format(len(locs)))
-                locs.to_csv(out_path, sep=",", encoding="utf-8")
+                df.to_csv(out_path, sep=",", encoding="utf-8")
     print("Complete.")
 
 
