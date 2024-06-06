@@ -3,7 +3,7 @@ Changelog
 
 Last change: 06-JUN-2024 MTS
 
-0.6.9 - 0.6.10
+0.6.9 - 0.6.11
 --------------
 - Added the option to draw polygon picks in Picasso: Render
 - Save pick properties in Picasso: Render saves areas of picked regions in nm^2
@@ -14,6 +14,7 @@ Last change: 06-JUN-2024 MTS
 - Picasso: Localize - added the option to save the current view as a .png file
 - Picasso: Render - functions related to picking moved to ``picasso.lib`` and ``picasso.postprocess``
 - Picasso: Render - saving picked localizations saves the area(s) of the picked region(s) in the metadata file (.yaml)
+- Documentation on readthedocs works again
 
 0.6.6 - 0.6.8
 -------------
