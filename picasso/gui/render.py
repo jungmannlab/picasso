@@ -3582,7 +3582,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.save_mask_button.clicked.connect(self.save_mask)
         mask_grid.addWidget(self.save_mask_button, 5, 1)
 
-        self.save_blur_button = QtWidgets.QPushButton("Save Blur")
+        self.save_blur_button = QtWidgets.QPushButton("Save Blurred")
         self.save_blur_button.setEnabled(False)
         self.save_blur_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_blur_button.clicked.connect(self.save_blur)
@@ -3661,8 +3661,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         )
         if path:
             np.save(path, self.mask)
-            png_path = base + "_mask" + ".png"
-            plt.imsave(png_path, self.mask, cmap='gray')
+            png_path = path.replace(".npy", ".png")
+            plt.imsave(png_path, self.mask, cmap="gray")
 
     def save_blur(self):
         """Save blurred image to a png. format."""
@@ -5386,11 +5386,7 @@ class View(QtWidgets.QLabel):
         Finds group color index for each localization
     get_index_blocks(channel)
         Calls self.index_locs if not calculated earlier
-    get_pick_polygon_corners(pick)
-        Returns X and Y coordinates of a pick polygon
-    get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width)
-        Finds the positions of a rectangular pick's corners
-    get_pick_rectangle_polygon(start_x, start_y, end_x, end_y, width)
+    get_pick_polygon(start_x, start_y, end_x, end_y, width)
         Finds a PyQt5 object used for drawing a rectangular pick
     get_render_kwargs()
         Returns a dictionary to be used for the kwargs of render.render
@@ -5432,7 +5428,7 @@ class View(QtWidgets.QLabel):
     pan_relative(dy, dx)
         Moves viewport by a given relative distance
     pick_areas()
-        Finds the areas of all current picks in nm^2.
+        Finds the areas of all current picks in um^2.
     pick_message_box(params)
         Returns a message box for selecting picks
     pick_similar()
@@ -6050,7 +6046,7 @@ class View(QtWidgets.QLabel):
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_clustered",
+                    "_dbscan",
                 )
                 if ok:
                     for channel in range(len(self.locs_paths)):
@@ -6063,7 +6059,7 @@ class View(QtWidgets.QLabel):
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self,
                     "Save clustered locs",
-                    self.locs_paths[channel].replace(".hdf5", "_clustered.hdf5"),
+                    self.locs_paths[channel].replace(".hdf5", "_dbscan.hdf5"),
                     filter="*.hdf5",
                 )
                 if path:
@@ -6118,7 +6114,7 @@ class View(QtWidgets.QLabel):
         status.close()
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_cluster_centers.hdf5")
+            path = path.replace(".hdf5", "_centers.hdf5")
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)     
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
@@ -6142,7 +6138,7 @@ class View(QtWidgets.QLabel):
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_clustered",
+                    "_hdbscan",
                 )
                 if ok:
                     for channel in range(len(self.locs_paths)):
@@ -6157,7 +6153,7 @@ class View(QtWidgets.QLabel):
                     "Save clustered locs",
                     self.locs_paths[channel].replace(
                         ".hdf5", 
-                        "_clustered.hdf5"
+                        "_hdbscan.hdf5"
                     ),
                     filter="*.hdf5",
                 )
@@ -6215,7 +6211,7 @@ class View(QtWidgets.QLabel):
         status.close()
         if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_cluster_centers.hdf5")
+            path = path.replace(".hdf5", "_centers.hdf5")
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
             status.close()
@@ -6359,7 +6355,7 @@ class View(QtWidgets.QLabel):
         # save cluster centers
         if params[-3]:
             status = lib.StatusDialog("Calculating cluster centers", self)
-            path = path.replace(".hdf5", "_cluster_centers.hdf5")
+            path = path.replace(".hdf5", "_centers.hdf5")
             centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
             io.save_locs(path, centers, info)
             status.close()
@@ -6460,50 +6456,7 @@ class View(QtWidgets.QLabel):
         else:
             event.ignore()
 
-    def get_pick_polygon_corners(self, pick):
-        """Returns X and Y coordinates of a pick polygon.
-        
-        Returns None, None if the pick is not a closed polygon."""
-
-        if len(pick) < 3 or pick[0] != pick[-1]:
-            return None, None
-        else:
-            X = [_[0] for _ in pick]
-            Y = [_[1] for _ in pick]
-            return X, Y
-
-    def get_pick_rectangle_corners(
-        self, start_x, start_y, end_x, end_y, width
-    ):
-        """
-        Finds the positions of corners of a rectangular pick.
-        Rectangular pick is defined by:
-            [(start_x, start_y), (end_x, end_y)]
-        and its width. (all values in pixels)
-
-        Returns
-        -------
-        tuple
-            Contains corners' x and y coordinates in two lists
-        """
-
-        if end_x == start_x:
-            alpha = np.pi / 2
-        else:
-            alpha = np.arctan((end_y - start_y) / (end_x - start_x))
-        dx = width * np.sin(alpha) / 2
-        dy = width * np.cos(alpha) / 2
-        x1 = float(start_x - dx)
-        x2 = float(start_x + dx)
-        x4 = float(end_x - dx)
-        x3 = float(end_x + dx)
-        y1 = float(start_y + dy)
-        y2 = float(start_y - dy)
-        y4 = float(end_y + dy)
-        y3 = float(end_y - dy)
-        return [x1, x2, x3, x4], [y1, y2, y3, y4]
-
-    def get_pick_rectangle_polygon(
+    def get_pick_polygon(
         self, start_x, start_y, end_x, end_y, width, return_most_right=False
     ):
         """
@@ -6515,7 +6468,7 @@ class View(QtWidgets.QLabel):
         QtGui.QPolygonF
         """
 
-        X, Y = self.get_pick_rectangle_corners(
+        X, Y = lib.get_pick_rectangle_corners(
             start_x, start_y, end_x, end_y, width
         )
         p = QtGui.QPolygonF()
@@ -6618,7 +6571,7 @@ class View(QtWidgets.QLabel):
                 painter.drawLine(start_x, start_y, end_x, end_y)
 
                 # draw a rectangle
-                polygon, most_right = self.get_pick_rectangle_polygon(
+                polygon, most_right = self.get_pick_polygon(
                     start_x, start_y, end_x, end_y, w, return_most_right=True
                 )
                 painter.drawPolygon(polygon)
@@ -6695,7 +6648,7 @@ class View(QtWidgets.QLabel):
         # convert from camera units to display units
         w *= self.width() / self.viewport_width()
 
-        polygon = self.get_pick_rectangle_polygon(
+        polygon = self.get_pick_polygon(
             self.rectangle_pick_start_x,
             self.rectangle_pick_start_y,
             self.rectangle_pick_current_x,
@@ -7070,13 +7023,13 @@ class View(QtWidgets.QLabel):
                     xc = np.mean([xs, xe])
                     yc = np.mean([ys, ye])
                     w = self.window.tools_settings_dialog.pick_width.value()
-                    X, Y = self.get_pick_rectangle_corners(xs, ys, xe, ye, w)
+                    X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, w)
                     x_min = min(X) - (0.2 * (xc - min(X)))
                     x_max = max(X) + (0.2 * (max(X) - xc))
                     y_min = min(Y) - (0.2 * (yc - min(Y)))
                     y_max = max(Y) + (0.2 * (max(Y) - yc))
                 elif self._pick_shape == "Polygon":
-                    X, Y = self.get_pick_polygon_corners(self._picks[pick_no])
+                    X, Y = lib.get_pick_polygon_corners(self._picks[pick_no])
                     x_min = min(X) - 0.2 * (max(X) - min(X))
                     x_max = max(X) + 0.2 * (max(X) - min(X))
                     y_min = min(Y) - 0.2 * (max(Y) - min(Y))
@@ -8573,7 +8526,7 @@ class View(QtWidgets.QLabel):
     
     @check_pick
     def pick_areas(self):
-        """Finds the areas of all current picks in nm^2.
+        """Finds the areas of all current picks in um^2.
         
         Returns
         -------
@@ -8584,25 +8537,15 @@ class View(QtWidgets.QLabel):
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
-            areas = np.ones(len(self._picks)) * np.pi * r ** 2
+            areas = lib.pick_areas_circle(self._picks, r)
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
-            areas = np.zeros(len(self._picks))
-            for i, pick in enumerate(self._picks):
-                (xs, ys), (xe, ye) = pick
-                areas[i] = w * np.sqrt((xe - xs) ** 2 + (ye - ys) ** 2)
+            areas = lib.pick_areas_rectangle(self._picks, w)
         elif self._pick_shape == "Polygon":
-            areas = np.zeros(len(self._picks))
-            for i, pick in enumerate(self._picks):
-                if len(pick) < 3 or pick[0] != pick[-1]: # not a closed polygon
-                    areas[i] = 0
-                    continue
-                X, Y = self.get_pick_polygon_corners(pick)
-                areas[i] = lib.polygon_area(X, Y)
-            areas = areas[areas > 0] # remove open polygons
-
+            areas = lib.pick_areas_polygon(self._picks)
+            
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        areas *= pixelsize ** 2
+        areas *= (pixelsize * 1e-3) ** 2 # convert to um^2
         return areas
 
     @check_picks
@@ -8698,112 +8641,52 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         channel : int
-            Channel of locs to be processed
+            Channel of locs to be processed.
         add_group : boolean (default=True)
             True if group id should be added to locs. Each pick will be
-            assigned a different id
+            assigned a different id.
         fast_render : boolean
             If True, takes self.locs, i.e. after randomly sampling a 
-            fraction of self.all_locs. If False, takes self.all_locs
+            fraction of self.all_locs. If False, takes self.all_locs.
 
         Returns
         -------
-        list 
-            List of np.recarrays, each containing locs from one pick
+        picked_locs : list of np.recarrays 
+            List of np.recarrays, each containing locs from one pick.
         """
 
         if len(self._picks):
-            picked_locs = []
+            # initialize progress dialog
             progress = lib.ProgressDialog(
                 "Creating localization list", 0, len(self._picks), self
             )
             progress.set_value(0)
+
+            # extract localizations to pick from
+            if fast_render:
+                locs = self.locs[channel].copy()
+            else:
+                locs = self.all_locs[channel].copy()
+
+            # find pick size (radius or width)
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
-                r = d / 2
-                index_blocks = self.get_index_blocks(
-                    channel, fast_render=fast_render
-                )
-                for i, pick in enumerate(self._picks):
-                    x, y = pick
-                    block_locs = postprocess.get_block_locs_at(
-                        x, y, index_blocks
-                    )
-                    group_locs = lib.locs_at(x, y, block_locs, r)
-                    if add_group:
-                        group = i * np.ones(len(group_locs), dtype=np.int32)
-                        group_locs = lib.append_to_rec(
-                            group_locs, group, "group"
-                        )
-                    group_locs.sort(kind="mergesort", order="frame")
-                    picked_locs.append(group_locs)
-                    progress.set_value(i + 1)
+                pick_size = d / 2
             elif self._pick_shape == "Rectangle":
-                w = self.window.tools_settings_dialog.pick_width.value()
-                if fast_render:
-                    channel_locs = self.locs[channel]
-                else:
-                    channel_locs = self.all_locs[channel]
-                for i, pick in enumerate(self._picks):
-                    (xs, ys), (xe, ye) = pick
-                    X, Y = self.get_pick_rectangle_corners(xs, ys, xe, ye, w)
-                    x_min = min(X)
-                    x_max = max(X)
-                    y_min = min(Y)
-                    y_max = max(Y)
-                    group_locs = channel_locs[channel_locs.x > x_min]
-                    group_locs = group_locs[group_locs.x < x_max]
-                    group_locs = group_locs[group_locs.y > y_min]
-                    group_locs = group_locs[group_locs.y < y_max]
-                    group_locs = lib.locs_in_rectangle(group_locs, X, Y)
-                    # store rotated coordinates in x_rot and y_rot
-                    angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
-                    x_shifted = group_locs.x - xs
-                    y_shifted = group_locs.y - ys
-                    x_pick_rot = x_shifted * np.cos(
-                        angle
-                    ) - y_shifted * np.sin(angle)
-                    y_pick_rot = x_shifted * np.sin(
-                        angle
-                    ) + y_shifted * np.cos(angle)
-                    group_locs = lib.append_to_rec(
-                        group_locs, x_pick_rot, "x_pick_rot"
-                    )
-                    group_locs = lib.append_to_rec(
-                        group_locs, y_pick_rot, "y_pick_rot"
-                    )
-                    if add_group:
-                        group = i * np.ones(len(group_locs), dtype=np.int32)
-                        group_locs = lib.append_to_rec(
-                            group_locs, group, "group"
-                        )
-                    group_locs.sort(kind="mergesort", order="frame")
-                    picked_locs.append(group_locs)
-                    progress.set_value(i + 1)
-            elif self._pick_shape == "Polygon":
-                if fast_render:
-                    channel_locs = self.locs[channel]
-                else:
-                    channel_locs = self.all_locs[channel]
-                for i, pick in enumerate(self._picks):
-                    X, Y = self.get_pick_polygon_corners(pick)
-                    if X is None:
-                        progress.set_value(i + 1)
-                        continue
-                    group_locs = channel_locs[channel_locs.x > min(X)]
-                    group_locs = group_locs[group_locs.x < max(X)]
-                    group_locs = group_locs[group_locs.y > min(Y)]
-                    group_locs = group_locs[group_locs.y < max(Y)]
-                    group_locs = lib.locs_in_polygon(group_locs, X, Y)
-                    if add_group:
-                        group = i * np.ones(len(group_locs), dtype=np.int32)
-                        group_locs = lib.append_to_rec(
-                            group_locs, group, "group"
-                        )
-                    group_locs.sort(kind="mergesort", order="frame")
-                    picked_locs.append(group_locs)
-                    progress.set_value(i + 1)
-
+                pick_size = self.window.tools_settings_dialog.pick_width.value()
+            else:
+                pick_size = None
+    
+            # pick localizations
+            picked_locs = postprocess.picked_locs(
+                locs, 
+                self.infos[channel], 
+                self._picks,
+                self._pick_shape,
+                pick_size=pick_size,
+                add_group=add_group,
+                callback=progress.set_value,
+            )
             return picked_locs
 
     def remove_picks(self, position):
@@ -8832,7 +8715,7 @@ class View(QtWidgets.QLabel):
             y = np.array([y])
             for pick in self._picks:
                 (start_x, start_y), (end_x, end_y) = pick
-                X, Y = self.get_pick_rectangle_corners(
+                X, Y = lib.get_pick_rectangle_corners(
                     start_x, start_y, end_x, end_y, width
                 )
                 # do not check if rectangle has no size
@@ -9259,9 +9142,13 @@ class View(QtWidgets.QLabel):
 
         # save picked locs with .yaml 
         if locs is not None:
+            areas = self.pick_areas()
             pick_info = {
                 "Generated by": "Picasso Render : Pick",
                 "Pick Shape": self._pick_shape,
+                "Pick Areas (um^2)": [float(_) for _ in areas],
+                "Total Picked Area (um^2)": float(np.sum(areas)),
+                "Number of picks": len(self._picks),
             }
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -9296,10 +9183,14 @@ class View(QtWidgets.QLabel):
         # save
         locs = locs.view(np.recarray)
         if locs is not None:
-            d = self.window.tools_settings_dialog.pick_diameter.value()
+            areas = self.pick_areas()
             pick_info = {
                 "Generated by:": "Picasso Render : Pick",
                 "Pick Shape:": self._pick_shape,
+                "Pick Areas (um^2)": [float(_) for _ in areas],
+                "Total Picked Area (um^2)": float(np.sum(areas)),
+                "Number of picks": len(self._picks),
+
             }
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -9363,7 +9254,7 @@ class View(QtWidgets.QLabel):
         )
         # add the area of the picks to the properties
         areas = self.pick_areas()
-        pick_props = lib.append_to_rec(pick_props, areas, "pick_area_nm2")
+        pick_props = lib.append_to_rec(pick_props, areas, "pick_area_um2")
         progress.close()
         # QPAINT estimate of number of binding sites 
         n_units = self.window.info_dialog.calculate_n_units(dark)
@@ -11195,6 +11086,8 @@ class Window(QtWidgets.QMainWindow):
             "Scalebar Length (nm)": d.scalebar.value(),
             "Localizations Loaded": self.view.locs_paths,
             "Colors": colors,
+            "Display pixel size (nm)": d.disp_px_size.value(),
+            "Min. blur (cam. px)": d.min_blur_width.value(),
         }
 
         io.save_info(path, [info])
@@ -11215,6 +11108,7 @@ class Window(QtWidgets.QMainWindow):
             viewport = [(0, 0), (movie_height, movie_width)]
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage.save(path)
+            self.export_current_info(path)
 
     def export_txt(self):
         """ 
