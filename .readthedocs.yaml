@@ -10,7 +10,7 @@ build:
   tools:
     python: "3.10"
       install:
-        - path: .
+      - path: .
 
 # Build documentation in the "docs/" directory with Sphinx
 sphinx:
