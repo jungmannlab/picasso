@@ -16,7 +16,8 @@ Picasso
  :target: https://pepy.tech/project/picassosr
 
 .. image:: main_render.png
-   :scale: 100 %
+   :width: 750
+   :height: 564
    :alt: UML Render view
 
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
