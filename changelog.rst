@@ -12,7 +12,8 @@ Last change: 06-JUN-2024 MTS
 - Mask dialog in Picasso: Render saves .png mask files
 - Mask dialog in Picasso: Render allows to save .png with the blurred image
 - Picasso: Localize - added the option to save the current view as a .png file
-- Picasso:Render - functions related to picking moved to ``picasso.lib`` and ``picasso.postprocess``
+- Picasso: Render - functions related to picking moved to ``picasso.lib`` and ``picasso.postprocess``
+- Picasso: Render - saving picked localizations saves the area(s) of the picked region(s) in the metadata file (.yaml)
 
 0.6.6 - 0.6.8
 -------------
