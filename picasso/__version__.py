@@ -1,1 +1,1 @@
-VERSION_NO = "0.6.9"
+VERSION_NO = "0.6.10"
