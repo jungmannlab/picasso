@@ -1249,7 +1249,10 @@ def load_locs(path, qt_parent=None):
 
 def load_clusters(path, qt_parent=None):
     with _h5py.File(path, "r") as cluster_file:
-        clusters = cluster_file["clusters"][...]
+        try:
+            clusters = cluster_file["clusters"][...]
+        except KeyError:
+            clusters = cluster_file["locs"][...]
     clusters = _np.rec.array(
         clusters, dtype=clusters.dtype
     )  # Convert to rec array with fields as attributes
