@@ -26,7 +26,7 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 
 Picasso 0.7.0
 -------------
-Adaptive Intersection Maximization (AIM, `doi: 10.1126/sciadv.adm7765 <https://www.science.org/doi/10.1126/sciadv.adm7765>`_) implemented in Picasso. The implementation may not be as fast as in the original version due to Python constraints.
+Adaptive Intersection Maximization (AIM, `doi: 10.1126/sciadv.adm7765 <https://www.science.org/doi/10.1126/sciadv.adm7765>`_) implemented in Picasso.
 
 Previous versions
 -----------------
