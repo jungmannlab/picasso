@@ -22,8 +22,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from numpy.lib.recfunctions import stack_arrays
 
-from .. import io, render
-from ..lib import ProgressDialog
+from .. import io, render, lib
 
 
 DEFAULT_OVERSAMPLING = 1.0
@@ -614,7 +613,7 @@ class AnimationDialog(QtWidgets.QDialog):
 
             # render all frames and save in RAM
             video_writer = imageio.get_writer(name, fps=self.fps.value())
-            progress = ProgressDialog(
+            progress = lib.ProgressDialog(
                 "Rendering frames", 0, len(angx), self.window
             )
             progress.set_value(0)
@@ -1528,7 +1527,7 @@ class ViewRotation(QtWidgets.QLabel):
         elif self.pick_shape == "Rectangle":
             w = self.pick_size
             (xs, ys), (xe, ye) = self.pick
-            X, Y = self.window.window.view.get_pick_rectangle_corners(
+            X, Y = lib.get_pick_rectangle_corners(
                 xs, ys, xe, ye, w
             )
             x_min = min(X)
@@ -1536,7 +1535,7 @@ class ViewRotation(QtWidgets.QLabel):
             y_min = min(Y)
             y_max = max(Y)
         elif self.pick_shape == "Polygon":
-            X, Y = self.window.window.view.get_pick_polygon_corners(self.pick)
+            X, Y = lib.get_pick_polygon_corners(self.pick)
             x_min = min(X)
             x_max = max(X)
             y_min = min(Y)
