@@ -9795,7 +9795,6 @@ class View(QtWidgets.QLabel):
                     "Correlating image pairs", 0, n_pairs, self
                 )
                 try:
-                    start_time = time.time()
                     # find drift and apply it to locs
                     drift, _ = postprocess.undrift(
                         locs,
@@ -9804,11 +9803,6 @@ class View(QtWidgets.QLabel):
                         False,
                         seg_progress.set_value,
                         rcc_progress.set_value,
-                    )
-                    finish_time = time.time()
-                    print(
-                        "RCC drift estimate running time [seconds]: ", 
-                        np.round(finish_time-start_time, 1)
                     )
                     # sanity check and assign attributes
                     locs = lib.ensure_sanity(locs, info)
