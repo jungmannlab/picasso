@@ -1,7 +1,12 @@
 Changelog
 =========
 
-Last change: 06-JUN-2024 MTS
+Last change: 28-JUN-2024 MTS
+
+0.7.0
+-----
+- Adaptive Intersection Maximization (AIM, doi: 10.1038/s41592-022-01307-0) implemented
+- CMD ``clusterfile`` fixed 
 
 0.6.9 - 0.6.11
 --------------

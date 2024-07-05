@@ -2,8 +2,8 @@
     gui/render
     ~~~~~~~~~~~~~~~~~~~~
     Graphical user interface for rendering localization images
-    :author: Joerg Schnitzbauer & Maximilian Strauss 
-        & Rafal Kowalewski, 2017-2022
+    :author: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, 
+        2017-2022
     :copyright: Copyright (c) 2017 Jungmann Lab, MPI of Biochemistry
 """
 import os
@@ -37,7 +37,8 @@ from collections import Counter
 
 import colorsys
 
-from .. import imageprocess, io, lib, postprocess, render, clusterer, __version__
+from .. import imageprocess, io, lib, postprocess, render, clusterer, aim, \
+    __version__
 from .rotation import RotationWindow
 
 # PyImarisWrite works on windows only
@@ -1678,57 +1679,6 @@ class ClsDlg2D(QtWidgets.QDialog):
             clustered_locs,
         )
 
-
-class LinkDialog(QtWidgets.QDialog):
-    """
-    A class to obtain inputs for linking localizations.
-
-    ...
-
-    Attributes
-    ----------
-    max_dark_time : QDoubleSpinBox
-        contains the maximum gap between localizations (frames) to be
-        considered as belonging to the same group of linked locs
-    max_distance : QDoubleSpinBox
-        contains the maximum distance (pixels) between locs to be
-        considered as belonging to the same group of linked locs
-
-    Methods
-    -------
-    getParams(parent=None)
-        Creates the dialog and returns the requested values for linking
-    """
-
-    def __init__(self, window):
-        super().__init__(window)
-        self.window = window
-        self.setWindowTitle("Enter parameters")
-        vbox = QtWidgets.QVBoxLayout(self)
-        grid = QtWidgets.QGridLayout()
-        grid.addWidget(QtWidgets.QLabel("Max. distance (pixels):"), 0, 0)
-        self.max_distance = QtWidgets.QDoubleSpinBox()
-        self.max_distance.setRange(0, 1e6)
-        self.max_distance.setValue(1)
-        grid.addWidget(self.max_distance, 0, 1)
-        grid.addWidget(QtWidgets.QLabel("Max. transient dark frames:"), 1, 0)
-        self.max_dark_time = QtWidgets.QDoubleSpinBox()
-        self.max_dark_time.setRange(0, 1e9)
-        self.max_dark_time.setValue(1)
-        grid.addWidget(self.max_dark_time, 1, 1)
-        vbox.addLayout(grid)
-        hbox = QtWidgets.QHBoxLayout()
-        vbox.addLayout(hbox)
-        # OK and Cancel buttons
-        self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
-            self,
-        )
-        vbox.addWidget(self.buttons)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-
     @staticmethod
     def getParams(parent=None):
         """
@@ -1743,6 +1693,86 @@ class LinkDialog(QtWidgets.QDialog):
             dialog.max_dark_time.value(),
             result == QtWidgets.QDialog.Accepted,
         )
+    
+
+class AIMDialog(QtWidgets.QDialog):
+    """Dialog to choose parameters for AIM undrifting.
+
+    ...
+
+    Attributes
+    ----------
+    intersect_d : QDoubleSpinBox
+        Contains the intersection distance in nm.
+    max_drift : QDoubleSpinBox
+        Contains the maximum drift within segmentation in nm.
+    segmentation : QSpinBox
+        Contains the lenght of temporal segments in units of frames.    
+
+    Methods
+    -------
+    getParams(parent=None)
+        Creates the dialog and converts and returns the requested values
+        for AIM.
+    """
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Segmentation:"), 0, 0)
+        self.segmentation = QtWidgets.QSpinBox()
+        self.segmentation.setRange(1, int(1e5))
+        self.segmentation.setValue(100)
+        grid.addWidget(self.segmentation, 0, 1)
+        grid.addWidget(QtWidgets.QLabel("Intersection distance (nm):"), 1, 0)
+        self.intersect_d = QtWidgets.QDoubleSpinBox()
+        self.intersect_d.setRange(0.1, 1e6)
+        try:
+            default = 6 * float(window.info_dialog.fit_precision.text())
+        except:
+            default = 20.0
+        self.intersect_d.setValue(default)
+        self.intersect_d.setDecimals(1)
+        self.intersect_d.setSingleStep(1)
+        grid.addWidget(self.intersect_d, 1, 1)
+        grid.addWidget(
+            QtWidgets.QLabel("Max. drift in segmentation (nm):"), 2, 0
+        )
+        self.max_drift = QtWidgets.QDoubleSpinBox()
+        self.max_drift.setRange(0.1, 1e6)
+        self.max_drift.setValue(60.0)
+        self.max_drift.setDecimals(1)
+        self.max_drift.setSingleStep(1)
+        grid.addWidget(self.max_drift, 2, 1)
+        vbox.addLayout(grid)
+
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(parent=None):
+        """Creates the dialog and converts and returns the requested 
+        values for AIM."""
+
+        dialog = AIMDialog(parent)
+        result = dialog.exec_()
+        # convert intersect_d and max_drift to pixels
+        params = {
+            "segmentation": dialog.segmentation.value(),
+            "intersect_d": dialog.intersect_d.value(),
+            "roi_r": dialog.max_drift.value(),
+        }
+        return params, result == QtWidgets.QDialog.Accepted
 
 
 class DbscanDialog(QtWidgets.QDialog):
@@ -1900,6 +1930,139 @@ class HdbscanDialog(QtWidgets.QDialog):
             dialog.save_centers.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )
+    
+
+class LinkDialog(QtWidgets.QDialog):
+    """
+    A class to obtain inputs for linking localizations.
+
+    ...
+
+    Attributes
+    ----------
+    max_dark_time : QDoubleSpinBox
+        contains the maximum gap between localizations (frames) to be
+        considered as belonging to the same group of linked locs
+    max_distance : QDoubleSpinBox
+        contains the maximum distance (pixels) between locs to be
+        considered as belonging to the same group of linked locs
+
+    Methods
+    -------
+    getParams(parent=None)
+        Creates the dialog and returns the requested values for linking
+    """
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(QtWidgets.QLabel("Max. distance (pixels):"), 0, 0)
+        self.max_distance = QtWidgets.QDoubleSpinBox()
+        self.max_distance.setRange(0, 1e6)
+        self.max_distance.setValue(1)
+        grid.addWidget(self.max_distance, 0, 1)
+        grid.addWidget(QtWidgets.QLabel("Max. transient dark frames:"), 1, 0)
+        self.max_dark_time = QtWidgets.QDoubleSpinBox()
+        self.max_dark_time.setRange(0, 1e9)
+        self.max_dark_time.setValue(1)
+        grid.addWidget(self.max_dark_time, 1, 1)
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+
+class SMLMDialog2D(QtWidgets.QDialog):
+    """
+    A class to obtain inputs for SMLM clusterer (2D).
+
+    ...
+
+    Attributes
+    ----------
+    radius : QDoubleSpinBox
+        contains clustering radius in x and y directions
+    min_locs : QSpinBox
+        contains minimum number of locs in cluster
+
+    Methods
+    -------
+    getParams(parent=None)
+        Creates the dialog and returns the requested values for 
+        clustering
+    """
+
+    def __init__(self, window):
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Enter parameters (2D)")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        # clustering radius
+        grid.addWidget(QtWidgets.QLabel("Cluster radius (pixels):"), 0, 0)
+        self.radius = QtWidgets.QDoubleSpinBox()
+        self.radius.setRange(0.0001, 1e3)
+        self.radius.setDecimals(4)
+        self.radius.setValue(0.1)
+        grid.addWidget(self.radius, 0, 1)
+        # min no. locs
+        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 1, 0)
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setRange(1, int(1e6))
+        self.min_locs.setValue(10)
+        grid.addWidget(self.min_locs, 1, 1)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(False)
+        grid.addWidget(self.save_centers, 2, 0, 1, 2)
+        # perform basic frame analysis
+        self.frame_analysis = QtWidgets.QCheckBox(
+            "Perform basic frame analysis"
+        )
+        self.frame_analysis.setChecked(True)
+        grid.addWidget(self.frame_analysis, 3, 0, 1, 2)
+
+        vbox.addLayout(grid)
+        hbox = QtWidgets.QHBoxLayout()
+        vbox.addLayout(hbox)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(parent=None):
+        """
+        Creates the dialog and returns the requested values for 
+        SMLM clusterer (2D).
+        """
+
+        dialog = SMLMDialog2D(parent)
+        result = dialog.exec_()
+        return (
+            dialog.radius.value(),
+            dialog.min_locs.value(),
+            dialog.save_centers.isChecked(),
+            dialog.frame_analysis.isChecked(),
+            result == QtWidgets.QDialog.Accepted,
+        )  
+
 
 class SMLMDialog3D(QtWidgets.QDialog):
     """
@@ -1991,87 +2154,6 @@ class SMLMDialog3D(QtWidgets.QDialog):
             dialog.frame_analysis.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )    
-
-
-class SMLMDialog2D(QtWidgets.QDialog):
-    """
-    A class to obtain inputs for SMLM clusterer (2D).
-
-    ...
-
-    Attributes
-    ----------
-    radius : QDoubleSpinBox
-        contains clustering radius in x and y directions
-    min_locs : QSpinBox
-        contains minimum number of locs in cluster
-
-    Methods
-    -------
-    getParams(parent=None)
-        Creates the dialog and returns the requested values for 
-        clustering
-    """
-
-    def __init__(self, window):
-        super().__init__(window)
-        self.window = window
-        self.setWindowTitle("Enter parameters (2D)")
-        vbox = QtWidgets.QVBoxLayout(self)
-        grid = QtWidgets.QGridLayout()
-        # clustering radius
-        grid.addWidget(QtWidgets.QLabel("Cluster radius (pixels):"), 0, 0)
-        self.radius = QtWidgets.QDoubleSpinBox()
-        self.radius.setRange(0.0001, 1e3)
-        self.radius.setDecimals(4)
-        self.radius.setValue(0.1)
-        grid.addWidget(self.radius, 0, 1)
-        # min no. locs
-        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 1, 0)
-        self.min_locs = QtWidgets.QSpinBox()
-        self.min_locs.setRange(1, int(1e6))
-        self.min_locs.setValue(10)
-        grid.addWidget(self.min_locs, 1, 1)
-        # save cluster centers
-        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
-        self.save_centers.setChecked(False)
-        grid.addWidget(self.save_centers, 2, 0, 1, 2)
-        # perform basic frame analysis
-        self.frame_analysis = QtWidgets.QCheckBox(
-            "Perform basic frame analysis"
-        )
-        self.frame_analysis.setChecked(True)
-        grid.addWidget(self.frame_analysis, 3, 0, 1, 2)
-
-        vbox.addLayout(grid)
-        hbox = QtWidgets.QHBoxLayout()
-        vbox.addLayout(hbox)
-        # OK and Cancel buttons
-        self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
-            self,
-        )
-        vbox.addWidget(self.buttons)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-
-    @staticmethod
-    def getParams(parent=None):
-        """
-        Creates the dialog and returns the requested values for 
-        SMLM clusterer (2D).
-        """
-
-        dialog = SMLMDialog2D(parent)
-        result = dialog.exec_()
-        return (
-            dialog.radius.value(),
-            dialog.min_locs.value(),
-            dialog.save_centers.isChecked(),
-            dialog.frame_analysis.isChecked(),
-            result == QtWidgets.QDialog.Accepted,
-        )  
 
 
 class TestClustererDialog(QtWidgets.QDialog):
@@ -5525,18 +5607,16 @@ class View(QtWidgets.QLabel):
         Called on pressing right arrow; moves FOV
     to_up()
         Called on pressing up arrow; moves FOV
-    undrift()
-        Undrifts with RCC
-    undrift_from_picked
-        Gets channel for undrifting from picked locs
-    _undrift_from_picked
-        Undrifts based on picked locs in a given channel
-    _undrift_from_picked_coordinate
+    undrift_aim()
+        Undrifts with AIM.
+    undrift_from_picked()
+        Undrifts from picked localizations.
+    _undrift_from_picked_coordinate()
         Calculates drift in a given coordinate
-    undrift_from_picked2d
-        Gets channel for undrifting from picked locs in 2D
-    _undrift_from_picked2d
-        Undrifts in x and y based on picked locs in a given channel
+    undrift_from_picked2d()
+        Undrifts x and y coordinates from picked localizations.
+    undrift_rcc()
+        Undrifts with RCC
     undo_drift
         Gets channel for undoing drift
     _undo_drift
@@ -7063,7 +7143,7 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def save_channel(self, title="Choose a channel"):
+    def save_channel(self, title="Choose a channel to save localizations"):
         """
         Opens an input dialog to ask which channel to save.
         There is an option to save all channels separetely or merge
@@ -7085,7 +7165,7 @@ class View(QtWidgets.QLabel):
             pathlist.append("Combine all channels")
             index, ok = QtWidgets.QInputDialog.getItem(
                 self,
-                "Save localizations",
+                title,
                 "Channel:",
                 pathlist,
                 editable=False,
@@ -7118,7 +7198,7 @@ class View(QtWidgets.QLabel):
             pathlist.append("Apply to all sequentially")
             index, ok = QtWidgets.QInputDialog.getItem(
                 self,
-                "Save localizations",
+                title,
                 "Channel:",
                 pathlist,
                 editable=False,
@@ -9648,15 +9728,48 @@ class View(QtWidgets.QLabel):
 
                 self.plot_window.show()
 
+    def undrift_aim(self):
+        """Undrifts with Adaptive Intersection Maximization (AIM).
+        
+        See Ma H., et al. Science Advances. 2024."""
 
-    def undrift(self):
+        channel = self.get_channel("Undrift by AIM")
+        if channel is not None:
+            locs = self.all_locs[channel]
+            info = self.infos[channel]
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+
+            # get parameters for AIM
+            params, ok = AIMDialog.getParams()
+            params["intersect_d"] = params["intersect_d"] / pixelsize
+            params["roi_r"] = params["roi_r"] / pixelsize
+            if ok:
+                n_frames = info[0]["Frames"]
+                n_segments = int(np.floor(n_frames / params["segmentation"]))
+                progress = lib.ProgressDialog(
+                    "Undrifting by AIM (1/2)", 0, n_segments, self.window
+                )
+                locs, new_info, drift = aim.aim(
+                    locs, info, **params, progress=progress
+                )
+                # sanity check and assign attributes
+                locs = lib.ensure_sanity(locs, info)
+                self.all_locs[channel] = locs
+                self.locs[channel] = copy.copy(locs)
+                self.infos[channel] = new_info
+                self.index_blocks[channel] = None
+                self.add_drift(channel, drift)
+                self.update_scene()
+                self.show_drift()
+
+    def undrift_rcc(self):
         """ 
         Undrifts with RCC. 
 
         See Wang Y., et al. Optics Express. 2014
         """
 
-        channel = self.get_channel("Undrift")
+        channel = self.get_channel("Undrift by RCC")
         if channel is not None:
             info = self.infos[channel]
             n_frames = info[0]["Frames"]
@@ -9721,23 +9834,78 @@ class View(QtWidgets.QLabel):
 
     @check_picks
     def undrift_from_picked(self):
-        """ Gets channel for undrifting from picked locs. """
+        """Undrifts based on picked locs in a given channel."""
 
         channel = self.get_channel("Undrift from picked")
         if channel is not None:
-            self._undrift_from_picked(channel)
+            picked_locs = self.picked_locs(channel)
+            status = lib.StatusDialog("Calculating drift...", self)
+
+            drift_x = self._undrift_from_picked_coordinate(
+                channel, picked_locs, "x"
+            ) # find drift in x
+            drift_y = self._undrift_from_picked_coordinate(
+                channel, picked_locs, "y"
+            ) # find drift in y
+
+            # Apply drift
+            self.all_locs[channel].x -= drift_x[self.all_locs[channel].frame]
+            self.all_locs[channel].y -= drift_y[self.all_locs[channel].frame]
+            self.locs[channel].x -= drift_x[self.locs[channel].frame]
+            self.locs[channel].y -= drift_y[self.locs[channel].frame]
+
+            # A rec array to store the applied drift
+            drift = (drift_x, drift_y)
+            drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
+
+            # If z coordinate exists, also apply drift there
+            if all([hasattr(_, "z") for _ in picked_locs]):
+                drift_z = self._undrift_from_picked_coordinate(
+                    channel, picked_locs, "z"
+                )
+                self.all_locs[channel].z -= drift_z[self.all_locs[channel].frame]
+                self.locs[channel].z -= drift_z[self.locs[channel].frame]
+                drift = lib.append_to_rec(drift, drift_z, "z")
+
+            # Cleanup
+            self.index_blocks[channel] = None
+            self.add_drift(channel, drift)
+            status.close()
+            self.update_scene()
 
     @check_picks
     def undrift_from_picked2d(self):
-        """ 
-        Gets channel for undrifting from picked locs in 2D.
-        Available when 3D data is loaded.
-        """
+        """Undrifts in x and y based on picked locs in a given channel.
+        Available when 3D data is loaded."""
 
         channel = self.get_channel("Undrift from picked")
         if channel is not None:
-            self._undrift_from_picked2d(channel)
+            picked_locs = self.picked_locs(channel)
+            status = lib.StatusDialog("Calculating drift...", self)
 
+            drift_x = self._undrift_from_picked_coordinate(
+                channel, picked_locs, "x"
+            )
+            drift_y = self._undrift_from_picked_coordinate(
+                channel, picked_locs, "y"
+            )
+
+            # Apply drift
+            self.all_locs[channel].x -= drift_x[self.all_locs[channel].frame]
+            self.all_locs[channel].y -= drift_y[self.all_locs[channel].frame]
+            self.locs[channel].x -= drift_x[self.locs[channel].frame]
+            self.locs[channel].y -= drift_y[self.locs[channel].frame]
+
+            # A rec array to store the applied drift
+            drift = (drift_x, drift_y)
+            drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
+
+            # Cleanup
+            self.index_blocks[channel] = None
+            self.add_drift(channel, drift)
+            status.close()
+            self.update_scene()
+    
     def _undrift_from_picked_coordinate(
         self, channel, picked_locs, coordinate
     ):
@@ -9794,87 +9962,6 @@ class View(QtWidgets.QLabel):
         )
 
         return drift_mean
-
-    def _undrift_from_picked(self, channel):
-        """
-        Undrifts based on picked locs in a given channel.
-        
-        Parameters
-        ----------
-        channel : int
-            Channel to be undrifted
-        """
-
-        picked_locs = self.picked_locs(channel)
-        status = lib.StatusDialog("Calculating drift...", self)
-
-        drift_x = self._undrift_from_picked_coordinate(
-            channel, picked_locs, "x"
-        ) # find drift in x
-        drift_y = self._undrift_from_picked_coordinate(
-            channel, picked_locs, "y"
-        ) # find drift in y
-
-        # Apply drift
-        self.all_locs[channel].x -= drift_x[self.all_locs[channel].frame]
-        self.all_locs[channel].y -= drift_y[self.all_locs[channel].frame]
-        self.locs[channel].x -= drift_x[self.locs[channel].frame]
-        self.locs[channel].y -= drift_y[self.locs[channel].frame]
-
-        # A rec array to store the applied drift
-        drift = (drift_x, drift_y)
-        drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
-
-        # If z coordinate exists, also apply drift there
-        if all([hasattr(_, "z") for _ in picked_locs]):
-            drift_z = self._undrift_from_picked_coordinate(
-                channel, picked_locs, "z"
-            )
-            self.all_locs[channel].z -= drift_z[self.all_locs[channel].frame]
-            self.locs[channel].z -= drift_z[self.locs[channel].frame]
-            drift = lib.append_to_rec(drift, drift_z, "z")
-
-        # Cleanup
-        self.index_blocks[channel] = None
-        self.add_drift(channel, drift)
-        status.close()
-        self.update_scene()
-
-    def _undrift_from_picked2d(self, channel):
-        """
-        Undrifts in x and y based on picked locs in a given channel.
-        
-        Parameters
-        ----------
-        channel : int
-            Channel to be undrifted
-        """
-
-        picked_locs = self.picked_locs(channel)
-        status = lib.StatusDialog("Calculating drift...", self)
-
-        drift_x = self._undrift_from_picked_coordinate(
-            channel, picked_locs, "x"
-        )
-        drift_y = self._undrift_from_picked_coordinate(
-            channel, picked_locs, "y"
-        )
-
-        # Apply drift
-        self.all_locs[channel].x -= drift_x[self.all_locs[channel].frame]
-        self.all_locs[channel].y -= drift_y[self.all_locs[channel].frame]
-        self.locs[channel].x -= drift_x[self.locs[channel].frame]
-        self.locs[channel].y -= drift_y[self.locs[channel].frame]
-
-        # A rec array to store the applied drift
-        drift = (drift_x, drift_y)
-        drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
-
-        # Cleanup
-        self.index_blocks[channel] = None
-        self.add_drift(channel, drift)
-        status.close()
-        self.update_scene()
 
     def undo_drift(self):
         """ Gets channel for undoing drift. """
@@ -10900,9 +10987,9 @@ class Window(QtWidgets.QMainWindow):
         
         # menu bar - Postprocess
         postprocess_menu = self.menu_bar.addMenu("Postprocess")
-        undrift_action = postprocess_menu.addAction("Undrift by RCC")
-        undrift_action.setShortcut("Ctrl+U")
-        undrift_action.triggered.connect(self.view.undrift)
+        undrift_aim_action = postprocess_menu.addAction("Undrift by AIM")
+        undrift_aim_action.setShortcut("Ctrl+U")
+        undrift_aim_action.triggered.connect(self.view.undrift_aim)
         undrift_from_picked_action = postprocess_menu.addAction(
             "Undrift from picked"
         )
@@ -10916,6 +11003,8 @@ class Window(QtWidgets.QMainWindow):
         undrift_from_picked2d_action.triggered.connect(
             self.view.undrift_from_picked2d
         )
+        undrift_action = postprocess_menu.addAction("Undrift by RCC")
+        undrift_action.triggered.connect(self.view.undrift_rcc)
         drift_action = postprocess_menu.addAction("Undo drift")
         drift_action.triggered.connect(self.view.undo_drift)
         drift_action = postprocess_menu.addAction("Show drift")
