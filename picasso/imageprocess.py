@@ -1,5 +1,5 @@
 """
-    picasso/imageprocess
+    picasso.imageprocess
     ~~~~~~~~~~~~~~~~~~~~
 
     Image processing functions

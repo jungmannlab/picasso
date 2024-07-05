@@ -24,13 +24,9 @@ A collection of tools for painting super-resolution images. The Picasso software
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
 
-Picasso 0.6.1
+Picasso 0.7.0
 -------------
-In previous version, the rotation window (3D Render) showed an incorrect length of the scalebar. This has been fixed.
-
-Picasso 0.6.0
--------------
-RESI dialog added to Picasso Render, allowing for substantial boost in spatial resolution (*Reinhardt, et al., Nature, 2023.* DOI: 10.1038/s41586-023-05925-9).
+Adaptive Intersection Maximization (AIM, `doi: 10.1126/sciadv.adm7765 <https://www.science.org/doi/10.1126/sciadv.adm7765>`_) implemented in Picasso. The implementation may not be as fast as in the original version due to Python constraints.
 
 Previous versions
 -----------------
