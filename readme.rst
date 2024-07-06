@@ -122,7 +122,7 @@ Contributions & Copyright
 | Contributors: Joerg Schnitzbauer, Maximilian Strauss, Rafal Kowalewski, Adrian Przybylski, Andrey Aristov, Hiroshi Sasaki, Alexander Auer, Johanna Rahm
 | Copyright (c) 2015-2019 Jungmann Lab, Max Planck Institute of Biochemistry
 | Copyright (c) 2020-2021 Maximilian Strauss
-| Copyright (c) 2022-2023 Rafal Kowalewski
+| Copyright (c) 2022-2024 Rafal Kowalewski
 
 Citing Picasso
 --------------
@@ -132,6 +132,13 @@ If you use picasso in your research, please cite our Nature Protocols publicatio
 | J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann
 | Super-Resolution Microscopy with DNA-PAINT
 | Nature Protocols (2017). 12: 1198-1228 DOI: `https://doi.org/10.1038/nprot.2017.024 <https://doi.org/10.1038/nprot.2017.024>`__
+
+If you use some of the functionalities provided by Picasso, please also cite the respective publications:
+
+- Nearest Neighbor based Analysis (NeNA) for experimental localization precision. DOI: `https://doi.org/10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
+- Theoretical localization precision (Gauss LQ and MLE). DOI: `https://doi.org/10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
+- MLE fitting. DOI: `https://doi.org/10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
+- AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
 
 Credits
 -------
