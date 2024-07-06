@@ -14,13 +14,16 @@ Opening Files
 
 Drift Correction
 ----------------
-Picasso offers two procedures to correct for drift: an RCC algorithm (option A), and use of specific structures in the image as drift markers (option B). Although option A does not require any additional sample preparation, option B depends on the presence of either fiducial markers or inherently clustered structures in the image. On the other hand, option B often supports more precise drift estimation and thus allows for higher image resolution. To achieve the highest possible resolution (ultra-resolution), we recommend consecutive applications of option A and multiple rounds of option B. The drift markers for option B can be features of the image itself (e.g., protein complexes or DNA origami) or intentionally included markers (e.g., DNA origami or gold nanoparticles). When using DNA origami as drift markers, the correction is typically applied in two rounds: first, with whole DNA origami structures as markers, and, second, using single DNA-PAINT binding sites as markers. In both cases, the precision of drift correction strongly depends on the number of selected drift markers.
+Picasso offers three procedures to correct for drift: AIM (Ma, H., et al. Science Advances. 2024., option A), use of specific structures in the image as drift markers (option B) and an RCC algorithm (option C). AIM is precise, robust, quick, requires no user interaction or fiducial markers (although adding them will may improve performance).  Although RCC does not require any additional sample preparation, option B depends on the presence of either fiducial markers or inherently clustered structures in the image. On the other hand, option B often supports more precise drift estimation and thus allows for higher image resolution. To achieve the highest possible resolution (ultra-resolution), we recommend AIM or consecutive applications of option C and multiple rounds of option B. The drift markers for option B can be features of the image itself (e.g., protein complexes or DNA origami) or intentionally included markers (e.g., DNA origami or gold nanoparticles). When using DNA origami as drift markers, the correction is typically applied in two rounds: first, with whole DNA origami structures as markers, and, second, using single DNA-PAINT binding sites as markers. In both cases, the precision of drift correction strongly depends on the number of selected drift markers.
 
-Redundant cross-correlation drift correction
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Adaptive Intersection Maximization (AIM) drift correction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. In ``Picasso: Render``, select ``Postprocess > Undrift by RCC``.
-2. A dialog will appear asking for the segmentation parameter. Although the default value, 1,000 frames, is a sensible choice for most movies, it might be necessary to adjust the segmentation parameter of the algorithm, depending on the total number of frames in the movie and the number of localizations per frame. A smaller segment size results in better temporal drift resolution but requires a movie with more localizations per frame.
+1. In ``Picasso: Render``, select ``Postprocess > Undrift by AIM``.
+2. The dialog asks the user to select:
+   a. ``Segmentation`` - the number of frames per interval to calculate the drift. The lower the value, the better the temporal resolution of the drift correction, but the higher the computational cost.
+   b. ``Intersection distance (nm)`` - the maximum distance between two localizations in two consecutive temporal segments to be considered the same molecule. This parameter is robust, 3*NeNA for optimal result is recommended.
+   c. ``Max. drift in segment (nm)`` - the maximum expected drift between two consecutive temporal segments. If the drift is larger, the algorithm will likely diverge. Setting the parameter up to ``3 * intersection_distance`` will result in fast computation.
 3. After the algorithm finishes, the estimated drift will be displayed in a pop-up window, and the display will show the drift-corrected image.
 
 Marker-based drift correction
@@ -30,6 +33,14 @@ Marker-based drift correction
 2. If the structures used as drift markers have an intrinsic size larger than the precision of individual localizations (e.g., DNA origami, large protein complexes), it is critical to select a large number of structures. Otherwise, the statistic for calculating the drift in each frame (the mean displacement of localization to the structure's center of mass) is not valid.
 3. Select ``Postprocess > Undrift from picked`` to compute and apply the drift correction.
 4. (Optional) Save the drift-corrected localizations by selecting ``File > Save localizations``.
+
+Redundant cross-correlation drift correction
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+1. In ``Picasso: Render``, select ``Postprocess > Undrift by RCC``.
+2. A dialog will appear asking for the segmentation parameter. Although the default value, 1,000 frames, is a sensible choice for most movies, it might be necessary to adjust the segmentation parameter of the algorithm, depending on the total number of frames in the movie and the number of localizations per frame. A smaller segment size results in better temporal drift resolution but requires a movie with more localizations per frame.
+3. After the algorithm finishes, the estimated drift will be displayed in a pop-up window, and the display will show the drift-corrected image.
+
 
 Picking of regions of interest
 ------------------------------
@@ -340,9 +351,9 @@ Allows the user to display only a fraction of localizations to speed up renderin
 Postprocess
 ~~~~~~~~~~~
 
-Undrift by RCC
+Undrift by AIM
 ^^^^^^^^^^^^^^
-Performs drift correction by redundant cross-correlation.
+Performs drift correction using the AIM algorithm (Ma, H., et al. Science Advances. 2024).
 
 Undrift from picked (3D)
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -351,6 +362,10 @@ Performs drift correction using the picked localizations as fiducials. Also perf
 Undrift from picked (2D)
 ^^^^^^^^^^^^^^^^^^^^^^^^
 Performs drift correction using the picked localizations as fiducials. Does not perform drift correction in z even if dataset has 3D information.
+
+Undrift by RCC
+^^^^^^^^^^^^^^
+Performs drift correction by redundant cross-correlation.
 
 Undo drift (2D)
 ^^^^^^^^^^^^^^^
