@@ -19,8 +19,6 @@ from scipy.interpolate import InterpolatedUnivariateSpline as \
     _InterpolatedUnivariateSpline
 from tqdm import tqdm as _tqdm
 
-#TODO: add progress dialog, also tqdm
-
 
 def intersect1d(a, b):
     """Slightly faster implementation of _np.intersect1d without 

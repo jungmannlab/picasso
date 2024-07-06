@@ -391,7 +391,7 @@ def fit_async(
     box,
     eps=0.001,
     max_it=100,
-    method="sigma",
+    method="sigmaxy",
 ):
     spots = get_spots(movie, identifications, box, camera_info)
     return _gaussmle.gaussmle_async(spots, eps, max_it, method=method)

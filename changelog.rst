@@ -7,6 +7,7 @@ Last change: 28-JUN-2024 MTS
 -----
 - Adaptive Intersection Maximization (AIM, doi: 10.1038/s41592-022-01307-0) implemented
 - CMD ``clusterfile`` fixed 
+- Picasso: Render 3D, rectangular and polygonal pick fixed
 
 0.6.9 - 0.6.11
 --------------

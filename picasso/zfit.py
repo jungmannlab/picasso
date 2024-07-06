@@ -220,7 +220,11 @@ def fit_z(
     sx = locs.sx
     sy = locs.sy
     for i in range(len(z)):
-        result = _minimize_scalar(_fit_z_target, args=(sx[i], sy[i], cx, cy))
+        result = _minimize_scalar(
+            _fit_z_target, 
+            bounds=[-1000, 1000], # to avoid potential gaps in the calibration curve, credits to Loek Andriessen
+            args=(sx[i], sy[i], cx, cy)
+        )
         z[i] = result.x
         square_d_zcalib[i] = result.fun
     z *= magnification_factor
