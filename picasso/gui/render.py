@@ -1739,7 +1739,7 @@ class AIMDialog(QtWidgets.QDialog):
         self.intersect_d.setSingleStep(1)
         grid.addWidget(self.intersect_d, 1, 1)
         grid.addWidget(
-            QtWidgets.QLabel("Max. drift in segmentation (nm):"), 2, 0
+            QtWidgets.QLabel("Max. drift in segment (nm):"), 2, 0
         )
         self.max_drift = QtWidgets.QDoubleSpinBox()
         self.max_drift.setRange(0.1, 1e6)
