@@ -133,6 +133,7 @@ If you use picasso in your research, please cite our Nature Protocols publicatio
 | Super-Resolution Microscopy with DNA-PAINT
 | Nature Protocols (2017). 12: 1198-1228 DOI: `https://doi.org/10.1038/nprot.2017.024 <https://doi.org/10.1038/nprot.2017.024>`__
 
+
 If you use some of the functionalities provided by Picasso, please also cite the respective publications:
 
 - Nearest Neighbor based Analysis (NeNA) for experimental localization precision. DOI: `https://doi.org/10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
