@@ -391,7 +391,7 @@ def fit_async(
     box,
     eps=0.001,
     max_it=100,
-    method="sigma",
+    method="sigmaxy",
 ):
     spots = get_spots(movie, identifications, box, camera_info)
     return _gaussmle.gaussmle_async(spots, eps, max_it, method=method)
@@ -424,9 +424,13 @@ def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
     return locs
 
 
-def localize(movie, info, parameters):
-    identifications = identify(movie, parameters)
-    return fit(movie, info, identifications, parameters["Box Size"])
+def localize(movie, camera_info, parameters):
+    identifications = identify(
+        movie,
+        parameters["Min. Net Gradient"],
+        parameters["Box Size"],
+    )
+    return fit(movie, camera_info, identifications, parameters["Box Size"])
 
 
 def check_nena(locs, info, callback=None):

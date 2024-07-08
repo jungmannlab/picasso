@@ -57,6 +57,13 @@ class ProgressDialog(QtWidgets.QProgressDialog):
     def closeEvent(self, event):
         _dialogs.remove(self)
 
+    def zero_progress(self, description=None):
+        """Sets progress dialog to zero and changes title if given."""
+
+        if description:
+            self.setLabelText(description)
+        self.set_value(0)
+
 
 class StatusDialog(QtWidgets.QDialog):
     """StatusDialog displays the description string in a dialog."""
