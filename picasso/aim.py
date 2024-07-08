@@ -448,6 +448,12 @@ def intersection_max(
         x1 = x[min_frame_idx & max_frame_idx]
         y1 = y[min_frame_idx & max_frame_idx]
 
+        # skip if no reference localizations
+        if len(x1) == 0:
+            drift_x[s] = drift_x[s-1]
+            drift_y[s] = drift_y[s-1]
+            continue
+
         # undrifting from the previous round
         x1 += rel_drift_x
         y1 += rel_drift_y
@@ -551,6 +557,11 @@ def intersection_max_z(
         x1 = x[min_frame_idx & max_frame_idx]
         y1 = y[min_frame_idx & max_frame_idx]
         z1 = z[min_frame_idx & max_frame_idx]
+
+        # skip if no reference localizations
+        if len(x1) == 0:
+            drift_z[s] = drift_z[s-1]
+            continue
 
         # undrifting from the previous round
         z1 += rel_drift_z
@@ -664,9 +675,9 @@ def aim(
     drift_x = drift_x1 + drift_x2
     drift_y = drift_y1 + drift_y2
 
-    # # shift the drifts by the mean value (like in Picasso)
-    # drift_x -= _np.mean(drift_x)
-    # drift_y -= _np.mean(drift_y)
+    # # shift the drifts by the mean value
+    drift_x -= _np.mean(drift_x)
+    drift_y -= _np.mean(drift_y)
 
     # combine to Picasso format
     drift = _np.rec.array((drift_x, drift_y), dtype=[("x", "f"), ("y", "f")])
