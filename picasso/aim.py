@@ -353,7 +353,8 @@ def get_fft_peak_z(roi_cc, roi_size):
 
 def intersection_max(
     x, y, ref_x, ref_y, 
-    frame, segmentation, intersect_d, roi_r, width, progress=None,
+    frame, seg_bounds, intersect_d, roi_r, width, 
+    aim_round=1, progress=None,
 ):
     """Maximize intersection (undrift) for 2D localizations.
     
@@ -369,8 +370,9 @@ def intersection_max(
         y-coordinates of the reference localizations.
     frame : _np.array 
         Frame indices of localizations.
-    segmentation : int
-        Time interval for drift tracking, unit: frames.
+    seg_bounds : np.array
+        Frame indices of the segmentation bounds. Defines temporal 
+        intervals used to estimate drift.
     intersect_d : float
         Intersect distance in camera pixels.
     roi_r : float
@@ -378,6 +380,11 @@ def intersection_max(
         higher than the maximum expected drift within one segment.
     width : int
         Width of the camera image in camera pixels.
+    aim_round : {1, 2}
+        Round of AIM algorithm. The first round uses the first interval
+        as reference, the second round uses the entire dataset as
+        reference. The impact is that in the second round, the first
+        interval is also undrifted.
     progress : picasso.lib.ProgressDialog (default=None)
         Progress dialog. If None, progress is displayed with tqdm.
     
@@ -393,8 +400,10 @@ def intersection_max(
         Drift in y-direction.
     """
 
+    assert aim_round in [1, 2], "aim_round must be 1 or 2."
+
     # number of segments
-    n_segments = int(_np.ceil(frame.max() / segmentation))
+    n_segments = len(seg_bounds) - 1
     rel_drift_x = 0 # adaptive drift (updated at each interval)
     rel_drift_y = 0
 
@@ -411,7 +420,7 @@ def intersection_max(
     for i, shift_x in enumerate(steps):
         for j, shift_y in enumerate(steps):
             shifts_xy[i, j] = shift_x + shift_y * width_units
-    shifts_xy = shifts_xy.reshape(box**2)
+    shifts_xy = shifts_xy.reshape(box ** 2)
 
     # convert reference to a 1D array in units of intersect_d and find
     # unique values and counts
@@ -421,16 +430,21 @@ def intersection_max(
     l0_coords, l0_counts = _np.unique(l0, return_counts=True)
 
     # initialize progress such that if GUI is used, tqdm is omitted
+    start_idx = 1 if aim_round == 1 else 0
     if progress is not None:
-        iterator = range(1, n_segments)
+        iterator = range(start_idx, n_segments)
     else:
-        iterator = _tqdm(n_segments, desc="Undrifting z", unit="segment") 
+        iterator = _tqdm(
+            range(start_idx, n_segments), 
+            desc=f"Undrifting ({aim_round}/2)", 
+            unit="segment",
+        ) 
 
     # run across each segment
     for s in iterator:
         # get the target localizations within the current segment
-        min_frame_idx = frame > s * segmentation
-        max_frame_idx = frame <= (s + 1) * segmentation
+        min_frame_idx = frame > seg_bounds[s]
+        max_frame_idx = frame <= seg_bounds[s+1]
         x1 = x[min_frame_idx & max_frame_idx]
         y1 = y[min_frame_idx & max_frame_idx]
 
@@ -462,12 +476,10 @@ def intersection_max(
             iterator.update(s - iterator.n)
 
     # interpolate the drifts (cubic spline) for all frames
-    n_frames = n_segments * segmentation
-    drift_track_points = _np.linspace(0, n_frames, n_segments+1)
-    t = (drift_track_points[1:] + drift_track_points[:-1]) / 2
+    t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
     drift_x_pol = _InterpolatedUnivariateSpline(t, drift_x, k=3)
     drift_y_pol = _InterpolatedUnivariateSpline(t, drift_y, k=3)
-    t_inter = _np.arange(n_frames) + 1
+    t_inter = _np.arange(seg_bounds[-1]) + 1
     drift_x = drift_x_pol(t_inter)
     drift_y = drift_y_pol(t_inter)
 
@@ -480,8 +492,8 @@ def intersection_max(
 
 def intersection_max_z(
     x, y, z, ref_x, ref_y, ref_z,
-    frame, segmentation, intersect_d, roi_r, width, height, pixelsize,
-    progress=None,
+    frame, seg_bounds, intersect_d, roi_r, width, height, pixelsize,
+    aim_round=1, progress=None,
 ):
     """Maximize intersection (undrift) for 3D localizations. Assumes
     that x and y coordinates were already undrifted. x and y are in
@@ -494,7 +506,7 @@ def intersection_max_z(
     ref_z = ref_z.copy() / pixelsize #TODO: remember to convert back to nm, also for drift_z
 
     # number of segments
-    n_segments = int(_np.ceil(frame.max() / segmentation))
+    n_segments = len(seg_bounds) - 1
     rel_drift_z = 0 # adaptive drift (updated at each interval)
 
     # drift in z
@@ -521,16 +533,21 @@ def intersection_max_z(
     l0_coords, l0_counts = _np.unique(l0, return_counts=True) 
 
     # initialize progress such that if GUI is used, tqdm is omitted
+    start_idx = 1 if aim_round == 1 else 0
     if progress is not None:
-        iterator = range(1, n_segments)
+        iterator = range(start_idx, n_segments)
     else:
-        iterator = _tqdm(n_segments, desc="Undrifting z", unit="segment")
+        iterator = _tqdm(
+            range(start_idx, n_segments), 
+            desc=f"Undrifting z ({aim_round}/2)", 
+            unit="segment",
+        )
 
     # run across each segment
     for s in iterator:
         # get the target localizations within the current segment
-        min_frame_idx = frame > s * segmentation
-        max_frame_idx = frame <= (s + 1) * segmentation
+        min_frame_idx = frame > seg_bounds[s]
+        max_frame_idx = frame <= seg_bounds[s+1]
         x1 = x[min_frame_idx & max_frame_idx]
         y1 = y[min_frame_idx & max_frame_idx]
         z1 = z[min_frame_idx & max_frame_idx]
@@ -561,11 +578,9 @@ def intersection_max_z(
         
 
     # interpolate the drifts (cubic spline) for all frames
-    n_frames = n_segments * segmentation
-    drift_track_points = _np.linspace(0, n_frames, n_segments+1)
-    t = (drift_track_points[1:] + drift_track_points[:-1]) / 2
+    t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
     drift_z_pol = _InterpolatedUnivariateSpline(t, drift_z, k=3)
-    t_inter = _np.arange(n_frames) + 1
+    t_inter = _np.arange(seg_bounds[-1]) + 1
     drift_z = drift_z_pol(t_inter)
 
     # undrift the localizations
@@ -616,15 +631,14 @@ def aim(
     width = info[0]["Width"]
     height = info[0]["Height"]
     pixelsize = info[1]["Pixelsize"] 
+    n_frames = info[0]["Frames"]
 
     # frames should start at 1 
     frame = locs["frame"] + 1
-    n_frames = _np.max(frame)
-    
-    # group frames into track intervals and correct for rounding errors
-    n_segments = _np.floor(n_frames / segmentation).astype(int)
-    n_frames = n_segments * segmentation 
-    frame[frame > n_frames] = n_frames # cap frame number
+    # find the segmentation bounds (temporal intervals)
+    seg_bounds = _np.concatenate((
+        _np.arange(0, n_frames, segmentation), [n_frames]
+    ))
 
     # get the reference localizations (first interval)
     ref_x = locs["x"][frame <= segmentation]
@@ -634,25 +648,25 @@ def aim(
     # the first run is with the first interval as reference
     x_pdc, y_pdc, drift_x1, drift_y1 = intersection_max(
         locs.x, locs.y, ref_x, ref_y,
-        frame, segmentation, intersect_d, roi_r, width, 
-        progress=progress,
+        frame, seg_bounds, intersect_d, roi_r, width, 
+        aim_round=1, progress=progress,
     )
     # the second run is with the entire dataset as reference
     if progress is not None:
         progress.zero_progress(description="Undrifting by AIM (2/2)")
     x_pdc, y_pdc, drift_x2, drift_y2 = intersection_max(
         x_pdc, y_pdc, x_pdc, y_pdc,
-        frame, segmentation, intersect_d, roi_r, width,
-        progress=progress,
+        frame, seg_bounds, intersect_d, roi_r, width,
+        aim_round=2, progress=progress,
     )
 
     # add the drifts together from the two rounds
     drift_x = drift_x1 + drift_x2
     drift_y = drift_y1 + drift_y2
 
-    # shift the drifts by the mean value (like in Picasso)
-    drift_x -= _np.mean(drift_x)
-    drift_y -= _np.mean(drift_y)
+    # # shift the drifts by the mean value (like in Picasso)
+    # drift_x -= _np.mean(drift_x)
+    # drift_y -= _np.mean(drift_y)
 
     # combine to Picasso format
     drift = _np.rec.array((drift_x, drift_y), dtype=[("x", "f"), ("y", "f")])
@@ -666,15 +680,15 @@ def aim(
         ref_z = locs.z[frame <= segmentation]
         z_pdc, drift_z1 = intersection_max_z(
             x_pdc, y_pdc, locs.z, ref_x, ref_y, ref_z,
-            frame, segmentation, intersect_d, roi_r, width, height, pixelsize,
-            progress=progress,
+            frame, seg_bounds, intersect_d, roi_r, width, height, pixelsize,
+            aim_round=1, progress=progress,
         )
         if progress is not None:
             progress.zero_progress(description="Undrifting z (2/2)")
         z_pdc, drift_z2 = intersection_max_z(
             x_pdc, y_pdc, z_pdc, x_pdc, y_pdc, z_pdc,
-            frame, segmentation, intersect_d, roi_r, width, height, pixelsize,
-            progress=progress,
+            frame, seg_bounds, intersect_d, roi_r, width, height, pixelsize,
+            aim_round=2, progress=progress,
         )
         drift_z = drift_z1 + drift_z2
         drift_z -= _np.mean(drift_z)
