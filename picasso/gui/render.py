@@ -9745,7 +9745,7 @@ class View(QtWidgets.QLabel):
             params["roi_r"] = params["roi_r"] / pixelsize
             if ok:
                 n_frames = info[0]["Frames"]
-                n_segments = int(np.floor(n_frames / params["segmentation"]))
+                n_segments = int(np.ceil(n_frames / params["segmentation"]))
                 progress = lib.ProgressDialog(
                     "Undrifting by AIM (1/2)", 0, n_segments, self.window
                 )
