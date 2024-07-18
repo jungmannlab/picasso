@@ -639,10 +639,21 @@ def aim(
     """
 
     # extract metadata
-    width = info[0]["Width"]
-    height = info[0]["Height"]
-    pixelsize = info[1]["Pixelsize"] 
-    n_frames = info[0]["Frames"]
+    width = _np.nan
+    height = _np.nan
+    pixelsize = _np.nan
+    n_frames = _np.nan
+    for inf in info:
+        if val := inf.get("Width"):
+            width = val
+        if val := inf.get("Height"):
+            height = val
+        if val := inf.get('Frames'):
+            n_frames = val
+        if val := inf.get("Pixelsize"):
+            pixelsize = val
+    if _np.isnan(width * height * pixelsize * n_frames):
+        raise KeyError("Insufficient metadata available.")
 
     # frames should start at 1 
     frame = locs["frame"] + 1
