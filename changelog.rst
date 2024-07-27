@@ -12,6 +12,7 @@ Last change: 06-JUL-2024 MTS
 - ``picasso.localize.localize`` fixed
 - default MLE fitting uses different sx and sy (CMD only)
 - SMLM clusterer in picked regions deleted
+- Show legend in Render property displayed rounded tick label values
 
 0.6.9 - 0.6.11
 --------------

@@ -9457,7 +9457,7 @@ class View(QtWidgets.QLabel):
         ax1.set_xlim([0, 10])
         ax1.get_yaxis().set_visible(False)
 
-        labels = np.linspace(min_val, max_val, 5)
+        labels = np.linspace(min_val, max_val, 5).round(2)
         plt.xticks(x, labels)
 
         plt.title(parameter)
