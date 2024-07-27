@@ -6359,56 +6359,56 @@ class View(QtWidgets.QLabel):
         # for converting z coordinates
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
-        if len(self._picks): # cluster only picked localizations
-            clustered_locs = [] # list with picked locs after clustering
-            picked_locs = self.picked_locs(channel, add_group=False)
-            group_offset = 1
-            pd = lib.ProgressDialog(
-                "Clustering in picks", 0, len(picked_locs), self
+        # if len(self._picks): # cluster only picked localizations
+        #     clustered_locs = [] # list with picked locs after clustering
+        #     picked_locs = self.picked_locs(channel, add_group=False)
+        #     group_offset = 1
+        #     pd = lib.ProgressDialog(
+        #         "Clustering in picks", 0, len(picked_locs), self
+        #     )
+        #     pd.set_value(0)
+        #     for i in range(len(picked_locs)):
+        #         locs = picked_locs[i]
+
+        #         # save pick index as group_input
+        #         locs = lib.append_to_rec(
+        #             locs,
+        #             i * np.ones(len(locs), dtype=np.int32), 
+        #             "group_input",
+        #         )
+
+        #         if len(locs) > 0:
+        #             temp_locs = clusterer.cluster(
+        #                 locs, params, pixelsize=pixelsize
+        #             )
+
+        #             if len(temp_locs) > 0:
+        #                 # make sure each picks produces unique cluster ids
+        #                 temp_locs.group += group_offset
+        #                 clustered_locs.append(temp_locs)
+        #                 group_offset += np.max(temp_locs.group) + 1
+        #         pd.set_value(i + 1)
+        #     clustered_locs = stack_arrays(
+        #         clustered_locs, asrecarray=True, usemask=False
+        #     ) # np.recarray with all clustered locs to be saved
+
+        # else: # cluster all locs
+        status = lib.StatusDialog("Clustering localizations", self)
+
+        # keep group info if already present
+        if hasattr(self.all_locs[channel], "group"):
+            locs = lib.append_to_rec(
+                self.all_locs[channel], 
+                self.all_locs[channel].group, 
+                "group_input",
             )
-            pd.set_value(0)
-            for i in range(len(picked_locs)):
-                locs = picked_locs[i]
+        else:
+            locs = self.all_locs[channel]
 
-                # save pick index as group_input
-                locs = lib.append_to_rec(
-                    locs,
-                    i * np.ones(len(locs), dtype=np.int32), 
-                    "group_input",
-                )
-
-                if len(locs) > 0:
-                    temp_locs = clusterer.cluster(
-                        locs, params, pixelsize=pixelsize
-                    )
-
-                    if len(temp_locs) > 0:
-                        # make sure each picks produces unique cluster ids
-                        temp_locs.group += group_offset
-                        clustered_locs.append(temp_locs)
-                        group_offset += np.max(temp_locs.group) + 1
-                pd.set_value(i + 1)
-            clustered_locs = stack_arrays(
-                clustered_locs, asrecarray=True, usemask=False
-            ) # np.recarray with all clustered locs to be saved
-
-        else: # cluster all locs
-            status = lib.StatusDialog("Clustering localizations", self)
-
-            # keep group info if already present
-            if hasattr(self.all_locs[channel], "group"):
-                locs = lib.append_to_rec(
-                    self.all_locs[channel], 
-                    self.all_locs[channel].group, 
-                    "group_input",
-                )
-            else:
-                locs = self.all_locs[channel]
-
-            clustered_locs = clusterer.cluster(
-                locs, params, pixelsize=pixelsize
-            )
-            status.close()
+        clustered_locs = clusterer.cluster(
+            locs, params, pixelsize=pixelsize
+        )
+        status.close()
 
         # saving
         if hasattr(self.all_locs[channel], "z"):
