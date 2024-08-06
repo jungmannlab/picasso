@@ -1120,7 +1120,7 @@ def main():
     parser = argparse.ArgumentParser("picasso")
     subparsers = parser.add_subparsers(dest="command")
 
-    for command in ["toraw", "localize", "filter", "render"]:
+    for command in ["toraw", "filter"]:
         subparsers.add_parser(command)
 
     # link parser
