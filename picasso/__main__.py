@@ -505,15 +505,16 @@ def _smlm_clusterer(
     paths = glob.glob(files)
     if paths:
         from . import io, clusterer
-        if radius_z is not None: # 3D
-            params = [radius, radius_z, min_locs, 0, basic_fa, 0]
-        else: # 2D
-            params = [radius, min_locs, 0, basic_fa, 0]
-
+        params = {
+            "radius_xy": radius,
+            "radius_z": radius_z,
+            "min_locs": min_locs,
+            "frame_analysis": basic_fa,
+        }
         for path in paths:
             print("Loading {} ...".format(path))
             locs, info = io.load_locs(path)
-            locs = clusterer.cluster(locs, params, pixelsize)
+            locs = clusterer.cluster(locs, **params, pixelsize=pixelsize)
             clusters = clusterer.find_cluster_centers(locs, pixelsize)
             base, ext = os.path.splitext(path)
             smlm_cluster_info = {
