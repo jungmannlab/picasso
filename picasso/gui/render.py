@@ -1801,12 +1801,12 @@ class DbscanDialog(QtWidgets.QDialog):
         self.setWindowTitle("Enter parameters")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Radius (nm):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
-        self.radius.setRange(0.001, 1e6)
-        self.radius.setValue(0.1)
-        self.radius.setDecimals(4)
-        self.radius.setSingleStep(0.001)
+        self.radius.setRange(0.01, 1e6)
+        self.radius.setValue(10)
+        self.radius.setDecimals(2)
+        self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
         self.density = QtWidgets.QSpinBox()
@@ -2010,11 +2010,12 @@ class SMLMDialog2D(QtWidgets.QDialog):
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
         # clustering radius
-        grid.addWidget(QtWidgets.QLabel("Cluster radius (pixels):"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Cluster radius (nm):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
-        self.radius.setRange(0.0001, 1e3)
-        self.radius.setDecimals(4)
-        self.radius.setValue(0.1)
+        self.radius.setRange(0.01, 1e6)
+        self.radius.setDecimals(2)
+        self.radius.setSingleStep(0.1)
+        self.radius.setValue(10)
         grid.addWidget(self.radius, 0, 1)
         # min no. locs
         grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 1, 0)
@@ -2055,13 +2056,13 @@ class SMLMDialog2D(QtWidgets.QDialog):
 
         dialog = SMLMDialog2D(parent)
         result = dialog.exec_()
-        return (
+        return [
             dialog.radius.value(),
             dialog.min_locs.value(),
             dialog.save_centers.isChecked(),
             dialog.frame_analysis.isChecked(),
             result == QtWidgets.QDialog.Accepted,
-        )  
+        ]
 
 
 class SMLMDialog3D(QtWidgets.QDialog):
@@ -2094,18 +2095,19 @@ class SMLMDialog3D(QtWidgets.QDialog):
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
         # radius xy
-        grid.addWidget(QtWidgets.QLabel("Cluster radius xy (pixels):"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Cluster radius xy (nm):"), 0, 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
-        self.radius_xy.setRange(0.0001, 1e3)
-        self.radius_xy.setDecimals(4)
-        self.radius_xy.setValue(0.1)
+        self.radius_xy.setRange(0.01, 1e6)
+        self.radius_xy.setDecimals(2)
+        self.radius_xy.setSingleStep(0.1)
+        self.radius_xy.setValue(10)
         grid.addWidget(self.radius_xy, 0, 1)
         # radius z
-        grid.addWidget(QtWidgets.QLabel("Cluster radius z (pixels):"), 1, 0)
+        grid.addWidget(QtWidgets.QLabel("Cluster radius z (nm):"), 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
-        self.radius_z.setRange(0, 1e3)
-        self.radius_z.setDecimals(4)
-        self.radius_z.setValue(0.25)
+        self.radius_z.setRange(0.01, 1e6)
+        self.radius_z.setDecimals(2)
+        self.radius_z.setValue(25)
         grid.addWidget(self.radius_z, 1, 1)
         # min no. locs
         grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 2, 0)
@@ -2146,14 +2148,14 @@ class SMLMDialog3D(QtWidgets.QDialog):
 
         dialog = SMLMDialog3D(parent)
         result = dialog.exec_()
-        return (
+        return [
             dialog.radius_xy.value(),
             dialog.radius_z.value(),
             dialog.min_locs.value(),
             dialog.save_centers.isChecked(),
             dialog.frame_analysis.isChecked(),
             result == QtWidgets.QDialog.Accepted,
-        )    
+        ]
 
 
 class TestClustererDialog(QtWidgets.QDialog):
@@ -2433,9 +2435,12 @@ class TestClustererDialog(QtWidgets.QDialog):
         """
 
         params = {}
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            params["radius"] = self.test_dbscan_params.radius.value()
+            params["radius"] = (
+                self.test_dbscan_params.radius.value() / pixelsize
+            )
             params["min_samples"] = self.test_dbscan_params.min_samples.value()
         elif clusterer_name == "HDBSCAN":
             params["min_cluster_size"] = (
@@ -2448,8 +2453,12 @@ class TestClustererDialog(QtWidgets.QDialog):
                 self.test_hdbscan_params.cluster_eps.value()
             )
         elif clusterer_name == "SMLM":
-            params["radius_xy"] = self.test_smlm_params.radius_xy.value()
-            params["radius_z"] = self.test_smlm_params.radius_z.value()
+            params["radius_xy"] = (
+                self.test_smlm_params.radius_xy.value() / pixelsize
+            )
+            params["radius_z"] = (
+                self.test_smlm_params.radius_z.value() / pixelsize
+            )
             params["min_cluster_size"] = self.test_smlm_params.min_locs.value()
             params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
         return params
@@ -2526,13 +2535,13 @@ class TestDBSCANParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Radius (nm):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
         self.radius.setKeyboardTracking(False)
-        self.radius.setRange(0.001, 1e6)
-        self.radius.setValue(0.1)
-        self.radius.setDecimals(3)
-        self.radius.setSingleStep(0.001)
+        self.radius.setRange(0.01, 1e6)
+        self.radius.setValue(10)
+        self.radius.setDecimals(2)
+        self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
 
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
@@ -2592,20 +2601,22 @@ class TestSMLMParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        grid.addWidget(QtWidgets.QLabel("Radius xy [pixels]:"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Radius xy (nm):"), 0, 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
         self.radius_xy.setKeyboardTracking(False)
-        self.radius_xy.setValue(0.1)
-        self.radius_xy.setRange(0.0001, 1e3)
-        self.radius_xy.setDecimals(4)
+        self.radius_xy.setValue(10)
+        self.radius_xy.setRange(0.01, 1e6)
+        self.radius_xy.setSingleStep(0.1)
+        self.radius_xy.setDecimals(2)
         grid.addWidget(self.radius_xy, 0, 1)
 
         grid.addWidget(QtWidgets.QLabel("Radius z (3D only):"), 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setKeyboardTracking(False)
-        self.radius_z.setValue(0.25)
-        self.radius_z.setRange(0, 1e3)
-        self.radius_z.setDecimals(4)
+        self.radius_z.setValue(25)
+        self.radius_z.setRange(0.01, 1e6)
+        self.radius_z.setSingleStep(0.1)
+        self.radius_z.setDecimals(2)
         grid.addWidget(self.radius_z, 1, 1)
 
         grid.addWidget(QtWidgets.QLabel("Min. no. locs"), 2, 0)     
@@ -6179,14 +6190,14 @@ class View(QtWidgets.QLabel):
         # perform DBSCAN in a channel
         locs = clusterer.dbscan(
             locs, 
-            radius, 
+            radius / pixelsize, # convert to camera pixels
             min_density,
             pixelsize=pixelsize,
         )
         dbscan_info = {
             "Generated by": "Picasso DBSCAN",
             "Number of clusters": len(np.unique(locs.group)),
-            "Radius [cam. px]": radius,
+            "Radius (nm)": radius,
             "Minimum local density": min_density,
         }
 
@@ -6304,10 +6315,14 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("Cluster")
 
         # get clustering parameters
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if any([hasattr(_, "z") for _ in self.all_locs]):
             params = SMLMDialog3D.getParams()
+            params[0] = params[0] / pixelsize # convert to camera pixels
+            params[1] = params[1] / pixelsize
         else:
             params = SMLMDialog2D.getParams()
+            params[0] = params[0] / pixelsize # convert to camera pixels
 
         ok = params[-1] # true if parameters were given
 
@@ -6415,8 +6430,8 @@ class View(QtWidgets.QLabel):
             new_info = {
                 "Generated by": "Picasso Render SMLM clusterer 3D",
                 "Number of clusters": len(np.unique(clustered_locs.group)),
-                "Clustering radius xy [cam. px]": params[0],
-                "Clustering radius z [cam. px]": params[1],
+                "Clustering radius xy (nm)": params[0] * pixelsize,
+                "Clustering radius z (nm)": params[1] * pixelsize,
                 "Min. cluster size": params[2],
                 "Performed basic frame analysis": params[-2],
             }            
@@ -6424,7 +6439,7 @@ class View(QtWidgets.QLabel):
             new_info = {
                 "Generated by": "Picasso Render SMLM clusterer 2D",
                 "Number of clusters": len(np.unique(clustered_locs.group)),
-                "Clustering radius [cam. px]": params[0],
+                "Clustering radius (nm)": params[0] * pixelsize,
                 "Min. cluster size": params[1],
                 "Performed basic frame analysis": params[-2],
             }
