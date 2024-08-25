@@ -716,9 +716,9 @@ def aim(
 
     new_info = {
         "Undrifted by": "AIM",
-        "Intersect distance (cam. pixels)": intersect_d,
+        "Intersect distance (nm)": intersect_d * pixelsize,
         "Segmentation": segmentation,
-        "Search regions radius (cam. pixels)": roi_r,
+        "Search regions radius (nm)": roi_r * pixelsize,
     }
     new_info = info + [new_info]
 
