@@ -8066,7 +8066,7 @@ class View(QtWidgets.QLabel):
                         reply = msgBox.exec()
 
                         if reply == 0:
-                            # acepted
+                            # accepted
                             if pick in removelist:
                                 removelist.remove(pick)
                         elif reply == 3:
@@ -8617,7 +8617,8 @@ class View(QtWidgets.QLabel):
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
-            areas = lib.pick_areas_circle(self._picks, r)
+            # no need for repeating, same area for all picks
+            areas = [np.pi * r ** 2] # list for consistency
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
             areas = lib.pick_areas_rectangle(self._picks, w)
