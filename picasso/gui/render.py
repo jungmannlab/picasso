@@ -11039,22 +11039,19 @@ class Window(QtWidgets.QMainWindow):
         ]
         d = self.display_settings_dlg
         colors = [_.currentText() for _ in self.dataset_dialog.colorselection]
-
         info = {
             "FOV (X, Y, Width, Height)": fov_info,
             "Zoom": d.zoom.value(),
-            "Display Pixel Size (nm)": d.disp_px_size.value(),
-            "Min. Density": d.minimum.value(),
-            "Max. Density": d.maximum.value(),
-            "Colormap": d.colormap.currentText(),
-            "Blur Method": d.blur_methods[d.blur_buttongroup.checkedButton()],
-            "Scalebar Length (nm)": d.scalebar.value(),
-            "Localizations Loaded": self.view.locs_paths,
-            "Colors": colors,
             "Display pixel size (nm)": d.disp_px_size.value(),
+            "Min. density": d.minimum.value(),
+            "Max. density": d.maximum.value(),
+            "Colormap": d.colormap.currentText(),
+            "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
+            "Scalebar length (nm)": d.scalebar.value(),
+            "Localizations loaded": self.view.locs_paths,
+            "Colors": colors,
             "Min. blur (cam. px)": d.min_blur_width.value(),
         }
-
         io.save_info(path, [info])
 
     def export_complete(self):
