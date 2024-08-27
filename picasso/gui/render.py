@@ -1982,6 +1982,19 @@ class LinkDialog(QtWidgets.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
+    @staticmethod
+    def getParams(parent=None):
+        """Creates the dialog and returns the requested values for 
+        linking."""
+
+        dialog = LinkDialog(parent)
+        result = dialog.exec_()
+        return (
+            dialog.max_distance.value(),
+            dialog.max_dark_time.value(),
+            result == QtWidgets.QDialog.Accepted,
+        )
+
 
 class SMLMDialog(QtWidgets.QDialog):
     """A class to obtain inputs for SMLM clusterer.
