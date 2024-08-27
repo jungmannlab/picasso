@@ -1221,10 +1221,10 @@ class Window(QtWidgets.QMainWindow):
     @property
     def camera_info(self):
         camera_info = {}
-        camera_info["baseline"] = self.parameters_dialog.baseline.value()
-        camera_info["gain"] = self.parameters_dialog.gain.value()
-        camera_info["sensitivity"] = self.parameters_dialog.sensitivity.value()
-        camera_info["qe"] = self.parameters_dialog.qe.value()
+        camera_info["Baseline"] = self.parameters_dialog.baseline.value()
+        camera_info["Gain"] = self.parameters_dialog.gain.value()
+        camera_info["Sensitivity"] = self.parameters_dialog.sensitivity.value()
+        camera_info["Qe"] = self.parameters_dialog.qe.value()
         return camera_info
 
     def calibrate_z(self):
