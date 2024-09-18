@@ -11151,7 +11151,7 @@ class Window(QtWidgets.QMainWindow):
                         (
                             row[0] * pixelsize,
                             row[1] * pixelsize,
-                            row[2] * pixelsize,
+                            row[2],
                             1,
                             row[3] * pixelsize,
                             row[4],
@@ -11246,7 +11246,7 @@ class Window(QtWidgets.QMainWindow):
                             1, 
                             row[0] * pixelsize, 
                             row[1] * pixelsize, 
-                            row[2] * pixelsize,
+                            row[2],
                         )
                         for row in loctxt
                     ]
@@ -11285,12 +11285,11 @@ class Window(QtWidgets.QMainWindow):
                 out_path,
             )
             if path:
-                locs = self.view.all_locs[channel]
+                locs = self.view.all_locs[channel].copy()
                 if hasattr(locs, "z"):
                     locs = locs[["x", "y", "z", "photons", "frame"]].copy()
                     locs.x *= pixelsize
                     locs.y *= pixelsize
-                    locs.z *= pixelsize
                     with open(path, "wb") as f:
                         np.savetxt(
                             f,
@@ -11368,7 +11367,7 @@ class Window(QtWidgets.QMainWindow):
                                 row[0],
                                 row[1] * pixelsize,
                                 row[2] * pixelsize,
-                                row[9] * pixelsize,
+                                row[9],
                                 row[3] * pixelsize,
                                 row[4] * pixelsize,
                                 row[5],
