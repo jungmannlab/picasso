@@ -355,11 +355,11 @@ def _cut_spots(movie, ids, box):
 
 def _to_photons(spots, camera_info):
     spots = _np.float32(spots)
-    baseline = camera_info["baseline"]
-    sensitivity = camera_info["sensitivity"]
-    gain = camera_info["gain"]
+    baseline = camera_info["Baseline"]
+    sensitivity = camera_info["Sensitivity"]
+    gain = camera_info["Gain"]
     # since v0.6.0: remove quantum efficiency to better reflect precision
-    # qe = camera_info["qe"]
+    # qe = camera_info["Qe"]
     return (spots - baseline) * sensitivity / (gain)
 
 

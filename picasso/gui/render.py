@@ -162,7 +162,7 @@ def fit_cum_exp(data):
 
 
 def kinetic_rate_from_fit(data):
-    """ Finds the mean dark time from the lmfit fitted Model. """
+    """Finds the mean dark/bright time from the lmfit fitted Model."""
 
     if len(data) > 2:
         if data.ptp() == 0:
@@ -1678,21 +1678,6 @@ class ClsDlg2D(QtWidgets.QDialog):
             l_locs,
             clustered_locs,
         )
-
-    @staticmethod
-    def getParams(parent=None):
-        """
-        Creates the dialog and returns the requested values for 
-        linking.
-        """
-
-        dialog = LinkDialog(parent)
-        result = dialog.exec_()
-        return (
-            dialog.max_distance.value(),
-            dialog.max_dark_time.value(),
-            result == QtWidgets.QDialog.Accepted,
-        )
     
 
 class AIMDialog(QtWidgets.QDialog):
@@ -1801,12 +1786,12 @@ class DbscanDialog(QtWidgets.QDialog):
         self.setWindowTitle("Enter parameters")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Radius (nm):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
-        self.radius.setRange(0.001, 1e6)
-        self.radius.setValue(0.1)
-        self.radius.setDecimals(4)
-        self.radius.setSingleStep(0.001)
+        self.radius.setRange(0.01, 1e6)
+        self.radius.setValue(10)
+        self.radius.setDecimals(2)
+        self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
         self.density = QtWidgets.QSpinBox()
@@ -1982,103 +1967,38 @@ class LinkDialog(QtWidgets.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
-
-class SMLMDialog2D(QtWidgets.QDialog):
-    """
-    A class to obtain inputs for SMLM clusterer (2D).
-
-    ...
-
-    Attributes
-    ----------
-    radius : QDoubleSpinBox
-        contains clustering radius in x and y directions
-    min_locs : QSpinBox
-        contains minimum number of locs in cluster
-
-    Methods
-    -------
-    getParams(parent=None)
-        Creates the dialog and returns the requested values for 
-        clustering
-    """
-
-    def __init__(self, window):
-        super().__init__(window)
-        self.window = window
-        self.setWindowTitle("Enter parameters (2D)")
-        vbox = QtWidgets.QVBoxLayout(self)
-        grid = QtWidgets.QGridLayout()
-        # clustering radius
-        grid.addWidget(QtWidgets.QLabel("Cluster radius (pixels):"), 0, 0)
-        self.radius = QtWidgets.QDoubleSpinBox()
-        self.radius.setRange(0.0001, 1e3)
-        self.radius.setDecimals(4)
-        self.radius.setValue(0.1)
-        grid.addWidget(self.radius, 0, 1)
-        # min no. locs
-        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 1, 0)
-        self.min_locs = QtWidgets.QSpinBox()
-        self.min_locs.setRange(1, int(1e6))
-        self.min_locs.setValue(10)
-        grid.addWidget(self.min_locs, 1, 1)
-        # save cluster centers
-        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
-        self.save_centers.setChecked(False)
-        grid.addWidget(self.save_centers, 2, 0, 1, 2)
-        # perform basic frame analysis
-        self.frame_analysis = QtWidgets.QCheckBox(
-            "Perform basic frame analysis"
-        )
-        self.frame_analysis.setChecked(True)
-        grid.addWidget(self.frame_analysis, 3, 0, 1, 2)
-
-        vbox.addLayout(grid)
-        hbox = QtWidgets.QHBoxLayout()
-        vbox.addLayout(hbox)
-        # OK and Cancel buttons
-        self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
-            self,
-        )
-        vbox.addWidget(self.buttons)
-        self.buttons.accepted.connect(self.accept)
-        self.buttons.rejected.connect(self.reject)
-
     @staticmethod
     def getParams(parent=None):
-        """
-        Creates the dialog and returns the requested values for 
-        SMLM clusterer (2D).
-        """
+        """Creates the dialog and returns the requested values for 
+        linking."""
 
-        dialog = SMLMDialog2D(parent)
+        dialog = LinkDialog(parent)
         result = dialog.exec_()
         return (
-            dialog.radius.value(),
-            dialog.min_locs.value(),
-            dialog.save_centers.isChecked(),
-            dialog.frame_analysis.isChecked(),
+            dialog.max_distance.value(),
+            dialog.max_dark_time.value(),
             result == QtWidgets.QDialog.Accepted,
-        )  
+        )
 
 
-class SMLMDialog3D(QtWidgets.QDialog):
-    """
-    A class to obtain inputs for SMLM clusterer (3D).
+class SMLMDialog(QtWidgets.QDialog):
+    """A class to obtain inputs for SMLM clusterer.
 
     ...
 
     Attributes
     ----------
     radius_xy : QDoubleSpinBox
-        contains clustering radius in x and y directions
+        Contains clustering radius in x and y directions.
     radius_z : QDoubleSpinBox
-        contains clustering radius in z direction 
-        (typically =2*radius_xy)
+        Contains clustering radius in z direction. Shown only if 3D data
+        is present.
     min_locs : QSpinBox
-        contains minimum number of locs in cluster
+        Contains minimum number of locs in cluster.
+    save_centers : QCheckBox
+        Controls whether cluster centers are saved.
+    frame_analysis : QCheckBox
+        Controls whether basic frame analysis is performed.
 
     Methods
     -------
@@ -2086,43 +2006,51 @@ class SMLMDialog3D(QtWidgets.QDialog):
         Creates the dialog and returns the requested values for 
         clustering
     """
-    
-    def __init__(self, window):
+
+    def __init__(self, window, flag_3D=False):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Enter parameters (3D)")
+        self.setWindowTitle("Enter parameters (2D)")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
-        # radius xy
-        grid.addWidget(QtWidgets.QLabel("Cluster radius xy (pixels):"), 0, 0)
+        # clustering radius
+        label_radius = (
+            "Cluster radius (nm):" if not flag_3D else "Cluster radius xy (nm):"
+        )
+        grid.addWidget(QtWidgets.QLabel(label_radius), grid.rowCount(), 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
-        self.radius_xy.setRange(0.0001, 1e3)
-        self.radius_xy.setDecimals(4)
-        self.radius_xy.setValue(0.1)
-        grid.addWidget(self.radius_xy, 0, 1)
-        # radius z
-        grid.addWidget(QtWidgets.QLabel("Cluster radius z (pixels):"), 1, 0)
+        self.radius_xy.setRange(0.01, 1e6)
+        self.radius_xy.setDecimals(2)
+        self.radius_xy.setSingleStep(0.1)
+        self.radius_xy.setValue(10)
+        grid.addWidget(self.radius_xy, grid.rowCount() - 1, 1)
         self.radius_z = QtWidgets.QDoubleSpinBox()
-        self.radius_z.setRange(0, 1e3)
-        self.radius_z.setDecimals(4)
-        self.radius_z.setValue(0.25)
-        grid.addWidget(self.radius_z, 1, 1)
+        self.radius_z.setRange(0.01, 1e6)
+        self.radius_z.setDecimals(2)
+        self.radius_z.setSingleStep(0.1)
+        self.radius_z.setValue(25)
+        if flag_3D:
+            grid.addWidget(
+                QtWidgets.QLabel("Cluster radius z (nm):"), grid.rowCount(), 0
+            )
+            grid.addWidget(self.radius_z, grid.rowCount() - 1, 1)
+
         # min no. locs
-        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 2, 0)
+        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), grid.rowCount(), 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setRange(1, int(1e6))
         self.min_locs.setValue(10)
-        grid.addWidget(self.min_locs, 2, 1)
+        grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
         # save cluster centers
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
-        grid.addWidget(self.save_centers, 3, 0, 1, 2)
+        grid.addWidget(self.save_centers, grid.rowCount(), 0, 1, 2)
         # perform basic frame analysis
         self.frame_analysis = QtWidgets.QCheckBox(
             "Perform basic frame analysis"
         )
         self.frame_analysis.setChecked(True)
-        grid.addWidget(self.frame_analysis, 4, 0, 1, 2)
+        grid.addWidget(self.frame_analysis, grid.rowCount(), 0, 1, 2)
 
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -2138,22 +2066,21 @@ class SMLMDialog3D(QtWidgets.QDialog):
         self.buttons.rejected.connect(self.reject)
 
     @staticmethod
-    def getParams(parent=None):
+    def getParams(parent=None, flag_3D=False):
         """
         Creates the dialog and returns the requested values for 
-        SMLM clusterer (3D).
+        SMLM clusterer (2D).
         """
 
-        dialog = SMLMDialog3D(parent)
+        dialog = SMLMDialog(parent, flag_3D=flag_3D)
         result = dialog.exec_()
-        return (
-            dialog.radius_xy.value(),
-            dialog.radius_z.value(),
-            dialog.min_locs.value(),
-            dialog.save_centers.isChecked(),
-            dialog.frame_analysis.isChecked(),
-            result == QtWidgets.QDialog.Accepted,
-        )    
+        return {
+            "radius_xy": dialog.radius_xy.value(),
+            "radius_z": dialog.radius_z.value(),
+            "min_locs": dialog.min_locs.value(),
+            "save_centers": dialog.save_centers.isChecked(),
+            "frame_analysis": dialog.frame_analysis.isChecked(),
+        }, result == QtWidgets.QDialog.Accepted,
 
 
 class TestClustererDialog(QtWidgets.QDialog):
@@ -2374,48 +2301,13 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # for converting z coordinates
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            locs = clusterer.dbscan(
-                locs, 
-                params["radius"],
-                params["min_samples"],
-                pixelsize,
-            )
+            locs = clusterer.dbscan(locs, **params, pixelsize=pixelsize)
         elif clusterer_name == "HDBSCAN":
-            locs = clusterer.hdbscan(
-                locs,
-                params["min_cluster_size"],
-                params["min_samples"],
-                pixelsize,
-                params["intercluster_radius"],
-            )
+            locs = clusterer.hdbscan(locs, **params, pixelsize=pixelsize)
         elif clusterer_name == "SMLM":
-            if params["frame_analysis"]:
-                frame = locs.frame
-            else:
-                frame = None
-
-            if hasattr(locs, "z"):
-                params_c = [
-                    params["radius_xy"],
-                    params["radius_z"],
-                    params["min_cluster_size"],
-                    None,
-                    params["frame_analysis"],
-                    None,
-                ]
-            else:
-                params_c = [
-                    params["radius_xy"],
-                    params["min_cluster_size"],
-                    None,
-                    params["frame_analysis"],
-                    None,
-                ]
-
-            locs = clusterer.cluster(locs, params_c, pixelsize)
+            locs = clusterer.cluster(locs, **params, pixelsize=pixelsize)
         
         if len(locs):
             self.view.group_color = self.window.view.get_group_color(locs)
@@ -2433,9 +2325,12 @@ class TestClustererDialog(QtWidgets.QDialog):
         """
 
         params = {}
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            params["radius"] = self.test_dbscan_params.radius.value()
+            params["radius"] = (
+                self.test_dbscan_params.radius.value() / pixelsize
+            )
             params["min_samples"] = self.test_dbscan_params.min_samples.value()
         elif clusterer_name == "HDBSCAN":
             params["min_cluster_size"] = (
@@ -2444,13 +2339,17 @@ class TestClustererDialog(QtWidgets.QDialog):
             params["min_samples"] = (
                 self.test_hdbscan_params.min_samples.value()
             )
-            params["intercluster_radius"] = (
+            params["cluster_eps"] = (
                 self.test_hdbscan_params.cluster_eps.value()
             )
         elif clusterer_name == "SMLM":
-            params["radius_xy"] = self.test_smlm_params.radius_xy.value()
-            params["radius_z"] = self.test_smlm_params.radius_z.value()
-            params["min_cluster_size"] = self.test_smlm_params.min_locs.value()
+            params["radius_xy"] = (
+                self.test_smlm_params.radius_xy.value() / pixelsize
+            )
+            params["radius_z"] = (
+                self.test_smlm_params.radius_z.value() / pixelsize
+            )
+            params["min_locs"] = self.test_smlm_params.min_locs.value()
             params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
         return params
 
@@ -2488,13 +2387,6 @@ class TestClustererDialog(QtWidgets.QDialog):
         # update viewport if pick has changed
         if self.pick_changed():
             self.view.viewport = self.view.get_full_fov()
-        if self.view.locs is None:
-            message = (
-                "No HDBSCAN detected.\nPlease install the python package"
-                " HDBSCAN (pip install hdbscan)."
-            )
-            QtWidgets.QMessageBox.information(self, "No HDBSCAN", message)
-            return
         # render clustered locs
         self.view.update_scene()
 
@@ -2526,13 +2418,13 @@ class TestDBSCANParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        grid.addWidget(QtWidgets.QLabel("Radius (pixels):"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Radius (nm):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
         self.radius.setKeyboardTracking(False)
-        self.radius.setRange(0.001, 1e6)
-        self.radius.setValue(0.1)
-        self.radius.setDecimals(3)
-        self.radius.setSingleStep(0.001)
+        self.radius.setRange(0.01, 1e6)
+        self.radius.setValue(10)
+        self.radius.setDecimals(2)
+        self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
 
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
@@ -2592,20 +2484,22 @@ class TestSMLMParams(QtWidgets.QWidget):
         super().__init__()
         self.dialog = dialog
         grid = QtWidgets.QGridLayout(self)
-        grid.addWidget(QtWidgets.QLabel("Radius xy [pixels]:"), 0, 0)
+        grid.addWidget(QtWidgets.QLabel("Radius xy (nm):"), 0, 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
         self.radius_xy.setKeyboardTracking(False)
-        self.radius_xy.setValue(0.1)
-        self.radius_xy.setRange(0.0001, 1e3)
-        self.radius_xy.setDecimals(4)
+        self.radius_xy.setValue(10)
+        self.radius_xy.setRange(0.01, 1e6)
+        self.radius_xy.setSingleStep(0.1)
+        self.radius_xy.setDecimals(2)
         grid.addWidget(self.radius_xy, 0, 1)
 
         grid.addWidget(QtWidgets.QLabel("Radius z (3D only):"), 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
         self.radius_z.setKeyboardTracking(False)
-        self.radius_z.setValue(0.25)
-        self.radius_z.setRange(0, 1e3)
-        self.radius_z.setDecimals(4)
+        self.radius_z.setValue(25)
+        self.radius_z.setRange(0.01, 1e6)
+        self.radius_z.setSingleStep(0.1)
+        self.radius_z.setDecimals(2)
         grid.addWidget(self.radius_z, 1, 1)
 
         grid.addWidget(QtWidgets.QLabel("Min. no. locs"), 2, 0)     
@@ -6112,7 +6006,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for DBSCAN.
         """
 
-        channel = self.get_channel_all_seq("Cluster")
+        channel = self.get_channel_all_seq("DBSCAN")
 
         # get DBSCAN parameters
         params = DbscanDialog.getParams()
@@ -6179,14 +6073,14 @@ class View(QtWidgets.QLabel):
         # perform DBSCAN in a channel
         locs = clusterer.dbscan(
             locs, 
-            radius, 
+            radius / pixelsize, # convert to camera pixels
             min_density,
             pixelsize=pixelsize,
         )
         dbscan_info = {
             "Generated by": "Picasso DBSCAN",
             "Number of clusters": len(np.unique(locs.group)),
-            "Radius [cam. px]": radius,
+            "Radius (nm)": radius,
             "Minimum local density": min_density,
         }
 
@@ -6204,7 +6098,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for HDBSCAN.
         """
 
-        channel = self.get_channel_all_seq("Cluster")
+        channel = self.get_channel_all_seq("HDBSCAN")
 
         # get HDBSCAN parameters
         params = HdbscanDialog.getParams()
@@ -6301,15 +6195,18 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for SMLM clustering
         """
 
-        channel = self.get_channel_all_seq("Cluster")
+        channel = self.get_channel_all_seq("SMLM clusterer")
 
         # get clustering parameters
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if any([hasattr(_, "z") for _ in self.all_locs]):
-            params = SMLMDialog3D.getParams()
+            flag_3D = True
         else:
-            params = SMLMDialog2D.getParams()
-
-        ok = params[-1] # true if parameters were given
+            flag_3D = False
+        params, ok = SMLMDialog.getParams(flag_3D=flag_3D)
+        # convert to camera pixels
+        params["radius_xy"] = params["radius_xy"] / pixelsize 
+        params["radius_z"] = params["radius_z"] / pixelsize
 
         if ok:
 
@@ -6327,7 +6224,7 @@ class View(QtWidgets.QLabel):
                         path = self.locs_paths[channel].replace(
                             ".hdf5", f"{suffix}.hdf5"
                         ) # add the suffix to the current path
-                        self._smlm_clusterer(channel, path, params)
+                        self._smlm_clusterer(channel, path, **params)
             else:
                 # get the path to save
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -6339,9 +6236,18 @@ class View(QtWidgets.QLabel):
                     filter="*.hdf5",
                 )
                 if path:
-                    self._smlm_clusterer(channel, path, params)
+                    self._smlm_clusterer(channel, path, **params)
 
-    def _smlm_clusterer(self, channel, path, params):
+    def _smlm_clusterer(
+        self, 
+        channel, 
+        path, 
+        radius_xy,
+        radius_z,
+        min_locs,
+        frame_analysis,
+        save_centers,
+    ):
         """
         Performs SMLM clustering in a given channel with user-defined
         parameters and saves the result.
@@ -6349,91 +6255,64 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         channel : int
-            Index of the channel were clustering is performed
+            Index of the channel were clustering is performed.
         path : str
-            Path to save clustered localizations
-        params : list
-            SMLM clustering parameters        
+            Path to save clustered localizations.
+        radius_xy : float
+            Clustering radius in xy plane (camera pixels).   
+        radius_z : float
+            Clustering radius in z plane (camera pixels). Only used for
+            3D data. 
+        min_locs : int
+            Minimum number of localizations in a cluster.   
+        frame_analysis : bool
+            If True, performs basic frame analysis. 
+        save_centers : bool
+            If True, saves cluster centers. 
         """
 
         # for converting z coordinates
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        status = lib.StatusDialog("Clustering localizations", self)
 
-        if len(self._picks): # cluster only picked localizations
-            clustered_locs = [] # list with picked locs after clustering
-            picked_locs = self.picked_locs(channel, add_group=False)
-            group_offset = 1
-            pd = lib.ProgressDialog(
-                "Clustering in picks", 0, len(picked_locs), self
+        # keep group info if already present
+        if hasattr(self.all_locs[channel], "group"):
+            locs = lib.append_to_rec(
+                self.all_locs[channel], 
+                self.all_locs[channel].group, 
+                "group_input",
             )
-            pd.set_value(0)
-            for i in range(len(picked_locs)):
-                locs = picked_locs[i]
+        else:
+            locs = self.all_locs[channel]
 
-                # save pick index as group_input
-                locs = lib.append_to_rec(
-                    locs,
-                    i * np.ones(len(locs), dtype=np.int32), 
-                    "group_input",
-                )
-
-                if len(locs) > 0:
-                    temp_locs = clusterer.cluster(
-                        locs, params, pixelsize=pixelsize
-                    )
-
-                    if len(temp_locs) > 0:
-                        # make sure each picks produces unique cluster ids
-                        temp_locs.group += group_offset
-                        clustered_locs.append(temp_locs)
-                        group_offset += np.max(temp_locs.group) + 1
-                pd.set_value(i + 1)
-            clustered_locs = stack_arrays(
-                clustered_locs, asrecarray=True, usemask=False
-            ) # np.recarray with all clustered locs to be saved
-
-        else: # cluster all locs
-            status = lib.StatusDialog("Clustering localizations", self)
-
-            # keep group info if already present
-            if hasattr(self.all_locs[channel], "group"):
-                locs = lib.append_to_rec(
-                    self.all_locs[channel], 
-                    self.all_locs[channel].group, 
-                    "group_input",
-                )
-            else:
-                locs = self.all_locs[channel]
-
-            clustered_locs = clusterer.cluster(
-                locs, params, pixelsize=pixelsize
-            )
-            status.close()
+        clustered_locs = clusterer.cluster(
+            locs, 
+            radius_xy, 
+            min_locs, 
+            frame_analysis, 
+            radius_z=radius_z, 
+            pixelsize=pixelsize,
+        )
+        status.close()
 
         # saving
+        new_info = {
+            "Generated by": "Picasso Render SMLM clusterer",
+            "Number of clusters": len(np.unique(clustered_locs.group)),
+            "Min. cluster size": min_locs,
+            "Performed basic frame analysis": frame_analysis,
+        }
         if hasattr(self.all_locs[channel], "z"):
-            new_info = {
-                "Generated by": "Picasso Render SMLM clusterer 3D",
-                "Number of clusters": len(np.unique(clustered_locs.group)),
-                "Clustering radius xy [cam. px]": params[0],
-                "Clustering radius z [cam. px]": params[1],
-                "Min. cluster size": params[2],
-                "Performed basic frame analysis": params[-2],
-            }            
+            new_info["Clustering radius xy (nm)"] = radius_xy * pixelsize,
+            new_info["Clustering radius z (nm)"] = radius_z * pixelsize
         else:
-            new_info = {
-                "Generated by": "Picasso Render SMLM clusterer 2D",
-                "Number of clusters": len(np.unique(clustered_locs.group)),
-                "Clustering radius [cam. px]": params[0],
-                "Min. cluster size": params[1],
-                "Performed basic frame analysis": params[-2],
-            }
+            new_info["Clustering radius (nm)"] = radius_xy * pixelsize,
         info = self.infos[channel] + [new_info]
 
         # save locs
         io.save_locs(path, clustered_locs, info)
         # save cluster centers
-        if params[-3]:
+        if save_centers:
             status = lib.StatusDialog("Calculating cluster centers", self)
             path = path.replace(".hdf5", "_centers.hdf5")
             centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
@@ -8066,7 +7945,7 @@ class View(QtWidgets.QLabel):
                         reply = msgBox.exec()
 
                         if reply == 0:
-                            # acepted
+                            # accepted
                             if pick in removelist:
                                 removelist.remove(pick)
                         elif reply == 3:
@@ -8617,7 +8496,8 @@ class View(QtWidgets.QLabel):
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
-            areas = lib.pick_areas_circle(self._picks, r)
+            # no need for repeating, same area for all picks
+            areas = np.array([np.pi * r ** 2]) # list for consistency
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
             areas = lib.pick_areas_rectangle(self._picks, w)
@@ -9334,6 +9214,8 @@ class View(QtWidgets.QLabel):
         )
         # add the area of the picks to the properties
         areas = self.pick_areas()
+        if self._pick_shape == "Circle": # duplicate values for each pick
+            areas = np.repeat(areas, n_groups)
         pick_props = lib.append_to_rec(pick_props, areas, "pick_area_um2")
         progress.close()
         # QPAINT estimate of number of binding sites 
@@ -9457,7 +9339,7 @@ class View(QtWidgets.QLabel):
         ax1.set_xlim([0, 10])
         ax1.get_yaxis().set_visible(False)
 
-        labels = np.linspace(min_val, max_val, 5)
+        labels = np.linspace(min_val, max_val, 5).round(2)
         plt.xticks(x, labels)
 
         plt.title(parameter)
@@ -9745,7 +9627,7 @@ class View(QtWidgets.QLabel):
             params["roi_r"] = params["roi_r"] / pixelsize
             if ok:
                 n_frames = info[0]["Frames"]
-                n_segments = int(np.floor(n_frames / params["segmentation"]))
+                n_segments = int(np.ceil(n_frames / params["segmentation"]))
                 progress = lib.ProgressDialog(
                     "Undrifting by AIM (1/2)", 0, n_segments, self.window
                 )
@@ -11157,22 +11039,19 @@ class Window(QtWidgets.QMainWindow):
         ]
         d = self.display_settings_dlg
         colors = [_.currentText() for _ in self.dataset_dialog.colorselection]
-
         info = {
             "FOV (X, Y, Width, Height)": fov_info,
             "Zoom": d.zoom.value(),
-            "Display Pixel Size (nm)": d.disp_px_size.value(),
-            "Min. Density": d.minimum.value(),
-            "Max. Density": d.maximum.value(),
-            "Colormap": d.colormap.currentText(),
-            "Blur Method": d.blur_methods[d.blur_buttongroup.checkedButton()],
-            "Scalebar Length (nm)": d.scalebar.value(),
-            "Localizations Loaded": self.view.locs_paths,
-            "Colors": colors,
             "Display pixel size (nm)": d.disp_px_size.value(),
+            "Min. density": d.minimum.value(),
+            "Max. density": d.maximum.value(),
+            "Colormap": d.colormap.currentText(),
+            "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
+            "Scalebar length (nm)": d.scalebar.value(),
+            "Localizations loaded": self.view.locs_paths,
+            "Colors": colors,
             "Min. blur (cam. px)": d.min_blur_width.value(),
         }
-
         io.save_info(path, [info])
 
     def export_complete(self):
@@ -11259,7 +11138,7 @@ class Window(QtWidgets.QMainWindow):
                         (
                             row[0] * pixelsize,
                             row[1] * pixelsize,
-                            row[2] * pixelsize,
+                            row[2],
                             1,
                             row[3] * pixelsize,
                             row[4],
@@ -11354,7 +11233,7 @@ class Window(QtWidgets.QMainWindow):
                             1, 
                             row[0] * pixelsize, 
                             row[1] * pixelsize, 
-                            row[2] * pixelsize,
+                            row[2],
                         )
                         for row in loctxt
                     ]
@@ -11393,12 +11272,11 @@ class Window(QtWidgets.QMainWindow):
                 out_path,
             )
             if path:
-                locs = self.view.all_locs[channel]
+                locs = self.view.all_locs[channel].copy()
                 if hasattr(locs, "z"):
                     locs = locs[["x", "y", "z", "photons", "frame"]].copy()
                     locs.x *= pixelsize
                     locs.y *= pixelsize
-                    locs.z *= pixelsize
                     with open(path, "wb") as f:
                         np.savetxt(
                             f,
@@ -11476,7 +11354,7 @@ class Window(QtWidgets.QMainWindow):
                                 row[0],
                                 row[1] * pixelsize,
                                 row[2] * pixelsize,
-                                row[9] * pixelsize,
+                                row[9],
                                 row[3] * pixelsize,
                                 row[4] * pixelsize,
                                 row[5],
@@ -12086,11 +11964,9 @@ class Window(QtWidgets.QMainWindow):
             self.view.update_scene()
 
     def save_pick_properties(self):
-        """ 
-        Saves pick properties in a given channel (or all channels). 
-        """
+        """Saves pick properties in a given channel (or channels)."""
 
-        channel = self.view.get_channel_all_seq("Save localizations")
+        channel = self.view.get_channel_all_seq("Save pick properties")
         if channel is not None:
             if channel == len(self.view.locs_paths):
                 suffix, ok = QtWidgets.QInputDialog.getText(

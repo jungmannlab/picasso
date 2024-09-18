@@ -299,7 +299,9 @@ def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
     return labels
 
 
-def cluster(locs, params, pixelsize=None):
+def cluster(
+    locs, radius_xy, min_locs, frame_analysis, radius_z=None, pixelsize=None
+):
     """
     Clusters localizations given user parameters using KDTree.
 
@@ -309,8 +311,15 @@ def cluster(locs, params, pixelsize=None):
     ----------
     locs : np.recarray
         Localizations to be clustered
-    params : tuple
-        SMLM clustering parameters
+    radius_xy : float
+        Clustering radius in xy plane (camera pixels).   
+    min_locs : int
+        Minimum number of localizations in a cluster.   
+    frame_analysis : bool
+        If True, performs basic frame analysis.
+    radius_z : float (default=None)
+        Clustering radius in z plane (camera pixels). Only used for
+        3D clustering. 
     pixelsize : int (default=None)
         Camera pixel size in nm. Only needed for 3D clustering.
 
@@ -322,12 +331,11 @@ def cluster(locs, params, pixelsize=None):
     """
 
     if hasattr(locs, "z"): # 3D
-        if pixelsize is None:
+        if pixelsize is None or radius_z is None:
             raise ValueError(
-                "Camera pixel size must be specified as an integer for 3D"
-                " clustering."
+                "Camera pixel size and clustering radius in z must be specified"
+                " for 3D clustering."
             )
-        radius_xy, radius_z, min_locs, _, fa, _ = params
         labels = cluster_3D(
             locs.x,
             locs.y,
@@ -336,17 +344,16 @@ def cluster(locs, params, pixelsize=None):
             radius_xy,
             radius_z,
             min_locs,
-            fa
+            frame_analysis,
         )
     else:
-        radius, min_locs, _, fa, _ = params
         labels = cluster_2D(
             locs.x,
             locs.y,
             locs.frame,
-            radius,
+            radius_xy,
             min_locs,
-            fa
+            frame_analysis,
         )
     locs = extract_valid_labels(locs, labels)
     return locs
@@ -378,7 +385,7 @@ def _dbscan(X, radius, min_density):
     return db.labels_.astype(_np.int32)
 
 
-def dbscan(locs, radius, min_density, pixelsize=None):
+def dbscan(locs, radius, min_samples, pixelsize=None):
     """
     Performs DBSCAN on localizations.
     
@@ -389,7 +396,7 @@ def dbscan(locs, radius, min_density, pixelsize=None):
     radius : float
         DBSCAN search radius, often referred to as "epsilon". Same units
         as locs.
-    min_density : int
+    min_samples : int
         Number of localizations within radius to consider a given point 
         a core sample.
     pixelsize : int (default=None)
@@ -411,7 +418,7 @@ def dbscan(locs, radius, min_density, pixelsize=None):
         X = _np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
     else:
         X = _np.vstack((locs.x, locs.y)).T
-    labels = _dbscan(X, radius, min_density)
+    labels = _dbscan(X, radius, min_samples)
     locs = extract_valid_labels(locs, labels)
     return locs
 
