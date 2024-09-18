@@ -1678,21 +1678,6 @@ class ClsDlg2D(QtWidgets.QDialog):
             l_locs,
             clustered_locs,
         )
-
-    @staticmethod
-    def getParams(parent=None):
-        """
-        Creates the dialog and returns the requested values for 
-        linking.
-        """
-
-        dialog = LinkDialog(parent)
-        result = dialog.exec_()
-        return (
-            dialog.max_distance.value(),
-            dialog.max_dark_time.value(),
-            result == QtWidgets.QDialog.Accepted,
-        )
     
 
 class AIMDialog(QtWidgets.QDialog):
