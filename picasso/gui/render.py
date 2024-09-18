@@ -8497,7 +8497,7 @@ class View(QtWidgets.QLabel):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             r = d / 2
             # no need for repeating, same area for all picks
-            areas = [np.pi * r ** 2] # list for consistency
+            areas = np.array([np.pi * r ** 2]) # list for consistency
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
             areas = lib.pick_areas_rectangle(self._picks, w)
