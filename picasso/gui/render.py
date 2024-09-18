@@ -162,7 +162,7 @@ def fit_cum_exp(data):
 
 
 def kinetic_rate_from_fit(data):
-    """ Finds the mean dark time from the lmfit fitted Model. """
+    """Finds the mean dark/bright time from the lmfit fitted Model."""
 
     if len(data) > 2:
         if data.ptp() == 0:
@@ -6006,7 +6006,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for DBSCAN.
         """
 
-        channel = self.get_channel_all_seq("Cluster")
+        channel = self.get_channel_all_seq("DBSCAN")
 
         # get DBSCAN parameters
         params = DbscanDialog.getParams()
@@ -6098,7 +6098,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for HDBSCAN.
         """
 
-        channel = self.get_channel_all_seq("Cluster")
+        channel = self.get_channel_all_seq("HDBSCAN")
 
         # get HDBSCAN parameters
         params = HdbscanDialog.getParams()
@@ -6195,7 +6195,7 @@ class View(QtWidgets.QLabel):
         Gets channel, parameters and path for SMLM clustering
         """
 
-        channel = self.get_channel_all_seq("Cluster")
+        channel = self.get_channel_all_seq("SMLM clusterer")
 
         # get clustering parameters
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
@@ -9214,6 +9214,8 @@ class View(QtWidgets.QLabel):
         )
         # add the area of the picks to the properties
         areas = self.pick_areas()
+        if self._pick_shape == "Circle": # duplicate values for each pick
+            areas = np.repeat(areas, n_groups)
         pick_props = lib.append_to_rec(pick_props, areas, "pick_area_um2")
         progress.close()
         # QPAINT estimate of number of binding sites 
@@ -11962,11 +11964,9 @@ class Window(QtWidgets.QMainWindow):
             self.view.update_scene()
 
     def save_pick_properties(self):
-        """ 
-        Saves pick properties in a given channel (or all channels). 
-        """
+        """Saves pick properties in a given channel (or channels)."""
 
-        channel = self.view.get_channel_all_seq("Save localizations")
+        channel = self.view.get_channel_all_seq("Save pick properties")
         if channel is not None:
             if channel == len(self.view.locs_paths):
                 suffix, ok = QtWidgets.QInputDialog.getText(
