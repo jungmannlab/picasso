@@ -612,7 +612,7 @@ def aim(
     roi_r=60/130,
     progress=None,
 ):
-    """Apply AIM algorithm to the localizations.
+    """Apply AIM undrifting to the localizations.
 
     Parameters
     ----------

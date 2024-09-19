@@ -893,7 +893,7 @@ def _localize(args):
 
             try:
                 with open(zpath, "r") as f:
-                    z_calibration = yaml.load(f)
+                    z_calibration = yaml.full_load(f)
             except Exception as e:
                 print(e)
                 print("Error loading calibration file.")
