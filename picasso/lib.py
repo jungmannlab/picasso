@@ -569,24 +569,24 @@ def get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width):
         return corners
 
 
-def pick_areas_circle(picks, r):
-    """Returns pick areas for each pick in picks.
+# def pick_areas_circle(picks, r):
+#     """Returns pick areas for each pick in picks.
     
-    Parameters
-    ----------
-    picks : list
-        List of picks, each pick is a list of x and y coordinates.
-    r : float
-        Pick radius.
+#     Parameters
+#     ----------
+#     picks : list
+#         List of picks, each pick is a list of x and y coordinates.
+#     r : float
+#         Pick radius.
     
-    Returns
-    -------
-    areas : np.1darray
-        Pick areas, same units as r.
-    """
+#     Returns
+#     -------
+#     areas : np.1darray
+#         Pick areas, same units as r.
+#     """
 
-    areas = _np.ones(len(picks)) * _np.pi * r**2
-    return areas
+#     areas = _np.ones(len(picks)) * _np.pi * r**2
+#     return areas
 
 
 def polygon_area(X, Y):

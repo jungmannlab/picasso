@@ -1,7 +1,14 @@
 Changelog
 =========
 
-Last change: 06-JUL-2024 MTS
+Last change: 19-SEP-2024 MTS
+
+0.7.1
+-----
+- SMLM clusterer in picked regions deleted
+- Show legend in Render property displayed rounded tick label values
+- Pick circular area does not save the area for each pick in localization's metadata 
+- Other minor bug fixes
 
 0.7.0
 -----
@@ -9,7 +16,7 @@ Last change: 06-JUL-2024 MTS
 - Z fitting improved by setting bounds on fitted z values to avoid NaNs
 - CMD ``clusterfile`` fixed 
 - Picasso: Render 3D, rectangular and polygonal pick fixed
-- picasso.localize.localize fixed
+- ``picasso.localize.localize`` fixed
 - default MLE fitting uses different sx and sy (CMD only)
 
 0.6.9 - 0.6.11
