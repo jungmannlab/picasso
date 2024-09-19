@@ -3,8 +3,8 @@ Changelog
 
 Last change: 19-SEP-2024 MTS
 
-0.7.1
------
+0.7.1 - 0.7.2
+-------------
 - SMLM clusterer in picked regions deleted
 - Show legend in Render property displayed rounded tick label values
 - Pick circular area does not save the area for each pick in localization's metadata 
