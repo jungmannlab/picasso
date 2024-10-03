@@ -1,9 +1,9 @@
 Changelog
 =========
 
-Last change: 19-SEP-2024 MTS
+Last change: 02-OCT-2024 MTS
 
-0.7.1 - 0.7.2
+0.7.1 - 0.7.3
 -------------
 - SMLM clusterer in picked regions deleted
 - Show legend in Render property displayed rounded tick label values
