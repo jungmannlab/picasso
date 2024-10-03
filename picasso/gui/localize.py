@@ -1924,7 +1924,7 @@ class FitWorker(QtCore.QThread):
             if self.use_gpufit:
                 self.progressMade.emit(1, 1)
                 theta = gausslq.fit_spots_gpufit(spots)
-                em = self.camera_info["gain"] > 1
+                em = self.camera_info["Gain"] > 1
                 locs = gausslq.locs_from_fits_gpufit(
                     self.identifications, theta, self.box, em
                 )
@@ -1937,7 +1937,7 @@ class FitWorker(QtCore.QThread):
                     )
                     time.sleep(0.2)
                 theta = gausslq.fits_from_futures(fs)
-                em = self.camera_info["gain"] > 1
+                em = self.camera_info["Gain"] > 1
                 locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
         elif self.method == "mle":
             curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
@@ -1963,7 +1963,7 @@ class FitWorker(QtCore.QThread):
                 self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
                 time.sleep(0.2)
             theta = avgroi.fits_from_futures(fs)
-            em = self.camera_info["gain"] > 1
+            em = self.camera_info["Gain"] > 1
             locs = avgroi.locs_from_fits(self.identifications, theta, self.box, em)
         else:
             print("This should never happen...")
