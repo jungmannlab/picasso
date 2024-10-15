@@ -3933,7 +3933,7 @@ class PickToolRectangleSettings(QtWidgets.QWidget):
 
 
 class RESIDialog(QtWidgets.QDialog):
-    """ RESI dialog.
+    """RESI dialog.
 
     Allows for clustering multiple channels with user-defined
     clustering parameters using the SMLM clusterer; saves cluster 
@@ -4023,17 +4023,17 @@ class RESIDialog(QtWidgets.QDialog):
         params_grid.addWidget(QtWidgets.QLabel("RESI channel"), 2, 0)
         if self.ndim == 2:
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius\n[cam. pixel]"), 2, 1
+                QtWidgets.QLabel("Radius\n[nm]"), 2, 1
             )
             params_grid.addWidget(
                 QtWidgets.QLabel("Min # localizations"), 2, 2, 1, 2
             )
         else:
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius xy\n[cam. pixel]"), 2, 1
+                QtWidgets.QLabel("Radius xy\n[nm]"), 2, 1
             )
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius z\n[cam. pixel]"), 2, 2
+                QtWidgets.QLabel("Radius z\n[nm]"), 2, 2
             )
             params_grid.addWidget(
                 QtWidgets.QLabel("Min # localizations"), 2, 3
@@ -4045,17 +4045,17 @@ class RESIDialog(QtWidgets.QDialog):
             count = params_grid.rowCount()
 
             r_xy = QtWidgets.QDoubleSpinBox()
-            r_xy.setRange(0.0001, 1e3)
-            r_xy.setDecimals(4)
-            r_xy.setValue(0.1)
-            r_xy.setSingleStep(0.01)
+            r_xy.setRange(0.01, 1e6)
+            r_xy.setDecimals(2)
+            r_xy.setValue(10)
+            r_xy.setSingleStep(0.1)
             self.radius_xy.append(r_xy)
 
             r_z = QtWidgets.QDoubleSpinBox()
-            r_z.setRange(0.0001, 1e3)
-            r_z.setDecimals(4)
-            r_z.setValue(0.25)
-            r_z.setSingleStep(0.01)
+            r_z.setRange(0.01, 1e6)
+            r_z.setDecimals(2)
+            r_z.setValue(25)
+            r_z.setSingleStep(0.1)
             self.radius_z.append(r_z)
 
             min_locs = QtWidgets.QSpinBox()
@@ -4129,13 +4129,14 @@ class RESIDialog(QtWidgets.QDialog):
             return
         
         ### Prepare data
-        # extract clustering parameters
-        r_xy = [_.value() for _ in self.radius_xy]
-        r_z = [_.value() for _ in self.radius_z]
-        min_locs = [_.value() for _ in self.min_locs]
-
         # get camera pixel size
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        
+        # extract clustering parameters
+        r_xy = [_.value() / pixelsize for _ in self.radius_xy]
+        r_z = [_.value() / pixelsize for _ in self.radius_z]
+        min_locs = [_.value() for _ in self.min_locs]
+
 
         # saving: path and info for the resi file, suffices for saving
         # clustered localizations and cluster centers if requested
@@ -4191,13 +4192,14 @@ class RESIDialog(QtWidgets.QDialog):
 
             resi_channels = [] # holds each channel's cluster centers
             for i, locs in enumerate(self.locs):
-                # cluster each channel using SMLM clusterer
-                if self.ndim == 3:
-                    params = [r_xy[i], r_z[i], min_locs[i], 0, apply_fa, 0]
-                else:
-                    params = [r_xy[i], min_locs[i], 0, apply_fa, 0]
-
-                clustered_locs = clusterer.cluster(locs, params, pixelsize)
+                clustered_locs = clusterer.cluster(
+                    locs, 
+                    radius_xy=r_xy[i], 
+                    min_locs=min_locs[i],
+                    frame_analysis=apply_fa,
+                    radius_z=r_z[i] if self.ndim == 3 else None,
+                    pixelsize=pixelsize,
+                )
 
                 # save clustered localizations if requested
                 if ok1:
