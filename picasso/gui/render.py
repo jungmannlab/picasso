@@ -827,6 +827,12 @@ class DatasetDialog(QtWidgets.QDialog):
                 self.update_viewport()
                 self.adjustSize()
 
+            # update the window title
+            self.window.setWindowTitle(
+                f"Picasso v{__version__}: Render. File: "
+                f"{os.path.basename(self.window.view.locs_paths[-1])}"
+            )
+
     def update_viewport(self):
         """ Updates the scene in the main window. """
 
@@ -5630,8 +5636,7 @@ class View(QtWidgets.QLabel):
         return locs.group.astype(int) % N_GROUP_COLORS
 
     def add(self, path, render=True):
-        """
-        Loads a .hdf5 localizations and the associated .yaml metadata 
+        """Loads a .hdf5 localizations and the associated .yaml metadata 
         files. 
 
         Parameters
@@ -5733,10 +5738,14 @@ class View(QtWidgets.QLabel):
         self.window.dataset_dialog.add_entry(path)
 
         self.window.setWindowTitle(
+<<<<<<< HEAD
             "Picasso v{}: Render. File: {}".format(
                 # __version__, os.path.basename(path)
                 __version__, path
             )
+=======
+            f"Picasso v{__version__}: Render. File: {os.path.basename(path)}"
+>>>>>>> 6d49c52 (display the last loaded file in Render after closing a channel)
         )
 
         # fast rendering add channel
