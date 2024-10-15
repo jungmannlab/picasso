@@ -12,7 +12,9 @@
 import os.path
 import sys
 import yaml
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt5           import QtCore, QtGui, QtWidgets
+from PyQt5.QtWidgets import QShortcut
+from PyQt5.QtGui     import QKeySequence
 import time
 import numpy as np
 import traceback
@@ -44,7 +46,6 @@ class RubberBand(QtWidgets.QRubberBand):
         rect.setWidth(int(rect.width() - 1))
         painter.drawRect(rect)
 
-
 class View(QtWidgets.QGraphicsView):
     """The central widget which shows `Scene` objects of individual frames"""
 
@@ -52,11 +53,15 @@ class View(QtWidgets.QGraphicsView):
         super().__init__(window)
         self.window = window
         self.setAcceptDrops(True)
+        self.setMouseTracking(True)
+        self.clickInsideRubberBand = False
         self.pan = False
         self.hscrollbar = self.horizontalScrollBar()
         self.vscrollbar = self.verticalScrollBar()
         self.rubberband = RubberBand(self)
         self.roi = None
+        self.roi_point1 = QtCore.QPoint()
+        self.roi_point2 = QtCore.QPoint()
         self.numeric_roi = False
 
     def mousePressEvent(self, event):
@@ -65,26 +70,72 @@ class View(QtWidgets.QGraphicsView):
             self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, QtCore.QSize()))
             self.rubberband.show()
         elif event.button() == QtCore.Qt.RightButton:
+            click_pos = event.pos()
+            rubberband_rect = self.rubberband.geometry()
+            if self.roi != None and rubberband_rect.contains(click_pos):
+                self.clickInsideRubberBand = True
+                self.setCursor(QtCore.Qt.ClosedHandCursor)
+            else:
+                self.clickInsideRubberBand = False
+                self.setCursor(QtCore.Qt.OpenHandCursor)
             self.pan = True
             self.pan_start_x = event.x()
             self.pan_start_y = event.y()
-            self.setCursor(QtCore.Qt.ClosedHandCursor)
             event.accept()
         else:
             event.ignore()
 
+    def mouseDoubleClickEvent(self, event):
+        self.window.fit_in_view()
+
     def mouseMoveEvent(self, event):
+        x_on_scene = self.mapToScene(event.x(), event.y()).x()
+        y_on_scene = self.mapToScene(event.x(), event.y()).y()
+        if(self.window.movie is not None and x_on_scene > 0 and x_on_scene < np.shape(self.window.movie[self.window.curr_frame_number])[0] - 1):
+            x_on_screen = str(round(x_on_scene))
+            # x_on_screen = str(round(x_on_scene, 2))
+        else:
+            x_on_screen = "-"
+        if(self.window.movie is not None and y_on_scene > 0 and y_on_scene < np.shape(self.window.movie[self.window.curr_frame_number])[1] - 1):
+            y_on_screen = str(round(y_on_scene))
+            # y_on_screen = str(round(y_on_scene, 2))
+        else:
+            y_on_screen = "-"
+        if self.window.movie is not None and x_on_screen != "-" and y_on_screen != "-":
+            value = str(self.window.movie[self.window.curr_frame_number][round(x_on_scene), round(y_on_scene)])
+        else:
+            value = "-"
+        if value != "-" and x_on_screen != "-" and y_on_screen != "-":
+            self.window.status_bar.showMessage("x=" + x_on_screen + ", y=" + y_on_screen + ", value=" + value)
+        else:
+            self.window.status_bar.showMessage("")
+
         if event.buttons() == QtCore.Qt.LeftButton and not self.numeric_roi:
-            self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, event.pos()))
+            if event.x() > self.roi_origin.x():
+                self.roi_point1.setX(self.roi_origin.x())
+                self.roi_point2.setX(event.x())
+            else:
+                self.roi_point1.setX(event.x())
+                self.roi_point2.setX(self.roi_origin.x())
+            if event.y() > self.roi_origin.y():
+                self.roi_point1.setY(self.roi_origin.y())
+                self.roi_point2.setY(event.y())
+            else:
+                self.roi_point1.setY(event.y())
+                self.roi_point2.setY(self.roi_origin.y())
+            self.rubberband.setGeometry(QtCore.QRect(self.roi_point1, self.roi_point2))
         if self.pan:
-            self.hscrollbar.setValue(
-                self.hscrollbar.value() - event.x() + self.pan_start_x
-            )
-            self.vscrollbar.setValue(
-                self.vscrollbar.value() - event.y() + self.pan_start_y
-            )
-            self.pan_start_x = event.x()
-            self.pan_start_y = event.y()
+            if self.clickInsideRubberBand:
+                self.rubberband.move(self.roi_point1.x() + event.x() - self.pan_start_x, self.roi_point1.y() + event.y() - self.pan_start_y)
+            else:
+                self.hscrollbar.setValue(
+                    self.hscrollbar.value() - event.x() + self.pan_start_x
+                )
+                self.vscrollbar.setValue(
+                    self.vscrollbar.value() - event.y() + self.pan_start_y
+                )
+                self.pan_start_x = event.x()
+                self.pan_start_y = event.y()
             event.accept()
         else:
             event.ignore()
@@ -99,18 +150,56 @@ class View(QtWidgets.QGraphicsView):
                 self.rubberband.hide()
                 self.window.parameters_dialog.roi_edit.setText("")
             else:
+                if self.roi_end.x() > self.roi_origin.x():
+                    self.roi_point1.setX(self.roi_origin.x())
+                    self.roi_point2.setX(self.roi_end.x())
+                else:
+                    self.roi_point1.setX(self.roi_end.x())
+                    self.roi_point2.setX(self.roi_origin.x())
+                if self.roi_end.y() > self.roi_origin.y():
+                    self.roi_point1.setY(self.roi_origin.y())
+                    self.roi_point2.setY(self.roi_end.y())
+                else:
+                    self.roi_point1.setY(self.roi_end.y())
+                    self.roi_point2.setY(self.roi_origin.y())
+                modifiers = QtWidgets.QApplication.keyboardModifiers()
+                if modifiers == QtCore.Qt.ControlModifier:
+                    roi_points = (
+                        self.mapToScene(self.roi_point1),
+                        self.mapToScene(self.roi_point2)
+                    )
+                    self.roi = [[int(_.y()), int(_.x())] for _ in roi_points]
+                    (y_min, x_min), (y_max, x_max) = self.roi
+                    self.window.parameters_dialog.roi_edit.setText(
+                        f"{y_min},{x_min},{y_max},{x_max}"
+                    )
+                    self.numeric_roi = False
+                else:
+                    self.rubberband.hide()
+                    self.fitInView(
+                        self.mapToScene(self.roi_point1).x(),
+                        self.mapToScene(self.roi_point1).y(),
+                        self.mapToScene(self.roi_point2).x() - self.mapToScene(self.roi_point1).x(),
+                        self.mapToScene(self.roi_point2).y() - self.mapToScene(self.roi_point1).y(),
+                        QtCore.Qt.KeepAspectRatio)
+            self.window.draw_frame()
+        elif event.button() == QtCore.Qt.RightButton:
+            # if self.clickInsideRubberBand:
+            if self.roi != None:
+                rubberband_rect = self.rubberband.geometry()
+                self.roi_point1.setX(rubberband_rect.x())
+                self.roi_point2.setX(rubberband_rect.x() + rubberband_rect.width())
+                self.roi_point1.setY(rubberband_rect.y())
+                self.roi_point2.setY(rubberband_rect.y() + rubberband_rect.height())
                 roi_points = (
-                    self.mapToScene(self.roi_origin),
-                    self.mapToScene(self.roi_end),
+                    self.mapToScene(self.roi_point1),
+                    self.mapToScene(self.roi_point2)
                 )
                 self.roi = [[int(_.y()), int(_.x())] for _ in roi_points]
                 (y_min, x_min), (y_max, x_max) = self.roi
                 self.window.parameters_dialog.roi_edit.setText(
                     f"{y_min},{x_min},{y_max},{x_max}"
                 )
-                self.numeric_roi = False
-            self.window.draw_frame()
-        elif event.button() == QtCore.Qt.RightButton:
             self.pan = False
             self.setCursor(QtCore.Qt.ArrowCursor)
             event.accept()
@@ -118,10 +207,24 @@ class View(QtWidgets.QGraphicsView):
             event.ignore()
 
     def wheelEvent(self, event):
-        """Implements zoooming with the mouse wheel"""
-        scale = 1.008 ** (-event.angleDelta().y())
-        self.scale(scale, scale)
-
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+        if modifiers == QtCore.Qt.ControlModifier:
+            if self.window.movie is not None:
+                step =      int(event.angleDelta().y() / abs(event.angleDelta().y()))
+                if self.window.curr_frame_number + step >= 0 and self.window.curr_frame_number + step < self.window.info[0]["Frames"]:
+                    self.window.set_frame(self.window.curr_frame_number + step)
+        elif modifiers == (QtCore.Qt.ShiftModifier | QtCore.Qt.ControlModifier):
+            if self.window.movie is not None:
+                step = 10 * int(event.angleDelta().y() / abs(event.angleDelta().y()))
+                if self.window.curr_frame_number + step >= 0 and self.window.curr_frame_number + step < self.window.info[0]["Frames"]:
+                    self.window.set_frame(self.window.curr_frame_number + step)
+        else:
+            """Implements zoooming with the mouse wheel"""
+            pos_on_scene = self.mapToScene(event.pos())
+            self.centerOn(pos_on_scene)
+            # scale = 1.008 ** (event.angleDelta().y())
+            scale = 1.00153 ** event.angleDelta().y()
+            self.scale(scale, scale)
 
 class Scene(QtWidgets.QGraphicsScene):
     """
@@ -579,11 +682,10 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Baseline
         photon_grid.addWidget(QtWidgets.QLabel("Baseline:"), 1, 0)
-        self.baseline = QtWidgets.QDoubleSpinBox()
-        self.baseline.setRange(0, 1e6)
-        self.baseline.setValue(100.0)
-        self.baseline.setDecimals(1)
-        self.baseline.setSingleStep(0.1)
+        self.baseline = QtWidgets.QSpinBox()
+        self.baseline.setRange(0, int(1e6))
+        self.baseline.setValue(100)
+        self.baseline.setSingleStep(1)
         photon_grid.addWidget(self.baseline, 1, 1)
 
         # Sensitivity
@@ -777,7 +879,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
     def on_roi_edit_changed(self):
         if self.roi_edit.text() == "":
-            self.window.view.numeric_roi = False            
+            self.window.view.numeric_roi = False
             self.window.view.roi = None
             self.window.view.rubberband.hide()
             self.window.draw_frame()
@@ -797,7 +899,8 @@ class ParametersDialog(QtWidgets.QDialog):
         )
         self.window.view.rubberband.show()
         self.window.draw_frame()
-        self.window.view.numeric_roi = True
+        # self.window.view.numeric_roi = True
+        self.window.view.numeric_roi = False
 
     def on_fit_method_changed(self, state):
         if self.fit_method.currentText() == "LQ, Gaussian":
@@ -1156,10 +1259,27 @@ class Window(QtWidgets.QMainWindow):
         previous_frame_action.setShortcut("Left")
         previous_frame_action.triggered.connect(self.previous_frame)
         view_menu.addAction(previous_frame_action)
-        next_frame_action = view_menu.addAction("Next frame")
+        next_frame_action = view_menu.addAction("Next        frame")
+        # next_frame_action.setShortcuts(["Up", "Right"])
         next_frame_action.setShortcut("Right")
         next_frame_action.triggered.connect(self.next_frame)
         view_menu.addAction(next_frame_action)
+        shortcut_previous_frame_10 = QShortcut(QKeySequence("Shift+Left"), self)
+        shortcut_previous_frame_10.activated.connect(self.previous_frame_10)
+        shortcut_next_frame_10 = QShortcut(QKeySequence("Shift+Right"), self)
+        shortcut_next_frame_10.activated.connect(self.next_frame_10)
+        previous_frame_25_action = view_menu.addAction("Previous frame 25")
+        previous_frame_25_action.setShortcut("Down")
+        previous_frame_25_action.triggered.connect(self.previous_frame_25)
+        view_menu.addAction(previous_frame_25_action)
+        next_frame_action_25 = view_menu.addAction("Next        frame 25")
+        next_frame_action_25.setShortcut("Up")
+        next_frame_action_25.triggered.connect(self.next_frame_25)
+        view_menu.addAction(next_frame_action_25)
+        shortcut_previous_frame_50 = QShortcut(QKeySequence("Shift+Down"), self)
+        shortcut_previous_frame_50.activated.connect(self.previous_frame_50)
+        shortcut_next_frame_50 = QShortcut(QKeySequence("Shift+Up"), self)
+        shortcut_next_frame_50.activated.connect(self.next_frame_50)
         view_menu.addSeparator()
         first_frame_action = view_menu.addAction("First frame")
         first_frame_action.setShortcut("Home")
@@ -1221,10 +1341,10 @@ class Window(QtWidgets.QMainWindow):
     @property
     def camera_info(self):
         camera_info = {}
-        camera_info["Baseline"] = self.parameters_dialog.baseline.value()
-        camera_info["Gain"] = self.parameters_dialog.gain.value()
-        camera_info["Sensitivity"] = self.parameters_dialog.sensitivity.value()
-        camera_info["Qe"] = self.parameters_dialog.qe.value()
+        camera_info["baseline"] = self.parameters_dialog.baseline.value()
+        camera_info["gain"] = self.parameters_dialog.gain.value()
+        camera_info["sensitivity"] = self.parameters_dialog.sensitivity.value()
+        camera_info["qe"] = self.parameters_dialog.qe.value()
         return camera_info
 
     def calibrate_z(self):
@@ -1281,7 +1401,8 @@ class Window(QtWidgets.QMainWindow):
                 )
 
         self.setWindowTitle(
-            "Picasso: Localize. File: {}".format(os.path.basename(path))
+            # "Picasso: Localize. File: {}".format(os.path.basename(path))
+            "Picasso: Localize. File: {}".format(path)
         )
         self.parameters_dialog.reset_quality_check()
 
@@ -1474,14 +1595,38 @@ class Window(QtWidgets.QMainWindow):
             return channel
 
     def previous_frame(self):
-        if self.movie is not None:
-            if self.curr_frame_number > 0:
-                self.set_frame(self.curr_frame_number - 1)
+        self.previous_frame_step(1)
 
     def next_frame(self):
+        self.next_frame_step(1)
+
+    def previous_frame_10(self):
+        self.previous_frame_step(10)
+
+    def next_frame_10(self):
+        self.next_frame_step(10)
+
+    def previous_frame_25(self):
+        self.previous_frame_step(25)
+
+    def next_frame_25(self):
+        self.next_frame_step(25)
+
+    def previous_frame_50(self):
+        self.previous_frame_step(50)
+
+    def next_frame_50(self):
+        self.next_frame_step(50)
+
+    def previous_frame_step(self, step):
         if self.movie is not None:
-            if self.curr_frame_number + 1 < self.info[0]["Frames"]:
-                self.set_frame(self.curr_frame_number + 1)
+            if self.curr_frame_number - step >= 0:
+                self.set_frame(self.curr_frame_number - step)
+
+    def next_frame_step(self, step):
+        if self.movie is not None:
+            if self.curr_frame_number + step < self.info[0]["Frames"]:
+                self.set_frame(self.curr_frame_number + step)
 
     def first_frame(self):
         if self.movie is not None:
@@ -1732,6 +1877,7 @@ class Window(QtWidgets.QMainWindow):
                     zfit.calibrate_z(
                         locs,
                         self.info,
+                        self.last_identification_info["Min. Net Gradient"],
                         step,
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,
@@ -1924,7 +2070,7 @@ class FitWorker(QtCore.QThread):
             if self.use_gpufit:
                 self.progressMade.emit(1, 1)
                 theta = gausslq.fit_spots_gpufit(spots)
-                em = self.camera_info["Gain"] > 1
+                em = self.camera_info["gain"] > 1
                 locs = gausslq.locs_from_fits_gpufit(
                     self.identifications, theta, self.box, em
                 )
@@ -1937,7 +2083,7 @@ class FitWorker(QtCore.QThread):
                     )
                     time.sleep(0.2)
                 theta = gausslq.fits_from_futures(fs)
-                em = self.camera_info["Gain"] > 1
+                em = self.camera_info["gain"] > 1
                 locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
         elif self.method == "mle":
             curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
@@ -1963,7 +2109,7 @@ class FitWorker(QtCore.QThread):
                 self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
                 time.sleep(0.2)
             theta = avgroi.fits_from_futures(fs)
-            em = self.camera_info["Gain"] > 1
+            em = self.camera_info["gain"] > 1
             locs = avgroi.locs_from_fits(self.identifications, theta, self.box, em)
         else:
             print("This should never happen...")

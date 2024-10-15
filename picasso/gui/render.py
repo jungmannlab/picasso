@@ -21,6 +21,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
+import pandas as pd
 import yaml
 
 from matplotlib.backends.backend_qt5agg import FigureCanvas
@@ -3892,7 +3893,8 @@ class PickToolCircleSettings(QtWidgets.QWidget):
         self.grid.addWidget(QtWidgets.QLabel("Diameter (cam. pixel):"), 0, 0)
         self.pick_diameter = QtWidgets.QDoubleSpinBox()
         self.pick_diameter.setRange(0.001, 999999)
-        self.pick_diameter.setValue(1)
+        # self.pick_diameter.setValue(1)
+        self.pick_diameter.setValue(10)
         self.pick_diameter.setSingleStep(0.1)
         self.pick_diameter.setDecimals(3)
         self.pick_diameter.setKeyboardTracking(False)
@@ -4481,7 +4483,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.minimum.setRange(0, 999999)
         self.minimum.setSingleStep(5)
         self.minimum.setValue(0)
-        self.minimum.setDecimals(6)
+        # self.minimum.setDecimals(6)
+        self.minimum.setDecimals(0)
         self.minimum.setKeyboardTracking(False)
         self.minimum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.minimum, 0, 1)
@@ -4490,8 +4493,10 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.maximum = QtWidgets.QDoubleSpinBox()
         self.maximum.setRange(0, 999999)
         self.maximum.setSingleStep(5)
-        self.maximum.setValue(100)
-        self.maximum.setDecimals(6)
+        self.maximum.setValue(20)
+        # self.maximum.setValue(100)
+        # self.maximum.setDecimals(6)
+        self.maximum.setDecimals(0)
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
@@ -4981,7 +4986,7 @@ class SlicerDialog(QtWidgets.QDialog):
         self.sl.valueChanged.connect(self.on_slice_position_changed)
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
 
-        self.figure, self.ax = plt.subplots(1, figsize=(3, 3))
+        self.figure, self.ax = plt.subplots(1, figsize=(7, 7))
         self.canvas = FigureCanvas(self.figure)
         slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
 
@@ -5007,6 +5012,7 @@ class SlicerDialog(QtWidgets.QDialog):
         """
 
         self.calculate_histogram()
+        self.window.status_bar_frame_indicator.setText("")
         self.show()
 
     def calculate_histogram(self):
@@ -5053,8 +5059,8 @@ class SlicerDialog(QtWidgets.QDialog):
         self.ax.set_ylabel("Rel. frequency")
         self.ax.set_title(r"$\mathrm{Histogram\ of\ Z:}$")
         self.canvas.draw()
-        self.sl.setMaximum(int(len(self.bins)) - 2)
-        self.sl.setValue(int(len(self.bins) / 2))
+        self.sl.setMaximum(int(len(self.bins) - 2))
+        self.sl.setValue  (int(len(self.bins) / 2))
 
         # reset cache
         self.slicer_cache = {}
@@ -5071,10 +5077,24 @@ class SlicerDialog(QtWidgets.QDialog):
             self.sl.setValue(int(len(self.bins) / 2))
             # self.on_slice_position_changed(self.sl.value())
 
+    def toggle_slicer_and_radio_button_check(self):
+        if not hasattr(SlicerDialog, "slicermin"):
+            self.calculate_histogram()
+        self.window.slicer_dialog.slicer_radio_button.setChecked(not self.window.slicer_dialog.slicer_radio_button.checkState())
+        self.toggle_slicer
+
+
     def toggle_slicer(self):
         """ Updates scene in the main window slicing is called. """
 
         self.window.view.update_scene()
+
+        if not self.window.slicer_dialog.slicer_radio_button.isChecked():
+            self.window.status_bar_frame_indicator.setText("")
+        else:
+            self.window.status_bar_frame_indicator.setText(
+                "{:,}/{:,}".format(self.window.slicer_dialog.sl.value(), self.window.slicer_dialog.sl.maximum())
+            )
 
     def on_slice_position_changed(self, position):
         """
@@ -5091,6 +5111,10 @@ class SlicerDialog(QtWidgets.QDialog):
         self.slicermin = self.bins[position]
         self.slicermax = self.bins[position + 1]
         self.window.view.update_scene_slicer()
+
+        self.window.status_bar_frame_indicator.setText(
+            "{:,}/{:,}".format(self.window.slicer_dialog.sl.value(), self.window.slicer_dialog.sl.maximum())
+        )
 
     def export_stack(self):
         """ Saves all slices as .tif files. """
@@ -5554,6 +5578,7 @@ class View(QtWidgets.QLabel):
         icon = QtGui.QIcon(icon_path)
         self.icon = icon
         self.setAcceptDrops(True)
+        self.setMouseTracking(True)
         self.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
@@ -5561,6 +5586,8 @@ class View(QtWidgets.QLabel):
             QtWidgets.QRubberBand.Rectangle, self
         )
         self.rubberband.setStyleSheet("selection-background-color: white")
+        self.roi_point1 = QtCore.QPoint()
+        self.roi_point2 = QtCore.QPoint()
         self.window = window
         self._pixmap = None
         self.all_locs = [] # for fast render
@@ -5705,7 +5732,8 @@ class View(QtWidgets.QLabel):
 
         self.window.setWindowTitle(
             "Picasso v{}: Render. File: {}".format(
-                __version__, os.path.basename(path)
+                # __version__, os.path.basename(path)
+                __version__, path
             )
         )
 
@@ -5737,7 +5765,8 @@ class View(QtWidgets.QLabel):
                 pd.set_value(i+1)
             if len(self.locs):  # if loading was successful
                 if fit_in_view:
-                    self.fit_in_view(autoscale=True)
+                    # self.fit_in_view(autoscale=True)
+                    self.fit_in_view(autoscale=False)
                 else:
                     self.update_scene()
 
@@ -7334,6 +7363,17 @@ class View(QtWidgets.QLabel):
 
         return max([info[0]["Width"] for info in self.infos])
 
+    # Function to find the nearest (x, y) and return the corresponding photons value
+    def find_nearest_photons(self, df, input_x, input_y):
+        # Calculate the Euclidean distance from the input (x, y) to all points
+        df['distance'] = np.sqrt((df['x'] - input_x)**2 + (df['y'] - input_y)**2)
+        
+        # Find the index of the row with the minimum distance
+        nearest_index = df['distance'].idxmin()
+        
+        # Return the corresponding photons value
+        return df.loc[nearest_index, 'photons']
+
     def mouseMoveEvent(self, event):
         """
         Defines actions taken when moving mouse.
@@ -7346,12 +7386,32 @@ class View(QtWidgets.QLabel):
         event : QMouseEvent
         """
 
+        if hasattr(self, 'viewport'):
+            x_on_scene, y_on_scene = self.map_to_movie(event.pos())
+
+            df = pd.DataFrame(self.all_locs[0])
+
+            # nearest_photons = self.find_nearest_photons(df, x_on_scene, y_on_scene)
+            # self.window.status_bar.showMessage("x=" + str(round(x_on_scene, 2)) + ", y=" + str(round(y_on_scene, 2)) + ", value=" + str(nearest_photons))
+
+            self.window.status_bar.showMessage("x=" + str(round(x_on_scene, 2)) + ", y=" + str(round(y_on_scene, 2)) + ", value=" + str(self.find_nearest_photons(df, x_on_scene, y_on_scene)))
+
         if self._mode == "Zoom":
             # if zooming in
             if self.rubberband.isVisible():
-                self.rubberband.setGeometry(
-                    QtCore.QRect(self.origin, event.pos())
-                )
+                if event.x() > self.origin.x():
+                    self.roi_point1.setX(self.origin.x())
+                    self.roi_point2.setX(event.x())
+                else:
+                    self.roi_point1.setX(event.x())
+                    self.roi_point2.setX(self.origin.x())
+                if event.y() > self.origin.y():
+                    self.roi_point1.setY(self.origin.y())
+                    self.roi_point2.setY(event.y())
+                else:
+                    self.roi_point1.setY(event.y())
+                    self.roi_point2.setY(self.origin.y())
+                self.rubberband.setGeometry(QtCore.QRect(self.roi_point1, self.roi_point2))
             # if panning
             if self._pan:
                 rel_x_move = (event.x() - self.pan_start_x) / self.width()
@@ -7359,6 +7419,7 @@ class View(QtWidgets.QLabel):
                 self.pan_relative(rel_y_move, rel_x_move)
                 self.pan_start_x = event.x()
                 self.pan_start_y = event.y()
+                self.setCursor(QtCore.Qt.OpenHandCursor)
         # if drawing a rectangular pick
         elif self._mode == "Pick":
             if self._pick_shape == "Rectangle":
@@ -7394,7 +7455,7 @@ class View(QtWidgets.QLabel):
                 self._pan = True
                 self.pan_start_x = event.x()
                 self.pan_start_y = event.y()
-                self.setCursor(QtCore.Qt.ClosedHandCursor)
+                self.setCursor(QtCore.Qt.OpenHandCursor)
                 event.accept()
             else:
                 event.ignore()
@@ -7406,6 +7467,50 @@ class View(QtWidgets.QLabel):
                     self.rectangle_pick_start_x = event.x()
                     self.rectangle_pick_start_y = event.y()
                     self.rectangle_pick_start = self.map_to_movie(event.pos())
+
+    def mouseDoubleClickEvent(self, event):
+        modifiers = QtWidgets.QApplication.keyboardModifiers()
+        if modifiers == QtCore.Qt.ControlModifier:
+            if self._pick_shape == "Circle":
+                # add pick
+                if event.button() == QtCore.Qt.LeftButton:
+                    x, y = self.map_to_movie(event.pos())
+                    self.add_pick((x, y))
+                    event.accept()
+                # remove pick
+                elif event.button() == QtCore.Qt.RightButton:
+                    x, y = self.map_to_movie(event.pos())
+                    self.remove_picks((x, y))
+                    event.accept()
+                else:
+                    event.ignore()
+            elif self._pick_shape == "Rectangle":
+                if event.button() == QtCore.Qt.LeftButton:
+                    # finish drawing rectangular pick and add it
+                    rectangle_pick_end = self.map_to_movie(event.pos())
+                    self._rectangle_pick_ongoing = False
+                    self.add_pick(
+                        (self.rectangle_pick_start, rectangle_pick_end)
+                    )
+                    event.accept()
+                elif event.button() == QtCore.Qt.RightButton:
+                    # remove pick
+                    x, y = self.map_to_movie(event.pos())
+                    self.remove_picks((x, y))
+                    event.accept()
+                else:
+                    event.ignore()
+            elif self._pick_shape == "Polygon":
+                # add a point to the polygon
+                if event.button() == QtCore.Qt.LeftButton:
+                    point_movie = self.map_to_movie(event.pos())
+                    self.add_polygon_point(point_movie, event.pos())
+                # remove the last point from the polygon
+                elif event.button() == QtCore.Qt.RightButton:
+                    self.remove_polygon_point()
+        else:
+        # elif self._mode == "Zoom":
+            self.fit_in_view()
 
     def mouseReleaseEvent(self, event):
         """
@@ -7425,11 +7530,20 @@ class View(QtWidgets.QLabel):
                 and self.rubberband.isVisible()
             ): # zoom in if the zoom-in rectangle is visible
                 end = QtCore.QPoint(event.pos())
-                if end.x() > self.origin.x() and end.y() > self.origin.y():
+                x_min_rel  = x_max_rel = y_min_rel = y_max_rel = 0
+                if end.x() > self.origin.x():
                     x_min_rel = self.origin.x() / self.width()
-                    x_max_rel = end.x() / self.width()
+                    x_max_rel = end.x()         / self.width()
+                if self.origin.x() > end.x():
+                    x_min_rel = end.x()         / self.width()
+                    x_max_rel = self.origin.x() / self.width()
+                if end.y() > self.origin.y():
                     y_min_rel = self.origin.y() / self.height()
-                    y_max_rel = end.y() / self.height()
+                    y_max_rel = end.y()         / self.height()
+                if self.origin.y() > end.y():
+                    y_min_rel = end.y()         / self.height()
+                    y_max_rel = self.origin.y() / self.height()
+                if x_min_rel != 0 and x_max_rel != 0 and y_min_rel != 0 and y_max_rel != 0:
                     viewport_height, viewport_width = self.viewport_size()
                     x_min = self.viewport[0][1] + x_min_rel * viewport_width
                     x_max = self.viewport[0][1] + x_max_rel * viewport_width
@@ -10505,21 +10619,30 @@ class View(QtWidgets.QLabel):
 
         self.zoom(ZOOM)
 
-    def wheelEvent(self, QWheelEvent):
+    def wheelEvent(self, event):
         """
         Defines what happens when mouse wheel is used.
 
         Press Ctrl/Command to zoom in/out.
         """
-        
-        modifiers = QtWidgets.QApplication.keyboardModifiers()
-        if modifiers == QtCore.Qt.ControlModifier:
-            direction = QWheelEvent.angleDelta().y()
-            position = self.map_to_movie(QWheelEvent.pos())
-            if direction > 0:
-                self.zoom(1 / ZOOM, cursor_position=position)
+
+        if hasattr(self, 'viewport'):
+            direction = event.angleDelta().y()
+            modifiers = QtWidgets.QApplication.keyboardModifiers()
+            if modifiers == QtCore.Qt.ControlModifier:
+                if hasattr(self.window.slicer_dialog, 'patches'):
+                    if   direction < 0 and self.window.slicer_dialog.sl.value() > 0:
+                        self.window.slicer_dialog.sl.setValue(self.window.slicer_dialog.sl.value() - 1)
+                        self.window.slicer_dialog.on_slice_position_changed(self.window.slicer_dialog.sl.value())
+                    elif direction > 0 and self.window.slicer_dialog.sl.value() < self.window.slicer_dialog.sl.maximum():
+                        self.window.slicer_dialog.sl.setValue(self.window.slicer_dialog.sl.value() + 1)
+                        self.window.slicer_dialog.on_slice_position_changed(self.window.slicer_dialog.sl.value())
             else:
-                self.zoom(ZOOM, cursor_position=position)
+                position = self.map_to_movie(event.pos())
+                if direction > 0:
+                    self.zoom(1 / ZOOM, cursor_position=position)
+                else:
+                    self.zoom(ZOOM, cursor_position=position)
 
 
 class Window(QtWidgets.QMainWindow):
@@ -10648,6 +10771,9 @@ class Window(QtWidgets.QMainWindow):
         self.view = View(self) # displays rendered locs
         self.view.setMinimumSize(1, 1)
         self.setCentralWidget(self.view)
+        self.status_bar = self.statusBar()
+        self.status_bar_frame_indicator = QtWidgets.QLabel()
+        self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
 
         # set up dialogs
         self.display_settings_dlg = DisplaySettingsDialog(self)
@@ -10771,8 +10897,13 @@ class Window(QtWidgets.QMainWindow):
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
-        slicer_action = view_menu.addAction("Slice")
+        slicer_action = view_menu.addAction("3D slicer menu")
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
+        slicing_action = view_menu.addAction("3D slicing")
+        # slicing_action.triggered.connect(self.slicer_dialog.initialize)
+        # slicing_action.triggered.connect(self.view.update_scene)
+        slicing_action.triggered.connect(self.slicer_dialog.toggle_slicer_and_radio_button_check)
+        slicing_action.setShortcut("Ctrl+Q")
         rot_win_action = view_menu.addAction("Update rotation window")
         rot_win_action.setShortcut("Ctrl+Shift+R")
         rot_win_action.triggered.connect(self.rot_win)
@@ -10938,7 +11069,7 @@ class Window(QtWidgets.QMainWindow):
         resi_action = postprocess_menu.addAction("RESI")
         resi_action.triggered.connect(self.open_resi_dialog)
 
-        self.load_user_settings()        
+        self.load_user_settings()
 
         # Define 3D entries
         self.actions_3d = [

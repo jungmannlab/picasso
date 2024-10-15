@@ -14,7 +14,7 @@ import numpy as _np
 from tqdm import tqdm as _tqdm
 import numba as _numba
 import multiprocessing as _multiprocessing
-from concurrent import futures as _futures
+from concurrent         import futures as _futures
 from . import postprocess as _postprocess
 
 try:
@@ -81,7 +81,6 @@ def _initial_parameters(spot, size, size_half):
 
 
 def initial_parameters_gpufit(spots, size):
-
     center = (size / 2.0) - 0.5
     initial_width = _np.amax([size / 5.0, 1.0])
 
@@ -155,7 +154,7 @@ def fit_spot(spot):
 
 def fit_spots(spots):
     theta = _np.empty((len(spots), 6), dtype=_np.float32)
-    theta.fill(_np.nan)
+    # theta.fill(_np.nan)
     for i, spot in enumerate(spots):
         theta[i] = fit_spot(spot)
     return theta
