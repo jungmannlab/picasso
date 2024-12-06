@@ -2857,8 +2857,9 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
         Creates 3 plots with drift
     """
 
-    def __init__(self, info_dialog):
+    def __init__(self, parent):
         super().__init__()
+        self.parent = parent
         self.setWindowTitle("Drift Plot")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
@@ -2886,23 +2887,26 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
 
         self.figure.clear()
 
+        # get camera pixel size in nm
+        pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
+
         ax1 = self.figure.add_subplot(131)
-        ax1.plot(drift.x, label="x")
-        ax1.plot(drift.y, label="y")
+        ax1.plot(drift.x * pixelsize, label="x")
+        ax1.plot(drift.y * pixelsize, label="y")
         ax1.legend(loc="best")
         ax1.set_xlabel("Frame")
-        ax1.set_ylabel("Drift (pixel)")
+        ax1.set_ylabel("Drift (nm)")
         ax2 = self.figure.add_subplot(132)
         ax2.plot(
-          drift.x,
-          drift.y,
+          drift.x * pixelsize,
+          drift.y * pixelsize,
           color=list(plt.rcParams["axes.prop_cycle"])[2][
               "color"
           ],
         )
 
-        ax2.set_xlabel("x")
-        ax2.set_ylabel("y")
+        ax2.set_xlabel("x (nm)")
+        ax2.set_ylabel("y (nm)")
         ax3 = self.figure.add_subplot(133)
         ax3.plot(drift.z, label="z")
         ax3.legend(loc="best")
@@ -2923,23 +2927,26 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
 
         self.figure.clear()
 
+        # get camera pixel size in nm
+        pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
+
         ax1 = self.figure.add_subplot(121)
-        ax1.plot(drift.x, label="x")
-        ax1.plot(drift.y, label="y")
+        ax1.plot(drift.x * pixelsize, label="x")
+        ax1.plot(drift.y * pixelsize, label="y")
         ax1.legend(loc="best")
         ax1.set_xlabel("Frame")
-        ax1.set_ylabel("Drift (pixel)")
+        ax1.set_ylabel("Drift (nm)")
         ax2 = self.figure.add_subplot(122)
         ax2.plot(
-          drift.x,
-          drift.y,
+          drift.x * pixelsize,
+          drift.y * pixelsize,
           color=list(plt.rcParams["axes.prop_cycle"])[2][
               "color"
           ],
         )
 
-        ax2.set_xlabel("x")
-        ax2.set_ylabel("y")
+        ax2.set_xlabel("x (nm)")
+        ax2.set_ylabel("y (nm)")
 
         self.canvas.draw()
 
