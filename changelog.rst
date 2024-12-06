@@ -8,6 +8,7 @@ Last change: 06-DEC-2024 MTS
 - Picasso: Render's title bar displays the file names of only opened files
 - Picasso: Render - RESI dialog fixed, units in nm
 - Picasso: Render - show drift in nm, not camera pixels
+- Picasso: Render - masking localizations saves the mask area in metadata
 - CMD localize saves camera information in the metadata file
 - Other minor bug fixes
 
