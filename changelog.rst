@@ -1,9 +1,15 @@
 Changelog
 =========
 
-Last change: 15-OCT-2024 MTS
+Last change: 06-DEC-2024 MTS
 
-0.7.1 - 0.7.4
+0.7.4
+-----
+- Picasso: Render's title bar displays the file names of only opened files
+- Picasso: Render - RESI dialog fixed, units in nm
+- Other minor bug fixes
+
+0.7.1 - 0.7.3
 -------------
 - SMLM clusterer in picked regions deleted
 - Show legend in Render property displayed rounded tick label values
