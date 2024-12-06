@@ -985,6 +985,7 @@ def _localize(args):
                 print("------------------------------------------")
 
             info.append(localize_info)
+            info.append(camera_info)
 
             base, ext = splitext(path)
 
