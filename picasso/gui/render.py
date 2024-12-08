@@ -2426,7 +2426,6 @@ class TestDBSCANParams(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(self)
         grid.addWidget(QtWidgets.QLabel("Radius (nm):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
-        self.radius.setKeyboardTracking(False)
         self.radius.setRange(0.01, 1e6)
         self.radius.setValue(10)
         self.radius.setDecimals(2)
@@ -2435,7 +2434,6 @@ class TestDBSCANParams(QtWidgets.QWidget):
 
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
         self.min_samples = QtWidgets.QSpinBox()
-        self.min_samples.setKeyboardTracking(False)
         self.min_samples.setValue(4)
         self.min_samples.setRange(1, int(1e6))
         self.min_samples.setSingleStep(1)
@@ -2454,7 +2452,6 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(self)
         grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 0, 0)
         self.min_cluster_size = QtWidgets.QSpinBox()
-        self.min_cluster_size.setKeyboardTracking(False)
         self.min_cluster_size.setValue(10)
         self.min_cluster_size.setRange(1, int(1e6))
         self.min_cluster_size.setSingleStep(1)
@@ -2462,7 +2459,6 @@ class TestHDBSCANParams(QtWidgets.QWidget):
 
         grid.addWidget(QtWidgets.QLabel("Min. samples"), 1, 0)     
         self.min_samples = QtWidgets.QSpinBox()
-        self.min_samples.setKeyboardTracking(False)
         self.min_samples.setValue(10)
         self.min_samples.setRange(1, int(1e6))
         self.min_samples.setSingleStep(1)
@@ -2472,7 +2468,6 @@ class TestHDBSCANParams(QtWidgets.QWidget):
             QtWidgets.QLabel("Intercluster max.\ndistance (pixels):"), 2, 0
         )
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
-        self.cluster_eps.setKeyboardTracking(False)
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
         self.cluster_eps.setDecimals(3)
@@ -2492,7 +2487,6 @@ class TestSMLMParams(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(self)
         grid.addWidget(QtWidgets.QLabel("Radius xy (nm):"), 0, 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
-        self.radius_xy.setKeyboardTracking(False)
         self.radius_xy.setValue(10)
         self.radius_xy.setRange(0.01, 1e6)
         self.radius_xy.setSingleStep(0.1)
@@ -2501,7 +2495,6 @@ class TestSMLMParams(QtWidgets.QWidget):
 
         grid.addWidget(QtWidgets.QLabel("Radius z (3D only):"), 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
-        self.radius_z.setKeyboardTracking(False)
         self.radius_z.setValue(25)
         self.radius_z.setRange(0.01, 1e6)
         self.radius_z.setSingleStep(0.1)
@@ -2510,7 +2503,6 @@ class TestSMLMParams(QtWidgets.QWidget):
 
         grid.addWidget(QtWidgets.QLabel("Min. no. locs"), 2, 0)     
         self.min_locs = QtWidgets.QSpinBox()
-        self.min_locs.setKeyboardTracking(False)
         self.min_locs.setValue(10)
         self.min_locs.setRange(1, int(1e6))
         self.min_locs.setSingleStep(1)
