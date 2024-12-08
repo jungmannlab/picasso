@@ -1711,7 +1711,7 @@ class AIMDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Enter parameters")
+        self.setWindowTitle("AIM undrifting")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
         grid.addWidget(QtWidgets.QLabel("Segmentation:"), 0, 0)
@@ -10076,7 +10076,7 @@ class View(QtWidgets.QLabel):
             )
             if path:
                 drift = np.loadtxt(path, delimiter=' ')
-                if hasattr(self.locs[channel], "z"):
+                if drift.shape[1] == 3: # 3D drift
                     drift = (drift[:,0], drift[:,1], drift[:,2])
                     drift = np.rec.array(
                         drift, 
@@ -10100,7 +10100,7 @@ class View(QtWidgets.QLabel):
                     self.locs[channel].z -= drift.z[
                         self.locs[channel].frame
                     ]
-                else:
+                else: # 2D drift
                     drift = (drift[:,0], drift[:,1])
                     drift = np.rec.array(
                         drift, 

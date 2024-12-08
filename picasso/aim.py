@@ -686,9 +686,13 @@ def aim(
     drift_x = drift_x1 + drift_x2
     drift_y = drift_y1 + drift_y2
 
-    # # shift the drifts by the mean value
-    drift_x -= _np.mean(drift_x)
-    drift_y -= _np.mean(drift_y)
+    # shift the drifts by the mean value
+    shift_x = _np.mean(drift_x)
+    shift_y = _np.mean(drift_y)
+    drift_x -= shift_x
+    drift_y -= shift_y
+    x_pdc += shift_x
+    y_pdc += shift_y
 
     # combine to Picasso format
     drift = _np.rec.array((drift_x, drift_y), dtype=[("x", "f"), ("y", "f")])
@@ -713,7 +717,9 @@ def aim(
             aim_round=2, progress=progress,
         )
         drift_z = drift_z1 + drift_z2
-        drift_z -= _np.mean(drift_z)
+        shift_z = _np.mean(drift_z)
+        drift_z -= shift_z
+        z_pdc += shift_z
         drift = _np.rec.array(
             (drift_x, drift_y, drift_z), 
             dtype=[("x", "f"), ("y", "f"), ("z", "f")]
