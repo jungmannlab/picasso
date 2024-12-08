@@ -423,6 +423,26 @@ def _undrift(files, segmentation, display=True, fromfile=None):
         savetxt(base + "_drift.txt", drift, header="dx\tdy", newline="\r\n")
 
 
+def _undrift_aim(
+    files, segmentation, intersectdist=20/130, roiradius=60/130
+):
+    import glob
+    from . import io, aim
+    from numpy import savetxt
+
+    paths = glob.glob(files)
+    for path in paths:
+        try:
+            locs, info = io.load_locs(path)
+        except io.NoMetadataFileError:
+            continue
+        print("Undrifting file {}".format(path))
+        locs, new_info, drift = aim.aim(locs, info, segmentation, intersectdist, roiradius)
+        base, ext = os.path.splitext(path)
+        io.save_locs(base + "_aim.hdf5", locs, new_info)
+        savetxt(base + "_aimdrift.txt", drift, header="dx\tdy", newline="\r\n")  
+
+
 def _density(files, radius):
     import glob
 
@@ -1211,12 +1231,12 @@ def main():
             " specified by a unix style path pattern"
         ),
     )
-    undrift_parser.add_argument(
-        "-m",
-        "--mode",
-        default="render",
-        help='"std", "render" or "framepair")',
-    )
+    # undrift_parser.add_argument(
+    #     "-m",
+    #     "--mode",
+    #     default="render",
+    #     help='"std", "render" or "framepair")',
+    # )
     undrift_parser.add_argument(
         "-s",
         "--segmentation",
@@ -1238,6 +1258,48 @@ def main():
         "--nodisplay",
         action="store_false",
         help="do not display estimated drift",
+    )
+
+    # undrift by AIM parser
+    undrift_aim_parser = subparsers.add_parser(
+        "aim", help="correct localization coordinates for drift with AIM"
+    )
+    undrift_aim_parser.add_argument(
+        "files",
+        help=(
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
+        ),
+    )
+    undrift_aim_parser.add_argument(
+        "-s",
+        "--segmentation",
+        type=float,
+        default=100,
+        help=(
+            "the number of frames to be combined"
+            " for one temporal segment (default=100)"
+        ),
+    )
+    undrift_aim_parser.add_argument(
+        "-i",
+        "--intersectdist",
+        type=float,
+        default=20/130,
+        help=(
+            "max. distance (cam. pixels) between localizations in"
+            " consecutive segments to be considered as intersecting"
+        ),
+    )
+    undrift_aim_parser.add_argument(
+        "-r",
+        "--roiradius",
+        type=float,
+        default=60/130,
+        help=(
+            "max. drift (cam. pixels) between two consecutive"
+            " segments"
+        ),
     )
 
     # local densitydd
@@ -1709,6 +1771,8 @@ def main():
             )
         elif args.command == "undrift":
             _undrift(args.files, args.segmentation, args.nodisplay, args.fromfile)
+        elif args.command == "aim":
+            _undrift_aim(args.files, args.segmentation, args.intersectdist, args.roiradius)
         elif args.command == "density":
             _density(args.files, args.radius)
         elif args.command == "dbscan":

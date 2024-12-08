@@ -12,6 +12,7 @@ Last change: 09-DEC-2024 MTS
 - Picasso: Render - RESI dialog fixed, units in nm
 - Picasso: Render - show drift in nm, not camera pixels
 - Picasso: Render - masking localizations saves the mask area in metadata
+- CMD implementation of AIM undrifting, see ``picasso aim -h`` in terminal
 - CMD localize saves camera information in the metadata file
 - Other minor bug fixes
 
