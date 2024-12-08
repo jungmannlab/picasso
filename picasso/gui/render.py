@@ -1831,12 +1831,11 @@ class DbscanDialog(QtWidgets.QDialog):
 
         dialog = DbscanDialog(parent)
         result = dialog.exec_()
-        return (
-            dialog.radius.value(),
-            dialog.density.value(),
-            dialog.save_centers.isChecked(),
-            result == QtWidgets.QDialog.Accepted,
-        )
+        return {
+            "radius": dialog.radius.value(),
+            "min_density": dialog.density.value(),
+            "save_centers": dialog.save_centers.isChecked(),
+        }, result == QtWidgets.QDialog.Accepted
 
 
 class HdbscanDialog(QtWidgets.QDialog):
@@ -1915,13 +1914,12 @@ class HdbscanDialog(QtWidgets.QDialog):
 
         dialog = HdbscanDialog(parent)
         result = dialog.exec_()
-        return (
-            dialog.min_cluster.value(),
-            dialog.min_samples.value(),
-            dialog.cluster_eps.value(),
-            dialog.save_centers.isChecked(),
-            result == QtWidgets.QDialog.Accepted,
-        )
+        return {
+            "min_cluster": dialog.min_cluster.value(),
+            "min_samples": dialog.min_samples.value(),
+            "cluster_eps": dialog.cluster_eps.value(),
+            "save_centers": dialog.save_centers.isChecked(),
+        }, result == QtWidgets.QDialog.Accepted,
     
 
 class LinkDialog(QtWidgets.QDialog):
@@ -6062,9 +6060,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("DBSCAN")
 
         # get DBSCAN parameters
-        params = DbscanDialog.getParams()
-        ok = params[-1] # true if parameters were given
-
+        params, ok = DbscanDialog.getParams()
         if ok:
             if channel == len(self.locs_paths): # apply to all channels
                 # get saving name suffix
@@ -6080,7 +6076,7 @@ class View(QtWidgets.QLabel):
                         path = self.locs_paths[channel].replace(
                             ".hdf5", f"{suffix}.hdf5"
                         )
-                        self._dbscan(channel, path, params)
+                        self._dbscan(channel, path, **params)
             else:
                 # get the path to save
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -6090,9 +6086,9 @@ class View(QtWidgets.QLabel):
                     filter="*.hdf5",
                 )
                 if path:
-                    self._dbscan(channel, path, params)
+                    self._dbscan(channel, path, **params)
 
-    def _dbscan(self, channel, path, params):
+    def _dbscan(self, channel, path, radius, min_density, save_centers):
         """
         Performs DBSCAN in a given channel with user-defined parameters
         and saves the result.
@@ -6103,11 +6099,14 @@ class View(QtWidgets.QLabel):
             Index of the channel were clustering is performed
         path : str
             Path to save clustered localizations
-        params : list
-            DBSCAN parameters
+        radius : float
+            Radius for DBSCAN clustering in nm
+        min_density : int
+            Minimum local density for DBSCAN clustering
+        save_centers : bool
+            Specifies if cluster centers should be saved
         """
 
-        radius, min_density, save_centers, _ = params
         status = lib.StatusDialog(
             "Applying DBSCAN. This may take a while.", self
         )
@@ -6136,7 +6135,6 @@ class View(QtWidgets.QLabel):
             "Radius (nm)": radius,
             "Minimum local density": min_density,
         }
-
         io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
         status.close()
         if save_centers:
@@ -6154,9 +6152,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("HDBSCAN")
 
         # get HDBSCAN parameters
-        params = HdbscanDialog.getParams()
-        ok = params[-1] # true if parameters were given
-
+        params, ok = HdbscanDialog.getParams()
         if ok:
             if channel == len(self.locs_paths): # apply to all channels
                 # get saving name suffix
@@ -6172,7 +6168,7 @@ class View(QtWidgets.QLabel):
                         path = self.locs_paths[channel].replace(
                             ".hdf5", f"{suffix}.hdf5"
                         )
-                        self._hdbscan(channel, path, params)
+                        self._hdbscan(channel, path, **params)
             else:
                 # get the path to save
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -6185,9 +6181,17 @@ class View(QtWidgets.QLabel):
                     filter="*.hdf5",
                 )
                 if path:
-                    self._hdbscan(channel, path, params)
+                    self._hdbscan(channel, path, **params)
 
-    def _hdbscan(self, channel, path, params):
+    def _hdbscan(
+        self, 
+        channel, 
+        path, 
+        min_cluster,
+        min_samples,
+        cluster_eps,
+        save_centers,
+    ):
         """
         Performs HDBSCAN in a given channel with user-defined 
         parameters and saves the result.
@@ -6198,11 +6202,17 @@ class View(QtWidgets.QLabel):
             Index of the channel were clustering is performed
         path : str
             Path to save clustered localizations
-        params : list
-            HDBSCAN parameters
+        min_cluster : int
+            Minimum number of localizations in a cluster
+        min_samples : int
+            Number of localizations within radius to consider a given 
+            point a core sample
+        cluster_eps : float
+            Distance threshold. Clusters below this value will be merged
+        save_centers : bool
+            Specifies if cluster centers should be saved
         """
 
-        min_cluster, min_samples, cluster_eps, save_centers, _ = params
         status = lib.StatusDialog(
             "Applying HDBSCAN. This may take a while.", self
         )
