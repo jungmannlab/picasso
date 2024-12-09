@@ -5501,6 +5501,8 @@ class View(QtWidgets.QLabel):
         Lets user to select picks based on their traces
     set_mode()
         Sets self._mode for QMouseEvents
+    set_optimal_scalebar()
+        Sets the optimal scalebar length based on the current viewport
     set_property()
         Activates rendering by property
     set_zoom(zoom)
@@ -7013,6 +7015,7 @@ class View(QtWidgets.QLabel):
         movie_height, movie_width = self.movie_size()
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
+        self.set_optimal_scalebar()
 
     def move_to_pick(self):
         """ Adjust viewport to show a pick identified by its id. """
@@ -7585,6 +7588,7 @@ class View(QtWidgets.QLabel):
                     y_max = self.viewport[0][0] + y_max_rel * viewport_height
                     viewport = [(y_min, x_min), (y_max, x_max)]
                     self.update_scene(viewport)
+                    self.set_optimal_scalebar()
                 self.rubberband.hide()
             # stop panning
             elif event.button() == QtCore.Qt.RightButton:
@@ -9692,6 +9696,27 @@ class View(QtWidgets.QLabel):
         current_zoom = self.display_pixels_per_viewport_pixels()
         self.zoom(current_zoom / zoom)
 
+    def set_optimal_scalebar(self):
+        """Sets scalebar to approx. 1/8 of the current viewport's 
+        width"""
+
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        width = self.viewport_width()
+        width_nm = width * pixelsize
+        optimal_scalebar = width_nm / 8
+        # approximate to the nearest thousands, hundreds, tens or ones
+        if optimal_scalebar > 10_000:
+            scalebar = 10_000
+        elif optimal_scalebar > 1_000:
+            scalebar = int(1_000 * round(optimal_scalebar / 1_000))
+        elif optimal_scalebar > 100:
+            scalebar = int(100 * round(optimal_scalebar / 100))
+        elif optimal_scalebar > 10:
+            scalebar = int(10 * round(optimal_scalebar / 10))
+        else:
+            scalebar = int(round(optimal_scalebar))
+        self.window.display_settings_dlg.scalebar.setValue(scalebar)
+
     def sizeHint(self):
         """ Returns recommended window size. """
 
@@ -10646,6 +10671,7 @@ class View(QtWidgets.QLabel):
             ),
         ]
         self.update_scene(new_viewport)
+        self.set_optimal_scalebar()
 
     def zoom_in(self):
         """ Zooms in by a constant factor. """
