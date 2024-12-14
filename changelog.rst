@@ -8,10 +8,12 @@ Last change: 09-DEC-2024 MTS
 - SMLM clusterer in picked regions deleted
 - Show legend in Render property displayed rounded tick label values
 - Pick circular area does not save the area for each pick in localization's metadata 
-- Picasso: Render's title bar displays the file names of only opened files
+- Picasso: Render - adjust the scale bar's size automatically based on the current FOV's width
 - Picasso: Render - RESI dialog fixed, units in nm
 - Picasso: Render - show drift in nm, not camera pixels
-- Picasso: Render - masking localizations saves the mask area in metadata
+- Picasso: Render - masking localizations saves the mask area in its metadata
+- Picasso: Render - export current view across channels in grayscale
+- Picasso: Render - title bar displays the file only the names of the currently opened files
 - CMD implementation of AIM undrifting, see ``picasso aim -h`` in terminal
 - CMD localize saves camera information in the metadata file
 - Other minor bug fixes

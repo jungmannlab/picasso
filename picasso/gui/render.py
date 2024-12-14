@@ -5388,6 +5388,8 @@ class View(QtWidgets.QLabel):
         Renders sliced locs in the given viewport and draws picks etc
     dropEvent(event)
         Defines what happens when a file is dropped onto the window
+    export_grayscale(suffix)
+        Renders each channel in grayscale and saves the images.
     export_trace()
         Saves trace as a .csv
     filter_picks()
@@ -7061,6 +7063,59 @@ class View(QtWidgets.QLabel):
                     y_max = max(Y) + 0.2 * (max(Y) - min(Y))
                 viewport = [(y_min, x_min), (y_max, x_max)] 
                 self.update_scene(viewport=viewport)
+
+    def export_grayscale(self, suffix):
+        """Exports grayscale rendering of the current viewport for each
+        channel separately."""
+
+        kwargs = self.get_render_kwargs()
+        for i, locs in enumerate(self.all_locs):
+            path = self.locs_paths[i].replace(".hdf5", f"{suffix}.png")
+            # render like in self.render_single_channel and 
+            # self.render_scene
+            _, image = render.render(locs, **kwargs, info=self.infos[i])
+            image = self.scale_contrast(image)
+            image = self.to_8bit(image)
+            cmap = np.uint8(
+                np.round(255 * plt.get_cmap("gray")(np.arange(256)))
+            )
+            Y, X = image.shape
+            bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
+            bgra[:, :, 0] = cmap[:, 2][image]
+            bgra[:, :, 1] = cmap[:, 1][image]
+            bgra[:, :, 2] = cmap[:, 0][image]
+            bgra[:, :, 3] = 255
+            qimage = QtGui.QImage(bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+            # modify qimage like in self.draw_scene
+            qimage = qimage.scaled(
+                self.width(), 
+                self.height(), 
+                QtCore.Qt.KeepAspectRatioByExpanding,
+            )
+            qimage = self.draw_scalebar(qimage)
+            qimage = self.draw_minimap(qimage)
+            qimage = self.draw_legend(qimage)
+            qimage = self.draw_picks(qimage)
+            qimage = self.draw_points(qimage)
+            # save image
+            qimage.save(path)
+
+            # save metadata
+            info = self.window.export_current_info(path=None)
+            info["Colormap"] = "gray"
+            io.save_info(path.replace(".png", ".yaml"), [info])
+
+            # save a copy with scale bar if not present
+            scalebar = self.window.display_settings_dlg.scalebar_groupbox.isChecked()
+            if not scalebar:
+                spath = path.replace(".png", "_scalebar.png")
+                self.window.display_settings_dlg.scalebar_groupbox.setChecked(True)
+                qimage_scale = self.draw_scalebar(qimage.copy())
+                qimage_scale.save(spath)
+                self.window.display_settings_dlg.scalebar_groupbox.setChecked(False)
+
+
+
 
     def get_channel(self, title="Choose a channel"):
         """ 
@@ -9150,7 +9205,7 @@ class View(QtWidgets.QLabel):
         """
         Renders single channel localizations. 
 
-        Calls render_multi_channel in case of clustered or picked locs,
+        Calls render_multi_channel in case of clustered, picked locs or
         rendering by property)
 
         Parameters
@@ -10761,6 +10816,8 @@ class Window(QtWidgets.QMainWindow):
         Exports current view as .png or .tif
     export_current_info()
         Exports info about the current view in .yaml file
+    export_grayscale()
+        Exports each channel in grayscale.
     export_multi()
         Asks the user to choose a type of export
     export_fov_ims()
@@ -10904,6 +10961,10 @@ class Window(QtWidgets.QMainWindow):
         export_complete_action = file_menu.addAction("Export complete image")
         export_complete_action.setShortcut("Ctrl+Shift+E")
         export_complete_action.triggered.connect(self.export_complete)
+        export_grayscale_action = file_menu.addAction(
+            "Export channels in grayscale"
+        )
+        export_grayscale_action.triggered.connect(self.export_grayscale)
 
         file_menu.addSeparator()
         export_multi_action = file_menu.addAction("Export localizations")
@@ -11220,11 +11281,8 @@ class Window(QtWidgets.QMainWindow):
         ----------
         path : str
             Path for saving the original image with .png or .tif
-            extension
+            extension. If None, info is returned and is not saved.
         """
-
-        path, ext = os.path.splitext(path)
-        path = path + ".yaml"
 
         fov_info = [
             self.info_dialog.change_fov.x_box.value(),
@@ -11247,10 +11305,15 @@ class Window(QtWidgets.QMainWindow):
             "Colors": colors,
             "Min. blur (cam. px)": d.min_blur_width.value(),
         }
-        io.save_info(path, [info])
+        if path is not None:
+            path, ext = os.path.splitext(path)
+            path = path + ".yaml"        
+            io.save_info(path, [info])
+        else:
+            return info
 
     def export_complete(self):
-        """ Exports the whole field of view as .png or .tif. """
+        """Exports the whole field of view as .png or .tif. """
 
         try:
             base, ext = os.path.splitext(self.view.locs_paths[0])
@@ -11266,6 +11329,21 @@ class Window(QtWidgets.QMainWindow):
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage.save(path)
             self.export_current_info(path)
+
+    def export_grayscale(self):
+        """Exports each channel in grayscale."""
+
+        # get the suffix to save the screenshots
+
+        suffix, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Save each channel in grayscale",
+            "Enter suffix for the screenshots",
+            QtWidgets.QLineEdit.Normal,
+            "_grayscale",
+        )
+        if ok:
+            self.view.export_grayscale(suffix)            
 
     def export_txt(self):
         """ 
