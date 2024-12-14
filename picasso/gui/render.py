@@ -6982,7 +6982,6 @@ class View(QtWidgets.QLabel):
         movie_height, movie_width = self.movie_size()
         viewport = [(0, 0), (movie_height, movie_width)]
         self.update_scene(viewport=viewport, autoscale=autoscale)
-        self.set_optimal_scalebar()
 
     def move_to_pick(self):
         """ Adjust viewport to show a pick identified by its id. """
@@ -7523,7 +7522,6 @@ class View(QtWidgets.QLabel):
                     y_max = self.viewport[0][0] + y_max_rel * viewport_height
                     viewport = [(y_min, x_min), (y_max, x_max)]
                     self.update_scene(viewport)
-                    self.set_optimal_scalebar()
                 self.rubberband.hide()
             # stop panning
             elif event.button() == QtCore.Qt.RightButton:
@@ -10421,6 +10419,8 @@ class View(QtWidgets.QLabel):
                 picks_only=picks_only,
             )
             self.update_cursor()
+            if not use_cache:
+                self.set_optimal_scalebar()
 
     def update_scene_slicer(
         self,
@@ -10440,7 +10440,7 @@ class View(QtWidgets.QLabel):
             True if optimally adjust contrast
         use_cache : boolean (default=False)
             True if use stored image
-        cache : boolena (default=True)
+        cache : boolean (default=True)
             True if save image
         """
 
@@ -10606,7 +10606,6 @@ class View(QtWidgets.QLabel):
             ),
         ]
         self.update_scene(new_viewport)
-        self.set_optimal_scalebar()
 
     def zoom_in(self):
         """ Zooms in by a constant factor. """
