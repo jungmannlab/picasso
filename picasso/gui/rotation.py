@@ -1819,6 +1819,46 @@ class ViewRotation(QtWidgets.QLabel):
         )
         if path:
             self.qimage.save(path)
+            self.export_current_view_info(path)
+            scalebar = self.window.display_settings_dlg.scalebar_groupbox.isChecked()
+            if not scalebar:
+                self.window.display_settings_dlg.scalebar_groupbox.setChecked(True)
+                self.update_scene()
+                self.qimage.save(path.replace(".png", "_scalebar.png"))
+                self.window.display_settings_dlg.scalebar_groupbox.setChecked(False)
+                self.update_scene()
+    
+    def export_current_view_info(self, path):
+        """ Exports current view's information. """
+
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        fov = [x_min, y_min, x_max - x_min, y_max - y_min]
+        d = self.window.display_settings_dlg
+        colors = [
+            _.currentText() for _ in self.window.dataset_dialog.colorselection
+        ]
+        rot_angles = [
+            int(self.angx * 180 / np.pi),
+            int(self.angy * 180 / np.pi),
+            int(self.angz * 180 / np.pi),
+        ]
+        info = {
+            "Rotation angles (deg)": rot_angles,
+            "FOV (X, Y, Width, Height)": fov,
+            "Display pixel size (nm)": d.disp_px_size.value(),
+            "Min. density": d.minimum.value(),
+            "Max. density": d.maximum.value(),
+            "Colormap": d.colormap.currentText(),
+            "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
+            "Scalebar length (nm)": d.scalebar.value(),
+            "Min. blur (cam. px)": d.min_blur_width.value(),
+            "Localizations loaded": self.paths,
+            "Colors": colors,
+        }
+        path, ext = os.path.splitext(path)
+        path = path + ".yaml"
+        io.save_info(path, [info])
+
 
     def zoom_in(self):
         """ Zooms in by a constant factor. """
