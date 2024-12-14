@@ -826,6 +826,12 @@ class DatasetDialog(QtWidgets.QDialog):
                 self.update_viewport()
                 self.adjustSize()
 
+            # update the window title
+            self.window.setWindowTitle(
+                f"Picasso v{__version__}: Render. File: "
+                f"{os.path.basename(self.window.view.locs_paths[-1])}"
+            )
+
     def update_viewport(self):
         """ Updates the scene in the main window. """
 
@@ -1704,7 +1710,7 @@ class AIMDialog(QtWidgets.QDialog):
     def __init__(self, window):
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Enter parameters")
+        self.setWindowTitle("AIM undrifting")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
         grid.addWidget(QtWidgets.QLabel("Segmentation:"), 0, 0)
@@ -1824,12 +1830,11 @@ class DbscanDialog(QtWidgets.QDialog):
 
         dialog = DbscanDialog(parent)
         result = dialog.exec_()
-        return (
-            dialog.radius.value(),
-            dialog.density.value(),
-            dialog.save_centers.isChecked(),
-            result == QtWidgets.QDialog.Accepted,
-        )
+        return {
+            "radius": dialog.radius.value(),
+            "min_density": dialog.density.value(),
+            "save_centers": dialog.save_centers.isChecked(),
+        }, result == QtWidgets.QDialog.Accepted
 
 
 class HdbscanDialog(QtWidgets.QDialog):
@@ -1908,13 +1913,12 @@ class HdbscanDialog(QtWidgets.QDialog):
 
         dialog = HdbscanDialog(parent)
         result = dialog.exec_()
-        return (
-            dialog.min_cluster.value(),
-            dialog.min_samples.value(),
-            dialog.cluster_eps.value(),
-            dialog.save_centers.isChecked(),
-            result == QtWidgets.QDialog.Accepted,
-        )
+        return {
+            "min_cluster": dialog.min_cluster.value(),
+            "min_samples": dialog.min_samples.value(),
+            "cluster_eps": dialog.cluster_eps.value(),
+            "save_centers": dialog.save_centers.isChecked(),
+        }, result == QtWidgets.QDialog.Accepted,
     
 
 class LinkDialog(QtWidgets.QDialog):
@@ -2420,7 +2424,6 @@ class TestDBSCANParams(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(self)
         grid.addWidget(QtWidgets.QLabel("Radius (nm):"), 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
-        self.radius.setKeyboardTracking(False)
         self.radius.setRange(0.01, 1e6)
         self.radius.setValue(10)
         self.radius.setDecimals(2)
@@ -2429,7 +2432,6 @@ class TestDBSCANParams(QtWidgets.QWidget):
 
         grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
         self.min_samples = QtWidgets.QSpinBox()
-        self.min_samples.setKeyboardTracking(False)
         self.min_samples.setValue(4)
         self.min_samples.setRange(1, int(1e6))
         self.min_samples.setSingleStep(1)
@@ -2448,7 +2450,6 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(self)
         grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 0, 0)
         self.min_cluster_size = QtWidgets.QSpinBox()
-        self.min_cluster_size.setKeyboardTracking(False)
         self.min_cluster_size.setValue(10)
         self.min_cluster_size.setRange(1, int(1e6))
         self.min_cluster_size.setSingleStep(1)
@@ -2456,7 +2457,6 @@ class TestHDBSCANParams(QtWidgets.QWidget):
 
         grid.addWidget(QtWidgets.QLabel("Min. samples"), 1, 0)     
         self.min_samples = QtWidgets.QSpinBox()
-        self.min_samples.setKeyboardTracking(False)
         self.min_samples.setValue(10)
         self.min_samples.setRange(1, int(1e6))
         self.min_samples.setSingleStep(1)
@@ -2466,7 +2466,6 @@ class TestHDBSCANParams(QtWidgets.QWidget):
             QtWidgets.QLabel("Intercluster max.\ndistance (pixels):"), 2, 0
         )
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
-        self.cluster_eps.setKeyboardTracking(False)
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
         self.cluster_eps.setDecimals(3)
@@ -2486,7 +2485,6 @@ class TestSMLMParams(QtWidgets.QWidget):
         grid = QtWidgets.QGridLayout(self)
         grid.addWidget(QtWidgets.QLabel("Radius xy (nm):"), 0, 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
-        self.radius_xy.setKeyboardTracking(False)
         self.radius_xy.setValue(10)
         self.radius_xy.setRange(0.01, 1e6)
         self.radius_xy.setSingleStep(0.1)
@@ -2495,7 +2493,6 @@ class TestSMLMParams(QtWidgets.QWidget):
 
         grid.addWidget(QtWidgets.QLabel("Radius z (3D only):"), 1, 0)
         self.radius_z = QtWidgets.QDoubleSpinBox()
-        self.radius_z.setKeyboardTracking(False)
         self.radius_z.setValue(25)
         self.radius_z.setRange(0.01, 1e6)
         self.radius_z.setSingleStep(0.1)
@@ -2504,7 +2501,6 @@ class TestSMLMParams(QtWidgets.QWidget):
 
         grid.addWidget(QtWidgets.QLabel("Min. no. locs"), 2, 0)     
         self.min_locs = QtWidgets.QSpinBox()
-        self.min_locs.setKeyboardTracking(False)
         self.min_locs.setValue(10)
         self.min_locs.setRange(1, int(1e6))
         self.min_locs.setSingleStep(1)
@@ -2851,8 +2847,9 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
         Creates 3 plots with drift
     """
 
-    def __init__(self, info_dialog):
+    def __init__(self, parent):
         super().__init__()
+        self.parent = parent
         self.setWindowTitle("Drift Plot")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
@@ -2880,23 +2877,26 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
 
         self.figure.clear()
 
+        # get camera pixel size in nm
+        pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
+
         ax1 = self.figure.add_subplot(131)
-        ax1.plot(drift.x, label="x")
-        ax1.plot(drift.y, label="y")
+        ax1.plot(drift.x * pixelsize, label="x")
+        ax1.plot(drift.y * pixelsize, label="y")
         ax1.legend(loc="best")
         ax1.set_xlabel("Frame")
-        ax1.set_ylabel("Drift (pixel)")
+        ax1.set_ylabel("Drift (nm)")
         ax2 = self.figure.add_subplot(132)
         ax2.plot(
-          drift.x,
-          drift.y,
+          drift.x * pixelsize,
+          drift.y * pixelsize,
           color=list(plt.rcParams["axes.prop_cycle"])[2][
               "color"
           ],
         )
 
-        ax2.set_xlabel("x")
-        ax2.set_ylabel("y")
+        ax2.set_xlabel("x (nm)")
+        ax2.set_ylabel("y (nm)")
         ax3 = self.figure.add_subplot(133)
         ax3.plot(drift.z, label="z")
         ax3.legend(loc="best")
@@ -2917,23 +2917,26 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
 
         self.figure.clear()
 
+        # get camera pixel size in nm
+        pixelsize = self.parent.window.display_settings_dlg.pixelsize.value()
+
         ax1 = self.figure.add_subplot(121)
-        ax1.plot(drift.x, label="x")
-        ax1.plot(drift.y, label="y")
+        ax1.plot(drift.x * pixelsize, label="x")
+        ax1.plot(drift.y * pixelsize, label="y")
         ax1.legend(loc="best")
         ax1.set_xlabel("Frame")
-        ax1.set_ylabel("Drift (pixel)")
+        ax1.set_ylabel("Drift (nm)")
         ax2 = self.figure.add_subplot(122)
         ax2.plot(
-          drift.x,
-          drift.y,
+          drift.x * pixelsize,
+          drift.y * pixelsize,
           color=list(plt.rcParams["axes.prop_cycle"])[2][
               "color"
           ],
         )
 
-        ax2.set_xlabel("x")
-        ax2.set_ylabel("y")
+        ax2.set_xlabel("x (nm)")
+        ax2.set_ylabel("y (nm)")
 
         self.canvas.draw()
 
@@ -3467,6 +3470,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         Blurs localizations using a Gaussian filter
     generate_image()
         Histograms loaded localizations from a given channel
+    get_info(channel)
+        Returns metadata for saving masked localizaitons in a given 
+        channel
     init_dialog()
         Initializes dialog when called from the main window
     load_mask()
@@ -3477,12 +3483,14 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         Masks localizations from a single or all channels
     _mask_locs(locs)
         Masks locs given a mask
+    save_blur()
+        Saves blurred image of localizations in .png format
     save_mask()
         Saves binary mask into .npy format
     save_locs()
         Saves masked localizations
-    save_locs_multi()
-        Saves masked localizations for all loaded channels
+    _save_locs(channel, path_in, path_out)
+        Saves masked localizations from a single channel
     update_plots()
         Plots in all 4 axes
     """
@@ -3531,10 +3539,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         mask_grid.addWidget(self.mask_thresh, 2, 1, 1, 2)
 
         gridspec_dict = {
-            'bottom': 0.05, 
-            'top': 0.95, 
-            'left': 0.05, 
-            'right': 0.95,
+            'bottom': 0.05, 'top': 0.95, 'left': 0.05, 'right': 0.95,
         }
         (
             self.figure, 
@@ -3794,93 +3799,105 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         """ Saves masked localizations. """
 
         if self.save_all.isChecked(): # save all channels
-            self.save_locs_multi()
-        else:
-            out_path = self.paths[self.channel].replace(
+            suffix_in, ok1 = QtWidgets.QInputDialog.getText(
+                self, 
+                "", 
+                "Enter suffix for localizations inside the mask",
+                QtWidgets.QLineEdit.Normal,
+                "_mask_in",
+            )
+            if ok1:
+                suffix_out, ok2 = QtWidgets.QInputDialog.getText(
+                    self,
+                    "",
+                    "Enter suffix for localizations outside the mask",
+                    QtWidgets.QLineEdit.Normal,
+                    "_mask_out",
+                )
+                if ok2:
+                    for channel in range(len(self.index_locs)):
+                        path_in = self.paths[channel].replace(
+                            ".hdf5", f"{suffix_in}.hdf5"
+                        )
+                        path_out = self.paths[channel].replace(
+                            ".hdf5", f"{suffix_out}.hdf5"
+                        )
+                        self._save_locs(channel, path_in, path_out)
+                        
+        else: # save only the current channel
+            path_in = self.paths[self.channel].replace(
                 ".hdf5", "_mask_in.hdf5"
             )
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path_in, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, 
                 "Save localizations within mask", 
-                out_path, 
+                path_in, 
                 filter="*.hdf5",
             )
-            if path:
-                info = self.infos[self.channel] + [
-                    {
-                        "Generated by": "Picasso Render : Mask in ",
-                        "Display pixel size [nm]": self.disp_px_size.value(),
-                        "Blur": self.mask_blur.value(),
-                        "Threshold": self.mask_thresh.value(),
-                    }
-                ]
-                io.save_locs(path, self.index_locs[0], info)
+            if path_in:
+                path_out = self.paths[self.channel].replace(
+                    ".hdf5", "_mask_out.hdf5"
+                )
+                path_out, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    self,
+                    "Save localizations outside of mask",
+                    path_out,
+                    filter="*.hdf5",
+                )
+                if path_out:
+                    self._save_locs(self.channel, path_in, path_out)
+                    
+    def _save_locs(self, channel, path_in, path_out):
+        """
+        Saves masked localizations for a single channel.
 
-            out_path = self.paths[self.channel].replace(
-                ".hdf5", "_mask_out.hdf5"
-            )
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save localizations outside of mask",
-                out_path,
-                filter="*.hdf5",
-            )
-            if path:
-                info = self.infos[self.channel] + [
-                    {
-                        "Generated by": "Picasso Render : Mask out",
-                        "Display pixel size [nm]": self.disp_px_size.value(),
-                        "Blur": self.mask_blur.value(),
-                        "Threshold": self.mask_thresh.value(),
-                    }
-                ]
-                io.save_locs(path, self.index_locs_out[0], info)
+        Parameters
+        ----------
+        channel : int
+            Channel of localizations to be saved
+        path_in : str
+            Path to save localizations inside the mask
+        path_out : str
+            Path to save localizations outside the mask
+        """
 
-    def save_locs_multi(self):
-        """ Saves masked localizations for all loaded channels. """
+        info = self.get_info(channel, locs_in=True)
+        io.save_locs(path_in, self.index_locs[channel], info)
+        info = self.get_info(channel, locs_in=False)
+        io.save_locs(path_out, self.index_locs_out[channel], info)
 
-        suffix_in, ok1 = QtWidgets.QInputDialog.getText(
-            self, 
-            "", 
-            "Enter suffix for localizations inside the mask",
-            QtWidgets.QLineEdit.Normal,
-            "_mask_in",
-        )
-        if ok1:
-            suffix_out, ok2 = QtWidgets.QInputDialog.getText(
-                self,
-                "",
-                "Enter suffix for localizations outside the mask",
-                QtWidgets.QLineEdit.Normal,
-                "_mask_out",
-            )
-            if ok2:
-                for channel in range(len(self.index_locs)):
-                    out_path = self.paths[channel].replace(
-                        ".hdf5", f"{suffix_in}.hdf5"
-                    )
-                    info = self.infos[channel] + [
-                        {
-                            "Generated by": "Picasso Render : Mask in",
-                        "Display pixel size [nm]": self.disp_px_size.value(),
-                        "Blur": self.mask_blur.value(),
-                        "Threshold": self.mask_thresh.value(),
-                        }
-                    ]
-                    io.save_locs(out_path, self.index_locs[channel], info)
+    def get_info(self, channel, locs_in=True):
+        """
+        Returns metadata for masked localizations.
 
-                    out_path = self.paths[channel].replace(
-                        ".hdf5", f"{suffix_out}.hdf5"
-                    )
-                    info = self.infos[channel] + [
-                        {
-                            "Generated by": "Picasso Render : Mask out",
-                        "Display pixel size [nm]": self.disp_px_size.value(),
-                        "Blur": self.mask_blur.value(),
-                        "Threshold": self.mask_thresh.value(),
-                        }
-                    ]
-                    io.save_locs(out_path, self.index_locs_out[channel], info)
+        Parameters
+        ----------
+        channel : int
+            Channel of localizations to be saved
+        locs_in : bool (default=True)
+            True if localizations inside the mask are to be saved
+        
+        Returns
+        -------
+        info : list of dicts
+            Metadata for masked localizations
+        """
+
+        mask_in = "in" if locs_in else "out"
+        mask_pixelsize = self.disp_px_size.value()
+        area_in = float(np.sum(self.mask)) * (mask_pixelsize * 1e-3) ** 2
+        area_total = float(self.mask.size * (mask_pixelsize * 1e-3) ** 2)
+        area = area_in if locs_in else area_total - area_in
+        info = self.infos[channel] + [{
+            "Generated by": f"Picasso Render : Mask {mask_in}",
+            "Display pixel size (nm)": mask_pixelsize,
+            "Blur": self.mask_blur.value(),
+            "Threshold": self.mask_thresh.value(),
+            "Area (um^2)": area,
+            # "Area (um^2)": np.sum(self.mask) * self.x_max * self.y_max, #TODO: get the right formula
+        }]
+        return info
+
 
 class PickToolCircleSettings(QtWidgets.QWidget):
     """ A class contating information about circular pick. """
@@ -3933,7 +3950,7 @@ class PickToolRectangleSettings(QtWidgets.QWidget):
 
 
 class RESIDialog(QtWidgets.QDialog):
-    """ RESI dialog.
+    """RESI dialog.
 
     Allows for clustering multiple channels with user-defined
     clustering parameters using the SMLM clusterer; saves cluster 
@@ -4023,17 +4040,17 @@ class RESIDialog(QtWidgets.QDialog):
         params_grid.addWidget(QtWidgets.QLabel("RESI channel"), 2, 0)
         if self.ndim == 2:
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius\n[cam. pixel]"), 2, 1
+                QtWidgets.QLabel("Radius\n[nm]"), 2, 1
             )
             params_grid.addWidget(
                 QtWidgets.QLabel("Min # localizations"), 2, 2, 1, 2
             )
         else:
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius xy\n[cam. pixel]"), 2, 1
+                QtWidgets.QLabel("Radius xy\n[nm]"), 2, 1
             )
             params_grid.addWidget(
-                QtWidgets.QLabel("Radius z\n[cam. pixel]"), 2, 2
+                QtWidgets.QLabel("Radius z\n[nm]"), 2, 2
             )
             params_grid.addWidget(
                 QtWidgets.QLabel("Min # localizations"), 2, 3
@@ -4045,17 +4062,17 @@ class RESIDialog(QtWidgets.QDialog):
             count = params_grid.rowCount()
 
             r_xy = QtWidgets.QDoubleSpinBox()
-            r_xy.setRange(0.0001, 1e3)
-            r_xy.setDecimals(4)
-            r_xy.setValue(0.1)
-            r_xy.setSingleStep(0.01)
+            r_xy.setRange(0.01, 1e6)
+            r_xy.setDecimals(2)
+            r_xy.setValue(10)
+            r_xy.setSingleStep(0.1)
             self.radius_xy.append(r_xy)
 
             r_z = QtWidgets.QDoubleSpinBox()
-            r_z.setRange(0.0001, 1e3)
-            r_z.setDecimals(4)
-            r_z.setValue(0.25)
-            r_z.setSingleStep(0.01)
+            r_z.setRange(0.01, 1e6)
+            r_z.setDecimals(2)
+            r_z.setValue(25)
+            r_z.setSingleStep(0.1)
             self.radius_z.append(r_z)
 
             min_locs = QtWidgets.QSpinBox()
@@ -4129,13 +4146,14 @@ class RESIDialog(QtWidgets.QDialog):
             return
         
         ### Prepare data
-        # extract clustering parameters
-        r_xy = [_.value() for _ in self.radius_xy]
-        r_z = [_.value() for _ in self.radius_z]
-        min_locs = [_.value() for _ in self.min_locs]
-
         # get camera pixel size
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        
+        # extract clustering parameters
+        r_xy = [_.value() / pixelsize for _ in self.radius_xy]
+        r_z = [_.value() / pixelsize for _ in self.radius_z]
+        min_locs = [_.value() for _ in self.min_locs]
+
 
         # saving: path and info for the resi file, suffices for saving
         # clustered localizations and cluster centers if requested
@@ -4191,13 +4209,14 @@ class RESIDialog(QtWidgets.QDialog):
 
             resi_channels = [] # holds each channel's cluster centers
             for i, locs in enumerate(self.locs):
-                # cluster each channel using SMLM clusterer
-                if self.ndim == 3:
-                    params = [r_xy[i], r_z[i], min_locs[i], 0, apply_fa, 0]
-                else:
-                    params = [r_xy[i], min_locs[i], 0, apply_fa, 0]
-
-                clustered_locs = clusterer.cluster(locs, params, pixelsize)
+                clustered_locs = clusterer.cluster(
+                    locs, 
+                    radius_xy=r_xy[i], 
+                    min_locs=min_locs[i],
+                    frame_analysis=apply_fa,
+                    radius_z=r_z[i] if self.ndim == 3 else None,
+                    pixelsize=pixelsize,
+                )
 
                 # save clustered localizations if requested
                 if ok1:
@@ -5345,6 +5364,8 @@ class View(QtWidgets.QLabel):
         Renders sliced locs in the given viewport and draws picks etc
     dropEvent(event)
         Defines what happens when a file is dropped onto the window
+    export_grayscale(suffix)
+        Renders each channel in grayscale and saves the images.
     export_trace()
         Saves trace as a .csv
     filter_picks()
@@ -5458,6 +5479,8 @@ class View(QtWidgets.QLabel):
         Lets user to select picks based on their traces
     set_mode()
         Sets self._mode for QMouseEvents
+    set_optimal_scalebar()
+        Sets the optimal scalebar length based on the current viewport
     set_property()
         Activates rendering by property
     set_zoom(zoom)
@@ -5601,8 +5624,7 @@ class View(QtWidgets.QLabel):
         return locs.group.astype(int) % N_GROUP_COLORS
 
     def add(self, path, render=True):
-        """
-        Loads a .hdf5 localizations and the associated .yaml metadata 
+        """Loads a .hdf5 localizations and the associated .yaml metadata 
         files. 
 
         Parameters
@@ -5704,9 +5726,7 @@ class View(QtWidgets.QLabel):
         self.window.dataset_dialog.add_entry(path)
 
         self.window.setWindowTitle(
-            "Picasso v{}: Render. File: {}".format(
-                __version__, os.path.basename(path)
-            )
+            f"Picasso v{__version__}: Render. File: {os.path.basename(path)}"
         )
 
         # fast rendering add channel
@@ -6009,9 +6029,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("DBSCAN")
 
         # get DBSCAN parameters
-        params = DbscanDialog.getParams()
-        ok = params[-1] # true if parameters were given
-
+        params, ok = DbscanDialog.getParams()
         if ok:
             if channel == len(self.locs_paths): # apply to all channels
                 # get saving name suffix
@@ -6027,7 +6045,7 @@ class View(QtWidgets.QLabel):
                         path = self.locs_paths[channel].replace(
                             ".hdf5", f"{suffix}.hdf5"
                         )
-                        self._dbscan(channel, path, params)
+                        self._dbscan(channel, path, **params)
             else:
                 # get the path to save
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -6037,9 +6055,9 @@ class View(QtWidgets.QLabel):
                     filter="*.hdf5",
                 )
                 if path:
-                    self._dbscan(channel, path, params)
+                    self._dbscan(channel, path, **params)
 
-    def _dbscan(self, channel, path, params):
+    def _dbscan(self, channel, path, radius, min_density, save_centers):
         """
         Performs DBSCAN in a given channel with user-defined parameters
         and saves the result.
@@ -6050,11 +6068,14 @@ class View(QtWidgets.QLabel):
             Index of the channel were clustering is performed
         path : str
             Path to save clustered localizations
-        params : list
-            DBSCAN parameters
+        radius : float
+            Radius for DBSCAN clustering in nm
+        min_density : int
+            Minimum local density for DBSCAN clustering
+        save_centers : bool
+            Specifies if cluster centers should be saved
         """
 
-        radius, min_density, save_centers, _ = params
         status = lib.StatusDialog(
             "Applying DBSCAN. This may take a while.", self
         )
@@ -6083,7 +6104,6 @@ class View(QtWidgets.QLabel):
             "Radius (nm)": radius,
             "Minimum local density": min_density,
         }
-
         io.save_locs(path, locs, self.infos[channel] + [dbscan_info])
         status.close()
         if save_centers:
@@ -6101,9 +6121,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel_all_seq("HDBSCAN")
 
         # get HDBSCAN parameters
-        params = HdbscanDialog.getParams()
-        ok = params[-1] # true if parameters were given
-
+        params, ok = HdbscanDialog.getParams()
         if ok:
             if channel == len(self.locs_paths): # apply to all channels
                 # get saving name suffix
@@ -6119,7 +6137,7 @@ class View(QtWidgets.QLabel):
                         path = self.locs_paths[channel].replace(
                             ".hdf5", f"{suffix}.hdf5"
                         )
-                        self._hdbscan(channel, path, params)
+                        self._hdbscan(channel, path, **params)
             else:
                 # get the path to save
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -6132,9 +6150,17 @@ class View(QtWidgets.QLabel):
                     filter="*.hdf5",
                 )
                 if path:
-                    self._hdbscan(channel, path, params)
+                    self._hdbscan(channel, path, **params)
 
-    def _hdbscan(self, channel, path, params):
+    def _hdbscan(
+        self, 
+        channel, 
+        path, 
+        min_cluster,
+        min_samples,
+        cluster_eps,
+        save_centers,
+    ):
         """
         Performs HDBSCAN in a given channel with user-defined 
         parameters and saves the result.
@@ -6145,11 +6171,17 @@ class View(QtWidgets.QLabel):
             Index of the channel were clustering is performed
         path : str
             Path to save clustered localizations
-        params : list
-            HDBSCAN parameters
+        min_cluster : int
+            Minimum number of localizations in a cluster
+        min_samples : int
+            Number of localizations within radius to consider a given 
+            point a core sample
+        cluster_eps : float
+            Distance threshold. Clusters below this value will be merged
+        save_centers : bool
+            Specifies if cluster centers should be saved
         """
 
-        min_cluster, min_samples, cluster_eps, save_centers, _ = params
         status = lib.StatusDialog(
             "Applying HDBSCAN. This may take a while.", self
         )
@@ -6995,6 +7027,59 @@ class View(QtWidgets.QLabel):
                     y_max = max(Y) + 0.2 * (max(Y) - min(Y))
                 viewport = [(y_min, x_min), (y_max, x_max)] 
                 self.update_scene(viewport=viewport)
+
+    def export_grayscale(self, suffix):
+        """Exports grayscale rendering of the current viewport for each
+        channel separately."""
+
+        kwargs = self.get_render_kwargs()
+        for i, locs in enumerate(self.all_locs):
+            path = self.locs_paths[i].replace(".hdf5", f"{suffix}.png")
+            # render like in self.render_single_channel and 
+            # self.render_scene
+            _, image = render.render(locs, **kwargs, info=self.infos[i])
+            image = self.scale_contrast(image)
+            image = self.to_8bit(image)
+            cmap = np.uint8(
+                np.round(255 * plt.get_cmap("gray")(np.arange(256)))
+            )
+            Y, X = image.shape
+            bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
+            bgra[:, :, 0] = cmap[:, 2][image]
+            bgra[:, :, 1] = cmap[:, 1][image]
+            bgra[:, :, 2] = cmap[:, 0][image]
+            bgra[:, :, 3] = 255
+            qimage = QtGui.QImage(bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+            # modify qimage like in self.draw_scene
+            qimage = qimage.scaled(
+                self.width(), 
+                self.height(), 
+                QtCore.Qt.KeepAspectRatioByExpanding,
+            )
+            qimage = self.draw_scalebar(qimage)
+            qimage = self.draw_minimap(qimage)
+            qimage = self.draw_legend(qimage)
+            qimage = self.draw_picks(qimage)
+            qimage = self.draw_points(qimage)
+            # save image
+            qimage.save(path)
+
+            # save metadata
+            info = self.window.export_current_info(path=None)
+            info["Colormap"] = "gray"
+            io.save_info(path.replace(".png", ".yaml"), [info])
+
+            # save a copy with scale bar if not present
+            scalebar = self.window.display_settings_dlg.scalebar_groupbox.isChecked()
+            if not scalebar:
+                spath = path.replace(".png", "_scalebar.png")
+                self.window.display_settings_dlg.scalebar_groupbox.setChecked(True)
+                qimage_scale = self.draw_scalebar(qimage.copy())
+                qimage_scale.save(spath)
+                self.window.display_settings_dlg.scalebar_groupbox.setChecked(False)
+
+
+
 
     def get_channel(self, title="Choose a channel"):
         """ 
@@ -8998,7 +9083,7 @@ class View(QtWidgets.QLabel):
         """
         Renders single channel localizations. 
 
-        Calls render_multi_channel in case of clustered or picked locs,
+        Calls render_multi_channel in case of clustered, picked locs or
         rendering by property)
 
         Parameters
@@ -9113,6 +9198,10 @@ class View(QtWidgets.QLabel):
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
                 pick_info["Pick Diameter"] = d
+                # correct for the total area
+                pick_info["Total Picked Area (um^2)"] = (
+                    pick_info["Total Picked Area (um^2)"] * len(self._picks)
+                )
             elif self._pick_shape == "Rectangle":
                 w = self.window.tools_settings_dialog.pick_width.value()
                 pick_info["Pick Width"] = w
@@ -9540,6 +9629,27 @@ class View(QtWidgets.QLabel):
         current_zoom = self.display_pixels_per_viewport_pixels()
         self.zoom(current_zoom / zoom)
 
+    def set_optimal_scalebar(self):
+        """Sets scalebar to approx. 1/8 of the current viewport's 
+        width"""
+
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        width = self.viewport_width()
+        width_nm = width * pixelsize
+        optimal_scalebar = width_nm / 8
+        # approximate to the nearest thousands, hundreds, tens or ones
+        if optimal_scalebar > 10_000:
+            scalebar = 10_000
+        elif optimal_scalebar > 1_000:
+            scalebar = int(1_000 * round(optimal_scalebar / 1_000))
+        elif optimal_scalebar > 100:
+            scalebar = int(100 * round(optimal_scalebar / 100))
+        elif optimal_scalebar > 10:
+            scalebar = int(10 * round(optimal_scalebar / 10))
+        else:
+            scalebar = int(round(optimal_scalebar))
+        self.window.display_settings_dlg.scalebar.setValue(scalebar)
+
     def sizeHint(self):
         """ Returns recommended window size. """
 
@@ -9926,7 +10036,7 @@ class View(QtWidgets.QLabel):
             )
             if path:
                 drift = np.loadtxt(path, delimiter=' ')
-                if hasattr(self.locs[channel], "z"):
+                if drift.shape[1] == 3: # 3D drift
                     drift = (drift[:,0], drift[:,1], drift[:,2])
                     drift = np.rec.array(
                         drift, 
@@ -9950,7 +10060,7 @@ class View(QtWidgets.QLabel):
                     self.locs[channel].z -= drift.z[
                         self.locs[channel].frame
                     ]
-                else:
+                else: # 2D drift
                     drift = (drift[:,0], drift[:,1])
                     drift = np.rec.array(
                         drift, 
@@ -10309,6 +10419,8 @@ class View(QtWidgets.QLabel):
                 picks_only=picks_only,
             )
             self.update_cursor()
+            if not use_cache:
+                self.set_optimal_scalebar()
 
     def update_scene_slicer(
         self,
@@ -10328,7 +10440,7 @@ class View(QtWidgets.QLabel):
             True if optimally adjust contrast
         use_cache : boolean (default=False)
             True if use stored image
-        cache : boolena (default=True)
+        cache : boolean (default=True)
             True if save image
         """
 
@@ -10574,6 +10686,8 @@ class Window(QtWidgets.QMainWindow):
         Exports current view as .png or .tif
     export_current_info()
         Exports info about the current view in .yaml file
+    export_grayscale()
+        Exports each channel in grayscale.
     export_multi()
         Asks the user to choose a type of export
     export_fov_ims()
@@ -10714,6 +10828,10 @@ class Window(QtWidgets.QMainWindow):
         export_complete_action = file_menu.addAction("Export complete image")
         export_complete_action.setShortcut("Ctrl+Shift+E")
         export_complete_action.triggered.connect(self.export_complete)
+        export_grayscale_action = file_menu.addAction(
+            "Export channels in grayscale"
+        )
+        export_grayscale_action.triggered.connect(self.export_grayscale)
 
         file_menu.addSeparator()
         export_multi_action = file_menu.addAction("Export localizations")
@@ -11025,11 +11143,8 @@ class Window(QtWidgets.QMainWindow):
         ----------
         path : str
             Path for saving the original image with .png or .tif
-            extension
+            extension. If None, info is returned and is not saved.
         """
-
-        path, ext = os.path.splitext(path)
-        path = path + ".yaml"
 
         fov_info = [
             self.info_dialog.change_fov.x_box.value(),
@@ -11052,10 +11167,15 @@ class Window(QtWidgets.QMainWindow):
             "Colors": colors,
             "Min. blur (cam. px)": d.min_blur_width.value(),
         }
-        io.save_info(path, [info])
+        if path is not None:
+            path, ext = os.path.splitext(path)
+            path = path + ".yaml"        
+            io.save_info(path, [info])
+        else:
+            return info
 
     def export_complete(self):
-        """ Exports the whole field of view as .png or .tif. """
+        """Exports the whole field of view as .png or .tif. """
 
         try:
             base, ext = os.path.splitext(self.view.locs_paths[0])
@@ -11071,6 +11191,21 @@ class Window(QtWidgets.QMainWindow):
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage.save(path)
             self.export_current_info(path)
+
+    def export_grayscale(self):
+        """Exports each channel in grayscale."""
+
+        # get the suffix to save the screenshots
+
+        suffix, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Save each channel in grayscale",
+            "Enter suffix for the screenshots",
+            QtWidgets.QLineEdit.Normal,
+            "_grayscale",
+        )
+        if ok:
+            self.view.export_grayscale(suffix)            
 
     def export_txt(self):
         """ 

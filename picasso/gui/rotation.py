@@ -314,7 +314,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
     def render_scene(self, *args, **kwargs):
         """ Updates scene in the rotation window. """
 
-        self.window.view_rot.update_scene()
+        self.window.view_rot.update_scene(use_cache=True)
 
     def set_dynamic_disp_px(self, state):
         """ Updates scene if dynamic display pixel size is checked. """
@@ -762,6 +762,8 @@ class ViewRotation(QtWidgets.QLabel):
         Dialog
     set_mode(action)
         Sets self._mode for QMouseEvents
+    set_optimal_scalebar()
+        Sets the scalebar to approx. 1/8 of the current viewport's width
     shift_viewport(dx, dy)
         Moves viewport by dx and dy
     to_down_rot()
@@ -900,6 +902,7 @@ class ViewRotation(QtWidgets.QLabel):
         ang=None, 
         animation=False,
         autoscale=False,
+        use_cache=False,
     ):
         """
         Returns QImage with rendered localizations.
@@ -915,6 +918,8 @@ class ViewRotation(QtWidgets.QLabel):
             If True, scenes are rendered for building an animation
         autoscale : boolean
             If True, optimally adjust contrast
+        use_cache : boolean
+            If True, use cached image
 
         Returns
         -------
@@ -929,9 +934,13 @@ class ViewRotation(QtWidgets.QLabel):
         # render single or multi channel data
         n_channels = len(self.locs)
         if n_channels == 1:
-            self.render_single_channel(kwargs, ang=ang, autoscale=autoscale)
+            self.render_single_channel(
+                kwargs, ang=ang, autoscale=autoscale, use_cache=use_cache
+            )
         else:
-            self.render_multi_channel(kwargs, ang=ang, autoscale=autoscale)
+            self.render_multi_channel(
+                kwargs, ang=ang, autoscale=autoscale, use_cache=use_cache
+            )
         # add alpha channel (no transparency)
         self._bgra[:, :, 3].fill(255)
         # build QImage
@@ -947,6 +956,7 @@ class ViewRotation(QtWidgets.QLabel):
         locs=None, 
         ang=None, 
         autoscale=False,
+        use_cache=False,
     ):
         """
         Renders and paints multichannel localizations. 
@@ -965,6 +975,8 @@ class ViewRotation(QtWidgets.QLabel):
             angles 
         autoscale : boolean
             If True, optimally adjust contrast
+        use_cache : boolean
+            If True, use cached image
 
         Returns
         -------
@@ -980,24 +992,28 @@ class ViewRotation(QtWidgets.QLabel):
         n_channels = len(locs)
         colors = get_colors(n_channels) # automatic colors
 
-        if ang is None: # no build animation
-            renderings = [
-                render.render(
-                    _, **kwargs, 
-                    ang=(self.angx, self.angy, self.angz), 
-                ) for _ in locs
-            ]
-        else: # build animation
-            renderings = [
-                render.render(
-                    _, **kwargs, 
-                    ang=ang, 
-                ) for _ in locs
-            ]
-        n_locs = sum([_[0] for _ in renderings])
-        image = np.array([_[1] for _ in renderings])
-        self.n_locs = n_locs
-        self.image = image
+        if use_cache:
+            n_locs = self.n_locs
+            image = self.image
+        else:
+            if ang is None: # no build animation
+                renderings = [
+                    render.render(
+                        _, **kwargs, 
+                        ang=(self.angx, self.angy, self.angz), 
+                    ) for _ in locs
+                ]
+            else: # build animation
+                renderings = [
+                    render.render(
+                        _, **kwargs, 
+                        ang=ang, 
+                    ) for _ in locs
+                ]
+            n_locs = sum([_[0] for _ in renderings])
+            image = np.array([_[1] for _ in renderings])
+            self.n_locs = n_locs
+            self.image = image
 
         # adjust contrast
         image = self.scale_contrast(image, autoscale=autoscale)
@@ -1063,7 +1079,9 @@ class ViewRotation(QtWidgets.QLabel):
         self._bgra = self.to_8bit(bgra) # convert to 8 bit 
         return self._bgra
 
-    def render_single_channel(self, kwargs, ang=None, autoscale=False):
+    def render_single_channel(
+        self, kwargs, ang=None, autoscale=False, use_cache=False
+    ):
         """
         Renders single channel localizations. 
 
@@ -1078,7 +1096,9 @@ class ViewRotation(QtWidgets.QLabel):
             Rotation angles to be rendered. If None, takes the current
             angles 
         autoscale : boolean (default=False)
-            True if optimally adjust contrast    
+            True if optimally adjust contrast  
+        use_cache : boolean (default=False)
+            True if the rendered scene should be taken from cache    
 
         Returns
         -------
@@ -1098,22 +1118,26 @@ class ViewRotation(QtWidgets.QLabel):
                 kwargs, locs=locs, ang=ang, autoscale=autoscale
             )
 
-        if ang is None: # if not build animation
-            n_locs, image = render.render(
-                locs, 
-                **kwargs, 
-                info=self.infos[0], 
-                ang=(self.angx, self.angy, self.angz), 
-            )
-        else: # if build animation
-            n_locs, image = render.render(
-                locs, 
-                **kwargs, 
-                info=self.infos[0], 
-                ang=ang, 
-            )
-        self.n_locs = n_locs
-        self.image = image
+        if use_cache:
+            n_locs = self.n_locs
+            image = self.image
+        else:
+            if ang is None: # if not build animation
+                n_locs, image = render.render(
+                    locs, 
+                    **kwargs, 
+                    info=self.infos[0], 
+                    ang=(self.angx, self.angy, self.angz), 
+                )
+            else: # if build animation
+                n_locs, image = render.render(
+                    locs, 
+                    **kwargs, 
+                    info=self.infos[0], 
+                    ang=ang, 
+                )
+            self.n_locs = n_locs
+            self.image = image
 
         # adjust contrast and convert to 8 bits
         image = self.scale_contrast(image, autoscale=autoscale)
@@ -1132,7 +1156,7 @@ class ViewRotation(QtWidgets.QLabel):
         self._bgra[..., 2] = cmap[:, 0][image]
         return self._bgra
 
-    def update_scene(self, viewport=None, autoscale=False):
+    def update_scene(self, viewport=None, autoscale=False, use_cache=False):
         """
         Updates the view of rendered locs.
 
@@ -1142,12 +1166,16 @@ class ViewRotation(QtWidgets.QLabel):
             Viewport to be rendered. If None self.viewport is taken
         autoscale : boolean (default=False)
             True if optimally adjust contrast
+        use_cache : boolean (default=False)
+            True if the rendered scene should be taken from cache
         """
 
         n_channels = len(self.locs)
         if n_channels:
             viewport = viewport or self.viewport
-            self.draw_scene(viewport, autoscale=autoscale)
+            self.draw_scene(viewport, autoscale=autoscale, use_cache=use_cache)
+            if not use_cache:
+                self.set_optimal_scalebar()
 
         # update current position in the animation dialog
         angx = np.round(self.angx * 180 / np.pi, 1)
@@ -1157,7 +1185,7 @@ class ViewRotation(QtWidgets.QLabel):
             "{}, {}, {}".format(angx, angy, angz)
         )
 
-    def draw_scene(self, viewport, autoscale=False):
+    def draw_scene(self, viewport, autoscale=False, use_cache=False):
         """
         Renders localizations in the given viewport and draws legend,
         rotation, etc.
@@ -1168,12 +1196,14 @@ class ViewRotation(QtWidgets.QLabel):
             Viewport defining the rendered FOV
         autoscale : boolean (default=False)
             True if contrast should be optimally adjusted
+        use_cache : boolean (default=False)
+            True if the rendered scene should be taken from cache
         """
 
         # make sure viewport has the same shape as the main window
         self.viewport = self.adjust_viewport_to_view(viewport)
         # render locs
-        qimage = self.render_scene(autoscale=autoscale)
+        qimage = self.render_scene(autoscale=autoscale, use_cache=use_cache)
         # scale image's size to the window
         self.qimage = qimage.scaled(
             self.width(),
@@ -1592,6 +1622,26 @@ class ViewRotation(QtWidgets.QLabel):
         self.window.move_pick(0, dy)
         self.shift_viewport(0, dy)
 
+    def set_optimal_scalebar(self):
+        """Sets scalebar to approx. 1/8 of the current viewport's 
+        width"""
+
+        width = self.viewport_width()
+        width_nm = width * self.pixelsize
+        optimal_scalebar = width_nm / 8
+        # approximate to the nearest thousands, hundreds, tens or ones
+        if optimal_scalebar > 10_000:
+            scalebar = 10_000
+        elif optimal_scalebar > 1_000:
+            scalebar = int(1_000 * round(optimal_scalebar / 1_000))
+        elif optimal_scalebar > 100:
+            scalebar = int(100 * round(optimal_scalebar / 100))
+        elif optimal_scalebar > 10:
+            scalebar = int(10 * round(optimal_scalebar / 10))
+        else:
+            scalebar = int(round(optimal_scalebar))
+        self.window.display_settings_dlg.scalebar.setValue(scalebar)
+
     def shift_viewport(self, dx, dy):
         """ 
         Moves viewport by a given amount.
@@ -1819,6 +1869,46 @@ class ViewRotation(QtWidgets.QLabel):
         )
         if path:
             self.qimage.save(path)
+            self.export_current_view_info(path)
+            scalebar = self.window.display_settings_dlg.scalebar_groupbox.isChecked()
+            if not scalebar:
+                self.window.display_settings_dlg.scalebar_groupbox.setChecked(True)
+                self.update_scene()
+                self.qimage.save(path.replace(".png", "_scalebar.png"))
+                self.window.display_settings_dlg.scalebar_groupbox.setChecked(False)
+                self.update_scene()
+    
+    def export_current_view_info(self, path):
+        """ Exports current view's information. """
+
+        (y_min, x_min), (y_max, x_max) = self.viewport
+        fov = [x_min, y_min, x_max - x_min, y_max - y_min]
+        d = self.window.display_settings_dlg
+        colors = [
+            _.currentText() for _ in self.window.dataset_dialog.colorselection
+        ]
+        rot_angles = [
+            int(self.angx * 180 / np.pi),
+            int(self.angy * 180 / np.pi),
+            int(self.angz * 180 / np.pi),
+        ]
+        info = {
+            "Rotation angles (deg)": rot_angles,
+            "FOV (X, Y, Width, Height)": fov,
+            "Display pixel size (nm)": d.disp_px_size.value(),
+            "Min. density": d.minimum.value(),
+            "Max. density": d.maximum.value(),
+            "Colormap": d.colormap.currentText(),
+            "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
+            "Scalebar length (nm)": d.scalebar.value(),
+            "Min. blur (cam. px)": d.min_blur_width.value(),
+            "Localizations loaded": self.paths,
+            "Colors": colors,
+        }
+        path, ext = os.path.splitext(path)
+        path = path + ".yaml"
+        io.save_info(path, [info])
+
 
     def zoom_in(self):
         """ Zooms in by a constant factor. """

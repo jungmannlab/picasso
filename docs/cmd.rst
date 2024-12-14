@@ -78,6 +78,10 @@ undrift
 -------
 Correct localization coordinates for drift with RCC.
 
+aim
+-------
+Correct localization coordinates for drift with AIM.
+
 density
 -------
 Compute the local density of localizations
