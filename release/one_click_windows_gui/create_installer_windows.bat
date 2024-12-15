@@ -5,7 +5,7 @@ call RMDIR /Q/S dist
 
 call cd %~dp0\..\..
 
-call conda create -n picasso_installer python=3.10 -y
+call conda create -n picasso_installer python=3.10.15 -y
 call conda activate picasso_installer
 
 call python setup.py sdist bdist_wheel
