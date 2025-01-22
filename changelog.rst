@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 14-DEC-2024 MTS
+Last change: 20-JAN-2025 MTS
+
+0.7.5
+-----
+- Plugin docs update
 
 0.7.1 - 0.7.4
 -------------
