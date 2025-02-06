@@ -628,7 +628,8 @@ def aim(
         Radius of the local search region in camera pixels. Should be 
         larger than the  maximum expected drift within segmentation.
     progress : picasso.lib.ProgressDialog (default=None)
-        Progress dialog. If None, progress is displayed with tqdm.
+        Progress dialog. If None, progress is displayed with into the 
+        console.
     
     Returns
     -------
@@ -651,14 +652,18 @@ def aim(
         if val := inf.get("Height"):
             height = val
         if val := inf.get('Frames'):
-            n_frames = val
+            n_frames = val - locs["frame"].min()
         if val := inf.get("Pixelsize"):
             pixelsize = val
     if _np.isnan(width * height * pixelsize * n_frames):
-        raise KeyError("Insufficient metadata available.")
+        raise KeyError(
+            "Insufficient metadata available. Please specify 'Width', 'Height',"
+            " 'Frames' and 'Pixelsize' in the metadata .yaml."
+        )
 
     # frames should start at 1 
-    frame = locs["frame"] + 1
+    frame = locs["frame"] + 1 - locs["frame"].min()
+
     # find the segmentation bounds (temporal intervals)
     seg_bounds = _np.concatenate((
         _np.arange(0, n_frames, segmentation), [n_frames]
