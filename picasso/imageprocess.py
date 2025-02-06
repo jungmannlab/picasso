@@ -13,7 +13,8 @@ from numpy import fft as _fft
 import lmfit as _lmfit
 from tqdm import tqdm as _tqdm
 from . import lib as _lib
-
+from . import render as _render
+from . import localize as _localize
 
 _plt.style.use("ggplot")
 
@@ -132,3 +133,54 @@ def rcc(segments, max_shift=None, callback=None):
                 callback(flag)
         
     return _lib.minimize_shifts(shifts_x, shifts_y)
+
+
+def find_fiducials(locs, info):
+    """Finds the xy coordinates of regions with high density of 
+    localizations, likely originating from fiducial markers. 
+
+    Uses picasso.localize.identify_in_image with threshold set to 99th
+    percentile of the image histogram. The image is rendered using 
+    one-pixel-blur, see picasso.render.render.
+
+    
+    Parameters
+    ----------
+    locs : np.recarray
+        Localizations.
+    info : list of dicts
+        Localizations' metadata (from the corresponding .yaml file).
+        
+    Returns
+    -------
+    picks : list of (2,) tuples
+        Coordinates of fiducial markers. Each list element corresponds 
+        to (x, y) coordinates of one fiducial marker.
+    box : int
+        Size of the box used for the fiducial marker identification.
+        Can be set as the pick diameter in pixels for undrifting.
+    """
+
+    image = _render.render(
+        locs=locs,
+        info=info,
+        oversampling=1,
+        viewport=None,
+        blur_method="smooth",        
+    )[1]
+    hist = _np.histogram(image.flatten(), bins=256)
+    threshold = _np.percentile(hist[0], 99)
+    # box size should be an odd number, corresponding to approximately
+    # 900 nm 
+    pixelsize = 130
+    for inf in info:
+        if val := inf.get("Pixelsize"):
+            pixelsize = val
+            break
+    box = int(_np.round(900 / pixelsize))
+    box = box + 1 if box % 2 == 0 else box
+
+    # find the local maxima and translate to pick coordinates
+    y, x, _ = _localize.identify_in_image(image, threshold, box=box)
+    picks = [(xi, yi) for xi, yi in zip(x, y)]
+    return picks, box

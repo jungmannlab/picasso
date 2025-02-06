@@ -5452,6 +5452,8 @@ class View(QtWidgets.QLabel):
         Moves viewport by a given relative distance
     pick_areas()
         Finds the areas of all current picks in um^2.
+    pick_fiducials()
+        Finds the circular picks centered around the fiducials
     pick_message_box(params)
         Returns a message box for selecting picks
     pick_similar()
@@ -8717,6 +8719,34 @@ class View(QtWidgets.QLabel):
         areas *= (pixelsize * 1e-3) ** 2 # convert to um^2
         return areas
 
+    def pick_fiducials(self):
+        """Finds the circular picks centered around the fiducials."""
+
+        channel = self.get_channel("Pick fiducials")
+        if channel is None:
+            return
+        
+        if self._pick_shape != "Circle":
+            message = "Please select circular pick before picking fiducials."
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
+        if len(self._picks):
+            message = "Please remove all picks before picking fiducials."
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
+        
+        locs = self.all_locs[channel]
+        info = self.infos[channel]
+        picks, box = imageprocess.find_fiducials(locs, info)
+
+        if len(picks) == 0:
+            message = "No fiducials found, manual picking is required."
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
+        
+        self.window.tools_settings_dialog.pick_diameter.setValue(box)
+        self.add_picks(picks)
+
     @check_picks
     def pick_similar(self):
         """
@@ -11087,6 +11117,9 @@ class Window(QtWidgets.QMainWindow):
 
         move_to_pick_action = tools_menu.addAction("Move to pick")
         move_to_pick_action.triggered.connect(self.view.move_to_pick)
+
+        pick_fiducials_action = tools_menu.addAction("Pick fiducials")
+        pick_fiducials_action.triggered.connect(self.view.pick_fiducials)
 
         tools_menu.addSeparator()
         show_trace_action = tools_menu.addAction("Show trace")
