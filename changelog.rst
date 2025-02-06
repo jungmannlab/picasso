@@ -6,7 +6,9 @@ Last change: 20-JAN-2025 MTS
 0.7.5
 -----
 - Plugin docs update
-- Bug fixes
+- Filter histogram display fixed for datasets with low variance (bug fix)
+- AIM undrifting works now if the first frames of localizations are filtered out (bug fix)
+- Other minor bug fixes
 
 0.7.1 - 0.7.4
 -------------
