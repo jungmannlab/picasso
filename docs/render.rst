@@ -302,6 +302,10 @@ Move to pick
 ^^^^^^^^^^^^
 Changes FoV to display a pick region specified by the user.
 
+Pick fiducials
+^^^^^^^^^^^^^^
+Automatically picks fiducials. To do so, the whole FOV image is rendered at one-pixel-blur. Then, such image pixel intesities are histogramed and the 99th is used as a threshold for selecting image maxima using Localize's identification.
+
 Show trace (CTRL + R)
 ^^^^^^^^^^^^^^^^^^^^^
 Shows the time trace of the currently selected pick(s).
