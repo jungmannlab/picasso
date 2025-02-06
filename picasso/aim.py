@@ -652,7 +652,7 @@ def aim(
         if val := inf.get("Height"):
             height = val
         if val := inf.get('Frames'):
-            n_frames = val
+            n_frames = val - locs["frame"].min()
         if val := inf.get("Pixelsize"):
             pixelsize = val
     if _np.isnan(width * height * pixelsize * n_frames):
@@ -662,7 +662,8 @@ def aim(
         )
 
     # frames should start at 1 
-    frame = locs["frame"] + 1
+    frame = locs["frame"] + 1 - locs["frame"].min()
+
     # find the segmentation bounds (temporal intervals)
     seg_bounds = _np.concatenate((
         _np.arange(0, n_frames, segmentation), [n_frames]
