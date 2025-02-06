@@ -5785,7 +5785,7 @@ class View(QtWidgets.QLabel):
         if update_scene:
             self.update_scene()
 
-    def add_polygon_point(self, point_movie, point_screen, update_scene=True):
+    def add_polygon_point(self, point_movie, point_screen):
         """Adds a new point to the polygon or closes the current 
         polygon."""
 
@@ -5796,6 +5796,9 @@ class View(QtWidgets.QLabel):
             # to be added
             if len(self._picks[-1]) < 3: # cannot close polygon yet
                 self._picks[-1].append(point_movie)
+            # if the last polygon has been closed, start a new pick
+            elif self._picks[-1][0] == self._picks[-1][-1]:
+                self._picks.append([point_movie])
             else:
                 # check the distance between the current point and the 
                 # starting point of the currently drawn polygon
@@ -5807,8 +5810,7 @@ class View(QtWidgets.QLabel):
                 # close the polygon
                 if distance2 < POLYGON_POINTER_SIZE ** 2: 
                     self._picks[-1].append(self._picks[-1][0])
-                    self._picks.append([])
-                else: # add a new point
+                else: # add a new point to the existing pick
                     self._picks[-1].append(point_movie)
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
@@ -9205,6 +9207,12 @@ class View(QtWidgets.QLabel):
             elif self._pick_shape == "Rectangle":
                 w = self.window.tools_settings_dialog.pick_width.value()
                 pick_info["Pick Width"] = w
+            # if polygon pick and the last not closed, ignore the last pick
+            elif (
+                self._pick_shape == "Polygon" 
+                and self._picks[-1][0] != self._picks[-1][-1]
+            ):
+                pick_info["Number of picks"] -= 1
             io.save_locs(path, locs, self.infos[channel] + [pick_info])
 
     def save_picked_locs_multi(self, path):

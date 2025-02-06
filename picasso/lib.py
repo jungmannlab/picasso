@@ -629,14 +629,14 @@ def pick_areas_polygon(picks):
         Pick areas.
     """
 
-    areas = _np.zeros(len(picks))
+    areas = []
     for i, pick in enumerate(picks):
         if len(pick) < 3 or pick[0] != pick[-1]: # not a closed polygon
-            areas[i] = 0
             continue
         X, Y = get_pick_polygon_corners(pick)
-        areas[i] = polygon_area(X, Y)
-    areas = areas[areas > 0] # remove open polygons
+        areas.append(polygon_area(X, Y))
+    areas = _np.array(areas)
+    areas = areas[areas > 0] # remove open polygons #TODO: delete this line?
     return areas
 
 
