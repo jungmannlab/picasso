@@ -1227,6 +1227,8 @@ def undrift(
     segmentation_callback=None,
     rcc_callback=None,
 ):
+    """Undrift by RCC. """
+
     bounds, segments = segment(
         locs,
         info,
@@ -1284,6 +1286,79 @@ def undrift(
     locs.x -= drift.x[locs.frame]
     locs.y -= drift.y[locs.frame]
     return drift, locs
+
+
+def undrift_from_picked(picked_locs, info):
+    """Finds drift from picked localizations. Note that unlike other 
+    undrifting functions, this function does not return undrifted 
+    localizations but only drift."""
+
+    drift_x = _undrift_from_picked_coordinate(picked_locs, info, "x") 
+    drift_y = _undrift_from_picked_coordinate(picked_locs, info, "y") 
+
+    # A rec array to store the applied drift
+    drift = (drift_x, drift_y)
+    drift = _np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
+
+    # If z coordinate exists, also apply drift there
+    if all([hasattr(_, "z") for _ in picked_locs]):
+        drift_z = _undrift_from_picked_coordinate(picked_locs, info, "z")
+        drift = _lib.append_to_rec(drift, drift_z, "z")
+    return drift
+
+
+def _undrift_from_picked_coordinate(picked_locs, info, coordinate):
+        """Calculates drift in a given coordinate.
+
+        Parameters
+        ----------
+        picked_locs : list
+            List of np.recarrays with locs for each pick.
+        info : list of dicts
+            Localizations' metadeta.
+        coordinate : {"x", "y", "z"}
+            Spatial coordinate where drift is to be found.
+
+        Returns
+        -------
+        drift_mean : np.array
+            Average drift across picks for all frames
+        """
+
+        n_picks = len(picked_locs)
+        n_frames = info[0]["Frames"]
+
+        # Drift per pick per frame
+        drift = _np.empty((n_picks, n_frames))
+        drift.fill(_np.nan)
+
+        # Remove center of mass offset
+        for i, locs in enumerate(picked_locs):
+            coordinates = getattr(locs, coordinate)
+            drift[i, locs.frame] = coordinates - _np.mean(coordinates)
+
+        # Mean drift over picks
+        drift_mean = _np.nanmean(drift, 0)
+        # Square deviation of each pick's drift to mean drift along frames
+        sd = (drift - drift_mean) ** 2
+        # Mean of square deviation for each pick
+        msd = _np.nanmean(sd, 1)
+        # New mean drift over picks
+        # where each pick is weighted according to its msd
+        nan_mask = _np.isnan(drift)
+        drift = _np.ma.MaskedArray(drift, mask=nan_mask)
+        drift_mean = _np.ma.average(drift, axis=0, weights=1/msd)
+        drift_mean = drift_mean.filled(_np.nan)
+
+        # Linear interpolation for frames without localizations
+        def nan_helper(y):
+            return _np.isnan(y), lambda z: z.nonzero()[0]
+
+        nans, nonzero = nan_helper(drift_mean)
+        drift_mean[nans] = _np.interp(
+            nonzero(nans), nonzero(~nans), drift_mean[~nans]
+        )
+        return drift_mean
 
 
 def align(locs, infos, display=False):

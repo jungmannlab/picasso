@@ -5532,8 +5532,6 @@ class View(QtWidgets.QLabel):
         Undrifts with AIM.
     undrift_from_picked()
         Undrifts from picked localizations.
-    _undrift_from_picked_coordinate()
-        Calculates drift in a given coordinate
     undrift_from_picked2d()
         Undrifts x and y coordinates from picked localizations.
     undrift_rcc()
@@ -9867,31 +9865,19 @@ class View(QtWidgets.QLabel):
             picked_locs = self.picked_locs(channel)
             status = lib.StatusDialog("Calculating drift...", self)
 
-            drift_x = self._undrift_from_picked_coordinate(
-                channel, picked_locs, "x"
-            ) # find drift in x
-            drift_y = self._undrift_from_picked_coordinate(
-                channel, picked_locs, "y"
-            ) # find drift in y
+            drift = postprocess.undrift_from_picked(
+                picked_locs, self.infos[channel]
+            )
 
             # Apply drift
-            self.all_locs[channel].x -= drift_x[self.all_locs[channel].frame]
-            self.all_locs[channel].y -= drift_y[self.all_locs[channel].frame]
-            self.locs[channel].x -= drift_x[self.locs[channel].frame]
-            self.locs[channel].y -= drift_y[self.locs[channel].frame]
-
-            # A rec array to store the applied drift
-            drift = (drift_x, drift_y)
-            drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
-
+            self.all_locs[channel].x -= drift["x"][self.all_locs[channel].frame]
+            self.all_locs[channel].y -= drift["y"][self.all_locs[channel].frame]
+            self.locs[channel].x -= drift["x"][self.locs[channel].frame]
+            self.locs[channel].y -= drift["y"][self.locs[channel].frame]
             # If z coordinate exists, also apply drift there
             if all([hasattr(_, "z") for _ in picked_locs]):
-                drift_z = self._undrift_from_picked_coordinate(
-                    channel, picked_locs, "z"
-                )
-                self.all_locs[channel].z -= drift_z[self.all_locs[channel].frame]
-                self.locs[channel].z -= drift_z[self.locs[channel].frame]
-                drift = lib.append_to_rec(drift, drift_z, "z")
+                self.all_locs[channel].z -= drift["z"][self.all_locs[channel].frame]
+                self.locs[channel].z -= drift["z"][self.locs[channel].frame]
 
             # Cleanup
             self.index_blocks[channel] = None
@@ -9909,85 +9895,21 @@ class View(QtWidgets.QLabel):
             picked_locs = self.picked_locs(channel)
             status = lib.StatusDialog("Calculating drift...", self)
 
-            drift_x = self._undrift_from_picked_coordinate(
-                channel, picked_locs, "x"
-            )
-            drift_y = self._undrift_from_picked_coordinate(
-                channel, picked_locs, "y"
+            drift = postprocess.undrift_from_picked(
+                picked_locs, self.infos[channel]
             )
 
-            # Apply drift
-            self.all_locs[channel].x -= drift_x[self.all_locs[channel].frame]
-            self.all_locs[channel].y -= drift_y[self.all_locs[channel].frame]
-            self.locs[channel].x -= drift_x[self.locs[channel].frame]
-            self.locs[channel].y -= drift_y[self.locs[channel].frame]
-
-            # A rec array to store the applied drift
-            drift = (drift_x, drift_y)
-            drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
+            # Apply drift, ignore z coordinates
+            self.all_locs[channel].x -= drift["x"][self.all_locs[channel].frame]
+            self.all_locs[channel].y -= drift["y"][self.all_locs[channel].frame]
+            self.locs[channel].x -= drift["x"][self.locs[channel].frame]
+            self.locs[channel].y -= drift["y"][self.locs[channel].frame]
 
             # Cleanup
             self.index_blocks[channel] = None
             self.add_drift(channel, drift)
             status.close()
             self.update_scene()
-    
-    def _undrift_from_picked_coordinate(
-        self, channel, picked_locs, coordinate
-    ):
-        """
-        Calculates drift in a given coordinate.
-
-        Parameters
-        ----------
-        channel : int
-            Channel where locs are being undrifted
-        picked_locs : list
-            List of np.recarrays with locs for each pick
-        coordinate : str
-            Spatial coordinate where drift is to be found
-
-        Returns
-        -------
-        np.array
-            Contains average drift across picks for all frames
-        """
-
-        n_picks = len(picked_locs)
-        n_frames = self.infos[channel][0]["Frames"]
-
-        # Drift per pick per frame
-        drift = np.empty((n_picks, n_frames))
-        drift.fill(np.nan)
-
-        # Remove center of mass offset
-        for i, locs in enumerate(picked_locs):
-            coordinates = getattr(locs, coordinate)
-            drift[i, locs.frame] = coordinates - np.mean(coordinates)
-
-        # Mean drift over picks
-        drift_mean = np.nanmean(drift, 0)
-        # Square deviation of each pick's drift to mean drift along frames
-        sd = (drift - drift_mean) ** 2
-        # Mean of square deviation for each pick
-        msd = np.nanmean(sd, 1)
-        # New mean drift over picks
-        # where each pick is weighted according to its msd
-        nan_mask = np.isnan(drift)
-        drift = np.ma.MaskedArray(drift, mask=nan_mask)
-        drift_mean = np.ma.average(drift, axis=0, weights=1/msd)
-        drift_mean = drift_mean.filled(np.nan)
-
-        # Linear interpolation for frames without localizations
-        def nan_helper(y):
-            return np.isnan(y), lambda z: z.nonzero()[0]
-
-        nans, nonzero = nan_helper(drift_mean)
-        drift_mean[nans] = np.interp(
-            nonzero(nans), nonzero(~nans), drift_mean[~nans]
-        )
-
-        return drift_mean
 
     def undo_drift(self):
         """ Gets channel for undoing drift. """
