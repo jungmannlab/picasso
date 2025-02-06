@@ -5,6 +5,7 @@ Last change: 06-FEB-2025 MTS
 
 0.7.5
 -----
+- Automatic picking of fiducials added in Render: ``Tools/Pick fiducials``
 - Plugin docs update
 - Filter histogram display fixed for datasets with low variance (bug fix)
 - AIM undrifting works now if the first frames of localizations are filtered out (bug fix)
