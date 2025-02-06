@@ -135,10 +135,12 @@ If you use picasso in your research, please cite our Nature Protocols publicatio
 |
 | If you use some of the functionalities provided by Picasso, please also cite the respective publications:
 
-- Nearest Neighbor based Analysis (NeNA) for experimental localization precision. DOI: `https://doi.org/10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
-- Theoretical localization precision (Gauss LQ and MLE). DOI: `https://doi.org/10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
-- MLE fitting. DOI: `https://doi.org/10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
+- Nearest Neighbor based Analysis (NeNA) for experimental localization precision. DOI: `10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
+- Theoretical localization precision (Gauss LQ and MLE). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
+- MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
 - AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
+- DBSCAN: Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
+- HDBSCAN. DOI: `10.1007/978-3-642-37456-2_14 <https://doi.org/10.1007/978-3-642-37456-2_14>`__
 
 Credits
 -------

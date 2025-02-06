@@ -61,6 +61,8 @@ The 3D rotation window allows the user to render 3D localization data. To use it
 
 The user may perform multiple actions in the rotation window, including: saving rotated localizations, building animations (.mp4 format), rotating by a specified angle, etc.
 
+Note that to build animations, the user must have ``ffmpeg`` installed on their system. 
+
 Rotation around z-axis is available by pressing Ctrl/Command. Rotation axis can be frozen by pressing x/y/z to freeze around the corresponding axes (to freeze around the z-axis, Ctrl/Command must be pressed as well).
 
 There are several things to keep in mind when using the rotation window. Firstly, using individual localization precision is very slow and is not recommended as a default blur method. Also, the size of the rotation window can be altered, however, if it becomes too large, rendering may start to lag.
