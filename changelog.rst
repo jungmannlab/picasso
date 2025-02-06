@@ -1,13 +1,14 @@
 Changelog
 =========
 
-Last change: 20-JAN-2025 MTS
+Last change: 06-FEB-2025 MTS
 
 0.7.5
 -----
 - Plugin docs update
 - Filter histogram display fixed for datasets with low variance (bug fix)
 - AIM undrifting works now if the first frames of localizations are filtered out (bug fix)
+- 2D drift plot in Render inverts y axis to match the rendered localizations
 - Other minor bug fixes
 
 0.7.1 - 0.7.4
