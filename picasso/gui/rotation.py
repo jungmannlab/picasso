@@ -16,8 +16,7 @@ from functools import partial
 
 import numpy as np
 import matplotlib.pyplot as plt
-# from moviepy.video.io.ImageSequenceClip import ImageSequenceClip
-import imageio
+import imageio.v2 as imageio
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from numpy.lib.recfunctions import stack_arrays
@@ -612,6 +611,7 @@ class AnimationDialog(QtWidgets.QDialog):
                 height += 1
 
             # render all frames and save in RAM
+            # video_writer = imageio.get_writer(name, fps=self.fps.value(),codec='libx264', format='FFMPEG')
             video_writer = imageio.get_writer(name, fps=self.fps.value())
             progress = lib.ProgressDialog(
                 "Rendering frames", 0, len(angx), self.window
