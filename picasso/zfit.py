@@ -23,11 +23,11 @@ def interpolate_nan(data):
     return data
 
 
-def calibrate_z(locs, info, d, magnification_factor, path=None):
+def calibrate_z(locs, info, min_net_gradient, step, magnification_factor, path=None):
     n_frames = info[0]["Frames"]
-    range = (n_frames - 1) * d
+    range = (n_frames - 1) * step
     frame_range = _np.arange(n_frames)
-    z_range = -(frame_range * d - range / 2)  # negative so that the first frames of
+    z_range = -(frame_range * step - range / 2)  # negative so that the first frames of
     # a bottom-to-up scan are positive z coordinates.
 
     mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
@@ -52,21 +52,25 @@ def calibrate_z(locs, info, d, magnification_factor, path=None):
     cy = _np.polyfit(z_range, mean_sy, 6, full=False)
 
     # Fits calibration curve to each localization
-    # true_z = locs.frame * d - range / 2
+    # true_z = locs.frame * step - range / 2
     # cx = _np.polyfit(true_z, locs.sx, 6, full=False)
     # cy = _np.polyfit(true_z, locs.sy, 6, full=False)
 
     calibration = {
-        "X Coefficients": [float(_) for _ in cx],
-        "Y Coefficients": [float(_) for _ in cy],
-        "Number of frames": int(n_frames),
-        "Step size in nm": float(d),
+        "Calibration min. net gradient": int(min_net_gradient),
         "Magnification factor": float(magnification_factor),
+<<<<<<< HEAD
 
+=======
+        "Number of frames": int(n_frames),
+        "Step size in nm": float(step),
+        "X Coefficients": [float(_) for _ in cx],
+        "Y Coefficients": [float(_) for _ in cy]
+>>>>>>> 2c0d57b (proposal for GUI improvements)
     }
     if path is not None:
         with open(path, "w") as f:
-            _yaml.dump(calibration, f, default_flow_style=False)
+            _yaml.dump(calibration, f, sort_keys=False, default_flow_style=False)
 
     locs = fit_z(locs, info, calibration, magnification_factor)
     locs.z /= magnification_factor
@@ -252,6 +256,7 @@ def fit_z_parallel(
         int(n_locs / n_tasks + 1) if _ < n_locs % n_tasks else int(n_locs / n_tasks)
         for _ in range(n_tasks)
     ]
+    
     start_indices = _np.cumsum([0] + spots_per_task[:-1])
     fs = []
     executor = _ProcessPoolExecutor(n_workers)
@@ -268,6 +273,10 @@ def fit_z_parallel(
         )
     if asynch:
         return fs
+<<<<<<< HEAD
+=======
+#   with _tqdm(                   total=n_tasks, unit="task") as progress_bar:
+>>>>>>> 2c0d57b (proposal for GUI improvements)
     with _tqdm(desc="3D Fitting", total=n_tasks, unit="task") as progress_bar:
         for f in _futures.as_completed(fs):
             progress_bar.update()
