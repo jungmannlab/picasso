@@ -5755,14 +5755,7 @@ class View(QtWidgets.QLabel):
         self.window.dataset_dialog.add_entry(path)
 
         self.window.setWindowTitle(
-<<<<<<< HEAD
-            "Picasso v{}: Render. File: {}".format(
-                # __version__, os.path.basename(path)
-                __version__, path
-            )
-=======
             f"Picasso v{__version__}: Render. File: {os.path.basename(path)}"
->>>>>>> 6d49c52 (display the last loaded file in Render after closing a channel)
         )
 
         # fast rendering add channel
