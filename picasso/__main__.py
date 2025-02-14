@@ -792,7 +792,7 @@ def _localize(args):
     print("Localize - Parameters:")
     print("{:<8} {:<15} {:<10}".format("No", "Label", "Value"))
 
-    if args.fit_method == "lq-gpu":
+    if args.fit_method == "lq-gpu" or args.fit_method == "lq-gpu-3d":
         if gausslq.gpufit_installed:
             print("GPUfit installed")
         else:
@@ -1025,7 +1025,7 @@ def _localize(args):
 
             if CHECK_DB:
                 print("\n")
-                print("Assesing quality and adding to DB")
+                print("Assessing quality and adding to DB")
                 add_file_to_db(path, out_path)
                 print("Done.")
                 print("\n")
