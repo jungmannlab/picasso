@@ -21,6 +21,29 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 from numpy.lib.recfunctions import stack_arrays
 
+from .. import io, render, lib"""
+    picasso/rotation
+    ~~~~~~~~~~~~~~~~~~~~
+
+    Rotation window classes and functions.
+    Extension of Picasso: Render to visualize 3D data.
+    Many functions are copied from gui.render.View to avoid circular import
+
+    :author: Rafal Kowalewski, 2021-2022
+    :copyright: Copyright (c) 2021 Jungmann Lab, MPI of Biochemistry
+"""
+
+import os
+import colorsys
+from functools import partial
+
+import numpy as np
+import matplotlib.pyplot as plt
+import imageio.v2 as imageio
+from PyQt5 import QtCore, QtGui, QtWidgets
+
+from numpy.lib.recfunctions import stack_arrays
+
 from .. import io, render, lib
 
 
