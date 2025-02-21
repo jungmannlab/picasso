@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 17-FEB-2025 MTS
+Last change: 21-FEB-2025 MTS
 
 0.7.6.
 ------
