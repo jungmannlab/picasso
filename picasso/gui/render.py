@@ -9201,7 +9201,6 @@ class View(QtWidgets.QLabel):
 
         self.update_scene()
 
-    @check_pick
     def save_picked_locs(self, path, channel):
         """ 
         Saves picked locs from a given channel to path as a .hdf5 file. 
