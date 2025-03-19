@@ -460,15 +460,20 @@ def distance_histogram(locs, info, bin_size, r_max):
 def nena(locs, info, callback=None):
     bin_centers, dnfl_ = next_frame_neighbor_distance_histogram(locs, callback)
 
-    def func(d, a, s, ac, dc, sc):
-        f = a * (d / s**2) * _np.exp(-0.5 * d**2 / s**2)
-        fc = (
-            ac
-            * (d / sc**2)
-            * _np.exp(-0.5 * (d**2 + dc**2) / sc**2)
-            * _iv(0, d * dc / sc)
-        )
-        return f + fc
+    # def func(d, a, s, ac, dc, sc):
+    #     f = a * (d / s**2) * _np.exp(-0.5 * d**2 / s**2)
+    #     fc = (
+    #         ac
+    #         * (d / sc**2)
+    #         * _np.exp(-0.5 * (d**2 + dc**2) / sc**2)
+    #         * _iv(0, d * dc / sc)
+    #     )
+    #     return f + fc
+    def func(d, delta_a, s, ac, dc, sc):
+        a = ac + delta_a # make sure a >= ac
+        p_single = a * (d / (2 * s**2)) * _np.exp(-d**2 / (4* s**2))
+        p_short = ac / (sc * _np.sqrt(2 * _np.pi)) * _np.exp(-0.5 * ((d - dc) / sc)**2)
+        return p_single + p_short
 
     pdf_model = _lmfit.Model(func)
     params = _lmfit.Parameters()

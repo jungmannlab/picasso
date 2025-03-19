@@ -1,10 +1,12 @@
 Changelog
 =========
 
-Last change: 21-FEB-2025 MTS
+Last change: 19-MAR-2025 MTS
 
 0.7.6.
 ------
+- **NeNA bug fix - old values were too large by a factor of sqrt(2) **
+- NeNA bug fix - less prone to fitting to to local maximum
 - Bug fixes
 
 0.7.5

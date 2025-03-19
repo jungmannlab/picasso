@@ -24,9 +24,9 @@ A collection of tools for painting super-resolution images. The Picasso software
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
 
-Picasso 0.7.0
+Picasso 0.7.6
 -------------
-Adaptive Intersection Maximization (AIM, `doi: 10.1126/sciadv.adm7765 <https://www.science.org/doi/10.1126/sciadv.adm7765>`_) implemented in Picasso.
+- NeNA bug fix: old values were too large by a factor of sqrt(2).
 
 Previous versions
 -----------------
