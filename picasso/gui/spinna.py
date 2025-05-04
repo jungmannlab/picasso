@@ -3464,6 +3464,11 @@ class SimulationsTab(QtWidgets.QDialog):
             roi_size = self.mixer.roi_size
             if self.dim_widget.currentIndex() == 0: # 2D
                 self.roi_button.setText(f"Area: {roi_size:.0f} \u03bcm\u00b2")
+                # discard the z component if 3D data is loaded
+                self.exp_data = {
+                    target: coords[:, :2] 
+                    for target, coords in self.exp_data.items()
+                }
             else: # 3D
                 self.roi_button.setText(f"Volume: {roi_size:.0f} (\u03bcm\u00b3)")
             self.single_sim_mass = roi_size
@@ -3744,8 +3749,8 @@ class SimulationsTab(QtWidgets.QDialog):
     @check_structures_loaded
     def single_sim_n_total(self):
         """Finds the total number of molecules for a single simulation.
-        Either takes the number of molecules from the mask metadata
-        (self.mask_infos) or from input observed densities and the
+        Either takes the number of molecules from experimental data
+        (masked) or from input observed densities and the
         area / volume. Note that the total number of molecules is
         adjusted for labeling efficiency, i.e., it is the number of
         observed molecules divided by the LE.
@@ -3758,7 +3763,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
         if self.mask_den_stack.currentIndex() == 0: # mask
             n_total = int(sum([
-                self.mask_infos[t]["Number of molecules"]
+                len(self.exp_data[t])
                 / self.le_spins[i].value() * 100
                 for i, t in enumerate(self.targets)
             ]))
