@@ -7,6 +7,7 @@ Last change: 04-MAY-2025 MTS
 ------
 - **NeNA bug fix - old values were (usually) too high by a ~sqrt(2) **
 - NeNA bug fix - less prone to fitting to local maximum leading to incorrect values
+- NeNA plot - displays distances in nm
 - ``picasso csv2hdf`` uses pandas to read .csv files
 - Bug fixes
 

@@ -3362,6 +3362,7 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
 
     def __init__(self, info_dialog):
         super().__init__()
+        self.info_dialog = info_dialog
         self.setWindowTitle("Nena Plot")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
@@ -3380,10 +3381,12 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
         self.figure.clear()
         d = nena_result.userkws["d"]
         ax = self.figure.add_subplot(111)
+        pixelsize = self.info_dialog.window.display_settings_dlg.pixelsize.value()
+        d *= pixelsize
         ax.set_title("Next frame neighbor distance histogram")
         ax.plot(d, nena_result.data, label="Data")
         ax.plot(d, nena_result.best_fit, label="Fit")
-        ax.set_xlabel("Distance (Px)")
+        ax.set_xlabel("Distance (nm)")
         ax.set_ylabel("Counts")
         ax.legend(loc="best")
 
