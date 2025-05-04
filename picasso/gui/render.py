@@ -2897,7 +2897,7 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
 
         ax2.set_xlabel("x (nm)")
         ax2.set_ylabel("y (nm)")
-        ax2.inverse_yaxis()
+        ax2.invert_yaxis()
         ax3 = self.figure.add_subplot(133)
         ax3.plot(drift.z, label="z")
         ax3.legend(loc="best")
