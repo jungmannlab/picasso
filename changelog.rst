@@ -1,12 +1,13 @@
 Changelog
 =========
 
-Last change: 19-MAR-2025 MTS
+Last change: 04-MAY-2025 MTS
 
 0.7.6.
 ------
-- **NeNA bug fix - old values were too large by a factor of sqrt(2) **
-- NeNA bug fix - less prone to fitting to to local maximum
+- **NeNA bug fix - old values were (usually) too high by a ~sqrt(2) **
+- NeNA bug fix - less prone to fitting to local maximum leading to incorrect values
+- ``picasso csv2hdf`` uses pandas to read .csv files
 - Bug fixes
 
 0.7.5

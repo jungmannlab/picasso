@@ -65,6 +65,7 @@ def _hdf2visp(path, pixel_size):
 def _csv2hdf(path, pixelsize):
     from glob import glob
     from tqdm import tqdm as _tqdm
+    import pandas as pd
 
     paths = glob(path)
     if paths:
@@ -74,22 +75,22 @@ def _csv2hdf(path, pixelsize):
 
         for path in _tqdm(paths):
             print("Converting {}".format(path))
-
-            data = _np.genfromtxt(path, dtype=float, delimiter=",", names=True)
+            data = pd.read_csv(path)
 
             try:
                 frames = data["frame"].astype(int)
                 # make sure frames start at zero:
                 frames = frames - _np.min(frames)
-                x = data["x_nm"] / pixelsize
-                y = data["y_nm"] / pixelsize
-                photons = data["intensity_photon"].astype(int)
+                x = data["x [nm]"] / pixelsize
+                y = data["y [nm]"] / pixelsize
+                photons = data["intensity [photon]"].astype(int)
 
-                bg = data["offset_photon"].astype(int)
-                lpx = data["uncertainty_xy_nm"] / pixelsize
-                lpy = data["uncertainty_xy_nm"] / pixelsize
+                bg = data["offset [photon]"].astype(int)
+                lpx = data["uncertainty_xy [nm]"] / pixelsize
+                lpy = data["uncertainty_xy [nm]"] / pixelsize
 
-                if "z_nm" in data.dtype.names:
+                if "z_nm" in list(data):
+                    # TODO update other column labels
                     z = data["z_nm"] / pixelsize
                     sx = data["sigma1_nm"] / pixelsize
                     sy = data["sigma2_nm"] / pixelsize
@@ -113,8 +114,8 @@ def _csv2hdf(path, pixelsize):
                     )
 
                 else:
-                    sx = data["sigma_nm"] / pixelsize
-                    sy = data["sigma_nm"] / pixelsize
+                    sx = data["sigma [nm]"] / pixelsize
+                    sy = data["sigma [nm]"] / pixelsize
 
                     LOCS_DTYPE = [
                         ("frame", "u4"),
@@ -151,6 +152,7 @@ def _csv2hdf(path, pixelsize):
             except Exception as e:
                 print(e)
                 print("Error. Datatype not understood.")
+                raise e
 
 
 def _hdf2csv(path):
