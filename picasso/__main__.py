@@ -1138,6 +1138,377 @@ def _render(args):
         )
 
 
+def _spinna_batch_analysis(parameters_filename, asynch=True, bootstrap=False, verbose=False):
+    """SPINNA batch analysis. Results are automatically saved in the
+    a new subfolder named "parameters_filename_fitting_results" in the 
+    folder where the parameters file is located. Parameters should be 
+    provided in .csv file. Each row in the file specifies one analysis 
+    run. The parameters (columns) are:
+
+    - "structures_filename" : Name of the files with structures saved 
+        (.yaml).
+    - "exp_data_TARGET" : Name of the file with experimental data 
+        (.hdf5). Each target in the structures must have a 
+        corresponding column, for example, "exp_data_EGFR".
+    - "le_TARGET" : Labeling efficiency (%) for each target. Each 
+        target in the structures must have a corresponding column, 
+        for example, "le_EGFR".
+    - "label_unc_TARGET" : Label uncertainty (nm) for each target. Each
+        target in the structures must have a corresponding column, 
+        for example: "label_unc_EGFR".
+    - "granularity" : Granularity used in parameters search space
+        generation. The higher the value the more combinations of 
+        structure counts will be tested.
+    - "sim_repeats" : Number of simulation repeats used for obtaining
+        smoother NND histograms.
+    - "save_filename" : Name of the file where the results will be
+        saved. 
+    - "NND_bin" : Bin size (nm) for the nearest neighbor distance (NND)
+        histogram (plotting only).
+    - "NND_maxdist" : Maximum distance (nm) for the nearest neighbor
+        distance (NND) histogram (plotting only).
+    
+    Depending on whether a homo- or heterogeneous (masked) distribution 
+    is used, the following columns must be present:
+    * For homogeneous distribution:
+
+    - "area" or "volume" : Area (2D simulation) or volume (3D 
+        simulation) of the simulated ROI (um^2 or um^3).
+    - "z_range" : Applicable only when "volume" is provided. Defines
+        the range of z coordinates (nm) of simulated molecular targets.
+    
+    * For heterogeneous distribution:
+    - "mask_filename_TARGET" : Name of the .npy file with the mask saved for 
+        each molecular target. Each target in the structures must have 
+        a corresponding column, for example, "mask_EGFR".
+        
+    Optional columns are:
+
+    - "rotation_mode" : Random rotations mode used in analysis. Values
+        must be one of {"3D", "2D", "None"}. Default: "2D".
+    - "nn_plotted" : Number of nearest neighbors plotted in the NND. 
+        Only integer values are accepted. Default: 4.
+    
+    When saving, each analysis run index is used as the prefix for 
+    filename, for example, "analysis_run1_fit_summary.txt".
+
+    Parameters
+    ----------
+    parameters_filename : str
+        Path to the parameters file.
+    asynch : bool (default=True)
+        If True, multiprocessing is used.
+    bootstrap : bool (default=False)
+        If True, bootstrapping is used.
+    verbose : bool (default=True)
+        If True, progress bar for each row is printed to the console.
+    """
+
+    # print(f"asynch: {asynch}")
+    # print(f"bootstrap: {bootstrap}")
+    # print(f"verbose: {verbose}")
+
+    import os
+    import yaml
+    from datetime import datetime
+    import numpy as np
+    import pandas as pd
+    from . import io, spinna
+
+    # open the parameters file
+    if not isinstance(parameters_filename, str):
+        raise TypeError("parameters_filename must be a string ending with .csv")
+    elif not parameters_filename.endswith(".csv"):
+        raise TypeError("parameters_filename must end with .csv")
+    
+    parameters = pd.read_csv(parameters_filename)
+
+    # find the folder name for saving results
+    result_dir = parameters_filename.replace(".csv", "_fitting_results")
+    if os.path.isdir(result_dir): 
+        i = 1
+        while True:
+            result_dir_ = result_dir + f"_{i}"
+            if not os.path.isdir(result_dir_):
+                result_dir = result_dir_
+                break
+            else:
+                i += 1
+
+    # check that all columns (non-target specific) are present
+    for column in [
+        "structures_filename",
+        "granularity",
+        "save_filename",
+        "NND_bin",
+        "NND_maxdist",
+        "sim_repeats",
+    ]:
+        if column not in parameters.columns:
+            raise ValueError(
+                f"Column {column} not found in the parameters file."
+            )
+
+    # summary list of results for each simulation
+    summary = []
+
+    # run each row (analysis) one by one:
+    for index, row in parameters.iterrows():
+        print(f"Running SPINNA on row {index+1} out of {len(parameters)}.")
+        # start by reading structures filename and creating the structures
+        structures_filename = row["structures_filename"]
+        structures, targets = spinna.load_structures(structures_filename)
+
+        # get the target-independent parameters
+        granularity = row["granularity"]
+        NND_bin = row["NND_bin"]
+        NND_maxdist = row["NND_maxdist"]
+        sim_repeats = row["sim_repeats"]
+        save_filename, _ = os.path.splitext(row["save_filename"])
+        save_filename = os.path.join(result_dir, save_filename)
+
+        # get the optional arguments
+        random_rot_mode = "2D"
+        if "rotation_mode" in row.index:
+            if not isinstance(row["rotation_mode"], str):
+                print("Invalid rotation_mode. Using default: 2D")
+            else:
+                random_rot_mode = str(row["rotation_mode"])
+
+        nn_plotted = 4
+        if "nn_plotted" in row.index:
+            if not isinstance(row["nn_plotted"], int):
+                print("Invalid nn_plotted. Using default: 4")
+            else:
+                nn_plotted = int(row["nn_plotted"])
+
+        # initialize the input dictionaries that are target-specific
+        label_unc = {}
+        le = {}
+        exp_data = {}
+        n_simulated = {}
+
+        # load data and parameters for each molecular target
+        for target in targets:
+            for col_name in [
+                f"{_}_{target}" 
+                for _ in ["label_unc", "le", "exp_data"]
+            ]:
+                if col_name not in row.index:
+                    raise ValueError(
+                        f"Column {col_name} not found in the parameters file."
+                    )
+            
+            # load label uncertainy and labelling efficiency
+            label_unc[target] = float(row[f"label_unc_{target}"])
+            le[target] = float(row[f"le_{target}"]) / 100
+
+            # load experimental data
+            locs, info = io.load_locs(str(row[f"exp_data_{target}"]))
+            pixelsize = 130
+            for element in info:
+                if "Picasso Localize" in element.values():
+                    if "Pixelsize" in element:
+                        pixelsize = element["Pixelsize"]
+                        break
+            if hasattr(locs, "z"):
+                exp_data[target] = np.stack(
+                    (locs.x * pixelsize, locs.y * pixelsize, locs.z)   
+                ).T
+                dim = 3
+            else:
+                exp_data[target] = np.stack(
+                    (locs.x * pixelsize, locs.y * pixelsize)
+                ).T
+                dim = 2
+
+            # number of simulated molecules (after labelling efficiency
+            # correction)
+            n_simulated[target] = int(len(locs) / le[target])
+
+
+        # check if the distribution is homogeneous or heterogeneous
+        apply_mask = True
+        if dim == 3: # 3D simulation
+            area = None
+            if "volume" in row.index:
+                volume = float(row["volume"])
+                apply_mask = False
+                # find z range
+                if "z_range" not in row.index:
+                    raise ValueError(
+                        f"Column z_range not found in the parameters file."
+                        " 3D simulation was specified with homogeneous"
+                        " distribution. Please specify z_range."
+                    )
+                else:
+                    z_range = float(row["z_range"])
+        elif dim == 2: # 2D simulation
+            volume = None
+            if "area" in row.index:
+                area = float(row["area"])
+                apply_mask = False
+        
+        # extract masks if area/volume is not provided
+        if apply_mask: 
+            mask_paths = {}
+            for target in targets:
+                if f"mask_filename_{target}" not in row.index:
+                    raise ValueError(
+                        f"Column mask_filename_{target} not found in the"
+                        " parameters file."
+                    )
+                else:
+                    mask_paths[target] = row[f"mask_filename_{target}"]
+            
+        # generate search space for fitting
+        N_structures = spinna.generate_N_structures(
+            structures, n_simulated, granularity
+        )
+
+        # set up StructureMixer
+        if apply_mask:
+            masks = {}
+            mask_info = {}
+            width = height = depth = None
+            for target in targets:
+                masks[target] = np.load(mask_paths[target])
+                mask_info[target] = yaml.load(
+                    open(mask_paths[target].replace(".npy", ".yaml"), "r"),
+                    Loader=yaml.FullLoader,
+                )
+            mask_dict = {"mask": masks, "info": mask_info}
+        else:
+            mask_dict = None
+            if dim == 2:
+                width = height = np.sqrt(area * 1e6)
+                depth = None
+            elif dim == 3:
+                depth = z_range
+                width = height = np.sqrt(volume * 1e9 / depth)
+
+        mixer = spinna.StructureMixer(
+            structures=structures,
+            label_unc=label_unc,
+            le=le,
+            mask_dict=mask_dict,
+            width=width, height=height, depth=depth,
+            random_rot_mode=random_rot_mode,
+        )
+        
+        if not os.path.isdir(result_dir): # create the save folder
+            os.mkdir(result_dir)
+
+        # set up and run fitting
+        opt_props, score = spinna.SPINNA(
+            mixer=mixer,
+            gt_coords=exp_data,
+            N_sim=sim_repeats,
+        ).fit_stoichiometry(
+            N_structures, 
+            save=f"{save_filename}_fit_scores.csv", 
+            asynch=asynch,
+            bootstrap=bootstrap,
+            callback="console" if verbose else None,
+        )
+
+        # save the results
+        results = {}
+        results["Date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        results["File location of structures"] = structures_filename
+        results["Molecular targets"] = targets
+        results["File location of experimenal data"] = [
+            str(row[f"exp_data_{target}"]) for target in targets
+        ]
+        results["Labelling efficiency (%)"] = [
+            le[target] * 100 for target in targets
+        ]
+        results["Label uncertainty (nm)"] = list(label_unc.values())
+        results["Rotation mode"] = random_rot_mode
+        results["Dimensionality"] = f"{dim}D"
+        results["Parameters search space granularity"] = granularity
+        results["Fitted structures names"] = list(N_structures.keys())
+        results["Number of simulation repeats"] = sim_repeats
+        if isinstance(opt_props, tuple):
+            props_mean, props_std = opt_props
+            results["Modified Kolmogorov-Smirnov score +/- s.d."] = score
+            results["Fitted proportions of structures"] = ", ".join([
+                f"{props_mean[i]:.2f} +/- {props_std[i]:.2f}%" 
+                for i in range(len(props_mean))
+            ])
+        else:
+            results["Modified Kolmogorov-Smirnov score"] = score
+            results["Fitted proportions of structures"] = opt_props
+        
+        # relative proportions of structures for each target
+        if len(targets) > 1:
+            for target in targets:
+                rel_props = mixer.convert_props_for_target(
+                    opt_props, target, n_simulated,
+                )
+                idx_valid = np.where(rel_props != np.inf)[0]
+                value = ", ".join([
+                    f"{structures[i].title}: {rel_props[i]:.2f}%" 
+                    for i in idx_valid
+                ])
+                results[f"Relative proportions of {target} in"] = value
+        
+        if apply_mask:
+            results["File location of masks"] = [
+                row[f"mask_filename_{target}"] for target in targets
+            ]
+        else:
+            if dim == 2:
+                results["Area (um^2)"] = area
+            elif dim == 3:
+                results["Volume (um^3)"] = volume
+                results["Z range (nm)"] = z_range
+        # save .txt with summary of the results
+        with open(f"{save_filename}_fit_summary.txt", "w") as f:
+            for key, value in results.items():
+                f.write(f"{key}: {value}\n")
+        print(f"Results saved to {save_filename}_fit_summary.txt")
+        summary.append(results)
+
+        # plot and save the NND plots
+        nn_counts = {}
+        for i, t1 in enumerate(targets):
+            for t2 in targets[i:]:
+                nn_counts[f"{t1}-{t2}"] = nn_plotted
+        mixer.nn_counts = nn_counts
+        n_total = sum(n_simulated.values())
+        dist_sim = spinna.get_NN_dist_simulated(
+            mixer.convert_props_to_counts(opt_props[0], n_total), 
+            sim_repeats, 
+            mixer, 
+            duplicate=True,
+        )
+        for i, (t1, t2, _) in enumerate(mixer.get_neighbor_idx(duplicate=True)):
+            fig, ax = spinna.plot_NN(
+                dist=dist_sim[i], mode='plot', show_legend=False,
+                return_fig=True, figsize=(4.947, 3.71), alpha=1.0,
+                binsize=NND_bin, xlim=[0, NND_maxdist],
+                title=f"Nearest Neighbors Distances: {t1} -> {t2}",
+            )
+            exp1 = exp_data[t1]
+            exp2 = exp_data[t2]
+            fig, ax = spinna.plot_NN(
+                data1=exp1, data2=exp2, 
+                n_neighbors=nn_plotted, 
+                show_legend=False, fig=fig, ax=ax, mode='hist', 
+                return_fig=True, binsize=NND_bin, xlim=[0, NND_maxdist],
+                title=f"Nearest Neighbors Distances: {t1} -> {t2}",
+                savefig=[
+                    f"{save_filename}_NND_{t1}_{t2}.{_}" 
+                    for _ in ["png", "svg"]
+                ],
+            ) 
+
+    # save the summary as .csv file
+    summary = pd.DataFrame(summary)
+    summary.to_csv(os.path.join(result_dir, "summary_results.csv"), index=False)
+
+
 def main():
     import argparse
 
@@ -1714,6 +2085,41 @@ def main():
         "server", help="picasso server workflow management system"
     )
 
+    spinna_parser = subparsers.add_parser(
+        "spinna",
+        help=(
+            "picasso single protein investigation via nearest neighbor analysis"
+        ),
+    )
+    spinna_parser.add_argument(
+        "-p",
+        "--parameters",
+        type=str,
+        help=(
+            ".csv file containing the parameters for spinna batch analysis;"
+            " see the documentation for details explaining the .csv file"
+            " structure."
+        ),
+    )
+    spinna_parser.add_argument(
+        "-a",
+        "--asynch",
+        action="store_false",
+        help="do not perform fitting asynchronously (multiprocessing)",
+    )
+    spinna_parser.add_argument(
+        "-b",
+        "--bootstrap",
+        action="store_true",
+        help="perform bootstrapping",
+    )
+    spinna_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="display progress bar for each row",
+    )
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -1818,6 +2224,13 @@ def main():
             _hdf2csv(args.files)
         elif args.command == "server":
             _start_server()
+        elif args.command == "spinna":
+            if args.parameters:
+                _spinna_batch_analysis(args.parameters, args.asynch, args.bootstrap)
+            else:
+                from .gui import spinna
+
+                spinna.main()
     else:
         parser.print_help()
 
