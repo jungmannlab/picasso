@@ -537,7 +537,6 @@ class DatasetDialog(QtWidgets.QDialog):
         self.setWindowTitle("Datasets")
         self.setModal(False)
         self.layout = QtWidgets.QGridLayout()
-        self.warning = True
         self.checks = []
         self.title = []
         self.closebuttons = []
@@ -701,20 +700,6 @@ class DatasetDialog(QtWidgets.QDialog):
         self.layout.addWidget(colordisp, currentline, 3)
         self.layout.addWidget(intensity, currentline, 4)
         self.layout.addWidget(p, currentline, 5)
-
-        # check if the number of channels surpassed the number of 
-        # default colors
-        if len(self.checks) == len(self.default_colors):
-            if self.warning:
-                text = (
-                    "The number of channels passed the number of default "
-                    " colors. In case you would like to use your own color, "
-                    " please insert the color's hexadecimal expression,"
-                    " starting with '#', e.g. '#ffcdff' for pink or choose"
-                    " the automatic coloring in the Files dialog."
-                )
-                QtWidgets.QMessageBox.information(self, "Warning", text)
-                self.warning = False
 
     def update_colors(self):
         """
