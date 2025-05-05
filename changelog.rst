@@ -3,8 +3,8 @@ Changelog
 
 Last change: 04-MAY-2025 MTS
 
-0.7.6.
-------
+0.7.6
+-----
 - **New module SPINNA for investigating oligormerization of proteins, DOI: **
 - **NeNA bug fix - old values were (usually) too high by a ~sqrt(2) **
 - NeNA bug fix - less prone to fitting to local maximum leading to incorrect values
