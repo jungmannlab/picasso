@@ -6330,7 +6330,7 @@ class View(QtWidgets.QLabel):
             new_info["Clustering radius xy (nm)"] = radius_xy * pixelsize
             new_info["Clustering radius z (nm)"] = radius_z * pixelsize
         else:
-            new_info["Clustering radius (nm)"] = radius_xy * pixelsize,
+            new_info["Clustering radius (nm)"] = radius_xy * pixelsize
         info = self.infos[channel] + [new_info]
 
         # save locs
