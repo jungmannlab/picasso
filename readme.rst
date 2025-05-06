@@ -24,9 +24,10 @@ A collection of tools for painting super-resolution images. The Picasso software
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
 
-Picasso 0.7.0
+Picasso 0.8.0
 -------------
-Adaptive Intersection Maximization (AIM, `doi: 10.1126/sciadv.adm7765 <https://www.science.org/doi/10.1126/sciadv.adm7765>`_) implemented in Picasso.
+- **New module SPINNA for investigating oligomerization of proteins, DOI: `10.1038/s41467-025-59500-z<https://doi.org/10.1038/s41467-025-59500-z>`_**
+- NeNA bug fix: old values were too large by a factor of sqrt(2).
 
 Previous versions
 -----------------
@@ -145,14 +146,15 @@ If you use picasso in your research, please cite our Nature Protocols publicatio
 Credits
 -------
 
--  Design icon based on “Hexagon by Creative Stalls from the Noun
-   Project”
--  Simulate icon based on “Microchip by Futishia from the Noun Project”
--  Localize icon based on “Mountains by MONTANA RUCOBO from the Noun
-   Project”
--  Filter icon based on “Funnel by José Campos from the Noun Project”
--  Render icon based on “Paint Palette by Vectors Market from the Noun
-   Project”
--  Average icon based on “Layers by Creative Stall from the Noun
-   Project”
--  Server icon based on “Database by Nimal Raj from NounProject.com”
+-  Design icon based on “Hexagon by Creative Stalls" from the Noun
+   Project
+-  Simulate icon based on “Microchip by Futishia" from the Noun Project
+-  Localize icon based on “Mountains" by MONTANA RUCOBO from the Noun
+   Project
+-  Filter icon based on “Funnel" by José Campos from the Noun Project
+-  Render icon based on “Paint Palette" by Vectors Market from the Noun
+   Project
+-  Average icon based on “Layers" by Creative Stall from the Noun
+   Project
+-  Server icon based on “Database" by Nimal Raj from the Noun Project
+-  SPINNA icon based on "Spinner" by Viktor Ostrovsky from the Noun Project

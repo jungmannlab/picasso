@@ -15,6 +15,7 @@ from tqdm import tqdm as _tqdm
 from . import lib as _lib
 from . import render as _render
 from . import localize as _localize
+from . import postprocess as _postprocess
 
 _plt.style.use("ggplot")
 
@@ -183,4 +184,18 @@ def find_fiducials(locs, info):
     # find the local maxima and translate to pick coordinates
     y, x, _ = _localize.identify_in_image(image, threshold, box=box)
     picks = [(xi, yi) for xi, yi in zip(x, y)]
+
+    # select the picks with appropriate number of localizations
+    n_frames = 0
+    for inf in info:
+        if val := inf.get("Frames"):
+            n_frames = val
+            break
+    min_n = 0.8 * n_frames
+    picked_locs = _postprocess.picked_locs(
+        locs, info, picks, "Circle", pick_size=box/2, add_group=False,
+    )
+    picks = [
+        pick for i, pick in enumerate(picks) if len(picked_locs[i]) > min_n
+    ]
     return picks, box
