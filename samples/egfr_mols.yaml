@@ -1,0 +1,310 @@
+Byte Order: <
+Camera: Zyla 4.2 Plus
+Data Type: uint16
+File: Z:\users\honsa\z.microscopy_raw\231025_EGF-AF647_test\A549_10nm-sortase-EGF_w1_s1_R1-200pM_1\A549_10nm-sortase-EGF_w1_s1_R1-200pM_1_MMStack_Pos4.ome.tif
+Frames: 40000
+Height: 512
+Micro-Manager Acquisiton Comments:
+- Apollo
+- '560: 102 deg + 200mW - 30mW'
+- '642: 100mW + 80 deg - 2mW'
+- '488: 50mW + 85 deg - 1mW'
+- with PCA/PCD/trolox
+Micro-Manager Metadata:
+  Binning: 2
+  BitDepth: 16
+  COM3-AnswerTimeout: '500.0000'
+  COM3-BaudRate: '115200'
+  COM3-DTR: Disable
+  COM3-DataBits: '8'
+  COM3-DelayBetweenCharsMs: '0.0000'
+  COM3-Description: Serial port driver (boost:asio)
+  COM3-Fast USB to Serial: Disable
+  COM3-Handshaking: 'Off'
+  COM3-Name: COM3
+  COM3-Parity: None
+  COM3-StopBits: '1'
+  COM3-Verbose: '1'
+  Camera: Zyla 4.2 Plus
+  ChannelIndex: 0
+  Core-AutoFocus: PFS
+  Core-AutoShutter: '1'
+  Core-Camera: Zyla 4.2 Plus
+  Core-ChannelGroup: ''
+  Core-Focus: ZDrive
+  Core-Galvo: ''
+  Core-ImageProcessor: ''
+  Core-Initialize: '1'
+  Core-SLM: ''
+  Core-Shutter: Turret1Shutter
+  Core-TimeoutMs: '5000'
+  Core-XYStage: XYStage
+  ElapsedTime-ms: 8014672.0
+  Exposure-ms: 100.008
+  FileName: A549_10nm-sortase-EGF_w1_s1_R1-200pM_1_MMStack_Pos4.ome.tif
+  FilterTurret1-Label: 2-TIRF 560
+  FilterTurret1-State: '1'
+  Frame: 0
+  FrameIndex: 0
+  Height: 512
+  ImageNumber: 0
+  IntermediateMagnification-Magnification: 1.0x
+  LightPath-Label: 2-R100
+  LightPath-State: '1'
+  MicroscopeID-ClosedPosition: '0'
+  MicroscopeID-Description: Demo filter wheel driver
+  MicroscopeID-HubID: ''
+  MicroscopeID-Label: Apollo
+  MicroscopeID-Name: DWheel
+  MicroscopeID-State: '0'
+  Nosepiece-Label: 1-Apo TIRF 100x Oil
+  Nosepiece-State: '0'
+  PFS-DichroicMirrorInserted: 'Yes'
+  PFS-FocusMaintenance: 'On'
+  PFS-LEDIntensity: '40'
+  PFS-PFS Status: '0000001100001010'
+  PFS-PFS in Range: In Range
+  PixelSizeAffine: 0.0;0.0;0.0;0.0;0.0;0.0
+  PixelSizeUm: 0.0
+  PixelType: GRAY16
+  PositionIndex: 2
+  PositionName: Pos4
+  ROI: 255-255-512-512
+  ReceivedTime: 2023-10-25 19:59:40.834 +0200
+  ScopeDataKeys:
+  - Zyla 4.2 Plus-SensorCooling
+  - IntermediateMagnification-Magnification
+  - Zyla 4.2 Plus-TransposeMirrorY
+  - XYStage-AxisLetterX
+  - COM3-Description
+  - Zyla 4.2 Plus-CurrentSoftware
+  - XYStage-AxisLetterY
+  - LightPath-Label
+  - Nosepiece-Label
+  - Zyla 4.2 Plus-LightScanPlus-SensorReadoutMode
+  - XYStage-OnlySendSerialCommandOnChange
+  - COM3-StopBits
+  - Zyla 4.2 Plus-RollingShutterGlobalClear
+  - COM3-DelayBetweenCharsMs
+  - XYStage-OverShoot(um)
+  - XYStage-VectorMoveY-VE(mm/s)
+  - Zyla 4.2 Plus-CameraModel
+  - XYStage-VectorMoveX-VE(mm/s)
+  - Core-ImageProcessor
+  - XYStage-SerialResponse
+  - PFS-PFS Status
+  - COM3-Name
+  - Core-SLM
+  - Zyla 4.2 Plus-Exposure
+  - Zyla 4.2 Plus-FrameRateLimits
+  - COM3-DTR
+  - XYStage-Wait_Cycles
+  - XYStage-SerialCommand
+  - COM3-Verbose
+  - Zyla 4.2 Plus-TemperatureStatus
+  - COM3-AnswerTimeout
+  - Zyla 4.2 Plus-TemperatureControl
+  - XYStage-EnableAdvancedProperties
+  - PFS-DichroicMirrorInserted
+  - Zyla 4.2 Plus-Overlap
+  - XYStage-Version
+  - COM3-Parity
+  - XYStage-BuildName
+  - COM3-BaudRate
+  - Core-Focus
+  - ZDrive-Speed
+  - Core-ChannelGroup
+  - COM3-DataBits
+  - Zyla 4.2 Plus-Ext (Exp) Trigger Timeout[ms]
+  - PFS-FocusMaintenance
+  - XYStage-MotorOnOff
+  - Zyla 4.2 Plus-ShutterTransferTime [s]
+  - XYStage-Description
+  - Zyla 4.2 Plus-LightScanPlus-ExposedPixelHeight
+  - FilterTurret1-State
+  - Zyla 4.2 Plus-Sensitivity/DynamicRange
+  - MicroscopeID-Name
+  - Zyla 4.2 Plus-LightScanPlus-LineScanSpeed [lines/sec]
+  - Zyla 4.2 Plus-FrameRate
+  - Zyla 4.2 Plus-AccumulateCount
+  - XYStage-JoyStick Reverse
+  - MicroscopeID-HubID
+  - Core-XYStage
+  - Zyla 4.2 Plus-CameraName
+  - MicroscopeID-State
+  - Core-AutoShutter
+  - XYStage-TransposeMirrorX
+  - FilterTurret1-Label
+  - Turret1Shutter-State
+  - ZDrive-Tolerance
+  - XYStage-TransposeMirrorY
+  - XYStage-CompileDate
+  - Zyla 4.2 Plus-PixelReadoutRate
+  - XYStage-Port
+  - XYStage-Error-E(nm)
+  - MicroscopeID-Label
+  - Zyla 4.2 Plus-ShutterOutputMode
+  - Core-Camera
+  - Zyla 4.2 Plus-ElectronicShutteringMode
+  - Zyla 4.2 Plus-FanSpeed
+  - COM3-Fast USB to Serial
+  - PFS-PFS in Range
+  - Zyla 4.2 Plus-SpuriousNoiseFilter
+  - Zyla 4.2 Plus-LightScanPlus-ScanSpeedControlEnable
+  - XYStage-Backlash-B
+  - XYStage-Maximum Speed (Do Not Change)
+  - MicroscopeID-ClosedPosition
+  - XYStage-JoyStick Fast Speed
+  - Zyla 4.2 Plus-TransposeCorrection
+  - PFS-LEDIntensity
+  - COM3-Handshaking
+  - Core-TimeoutMs
+  - MicroscopeID-Description
+  - Zyla 4.2 Plus-LightScanPlus-ExternalTriggerDelay [s]
+  - XYStage-Acceleration-AC(ms)
+  - Zyla 4.2 Plus-PixelEncoding
+  - Zyla 4.2 Plus-TransposeXY
+  - XYStage-Name
+  - XYStage-StepSizeY_um
+  - Zyla 4.2 Plus-SensorTemperature
+  - Core-AutoFocus
+  - Zyla 4.2 Plus-Binning
+  - Zyla 4.2 Plus-TriggerMode
+  - XYStage-JoyStick Slow Speed
+  - Zyla 4.2 Plus-AuxiliaryOutTwoSource (TTL I/O)
+  - XYStage-StepSizeX_um
+  - Zyla 4.2 Plus-StaticBlemishCorrection
+  - Core-Galvo
+  - Zyla 4.2 Plus-Description
+  - XYStage-FinishError-PCROS(nm)
+  - XYStage-Speed-S
+  - Zyla 4.2 Plus-LightScanPlus-RowReadTime
+  - Zyla 4.2 Plus-AuxiliaryOutSource (TTL I/O)
+  - Core-Initialize
+  - Zyla 4.2 Plus-AcquisitionWindow
+  - Zyla 4.2 Plus-CameraID
+  - Zyla 4.2 Plus-TransposeMirrorX
+  - LightPath-State
+  - Zyla 4.2 Plus-CameraFirmware
+  - Zyla 4.2 Plus-LightScanPlus-AlternatingReadoutDirection
+  - Nosepiece-State
+  - Core-Shutter
+  Slice: 0
+  SliceIndex: 0
+  Turret1Shutter-State: '0'
+  UUID: 17ad4c73-a3ae-4a35-89a9-0de5d88e2206
+  UserData: null
+  Width: 512
+  XPositionUm: 2250.6
+  XYStage-Acceleration-AC(ms): '100'
+  XYStage-AxisLetterX: X
+  XYStage-AxisLetterY: Y
+  XYStage-Backlash-B: '0.0040'
+  XYStage-BuildName: STD_XY
+  XYStage-CompileDate: May 03 2019:11:28:11
+  XYStage-Description: ASI XY stage driver adapter
+  XYStage-EnableAdvancedProperties: 'No'
+  XYStage-Error-E(nm): '1000.0000'
+  XYStage-FinishError-PCROS(nm): '2.0000'
+  XYStage-JoyStick Fast Speed: '60'
+  XYStage-JoyStick Reverse: 'Off'
+  XYStage-JoyStick Slow Speed: '5'
+  XYStage-Maximum Speed (Do Not Change): '0.8576'
+  XYStage-MotorOnOff: 'On'
+  XYStage-Name: XYStage
+  XYStage-OnlySendSerialCommandOnChange: 'Yes'
+  XYStage-OverShoot(um): '0.0000'
+  XYStage-Port: COM3
+  XYStage-SerialCommand: ''
+  XYStage-SerialResponse: ''
+  XYStage-Speed-S: '0.5746'
+  XYStage-StepSizeX_um: '0.0100'
+  XYStage-StepSizeY_um: '0.0100'
+  XYStage-TransposeMirrorX: '0'
+  XYStage-TransposeMirrorY: '0'
+  XYStage-VectorMoveX-VE(mm/s): '0.0000'
+  XYStage-VectorMoveY-VE(mm/s): '0.0000'
+  XYStage-Version: 'Version: USB-9.2m '
+  XYStage-Wait_Cycles: '0'
+  YPositionUm: 5421.6
+  ZDrive-Speed: 2.50mm/sec
+  ZDrive-Tolerance: 0.000um
+  ZPositionUm: 3738.7200000000003
+  Zyla 4.2 Plus-AccumulateCount: '1'
+  Zyla 4.2 Plus-AcquisitionWindow: Custom AOI (512x512)
+  Zyla 4.2 Plus-AuxiliaryOutSource (TTL I/O): FireAll
+  Zyla 4.2 Plus-AuxiliaryOutTwoSource (TTL I/O): ExternalShutterControl
+  Zyla 4.2 Plus-Binning: 2x2
+  Zyla 4.2 Plus-CameraFirmware: 15.8.12.0
+  Zyla 4.2 Plus-CameraID: VSC-08707
+  Zyla 4.2 Plus-CameraModel: ZYLA-4.2P-USB3
+  Zyla 4.2 Plus-CameraName: Zyla 4.2 USB3
+  Zyla 4.2 Plus-CurrentSoftware: 3.14.30031.0
+  Zyla 4.2 Plus-Description: SDK3 Device Adapter for sCMOS cameras
+  Zyla 4.2 Plus-ElectronicShutteringMode: Rolling
+  Zyla 4.2 Plus-Exposure: '100.01'
+  Zyla 4.2 Plus-Ext (Exp) Trigger Timeout[ms]: '5000'
+  Zyla 4.2 Plus-FanSpeed: 'On'
+  Zyla 4.2 Plus-FrameRate: '9.9968'
+  Zyla 4.2 Plus-FrameRateLimits: 'Min: 8.89933  Max: 9.99680  Max Sustain: 268.22499'
+  Zyla 4.2 Plus-LightScanPlus-AlternatingReadoutDirection: 'Off'
+  Zyla 4.2 Plus-LightScanPlus-ExposedPixelHeight: '4167'
+  Zyla 4.2 Plus-LightScanPlus-ExternalTriggerDelay [s]: '0.0000'
+  Zyla 4.2 Plus-LightScanPlus-LineScanSpeed [lines/sec]: '41666.6667'
+  Zyla 4.2 Plus-LightScanPlus-RowReadTime: '0.0000'
+  Zyla 4.2 Plus-LightScanPlus-ScanSpeedControlEnable: 'Off'
+  Zyla 4.2 Plus-LightScanPlus-SensorReadoutMode: Centre Out Simultaneous
+  Zyla 4.2 Plus-Overlap: 'On'
+  Zyla 4.2 Plus-PixelEncoding: Mono16
+  Zyla 4.2 Plus-PixelReadoutRate: 200 MHz - lowest noise
+  Zyla 4.2 Plus-RollingShutterGlobalClear: 'Off'
+  Zyla 4.2 Plus-Sensitivity/DynamicRange: 16-bit (low noise & high well capacity)
+  Zyla 4.2 Plus-SensorCooling: 'On'
+  Zyla 4.2 Plus-SensorTemperature: '0.2700'
+  Zyla 4.2 Plus-ShutterOutputMode: Closed
+  Zyla 4.2 Plus-ShutterTransferTime [s]: '0.0000'
+  Zyla 4.2 Plus-SpuriousNoiseFilter: 'On'
+  Zyla 4.2 Plus-StaticBlemishCorrection: 'On'
+  Zyla 4.2 Plus-TemperatureControl: '0.00'
+  Zyla 4.2 Plus-TemperatureStatus: Stabilised
+  Zyla 4.2 Plus-TransposeCorrection: '0'
+  Zyla 4.2 Plus-TransposeMirrorX: '0'
+  Zyla 4.2 Plus-TransposeMirrorY: '0'
+  Zyla 4.2 Plus-TransposeXY: '0'
+  Zyla 4.2 Plus-TriggerMode: Internal (Recommended for fast acquisitions)
+Width: 512
+---
+Box Size: 7
+Fit method: LQ, Gaussian
+Generated by: Picasso Localize
+Min. Net Gradient: 8000
+Pixelsize: 130
+ROI: null
+---
+Generated by: Picasso Render
+Last driftfile: Z:/users/honsa/z.microscopy_raw/231025_EGF-AF647_test/A549_10nm-sortase-EGF_w1_s1_R1-200pM_1/A549_10nm-sortase-EGF_w1_s1_R1-200pM_1_MMStack_Pos4.ome_locs_231026_112159_drift.txt
+---
+Generated by: Picasso Filter
+bg: null
+ellipticity: null
+frame: null
+lpx: null
+lpy: null
+net_gradient: null
+photons: null
+sx:
+- 0.3177719763208122
+- 1.5116401836435553
+sy:
+- 0.5844529088469361
+- 2.056088940944636
+x: null
+y: null
+---
+Generated by: 'Picasso Render : Pick'
+Pick Diameter: 50.0
+Pick Shape: Circle
+---
+Cluster radius (cam. pixels): 0.04349442424548444
+Generated by: Automatic SPINNA analysis
+Min locs: 10

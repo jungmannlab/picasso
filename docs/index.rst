@@ -20,6 +20,7 @@ This documentation is based on the `Nature Protocols publication <https://www.na
    filter
    render
    average
+   spinna
    files
    cmd
    postprocessing

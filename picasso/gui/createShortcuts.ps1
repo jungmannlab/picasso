@@ -45,3 +45,9 @@ $s.TargetPath="pythonw"
 $s.Arguments="-m picasso average3"
 $s.IconLocation="$PSScriptRoot/icons/average.ico"
 $s.Save()
+
+$s=(New-Object -COM WScript.Shell).CreateShortcut("$PSScriptRoot/../../SPINNA.lnk")
+$s.TargetPath="pythonw"
+$s.Arguments="-m picasso spinna"
+$s.IconLocation="$PSScriptRoot/icons/spinna.ico"
+$s.Save()

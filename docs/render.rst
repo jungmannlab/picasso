@@ -21,9 +21,9 @@ Adaptive Intersection Maximization (AIM) drift correction
 
 1. In ``Picasso: Render``, select ``Postprocess > Undrift by AIM``.
 2. The dialog asks the user to select:
-|   a. ``Segmentation`` - the number of frames per interval to calculate the drift. The lower the value, the better the temporal resolution of the drift correction, but the higher the computational cost.
-|   b. ``Intersection distance (nm)`` - the maximum distance between two localizations in two consecutive temporal segments to be considered the same molecule. This parameter is robust, 3*NeNA for optimal result is recommended.
-|   c. ``Max. drift in segment (nm)`` - the maximum expected drift between two consecutive temporal segments. If the drift is larger, the algorithm will likely diverge. Setting the parameter up to ``3 * intersection_distance`` will result in fast computation.
+  a. ``Segmentation`` - the number of frames per interval to calculate the drift. The lower the value, the better the temporal resolution of the drift correction, but the higher the computational cost.
+  b. ``Intersection distance (nm)`` - the maximum distance between two localizations in two consecutive temporal segments to be considered the same molecule. This parameter is robust, 3*NeNA for optimal result is recommended.
+  c. ``Max. drift in segment (nm)`` - the maximum expected drift between two consecutive temporal segments. If the drift is larger, the algorithm will likely diverge. Setting the parameter up to ``3 * intersection_distance`` will result in fast computation.
 3. After the algorithm finishes, the estimated drift will be displayed in a pop-up window, and the display will show the drift-corrected image.
 
 Marker-based drift correction
@@ -301,6 +301,10 @@ Remove localizations found in picked region(s) of interest. Can be applied to se
 Move to pick
 ^^^^^^^^^^^^
 Changes FoV to display a pick region specified by the user.
+
+Pick fiducials
+^^^^^^^^^^^^^^
+Automatically picks fiducials. To do so, the whole FOV image is rendered at one-pixel-blur. Then, such image pixel intesities are histogramed and the 99th is used as a threshold for selecting image maxima using Localize's identification.
 
 Show trace (CTRL + R)
 ^^^^^^^^^^^^^^^^^^^^^

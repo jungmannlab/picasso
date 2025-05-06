@@ -460,23 +460,28 @@ def distance_histogram(locs, info, bin_size, r_max):
 def nena(locs, info, callback=None):
     bin_centers, dnfl_ = next_frame_neighbor_distance_histogram(locs, callback)
 
-    def func(d, a, s, ac, dc, sc):
-        f = a * (d / s**2) * _np.exp(-0.5 * d**2 / s**2)
-        fc = (
-            ac
-            * (d / sc**2)
-            * _np.exp(-0.5 * (d**2 + dc**2) / sc**2)
-            * _iv(0, d * dc / sc)
-        )
-        return f + fc
+    # def func(d, a, s, ac, dc, sc):
+    #     f = a * (d / s**2) * _np.exp(-0.5 * d**2 / s**2)
+    #     fc = (
+    #         ac
+    #         * (d / sc**2)
+    #         * _np.exp(-0.5 * (d**2 + dc**2) / sc**2)
+    #         * _iv(0, d * dc / sc)
+    #     )
+    #     return f + fc
+    def func(d, delta_a, s, ac, dc, sc):
+        a = ac + delta_a # make sure a >= ac
+        p_single = a * (d / (2 * s**2)) * _np.exp(-d**2 / (4* s**2))
+        p_short = ac / (sc * _np.sqrt(2 * _np.pi)) * _np.exp(-0.5 * ((d - dc) / sc)**2)
+        return p_single + p_short
 
     pdf_model = _lmfit.Model(func)
     params = _lmfit.Parameters()
     area = _np.trapz(dnfl_, bin_centers)
     median_lp = _np.mean([_np.median(locs.lpx), _np.median(locs.lpy)])
-    params.add("a", value=area / 2, min=0)
+    params.add("delta_a", value=0.8*area, min=0)
     params.add("s", value=median_lp, min=0)
-    params.add("ac", value=area / 2, min=0)
+    params.add("ac", value=0.1*area, min=0)
     params.add("dc", value=2 * median_lp, min=0)
     params.add("sc", value=median_lp, min=0)
     result = pdf_model.fit(dnfl_, params, d=bin_centers)
