@@ -24,8 +24,9 @@ A collection of tools for painting super-resolution images. The Picasso software
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
 
-Picasso 0.7.6
+Picasso 0.8.0
 -------------
+- **New module SPINNA for investigating oligomerization of proteins, DOI: `10.1038/s41467-025-59500-z<https://doi.org/10.1038/s41467-025-59500-z>`_**
 - NeNA bug fix: old values were too large by a factor of sqrt(2).
 
 Previous versions

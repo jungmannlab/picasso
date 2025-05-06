@@ -1,6 +1,8 @@
 SPINNA
 ======
 
+SPINNA is a module for analyzing the oligomerization of proteins using super-resolution microscopy data. For more information, please refer to the publication `L. A. Masullo, R. Kowalewski, et al. Nature Comm, 2025 <https://doi.org/10.1038/s41467-025-59500-z>`_.
+
 Overview of the GUI
 -------------------
 
@@ -52,7 +54,7 @@ Fitting
 ~~~~~~~
 
 Within the *Fitting* box:
-1. To generate the search space, i.e., the set of stoichiometries tested in SPINNA, click the button *Generate parameter search space* and define the number of simulation repeats and granularity. For more information, see Supplementary Figure 2 in the `SPINNA paper <https://doi.org/123123>`_.
+1. To generate the search space, i.e., the set of stoichiometries tested in SPINNA, click the button *Generate parameter search space* and define the number of simulation repeats and granularity. For more information, see Supplementary Figure 2 in the `SPINNA publication <https://doi.org/10.1038/s41467-025-59500-z>`_.
 2. To save the fitting scores for each tested stoichiometry, tick *Save fitting scores*. The user will be asked to input the name of the resulting .csv file.
 3. To obtain the result’s uncertainty, check the *Bootstrap* box, which will resample from the best fitting model 20 times and rerun SPINNA on the resampled datasets. Note that this will increase the computation time.
 4. To test different SPINNA models, click *Compare models*. The dialog will open, asking the user to input the range of tested label uncertainties (the user can choose to fit label uncertainty or not) and the candidate SPINNA models. For example, the user may want to explore the models with different spacings between the structures or different shape. We recommend the choose lower granularity when comparing models since the fitting may take a long time. 

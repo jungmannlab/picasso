@@ -1,11 +1,11 @@
 Changelog
 =========
 
-Last change: 04-MAY-2025 MTS
+Last change: 06-MAY-2025 MTS
 
-0.7.6
+0.8.0
 -----
-- **New module SPINNA for investigating oligormerization of proteins, DOI: **
+- **New module SPINNA for investigating oligormerization of proteins, DOI: `10.1038/s41467-025-59500-z<https://doi.org/10.1038/s41467-025-59500-z>`_**
 - **NeNA bug fix - old values were (usually) too high by a ~sqrt(2) **
 - NeNA bug fix - less prone to fitting to local maximum leading to incorrect values
 - NeNA plot - displays distances in nm
