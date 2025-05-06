@@ -26,7 +26,7 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 
 Picasso 0.8.0
 -------------
-- **New module SPINNA for investigating oligomerization of proteins, DOI: `10.1038/s41467-025-59500-z<https://doi.org/10.1038/s41467-025-59500-z>`_**
+- **New module SPINNA for investigating oligomerization of proteins**, `DOI: 10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`_.
 - NeNA bug fix: old values were too large by a factor of sqrt(2).
 
 Previous versions
