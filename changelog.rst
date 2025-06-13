@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 06-MAY-2025 MTS
+Last change: 13-JUN-2025 MTS
+
+0.8.1
+-----
+- Added ``n_events`` to cluster centers, i.e., number of binding events per cluster
 
 0.8.0
 -----
