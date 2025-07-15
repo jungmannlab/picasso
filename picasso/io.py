@@ -175,9 +175,11 @@ def load_tif(path, progress=None):
     info = movie.info()
     return movie, [info]
 
-def load_nd2(path):
-    movie = ND2Movie(path)
-    info = movie.info()
+def load_nd2(path): #TODO: check if this fixes the garbage collection issue
+    with ND2Movie(path) as movie:
+        info = movie.info()
+    # movie = ND2Movie(path)
+    # info = movie.info()
     return movie, [info]
 
 def load_movie(path, prompt_info=None, progress=None):
