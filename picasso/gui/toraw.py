@@ -13,7 +13,7 @@ import sys, os, importlib, pkgutil
 import os.path
 from PyQt5 import QtCore, QtGui, QtWidgets
 import traceback
-from .. import io, lib
+from .. import io, lib, __version__
 
 
 class TextEdit(QtWidgets.QTextEdit):
@@ -57,7 +57,7 @@ class Window(QtWidgets.QWidget):
     def __init__(self):
         super().__init__()
         # Init GUI
-        self.setWindowTitle("Picasso: ToRaw")
+        self.setWindowTitle(f"Picasso v{__version__}: ToRaw")
         self.resize(768, 512)
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "toraw.ico")
@@ -100,7 +100,7 @@ class Window(QtWidgets.QWidget):
         progress_bar.setTextVisible(False)
         self.progress_dialog.setBar(progress_bar)
         self.progress_dialog.setMaximum(n_movies)
-        self.progress_dialog.setWindowTitle("Picasso: ToRaw")
+        self.progress_dialog.setWindowTitle(f"Picasso v{__version__}: ToRaw")
         self.progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
         self.progress_dialog.canceled.connect(self.cancel)
         self.progress_dialog.closeEvent = self.cancel
@@ -119,7 +119,7 @@ class Window(QtWidgets.QWidget):
     def on_finished(self, done):
         self.progress_dialog.close()
         QtWidgets.QMessageBox.information(
-            self, "Picasso: ToRaw", "Conversion complete."
+            self, f"Picasso v{__version__}: ToRaw", "Conversion complete."
         )
 
 

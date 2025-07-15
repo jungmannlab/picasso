@@ -34,6 +34,7 @@ CLUSTER_CENTERS_DTYPE_2D = [
     ("ellipticity", "f4"),
     ("net_gradient", "f4"),
     ("n", "u4"),
+    ("n_events", "i4"), 
     ("area", "f4"),
     ("convexhull", "f4"),
     ("group", "i4"),
@@ -56,6 +57,7 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("ellipticity", "f4"),
     ("net_gradient", "f4"),
     ("n", "u4"),
+    ("n_events", "u4"), 
     ("volume", "f4"),
     ("convexhull", "f4"),
     ("group", "i4"),
@@ -325,9 +327,10 @@ def cluster(
 
     Returns
     -------
-    np.array
-        Cluster labels for each localization (-1 means no cluster 
-        assigned)
+    locs : np.recarray
+        Clusterered localizations, with column 'group' added, which
+        specifies cluster label for each localization. Noise (label -1)
+        is removed.  
     """
 
     if hasattr(locs, "z"): # 3D
@@ -405,8 +408,9 @@ def dbscan(locs, radius, min_samples, pixelsize=None):
     Returns
     -------
     locs : np.recarray
-        Clustered localizations; cluster labels are assigned to the
-        "group" column    
+        Clusterered localizations, with column 'group' added, which
+        specifies cluster label for each localization. Noise (label -1)
+        is removed.  
     """
     
     if hasattr(locs, "z"):
@@ -479,8 +483,9 @@ def hdbscan(
     Returns
     -------
     locs : np.recarray
-        Clustered localizations; cluster labels are assigned to the
-        "group" column    
+        Clusterered localizations, with column 'group' added, which
+        specifies cluster label for each localization. Noise (label -1)
+        is removed.  
     """
 
     if hasattr(locs, "z"):
@@ -593,12 +598,13 @@ def find_cluster_centers(locs, pixelsize=None):
     ellipticity = _np.array([_[12] for _ in centers_])
     net_gradient = _np.array([_[13] for _ in centers_])
     n = _np.array([_[14] for _ in centers_])
+    n_events = _np.array([_[15] for _ in centers_]) # number of localizations in cluster
 
     if hasattr(locs, "z"):
-        z = _np.array([_[15] for _ in centers_])
-        std_z = _np.array([_[16] for _ in centers_])
-        volume = _np.array([_[17] for _ in centers_])
-        convexhull = _np.array([_[18] for _ in centers_])
+        z = _np.array([_[16] for _ in centers_])
+        std_z = _np.array([_[17] for _ in centers_])
+        volume = _np.array([_[18] for _ in centers_])
+        convexhull = _np.array([_[19] for _ in centers_])
         centers = _np.rec.array(
             (
                 frame,
@@ -618,6 +624,7 @@ def find_cluster_centers(locs, pixelsize=None):
                 ellipticity,
                 net_gradient,
                 n,
+                n_events,
                 volume,
                 convexhull,
                 res.index.values, # group id
@@ -625,8 +632,8 @@ def find_cluster_centers(locs, pixelsize=None):
             dtype=CLUSTER_CENTERS_DTYPE_3D,
         )
     else:
-        area = _np.array([_[15] for _ in centers_])
-        convexhull = _np.array([_[16] for _ in centers_])
+        area = _np.array([_[16] for _ in centers_])
+        convexhull = _np.array([_[17] for _ in centers_])
         centers = _np.rec.array(
             (
                 frame,
@@ -644,6 +651,7 @@ def find_cluster_centers(locs, pixelsize=None):
                 ellipticity,
                 net_gradient,
                 n,
+                n_events,
                 area,
                 convexhull,
                 res.index.values, # group id
@@ -713,6 +721,10 @@ def cluster_center(grouplocs, pixelsize=None, separate_lp=False):
     net_gradient = grouplocs.net_gradient.mean()
     # n_locs in cluster
     n = len(grouplocs)
+    # number of binding events
+    split_idx = _np.where(_np.diff(grouplocs.frame) > 3)[0] + 1 # split locs by consecutive frames
+    x_events = _np.split(grouplocs.x, split_idx)
+    n_events = len(x_events) # number of binding events
     if hasattr(grouplocs, "z"):
         if pixelsize is None:
             raise ValueError(
@@ -753,6 +765,7 @@ def cluster_center(grouplocs, pixelsize=None, separate_lp=False):
             ellipticity,
             net_gradient,
             n, 
+            n_events,
             z,
             std_z,
             # lpz,
@@ -783,6 +796,7 @@ def cluster_center(grouplocs, pixelsize=None, separate_lp=False):
             ellipticity,
             net_gradient,
             n,
+            n_events,
             area,
             convexhull,
         ]
