@@ -129,6 +129,8 @@ def calculate_optimal_bins(data, max_n_bins=None):
     """
     
     iqr = _np.subtract(*_np.percentile(data, [75, 25]))
+    if iqr == 0:
+        return _np.array([data[0] - 1.0, data[0] + 1.0])
     bin_size = 2 * iqr * len(data) ** (-1 / 3)
     if data.dtype.kind in ("u", "i") and bin_size < 1:
         bin_size = 1

@@ -169,8 +169,8 @@ def find_fiducials(locs, info):
         viewport=None,
         blur_method="smooth",        
     )[1]
-    hist = _np.histogram(image.flatten(), bins=256)
-    threshold = _np.percentile(hist[0], 99)
+    # hist = _np.histogram(image.flatten(), bins=256)
+    threshold = _np.percentile(image.flatten(), 99)
     # box size should be an odd number, corresponding to approximately
     # 900 nm 
     pixelsize = 130
