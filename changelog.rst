@@ -7,6 +7,7 @@ Last change: 15-JUL-2025 MTS
 -----
 - Added ``n_events`` to cluster centers, i.e., number of binding events per cluster
 - .yaml files contain Picasso version number for easier tracking
+- Bug fixes
 
 0.8.0
 -----
