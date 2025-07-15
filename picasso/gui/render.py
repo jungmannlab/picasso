@@ -3746,19 +3746,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             Localizations to be masked
         """
 
-        x_ind = (
-            np.floor(locs["x"] / self.x_max * self.mask.shape[0])
-        ).astype(int)
-        y_ind = (
-            np.floor(locs["y"] / self.y_max * self.mask.shape[1])
-        ).astype(int)
-
-        index = self.mask[y_ind, x_ind].astype(bool)
-        locs_in = locs[index]
-        locs_in.sort(kind="mergesort", order="frame")
-        locs_out = locs[~index]
-        locs_out.sort(kind="mergesort", order="frame")
-
+        locs_in, locs_out = postprocess.mask_locs(
+            locs, self.mask, self.x_max, self.y_max,
+        )
         self.index_locs.append(locs_in) # locs in the mask
         self.index_locs_out.append(locs_out) # locs outside the mask
 
