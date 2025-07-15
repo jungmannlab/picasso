@@ -3085,10 +3085,10 @@ class SimulationsTab(QtWidgets.QDialog):
             locs, info = io.load_locs(path)
             pixelsize = None
             for element in info:
-                if "Picasso Localize" in element.values():
+                if "Localize" in element.values():
                     if "Pixelsize" in element and pixelsize is None:
                         pixelsize = element["Pixelsize"]
-                if "Picasso Render : Pick" in element.values():
+                if "Render : Pick" in element.values():
                     if "Total Picked Area (um^2)" in element:
                         area = element["Total Picked Area (um^2)"]
                         # set the observed density of the molecules
