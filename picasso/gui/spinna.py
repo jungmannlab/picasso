@@ -3476,7 +3476,7 @@ class SimulationsTab(QtWidgets.QDialog):
         save = ""
         if self.save_fit_results_check.isChecked():
             out_path = self.structures_path.replace(".yaml", "_fit_scores.csv")
-            save, ext = QtWidgets.QFileaDialog.getSaveFileName(
+            save, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save fitting scores", out_path, filter="*.csv"
             )
             if not save:

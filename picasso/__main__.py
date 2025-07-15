@@ -1477,12 +1477,20 @@ def _spinna_batch_analysis(parameters_filename, asynch=True, bootstrap=False, ve
                 nn_counts[f"{t1}-{t2}"] = nn_plotted
         mixer.nn_counts = nn_counts
         n_total = sum(n_simulated.values())
-        dist_sim = spinna.get_NN_dist_simulated(
-            mixer.convert_props_to_counts(opt_props[0], n_total), 
-            sim_repeats, 
-            mixer, 
-            duplicate=True,
-        )
+        if isinstance(opt_props, tuple):
+            dist_sim = spinna.get_NN_dist_simulated(
+                mixer.convert_props_to_counts(opt_props[0], n_total), 
+                sim_repeats, 
+                mixer, 
+                duplicate=True,
+            )
+        else:
+            dist_sim = spinna.get_NN_dist_simulated(
+                mixer.convert_props_to_counts(opt_props, n_total), 
+                sim_repeats, 
+                mixer, 
+                duplicate=True,
+            )
         for i, (t1, t2, _) in enumerate(mixer.get_neighbor_idx(duplicate=True)):
             fig, ax = spinna.plot_NN(
                 dist=dist_sim[i], mode='plot', show_legend=False,
