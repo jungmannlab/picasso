@@ -12,11 +12,35 @@ import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm as tqdm
 from scipy import ndimage
+from sklearn.neural_network import MLPClassifier
 
 from . import render, lib
 
 
-def prepare_img(img, img_shape, alpha=1, bg=0):
+def prepare_img(
+    img: np.ndarray, 
+    img_shape: int, 
+    alpha: float = 1, 
+    bg: float = 0,
+) -> np.ndarray:
+    """Prepare image for classification.
+    
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image to be prepared.
+    img_shape : int
+        Shape of the image (assumed to be square).
+    alpha : float, optional
+        Scaling factor for the image, by default 1.
+    bg : float, optional
+        Background value to be subtracted, by default 0.
+    
+    Returns
+    -------
+    img : np.ndarray
+        Prepared image.
+    """
 
     img = alpha * img - bg
     img = img.astype('float')
@@ -27,13 +51,57 @@ def prepare_img(img, img_shape, alpha=1, bg=0):
     return img
 
 
-def rotate_img(img, angle):
+def rotate_img(img: np.ndarray, angle: float) -> np.ndarray:
+    """Rotate image by a given angle.
+
+    Parameters
+    ----------
+    img : np.ndarray
+        Input image to be rotated.
+    angle : float
+        Angle in degrees by which to rotate the image.
+    
+    Returns
+    -------
+    np.ndarray
+        Rotated image.
+    """
 
     rot_img = ndimage.rotate(img, angle, reshape=False)
 
     return rot_img
 
-def roi_to_img(locs, pick, radius, oversampling, picks=None):
+def roi_to_img(
+    locs: np.recarray, 
+    pick: int, 
+    radius: float, 
+    oversampling: float, 
+    picks: tuple[float, float] | None = None,
+) -> np.ndarray:
+    """Convert a region of interest (ROI) defined by localizations to an 
+    image.
+    
+    Parameters
+    ----------
+    locs : np.recarray
+        Localizations from which to create the image.
+    pick : int
+        The group number of the localizations to be picked.
+    radius : float
+        Radius around the mean position of the localizations to define 
+        the ROI.
+    oversampling : float
+        Number of super-resolution pixels per camera pixel.
+    picks : tuple[float, float] | None, optional
+        Specific coordinates (x, y) to isolate localizations from, by
+        default None. If None, uses the mean position of the localizations
+        in the specified group.
+        
+    Returns
+    -------
+    pick_img : np.ndarray
+        Image of the picked localizations.
+    """
 
     # Isolate locs from pick
     pick_locs = []
@@ -75,9 +143,44 @@ def roi_to_img(locs, pick, radius, oversampling, picks=None):
     return pick_img
 
 
-def prepare_data(locs, label, pick_radius,
-                 oversampling, alpha=10,
-                 bg=1, export=False):
+def prepare_data(
+    locs: np.recarray, 
+    label: int, 
+    pick_radius: float,
+    oversampling: float, 
+    alpha: float = 10,
+    bg: float = 1, 
+    export: bool = False,
+) -> tuple[list[np.ndarray], list[int]]:
+    """Prepare data for classification by extracting images of 
+    localizations. 
+    
+    Parameters
+    ----------
+    locs : np.recarray
+        Localizations from which to create the images.
+    label : int
+        Label for the data, typically the group number.
+    pick_radius : float
+        Radius around the mean position of the localizations to define 
+        the ROI.
+    oversampling : float
+        Number of super-resolution pixels per camera pixel.
+    alpha : float, optional
+        Scaling factor for the image, by default 10.
+    bg : float, optional
+        Background value to be subtracted, by default 1.
+    export : bool, optional
+        If True, saves the images to the './img/' directory, by default 
+        False.
+        
+    Returns
+    -------
+    data : list[np.ndarray]
+        List of prepared images of the localizations.
+    labels : list[int]
+        List of labels corresponding to the images.
+    """
 
     img_shape = int(2 * pick_radius * oversampling)
     data = []
@@ -101,7 +204,39 @@ def prepare_data(locs, label, pick_radius,
     return data, label
 
 
-def predict_structure(mlp, locs, pick, pick_radius, oversampling, picks=None):
+def predict_structure(
+    mlp: MLPClassifier, 
+    locs: np.recarray, 
+    pick: int, 
+    pick_radius: float, 
+    oversampling: float, 
+    picks: tuple[float, float] | None = None,
+) -> tuple[int, np.ndarray]:
+    """Predict the structure of localizations using a trained MLP
+    classifier.
+
+    Parameters
+    ----------
+    mlp : MLPClassifier
+        Trained MLP classifier.
+    locs : np.recarray
+        Localizations to predict.
+    pick : int
+        Index of the localizations to predict.
+    pick_radius : float
+        Radius around the localizations to consider.
+    oversampling : float
+        Oversampling factor for the image.
+    picks : tuple[float, float] | None, optional
+        Coordinates of the region of interest (ROI) to predict.
+
+    Returns
+    -------
+    pred : int
+        Predicted label for the image.
+    pred_proba : np.ndarray
+        Predicted probabilities for each class.
+    """
 
     img_shape = int(2 * pick_radius * oversampling)
     img = roi_to_img(locs, pick=pick, radius=pick_radius, oversampling=oversampling, picks=picks)
