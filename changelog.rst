@@ -5,7 +5,7 @@ Last change: 06-AUG-2025 MTS
 
 0.8.1 - 0.8.2
 -------------
-- Added docstrings and data typesto functions in ``postprocess``, ``simulate``, and ``zfit``
+- Added docstrings and data types for all functions in ``postprocess``, ``simulate``, ``render``, and ``zfit``
 - Added ``n_events`` to cluster centers, i.e., number of binding events per cluster
 - .yaml files contain Picasso version number for easier tracking
 - Improved fiducial picking
