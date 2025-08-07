@@ -2,13 +2,13 @@
     picasso.avgroi
     ~~~~~~~~~~~~~~~~
 
-    Return average intensity of Spot
+    Fits spots, i.e., finds the average of the pixels in a region of 
+    interest (ROI).
 
     :author: Maximilian Thomas Strauss, 2016
     :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
-from scipy import optimize as _optimize
 import numpy as _np
 from tqdm import tqdm as _tqdm
 import numba as _numba
@@ -18,7 +18,9 @@ from . import postprocess as _postprocess
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _sum(spot, size):
+def _sum(spot: _np.ndarray, size: int) -> float:
+    """Calculate the sum of all pixels in a spot."""
+    
     _sum_ = 0.0
     for i in range(size):
         for j in range(size):
@@ -27,7 +29,9 @@ def _sum(spot, size):
     return _sum_
 
 
-def fit_spot(spot):
+def fit_spot(spot: _np.ndarray) -> _np.ndarray:
+    """Fit a single spot and return fit parameters."""
+
     size = spot.shape[0]
     avg_roi = _sum(spot, size)
     # result is [x, y, photons, bg, sx, sy]
@@ -35,7 +39,9 @@ def fit_spot(spot):
     return result
 
 
-def fit_spots(spots):
+def fit_spots(spots: _np.ndarray) -> _np.ndarray:
+    """Fit spots and return fit parameters."""
+
     theta = _np.empty((len(spots), 6), dtype=_np.float32)
     theta.fill(_np.nan)
     for i, spot in enumerate(spots):
@@ -43,7 +49,12 @@ def fit_spots(spots):
     return theta
 
 
-def fit_spots_parallel(spots, asynch=False):
+def fit_spots_parallel(
+    spots: _np.ndarray, 
+    asynch: bool = False,
+) -> _np.ndarray | list[_futures.Future]:
+    """Fit spots in parallel (if asynch)."""
+
     n_workers = min(
         60, max(1, int(0.75 * _multiprocessing.cpu_count()))
     ) # Python crashes when using >64 cores
@@ -66,12 +77,21 @@ def fit_spots_parallel(spots, asynch=False):
     return fits_from_futures(fs)
 
 
-def fits_from_futures(futures):
+def fits_from_futures(futures: list[_futures.Future]) -> _np.ndarray:
+    """Collect fit results from futures."""
+
     theta = [_.result() for _ in futures]
     return _np.vstack(theta)
 
 
-def locs_from_fits(identifications, theta, box, em):
+def locs_from_fits(
+    identifications: _np.recarray, 
+    theta: _np.ndarray, 
+    box: int, 
+    em: float,
+) -> _np.recarray:
+    """Convert fit results to localization recarray."""
+
     # box_offset = int(box/2)
     x = theta[:, 0] + identifications.x  # - box_offset
     y = theta[:, 1] + identifications.y  # - box_offset
