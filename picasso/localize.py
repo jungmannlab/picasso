@@ -8,6 +8,7 @@
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
+from __future__ import annotations
 from typing import Literal as _Literal
 from typing import Callable as _Callable
 import numpy as _np
@@ -276,54 +277,56 @@ def identify_in_frame(
         x += roi[0][1]
     return y, x, net_gradient
 
-def identify_frame(
-    frame: _np.ndarray, 
-    minimum_ng: float, 
-    box: int, 
-    frame_number: int, 
-    roi: tuple[tuple[int, int], tuple[int, int]] | None = None, 
-    resultqueue: _multiprocessing.Queue | None = None
-) -> _np.recarray:
-    """Identifies local maxima in a single frame and calculates the net
-    gradient at those maxima. Optionally, the results can be put into a
-    multiprocessing queue.
 
-    Parameters
-    ----------
-    frame : np.ndarray
-        An image frame, 2D array of shape (Y, X).
-    minimum_ng : float
-        Minimum net gradient value to consider a maximum as valid.
-    box : int
-        Size of the box used for calculating the gradient. Should be
-        an odd integer.
-    frame_number : int
-        The index of the frame in the movie sequence.
-    roi : tuple, optional
-        Region of interest (ROI) defined as a tuple of two tuples,
-        where the first tuple contains the start coordinates 
-        (y_start, x_start) and the second tuple contains the end 
-        coordinates (y_end, x_end). If None, the entire frame is used. 
-    resultqueue : multiprocessing.Queue, optional
-        If provided, the results will be put into this queue as a
-        structured numpy array. 
+# def identify_frame(
+#     frame: _np.ndarray, 
+#     minimum_ng: float, 
+#     box: int, 
+#     frame_number: int, 
+#     roi: tuple[tuple[int, int], tuple[int, int]] | None = None, 
+#     resultqueue: _multiprocessing.Queue | None = None
+# ) -> _np.recarray:
+#     """Identifies local maxima in a single frame and calculates the net
+#     gradient at those maxima. Optionally, the results can be put into a
+#     multiprocessing queue.
 
-    Returns
-    -------
-    result : np.recarray
-        A structured numpy array containing the frame number, x and y
-        coordinates of the identified maxima, and their net gradient.   
-    """
+#     Parameters
+#     ----------
+#     frame : np.ndarray
+#         An image frame, 2D array of shape (Y, X).
+#     minimum_ng : float
+#         Minimum net gradient value to consider a maximum as valid.
+#     box : int
+#         Size of the box used for calculating the gradient. Should be
+#         an odd integer.
+#     frame_number : int
+#         The index of the frame in the movie sequence.
+#     roi : tuple, optional
+#         Region of interest (ROI) defined as a tuple of two tuples,
+#         where the first tuple contains the start coordinates 
+#         (y_start, x_start) and the second tuple contains the end 
+#         coordinates (y_end, x_end). If None, the entire frame is used. 
+#     resultqueue : multiprocessing.Queue, optional
+#         If provided, the results will be put into this queue as a
+#         structured numpy array. 
 
-    y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
-    frame = frame_number * _np.ones(len(x))
-    result = _np.rec.array(
-        (frame, x, y, net_gradient),
-        dtype=[("frame", "i"), ("x", "i"), ("y", "i"), ("net_gradient", "f4")],
-    )
-    if resultqueue is not None:
-        resultqueue.put(result)
-    return result
+#     Returns
+#     -------
+#     result : np.recarray
+#         A structured numpy array containing the frame number, x and y
+#         coordinates of the identified maxima, and their net gradient.   
+#     """
+
+#     y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
+#     frame = frame_number * _np.ones(len(x))
+#     result = _np.rec.array(
+#         (frame, x, y, net_gradient),
+#         dtype=[("frame", "i"), ("x", "i"), ("y", "i"), ("net_gradient", "f4")],
+#     )
+#     if resultqueue is not None:
+#         resultqueue.put(result)
+#     return result
+
 
 def identify_by_frame_number(
     movie: _np.ndarray, 
@@ -381,11 +384,11 @@ def identify_by_frame_number(
 
 def _identify_worker(
     movie: _np.ndarray, 
-    current: int, 
+    current: list[int], 
     minimum_ng: float,
     box: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | None,
-    lock: _threading.Lock | None
+    lock: _threading.Lock | None,
 ) -> list[_np.recarray]:
     """Worker function for identifying local maxima in a movie. This   
     function is designed to be run in a separate thread and processes

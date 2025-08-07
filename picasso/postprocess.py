@@ -697,7 +697,7 @@ def nena(
     locs: _np.recarray, 
     info: None, 
     callback: _Callable[[int], None] | None = None,
-) -> tuple[_lmfit.ModelResult, float]:
+) -> tuple[_lmfit.Model, float]:
     """Calculates NeNA - experimental estimate of localization 
     precision. Please refer to the original paper for details:
     Endesfelder, et al. Histochemistry and Cell Biology, 2014.
@@ -714,8 +714,8 @@ def nena(
         
     Returns
     -------
-    result : _lmfit.ModelResult
-        Fitted model result.
+    result : _lmfit.Model
+        Fitted model.
     s : float
         Estimated localization precision.
     """
