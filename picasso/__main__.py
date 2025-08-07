@@ -8,11 +8,15 @@
     :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss
     :copyright: Copyright (c) 2016-2019 Jungmann Lab, MPI of Biochemistry
 """
+
 import os.path
+import argparse
 from . import __version__
 
 
 def picasso_logo():
+    """Prints the Picasso logo to the console."""
+
     print("    ____  _____________   __________ ____ ")
     print("   / __ \\/  _/ ____/   | / ___/ ___// __ \\")
     print("  / /_/ // // /   / /| | \\__ \\\\__ \\/ / / /")
@@ -21,7 +25,19 @@ def picasso_logo():
     print("                                          ")
 
 
-def _average(args):
+def _average(args: argparse.Namespace) -> None:
+    """Run Picasso: Average.
+    
+    Parameters
+    ----------
+    iterations : int
+        Number of iterations for the averaging algorithm.
+    oversampling : int
+        Number of super-resolution pixels per camera pixel.
+    file : list of str
+        List of file paths to the localization files to be averaged.
+    """
+
     from glob import glob
     from .io import load_locs, NoMetadataFileError
     from picasso.gui import average
@@ -39,7 +55,18 @@ def _average(args):
             average(locs, info, **kwargs)
 
 
-def _hdf2visp(path, pixel_size):
+def _hdf2visp(path: str, pixel_size: float) -> None:
+    """Convert HDF5 localization files to VISP format.
+
+    Parameters
+    ----------
+    path : str
+        Path to the HDF5 localization files. The file will be saved
+        under the same name with a `.3d` extension.
+    pixel_size : float
+        Camera pixel size in nanometers.
+    """
+
     from glob import glob
 
     paths = glob(path)
@@ -63,7 +90,17 @@ def _hdf2visp(path, pixel_size):
             )
 
 
-def _csv2hdf(path, pixelsize):
+def _csv2hdf(path: str, pixelsize: float) -> None:
+    """Convert CSV localization files to HDF5 format.
+
+    Parameters
+    ----------
+    path : str
+        Path to the CSV localization files.
+    pixelsize : float
+        Camera pixel size in nanometers.
+    """
+
     from glob import glob
     from tqdm import tqdm as _tqdm
     import pandas as pd
@@ -156,7 +193,9 @@ def _csv2hdf(path, pixelsize):
                 raise e
 
 
-def _hdf2csv(path):
+def _hdf2csv(path: str) -> None:
+    """Convert HDF5 localization files to CSV format."""
+
     from glob import glob
     import pandas as pd
     from tqdm import tqdm as _tqdm
@@ -182,7 +221,10 @@ def _hdf2csv(path):
     print("Complete.")
 
 
-def _link(files, d_max, tolerance):
+def _link(files: str, d_max: float, tolerance: float) -> None:
+    """Link localizations in HDF5 files, see ``postprocess.link`` for
+    details."""
+
     import numpy as _np
     from tqdm import tqdm as _tqdm
     from . import lib as _lib
@@ -255,7 +297,10 @@ def _link(files, d_max, tolerance):
                 continue
 
 
-def _cluster_combine(files):
+def _cluster_combine(files: str) -> None:
+    """Combine clusters in HDF5 files. See 
+    ``postprocess.cluster_combine`` for details."""
+
     import glob
 
     paths = glob.glob(files)
@@ -274,7 +319,10 @@ def _cluster_combine(files):
             io.save_locs(base + "_comb.hdf5", combined_locs, info)
 
 
-def _cluster_combine_dist(files):
+def _cluster_combine_dist(files: str) -> None:
+    """Combine clusters in HDF5 files based on distance. See
+    ``postprocess.cluster_combine_dist`` for details."""
+
     import glob
 
     paths = glob.glob(files)
@@ -293,7 +341,29 @@ def _cluster_combine_dist(files):
             io.save_locs(base + "_cdist.hdf5", combinedist_locs, info)
 
 
-def _clusterfilter(files, clusterfile, parameter, minval, maxval):
+def _clusterfilter(
+    files: str,
+    clusterfile: str,
+    parameter: str,
+    minval: float,
+    maxval: float,
+) -> None:
+    """Filter localizations based on cluster parameters.
+
+    Parameters
+    ----------
+    files : str
+        Glob pattern for input files.
+    clusterfile : str
+        Path to the cluster file.
+    parameter : str
+        Name of the parameter to filter on.
+    minval : float
+        Minimum value for the parameter.
+    maxval : float
+        Maximum value for the parameter.
+    """
+
     from glob import glob
     from tqdm import tqdm
     import numpy as np
@@ -370,7 +440,16 @@ def _clusterfilter(files, clusterfile, parameter, minval, maxval):
                 print("Error: Field {} not found.".format(parameter))
 
 
-def _undrift(files, segmentation, display=True, fromfile=None):
+def _undrift(
+    files: str, 
+    segmentation: int, 
+    display: bool = True, 
+    fromfile: str | None = None,
+) -> None:
+    """Runs RCC undrifting on the given files. See 
+    ``postprocess.undrift`` for details. Alternatively, it can read the
+    drift .txt file to apply the drift correction."""
+
     import glob
     from . import io, postprocess
     from numpy import genfromtxt, savetxt
@@ -427,8 +506,14 @@ def _undrift(files, segmentation, display=True, fromfile=None):
 
 
 def _undrift_aim(
-    files, segmentation, intersectdist=20/130, roiradius=60/130
-):
+    files: str, 
+    segmentation: int, 
+    intersectdist: float = 20/130, 
+    roiradius: float = 60/130
+) -> None:
+    """Runs AIM undrifting on the given files. See ``aim.aim`` for 
+    details."""
+
     import glob
     from . import io, aim
     from numpy import savetxt
@@ -446,7 +531,10 @@ def _undrift_aim(
         savetxt(base + "_aimdrift.txt", drift, header="dx\tdy", newline="\r\n")  
 
 
-def _density(files, radius):
+def _density(files: str, radius: float) -> None:
+    """Compute local density of localizations in HDF5 files. See
+    ``postprocess.compute_local_density`` for details."""
+
     import glob
 
     paths = glob.glob(files)
@@ -465,7 +553,15 @@ def _density(files, radius):
             io.save_locs(base + "_density.hdf5", locs, info)
 
 
-def _dbscan(files, radius, min_density, pixelsize=None):
+def _dbscan(
+    files: str, 
+    radius: float, 
+    min_density: float, 
+    pixelsize: float | None = None,
+) -> None:
+    """Run DBSCAN clustering on localizations in HDF5 files. See
+    ``clusterer.dbscan`` for details."""
+
     import glob
 
     paths = glob.glob(files)
@@ -493,7 +589,15 @@ def _dbscan(files, radius, min_density, pixelsize=None):
             )
 
 
-def _hdbscan(files, min_cluster, min_samples, pixelsize=None):
+def _hdbscan(
+    files: str, 
+    min_cluster: int, 
+    min_samples: int, 
+    pixelsize: float | None = None,
+) -> None:
+    """Run HDBSCAN clustering on localizations in HDF5 files. See
+    ``clusterer.hdbscan`` for details."""
+
     import glob
 
     paths = glob.glob(files)
@@ -521,8 +625,16 @@ def _hdbscan(files, min_cluster, min_samples, pixelsize=None):
             )
 
 def _smlm_clusterer(
-        files, radius, min_locs, pixelsize=None, basic_fa=False, radius_z=None
-    ):
+    files: str, 
+    radius: float, 
+    min_locs: int, 
+    pixelsize: float | None = None, 
+    basic_fa: bool = False, 
+    radius_z: float | None = None,
+) -> None:
+    """Run SMLM clustering on localizations in HDF5 files. See
+    ``clusterer.cluster`` for details."""
+
     import glob
 
     paths = glob.glob(files)
@@ -557,7 +669,13 @@ def _smlm_clusterer(
             )
 
 
-def _nneighbor(files):
+def _nneighbor(files: str) -> None:
+    """Calculate the minimum distance to the nearest neighbor for each
+    localization in the given HDF5 files. The results are saved in a
+    text file with the same name as the input file, but with a
+    `_minval.txt` suffix. The distances are calculated using the
+    Euclidean distance metric."""
+
     import glob
     import h5py as _h5py
     import numpy as np
@@ -580,7 +698,10 @@ def _nneighbor(files):
             print("Saved filest o: {}".format(out_path))
 
 
-def _dark(files):
+def _dark(files: str) -> None:
+    """Compute dark times for localizations in HDF5 files. See
+    ``postprocess.compute_dark_times`` for details."""
+
     import glob
 
     paths = glob.glob(files)
@@ -596,7 +717,10 @@ def _dark(files):
             io.save_locs(base + "_dark.hdf5", locs, info)
 
 
-def _align(files, display):
+def _align(files: str, display: bool) -> None:
+    """Aligns localization files using RCC, see ``postprocess.align`` 
+    for details."""
+
     from glob import glob
     from itertools import chain
     from .io import load_locs, save_locs
@@ -618,7 +742,9 @@ def _align(files, display):
         save_locs(base + "_align.hdf5", locs_, info)
 
 
-def _join(files, keep_index=True):
+def _join(files: list[str], keep_index: bool = True) -> None:
+    """Join multiple localization files into one."""
+
     from .io import load_locs, save_locs
     from os.path import splitext
     from numpy import append
@@ -651,7 +777,10 @@ def _join(files, keep_index=True):
     save_locs(base + "_join.hdf5", locs, info)
 
 
-def _groupprops(files):
+def _groupprops(files: str) -> None:
+    """Calculate group properties for localizations in HDF5 files.
+    See ``postprocess.groupprops`` for details."""
+
     import glob
 
     paths = glob.glob(files)
@@ -667,7 +796,10 @@ def _groupprops(files):
             save_datasets(base + "_groupprops.hdf5", info, locs=locs, groups=groups)
 
 
-def _pair_correlation(files, bin_size, r_max):
+def _pair_correlation(files: str, bin_size: float, r_max: float) -> None:
+    """Calculate pair-correlation for localizations in HDF5 files. See
+    ``postprocess.pair_correlation`` for details."""
+
     from glob import glob
 
     paths = glob(files)
@@ -689,7 +821,9 @@ def _pair_correlation(files, bin_size, r_max):
             show()
 
 
-def _start_server():
+def _start_server() -> None:
+    """Start the Streamlit server for the Picasso GUI."""
+
     import os
     import sys
     from streamlit.web import cli as stcli
@@ -743,7 +877,20 @@ def _start_server():
     sys.exit(stcli.main())
 
 
-def _nanotron(args):
+def _nanotron(args: argparse.Namespace) -> None:
+    """Run nanoTRON prediction on localization files.
+    
+    Parameters
+    ----------
+    files : str
+        Path to the localization files or a directory containing
+        HDF5 files.
+    model_path : str
+        Path to the nanoTRON model file.
+    model_pth : str
+        Path to the nanoTRON model weights file.
+    """
+
     from glob import glob
     from os.path import isdir
     from .io import load_locs, NoMetadataFileError
@@ -771,7 +918,35 @@ def _nanotron(args):
             # predict(locs, info, **kwargs)
 
 
-def _localize(args):
+def _localize(args: argparse.Namespace) -> None:
+    """Localize molecules in microscopy images.
+    
+    Parameters
+    ----------
+    files : str
+        Path to the microscopy image files or a directory containing
+        image files.
+    fit_method : str
+        Method to use for fitting localizations. Options are:
+        - 'mle': Maximum Likelihood Estimation
+        - 'lq-3d': LQ 3D fitting
+        - 'lq-gpu-3d': LQ GPU 3D fitting
+    box_side_length : int
+        Side length of the box used for localization.
+    gradient : float
+        Minimum net gradient for localization.
+    roi : list of int
+        Region of interest defined as [y_min, x_min, y_max, x_max].
+    baseline : float
+        Baseline value for the camera.
+    sensitivity : float
+        Sensitivity of the camera.
+    gain : float
+        Gain of the camera.
+    qe : float
+        Not used in the calculations.
+    """
+
     files = args.files
     from glob import glob
     from .io import load_movie, save_locs, save_info
@@ -1048,7 +1223,36 @@ def _localize(args):
         raise FileNotFoundError
 
 
-def _render(args):
+def _render(args: argparse.Namespace) -> None:
+    """Render localization files to images.
+    
+    Parameters
+    ----------
+    files : str
+        Path to the localization files or a directory containing
+        HDF5 files.
+    oversampling : int
+        Number of super-resolution pixels per camera pixel.
+    blur_method : str 
+        Defines localizations' blur. The string has to be one of 
+        'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
+        blurring is applied.
+    min_blur_width : float
+        Minimum width of the blur kernel in pixels.
+    vmin : float
+        Minimum value for the color scale.
+    vmax : float
+        Maximum value for the color scale.  
+    cmap : str
+        Colormap to use for rendering. If None, the colormap from
+        user settings is used.
+    scaling : str
+        If 'yes', the image is scaled to the range [vmin, vmax].
+        If 'no', the image is not scaled.
+    silent : bool
+        If True, the rendered images are not opened automatically.
+    """
+
     from .lib import locs_glob_map
     from .render import render
     from os.path import splitext
@@ -1139,7 +1343,12 @@ def _render(args):
         )
 
 
-def _spinna_batch_analysis(parameters_filename, asynch=True, bootstrap=False, verbose=False):
+def _spinna_batch_analysis(
+    parameters_filename: str, 
+    asynch: bool = True, 
+    bootstrap: bool = False, 
+    verbose: bool = False,
+) -> None:
     """SPINNA batch analysis. Results are automatically saved in the
     a new subfolder named "parameters_filename_fitting_results" in the 
     folder where the parameters file is located. Parameters should be 
@@ -1519,7 +1728,6 @@ def _spinna_batch_analysis(parameters_filename, asynch=True, bootstrap=False, ve
 
 
 def main():
-    import argparse
 
     # Main parser
     parser = argparse.ArgumentParser("picasso")
