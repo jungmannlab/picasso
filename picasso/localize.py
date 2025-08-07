@@ -750,7 +750,7 @@ def fit(
 ) -> _np.recarray:
     """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the 
     identified spots in a movie to localize fluorescent molecules. See
-    Smith, et al. Nature Methods, 2014. DOI: 10.1038/nmeth.1449.
+    Smith, et al. Nature Methods, 2010. DOI: 10.1038/nmeth.1449.
     
     Parameters
     ----------
@@ -802,7 +802,7 @@ def fit_async(
     """Asynchronously fits Gaussians using Maximum Likelihood Estimation
     (MLE) to the identified spots in a movie to localize fluorescent
     molecules. This function is designed to run in a separate thread or
-    process. See Smith, et al. Nature Methods, 2014. 
+    process. See Smith, et al. Nature Methods, 2010. 
     DOI: 10.1038/nmeth.1449.
 
     Parameters
