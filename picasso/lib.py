@@ -10,7 +10,7 @@
 
 from __future__ import annotations
 from collections.abc import Callable as _Callable
-from collections.abc import Future as _Future
+from asyncio import Future as _Future
 from typing import Any as _Any
 import numba as _numba
 import numpy as _np
