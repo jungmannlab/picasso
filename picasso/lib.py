@@ -12,6 +12,8 @@ from __future__ import annotations
 from collections.abc import Callable as _Callable
 from asyncio import Future as _Future
 from typing import Any as _Any
+
+import time as _time
 import numba as _numba
 import numpy as _np
 from lmfit import Model as _Model
@@ -34,6 +36,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
     """ProgressDialog displays a progress dialog with a progress bar."""
 
     def __init__(self, description, minimum, maximum, parent):
+        # append time estimate to description
         super().__init__(
             description,
             None,
@@ -42,12 +45,14 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             parent,
             QtCore.Qt.CustomizeWindowHint,
         )
+        self.description_base = description # without time estimate
         self.initalized = None
 
     def init(self):
         _dialogs.append(self)
         self.setMinimumDuration(500)
         self.setModal(True)
+        self.t0 = _time.time()
         self.app = QtCore.QCoreApplication.instance()
         self.initalized = True
 
@@ -55,6 +60,23 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         if not self.initalized:
             self.init()
         self.setValue(value)
+        # estimate time left
+        elapsed = _time.time() - self.t0
+        remaining = int((self.maximum() - value) * elapsed / (value + 1e-6)) # s
+        # convert to hh-mm-ss
+        hours, remainder = divmod(remaining, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        # format time estimate
+        if hours > 0:
+            time_estimate = f"{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
+        else:
+            time_estimate = f"{minutes:02d}m:{seconds:02d}s"
+        # set label text with time estimate
+        description = (
+            f"{self.description_base}"
+            f"\nEstimated time remaining: {time_estimate}"
+        )
+        self.setLabelText(description)
         self.app.processEvents()
 
     def closeEvent(self, event):
