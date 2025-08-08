@@ -619,6 +619,7 @@ class ND2Movie(AbstractPicassoMovie):
             self.nd2data.metadata['width'],
             self.nd2data.metadata['height'],
         ]
+        nd2file.close() # may crash without closing the file!
 
     def info(self) -> dict:
         return self.meta
