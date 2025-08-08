@@ -748,7 +748,7 @@ def aim(
     y_pdc += shift_y
 
     # combine to Picasso format
-    drift = _np.recarray((drift_x, drift_y), dtype=[("x", "f"), ("y", "f")])
+    drift = _np.rec.array((drift_x, drift_y), dtype=[("x", "f"), ("y", "f")])
 
     # 3D undrifting
     if hasattr(locs, "z"):
@@ -773,7 +773,7 @@ def aim(
         shift_z = _np.mean(drift_z)
         drift_z -= shift_z
         z_pdc += shift_z
-        drift = _np.recarray(
+        drift = _np.rec.array(
             (drift_x, drift_y, drift_z), 
             dtype=[("x", "f"), ("y", "f"), ("z", "f")]
         )
