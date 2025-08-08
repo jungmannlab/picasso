@@ -6837,8 +6837,8 @@ class View(QtWidgets.QLabel):
             painter.setPen(QtGui.QColor("yellow"))
             if self.window.dataset_dialog.wbackground.isChecked():
                 painter.setPen(QtGui.QColor("red"))
-            length = int(self.viewport_width() / movie_width * length_minimap)
-            height = int(self.viewport_height() / movie_height * height_minimap)
+            length = max(5, int(self.viewport_width() / movie_width * length_minimap))
+            height = max(5, int(self.viewport_height() / movie_height * height_minimap))
             x_vp = int(self.viewport[0][1] / movie_width * length_minimap)
             y_vp = int(self.viewport[0][0] / movie_height * length_minimap)
             painter.drawRect(x + x_vp, y + y_vp, length + 0, height + 0)
