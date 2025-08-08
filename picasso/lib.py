@@ -252,7 +252,7 @@ def merge_locs(
 
 def ensure_sanity(locs: _np.recarray, info: list[dict]) -> _np.recarray:
     """Ensures that localizations are within the image dimensions
-    and have positive localization precisions.
+    and have positive localization precisions and other parameters.
     
     Parameters
     ----------
@@ -281,6 +281,10 @@ def ensure_sanity(locs: _np.recarray, info: list[dict]) -> _np.recarray:
     locs = locs[locs.y < info[0]["Height"]]
     locs = locs[locs.lpx > 0]
     locs = locs[locs.lpy > 0]
+    locs = locs[locs.photons > 0]
+    locs = locs[locs.ellipticity > 0]
+    locs = locs[locs.sx > 0]
+    locs = locs[locs.sy > 0]
     return locs
 
 
