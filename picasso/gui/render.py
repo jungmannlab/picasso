@@ -11170,7 +11170,12 @@ class Window(QtWidgets.QMainWindow):
         """ Exports current view as .png or .tif. """
 
         try:
-            base, ext = os.path.splitext(self.view.locs_paths[0])
+            # get the index of the first checked (displayed) channel
+            checked_channels = [
+                _.isChecked() for _ in self.dataset_dialog.checks
+            ]
+            idx = checked_channels.index(True)
+            base, ext = os.path.splitext(self.view.locs_paths[idx])
         except AttributeError:
             return
         out_path = base + "_view.png"

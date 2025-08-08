@@ -10,6 +10,7 @@ Last change: 08-AUG-2025 MTS
 - Fix garbage collection when openinging ``.nd2`` files in Localize
 - Fix 3D rotation window for a polygon pick
 - Render minimap - the zoom-in window is always visible
+- Other small fixes and improvements
 
 0.8.1
 -----
