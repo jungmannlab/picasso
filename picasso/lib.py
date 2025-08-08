@@ -68,6 +68,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         minutes, seconds = divmod(remainder, 60)
         # format time estimate
         if hours > 0:
+            hours = min(10, hours) # limit hours to 10 for display
             time_estimate = f"{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
         else:
             time_estimate = f"{minutes:02d}m:{seconds:02d}s"
