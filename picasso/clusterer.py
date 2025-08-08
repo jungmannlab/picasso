@@ -341,6 +341,11 @@ def cluster(
     in Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023 
     (10.1038/s41586-023-05925-9).
 
+    The recommended parameters are ``radius`` of 2*NeNA and ``min_locs`` 
+    of 10. Keep in mind that the parameters may vary between 
+    applications, so we encourage you to experiment with them when 
+    needed. Especially ``min_locs`` may vary between datasets.  
+
     Parameters
     ----------
     locs : _np.recarray
