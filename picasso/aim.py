@@ -201,9 +201,9 @@ def run_intersections_multithread(
     ]
     executor.shutdown(wait=True)
     if box == 1: # z intersection only, for z undrifting
-        roi_cc = _np.ndarray([_.result() for _ in f])
+        roi_cc = _np.array([_.result() for _ in f])
     else: # 2D intersection
-        roi_cc = _np.ndarray([_.result() for _ in f]).reshape(box, box)
+        roi_cc = _np.array([_.result() for _ in f]).reshape(box, box)
     return roi_cc
 
 
