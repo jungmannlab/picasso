@@ -12217,14 +12217,13 @@ class Window(QtWidgets.QMainWindow):
     def rot_win(self):
         """ Opens/updates RotationWindow. """
 
-        if self.view._pick_shape == "Polygon":
-            if len(self.view._picks) != 2 or len(self.view._picks[1]):
-                raise ValueError("Pick only one region.")
-        else:
-            if len(self.view._picks) == 0:
-                raise ValueError("Pick a region to rotate.")
-            elif len(self.view._picks) > 1:
-                raise ValueError("Pick only one region.")
+        if len(self.view._picks) == 0:
+            raise ValueError("Pick a region to rotate.")
+        elif len(self.view._picks) > 1:
+            raise ValueError("Pick only one region.")
+        elif self.view._pick_shape == "Polygon":
+            if self.view._picks[0][0] != self.view._picks[0][-1]:
+                raise ValueError("Polygon pick not finished.")
         self.window_rot.view_rot.load_locs(update_window=True)
         self.window_rot.show()
         self.window_rot.view_rot.update_scene(autoscale=True)

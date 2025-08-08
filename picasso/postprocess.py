@@ -2105,7 +2105,7 @@ def align(
     
     Returns
     -------
-    locs : np.recarray
+    locs : list of np.recarrays
         Aligned localizations with the shifts applied to the 'x' and
         'y' coordinates.
     """
