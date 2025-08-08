@@ -10,6 +10,8 @@
     :copyright: Copyright (c) 2022 Jungmann Lab, MPI of Biochemistry
 """
 
+from __future__ import annotations
+
 import numpy as _np
 import pandas as _pd
 from scipy.spatial import cKDTree as _cKDTree
@@ -64,7 +66,7 @@ CLUSTER_CENTERS_DTYPE_3D = [
     ("group", "i4"),
 ]
 
-def _frame_analysis(frame: _pd.Series, n_frames: int) -> int:
+def _frame_analysis(frame: _pd.SeriesGroupBy, n_frames: int) -> int:
     """Verifies which clusters pass basic frame analysis.
 
     Rejects clusters whose mean frame is outside of the 
