@@ -6,6 +6,7 @@ Last change: 08-AUG-2025 MTS
 0.8.2
 -----
 - Added docstrings and data types in modules: ``postprocess``, ``simulate``, ``render``, ``nanotron``, ``localize``, ``lib``, ``io``, ``imageprocess``, ``gaussmle``, ``gausslq``, ``design``, ``clusterer``, ``aim``, ``avgroi`` and ``zfit``
+- Render allows for saving picked localizations in a separate file for each pick
 - Fix garbage collection when openinging ``.nd2`` files in Localize
 - Fix 3D rotation window for a polygon pick
 - Render minimap - the zoom-in window is always visible
