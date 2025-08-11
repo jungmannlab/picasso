@@ -7,6 +7,11 @@
     :author: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
+
+from __future__ import annotations
+from typing import Callable as _Callable
+from PyQt5.QtWidgets import QWidget as _QWidget
+
 import os.path as _ospath
 import numpy as _np
 import yaml as _yaml
@@ -37,12 +42,38 @@ class NoMetadataFileError(FileNotFoundError):
     pass
 
 
-def _user_settings_filename():
+def _user_settings_filename() -> str:
+    """Returns the path to the user settings file."""
+
     home = _ospath.expanduser("~")
     return _ospath.join(home, ".picasso", "settings.yaml")
 
 
-def load_raw(path, prompt_info=None, progress=None):
+def load_raw(
+    path: str, 
+    prompt_info: _Callable[[None], tuple[dict, bool]] | None = None, 
+    progress: None = None,
+) -> tuple[_np.memmap, list[dict]]:
+    """Loads a raw movie file and its metadata.
+
+    Parameters
+    ----------
+    path : str
+        The path to the raw movie file.
+    prompt_info : Callable, optional
+        A function to call for additional information if needed.
+    progress : None, optional 
+        A placeholder for progress tracking, not used in this function.
+    
+    Returns
+    -------
+    movie : _np.memmap
+        A memory-mapped numpy array representing the movie, i.e., an 
+        array that's only partially loaded into memory.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+
     try:
         info = load_info(path)
     except FileNotFoundError as error:
@@ -68,7 +99,27 @@ def load_raw(path, prompt_info=None, progress=None):
     return movie, info
 
 
-def load_ims(path, prompt_info=None):
+def load_ims(
+    path: str, 
+    prompt_info: _Callable[[list[str]], str] | None = None,
+) -> tuple[_np.memmap, list[dict]]:
+    """Loads a Bitplane IMS movie file and its metadata.
+
+    Parameters
+    ----------
+    path : str
+        The path to the IMS movie file.
+    prompt_info : Callable, optional
+        A function to call for additional information if needed.
+
+    Returns
+    -------
+    movie : _np.memmap
+        A memory-mapped numpy array representing the movie, i.e., an
+        array that's only partially loaded into memory.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
 
     file = IMSFile(path)
 
@@ -111,7 +162,22 @@ def load_ims(path, prompt_info=None):
     return file.movie, info
 
 
-def load_ims_all(path):
+def load_ims_all(path: str) -> tuple[list[_np.memmap], list[list[dict]]]:
+    """Loads all channels of a Bitplane IMS movie file and their 
+    metadata.
+
+    Parameters
+    ----------
+    path : str
+        The path to the IMS movie file.
+
+    Returns
+    -------
+    movies : list[_np.memmap]
+        A list of memory-mapped numpy arrays representing the movie channels.
+    infos : list[list[dict]]
+        A list of lists containing dictionaries with metadata about each movie channel.
+    """
 
     file = IMSFile(path)
 
@@ -151,38 +217,131 @@ def load_ims_all(path):
     return movies, infos
 
 
-def save_config(CONFIG):
+def save_config(CONFIG: dict) -> None:
+    """Saves the camera configuration dictionary to a YAML file. See
+    https://picassosr.readthedocs.io/en/latest/localize.html#camera-config.
+
+    Parameters
+    ----------
+    CONFIG : dict
+        The camera configuration dictionary to save.
+    """
+
     this_file = _ospath.abspath(__file__)
     this_directory = _ospath.dirname(this_file)
     with open(_ospath.join(this_directory, "config.yaml"), "w") as config_file:
         _yaml.dump(CONFIG, config_file, width=1000)
 
 
-def save_raw(path, movie, info):
+def save_raw(path: str, movie: _np.ndarray, info: dict) -> None:
+    """Saves a raw movie file and its metadata.
+
+    Parameters
+    ----------
+    path : str
+        The path to the raw movie file.
+    movie : _np.ndarray
+        The raw movie data to save.
+    info : dict
+        The metadata information to save.
+    """
+
     movie.tofile(path)
     info_path = _ospath.splitext(path)[0] + ".yaml"
     save_info(info_path, info)
 
 
-def multiple_filenames(path, index):
+def multiple_filenames(path: str, index: int) -> str:
+    """Generates a new filename by appending the index to the base name 
+    of the file.
+
+    Parameters
+    ----------
+    path : str
+        The path to the original file.
+    index : int
+        The index to append to the base name.
+
+    Returns
+    -------
+    filename : str
+        The new filename with the index appended.
+    """
+
     base, ext = _ospath.splitext(path)
     filename = base + "_" + str(index) + ext
     return filename
 
 
-def load_tif(path, progress=None):
+def load_tif(path: str, progress=None) -> tuple[_np.memmap, list[dict]]:
+    """Loads a TIFF movie file and its metadata.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the TIFF movie file.
+    progress : None, optional
+        A placeholder for progress tracking, not used in this function.
+        
+    Returns
+    -------
+    movie : _np.memmap
+        A memory-mapped numpy array representing the movie, i.e., an
+        array that's only partially loaded into memory.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+
     movie = TiffMultiMap(path, memmap_frames=False)
     info = movie.info()
     return movie, [info]
 
-def load_nd2(path): #TODO: check if this fixes the garbage collection issue
-    with ND2Movie(path) as movie:
-        info = movie.info()
-    # movie = ND2Movie(path)
-    # info = movie.info()
+def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]: 
+    """Loads a Nikon ND2 movie file and its metadata.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the ND2 movie file.
+
+    Returns
+    -------
+    movie : ND2Movie
+        The loaded ND2 movie.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+
+    movie = ND2Movie(path) #TODO: fix (email from 02.06.2025)
+    info = movie.info()
     return movie, [info]
 
-def load_movie(path, prompt_info=None, progress=None):
+def load_movie(
+    path: str, 
+    prompt_info=None, 
+    progress=None,
+) -> tuple[AbstractPicassoMovie, list[dict]]:
+    """Loads a movie file based on its extension and returns the movie 
+    object and its metadata. Accepted format are ``.raw``, ``ome.tif``, 
+    ``.ims``, and ``.nd2``.
+
+    Parameters
+    ----------
+    path : str
+        The path to the movie file.
+    prompt_info : None
+        Placeholder for prompt information, not used in this function.
+    progress : None
+        Placeholder for progress tracking, not used in this function.
+
+    Returns
+    -------
+    movie : AbstractPicassoMovie
+        The loaded movie object.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+
     base, ext = _ospath.splitext(path)
     ext = ext.lower()
     if ext == ".raw":
@@ -197,7 +356,26 @@ def load_movie(path, prompt_info=None, progress=None):
     #     print("Extension .tiff not supported, please use .ome.tif instead.")
 
 
-def load_info(path, qt_parent=None):
+def load_info(
+    path: str, 
+    qt_parent: _QWidget | None = None,
+) -> list[dict]:
+    """Loads metadata from a YAML file associated with the movie file.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the movie file, which is used to derive the metadata 
+        file name.
+    qt_parent : _QWidget, optional
+        The parent widget for any error messages displayed using Qt.
+    
+    Returns
+    -------
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+
     path_base, path_extension = _ospath.splitext(path)
     filename = path_base + ".yaml"
     try:
@@ -215,8 +393,26 @@ def load_info(path, qt_parent=None):
     return info
 
 
-def load_mask(path, qt_parent=None):
-    """Loads a mask generated with MaskGenerator."""
+def load_mask(
+    path: str, 
+    qt_parent: _QWidget | None = None,
+) -> tuple[_np.ndarray, dict]:
+    """Loads a mask generated with ``spinna.MaskGenerator``.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the mask file.
+    qt_parent : _QWidget | None
+        The parent widget for any error messages displayed using Qt.
+
+    Returns
+    -------
+    mask : _np.ndarray
+        The loaded mask array.
+    info : dict
+        A dictionary containing metadata about the mask.
+    """
     
     mask = _np.float64(_np.load(path))
     mask = mask / mask.sum()
@@ -230,7 +426,17 @@ def load_mask(path, qt_parent=None):
     return mask, info
 
 
-def load_user_settings():
+def load_user_settings() -> _lib.AutoDict:
+    """Loads user settings from a YAML file containing information such
+    as the default directory for loading/saving files, Render color map,
+    Localize parameters, etc.
+
+    Returns
+    -------
+    settings : _lib.AutoDict
+        The loaded user settings.
+    """
+
     settings_filename = _user_settings_filename()
     settings = None
     try:
@@ -248,15 +454,32 @@ def load_user_settings():
     return _lib.AutoDict(settings)
 
 
-def save_info(path, info, default_flow_style=False):
+def save_info(
+    path: str, 
+    info: list[dict], 
+    default_flow_style: bool = False,
+) -> None:
+    """Saves metadata to a YAML file.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the YAML file where metadata will be saved.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    default_flow_style : bool, optional
+        If True, the YAML will be written in flow style; otherwise, it 
+        will be written in block style.
+    """
+
     with open(path, "w") as file:
         _yaml.dump_all(info, file, default_flow_style=default_flow_style)
 
 
-def _to_dict_walk(node):
-    """Converts mapping objects (subclassed from dict)
-    to actual dict objects, including nested ones
-    """
+def _to_dict_walk(node: dict) -> dict:
+    """Converts mapping objects (subclassed from dict) to actual dict 
+    objects, including nested ones."""
+
     node = dict(node)
     for key, val in node.items():
         if isinstance(val, dict):
@@ -264,7 +487,10 @@ def _to_dict_walk(node):
     return node
 
 
-def save_user_settings(settings):
+def save_user_settings(settings: dict) -> None:
+    """Saves user settings, for example, the default directory for 
+    loading/saving files to a YAML file."""
+
     settings = _to_dict_walk(settings)
     settings_filename = _user_settings_filename()
     _os.makedirs(_ospath.dirname(settings_filename), exist_ok=True)
@@ -273,9 +499,9 @@ def save_user_settings(settings):
 
 
 class AbstractPicassoMovie(abc.ABC):
-    """An abstract class defining the minimal interfaces of a PicassoMovie
-    used throughout picasso.
-    """
+    """An abstract class defining the minimal interfaces of a 
+    PicassoMovie used throughout Picasso."""
+
     @abc.abstractmethod
     def __init__(self):
         self.use_dask = False
@@ -293,7 +519,7 @@ class AbstractPicassoMovie(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def camera_parameters(self, config):
+    def camera_parameters(self, config: dict) -> dict:
         """Get the camera specific parameters:
             * gain
             * quantum efficiency
@@ -304,13 +530,17 @@ class AbstractPicassoMovie(abc.ABC):
         which needs to be matched in the config.yaml description, as detailed
         in the specific child classes.
 
-        Args:
-            config : dict
-                description of camera parameters (for all possible settings)
-                comes from the config.yaml file
-        Returns:
-            parameters : dict of lists of str
-                keys: gain, qe, wavelength, cam_index, camera
+        Parameters
+        ----------
+        config : dict
+            Description of camera parameters (for all possible settings)
+            comes from the config.yaml file.
+        
+        Returns
+        -------
+        parameters : dict
+            Keys: gain, qe, wavelength, cam_index, camera. Values are 
+            lists.
         """
         return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0,
                 'camera': 'None'}
@@ -324,14 +554,14 @@ class AbstractPicassoMovie(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def __len__(self):
+    def __len__(self) -> int:
         return self.n_frames
 
     def close(self):
         pass
 
     @abc.abstractmethod
-    def get_frame(self, index):
+    def get_frame(self, index: int) -> _np.ndarray:
         pass
 
     @abc.abstractmethod
@@ -345,21 +575,23 @@ class AbstractPicassoMovie(abc.ABC):
 
 
 class ND2Movie(AbstractPicassoMovie):
-    """Subclass of the AbstractPicassoMovie to implement reading Nikon nd2
-    files.
-    Two packages for reading nd2 files have been tested and are used here:
+    """Subclass of the AbstractPicassoMovie to implement reading Nikon 
+    nd2 files.
+    Two packages for reading nd2 files have been tested and are used 
+    here:
     * nd2.ND2File - makes all metadata accessible, and uses dask arrays
-      which is good for multiprocessing. Nonetheless, converting all data to
-      numpy arrays takes long (2000 frames/s for dask planes; 20 frames/s with
-      compute() on dask planes to get numpy)
-    * nd2reader.ND2Reader - image reading is a bit faster than TiffMultiMap
-      (ca 800 frames/s), and the file is serealizable for multiprocessing.
-      However, very limited metadata is available.
+      which is good for multiprocessing. Nonetheless, converting all 
+      data to numpy arrays takes long (2000 frames/s for dask planes; 20 
+      frames/s with compute() on dask planes to get numpy)
+    * nd2reader.ND2Reader - image reading is a bit faster than 
+    TiffMultiMap (ca 800 frames/s), and the file is realizable for 
+    multiprocessing. However, very limited metadata is available.
 
     This class implements a hybrid version which uses both packages:
-    nd2 for metadata retrieval, and nd2reader for image data retrieval
+    nd2 for metadata retrieval, and nd2reader for image data retrieval.
     """
-    def __init__(self, path, verbose=False):
+
+    def __init__(self, path: str, verbose: bool = False):
         super().__init__()
         if verbose:
             print("Reading info from {}".format(path))
@@ -387,21 +619,26 @@ class ND2Movie(AbstractPicassoMovie):
             self.nd2data.metadata['width'],
             self.nd2data.metadata['height'],
         ]
+        nd2file.close() # may crash without closing the file!
 
-    def info(self):
+    def info(self) -> dict:
         return self.meta
 
-    def get_metadata(self, nd2file):
-        """Brings the file metadata in a readable form, and preprocesses it
-        for easier downstream use.
+    def get_metadata(self, nd2file: nd2.ND2File) -> dict:
+        """Brings the file metadata in a readable form, and preprocesses
+        it for easier downstream use.
 
-        Args:
-            nd2file : nd2.ND2File
-                the object holding the image incl metadata
-        Returns:
-            info : dict
-                the metadata
+        Parameters
+        ----------
+        nd2file : nd2.ND2File
+            Object holding the image incl metadata.
+        
+        Returns
+        -------
+        info : dict
+            Metadata.
         """
+
         info = {
             # "Byte Order": self._tif_byte_order,
             "File": self.path,
@@ -465,16 +702,21 @@ class ND2Movie(AbstractPicassoMovie):
 
         return info
 
-    def metadata_to_dict(self, nd2file):
-        """Extracts all types of metadata in the file and returns it in a dict.
+    def metadata_to_dict(self, nd2file: nd2.ND2File) -> dict:
+        """Extracts all types of metadata in the file and returns it in 
+        a dict.
 
-        Args:
-            nd2file : nd2.ND2File
-                the object holding the image incl metadata
-        Returns:
-            mmmeta : dict
-                all metadata
+        Parameters
+        ----------
+        nd2file : nd2.ND2File
+            Object holding the image incl metadata.
+        
+        Returns
+        -------
+        mmmeta : dict
+            Metadata.
         """
+
         mmmeta = {}
 
         text_info = nd2file.text_info
@@ -502,18 +744,22 @@ class ND2Movie(AbstractPicassoMovie):
         return mmmeta
 
     @classmethod
-    def nikontext_to_dict(cls, text):
+    def nikontext_to_dict(cls, text: str) -> dict:
         """Some kinds of Nikon metadata are described with text, using
         newlines and colons. This function restructures the text into
         a dict.
 
-        Args:
-            text : str
-                nikon-style metadata description text
-        Returns:
-            out : dict
-                restructured text
+        Parameters
+        ----------
+        text : str
+            Nikon-style metadata description text.
+        
+        Returns
+        -------
+        out : dict
+            Restructured text.
         """
+
         out = {}
         curr_keys = []
         for i, item in enumerate(text.split('\r\n')):
@@ -541,18 +787,22 @@ class ND2Movie(AbstractPicassoMovie):
         return out
 
     @classmethod
-    def nd2metadata_to_dict(cls, meta):
-        """Restructure the 'metadata' field from the package nd2 into a dict
-        for independent use.
+    def nd2metadata_to_dict(cls, meta: dict) -> dict:
+        """Restructure the 'metadata' field from the package nd2 into a 
+        dict for independent use.
         https://github.com/tlambert03/nd2/blob/main/src/nd2/structures.py
 
-        Args:
-            meta : nd2 metadata structure
-                the 'metadata' part of nd2 metadata
-        Returns:
-            out : dict
-                the content as a dict.
+        Parameters
+        ----------
+        meta : nd2 metadata structure
+            The 'metadata' part of nd2 metadata.
+        
+        Returns
+        -------
+        out : dict
+            The content as a dict.  
         """
+
         out = {}
         out['contents'] = meta.contents.__dict__
         chans = [{}] * len(meta.channels)
@@ -573,16 +823,19 @@ class ND2Movie(AbstractPicassoMovie):
         return out
 
     @classmethod
-    def set_nested_dict_entry(cls, dict, keys, val):
+    def set_nested_dict_entry(cls, dict: dict, keys: list, val: any) -> None:
         """Set a value (deep) in a nested dict.
-        Args:
-            dict : dict
-                the nested dict
-            keys : list
-                the keys leading to the entry to set
-            val : anything
-                the value to set
+
+        Parameters
+        ----------
+        dict : dict
+            The nested dict.
+        keys : list
+            The keys leading to the entry to set.
+        val : anything
+            The value to set.
         """
+
         currlvl = dict
         for i, key in enumerate(keys[:-1]):
             try:
@@ -592,13 +845,13 @@ class ND2Movie(AbstractPicassoMovie):
                 currlvl = currlvl[key]
         currlvl[keys[-1]] = val
 
-    def __enter__(self):
+    def __enter__(self) -> ND2Movie:
         return self.nd2data
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
 
-    def __getitem__(self, it):
+    def __getitem__(self, it: int) -> _np.ndarray:
         return self.get_frame(it)
 
     def __iter__(self):
@@ -609,28 +862,33 @@ class ND2Movie(AbstractPicassoMovie):
         return self.sizes['T']
 
     @property
-    def shape(self):
+    def shape(self) -> tuple[int, int, int]:
         return self._shape
 
     def close(self):
         self.nd2data.close()
 
-    def get_frame(self, index):
+    def get_frame(self, index: int) -> _np.ndarray:
         """Load one frame of the movie
-        Args:
-            index : int
-                the frame index to retrieve.
-        Returns:
-            frame : 2D array
-                the image data of the frame
+
+        Parameters
+        ----------
+        index : int
+            The frame index to retrieve.
+
+        Returns
+        -------
+        frame : _np.ndarray
+            2D array representing the image data of the frame
         """
+
         return self.nd2data[index]
 
     def tofile(self, file_handle, byte_order=None):
         raise NotImplementedError('Cannot write .nd2 file.')
 
     def camera_parameters(self, config):
-        """get the camera specific parameters:
+        """Get the camera specific parameters:
             * gain
             * quantum efficiency
             * wavelength
@@ -661,13 +919,19 @@ class ND2Movie(AbstractPicassoMovie):
                 2-G561: 595
                 3-B489: 525
 
-        Args:
-            config : dict
-                description of camera parameters (for all possible settings)
-        Returns:
-            parameters : dict of lists of str
-                keys: gain, qe, wavelength
+        Parameters
+        ----------
+        config : dict
+            Description of camera parameters (for all possible 
+            settings).
+        
+        Returns
+        -------
+        parameters : dict
+            Keys: gain, qe, wavelength, cam_index, camera. Values are 
+            lists.
         """
+
         parameters = {}
         info = self.meta
 
@@ -743,6 +1007,9 @@ class ND2Movie(AbstractPicassoMovie):
 
 
 class TiffMap:
+    """A class to read TIFF files and return a memory-mapped numpy array
+    representing the TIFF image data. This class is used for 
+    single-frame TIFF files, not multi-page TIFFs."""
 
     TIFF_TYPES = {1: "B", 2: "c", 3: "H", 4: "L", 5: "RATIONAL"}
     TYPE_SIZES = {
@@ -756,7 +1023,10 @@ class TiffMap:
         "RATIONAL": 8,
     }
 
-    def __init__(self, path, verbose=False):
+    def __init__(self, path: str, verbose: bool = False):
+        """Initialize the TiffMap object by reading the TIFF file and
+        extracting metadata such as width, height, and data type."""
+
         if verbose:
             print("Reading info from {}".format(path))
         self.path = _ospath.abspath(path)
@@ -860,7 +1130,12 @@ class TiffMap:
     def __len__(self):
         return self.n_frames
 
-    def info(self):
+    def info(self) -> dict:
+        """Extracts metadata from the TIFF file and returns it in a
+        dictionary format. This includes byte order, file path, height,
+        width, data type, number of frames, and Micro-Manager 
+        metadata."""
+
         info = {
             "Byte Order": self._tif_byte_order,
             "File": self.path,
@@ -924,11 +1199,13 @@ class TiffMap:
                     comments = _json.loads(readout_s)["Summary"].split("\n")
                     break
 
-        info["Micro-Manager Acquisiton Comments"] = comments
+        info["Micro-Manager Acquisition Comments"] = comments
 
         return info
 
-    def get_frame(self, index, array=None):
+    def get_frame(self, index: int, array: None = None) -> _np.ndarray:
+        """Load one frame of the TIFF movie."""
+
         self.file.seek(self.image_offsets[index])
         frame = _np.reshape(
             _np.fromfile(self.file, dtype=self._tif_dtype, count=self.frame_size),
@@ -940,7 +1217,7 @@ class TiffMap:
             frame = frame.newbyteorder("<")
         return frame
 
-    def read(self, type, count=1):
+    def read(self, type: str, count: int = 1):
         if type == "c":
             return self.file.read(count)
         elif type == "RATIONAL":
@@ -948,7 +1225,7 @@ class TiffMap:
         else:
             return self.read_numbers(type, count)
 
-    def read_numbers(self, type, count=1):
+    def read_numbers(self, type: str, count: int = 1):
         size = self.TYPE_SIZES[type]
         fmt = self._tif_byte_order + count * type
         try:
@@ -969,11 +1246,17 @@ class TiffMap:
 
 class TiffMultiMap(AbstractPicassoMovie):
     """Implements a subclass of AbstractPicassoMovie for reading
-    ome tif files created by MicroManager. Single files are
-    maxed out at 4GB, so this class orchestrates reading from single files,
-    accessed by TiffMap.
+    .ome.tif files created by MicroManager. Single files are
+    maxed out at 4GB, so this class orchestrates reading from single
+    files, each accessed by TiffMap.
     """
-    def __init__(self, path, memmap_frames=False, verbose=False):
+
+    def __init__(
+        self, 
+        path: str, 
+        memmap_frames: bool = False, 
+        verbose: bool = False,
+    ):
         super().__init__()
         self.path = _ospath.abspath(path)
         self.dir = _ospath.dirname(self.path)
@@ -1059,7 +1342,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     def dtype(self):
         return self._dtype
 
-    def get_frame(self, index):
+    def get_frame(self, index: int) -> _np.ndarray:
         # TODO deal with negative numbers
         for i in range(self.n_maps):
             if self.cum_n_frames[i] <= index < self.cum_n_frames[i + 1]:
@@ -1074,7 +1357,7 @@ class TiffMultiMap(AbstractPicassoMovie):
         self.meta = info
         return info
 
-    def camera_parameters(self, config):
+    def camera_parameters(self, config: dict) -> dict:
         """Get the camera specific parameters:
             * gain
             * quantum efficiency
@@ -1088,11 +1371,15 @@ class TiffMultiMap(AbstractPicassoMovie):
         specific (HG, April 2022).
 
         Args:
-            config : dict
-                description of camera parameters (for all possible settings)
-        Returns:
-            parameters : dict of lists of str
-                keys: gain, qe, wavelength
+        config : dict
+            Description of camera parameters (for all possible 
+            settings).
+        
+        Returns
+        -------
+        parameters : dict 
+            Keys: gain, qe, wavelength, cam_index, camera. Values are 
+            lists.
         """
         # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
         parameters = {}
@@ -1174,7 +1461,18 @@ class TiffMultiMap(AbstractPicassoMovie):
             map.tofile(file_handle, byte_order)
 
 
-def to_raw_combined(basename, paths):
+def to_raw_combined(basename: str, paths: list[str]) -> None:
+    """Combine multiple TIFF files into a single raw file in the OME 
+    format.
+    
+    Parameters
+    ----------
+    basename : str
+        The base name for the output raw file.
+    paths : list[str]
+        List of paths to the TIFF files to be combined.
+    """
+
     raw_file_name = basename + ".ome.raw"
     with open(raw_file_name, "wb") as file_handle:
         with TiffMap(paths[0]) as tif:
@@ -1194,7 +1492,23 @@ def to_raw_combined(basename, paths):
         save_info(basename + ".ome.yaml", [info])
 
 
-def get_movie_groups(paths):
+def get_movie_groups(paths: list[str]) -> dict[str, list[str]]:
+    """Group movie files by their base name, allowing for an optional
+    appendix of the file number. This is useful for handling OME-TIFF
+    files that may have multiple parts or versions.
+    
+    Parameters
+    ----------
+    paths : list[str]
+        List of file paths to be grouped.
+        
+    Returns
+    -------
+    groups : dict[str, list[str]]
+        A dictionary where keys are base names and values are lists of
+        file paths that share the same base name.
+    """
+
     groups = {}
     if len(paths) > 0:
         # This matches the basename + an opt appendix of the file number
@@ -1219,7 +1533,11 @@ def get_movie_groups(paths):
     return groups
 
 
-def to_raw(path, verbose=True):
+def to_raw(path: str, verbose: bool = True) -> None:
+    """Convert TIFF files matching the given path pattern into a single
+    raw file in the OME format. This function groups files by their base
+    name and processes each group to create a combined raw file."""
+
     paths = _glob.glob(path)
     groups = get_movie_groups(paths)
     n_groups = len(groups)
@@ -1238,7 +1556,9 @@ def to_raw(path, verbose=True):
             print("No files matching {}".format(path))
 
 
-def save_datasets(path, info, **kwargs):
+def save_datasets(path: str, info: dict, **kwargs) -> None:
+    """Save multiple datasets to an HDF5 file at the specified path."""
+
     with _h5py.File(path, "w") as hdf:
         for key, val in kwargs.items():
             hdf.create_dataset(key, data=val)
@@ -1247,7 +1567,20 @@ def save_datasets(path, info, **kwargs):
     save_info(info_path, info)
 
 
-def save_locs(path, locs, info):
+def save_locs(path: str, locs: _np.recarray, info: list[dict]) -> None:
+    """Save localization data to an HDF5 file.
+    
+    Parameters
+    ----------
+    path : str
+        The path where the localization data will be saved.
+    locs : _np.recarray
+        The localization data to be saved, typically a structured array.
+    info : list[dict]
+        Metadata information to be saved alongside the localization 
+        data.
+    """
+
     locs = _lib.ensure_sanity(locs, info)
     with _h5py.File(path, "w") as locs_file:
         locs_file.create_dataset("locs", data=locs)
@@ -1256,7 +1589,29 @@ def save_locs(path, locs, info):
     save_info(info_path, info)
 
 
-def load_locs(path, qt_parent=None):
+def load_locs(
+    path: str,
+    qt_parent: _QWidget | None = None
+) -> tuple[_np.recarray, list[dict]]:
+    """Loads localization data from an HDF5 file.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the HDF5 file containing localization data.
+    qt_parent : _QWidget | None, optional
+        Parent widget for any Qt-related operations, default is None.
+    
+    Returns
+    -------
+    locs : _np.recarray
+        The localization data loaded from the file, as a structured
+        array with fields accessible as attributes.
+    info : list[dict]
+        Metadata information loaded from the file, typically a list of
+        dictionaries containing various metadata fields.
+    """
+
     with _h5py.File(path, "r") as locs_file:
         locs = locs_file["locs"][...]
     locs = _np.rec.array(
@@ -1266,7 +1621,26 @@ def load_locs(path, qt_parent=None):
     return locs, info
 
 
-def load_clusters(path, qt_parent=None):
+def load_clusters(
+    path: str, 
+    qt_parent: _QWidget | None = None
+) -> _np.recarray:
+    """Loads cluster data from an HDF5 file.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the HDF5 file containing cluster data.
+    qt_parent : _QWidget | None, optional
+        Parent widget for any Qt-related operations, default is None.
+
+    Returns
+    -------
+    clusters : _np.recarray
+        The cluster data loaded from the file, as a structured
+        array with fields accessible as attributes.
+    """
+
     with _h5py.File(path, "r") as cluster_file:
         try:
             clusters = cluster_file["clusters"][...]
@@ -1278,7 +1652,32 @@ def load_clusters(path, qt_parent=None):
     return clusters
 
 
-def load_filter(path, qt_parent=None):
+def load_filter(
+    path: str, 
+    qt_parent: _QWidget | None = None,
+):
+    """Loads localization data from an HDF5 file, checking for different
+    possible keys for the localization data. This function is used to
+    handle files that may contain localization data under different
+    keys such as 'locs', 'groups', or 'clusters'.
+    
+    Parameters
+    ----------
+    path : str
+        The path to the HDF5 file containing localization data.
+    qt_parent : _QWidget | None, optional
+        Parent widget for any Qt-related operations, default is None.
+        
+    Returns
+    -------
+    locs : _np.recarray
+        The localization data loaded from the file, as a structured
+        array with fields accessible as attributes.
+    info : list[dict]
+        Metadata information loaded from the file, typically a list of
+        dictionaries containing various metadata fields.
+    """
+    
     with _h5py.File(path, "r") as locs_file:
         try:
             locs = locs_file["locs"][...]

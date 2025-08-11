@@ -2,11 +2,14 @@
     picasso/gaussmle
     ~~~~~~~~~~~~~~~~
 
-    Maximum likelihood fits for single particle localization
+    Maximum likelihood fits for single particle localization. Based on
+    Smith, et al. Nature Methods, 2010. 
 
     :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
+
+from typing import Literal as _Literal
 
 import numpy as _np
 import numba as _numba
@@ -20,7 +23,12 @@ GAMMA = _np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _sum_and_center_of_mass(spot, size):
+def _sum_and_center_of_mass(
+    spot: _np.ndarray, 
+    size: int,
+) -> tuple[float, float, float]:
+    """Calculate the sum and center of mass of a 2D spot."""
+
     x = 0.0
     y = 0.0
     _sum_ = 0.0
@@ -35,7 +43,23 @@ def _sum_and_center_of_mass(spot, size):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def mean_filter(spot, size):
+def mean_filter(spot: _np.ndarray, size: int) -> _np.ndarray:
+    """Apply a mean filter to the spot. This function computes the mean 
+    of each pixel in a 3x3 neighborhood.
+    
+    Parameters
+    ----------
+    spot : _np.ndarray
+        The input image.
+    size : int
+        The size of the patch (assumed to be square).
+
+    Returns
+    -------
+    filtered_spot : _np.ndarray
+        The filtered image patch.
+    """
+
     filtered_spot = _np.zeros_like(spot)
     for k in range(size):
         for l in range(size):
@@ -53,7 +77,15 @@ def mean_filter(spot, size):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _initial_sigmas(spot, y, x, size):
+def _initial_sigmas(
+    spot: _np.ndarray, 
+    y: None, 
+    x: None, 
+    size: int,
+) -> tuple[float, float]:
+    """Initialize the sizes of the single-emitter images (sigmas of the
+    Gaussian fit) in x and y independently."""
+
     size_half = int(size / 2)
     sum_deviation_y = 0.0
     sum_deviation_x = 0.0
@@ -79,7 +111,13 @@ def _initial_sigmas(spot, y, x, size):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _initial_parameters(spot, size):
+def _initial_parameters(
+    spot: _np.ndarray, 
+    size: int,
+) -> tuple[float, float, float, float, float, float]:
+    """Initialize the parameters for the Gaussian fit - x, y, photons,
+    background, sigma_x and sigma_y."""
+
     sum, y, x = _sum_and_center_of_mass(spot, size)
     bg = _np.min(mean_filter(spot, size))
     photons = sum - size * size * bg
@@ -89,7 +127,11 @@ def _initial_parameters(spot, size):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _initial_theta_sigma(spot, size):
+def _initial_theta_sigma(spot: _np.ndarray, size: int) -> _np.ndarray:
+    """Initialize the parameters for the Gaussian fit with a single 
+    sigma for both x and y dimensions - x, y, photons, background, 
+    sigma."""
+
     theta = _np.zeros(5, dtype=_np.float32)
     theta[0], theta[1], theta[2], theta[3], sx, sy = _initial_parameters(spot, size)
     theta[4] = (sx + sy) / 2
@@ -97,7 +139,11 @@ def _initial_theta_sigma(spot, size):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _initial_theta_sigmaxy(spot, size):
+def _initial_theta_sigmaxy(spot: _np.ndarray, size: int) -> _np.ndarray:
+    """Initialize the parameters for the Gaussian fit with separate
+    sigmas for x and y dimensions - x, y, photons, background, sigma_x
+    and sigma_y."""
+
     theta = _np.zeros(6, dtype=_np.float32)
     theta[0], theta[1], theta[2], theta[3], theta[4], theta[5] = _initial_parameters(
         spot, size
@@ -106,8 +152,10 @@ def _initial_theta_sigmaxy(spot, size):
 
 
 @_numba.vectorize(nopython=True)
-def _erf(x):
-    """Currently not needed, but might be useful for a CUDA implementation"""
+def _erf(x: float) -> float:
+    """Currently not needed, but might be useful for a CUDA 
+    implementation."""
+    
     ax = _np.abs(x)
     if ax < 0.5:
         t = x * x
@@ -192,14 +240,26 @@ def _erf(x):
 
 
 @_numba.jit(nopython=True, nogil=True, cache=False)
-def _gaussian_integral(x, mu, sigma):
+def _gaussian_integral(x: float, mu: float, sigma: float) -> float: #TODO: check this is correct?
+    """Calculate the integral of a Gaussian function from negative 
+    infinity to x."""
+
     sq_norm = 0.70710678118654757 / sigma  # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
     return 0.5 * (_math.erf((d + 0.5) * sq_norm) - _math.erf((d - 0.5) * sq_norm))
 
 
 @_numba.jit(nopython=True, nogil=True, cache=False)
-def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
+def _derivative_gaussian_integral(
+    x: float, 
+    mu: float, 
+    sigma: float, 
+    photons: float, 
+    PSFc: float,
+) -> tuple[float, float]:
+    """Calculate the first and second derivatives of the integral of a
+    Gaussian function with respect to x."""
+
     d = x - mu
     a = _np.exp(-0.5 * ((d + 0.5) / sigma) ** 2)
     b = _np.exp(-0.5 * ((d - 0.5) / sigma) ** 2)
@@ -214,7 +274,16 @@ def _derivative_gaussian_integral(x, mu, sigma, photons, PSFc):
 
 
 @_numba.jit(nopython=True, nogil=True, cache=False)
-def _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFc):
+def _derivative_gaussian_integral_1d_sigma(
+    x: float, 
+    mu: float, 
+    sigma: float, 
+    photons: float, 
+    PSFc: float,
+) -> tuple[float, float]:
+    """Calculate the first and second derivatives of the integral of a
+    Gaussian function with respect to sigma in 1D."""
+
     ax = _np.exp(-0.5 * ((x + 0.5 - mu) / sigma) ** 2)
     bx = _np.exp(-0.5 * ((x - 0.5 - mu) / sigma) ** 2)
     dudt = (
@@ -230,7 +299,19 @@ def _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFc):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _derivative_gaussian_integral_2d_sigma(x, y, mu, nu, sigma, photons, PSFx, PSFy):
+def _derivative_gaussian_integral_2d_sigma(
+    x: float, 
+    y: float, 
+    mu: float, 
+    nu: float, 
+    sigma: float, 
+    photons: float, 
+    PSFx: float, 
+    PSFy: float
+) -> tuple[float, float]:
+    """Calculate the first and second derivatives of the integral of a
+    Gaussian function with respect to sigma in 2D."""
+
     dSx, ddSx = _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFy)
     dSy, ddSy = _derivative_gaussian_integral_1d_sigma(y, nu, sigma, photons, PSFx)
     dudt = dSx + dSy
@@ -250,6 +331,7 @@ def _worker(
     current,
     lock,
 ):
+    """Worker function for asynchronous Gaussian fitting."""
     N = len(spots)
     while True:
         with lock:
@@ -260,7 +342,44 @@ def _worker(
         func(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it)
 
 
-def gaussmle(spots, eps, max_it, method="sigma"):
+def gaussmle(
+    spots: _np.ndarray, 
+    eps: float, 
+    max_it: int, 
+    method: _Literal["sigma", "sigmaxy"] = "sigma",
+) -> tuple[_np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
+    """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the
+    extracted spots.
+    
+    Parameters
+    ----------
+    spots : _np.ndarray
+        The input image patches containing the spots of shape 
+        (N, size, size), where N is the number of spots and size is the
+        size of the square patch.
+    eps : float
+        The convergence criterion for the fitting algorithm.
+    max_it : int
+        The maximum number of iterations for the fitting algorithm.
+    method : _Literal["sigma", "sigmaxy"]
+        The method to use for fitting the Gaussian.
+
+    Returns
+    -------
+    thetas : _np.ndarray
+        The fitted parameters for each spot, shape (N, 6) or (N, 5) 
+        depending on the method. The columns are x, y, photons, 
+        background and sigma (or sigmax, sigmay).
+    CRLBs : _np.ndarray
+        The Cramer-Rao Lower Bounds for the fitted parameters, shape
+        (N, 6) or (N, 5).
+    likelihoods : _np.ndarray
+        The log-likelihoods for each fitted spot, shape (N,).
+    iterations : _np.ndarray
+        The number of iterations taken to converge for each spot,
+        shape (N,).
+    """
+
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
     CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
@@ -277,7 +396,25 @@ def gaussmle(spots, eps, max_it, method="sigma"):
     return thetas, CRLBs, likelihoods, iterations
 
 
-def gaussmle_async(spots, eps, max_it, method="sigma"):
+def gaussmle_async(
+    spots: _np.ndarray, 
+    eps: float, 
+    max_it: int, 
+    method: _Literal["sigma", "sigmaxy"] = "sigma",
+) -> tuple[_np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
+    """Runs ``gaussmle`` asynchronously (multiprocessing) to fit
+    Gaussians using Maximum Likelihood Estimation (MLE) to the
+    extracted spots. See ``gaussmle`` for parameter details.
+    
+    Returns
+    -------
+    current : _np.ndarray
+        A single-element array containing the current index of the
+        spot being processed.
+    thetas, CRLBs, likelihoods, iterations : _np.ndarrays
+        The same as in ``gaussmle``.
+    """
+
     N = len(spots)
     thetas = _np.zeros((N, 6), dtype=_np.float32)
     CRLBs = _np.inf * _np.ones((N, 6), dtype=_np.float32)
@@ -318,7 +455,19 @@ def gaussmle_async(spots, eps, max_it, method="sigma"):
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
+def _mlefit_sigma(
+    spots: _np.ndarray, 
+    index: int, 
+    thetas: _np.ndarray, 
+    CRLBs: _np.ndarray, 
+    likelihoods: _np.ndarray, 
+    iterations: _np.ndarray, 
+    eps: float, 
+    max_it: int,
+) -> None:
+    """Fits a Gaussian to a single spot using Maximum Likelihood
+    Estimation (MLE) with a single sigma for both x and y dimensions."""
+
     n_params = 5
 
     spot = spots[index]
@@ -462,7 +611,19 @@ def _mlefit_sigma(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max
 
 
 @_numba.jit(nopython=True, nogil=True)
-def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, max_it):
+def _mlefit_sigmaxy(
+    spots: _np.ndarray, 
+    index: int, 
+    thetas: _np.ndarray, 
+    CRLBs: _np.ndarray, 
+    likelihoods: _np.ndarray, 
+    iterations: _np.ndarray, 
+    eps: float,
+    max_it: int,
+) -> None:
+    """Fits a Gaussian to a single spot using Maximum Likelihood
+    Estimation (MLE) with separate sigmas for x and y dimensions."""
+
     n_params = 6
 
     spot = spots[index]
@@ -614,7 +775,48 @@ def _mlefit_sigmaxy(spots, index, thetas, CRLBs, likelihoods, iterations, eps, m
     CRLBs[index] = CRLB
 
 
-def locs_from_fits(identifications, theta, CRLBs, likelihoods, iterations, box):
+def locs_from_fits(
+    identifications: _np.recarray, 
+    theta: _np.ndarray, 
+    CRLBs: _np.ndarray, 
+    likelihoods: _np.ndarray, 
+    iterations: _np.ndarray, 
+    box: int,
+) -> _np.recarray:
+    """Converts the results of Gaussian fits into a structured array
+    suitable for further analysis or visualization.
+    
+    Parameters
+    ----------
+    identifications : _np.recarray
+        The structured array containing the identifications of the 
+        spots, which should include 'frame', 'x', 'y' and 
+        'net_gradient'.
+    theta : _np.ndarray
+        The fitted parameters for each spot, shape (N, 6) or (N, 5) 
+        depending on the method used.
+    CRLBs : _np.ndarray
+        The Cramer-Rao Lower Bounds for the fitted parameters, shape
+        (N, 6) or (N, 5).
+    likelihoods : _np.ndarray
+        The log-likelihoods for each fitted spot, shape (N,).  
+    iterations : _np.ndarray
+        The number of iterations taken to converge for each spot,
+        shape (N,).
+    box : int
+        The size of the box used for fitting, which is used to
+        calculate the offsets for the x and y coordinates.
+    
+    Returns
+    -------
+    locs : _np.recarray
+        A structured array containing the fitted parameters and
+        additional information for each spot, including frame, x, y,
+        photons, sigma_x, sigma_y, background, localization precision
+        (lpx, lpy), ellipticity, net gradient and identification ID
+        (if available).
+    """
+
     box_offset = int(box / 2)
     y = theta[:, 0] + identifications.y - box_offset
     x = theta[:, 1] + identifications.x - box_offset

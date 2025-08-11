@@ -8,7 +8,12 @@
     :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
+from __future__ import annotations
+from collections.abc import Callable as _Callable
+from asyncio import Future as _Future
+from typing import Any as _Any
 
+import time as _time
 import numba as _numba
 import numpy as _np
 from lmfit import Model as _Model
@@ -31,6 +36,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
     """ProgressDialog displays a progress dialog with a progress bar."""
 
     def __init__(self, description, minimum, maximum, parent):
+        # append time estimate to description
         super().__init__(
             description,
             None,
@@ -39,12 +45,14 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             parent,
             QtCore.Qt.CustomizeWindowHint,
         )
+        self.description_base = description # without time estimate
         self.initalized = None
 
     def init(self):
         _dialogs.append(self)
         self.setMinimumDuration(500)
         self.setModal(True)
+        self.t0 = _time.time()
         self.app = QtCore.QCoreApplication.instance()
         self.initalized = True
 
@@ -52,6 +60,24 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         if not self.initalized:
             self.init()
         self.setValue(value)
+        # estimate time left
+        elapsed = _time.time() - self.t0
+        remaining = int((self.maximum() - value) * elapsed / (value + 1e-6)) # s
+        # convert to hh-mm-ss
+        hours, remainder = divmod(remaining, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        # format time estimate
+        if hours > 0:
+            hours = min(10, hours) # limit hours to 10 for display
+            time_estimate = f"{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
+        else:
+            time_estimate = f"{minutes:02d}m:{seconds:02d}s"
+        # set label text with time estimate
+        description = (
+            f"{self.description_base}"
+            f"\nEstimated time remaining: {time_estimate}"
+        )
+        self.setLabelText(description)
         self.app.processEvents()
 
     def closeEvent(self, event):
@@ -82,9 +108,8 @@ class StatusDialog(QtWidgets.QDialog):
 
 
 class AutoDict(_collections.defaultdict):
-    """
-    A defaultdict whose auto-generated values are defaultdicts itself.
-    This allows for auto-generating nested values, e.g.
+    """A defaultdict whose auto-generated values are defaultdicts 
+    itself. This allows for auto-generating nested values, e.g.
     a = AutoDict()
     a['foo']['bar']['carrot'] = 42
     """
@@ -94,7 +119,8 @@ class AutoDict(_collections.defaultdict):
 
 
 def cancel_dialogs():
-    """Closes all open dialogs."""
+    """Closes all open dialogs (ProgressDialog and StatusDialog) in the 
+    GUI."""
 
     dialogs = [_ for _ in _dialogs]
     for dialog in dialogs:
@@ -105,26 +131,37 @@ def cancel_dialogs():
     QtCore.QCoreApplication.instance().processEvents()  # just in case...
 
 
-def cumulative_exponential(x, a, t, c):
+def cumulative_exponential(
+    x: _np.ndarray, 
+    a: float, 
+    t: float, 
+    c: float,
+) -> _np.ndarray:
+    """Used for binding kinetics estimation."""
+
     return a * (1 - _np.exp(-(x / t))) + c
 
 
 CumulativeExponentialModel = _Model(cumulative_exponential)
 
 
-def calculate_optimal_bins(data, max_n_bins=None):
-    """Calculates the optimal bins for display.
+def calculate_optimal_bins(
+    data: _np.ndarray, 
+    max_n_bins: int | None = None,
+) -> _np.ndarray:
+    """Calculates the optimal bins for display, for example, in 
+    Picasso: Filter.
     
     Parameters
     ----------
-    data : numpy.1darray
+    data : _np.ndarray
         Data to be binned.
-    max_n_bins : int (default=None)
+    max_n_bins : int | None, optional
         Maximum number of bins.
     
     Returns
     -------
-    bins : numpy.1darray
+    bins : _np.ndarray
         Bins for display.
     """
     
@@ -146,21 +183,25 @@ def calculate_optimal_bins(data, max_n_bins=None):
     return bins
 
 
-def append_to_rec(rec_array, data, name):
-    """Appends a new column to the existing np.recarray.
+def append_to_rec(
+    rec_array: _np.recarray, 
+    data: _np.ndarray, 
+    name: str,
+) -> _np.recarray:
+    """Appends a new column to the existing _np.recarray.
     
     Parameters
     ----------
-    rec_array : np.rec.array
+    rec_array : _np.recarray
         Recarray to which the new column is appended.
-    data : np.1darray
-        Data to be appended.
+    data : _np.ndarray
+        1D data to be appended.
     name : str
         Name of the new column.
     
     Returns
     -------
-    rec_array : np.rec.array
+    rec_array : _np.recarray
         Recarray with the new column.
     """
     
@@ -177,22 +218,25 @@ def append_to_rec(rec_array, data, name):
     return rec_array
 
 
-def merge_locs(locs_list, increment_frames=True):
+def merge_locs(
+    locs_list: list[_np.recarray], 
+    increment_frames: bool = True,
+) -> _np.recarray:
     """Merges localization lists into one file. Can increment frames
     to avoid overlapping frames.
     
     Parameters
     ----------
-    locs_list : list of np.rec.arrays
+    locs_list : list of _np.recarrays
         List of localization lists to be merged.
-    increment_frames : bool (default=True)
+    increment_frames : bool, optional
         If True, increments frames of each localization list by the
         maximum frame number of the previous localization list. Useful
         when the localization lists are from different movies but 
-        represent the same stack.
+        represent the same stack. Default is True.
     
     Returns
-    locs : np.rec.array
+    locs : _np.recarray
         Merged localizations.
     """
 
@@ -206,20 +250,20 @@ def merge_locs(locs_list, increment_frames=True):
     return locs
 
 
-def ensure_sanity(locs, info):
+def ensure_sanity(locs: _np.recarray, info: list[dict]) -> _np.recarray:
     """Ensures that localizations are within the image dimensions
-    and have positive localization precisions.
+    and have positive localization precisions and other parameters.
     
     Parameters
     ----------
-    locs : np.rec.array
+    locs : _np.recarray
         Localizations list.
     info : list of dicts
         Localization metadata.
     
     Returns
     -------
-    locs : np.rec.array
+    locs : _np.recarray
         Localizations that pass the sanity checks.
     """
     
@@ -235,29 +279,32 @@ def ensure_sanity(locs, info):
     locs = locs[locs.y > 0]
     locs = locs[locs.x < info[0]["Width"]]
     locs = locs[locs.y < info[0]["Height"]]
-    locs = locs[locs.lpx > 0]
-    locs = locs[locs.lpy > 0]
+    for attr in ["lpx", "lpy", "photons", "ellipticity", "sx", "sy"]:
+        if hasattr(locs, attr):
+            locs = locs[locs[attr] >= 0]
     return locs
 
 
-def is_loc_at(x, y, locs, r):
-    """Checks if localizations are at position (x, y) within radius r.
-    
+def is_loc_at(x: float, y: float, locs: _np.recarray, r: float) -> _np.ndarray:
+    """Checks which localizations are within radius r of position 
+    (x, y).
+
     Parameters
     ----------
     x : float
         x-coordinate of the position.
     y : float
         y-coordinate of the position.
-    locs : np.rec.array
+    locs : _np.recarray
         Localizations list.
     r : float
         Radius.
     
     Returns
     -------
-    is_picked : np.ndarray
-        Boolean array indicating if localization is at position.
+    is_picked : _np.ndarray
+        Boolean array - True if a localization is within radius r
+        of position (x, y).
     """
     
     dx = locs.x - x
@@ -267,8 +314,8 @@ def is_loc_at(x, y, locs, r):
     return is_picked
 
 
-def locs_at(x, y, locs, r):
-    """Returns localizations at position (x, y) within radius r.
+def locs_at(x: float, y: float, locs: _np.recarray, r: float) -> _np.recarray:
+    """Returns localizations within radius r of position (x, y).
 
     Parameters
     ----------
@@ -276,15 +323,15 @@ def locs_at(x, y, locs, r):
         x-coordinate of the position.
     y : float
         y-coordinate of the position.
-    locs : np.rec.array
+    locs : _np.recarray
         Localizations list.
     r : float   
         Radius.
 
     Returns 
     -------
-    picked_locs : np.rec.array
-        Localizations at position.
+    picked_locs : _np.recarray
+        Localizations in the specified area.
     """
 
     is_picked = is_loc_at(x, y, locs, r)
@@ -293,26 +340,27 @@ def locs_at(x, y, locs, r):
 
 
 @_numba.jit(nopython=True)
-def check_if_in_polygon(x, y, X, Y):
-    """Checks if points (x, y) are in polygon defined by corners (X, Y).
-    Uses the ray casting algorithm, see check_if_in_rectangle for 
-    details.
+def check_if_in_polygon(
+    x: _np.ndarray, 
+    y: _np.ndarray, 
+    X: _np.ndarray, 
+    Y: _np.ndarray,
+) -> _np.ndarray:
+    """Checks if points (x, y) are within the polygon defined by corners 
+    (X, Y). Uses the ray casting algorithm, see 
+    ``check_if_in_rectangle`` for details.
     
     Parameters
     ----------
-    x : numpy.1darray
-        x-coordinates of points.
-    y : numpy.1darray
-        y-coordinates of points.
-    X : numpy.1darray
-        x-coordinates of polygon corners.
-    Y : numpy.1darray
-        y-coordinates of polygon corners.
-    
+    x, y : _np.ndarray
+        x and y coordinates of points.
+    X, Y : _np.ndarray
+        x and y coordinates of polygon corners.
+
     Returns
     ------- 
-    is_in_polygon : numpy.ndarray
-        Boolean array indicating if point is in polygon.
+    is_in_polygon : _np.ndarray
+        Boolean array indicating which points are in the polygon.
     """
 
     n_locs = len(x)
@@ -334,12 +382,17 @@ def check_if_in_polygon(x, y, X, Y):
     return is_in_polygon
 
 
-def locs_in_polygon(locs, X, Y):
-    """Returns localizations in polygon defined by corners (X, Y).
+def locs_in_polygon(
+    locs: _np.recarray, 
+    X: _np.ndarray, 
+    Y: _np.ndarray,
+) -> _np.recarray:
+    """Returns localizations within the polygon defined by corners 
+    (X, Y).
     
     Parameters
     ----------
-    locs : numpy.recarray
+    locs : _np.recarray
         Localizations.
     X : list
         x-coordinates of polygon corners.
@@ -348,7 +401,7 @@ def locs_in_polygon(locs, X, Y):
     
     Returns
     -------
-    picked_locs : numpy.recarray
+    picked_locs : _np.recarray
         Localizations in polygon.
     """
 
@@ -359,27 +412,27 @@ def locs_in_polygon(locs, X, Y):
 
 
 @_numba.jit(nopython=True)
-def check_if_in_rectangle(x, y, X, Y):
-    """
-    Checks if locs with coordinates (x, y) are in rectangle with corners (X, Y)
-    by counting the number of rectangle sides which are hit by a ray
-    originating from each loc to the right. If the number of hit rectangle
-    sides is odd, then the loc is in the rectangle
+def check_if_in_rectangle(
+    x: _np.ndarray, 
+    y: _np.ndarray, 
+    X: _np.ndarray, 
+    Y: _np.ndarray,
+) -> _np.ndarray:
+    """Checks if locs with coordinates (x, y) are in rectangle with 
+    corners (X, Y) by counting the number of rectangle sides which are 
+    hit by a ray originating from each loc to the right. If the number 
+    of hit rectangle sides is odd, then the loc is in the rectangle.
 
     Parameters
     ----------
-    x : numpy.1darray
-        x-coordinates of points.
-    y : numpy.1darray
-        y-coordinates of points.
-    X : numpy.1darray
-        x-coordinates of polygon corners.
-    Y : numpy.1darray
-        y-coordinates of polygon corners.
-    
+    x, y : _np.ndarray
+        x and y coordinates of points.
+    X, Y : _np.ndarray
+        x and y coordinates of polygon corners.
+
     Returns
     ------- 
-    is_in_polygon : numpy.ndarray
+    is_in_polygon : _np.ndarray
         Boolean array indicating if point is in polygon.
     """
 
@@ -411,21 +464,24 @@ def check_if_in_rectangle(x, y, X, Y):
     return is_in_rectangle
 
 
-def locs_in_rectangle(locs, X, Y):
-    """Returns localizations in rectangle defined by corners (X, Y).
+def locs_in_rectangle(
+    locs: _np.recarray, 
+    X: _np.ndarray, 
+    Y: _np.ndarray,
+) -> _np.recarray:
+    """Returns localizations within the rectangle defined by corners 
+    (X, Y).
     
     Parameters
     ----------
-    locs : numpy.recarray
+    locs : _np.recarray
         Localizations list.
-    X : list
-        x-coordinates of rectangle corners.
-    Y : list
-        y-coordinates of rectangle corners.
-    
+    X, Y : list
+        x and y coordinates of rectangle corners.
+
     Returns
     -------
-    picked_locs : numpy.recarray
+    picked_locs : _np.recarray
         Localizations in rectangle.
     """
     
@@ -436,26 +492,30 @@ def locs_in_rectangle(locs, X, Y):
     return picked_locs
 
 
-def minimize_shifts(shifts_x, shifts_y, shifts_z=None):
-    """Minimizes shifts in x, y, and z directions. Used for drift correction.
+def minimize_shifts(
+    shifts_x: _np.ndarray, 
+    shifts_y: _np.ndarray, 
+    shifts_z: _np.ndarray | None = None,
+) -> tuple[_np.ndarray, _np.ndarray, _np.ndarray | None]:
+    """Minimizes shifts in x, y, and z directions. Used for drift 
+    correction.
     
     Parameters
     ---------- 
-    shifts_x : numpy.2darray
-        Shifts in x direction.
-    shifts_y : numpy.2darray
-        Shifts in y direction.
-    shifts_z : numpy.2darray (default=None)
-        Shifts in z direction.
-        
+    shifts_x, shifts_y : _np.ndarray
+        Shifts in x and y directions, shape (n_channels, n_channels).
+    shifts_z : _np.ndarray, optional
+        Shifts in z direction, shape (n_channels, n_channels). If None,
+        only x and y shifts are minimized.
+
     Returns
     -------
-    shift_y : numpy.1darray
+    shift_y : _np.ndarray
         Minimized shifts in y direction.
-    shift_x : numpy.1darray
+    shift_x : _np.ndarray
         Minimized shifts in x direction.
-    shift_z : numpy.1darray (optional)
-        Minimized shifts in z direction if shifts_z is not None.
+    shift_z : _np.ndarray, optional
+        Minimized shifts in z direction if shifts_z is specified.
     """
     
     n_channels = shifts_x.shape[0]
@@ -482,25 +542,26 @@ def minimize_shifts(shifts_x, shifts_y, shifts_z=None):
         return shift_y, shift_x, shift_z
 
 
-def n_futures_done(futures):
-    """Returns the number of finished futures, used in multiprocessing."""
+def n_futures_done(futures: list[_Future]) -> int:
+    """Returns the number of finished futures, used in 
+    multiprocessing."""
 
     return sum([_.done() for _ in futures])
 
 
-def remove_from_rec(rec_array, name):
-    """Removes a column from the existing np.recarray.
+def remove_from_rec(rec_array: _np.recarray, name: str) -> _np.recarray:
+    """Removes a column from the existing recarray.
 
     Parameters
     ----------
-    rec_array : np.rec.array
+    rec_array : _np.recarray
         Recarray from which the column is removed.
     name : str
         Name of the column to be removed.
     
     Returns
     -------
-    rec_array : np.rec.array
+    rec_array : _np.recarray
         Recarray without the column.
     """
 
@@ -508,15 +569,38 @@ def remove_from_rec(rec_array, name):
     return rec_array
 
 
-def locs_glob_map(func, pattern, args=[], kwargs={}, extension=""):
+def locs_glob_map(
+    func: _Callable[[_np.recarray, dict, str, _Any], tuple[_np.recarray, list[dict]]], 
+    pattern: str, 
+    args: list = [], 
+    kwargs: dict = {}, 
+    extension: str = "",
+) -> None:
+    """Maps a function to localization files, specified by a unix style 
+    path pattern.
+    The function must take two arguments: locs and info. It may take 
+    additional args and kwargs which are supplied to this map function.
+    A new locs file will be saved if an extension is provided. In that 
+    case the mapped function must return new locs and a new info dict.
+
+    Parameters
+    ----------
+    func : _Callable
+        Function to be mapped to each locs file. It must take
+        locs, info, path, and any additional args and kwargs.
+    pattern : str
+        Unix style path pattern to match locs files.
+    args : list, optional
+        Additional positional arguments to be passed to the function.
+    kwargs : dict, optional
+        Additional keyword arguments to be passed to the function.
+    extension : str, optional
+        If provided, the mapped function must return new locs and info 
+        dict, and a new locs file will be saved with this extension.
+        If not provided, the function is expected to modify locs and 
+        info in place.
     """
-    Maps a function to localization files, specified by a unix style path
-    pattern.
-    The function must take two arguments: locs and info. It may take additional
-    args and kwargs which are supplied to this map function.
-    A new locs file will be saved if an extension is provided. In that case the
-    mapped function must return new locs and a new info dict.
-    """
+
     paths = _glob.glob(pattern)
     for path in paths:
         locs, info = _io.load_locs(path)
@@ -528,10 +612,24 @@ def locs_glob_map(func, pattern, args=[], kwargs={}, extension=""):
             _io.save_locs(out_path, locs, info)
 
 
-def get_pick_polygon_corners(pick):
+def get_pick_polygon_corners(
+    pick: list[tuple[float, float]],
+) -> tuple[list[float], list[float]]:
     """Returns X and Y coordinates of a pick polygon.
-        
-    Returns None, None if the pick is not a closed polygon."""
+    Returns None, None if the pick is not a closed polygon.
+    
+    Parameters
+    ----------
+    pick : list of tuples
+        List of tuples, each tuple contains x and y coordinates of a
+        polygon corner.
+    
+    Returns
+    -------
+    X, Y : list of floats
+        Lists of x and y coordinates of the polygon corners.
+        Returns None, None if the pick is not a closed polygon.
+    """
 
     if len(pick) < 3 or pick[0] != pick[-1]:
         return None, None
@@ -541,34 +639,49 @@ def get_pick_polygon_corners(pick):
         return X, Y
 
 
-def get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width):
-        """Finds the positions of corners of a rectangular pick.
-        Rectangular pick is defined by:
-            [(start_x, start_y), (end_x, end_y)]
-        and its width. (all values in camera pixels)
+def get_pick_rectangle_corners(
+    start_x: float, 
+    start_y: float, 
+    end_x: float, 
+    end_y: float, 
+    width: float,
+) -> tuple[list[float], list[float]]:
+    """Finds the positions of corners of a rectangular pick.
+    Rectangular pick is defined by:
+        [(start_x, start_y), (end_x, end_y)]
+    and its width. (all values in camera pixels).
 
-        Returns
-        -------
-        corners : tuple
-            Contains corners' x and y coordinates in two lists
-        """
+    Parameters
+    ----------
+    start_x, start_y : float
+        Starting point of the pick.
+    end_x, end_y : float
+        Ending point of the pick.
+    width : float
+        Width of the pick in camera pixels.
 
-        if end_x == start_x:
-            alpha = _np.pi / 2
-        else:
-            alpha = _np.arctan((end_y - start_y) / (end_x - start_x))
-        dx = width * _np.sin(alpha) / 2
-        dy = width * _np.cos(alpha) / 2
-        x1 = float(start_x - dx)
-        x2 = float(start_x + dx)
-        x4 = float(end_x - dx)
-        x3 = float(end_x + dx)
-        y1 = float(start_y + dy)
-        y2 = float(start_y - dy)
-        y4 = float(end_y + dy)
-        y3 = float(end_y - dy)
-        corners = ([x1, x2, x3, x4], [y1, y2, y3, y4])
-        return corners
+    Returns
+    -------
+    corners : tuple
+        Contains corners' x and y coordinates in two lists.
+    """
+
+    if end_x == start_x:
+        alpha = _np.pi / 2
+    else:
+        alpha = _np.arctan((end_y - start_y) / (end_x - start_x))
+    dx = width * _np.sin(alpha) / 2
+    dy = width * _np.cos(alpha) / 2
+    x1 = float(start_x - dx)
+    x2 = float(start_x + dx)
+    x4 = float(end_x - dx)
+    x3 = float(end_x + dx)
+    y1 = float(start_y + dy)
+    y2 = float(start_y - dy)
+    y4 = float(end_y + dy)
+    y3 = float(end_y - dy)
+    corners = ([x1, x2, x3, x4], [y1, y2, y3, y4])
+    return corners
 
 
 # def pick_areas_circle(picks, r):
@@ -583,7 +696,7 @@ def get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width):
     
 #     Returns
 #     -------
-#     areas : np.1darray
+#     areas : _np.ndarray
 #         Pick areas, same units as r.
 #     """
 
@@ -591,16 +704,14 @@ def get_pick_rectangle_corners(start_x, start_y, end_x, end_y, width):
 #     return areas
 
 
-def polygon_area(X, Y):
+def polygon_area(X: _np.ndarray, Y: _np.ndarray) -> float:
     """Finds the area of a polygon defined by corners X and Y.
     
     Parameters
     ----------
-    X : numpy.1darray
-        x-coordinates of the polygon corners.
-    Y : numpy.1darray
-        y-coordinates of the polygon corners.
-    
+    X, Y : _np.ndarray
+        x-coordinates and y-coordinates of the polygon corners.
+
     Returns
     -------
     area : float
@@ -616,18 +727,18 @@ def polygon_area(X, Y):
     return area
 
 
-def pick_areas_polygon(picks):
-    """Returns pick areas for each pick in picks.
+def pick_areas_polygon(picks: list[list[tuple[float, float]]]) -> _np.ndarray:
+    """Returns pick areas for each polygonal pick in picks.
     
     Parameters
     ----------
-    picks : list
-        List of picks, each pick is a list of coordinates of the 
+    picks : list of lists of tuples
+        List of picks, each pick is a list of (x, y) coordinates of the 
         polygon corners.
     
     Returns
     -------
-    areas : np.1darray
+    areas : _np.ndarray
         Pick areas.
     """
 
@@ -638,11 +749,14 @@ def pick_areas_polygon(picks):
         X, Y = get_pick_polygon_corners(pick)
         areas.append(polygon_area(X, Y))
     areas = _np.array(areas)
-    areas = areas[areas > 0] # remove open polygons #TODO: delete this line?
+    areas = areas[areas > 0] # remove open polygons 
     return areas
 
 
-def pick_areas_rectangle(picks, w):
+def pick_areas_rectangle(
+    picks: list[list[tuple[float, float]]], 
+    w: float,
+) -> _np.ndarray:
     """Returns pick areas for each pick in picks.
     
     Parameters
@@ -655,7 +769,7 @@ def pick_areas_rectangle(picks, w):
     
     Returns
     -------
-    areas : np.1darray
+    areas : _np.ndarray
         Pick areas, same units as w.
     """
 

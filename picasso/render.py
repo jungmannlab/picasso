@@ -4,67 +4,64 @@
 
     Render single molecule localizations to a super-resolution image
 
-    :author: Joerg Schnitzbauer, 2015
+    :authors: Joerg Schnitzbauer 2015, Rafal Kowalewski 2023
     :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
-import time
-import os
-import sys
 
+from typing import Literal as _Literal
 import numpy as _np
 import numba as _numba
 import scipy.signal as _signal
 from scipy.spatial.transform import Rotation as _Rotation
 
 
-_DRAW_MAX_SIGMA = 3
+_DRAW_MAX_SIGMA = 3 # max. sigma from mean to render (mu +/- 3 sigma)
 
 
 def render(
-    locs,
-    info=None,
-    oversampling=1,
-    viewport=None,
-    blur_method=None,
-    min_blur_width=0,
-    ang=None,
-):  
-    """
-    Renders locs.
+    locs: _np.recarray,
+    info: dict | None = None,
+    oversampling: float = 1,
+    viewport: list | None = None,
+    blur_method: _Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None = None,
+    min_blur_width: float = 0,
+    ang: tuple | None = None,
+) -> tuple[int, _np.ndarray]:  
+    """Renders localizations given FOV and blur method.
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations to be rendered
-    info : dict (default=None)
+        Localizations to be rendered.
+    info : dict, optional
         Contains metadata for locs. Needed only if no viewport 
-        specified
-    oversampling : float (default=1)
-        Number of super-resolution pixels per camera pixel
-    viewport : list or tuple (default=None)
+        specified.
+    oversampling : float, optional 
+        Number of super-resolution pixels per camera pixel.
+    viewport : list or tuple, optional
         Field of view to be rendered. If None, all locs are rendered
-    blur_method : str (default=None)
+    blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, optional
         Defines localizations' blur. The string has to be one of 
-        'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, 
-        no blurring is applied.
-    min_blur_width : float (default=0)
-        Minimum size of blur (pixels)
-    ang : tuple (default=None)
-        Rotation angles of locs around x, y and z axes. If None, 
-        locs are not rotated.
+        'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
+        blurring is applied.
+    min_blur_width : float, optional
+        Minimum size of blur (pixels).
+    ang : tuple, optional
+        Rotation angles of locs around x, y and z axes in radians. If 
+        None, locs are not rotated.
 
     Raises
     ------
     Exception
         If blur_method not one of 'gaussian', 'gaussian_iso', 'smooth', 
-        'convolve' or None
+        'convolve' or None.
 
     Returns
     -------
-    int
-        Number of localizations rendered
-    np.array
-        Rendered image
+    n : int
+        Number of localizations rendered.
+    image : np.ndarray
+        Rendered image.
     """
 
     if viewport is None:
@@ -123,42 +120,38 @@ def render(
 
 @_numba.njit
 def _render_setup(
-    locs, 
-    oversampling, 
-    y_min, x_min, y_max, x_max,
-):
-    """
-    Finds coordinates to be rendered and sets up an empty image array.
+    locs: _np.recarray, 
+    oversampling: float, 
+    y_min: float, x_min: float, y_max: float, x_max: float,
+) -> tuple[_np.ndarray, int, int, _np.ndarray, _np.ndarray, _np.ndarray]:
+    """Finds coordinates to be rendered and sets up an empty image 
+    array.
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations
+        Localizations.
     oversampling : float
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (pixels).
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (pixels).
 
     Returns
     -------
-    np.array
-        Empty image array
-    int
-        Number of pixels in y
-    int 
-        Number of pixels in x
-    np.array 
-        x coordinates to be rendered
-    np.array 
-        y coordinates to be rendered
-    np.array
-        Indeces of locs to be rendered
+    image : np.ndarray
+        Empty image array.
+    n_pixel_y : int
+        Number of pixels in y.
+    n_pixel_x : int
+        Number of pixels in x.
+    x : np.ndarray
+        x coordinates to be rendered.
+    y : np.ndarray
+        y coordinates to be rendered.
+    in_view : np.ndarray
+        Indeces of locs to be rendered.
     """
 
     n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
@@ -176,54 +169,51 @@ def _render_setup(
 
 @_numba.njit
 def _render_setup3d(
-    locs, 
-    oversampling, 
-    y_min, x_min, y_max, x_max, z_min, z_max, 
-    pixelsize,
-):
-    """
-    Finds coordinates to be rendered in 3D and sets up an empty image 
+    locs: _np.recarray, 
+    oversampling: float, 
+    y_min: float, x_min: float, 
+    y_max: float, x_max: float, 
+    z_min: float, z_max: float, 
+    pixelsize: float,
+) -> tuple[_np.ndarray, int, int, int, _np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
+    """Finds coordinates to be rendered in 3D and sets up an empty image 
     array. Used by Picasso: Average3.
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations
+        Localizations.
     oversampling : float
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinate to be rendered (pixels).
+    y_max, x_max : float
+        Maximum y and x coordinate to be rendered (pixels).
     z_min : float
-        Minimum z coordinate to be rendered (nm)
+        Minimum z coordinate to be rendered (nm).
     z_max : float
-        Maximum z coordinate to be rendered (nm)
+        Maximum z coordinate to be rendered (nm).
     pixelsize : float
-        Camera pixel size, used for converting z coordinates
+        Camera pixel size, used for converting z coordinates.
 
     Returns
     -------
-    np.array
-        Empty image array
-    int
-        Number of pixels in y
-    int 
-        Number of pixels in x
-    int
-        Number of pixels in z
-    np.array 
-        x coordinates to be rendered
-    np.array 
-        y coordinates to be rendered
-    np.array
-        z coordinates to be rendered
-    np.array
-        Indeces of locs to be rendered
+    image : np.ndarray
+        Empty image array.
+    n_pixel_y : int
+        Number of pixels in y.
+    n_pixel_x : int
+        Number of pixels in x.
+    n_pixel_z : int
+        Number of pixels in z.
+    x : np.ndarray
+        x coordinates to be rendered.
+    y : np.ndarray
+        y coordinates to be rendered.
+    z : np.ndarray
+        z coordinates to be rendered.
+    in_view : np.ndarray
+        Indeces of locs to be rendered.
     """
 
     n_pixel_y = int(_np.ceil(oversampling * (y_max - y_min)))
@@ -267,19 +257,15 @@ def _render_setup3d(
 
 
 @_numba.njit
-def _fill(image, x, y):
-    """
-    Fills image with x and y coordinates. 
-    Image is not blurred.
+def _fill(image: _np.ndarray, x: _np.ndarray, y: _np.ndarray) -> None:
+    """Fills image with x and y coordinates. Image is not blurred.
 
     Parameters
     ----------
-    image : np.array
-        Empty image array
-    x : np.array
-        x coordinates to be rendered
-    y : np.array
-        y coordinates to be rendered
+    image : np.ndarray
+        Empty image array.
+    x, y : np.ndarray
+        x and y coordinates to be rendered.
     """
 
     x = x.astype(_np.int32)
@@ -289,22 +275,21 @@ def _fill(image, x, y):
 
 
 @_numba.njit
-def _fill3d(image, x, y, z):
-    """
-    Fills image with x, y and z coordinates.
-    Image is not blurred.
+def _fill3d(
+    image: _np.ndarray, 
+    x: _np.ndarray, 
+    y: _np.ndarray, 
+    z: _np.ndarray
+) -> None:
+    """Fills image with x, y and z coordinates. Image is not blurred.
     Used by Picasso: Average3.
 
     Parameters
     ----------
-    image : np.array
-        Empty image array
-    x : np.array
-        x coordinates to be rendered
-    y : np.array
-        y coordinates to be rendered
-    z : np.array
-        z coordinates to be rendered
+    image : np.ndarray
+        Empty image array.
+    x, y, z : np.ndarray
+        x, y and z coordinates to be rendered.
     """
 
     x = x.astype(_np.int32)
@@ -316,28 +301,29 @@ def _fill3d(image, x, y, z):
 
 
 @_numba.njit
-def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
-    """
-    Fills image with blurred x and y coordinates.
-    Localization precisions (sx and sy) are treated as standard
-    deviations of the guassians to be rendered.
+def _fill_gaussian(
+    image: _np.ndarray, 
+    x: _np.ndarray, 
+    y: _np.ndarray, 
+    sx: _np.ndarray, 
+    sy: _np.ndarray, 
+    n_pixel_x: int, 
+    n_pixel_y: int,
+) -> None:
+    """Fills image with blurred x and y coordinates. Each localization 
+    is rendered as a 2D Gaussian centered at (x, y) with standard 
+    deviations (sx, sy).
 
     Parameters
     ----------
-    image : np.array
-        Empty image array
-    x : np.array
-        x coordinates to be rendered
-    y : np.array
-        y coordinates to be rendered
-    sx : np.array
-        Localization precision in x for each loc
-    sy : np.array
-        Localization precision in y for each loc
-    n_pixel_x : int
-        Number of pixels in x
-    n_pixel_y : int
-        Number of pixels in y
+    image : np.ndarray
+        Empty image array.
+    x, y : np.ndarray
+        x and y coordinates to be rendered.
+    sx, sy : np.ndarray
+        Localization precision in x and y for each localization.
+    n_pixel_x, n_pixel_y : int
+        Number of pixels in x and y.
     """
 
     # render each localization separately
@@ -372,10 +358,18 @@ def _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y):
 
 @_numba.njit
 def _fill_gaussian_rot(
-    image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
-):
-    """
-    Fills image with rotated gaussian-blurred localizations.
+    image: _np.ndarray, 
+    x: _np.ndarray, 
+    y: _np.ndarray, 
+    z: _np.ndarray, 
+    sx: _np.ndarray, 
+    sy: _np.ndarray, 
+    sz: _np.ndarray, 
+    n_pixel_x: int, 
+    n_pixel_y: int, 
+    ang: tuple[float, float, float],
+) -> None:
+    """Fills image with rotated gaussian-blurred localizations.
 
     Localization precisions (sx, sy and sz) are treated as standard
     deviations of the guassians to be rendered.
@@ -384,26 +378,16 @@ def _fill_gaussian_rot(
 
     Parameters
     ----------
-    image : np.array
-        Empty image array
-    x : np.array
-        x coordinates to be rendered
-    y : np.array
-        y coordinates to be rendered
-    z: np.array
-        z coordinates to be rendered
-    sx : np.array
-        Localization precision in x for each loc
-    sy : np.array
-        Localization precision in y for each loc
-    sz : np.array
-        Localization precision in z for each loc
-    n_pixel_x : int
-        Number of pixels in x
-    n_pixel_y : int
-        Number of pixels in y
+    image : np.ndarray
+        Empty image array.
+    x, y, z : np.ndarray
+        3D coordinates to be rendered.
+    sx, sy, sz : np.ndarray
+        Localization precision in x, y and z for each localization.
+    n_pixel_x, n_pixel_y : int
+        Number of pixels in x and y.
     ang : tuple
-        Rotation angles of locs around x, y and z axes.
+        Rotation angles of locs around x, y and z axes (radians).
     """
 
     (angx, angy, angz) = ang # rotation angles
@@ -429,11 +413,6 @@ def _fill_gaussian_rot(
             [0.0, 0.0, 1.0],
         ], dtype=_np.float32
     ) # rotation matrix around z axis
-    # rot_matrix = _np.matmul(
-    #     _np.matmul(
-    #         rot_mat_x, rot_mat_y, dtype=_np.float32
-    #     ), rot_mat_z, dtype=_np.float32
-    # )
     rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z # rotation matrix
     rot_matrixT = _np.transpose(rot_matrix) # ...and its transpose
 
@@ -492,21 +471,19 @@ def _fill_gaussian_rot(
 
 
 @_numba.njit
-def inverse_3x3(a):
-    """
-    Calculates inverse of a 3x3 matrix.
-
-    This function is faster than np.linalg.inv.
+def inverse_3x3(a: _np.ndarray) -> _np.ndarray:
+    """Calculates inverse of a 3x3 matrix. This function is faster than 
+    np.linalg.inv.
 
     Parameters
     ----------
-    a : np.array
-        3x3 matrix
+    a : np.ndarray
+        3x3 matrix.
 
     Returns
     -------
-    np.array
-        Inverse of a
+    c : np.ndarray
+        Inverse of a.
     """
 
     c = _np.zeros((3,3), dtype=_np.float32)
@@ -528,63 +505,57 @@ def inverse_3x3(a):
 
 
 @_numba.njit
-def determinant_3x3(a):
-    """
-    Calculates determinant of a 3x3 matrix.
-
-    This function is faster than np.linalg.det.
+def determinant_3x3(a: _np.ndarray) -> _np.float32:
+    """Calculates determinant of a 3x3 matrix. This function is faster 
+    than np.linalg.det.
 
     Parameters
     ----------
-    a : np.array
-        3x3 matrix
+    a : np.ndarray
+        3x3 matrix.
 
     Returns
     -------
-    float
-        Determinant of a
+    det : float
+        Determinant of a.
     """
 
-    return _np.float32(
+    det = _np.float32(
         a[0,0] * (a[1,1] * a[2,2] - a[1,2] * a[2,1]) 
         - a[0,1] * (a[1,0] * a[2,2] - a[2,0] * a[1,2]) 
         + a[0,2] * (a[1,0] * a[2,1] - a[2,0] * a[1,1])
     )
+    return det
 
 
 def render_hist(
-    locs, 
-    oversampling, 
-    y_min, x_min, y_max, x_max, 
-    ang=None, 
-):
-    """
-    Renders locs with no blur.
+    locs: _np.recarray, 
+    oversampling: float, 
+    y_min: float, x_min: float, y_max: float, x_max: float, 
+    ang: tuple[float, float, float] | None = None, 
+) -> tuple[int, _np.ndarray]:
+    """Renders localizations with no blur by assigning them to pixels.
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations to be rendered
-    oversampling : float (default=1)
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
+        Localizations to be rendered.
+    oversampling : float 
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (pixels)
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (pixels)
     ang : tuple (default=None)
-        Rotation angles of locs around x, y and z axes. If None, 
-        locs are not rotated.
+        Rotation angles of locs around x, y and z axes in radians. If 
+        None, locs are not rotated.
 
     Returns
     -------
-    int
-        Number of localizations rendered
-    np.array
-        Rendered image
+    n : int
+        Number of localizations rendered.
+    image : np.ndarray
+        Rendered image.
     """
 
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -600,7 +571,8 @@ def render_hist(
             ang, 
         )
     _fill(image, x, y)
-    return len(x), image
+    n = len(x)
+    return n, image
 
 
 # @_numba.jit(nopython=True, nogil=True)
@@ -614,42 +586,39 @@ def render_hist(
 
 @_numba.jit(nopython=True, nogil=True)
 def render_hist3d(
-    locs, 
-    oversampling, 
-    y_min, x_min, y_max, x_max, z_min, z_max, 
-    pixelsize,
-):
-    """
-    Renders locs in 3D with no blur.
+    locs: _np.recarray, 
+    oversampling: float, 
+    y_min: float, x_min: float, 
+    y_max: float, x_max: float, 
+    z_min: float, z_max: float, 
+    pixelsize: float,
+) -> tuple[int, _np.ndarray]:
+    """Renders locs in 3D with no blur by assigning them to pixels.
     Used by Picasso: Average3.
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations to be rendered
+        Localizations to be rendered.
     oversampling : float (default=1)
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (pixels).
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (pixels).
     z_min : float
-        Minimum z coordinate to be rendered (nm)
+        Minimum z coordinate to be rendered (nm).
     z_max : float
-        Maximum z coordinate to be rendered (nm)
+        Maximum z coordinate to be rendered (nm).
     pixelsize : float
-        Camera pixel size, used for converting z coordinates
+        Camera pixel size in nm, used for converting z coordinates.
 
     Returns
     -------
-    int
-        Number of localizations rendered
-    np.array
-        Rendered 3D image
+    n : int
+        Number of localizations rendered.
+    image : np.ndarray
+        Rendered 3D image.
     """
 
     z_min = z_min / pixelsize
@@ -662,46 +631,42 @@ def render_hist3d(
         pixelsize,
     )
     _fill3d(image, x, y, z)
-    return len(x), image
+    n = len(x)
+    return n, image
 
 
 def render_gaussian(
-    locs, 
-    oversampling, 
-    y_min, x_min, y_max, x_max, 
-    min_blur_width, 
-    ang=None, 
-):
-    """
-    Renders locs with with individual localization precision which 
+    locs: _np.recarray, 
+    oversampling: float, 
+    y_min: float, x_min: float, y_max: float, x_max: float, 
+    min_blur_width: float, 
+    ang: tuple[float, float, float] | None = None, 
+) -> tuple[int, _np.ndarray]:
+    """Renders locs with with individual localization precision which 
     differs in x and y.
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations to be rendered
-    oversampling : float (default=1)
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
+        Localizations to be rendered.
+    oversampling : float
+        Number of super-resolution pixels per camera pixel.
+    y_min, y_max : float
+        Minimum and maximum y coordinates to be rendered (pixels).
+    x_min, x_max : float
+        Minimum and maximum x coordinates to be rendered (pixels).
     min_blur_width : float
-        Minimum localization precision (pixels)
-    ang : tuple (default=None)
-        Rotation angles of locs around x, y and z axes. If None, 
-        locs are not rotated.
+        Minimum localization precision (pixels).
+    ang : tuple, optional
+        Rotation angles of locs around x, y and z axes in radians. If 
+        None, locs are not rotated.
 
     Returns
     -------
-    int
-        Number of localizations rendered
-    np.array
-        Rendered image
+    n : int
+        Number of localizations rendered.
+    image : np.ndarray
+        Rendered image.
     """
 
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -742,47 +707,19 @@ def render_gaussian(
             image, x, y, z, sx, sy, sz, n_pixel_x, n_pixel_y, ang
         )
 
-    return len(x), image
+    n = len(x)
+    return n, image
 
 
 def render_gaussian_iso(
-    locs, 
-    oversampling, 
-    y_min, x_min, y_max, x_max, 
-    min_blur_width, 
-    ang=None, 
-):
-    """
-    Renders locs with with individual localization precision which 
-    is the same in x and y.
-
-    Parameters
-    ----------
-    locs : np.recarray
-        Localizations to be rendered
-    oversampling : float (default=1)
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
-    min_blur_width : float
-        Minimum localization precision (pixels)
-    ang : tuple (default=None)
-        Rotation angles of locs around x, y and z axes. If None, 
-        locs are not rotated.
-
-    Returns
-    -------
-    int
-        Number of localizations rendered
-    np.array
-        Rendered image
-    """
+    locs: _np.recarray, 
+    oversampling: float, 
+    y_min: float, x_min: float, y_max: float, x_max: float, 
+    min_blur_width: float, 
+    ang: tuple[float, float, float] | None = None, 
+) -> tuple[int, _np.ndarray]:
+    """Same as render_gaussian, but uses the same localization
+    precision in x and y."""
 
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
         locs, 
@@ -826,43 +763,38 @@ def render_gaussian_iso(
 
 
 def render_convolve(
-    locs, 
-    oversampling, 
-    y_min, x_min, y_max, x_max, 
-    min_blur_width, 
-    ang=None, 
-):
-    """
-    Renders locs with with global localization precision, i.e. each
+    locs: _np.recarray, 
+    oversampling: float, 
+    y_min: float, x_min: float, y_max: float, x_max: float, 
+    min_blur_width: float, 
+    ang: tuple[float, float, float] | None = None, 
+) -> tuple[int, _np.ndarray]:
+    """Renders locs with with global localization precision, i.e. each
     localization is blurred by the median localization precision in x
     and y.
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations to be rendered
-    oversampling : float (default=1)
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
+        Localizations to be rendered.
+    oversampling : float
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (pixels).
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (pixels).
     min_blur_width : float
-        Minimum localization precision (pixels)
-    ang : tuple (default=None)
-        Rotation angles of locs around x, y and z axes. If None, 
-        locs are not rotated.
+        Minimum localization precision (pixels).
+    ang : tuple, optional
+        Rotation angles of locs around x, y and z axes in radians. If 
+        None, locs are not rotated.
 
     Returns
     -------
-    int
-        Number of localizations rendered
-    np.array
-        Rendered image
+    n : int
+        Number of localizations rendered.
+    image : np.ndarray
+        Rendered image.
     """
 
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -878,7 +810,7 @@ def render_convolve(
             ang, 
         ) 
 
-    n = len(x)
+    n =  len(x)
     if n == 0:
         return 0, image
     else:
@@ -893,39 +825,34 @@ def render_convolve(
 
 
 def render_smooth(
-    locs, 
-    oversampling, 
-    y_min, x_min, y_max, x_max, 
-    ang=None, 
-):
-    """
-    Renders locs with with blur of one display pixel (set by 
-    oversampling)
+    locs: _np.recarray, 
+    oversampling: float, 
+    y_min: float, x_min: float, y_max: float, x_max: float, 
+    ang: tuple[float, float, float] | None = None, 
+) -> tuple[int, _np.ndarray]:
+    """Renders locs with with blur of one display pixel (set by 
+    oversampling).
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations to be rendered
-    oversampling : float (default=1)
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
-    ang : tuple (default=None)
-        Rotation angles of locs around x, y and z axes. If None, 
-        locs are not rotated.
+        Localizations to be rendered.
+    oversampling : float 
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (pixels).
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (pixels).
+    ang : tuple, optional
+        Rotation angles of locs around x, y and z axes in radians. If 
+        None, locs are not rotated.
 
     Returns
     -------
-    int
-        Number of localizations rendered
-    np.array
-        Rendered image
+    n : int
+        Number of localizations rendered.
+    image : np.array
+        Rendered image.
     """
 
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
@@ -950,23 +877,24 @@ def render_smooth(
         return n, _fftconvolve(image, 1, 1)
 
 
-def _fftconvolve(image, blur_width, blur_height): 
-    """
-    Blurs (convolves) 2D image using fast fourier transform.
+def _fftconvolve(
+    image: _np.ndarray, 
+    blur_width: float, 
+    blur_height: float,
+) -> _np.ndarray:
+    """Blurs (convolves) 2D image using fast fourier transform.
 
     Parameters
     ----------
-    image : np.array
-        Image with renderd but not blurred locs
-    blur_width : float
-        Blur width
-    blur_height
-        Blur height
+    image : np.ndarray
+        Image with rendered but not blurred locs.
+    blur_width, blur_height : float
+        Blur width and height in pixels.
 
     Returns
     -------
-    np.array
-        Blurred image
+    image : np.ndarray
+        Blurred image.
     """
 
     kernel_width = 10 * int(_np.round(blur_width)) + 1
@@ -975,26 +903,22 @@ def _fftconvolve(image, blur_width, blur_height):
     kernel_x = _signal.gaussian(kernel_width, blur_width)
     kernel = _np.outer(kernel_y, kernel_x)
     kernel /= kernel.sum()
-    return _signal.fftconvolve(image, kernel, mode="same")
+    image = _signal.fftconvolve(image, kernel, mode="same")
+    return image
 
 
-def rotation_matrix(angx, angy, angz):
-    """
-    Finds rotation matrix given rotation angles around axes.
+def rotation_matrix(angx: float, angy: float, angz: float) -> _Rotation:
+    """Finds rotation matrix given rotation angles around axes.
 
     Parameters
     ----------
-    angx : float
-        Rotation angle around x axis
-    angy : float
-        Rotation angle around y axis
-    angz : float
-        Rotation angle around z axis
+    angx, angy, angz : float
+        Rotation angles around x, y and z axes in radians.
 
     Returns
     -------
     scipy.spatial.transform.Rotation
-        Scipy class that can be applied to rotate an Nx3 np.array
+        Scipy class that can be applied to rotate an Nx3 np.ndarray
     """
 
     rot_mat_x = _np.array(
@@ -1023,40 +947,35 @@ def rotation_matrix(angx, angy, angz):
 
 
 def locs_rotation(
-    locs, 
-    oversampling,
-    x_min, x_max, y_min, y_max, 
-    ang, 
-):
-    """
-    Rotates localizations within a FOV.
+    locs: _np.recarray, 
+    oversampling: float,
+    x_min: float, x_max: float, y_min: float, y_max: float, 
+    ang: tuple[float, float, float]
+) -> tuple[_np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
+    """Rotates localizations within a FOV.
 
     Parameters
     ----------
     locs : np.recarray
-        Localizations to be rotated
+        Localizations to be rotated.
     oversampling : float
-        Number of super-resolution pixels per camera pixel
-    y_min : float
-        Minimum y coordinate to be rendered (pixels)
-    x_min : float
-        Minimum x coordinate to be rendered (pixels)
-    y_max : float
-        Maximum y coordinate to be rendered (pixels)
-    x_max : float
-        Maximum x coordinate to be rendered (pixels)
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinate to be rendered (pixels).
+    y_max, x_max : float
+        Maximum y and x coordinate to be rendered (pixels).
     ang : tuple
-        Rotation angles of locs around x, y and z axes.
+        Rotation angles of locs around x, y and z axes in radians.
 
     Returns
     -------
-    np.array
+    x : np.ndarray
         New (rotated) x coordinates
-    np.array
+    y : np.ndarray
         New y coordinates
-    np.array
+    in_view : np.ndarray
         Indeces of locs that are rendered
-    np.array
+    z : np.ndarray
         New z coordinates
     """
 
