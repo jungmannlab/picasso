@@ -7,15 +7,35 @@
     :author: Maximilian Thomas Strauss, 2016-2018
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
+
 import csv
 from . import io as _io
 
 
-def saveInfo(filename, info):
+def saveInfo(filename: str, info: dict) -> None:
+    """Saves information to a YAML file."""
+    
     _io.save_info(filename, [info], default_flow_style=True)
 
 
-def convertPlateIndex(plate, platename):
+def convertPlateIndex(plate: list, platename: str) -> list:
+    """Convert plate index from canvas index format to a structured 
+    format for ordering the sequeences.
+    
+    Parameters
+    ----------
+    plate : list
+        List of lists containing plate information in canvas index 
+        format.
+    platename : str
+        Name of the plate to be used in the output.
+    
+    Returns
+    -------
+    newplate : list
+        List of lists containing the plate information in a structured
+        format for ordering the sequences.
+    """
     # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
     # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
 
@@ -84,9 +104,26 @@ def convertPlateIndex(plate, platename):
     return newplate
 
 
-def convertPlateIndexColor(plate, platename):
+def convertPlateIndexColor(plate: list, platename: str) -> list:
+    """Convert plate index from canvas index format to a structured 
+    format for ordering the sequences, including color information.
+    
+    Parameters
+    ----------
+    plate : list
+        List of lists containing plate information in canvas index 
+        format.
+    platename : str
+        Name of the plate to be used in the output.
+        
+    Returns
+    -------
+    newplate : list
+        List of lists containing the plate information in a structured
+        format for ordering the sequences, including color information.
+    """
     # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
-    # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
+    # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE, COLOR]
 
     platerow = [
         "A",
@@ -155,14 +192,37 @@ def convertPlateIndexColor(plate, platename):
     return newplate
 
 
-def readPlate(filename):
+def readPlate(filename: str) -> list:
+    """Reads a plate file and returns its content as a list of lists.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the file to read.   
+    
+    Returns
+    -------
+    data : list
+        A list of lists containing the data from the file.
+    """
+
     File = open(filename)
     Reader = csv.reader(File)
     data = list(Reader)
     return data
 
 
-def savePlate(filename, data):
+def savePlate(filename: str, data: list) -> None:
+    """Saves the plate data to a CSV file.
+
+    Parameters
+    ----------
+    filename : str
+        The name of the file to save the data to.
+    data : list
+        A list of lists containing the plate data to save.
+    """
+    
     with open(filename, "w", newline="") as csvfile:
         Writer = csv.writer(
             csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL

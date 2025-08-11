@@ -1,3 +1,5 @@
+"""DNA sequences origami designs."""
+
 base_sequences = [
     ["Position", "Name", "Sequence"],
     ["A1", "21[32]23[31]BLK", "TTTTCACTCAAAGGGCGAAAAACCATCACC"],

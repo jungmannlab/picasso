@@ -15,7 +15,26 @@ magfac = 0.79
 
 
 @njit
-def calculate_zpsf(z, cx, cy):
+def calculate_zpsf(
+    z: _np.ndarray | float, 
+    cx: _np.ndarray, 
+    cy: _np.ndarray,
+) -> tuple[_np.ndarray, _np.ndarray] | tuple[float, float]:
+    """Calculates the astigmatic PSF size at a given z position.
+    
+    Parameters
+    ----------
+    z : _np.ndarray or number
+        The z position(s) at which to calculate the PSF.
+    cx, cy : _np.ndarray
+        Coefficients for the x/y dimension of the PSF.
+    
+    Returns
+    -------
+    wx, wy : _np.ndarray
+        The calculated PSF sizes in the x and y dimensions.
+    """
+
     z = z / magfac
     z2 = z * z
     z3 = z * z2
@@ -43,7 +62,9 @@ def calculate_zpsf(z, cx, cy):
     return (wx, wy)
 
 
-def test_calculate_zpsf():
+def test_calculate_zpsf() -> _np.ndarray:
+    """Test function for calculate_zpsf."""
+
     cx = _np.array([1, 2, 3, 4, 5, 6, 7])
     cy = _np.array([1, 2, 3, 4, 5, 6, 7])
     z = _np.array([1, 2, 3, 4, 5, 6, 7])
@@ -63,14 +84,30 @@ def test_calculate_zpsf():
     assert sum(delta**2) < 0.001
 
 
-def saveInfo(filename, info):
+def saveInfo(filename: str, info: dict) -> None:
+    """Saves metadata to a YAML file."""
+
     _io.save_info(filename, [info], default_flow_style=True)
 
 
-def noisy(image, mu, sigma):
+def noisy(image: _np.ndarray, mu: float, sigma: float) -> _np.ndarray:
+    """Adds gaussian noise to an image.
+
+    Parameters
+    ----------
+    image : _np.ndarray
+        The input image to which noise will be added.
+    mu : float
+        The mean of the Gaussian noise.
+    sigma : float
+        The standard deviation of the Gaussian noise.
+
+    Returns
+    -------
+    noisy : _np.ndarray
+        The noisy image with Gaussian noise added.
     """
-    Add gaussian noise to an image.
-    """
+
     row, col = image.shape  # Variance for _np.random is 1
     gauss = sigma * _np.random.normal(0, 1, (row, col)) + mu
     gauss = gauss.reshape(row, col)
@@ -79,29 +116,88 @@ def noisy(image, mu, sigma):
     return noisy
 
 
-def noisy_p(image, mu):
+def noisy_p(image: _np.ndarray, mu: float) -> _np.ndarray:
+    """Adds Poisson noise to an image or movie.
+    
+    Parameters
+    ----------
+    image : _np.ndarray
+        The input image to which Poisson noise will be added.
+    mu : float
+        The mean of the Poisson noise.  
+
+    Returns
+    -------
+    noisy : _np.ndarray
+        The noisy image with Poisson noise added.
     """
-    # Add poissonian noise to an image or movie
-    """
+    
     poiss = _np.random.poisson(mu, image.shape).astype(float)
     noisy = image + poiss
     return noisy
 
 
-def check_type(movie):
+def check_type(movie: _np.ndarray) -> _np.ndarray:
+    """Checks the type of the movie and converts it to a 16-bit unsigned 
+    integer if necessary.
+
+    Parameters
+    ----------
+    movie : _np.ndarray
+        The input movie to be checked and converted.    
+
+    Returns
+    -------
+    movie : _np.ndarray
+        The movie converted to a 16-bit unsigned integer type.
+    """
+
     movie[movie >= (2**16) - 1] = (2**16) - 1
     movie = movie.astype("<u2")  # little-endian 16-bit unsigned int
     return movie
 
 
 def paintgen(
-    meandark, meanbright, frames, time, photonrate, photonratestd, photonbudget
-):
+    meandark: int, 
+    meanbright: int, 
+    frames: int, 
+    time: float, 
+    photonrate: float, 
+    photonratestd: float, 
+    photonbudget: float,
+) -> tuple[_np.ndarray, _np.ndarray, list]:
+    """Paint-Generator: generates on and off-traces for given parameters
+    and calculates the number of photons in each frame for a binding 
+    site.
+
+    Parameters
+    ----------
+    meandark : float
+        Mean dark time (in ms) for the binding site.
+    meanbright : float
+        Mean bright time (in ms) for the binding site.
+    frames : int
+        Number of frames in the movie.
+    time : float
+        Time per frame (in ms).
+    photonrate : float
+        Mean photon rate (in photons per frame).
+    photonratestd : float
+        Standard deviation of the photon rate (in photons per frame).
+    photonbudget : float
+        Maximum number of photons that can be emitted in one on-event.  
+
+    Returns
+    -------
+    photonsinframe : _np.ndarray
+        Array containing the number of photons emitted in each frame.
+    timetrace : _np.ndarray
+        Array containing the time trace of the binding events.
+    spotkinetics : list
+        List containing the number of on-events, total bright events,
+        simulated mean dark time, and simulated mean bright time.
     """
-    Paint-Generator:
-    Generates on and off-traces for given parameters.
-    Calculates the number of Photons in each frame for a binding site.
-    """
+
     meanlocs = 4 * int(
         _np.ceil(frames * time / (meandark + meanbright))
     )  # This is an estimate for the total number of binding events
@@ -220,18 +316,49 @@ def paintgen(
 
 
 def distphotons(
-    structures,
-    itime,
-    frames,
-    taud,
-    taub,
-    photonrate,
-    photonratestd,
-    photonbudget,
-):
+    structures: _np.ndarray,
+    itime: float,
+    frames: int,
+    taud: float,
+    taub: float,
+    photonrate: float,
+    photonratestd: float,
+    photonbudget: float,
+) -> tuple[_np.ndarray, _np.ndarray, list]:
+    """Distribute photons and binding kinetics for the given simulated 
+    structures.
+
+    Parameters
+    ----------
+    structures : _np.ndarray
+        Array containing the binding sites' coordinates and exchange 
+        information.
+    itime : float
+        Integration time for the simulation (in ms).
+    frames : int
+        Number of frames in the movie.
+    taud : float
+        Mean dark time for the binding sites (in ms).
+    taub : float
+        Mean bright time for the binding sites (in ms).
+    photonrate : float
+        Mean photon rate for the binding sites (in photons per frame).
+    photonratestd : float
+        Standard deviation of the photon rate (in photons per frame).
+    photonbudget : float
+        Maximum number of photons that can be emitted in one on-event.
+
+    Returns
+    -------
+    photonsinframe : _np.ndarray
+        Array containing the number of photons emitted in each frame.
+    timetrace : _np.ndarray
+        Array containing the time trace of the binding events.
+    spotkinetics : list
+        List containing the number of on-events, total bright events,
+        simulated mean dark time, and simulated mean bright time.
     """
-    Distrbute Photons
-    """
+    
     time = itime
     meandark = int(taud)
     meanbright = int(taub)
@@ -256,7 +383,43 @@ def distphotons(
     return photonsinframe, timetrace, spotkinetics
 
 
-def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
+def distphotonsxy(
+    runner: int, 
+    photondist: _np.ndarray, 
+    structures: _np.ndarray, 
+    psf: float, 
+    mode3Dstate: bool, 
+    cx: list, 
+    cy: list,
+) -> _np.ndarray:
+    """Distributes photons in a PSF, with an option for astigmatic PSF
+    in 3D.
+    
+    Parameters
+    ----------
+    runner : int
+        The index of the current binding site.
+    photondist : _np.ndarray
+        Array containing the number of photons emitted in each frame for
+        each binding site.
+    structures : _np.ndarray
+        Array containing the binding sites' coordinates and exchange
+        information.
+    psf : float
+        The point spread function (PSF) size (only for 2D).
+    mode3Dstate : bool
+        If True, uses a 3D astigmatic PSF; if False, uses a 2D Gaussian 
+        PSF.
+    cx, cy : list
+        Calibration coefficients for the x/y dimension of the PSF, used 
+        if mode3Dstate is True.
+        
+    Returns
+    -------
+    photonposframe : _np.ndarray
+        Array containing the positions of the photons emitted in the
+        current frame for the specified binding site.
+    """
 
     bindingsitesx = structures[0, :]
     bindingsitesy = structures[1, :]
@@ -287,19 +450,58 @@ def distphotonsxy(runner, photondist, structures, psf, mode3Dstate, cx, cy):
 
 
 def convertMovie(
-    runner,
-    photondist,
-    structures,
-    imagesize,
-    frames,
-    psf,
-    photonrate,
-    background,
-    noise,
-    mode3Dstate,
-    cx,
-    cy,
+    runner: int,
+    photondist: _np.ndarray,
+    structures: _np.ndarray,
+    imagesize: int,
+    frames: int,
+    psf: float,
+    photonrate: float,
+    background: float,
+    noise: float,
+    mode3Dstate: bool,
+    cx: list,
+    cy: list,
 ):
+    """Converts the photon distribution into a simulated movie frame.
+    
+    Parameters
+    ----------
+    runner : int
+        The index of the current binding site.
+    photondist : _np.ndarray
+        Array containing the number of photons emitted in each frame for
+        each binding site.
+    structures : _np.ndarray
+        Array containing the binding sites' coordinates and exchange
+        information.
+    imagesize : int
+        Size of the image (in pixels).
+    frames : int
+        Number of frames in the movie.
+    psf : float
+        The point spread function (PSF) size (sx/sy) for the binding
+        sites.
+    photonrate : float
+        Mean photon rate for the binding sites (in photons per frame).
+    background : float
+        Background intensity (in photons per frame).
+    noise : float
+        Standard deviation of the noise to be added to the image.
+    mode3Dstate : bool
+        If True, uses a 3D astigmatic PSF; if False, uses a 2D Gaussian
+        PSF.
+    cx, cy : list
+        Calibration coefficients for the x/y dimension of the PSF, used
+        if mode3Dstate is True. 
+        
+    Returns
+    ------- 
+    simframe : _np.ndarray
+        The simulated movie frame with the photon distribution and noise
+        added.
+    """
+
     edges = range(0, imagesize + 1)
 
     photonposframe = distphotonsxy(
@@ -317,20 +519,48 @@ def convertMovie(
     return simframe
 
 
-def saveMovie(filename, movie, info):
+def saveMovie(filename: str, movie: _np.ndarray, info: dict) -> None:
+    """Saves the simulated movie to a file."""
+
     _io.save_raw(filename, movie, [info])
 
 
 # Function to store the coordinates of a structure in a container.
 # The coordinates wil be adjustet so that the center of mass is the origin
 def defineStructure(
-    structurexxpx,
-    structureyypx,
-    structureex,
-    structure3d,
-    pixelsize,
-    mean=True,
-):
+    structurexxpx: _np.ndarray,
+    structureyypx: _np.ndarray,
+    structureex: _np.ndarray,
+    structure3d: _np.ndarray,
+    pixelsize: float,
+    mean: bool = True,
+) -> _np.ndarray:
+    """Define a structure with given coordinates and exchange 
+    information.
+    
+    Parameters
+    ----------
+    structurexxpx : _np.ndarray
+        Array containing the x-coordinates of the structure in pixels.
+    structureyypx : _np.ndarray
+        Array containing the y-coordinates of the structure in pixels.
+    structureex : _np.ndarray
+        Array containing the exchange information for the structure.
+    structure3d : _np.ndarray
+        Array containing the 3D coordinates of the structure.
+    pixelsize : float
+        The pixel size in nanometers.
+    mean : bool, optional
+        If True, centers the structure by subtracting the mean of the
+        coordinates. Default is True.
+        
+    Returns
+    -------
+    structure : _np.ndarray
+        Array containing the structure's x-positions, y-positions,
+        exchange information, and 3D coordinates.
+    """
+
     if mean:
         structurexxpx = structurexxpx - _np.mean(structurexxpx)
         structureyypx = structureyypx - _np.mean(structureyypx)
@@ -349,10 +579,34 @@ def defineStructure(
     return structure
 
 
-def generatePositions(number, imagesize, frame, arrangement):
+def generatePositions(
+    number: int, 
+    imagesize: int, 
+    frame: int, 
+    arrangement: int,
+) -> _np.ndarray:
+    """Generate a set of positions where structures will be placed.
+
+    Parameters
+    ----------
+    number : int
+        Number of positions to generate.
+    imagesize : int
+        Size of the image (in pixels).
+    frame : int
+        Frame size to leave around the edges of the image.
+    arrangement : int
+        Arrangement type for the positions:
+        - 0: Grid arrangement
+        - 1: Random arrangement
+    
+    Returns
+    -------
+    gridpos : _np.ndarray
+        Array containing the generated positions in the format
+        [[x1, y1], [x2, y2], ...].
     """
-    Generate a set of positions where structures will be placed
-    """
+
     if arrangement == 0:
         spacing = int(_np.ceil((number**0.5)))
         linpos = _np.linspace(frame, imagesize - frame, spacing)
@@ -369,10 +623,22 @@ def generatePositions(number, imagesize, frame, arrangement):
     return gridpos
 
 
-def rotateStructure(structure):
+def rotateStructure(structure: _np.ndarray) -> _np.ndarray:
+    """Rotate a structure randomly.
+    
+    Parameters
+    ----------
+    structure : _np.ndarray
+        Array containing the structure's coordinates and exchange
+        information.
+        
+    Returns
+    -------
+    newstructure : _np.ndarray
+        Array containing the rotated structure's coordinates and
+        exchange information.
     """
-    Rotate a structure randomly
-    """
+
     angle_rad = _np.random.rand(1) * 2 * _np.pi
     newstructure = _np.array(
         [
@@ -387,30 +653,90 @@ def rotateStructure(structure):
     return newstructure
 
 
-def incorporateStructure(structure, incorporation):
-    """
-    Returns a subset of the strucutre to reflect incorporation of stpales
+def incorporateStructure(
+    structure: _np.ndarray, 
+    incorporation: float
+) -> _np.ndarray:
+    """Returns a subset of the structure to reflect incorporation of 
+    staples.
+
+    Parameters
+    ----------
+    structure : _np.ndarray
+        Array containing the structure's coordinates and exchange
+        information.
+    incorporation : float
+        Probability of incorporation for each staple in the structure. 
+    
+    Returns
+    -------
+    newstructure : _np.ndarray
+        Array containing the subset of the structure after applying the
+        incorporation probability.
     """
     newstructure = structure[:, (_np.random.rand(structure.shape[1]) < incorporation)]
     return newstructure
 
 
-def randomExchange(pos):
+def randomExchange(pos: _np.ndarray) -> _np.ndarray:
+    """Randomly shuffle exchange parameters for random labeling.
+
+    Parameters
+    ----------
+    pos : _np.ndarray
+        Array containing the positions and exchange information of the
+        structures.
+    
+    Returns
+    -------
+    newpos : _np.ndarray
+        Array containing the positions with shuffled exchange
+        parameters.
     """
-    Randomly shuffle exchange parameters for rnadom labeling
-    """
+
     arraytoShuffle = pos[2, :]
     _np.random.shuffle(arraytoShuffle)
     newpos = _np.array([pos[0, :], pos[1, :], arraytoShuffle, pos[3, :]])
     return newpos
 
 
-def prepareStructures(structure, gridpos, orientation, number, incorporation, exchange):
-    """
-    prepareStructures:
-    Input positions, the structure definitionconsider rotation etc.
+def prepareStructures(
+    structure: _np.ndarray, 
+    gridpos: _np.ndarray, 
+    orientation: int, 
+    number: int, 
+    incorporation: float, 
+    exchange: int,
+) -> _np.ndarray:
+    """Prepares input positions, the structure definition considering 
+    rotation etc.
 
+    Parameters
+    ----------
+    structure : _np.ndarray
+        Array containing the structure's coordinates and exchange
+        information.
+    gridpos : _np.ndarray
+        Array containing the positions where structures will be placed.
+    orientation : int
+        Orientation of the structure:
+        - 0: No rotation
+        - 1: Random rotation
+    number : int
+        Number of structures to generate.
+    incorporation : float
+        Probability of incorporation for each staple in the structure.
+    exchange : int
+        If 1, randomizes the exchange parameters; if 0, keeps them as 
+        is.
+
+    Returns
+    -------
+    newpos : _np.ndarray
+        Array containing the new positions of the structures after
+        applying the specified transformations.
     """
+    
     newpos = []
     oldstructure = _np.array(
         [structure[0, :], structure[1, :], structure[2, :], structure[3, :]]

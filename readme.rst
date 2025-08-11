@@ -127,34 +127,33 @@ Contributions & Copyright
 Citing Picasso
 --------------
 
-If you use picasso in your research, please cite our Nature Protocols publication describing the software.
+If you use Picasso in your research, please cite our Nature Protocols publication describing the software.
 
 | J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann
 | Super-Resolution Microscopy with DNA-PAINT
-| Nature Protocols (2017). 12: 1198-1228 DOI: `https://doi.org/10.1038/nprot.2017.024 <https://doi.org/10.1038/nprot.2017.024>`__
+| Nature Protocols (2017). 12: 1198-1228 DOI: `10.1038/nprot.2017.024 <https://doi.org/10.1038/nprot.2017.024>`__
 |
 | If you use some of the functionalities provided by Picasso, please also cite the respective publications:
 
 - Nearest Neighbor based Analysis (NeNA) for experimental localization precision. DOI: `10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
 - Theoretical localization precision (Gauss LQ and MLE). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
 - MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
+- RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__ 
 - AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
+- SMLM clusterer. DOIs: `10.1038/s41467-021-22606-1 <https://doi.org/10.1038/s41467-021-22606-1>__` and `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__
 - DBSCAN: Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
 - HDBSCAN. DOI: `10.1007/978-3-642-37456-2_14 <https://doi.org/10.1007/978-3-642-37456-2_14>`__
+- RESI. DOI: `10.1038/s41586-023-05925-9 <https://doi.org/10.1038/s41586-023-05925-9>`__
 - SPINNA. DOI: `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
 
 Credits
 -------
 
--  Design icon based on “Hexagon by Creative Stalls" from the Noun
-   Project
+-  Design icon based on “Hexagon by Creative Stalls" from the Noun Project
 -  Simulate icon based on “Microchip by Futishia" from the Noun Project
--  Localize icon based on “Mountains" by MONTANA RUCOBO from the Noun
-   Project
+-  Localize icon based on “Mountains" by MONTANA RUCOBO from the Noun Project
 -  Filter icon based on “Funnel" by José Campos from the Noun Project
--  Render icon based on “Paint Palette" by Vectors Market from the Noun
-   Project
--  Average icon based on “Layers" by Creative Stall from the Noun
-   Project
+-  Render icon based on “Paint Palette" by Vectors Market from the Noun Project
+-  Average icon based on “Layers" by Creative Stall from the Noun Project
 -  Server icon based on “Database" by Nimal Raj from the Noun Project
 -  SPINNA icon based on "Spinner" by Viktor Ostrovsky from the Noun Project

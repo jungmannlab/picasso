@@ -1,7 +1,18 @@
 Changelog
 =========
 
-Last change: 15-JUL-2025 MTS
+Last change: 11-AUG-2025 MTS
+
+0.8.2
+-----
+- Added docstrings and data types in all modules (``postprocess``, ``simulate``, ``render``, ``nanotron``, ``localize``, ``lib``, ``io``, ``imageprocess``, ``gaussmle``, ``gausslq``, ``design``, ``clusterer``, ``aim``, ``avgroi`` and ``zfit``)
+- Fix one click installer issues for non-administrator users
+- Render allows for saving picked localizations in a separate file for each pick
+- Remaining time estimate in the progress dialog
+- Fix garbage collection when openinging ``.nd2`` files in Localize
+- Fix 3D rotation window for a polygon pick
+- Render minimap - the zoom-in window is always visible
+- Other small fixes and improvements
 
 0.8.1
 -----
@@ -13,7 +24,7 @@ Last change: 15-JUL-2025 MTS
 0.8.0
 -----
 - **New module SPINNA for investigating oligormerization of proteins** , `DOI: 10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`_
-- **NeNA bug fix - old values were (usually) too high by a ~sqrt(2) **
+- **NeNA bug fix - old values were (usually) too high by a ~sqrt(2)**
 - NeNA bug fix - less prone to fitting to local maximum leading to incorrect values
 - NeNA plot - displays distances in nm
 - Fiducial picking - filter out picks too few localizations (80% of the total acquisition time)

@@ -7,6 +7,9 @@
     :author: Joerg Schnitzbauer, 2016
     :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
+
+from typing import Callable
+
 import matplotlib.pyplot as _plt
 import numpy as _np
 from numpy import fft as _fft
@@ -20,16 +23,62 @@ from . import postprocess as _postprocess
 _plt.style.use("ggplot")
 
 
-def xcorr(imageA, imageB):
+def xcorr(imageA: _np.ndarray, imageB: _np.ndarray) -> _np.ndarray:
+    """Computes the cross-correlation of two images using FFT.
+    
+    Parameters
+    ----------
+    imageA, imageB : np.ndarray
+        Input images to be cross-correlated. They should have the same 
+        shape.
+    
+    Returns
+    -------
+    res : np.ndarray
+        The cross-correlation result, which is the inverse Fourier
+        transform of the product of the Fourier transforms of the two
+        images.
+    """
+
     FimageA = _fft.fft2(imageA)
     CFimageB = _np.conj(_fft.fft2(imageB))
-    return _fft.fftshift(_np.real(_fft.ifft2((FimageA * CFimageB)))) / _np.sqrt(
+    res = _fft.fftshift(_np.real(_fft.ifft2((FimageA * CFimageB)))) / _np.sqrt(
         imageA.size
     )
+    return res
 
 
-def get_image_shift(imageA, imageB, box, roi=None, display=False):
-    """Computes the shift from imageA to imageB"""
+def get_image_shift(
+    imageA: _np.ndarray, 
+    imageB: _np.ndarray, 
+    box: int, 
+    roi: int | None = None, 
+    display: bool = False,
+) -> tuple[float, float]:
+    """Computes the shift from imageA to imageB.
+    
+    Parameters
+    ----------
+    imageA, imageB : np.ndarray
+        Input images to be cross-correlated. They should have the same
+        shape.
+    box : int
+        Size of the box used for fitting the cross-correlation peak.
+    roi : int, optional
+        Region of interest size to cut out the center of the 
+        cross-correlation image. If None, the entire cross-correlation
+        image is used.
+    display : bool, optional
+        If True, displays the images and the cross-correlation result.
+    
+    Returns
+    -------
+    yc, xc : float
+        The y and x coordinates of the shift from imageA to imageB.
+        The coordinates are adjusted to be relative to the center of
+        the images.
+    """
+
     if (_np.sum(imageA) == 0) or (_np.sum(imageB) == 0):
         return 0, 0
     # Compute image correlation
@@ -106,7 +155,38 @@ def get_image_shift(imageA, imageB, box, roi=None, display=False):
     return -yc, -xc
 
 
-def rcc(segments, max_shift=None, callback=None):
+def rcc(
+    segments: list[_np.ndarray], 
+    max_shift: float | None = None, 
+    callback: Callable[[int], None] | None = None,
+) -> _np.ndarray:
+    """Computes RCC, see Wang, Schnitzbauer, et al. Optics Express, 
+    2014. Returns the shifts in x and y directions for each pair of
+    segments. 
+    
+    Parameters
+    ----------
+    segments : list of np.ndarray
+        List of image segments to be correlated. Each segment should be
+        a 2D numpy array representing an image.
+    max_shift : float, optional
+        Maximum allowed shift in pixels. If None, the default value is
+        set to 5 pixels.
+    callback : Callable[[int], None], optional
+        A callback function that takes an integer argument and is called
+        after processing each pair of segments. This can be used to
+        update a progress bar or perform other actions during the
+        computation.
+    
+    Returns
+    -------
+    shifts : np.ndarray
+        A 2D numpy array containing the shifts in x and y directions for
+        each pair of segments. The shape of the array is 
+        (n_segments, n_segments), where n_segments is the number of 
+        segments provided.
+    """
+
     n_segments = len(segments)
     shifts_x = _np.zeros((n_segments, n_segments))
     shifts_y = _np.zeros((n_segments, n_segments))
@@ -136,7 +216,10 @@ def rcc(segments, max_shift=None, callback=None):
     return _lib.minimize_shifts(shifts_x, shifts_y)
 
 
-def find_fiducials(locs, info):
+def find_fiducials(
+    locs: _np.recarray, 
+    info: list[dict],
+) -> tuple[list[tuple[int, int]], int]:
     """Finds the xy coordinates of regions with high density of 
     localizations, likely originating from fiducial markers. 
 
@@ -147,7 +230,7 @@ def find_fiducials(locs, info):
     
     Parameters
     ----------
-    locs : np.recarray
+    locs : _np.recarray
         Localizations.
     info : list of dicts
         Localizations' metadata (from the corresponding .yaml file).
