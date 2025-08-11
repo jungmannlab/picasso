@@ -9,7 +9,8 @@
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
-from typing import Literal as _Literal
+from __future__ import annotations
+from typing import Literal
 
 import numpy as _np
 import numba as _numba
@@ -346,7 +347,7 @@ def gaussmle(
     spots: _np.ndarray, 
     eps: float, 
     max_it: int, 
-    method: _Literal["sigma", "sigmaxy"] = "sigma",
+    method: Literal["sigma", "sigmaxy"] = "sigma",
 ) -> tuple[_np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
     """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the
     extracted spots.
@@ -361,7 +362,7 @@ def gaussmle(
         The convergence criterion for the fitting algorithm.
     max_it : int
         The maximum number of iterations for the fitting algorithm.
-    method : _Literal["sigma", "sigmaxy"]
+    method : Literal["sigma", "sigmaxy"]
         The method to use for fitting the Gaussian.
 
     Returns
@@ -400,7 +401,7 @@ def gaussmle_async(
     spots: _np.ndarray, 
     eps: float, 
     max_it: int, 
-    method: _Literal["sigma", "sigmaxy"] = "sigma",
+    method: Literal["sigma", "sigmaxy"] = "sigma",
 ) -> tuple[_np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
     """Runs ``gaussmle`` asynchronously (multiprocessing) to fit
     Gaussians using Maximum Likelihood Estimation (MLE) to the

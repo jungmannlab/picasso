@@ -9,8 +9,9 @@
 """
 
 from __future__ import annotations
-from typing import Literal as _Literal
-from typing import Callable as _Callable
+from typing import Literal
+from typing import Callable
+
 import numpy as _np
 import dask.array as _da
 import numba as _numba
@@ -746,7 +747,7 @@ def fit(
     box: int,
     eps: float = 0.001,
     max_it: int = 100,
-    method: _Literal["sigma", "sigmaxy"] = "sigma",
+    method: Literal["sigma", "sigmaxy"] = "sigma",
 ) -> _np.recarray:
     """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the 
     identified spots in a movie to localize fluorescent molecules. See
@@ -771,7 +772,7 @@ def fit(
     max_it : int, optional
         The maximum number of iterations for the fitting algorithm. 
         Default is 100.
-    method : _Literal["sigma", "sigmaxy"], optional
+    method : Literal["sigma", "sigmaxy"], optional
         The method used for fitting (impose same sigma in x and y or 
         not, respectively). Default is "sigma".
 
@@ -797,7 +798,7 @@ def fit_async(
     box: int,
     eps: float = 0.001,
     max_it: int = 100,
-    method: _Literal["sigma", "sigmaxy"] = "sigmaxy",
+    method: Literal["sigma", "sigmaxy"] = "sigmaxy",
 ) -> tuple[int, _np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
     """Asynchronously fits Gaussians using Maximum Likelihood Estimation
     (MLE) to the identified spots in a movie to localize fluorescent
@@ -824,7 +825,7 @@ def fit_async(
     max_it : int, optional  
         The maximum number of iterations for the fitting algorithm.
         Default is 100.
-    method : _Literal["sigma", "sigmaxy"], optional
+    method : Literal["sigma", "sigmaxy"], optional
         The method used for fitting (impose same sigma in x and y or 
         not, respectively). Default is "sigmaxy".
 
@@ -954,7 +955,7 @@ def localize(
 def check_nena(
     locs: _np.recarray, 
     info: None, 
-    callback: _Callable[[int], None] = None,
+    callback: Callable[[int], None] = None,
 ) -> float:
     """Calculates the NeNA (experimental localization precision) from
     localizations.
@@ -965,7 +966,7 @@ def check_nena(
         A structured numpy array containing the localized spots.
     info : None
         Not used.
-    callback : _Callable[[int], None], optional
+    callback : Callable[[int], None], optional
         A callback function that can be used to report progress. It
         should accept an integer argument representing the current
         step or frame number. Default is None.
@@ -1020,7 +1021,7 @@ def check_kinetics(locs: _np.recarray, info: list[dict]) -> float:
 def check_drift(
     locs: _np.recarray, 
     info: list[dict], 
-    callback: _Callable[[int], None] = None,
+    callback: Callable[[int], None] = None,
 ) -> tuple[float, float]:
     """Estimates the drift of localizations in x and y directions.
     
@@ -1030,7 +1031,7 @@ def check_drift(
         A structured numpy array containing the localized spots.
     info : list[dict]
         A list of dictionaries containing metadata about the movie.
-    callback : _Callable[[int], None], optional
+    callback : Callable[[int], None], optional
         A callback function that can be used to report progress. It 
         should accept an integer argument representing the current
         step or frame number. Default is None.

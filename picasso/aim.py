@@ -12,7 +12,7 @@
     :copyright: Copyright (c) 2016-2024 Jungmann Lab, MPI of Biochemistry
 """
 
-from typing import Callable as _Callable
+from typing import Callable
 
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 
@@ -392,7 +392,7 @@ def intersection_max(
     roi_r: float, 
     width: int,
     aim_round: int = 1,
-    progress: _Callable[[int], None] | None = None,
+    progress: Callable[[int], None] | None = None,
 ) -> tuple[_np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
     """Maximize intersection (undrift) for 2D localizations.
     
@@ -545,7 +545,7 @@ def intersection_max_z(
     height: int, 
     pixelsize: float,
     aim_round: int = 1, 
-    progress: _Callable[[int], None] | None = None,
+    progress: Callable[[int], None] | None = None,
 ) -> tuple[_np.ndarray, _np.ndarray]:
     """Maximize intersection (undrift) for 3D localizations. Assumes
     that x and y coordinates were already undrifted. x and y are in
@@ -656,7 +656,7 @@ def aim(
     segmentation: int = 100, 
     intersect_d: float = 20/130, 
     roi_r: float = 60/130,
-    progress: _Callable[[int], None] | None = None,
+    progress: Callable[[int], None] | None = None,
 ) -> tuple[_np.recarray, list[dict], _np.recarray]:
     """Apply AIM undrifting to the localizations.
 
