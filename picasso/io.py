@@ -9,7 +9,7 @@
 """
 
 from __future__ import annotations
-from typing import Callable as _Callable
+from typing import Callable
 from PyQt5.QtWidgets import QWidget as _QWidget
 
 import os.path as _ospath
@@ -51,7 +51,7 @@ def _user_settings_filename() -> str:
 
 def load_raw(
     path: str, 
-    prompt_info: _Callable[[None], tuple[dict, bool]] | None = None, 
+    prompt_info: Callable[[None], tuple[dict, bool]] | None = None, 
     progress: None = None,
 ) -> tuple[_np.memmap, list[dict]]:
     """Loads a raw movie file and its metadata.
@@ -101,7 +101,7 @@ def load_raw(
 
 def load_ims(
     path: str, 
-    prompt_info: _Callable[[list[str]], str] | None = None,
+    prompt_info: Callable[[list[str]], str] | None = None,
 ) -> tuple[_np.memmap, list[dict]]:
     """Loads a Bitplane IMS movie file and its metadata.
 

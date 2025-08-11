@@ -9,7 +9,7 @@
 """
 
 from __future__ import annotations
-from collections.abc import Callable as _Callable
+from collections.abc import Callable
 from asyncio import Future as _Future
 from typing import Any as _Any
 
@@ -570,7 +570,7 @@ def remove_from_rec(rec_array: _np.recarray, name: str) -> _np.recarray:
 
 
 def locs_glob_map(
-    func: _Callable[[_np.recarray, dict, str, _Any], tuple[_np.recarray, list[dict]]], 
+    func: Callable[[_np.recarray, dict, str, _Any], tuple[_np.recarray, list[dict]]], 
     pattern: str, 
     args: list = [], 
     kwargs: dict = {}, 
@@ -585,7 +585,7 @@ def locs_glob_map(
 
     Parameters
     ----------
-    func : _Callable
+    func : Callable
         Function to be mapped to each locs file. It must take
         locs, info, path, and any additional args and kwargs.
     pattern : str

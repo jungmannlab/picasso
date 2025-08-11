@@ -8,7 +8,7 @@
     :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
-from typing import Callable as _Callable
+from typing import Callable
 
 import matplotlib.pyplot as _plt
 import numpy as _np
@@ -158,7 +158,7 @@ def get_image_shift(
 def rcc(
     segments: list[_np.ndarray], 
     max_shift: float | None = None, 
-    callback: _Callable[[int], None] | None = None,
+    callback: Callable[[int], None] | None = None,
 ) -> _np.ndarray:
     """Computes RCC, see Wang, Schnitzbauer, et al. Optics Express, 
     2014. Returns the shifts in x and y directions for each pair of

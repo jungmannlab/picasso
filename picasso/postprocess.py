@@ -8,8 +8,8 @@
     :copyright: Copyright (c) 2015-2018 Jungmann Lab, MPI Biochemistry
 """
 
-from collections.abc import Callable as _Callable
-from typing import Literal as _Literal
+from collections.abc import Callable
+from typing import Literal
 
 import numpy as _np
 import numba as _numba
@@ -250,7 +250,7 @@ def picked_locs(
     pick_shape: str, 
     pick_size: float = None, 
     add_group: bool = True, 
-    callback: _Callable[[int], None] | _Literal["console"] | None = None,
+    callback: Callable[[int], None] | Literal["console"] | None = None,
 ) -> list[_np.recarray]:
     """Finds picked localizations.
     
@@ -696,7 +696,7 @@ def distance_histogram(
 def nena(
     locs: _np.recarray, 
     info: None, 
-    callback: _Callable[[int], None] | None = None,
+    callback: Callable[[int], None] | None = None,
 ) -> tuple[_lmfit.Model, float]:
     """Calculates NeNA - experimental estimate of localization 
     precision. Please refer to the original paper for details:
@@ -744,7 +744,7 @@ def nena(
 
 def next_frame_neighbor_distance_histogram(
     locs: _np.recarray, 
-    callback: _Callable[[int], None] | None = None,
+    callback: Callable[[int], None] | None = None,
 ) -> tuple[_np.ndarray, _np.ndarray]:
     """Calculates the next frame neighbor distance histogram (NFNDH).
 
@@ -783,7 +783,7 @@ def _nfndh(
     group: _np.ndarray, 
     d_max: float, 
     bin_size: float, 
-    callback: _Callable[[int], None] | None = None,
+    callback: Callable[[int], None] | None = None,
 ) -> tuple[_np.ndarray, _np.ndarray]:
     """Calculates the next frame neighbor distance histogram (NFNDH)."""
 
@@ -1063,7 +1063,7 @@ def link(
     info: list[dict],
     r_max: float = 0.05,
     max_dark_time: int = 1,
-    combine_mode: _Literal["average", "refit"] = "average",
+    combine_mode: Literal["average", "refit"] = "average",
     remove_ambiguous_lengths: bool = True,
 ) -> _np.recarray:
     """Links localizations, i.e., groups them into binding events based
@@ -1831,7 +1831,7 @@ def segment(
     info: list[dict], 
     segmentation: int, 
     kwargs: dict = {}, 
-    callback: _Callable[[int], None] = None,
+    callback: Callable[[int], None] = None,
 ) -> tuple[_np.ndarray, _np.ndarray]:
     """Splits localizations into temporal segments (number of segments
     is defined by the segmentation parameter) and renders each segment
@@ -1888,8 +1888,8 @@ def undrift(
     info: list[dict],
     segmentation: int,
     display: bool = True,
-    segmentation_callback: _Callable[[int], None] = None,
-    rcc_callback: _Callable[[int], None] = None,
+    segmentation_callback: Callable[[int], None] = None,
+    rcc_callback: Callable[[int], None] = None,
 ) -> tuple[_np.recarray, _np.recarray]:
     """Undrift by RCC. See Wang, Schnitzbauer, et al. Optics Express,
     2014.
@@ -2024,7 +2024,7 @@ def undrift_from_picked(
 def _undrift_from_picked_coordinate(
     picked_locs: list[_np.recarray], 
     info: list[dict], 
-    coordinate: _Literal["x", "y", "z"],
+    coordinate: Literal["x", "y", "z"],
 ):
     """Calculates drift in a given coordinate from picked localizations.
     Uses the center of mass of each pick to find the drift
@@ -2125,7 +2125,7 @@ def align(
 
 def groupprops(
     locs: _np.recarray, 
-    callback: _Callable[[int], None] | None = None,
+    callback: Callable[[int], None] | None = None,
 ) -> _np.recarray:
     """Calculates group statistics for localizations, such as mean and
     standard deviation.

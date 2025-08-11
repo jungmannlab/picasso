@@ -8,7 +8,7 @@
     :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 
-from typing import Literal as _Literal
+from typing import Literal
 import numpy as _np
 import numba as _numba
 import scipy.signal as _signal
@@ -23,7 +23,7 @@ def render(
     info: dict | None = None,
     oversampling: float = 1,
     viewport: list | None = None,
-    blur_method: _Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None = None,
+    blur_method: Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None = None,
     min_blur_width: float = 0,
     ang: tuple | None = None,
 ) -> tuple[int, _np.ndarray]:  
