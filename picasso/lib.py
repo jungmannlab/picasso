@@ -279,12 +279,9 @@ def ensure_sanity(locs: _np.recarray, info: list[dict]) -> _np.recarray:
     locs = locs[locs.y > 0]
     locs = locs[locs.x < info[0]["Width"]]
     locs = locs[locs.y < info[0]["Height"]]
-    locs = locs[locs.lpx > 0]
-    locs = locs[locs.lpy > 0]
-    locs = locs[locs.photons > 0]
-    locs = locs[locs.ellipticity > 0]
-    locs = locs[locs.sx > 0]
-    locs = locs[locs.sy > 0]
+    for attr in ["lpx", "lpy", "photons", "ellipticity", "sx", "sy"]:
+        if hasattr(locs, attr):
+            locs = locs[locs[attr] >= 0]
     return locs
 
 
