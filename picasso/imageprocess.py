@@ -13,7 +13,7 @@ from typing import Callable
 import matplotlib.pyplot as _plt
 import numpy as _np
 from numpy import fft as _fft
-import lmfit as _lmfit
+from scipy.optimize import curve_fit as _curve_fit
 from tqdm import tqdm as _tqdm
 from . import lib as _lib
 from . import render as _render
@@ -114,27 +114,23 @@ def get_image_shift(
     if 0 in dimensions or dimensions[0] != dimensions[1]:
         xc, yc = 0, 0
     else:
-        # The fit model
-        def flat_2d_gaussian(a, xc, yc, s, b):
+        def flat_2d_gaussian(coords, a, xc, yc, s, b):
+            x, y = coords
             A = a * _np.exp(-0.5 * ((x - xc) ** 2 + (y - yc) ** 2) / s**2) + b
             return A.flatten()
-
-        gaussian2d = _lmfit.Model(
-            flat_2d_gaussian, name="2D Gaussian", independent_vars=[]
+        
+        p0 = [FitROI.max(), 0, 0, 1, FitROI.min()]
+        bounds = (
+            [0, -_np.inf, -_np.inf, 0, 0], 
+            [_np.inf, _np.inf, _np.inf, _np.inf, _np.inf],
+        )
+        popt, _ = _curve_fit(
+            flat_2d_gaussian, (x, y), FitROI.flatten(), p0=p0, bounds=bounds,
         )
 
-        # Set up initial parameters and fit
-        params = _lmfit.Parameters()
-        params.add("a", value=FitROI.max(), vary=True, min=0)
-        params.add("xc", value=0, vary=True)
-        params.add("yc", value=0, vary=True)
-        params.add("s", value=1, vary=True, min=0)
-        params.add("b", value=FitROI.min(), vary=True, min=0)
-        results = gaussian2d.fit(FitROI.flatten(), params)
-
         # Get maximum coordinates and add offsets
-        xc = results.best_values["xc"]
-        yc = results.best_values["yc"]
+        xc = popt[1]
+        yc = popt[2]
         xc += X_ + x_max_
         yc += Y_ + y_max_
 

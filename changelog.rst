@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 11-AUG-2025 MTS
+Last change: 18-AUG-2025 MTS
+
+0.8.3
+-----
+- Removed ``lmfit`` dependency
 
 0.8.2
 -----

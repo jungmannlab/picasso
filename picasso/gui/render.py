@@ -16,7 +16,6 @@ import importlib, pkgutil
 from math import ceil
 from functools import partial
 
-import lmfit
 import matplotlib 
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -28,6 +27,7 @@ from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT \
     as NavigationToolbar
 
 from scipy.ndimage.filters import gaussian_filter
+from scipy.optimize import curve_fit
 from numpy.lib.recfunctions import stack_arrays
 from PyQt5 import QtCore, QtGui, QtWidgets
 
@@ -144,8 +144,8 @@ def is_hexadecimal(text):
 
 def fit_cum_exp(data):
     """ 
-    Returns an lmfit Model class fitted to a 3-parameter cumulative
-    exponential.
+    Fits a cumulative exponential function to data. Used for binding
+    kinetics estimation.
     """
 
     data.sort()
@@ -153,23 +153,29 @@ def fit_cum_exp(data):
     y = np.arange(1, n + 1)
     data_min = data.min()
     data_max = data.max()
-    params = lmfit.Parameters()
-    params.add("a", value=n, vary=True, min=0)
-    params.add("t", value=np.mean(data), vary=True, min=data_min, max=data_max)
-    params.add("c", value=data_min, vary=True, min=0)
-    result = lib.CumulativeExponentialModel.fit(y, params, x=data)
+    p0 = [n, np.mean(data), data_min]
+    bounds = ([0, data_min, 0], [np.inf, data_max, np.inf])
+    popt, _ = curve_fit(
+        lib.cumulative_exponential, data, y, p0=p0, bounds=bounds
+    )
+    result = {
+        "best_values": {"a": popt[0], "t": popt[1], "c": popt[2]},
+        "data": data,
+        "best_fit": lib.cumulative_exponential(y, *popt),
+    }
     return result
 
 
 def kinetic_rate_from_fit(data):
-    """Finds the mean dark/bright time from the lmfit fitted Model."""
+    """Finds the mean dark/bright time from fitting a cumulative
+    exponential function."""
 
     if len(data) > 2:
         if data.ptp() == 0:
             rate = np.nanmean(data)
         else:
             result = fit_cum_exp(data)
-            rate = result.best_values["t"]
+            rate = result["best_values"]["t"]
     else:
         rate = np.nanmean(data)
     return rate
@@ -316,11 +322,10 @@ class PickHistWindow(QtWidgets.QTabWidget):
         ----------
         pooled_locs : np.recarray
             All picked localizations
-        fit_result_len : lmfit.Model
-            Fitted model of a 3-parameter cumulative exponential for
-            lenghts of each localization
-        fit_result_dark : lmfit.Model
-            Fitted model of a 3-parameter cumulative exponential 
+        fit_result_len : dict
+            Cumulative exponential fit results for bright times.
+        fit_result_dark : dict
+            Cumulative exponential fit results for dark times.
         """
 
         self.figure.clear()
@@ -328,9 +333,9 @@ class PickHistWindow(QtWidgets.QTabWidget):
         # Length
         axes = self.figure.add_subplot(121)
 
-        a = fit_result_len.best_values["a"]
-        t = fit_result_len.best_values["t"]
-        c = fit_result_len.best_values["c"]
+        a = fit_result_len["best_values"]["a"]
+        t = fit_result_len["best_values"]["t"]
+        c = fit_result_len["best_values"]["c"]
 
         axes.set_title(
             "Length (cumulative) \n"
@@ -340,7 +345,7 @@ class PickHistWindow(QtWidgets.QTabWidget):
         data.sort()
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label="data")
-        axes.semilogx(data, fit_result_len.best_fit, label="fit")
+        axes.semilogx(data, fit_result_len["best_fit"], label="fit")
         axes.legend(loc="best")
         axes.set_xlabel("Duration (frames)")
         axes.set_ylabel("Frequency")
@@ -348,9 +353,9 @@ class PickHistWindow(QtWidgets.QTabWidget):
         # Dark
         axes = self.figure.add_subplot(122)
 
-        a = fit_result_dark.best_values["a"]
-        t = fit_result_dark.best_values["t"]
-        c = fit_result_dark.best_values["c"]
+        a = fit_result_dark["best_values"]["a"]
+        t = fit_result_dark["best_values"]["t"]
+        c = fit_result_dark["best_values"]["c"]
 
         axes.set_title(
             "Dark time (cumulative) \n"
@@ -360,7 +365,7 @@ class PickHistWindow(QtWidgets.QTabWidget):
         data.sort()
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label="data")
-        axes.semilogx(data, fit_result_dark.best_fit, label="fit")
+        axes.semilogx(data, fit_result_dark["best_fit"], label="fit")
         axes.legend(loc="best")
         axes.set_xlabel("Duration (frames)")
         axes.set_ylabel("Frequency")
@@ -3364,13 +3369,13 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
 
     def plot(self, nena_result):
         self.figure.clear()
-        d = nena_result.userkws["d"]
+        d = nena_result["d"]
         ax = self.figure.add_subplot(111)
         pixelsize = self.info_dialog.window.display_settings_dlg.pixelsize.value()
         d *= pixelsize
         ax.set_title("Next frame neighbor distance histogram")
-        ax.plot(d, nena_result.data, label="Data")
-        ax.plot(d, nena_result.best_fit, label="Fit")
+        ax.plot(d, nena_result["data"], label="Data")
+        ax.plot(d, nena_result["best_fit"], label="Fit")
         ax.set_xlabel("Distance (nm)")
         ax.set_ylabel("Counts")
         ax.legend(loc="best")
