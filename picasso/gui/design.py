@@ -12,6 +12,7 @@
 import glob, os, sys, traceback, importlib, pkgutil
 import os.path as _ospath
 from math import sqrt
+from copy import deepcopy
 
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
@@ -119,8 +120,8 @@ def plotPlate(selection, selectioncolors, platename):
     return fig
 
 
-BasePlate = BASE_SEQUENCES.copy()
-PaintHandles = PAINT_SEQUENCES.copy()
+BasePlate = deepcopy(BASE_SEQUENCES)
+PaintHandles = deepcopy(PAINT_SEQUENCES)
 
 # list of standard paint sequences
 allSeqShort = "None"
@@ -509,7 +510,6 @@ class FoldingDialog(QtWidgets.QDialog):
                 "Target Concentration[nM]",
                 "Volume[ul]",
                 "Excess",
-                "Colorcode",
             ]
         )
         for row in range(self.table.rowCount()):
@@ -520,7 +520,7 @@ class FoldingDialog(QtWidgets.QDialog):
                     rowdata.append(item.text())
                 else:
                     rowdata.append("")
-            tablecontent.append(rowdata)
+            tablecontent.append(rowdata[:-1]) # do not save colorcode
 
         table[0] = tablecontent
         if hasattr(self, "pwd"):
@@ -697,7 +697,7 @@ class Scene(QtWidgets.QGraphicsScene):
                 )
             )  # 5nm spacing
 
-        # Pprepare file format for origami definition
+        # Prepare file format for origami definition
         self.origamicoords = []
         self.origamiindices = []
         for coords in ORIGAMI_SITES:
@@ -870,7 +870,6 @@ class Scene(QtWidgets.QGraphicsScene):
             else:
                 self.alllbl[i].setPlainText(str(canvascolors.count(tocount)))
             self.colorcounts.append(count)
-
         return canvascolors
 
     def updateExtensions(self, tableshort):
@@ -984,7 +983,7 @@ class Scene(QtWidgets.QGraphicsScene):
     def readCanvas(self):
         allplates = dict()
         canvascolors = self.evaluateCanvas()[::-1]
-        ExportPlate = BASE_SEQUENCES.copy()
+        ExportPlate = deepcopy(BASE_SEQUENCES)
 
         ExportPlate[0] = ["Position", "Name", "Sequence", "Color"]
         for i in range(0, len(canvascolors)):
@@ -1026,10 +1025,10 @@ class Scene(QtWidgets.QGraphicsScene):
             for j in range(0, noplates):
                 if colors[j] == 0:
                     allplates[j] = design.convertPlateIndex(
-                        BASE_SEQUENCES.copy(), "BLK"
+                        deepcopy(BASE_SEQUENCES), "BLK"
                     )
                 else:
-                    ExportPlate = BASE_SEQUENCES.copy()
+                    ExportPlate = deepcopy(BASE_SEQUENCES)
                     for i in range(0, len(canvascolors)):
                         ExportPlate[1 + i][2] = (
                             ExportPlate[1 + i][2] + " " + self.tablelong[colors[j] - 1]
@@ -1042,7 +1041,7 @@ class Scene(QtWidgets.QGraphicsScene):
                     )
 
         elif mode == 1:  # only one plate with the modifications
-            ExportPlate = BASE_SEQUENCES.copy()
+            ExportPlate = deepcopy(BASE_SEQUENCES)
             for i in range(0, len(canvascolors)):
                 if canvascolors[i] == 0:
                     pass
@@ -1191,7 +1190,7 @@ class Window(QtWidgets.QMainWindow):
             self.statusBar().showMessage(
                 "Error: "
                 + str(seqcheck)
-                + " Color(s) do not have extensions. Please set first."
+                + " color(s) do not have extensions. Please set first."
             )
         else:
             selection, ok = PlateDialog.getSelection()
@@ -1351,9 +1350,9 @@ class Window(QtWidgets.QMainWindow):
                                 pad_inches=0.2,
                                 dpi=200,
                             )
-                            base, ext = _ospath.splitext(path)
-                            csv_path = base + ".csv"
-                            design.savePlate(csv_path, exportlist)
+                            # base, ext = _ospath.splitext(path)
+                            # csv_path = base + ".csv"
+                            # design.savePlate(csv_path, exportlist)
                     progress.close()
                     self.statusBar().showMessage("Pippetting scheme saved to: " + path)
                     self.pwd = os.path.dirname(path)
@@ -1402,7 +1401,7 @@ class Window(QtWidgets.QMainWindow):
         fdialog.writeTable(mixno + 2, 0, "Biotin 1:10")
         fdialog.writeTable(mixno + 2, 1, str(100))
         fdialog.writeTable(mixno + 2, 2, str(80))
-        fdialog.writeTable(mixno + 2, 6, str(1))
+        fdialog.writeTable(mixno + 2, 6, str(25))
 
         fdialog.writeTable(mixno + 3, 0, "H2O")
 

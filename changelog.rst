@@ -7,6 +7,8 @@ Last change: 19-AUG-2025 MTS
 -----
 - Removed ``lmfit`` dependency
 - Render by property allows different colormaps
+- Design: fix export plates and pipetting schemes
+- Design: set default biotin excess to 25 (previously set to 1)
 
 0.8.2
 -----
@@ -47,8 +49,8 @@ Last change: 19-AUG-2025 MTS
 - 3D animation fixed
 - Other minor bug fixes
 
-0.7.1 - 0.7.4
--------------
+0.7.1-4
+-------
 - SMLM clusterer in picked regions deleted
 - Show legend in Render property displayed rounded tick label values
 - Pick circular area does not save the area for each pick in localization's metadata 
@@ -71,8 +73,8 @@ Last change: 19-AUG-2025 MTS
 - ``picasso.localize.localize`` fixed
 - default MLE fitting uses different sx and sy (CMD only)
 
-0.6.9 - 0.6.11
---------------
+0.6.9-11
+--------
 - Added the option to draw polygon picks in Picasso: Render
 - Save pick properties in Picasso: Render saves areas of picked regions in nm^2
 - Calibration .yaml file saves number of frames and step size in nm
@@ -84,8 +86,8 @@ Last change: 19-AUG-2025 MTS
 - Picasso: Render - saving picked localizations saves the area(s) of the picked region(s) in the metadata file (.yaml)
 - Documentation on readthedocs works again
 
-0.6.6 - 0.6.8
--------------
+0.6.6-8
+-------
 - GUI modules display the Picasso version number in the title bar
 - Added readthedocs requirements file (only for developers)
 - No blur applied when padding in Picasso: Render (increases speed of rendering)
@@ -97,8 +99,8 @@ Last change: 19-AUG-2025 MTS
 - Bug fix: 2D cluster centers area and convex hull are saved correctly
 - Bug fix: rectangular picks
 
-0.6.3 - 0.6.5
--------------
+0.6.3-5
+-------
 - Dependencies updated
 - Bug fixes due to Python 3.10 and PyQt5 (listed below)
 - Fix RCC error for Render GUI (one click installer) (remove tqdm from GUI)
