@@ -4371,6 +4371,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         contains available localization blur methods
     colormap : QComboBox
         contains strings with available colormaps (single channel only)
+    colormap_prop : QComboBox
+        contains strings with available colormap for rendering 
+        properties
     color_step : QSpinBox
         defines how many colors are to be rendered
     disp_px_size : QDoubleSpinBox
@@ -4637,15 +4640,25 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         )
         render_grid.addWidget(self.color_step, 3, 1)
 
+        self.colormap_prop = QtWidgets.QComboBox()
+        self.colormap_prop.addItems(plt.colormaps())
+        self.colormap_prop.setCurrentText("gist_rainbow")
+        self.colormap_prop.setEnabled(False)
+        self.colormap_prop.activated.connect(
+            self.window.view.activate_render_property
+        )
+        render_grid.addWidget(QtWidgets.QLabel("Colormap:"), 4, 0)
+        render_grid.addWidget(self.colormap_prop, 4, 1)
+
         self.render_check = QtWidgets.QCheckBox("Render")
         self.render_check.stateChanged.connect(
             self.window.view.activate_render_property
         )
         self.render_check.setEnabled(False)
-        render_grid.addWidget(self.render_check, 4, 0)
+        render_grid.addWidget(self.render_check, 5, 0)
 
         self.show_legend = QtWidgets.QPushButton("Show legend")
-        render_grid.addWidget(self.show_legend, 4, 1)
+        render_grid.addWidget(self.show_legend, 5, 1)
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
@@ -8989,7 +9002,10 @@ class View(QtWidgets.QLabel):
 
         # use the gist_rainbow colormap for rendering properties
         if self.x_render_state:
-            colors = get_render_properties_colors(n_channels)
+            colors = get_render_properties_colors(
+                n_channels, 
+                self.window.display_settings_dlg.colormap_prop.currentText(),
+            )
 
         return colors
 
@@ -9537,7 +9553,10 @@ class View(QtWidgets.QLabel):
         min_val = self.window.display_settings_dlg.minimum_render.value()
         max_val = self.window.display_settings_dlg.maximum_render.value()
 
-        colors = get_render_properties_colors(n_colors)
+        colors = get_render_properties_colors(
+            n_colors, 
+            self.window.display_settings_dlg.colormap_prop.currentText(),
+        )
 
         fig1 = plt.figure(figsize=(5, 1))
 
@@ -9641,6 +9660,7 @@ class View(QtWidgets.QLabel):
         self.window.display_settings_dlg.minimum_render.setEnabled(True)
         self.window.display_settings_dlg.maximum_render.setEnabled(True)
         self.window.display_settings_dlg.color_step.setEnabled(True)
+        self.window.display_settings_dlg.colormap_prop.setEnabled(True)
 
     def deactivate_property_menu(self):
         """ Blocks changing render parameters. """
@@ -9648,6 +9668,7 @@ class View(QtWidgets.QLabel):
         self.window.display_settings_dlg.minimum_render.setEnabled(False)
         self.window.display_settings_dlg.maximum_render.setEnabled(False)
         self.window.display_settings_dlg.color_step.setEnabled(False)
+        self.window.display_settings_dlg.colormap_prop.setEnabled(False)
 
     def set_property(self):
         """ Activates rendering by property. """
@@ -11164,6 +11185,9 @@ class Window(QtWidgets.QMainWindow):
             except: # otherwise, save magma
                 current_colormap = "magma"
         settings["Render"]["Colormap"] = current_colormap
+        settings["Render"]["Colormap Property"] = (
+            self.display_settings_dlg.colormap_prop.currentText()
+        )
         if self.view.locs_paths != []:
             settings["Render"]["PWD"] = os.path.dirname(
                 self.view.locs_paths[0]
@@ -11984,6 +12008,14 @@ class Window(QtWidgets.QMainWindow):
         for index in range(self.display_settings_dlg.colormap.count()):
             if self.display_settings_dlg.colormap.itemText(index) == colormap:
                 self.display_settings_dlg.colormap.setCurrentIndex(index)
+                break
+        try:
+            colormap_prop = settings["Render"]["Colormap Property"]
+        except KeyError:
+            colormap_prop = "gist_rainbow"
+        for index in range(self.display_settings_dlg.colormap_prop.count()):
+            if self.display_settings_dlg.colormap_prop.itemText(index) == colormap_prop:
+                self.display_settings_dlg.colormap_prop.setCurrentIndex(index)
                 break
         pwd = []
         try:
