@@ -28,9 +28,6 @@ from . import __version__
 import abc
 import nd2
 from nd2reader import ND2Reader
-from nd2reader.label_map import LabelMap
-from nd2reader.raw_metadata import RawMetadata
-from nd2reader.common_raw_metadata import parse_roi_shape, parse_roi_type, parse_dimension_text_line
 
 from .ext import bitplane
 
@@ -308,11 +305,11 @@ def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]:
     -------
     movie : ND2Movie
         The loaded ND2 movie.
-    info : list[dict]
+    info : list of dicts
         A list containing a dictionary with metadata about the movie.
     """
 
-    movie = ND2Movie(path) #TODO: fix (email from 02.06.2025)
+    movie = ND2Movie(path)
     info = movie.info()
     return movie, [info]
 

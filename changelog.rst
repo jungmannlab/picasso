@@ -5,10 +5,10 @@ Last change: 19-AUG-2025 MTS
 
 0.8.3
 -----
-- Removed ``lmfit`` dependency
-- Render by property allows different colormaps
 - Design: fix export plates and pipetting schemes
 - Design: set default biotin excess to 25 (previously set to 1)
+- Render by property allows different colormaps
+- Removed ``lmfit`` dependency
 
 0.8.2
 -----
