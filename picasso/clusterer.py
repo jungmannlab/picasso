@@ -631,29 +631,29 @@ def find_cluster_centers(
     centers_ = res.values
 
     # convert to recarray and save
-    frame = _np.ndarray([_[0] for _ in centers_])
-    std_frame = _np.ndarray([_[1] for _ in centers_])
-    x = _np.ndarray([_[2] for _ in centers_])
-    y = _np.ndarray([_[3] for _ in centers_])
-    std_x = _np.ndarray([_[4] for _ in centers_])
-    std_y = _np.ndarray([_[5] for _ in centers_])
-    photons = _np.ndarray([_[6] for _ in centers_])
-    sx = _np.ndarray([_[7] for _ in centers_])
-    sy = _np.ndarray([_[8] for _ in centers_])
-    bg = _np.ndarray([_[9] for _ in centers_])
-    lpx = _np.ndarray([_[10] for _ in centers_])
-    lpy = _np.ndarray([_[11] for _ in centers_])
-    ellipticity = _np.ndarray([_[12] for _ in centers_])
-    net_gradient = _np.ndarray([_[13] for _ in centers_])
-    n = _np.ndarray([_[14] for _ in centers_])
-    n_events = _np.ndarray([_[15] for _ in centers_]) # number of localizations in cluster
+    frame = _np.array([_[0] for _ in centers_])
+    std_frame = _np.array([_[1] for _ in centers_])
+    x = _np.array([_[2] for _ in centers_])
+    y = _np.array([_[3] for _ in centers_])
+    std_x = _np.array([_[4] for _ in centers_])
+    std_y = _np.array([_[5] for _ in centers_])
+    photons = _np.array([_[6] for _ in centers_])
+    sx = _np.array([_[7] for _ in centers_])
+    sy = _np.array([_[8] for _ in centers_])
+    bg = _np.array([_[9] for _ in centers_])
+    lpx = _np.array([_[10] for _ in centers_])
+    lpy = _np.array([_[11] for _ in centers_])
+    ellipticity = _np.array([_[12] for _ in centers_])
+    net_gradient = _np.array([_[13] for _ in centers_])
+    n = _np.array([_[14] for _ in centers_])
+    n_events = _np.array([_[15] for _ in centers_]) # number of localizations in cluster
 
     if hasattr(locs, "z"):
-        z = _np.ndarray([_[16] for _ in centers_])
-        std_z = _np.ndarray([_[17] for _ in centers_])
-        volume = _np.ndarray([_[18] for _ in centers_])
-        convexhull = _np.ndarray([_[19] for _ in centers_])
-        centers = _np.rec.ndarray(
+        z = _np.array([_[16] for _ in centers_])
+        std_z = _np.array([_[17] for _ in centers_])
+        volume = _np.array([_[18] for _ in centers_])
+        convexhull = _np.array([_[19] for _ in centers_])
+        centers = _np.rec.array(
             (
                 frame,
                 std_frame,
@@ -680,9 +680,9 @@ def find_cluster_centers(
             dtype=CLUSTER_CENTERS_DTYPE_3D,
         )
     else:
-        area = _np.ndarray([_[16] for _ in centers_])
-        convexhull = _np.ndarray([_[17] for _ in centers_])
-        centers = _np.rec.ndarray(
+        area = _np.array([_[16] for _ in centers_])
+        convexhull = _np.array([_[17] for _ in centers_])
+        centers = _np.rec.array(
             (
                 frame,
                 std_frame,
@@ -708,7 +708,7 @@ def find_cluster_centers(
         )
 
     if hasattr(locs, "group_input"):
-        group_input = _np.ndarray([_[-1] for _ in centers_])
+        group_input = _np.array([_[-1] for _ in centers_])
         centers = _lib.append_to_rec(centers, group_input, "group_input")
 
     return centers

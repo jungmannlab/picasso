@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 19-AUG-2025 MTS
+Last change: 20-AUG-2025 MTS
 
 0.8.3
 -----
@@ -9,6 +9,7 @@ Last change: 19-AUG-2025 MTS
 - Design: set default biotin excess to 25 (previously set to 1)
 - Render by property allows different colormaps
 - Removed ``lmfit`` dependency
+- Fix cluster centers bug from v0.8.2
 
 0.8.2
 -----
