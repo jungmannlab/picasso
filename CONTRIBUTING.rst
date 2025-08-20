@@ -98,4 +98,4 @@ Before you submit a pull request, check that it meets these guidelines:
 
 1. The pull request should include tests.
 2. If the pull request adds functionality, the docs should be updated. 
-3. The pull request should work for Python 3.5.
+3. The pull request should work for Python 3.10.

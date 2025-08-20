@@ -182,6 +182,12 @@ base_sequences = [
 
 paint_sequences = [
     ["Shortname", "Handlesequence"],
+    ["5xR1", "TTTCCTCCTCCTCCTCCTCCT"],
+    ["5xR2", "AAACCACCACCACCACCACCA"],
+    ["7xR3", "TCCTCTCTCTCTCTCTCTCTC"],
+    ["7xR4", "CAACACACACACACACACACA"],
+    ["5xR5", "CCCTTCTTCTTCTTCTTCTTC"],
+    ["5xR6", "AAAACAACAACAACAACAACAA"],
     ["P1", "TTATACATCTA"],
     ["P2", "TTATCTACATA"],
     ["P3", "TTTCTTCATTA"],
@@ -192,10 +198,4 @@ paint_sequences = [
     ["P8", "TTATGTTAATG"],
     ["P9", "TTAATTAGGAT"],
     ["P10", "TTATAATGGAT"],
-    ["5xR1", "TTTCCTCCTCCTCCTCCTCCT"],
-    ["5xR2", "AAACCACCACCACCACCACCA"],
-    ["7xR3", "TCCTCTCTCTCTCTCTCTCTC"],
-    ["7xR4", "CAACACACACACACACACACA"],
-    ["5xR5", "CCCTTCTTCTTCTTCTTCTTC"],
-    ["5xR6", "AAAACAACAACAACAACAACAA"],
 ]

@@ -15,6 +15,7 @@ import numpy as _np
 import numba as _numba
 
 from scipy import interpolate as _interpolate
+from scipy.optimize import curve_fit as _curve_fit
 from scipy.special import iv as _iv
 from scipy.spatial import distance
 
@@ -22,7 +23,6 @@ from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 import multiprocessing as _multiprocessing
 import matplotlib.pyplot as _plt
 import itertools as _itertools
-import lmfit as _lmfit
 from collections import OrderedDict as _OrderedDict
 from . import lib as _lib
 from . import render as _render
@@ -697,7 +697,7 @@ def nena(
     locs: _np.recarray, 
     info: None, 
     callback: Callable[[int], None] | None = None,
-) -> tuple[_lmfit.Model, float]:
+) -> tuple[dict, float]:
     """Calculates NeNA - experimental estimate of localization 
     precision. Please refer to the original paper for details:
     Endesfelder, et al. Histochemistry and Cell Biology, 2014.
@@ -714,31 +714,42 @@ def nena(
         
     Returns
     -------
-    result : _lmfit.Model
-        Fitted model.
+    result : dict
+        Data on the results, including the distances probed, best fit
+        and fitted parameters.
     s : float
         Estimated localization precision.
     """
 
-    bin_centers, dnfl_ = next_frame_neighbor_distance_histogram(locs, callback)
+    bin_centers, dnfl = next_frame_neighbor_distance_histogram(locs, callback)
 
     def func(d, delta_a, s, ac, dc, sc):
         a = ac + delta_a # make sure a >= ac
         p_single = a * (d / (2 * s**2)) * _np.exp(-d**2 / (4* s**2))
-        p_short = ac / (sc * _np.sqrt(2 * _np.pi)) * _np.exp(-0.5 * ((d - dc) / sc)**2)
+        p_short = (
+            ac / (sc * _np.sqrt(2 * _np.pi)) *
+            _np.exp(-0.5 * ((d - dc) / sc)**2)
+        )
         return p_single + p_short
-
-    pdf_model = _lmfit.Model(func)
-    params = _lmfit.Parameters()
-    area = _np.trapz(dnfl_, bin_centers)
+    
+    area = _np.trapz(dnfl, bin_centers)
     median_lp = _np.mean([_np.median(locs.lpx), _np.median(locs.lpy)])
-    params.add("delta_a", value=0.8*area, min=0)
-    params.add("s", value=median_lp, min=0)
-    params.add("ac", value=0.1*area, min=0)
-    params.add("dc", value=2 * median_lp, min=0)
-    params.add("sc", value=median_lp, min=0)
-    result = pdf_model.fit(dnfl_, params, d=bin_centers)
-    s = result.best_values["s"]
+    p0 = [0.8*area, median_lp, 0.1*area, 2*median_lp, median_lp]
+    bounds = ([0, 0, 0, 0, 0], [_np.inf, _np.inf, _np.inf, _np.inf, _np.inf])
+    popt, _ = _curve_fit(func, bin_centers, dnfl, p0=p0, bounds=bounds)
+    s = popt[1] # NeNA
+    result = {
+        "d": bin_centers, # distances probed
+        "data": dnfl,
+        "best_fit": func(bin_centers, *popt),
+        "best_values": {
+            "delta_a": popt[0],
+            "s": popt[1],
+            "ac": popt[2],
+            "dc": popt[3],
+            "sc": popt[4],
+        },
+    }
     return result, s
 
 
