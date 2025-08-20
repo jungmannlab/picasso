@@ -16,7 +16,6 @@ from typing import Any as _Any
 import time as _time
 import numba as _numba
 import numpy as _np
-from lmfit import Model as _Model
 from numpy.lib.recfunctions import append_fields as _append_fields
 from numpy.lib.recfunctions import drop_fields as _drop_fields
 from numpy.lib.recfunctions import stack_arrays as _stack_arrays
@@ -140,9 +139,6 @@ def cumulative_exponential(
     """Used for binding kinetics estimation."""
 
     return a * (1 - _np.exp(-(x / t))) + c
-
-
-CumulativeExponentialModel = _Model(cumulative_exponential)
 
 
 def calculate_optimal_bins(

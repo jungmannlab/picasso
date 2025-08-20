@@ -20,7 +20,7 @@ def saveInfo(filename: str, info: dict) -> None:
 
 def convertPlateIndex(plate: list, platename: str) -> list:
     """Convert plate index from canvas index format to a structured 
-    format for ordering the sequeences.
+    format for ordering the sequences.
     
     Parameters
     ----------
