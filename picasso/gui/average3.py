@@ -1,6 +1,9 @@
 """
     gui/average3
-    ~~~~~~~~~~~~~~~~~~~~
+    ~~~~~~~~~~~~
+
+    This module is depracated as new tools have been published by other
+    groups. The module is planned to be removed in v1.0.0.
 
     Graphical user interface for three-dimensional averaging of particles
 

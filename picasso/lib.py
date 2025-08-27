@@ -9,8 +9,11 @@
 """
 
 from __future__ import annotations
+
 from collections.abc import Callable
 from asyncio import Future as _Future
+import colorsys
+import os
 from typing import Any as _Any
 
 import time as _time
@@ -19,11 +22,13 @@ import numpy as _np
 from numpy.lib.recfunctions import append_fields as _append_fields
 from numpy.lib.recfunctions import drop_fields as _drop_fields
 from numpy.lib.recfunctions import stack_arrays as _stack_arrays
+import matplotlib.pyplot as _plt
+from matplotlib.backends.backend_qt5agg import FigureCanvas, NavigationToolbar2QT
 import collections as _collections
 import glob as _glob
 import os.path as _ospath
 from picasso import io as _io
-from PyQt5 import QtCore, QtWidgets
+from PyQt5 import QtCore, QtWidgets, QtGui
 
 # A global variable where we store all open progress and status dialogs.
 # In case of an exception, we close them all,
@@ -106,6 +111,70 @@ class StatusDialog(QtWidgets.QDialog):
         _dialogs.remove(self)
 
 
+class ScrollableGroupBox(QtWidgets.QGroupBox):
+    """QGroupBox with QScrollArea as the top widget that enables
+    scrolling."""
+
+    def __init__(self, title, parent=None, layout="grid"):
+        super().__init__(title, parent=parent)
+        
+        # Create a layout for the content of the group box
+        if layout == "grid":
+            self.content_layout = QtWidgets.QGridLayout(self)
+        elif layout == "form":
+            self.content_layout = QtWidgets.QFormLayout(self)
+        self.content_layout.setAlignment(QtCore.Qt.AlignTop)
+        self.content_layout.setSpacing(10)
+        self.content_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Create a scroll area and set its content to the content layout
+        self.scroll_area = QtWidgets.QScrollArea(self)
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setWidget(QtWidgets.QWidget(self))
+        self.scroll_area.widget().setLayout(self.content_layout)
+        
+        # Set the layout of the group box to the scroll area
+        self.setLayout(QtWidgets.QGridLayout(self))
+        self.layout().addWidget(self.scroll_area, 0, 0, 1, 2)
+    
+    def add_widget(self, widget, row, column, height=1, width=1):
+        """Adds widget to the grid layout inside the scroll area."""
+
+        self.content_layout.addWidget(widget, row, column, height, width)
+
+    def remove_all_widgets(self, keep_labels=False):
+        """Removes all widgets. If keep_labels is True, the QLabels
+        are kept."""  
+
+        for i in reversed(range(self.content_layout.count())):
+            widget = self.content_layout.itemAt(i).widget()
+            if keep_labels and isinstance(widget, QtWidgets.QLabel):
+                continue
+            widget.setParent(None)
+            del widget
+
+
+class GenericPlotWindow(QtWidgets.QTabWidget):
+    """Interface for displaying matplotlib plots in a separate 
+    window."""
+
+    def __init__(self, window_title, app_name):
+        super().__init__()
+        self.setWindowTitle(window_title)
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", f"{app_name}.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(1000, 500)
+        self.figure = _plt.Figure()
+        self.canvas = FigureCanvas(self.figure)
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        self.toolbar = NavigationToolbar2QT(self.canvas, self)
+        vbox.addWidget(self.toolbar)
+
+
 class AutoDict(_collections.defaultdict):
     """A defaultdict whose auto-generated values are defaultdicts 
     itself. This allows for auto-generating nested values, e.g.
@@ -128,6 +197,58 @@ def cancel_dialogs():
         else:
             dialog.close()
     QtCore.QCoreApplication.instance().processEvents()  # just in case...
+
+
+def get_colors(n_channels):
+    """Create a list with rgb channels for each channel. 
+    
+    Colors go from red to green, blue, pink and red again.
+
+    Parameters
+    ----------
+    n_channels : int
+        Number of locs channels
+
+    Returns
+    -------
+    list
+        Contains tuples with rgb channels
+    """
+    hues = _np.arange(0, 1, 1 / n_channels)
+    colors = [colorsys.hsv_to_rgb(_, 1, 1) for _ in hues]
+    return colors
+
+
+def is_hexadecimal(text):
+    """Check if text represents a hexadecimal code for rgb, for
+    example ``#ff02d4``.
+    
+    Parameters
+    ----------
+    text : str
+        String to be checked.
+
+    Returns
+    -------
+    bool
+        True if text represents rgb, False otherwise.
+    """
+
+    allowed_characters = [
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        'a', 'b', 'c', 'd', 'e', 'f',
+        'A', 'B', 'C', 'D', 'E', 'F',
+    ]
+    sum_char = 0
+    if type(text) == str:
+        if text[0] == '#':
+            if len(text) == 7:
+                for char in text[1:]:
+                    if char in allowed_characters:
+                        sum_char += 1
+                if sum_char == 6:
+                    return True
+    return False
 
 
 def cumulative_exponential(

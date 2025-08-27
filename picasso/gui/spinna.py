@@ -1,21 +1,23 @@
-#!/usr/bin/env python
 """
-    gui/spinna (single protein investigation via nearest neighbor
-    analysis)
-    ~~~~~~~~~~~~~~~~~~~~
+    picasso.gui.spinna
+    ~~~~~~~~~~~~~~~~~~
 
     Graphical user interface for simulating single proteins in 
-    DNA-PAINT.
+    DNA-PAINT using SPINNA. DOI: 10.1038/s41467-025-59500-z
 
-    :authors: Rafal Kowalewski, Luciano A Masullo, 2022-2023
-    :copyright: Copyright (c) 2022-2023 Jungmann Lab, MPI of Biochemistry
+    :authors: Rafal Kowalewski, Luciano A Masullo, 2022-2025
+    :copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
 """
+
+from __future__ import annotations
 
 import os
 import sys
 import time
 import traceback
 import re
+import importlib
+import pkgutil
 import io as python_io
 from functools import partial
 from multiprocessing import cpu_count
@@ -23,13 +25,13 @@ from datetime import datetime
 from copy import deepcopy
 from decimal import Decimal
 from math import isclose
+from typing import Callable, Literal
 
 import yaml
 import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
-import importlib, pkgutil
 from scipy.spatial.transform import Rotation
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtSvg import QSvgRenderer
@@ -56,27 +58,20 @@ NND_PLOT_SIZE = 470
 FIT_RESULT_LIM = 100
 
 
-def ignore_escape_key(event):
-    """Ignores the escape key. This function is applied to each of the
+def ignore_escape_key(event: QtCore.QEvent) -> None:
+    """Ignore the escape key. This function is applied to each of the
     tabs in the main window since we do not want to hide the currently
-    viewed tab.
-    
-    Parameters
-    ----------
-    event : QtCore.QEvent
-        Key press event.
-    """
-
+    viewed tab."""
     if event.key() == QtCore.Qt.Key_Escape:
         event.ignore()
 
 
-def split_name(name):
+def split_name(name: str) -> tuple[str, int]:
     """Extract str with name (without integer at the end) and the 
     integer from name. name is assumed to consist of a few lower 
     characters followed by an integer.
     
-    Paramters
+    Parameters
     ---------
     name : str
         Name to be processed.
@@ -87,17 +82,15 @@ def split_name(name):
         Two elements; first is the base of the name (without the 
         number), the other is the number.
     """
-
     split = re.match(r"([a-z]+)(\d+)", name)
     base = split.group(1)
     num = int(split.group(2))
     return base, num
 
 
-def check_structures_loaded(f):
+def check_structures_loaded(f: Callable) -> Callable:
     """Decorator that checks if structures are loaded. Displays a
     warning if not."""
-
     def wrapper(*args, **kwargs):
         if not args[0].structures:
             message = "Please load structures first."
@@ -108,10 +101,9 @@ def check_structures_loaded(f):
     return wrapper
 
 
-def check_exp_data_loaded(f):
+def check_exp_data_loaded(f: Callable) -> Callable:
     """Decorator that checks if experimental data is loaded. Displays
     a warning if not."""
-
     def wrapper(*args, **kwargs):
         message = "Please load experimental data first."
         if not args[0].targets:
@@ -125,10 +117,9 @@ def check_exp_data_loaded(f):
     return wrapper
 
 
-def check_search_space_loaded(f):
+def check_search_space_loaded(f: Callable) -> Callable:
     """Decorator that checks if the stoichiometry search space is 
     loaded. Displays a warning if not."""
-
     def wrapper(*args, **kwargs):
         if not args[0].N_structures_fit or not args[0].granularity:
             message = "Please generate/load search space."
@@ -167,52 +158,9 @@ class ignoreArrowsDoubleSpinBox(QtWidgets.QDoubleSpinBox):
             super().keyPressEvent(event)
 
 
-class ScrollableGroupBox(QtWidgets.QGroupBox):
-    """QGroupBox with QScrollArea as the top widget that enables
-    scrolling."""
-
-    def __init__(self, title, parent=None, layout="grid"):
-        super().__init__(title, parent=parent)
-        
-        # Create a layout for the content of the group box
-        if layout == "grid":
-            self.content_layout = QtWidgets.QGridLayout(self)
-        elif layout == "form":
-            self.content_layout = QtWidgets.QFormLayout(self)
-        self.content_layout.setAlignment(QtCore.Qt.AlignTop)
-        self.content_layout.setSpacing(10)
-        self.content_layout.setContentsMargins(10, 10, 10, 10)
-        
-        # Create a scroll area and set its content to the content layout
-        self.scroll_area = QtWidgets.QScrollArea(self)
-        self.scroll_area.setWidgetResizable(True)
-        self.scroll_area.setWidget(QtWidgets.QWidget(self))
-        self.scroll_area.widget().setLayout(self.content_layout)
-        
-        # Set the layout of the group box to the scroll area
-        self.setLayout(QtWidgets.QGridLayout(self))
-        self.layout().addWidget(self.scroll_area, 0, 0, 1, 2)
-    
-    def add_widget(self, widget, row, column, height=1, width=1):
-        """Adds widget to the grid layout inside the scroll area."""
-
-        self.content_layout.addWidget(widget, row, column, height, width)
-
-    def remove_all_widgets(self, keep_labels=False):
-        """Removes all widgets. If keep_labels is True, the QLabels
-        are kept."""  
-
-        for i in reversed(range(self.content_layout.count())):
-            widget = self.content_layout.itemAt(i).widget()
-            if keep_labels and isinstance(widget, QtWidgets.QLabel):
-                continue
-            widget.setParent(None)
-            del widget
-
-
 class MaskGeneratorLegend(QtWidgets.QLabel):
-    """Legend for the mask generator preview, locatable in the 
-    navigation box."""
+    """Legend for the mask generator preview, found in the navigation 
+    box."""
 
     def __init__(self, mask_tab):
         super().__init__(" ")
@@ -221,9 +169,8 @@ class MaskGeneratorLegend(QtWidgets.QLabel):
         # self.setFixedHeight(35)
         self.fig = None
 
-    def on_preview_updated(self, image):
-        """Updates the legend according to the current field of 
-        view.
+    def on_preview_updated(self, image: np.ndarray) -> None:
+        """Update the legend according to the current field of view.
         
         Parameters
         ----------
@@ -254,8 +201,8 @@ class MaskGeneratorLegend(QtWidgets.QLabel):
         painter.end()
         self.setPixmap(QtGui.QPixmap.fromImage(qimage))
 
-    def plot_legend(self, max_value):
-        """Plots the legend with the given max value."""
+    def plot_legend(self, max_value: float) -> None:
+        """Plot the legend with the given max value."""
 
         if self.fig:
             plt.close(self.fig)
@@ -289,40 +236,9 @@ class MaskPreview(QtWidgets.QLabel):
         Currently shown image of the mask.
     viewport : tuple
         FOV of the mask.
-    
-    Methods
-    -------
-    down(), left(), right(), up()
-        Moves viewport one unit down/left/right/up.
-    draw_scalebar(image)
-        Draws scalebar onto image.
-    get_viewport_shift(value)
-        Gives viewport shift that is at least 3 pixels.
-    get_qimage(image)
-        Applies magma cmap to the image and converts it to QImage.
-    on_mask_generated()
-        Renders the whole FOV with the new mask.
-    move_viewport(dy, dx)
-        Moves viewport by proportions given by dy and dx.
-    render_image()
-        Renders image in the preview.
-    save_current_view()
-        Saves self.image (QImage, the current view) as png or tif.
-    to_2D(image)
-        Converts mask to 2D that can be displayed (viewed from +z).
-    to_8bit(image)
-        Converts image (np.ndarray) to 8bit.
-    verify_boundaries(x_min, x_max, y_min, y_max)
-        Checks if the boundaries lie within the mask boundaries.
-    viewport_center()
-        Returns the center of the viewport.
-    viewport_size()
-        Returns the size of the viewport.
-    zoom_in(), zoom_out(), zoom(factor)
-        Zooms in/out or by factor.
     """
 
-    def __init__(self, mask_tab):
+    def __init__(self, mask_tab: MaskGeneratorTab) -> None:
         super().__init__(mask_tab)
         self.mask_tab = mask_tab
         self.qimage = None # currently shown image of the mask (QImage)
@@ -331,9 +247,8 @@ class MaskPreview(QtWidgets.QLabel):
         self.setFixedWidth(MASK_PREVIEW_SIZE)
         self.setFixedHeight(MASK_PREVIEW_SIZE)
 
-    def render_image(self):
-        """Renders image in the preview."""
-
+    def render_image(self) -> None:
+        """Render image in the preview."""
         self.mask_tab.legend.on_preview_updated(self.image)
         img = self.image
         img = self.to_2D(img)
@@ -342,9 +257,8 @@ class MaskPreview(QtWidgets.QLabel):
         self.qimage = self.draw_scalebar(self.qimage)
         self.setPixmap(QtGui.QPixmap.fromImage(self.qimage))
 
-    def on_mask_generated(self, full_fov=True):
-        """Renders the whole FOV with the new mask. """
-
+    def on_mask_generated(self, full_fov: bool = True) -> None:
+        """Render the whole FOV with the new mask."""
         if self.mask_tab.mask is None:
             return
         
@@ -355,11 +269,9 @@ class MaskPreview(QtWidgets.QLabel):
             (y_min, x_min), (y_max, x_max) = self.viewport
             self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
         self.render_image()
-        
-    def to_2D(self, image):
-        """Converts mask to 2D that can be displayed (viewed from
-        +z."""
 
+    def to_2D(self, image: np.ndarray) -> np.ndarray:
+        """Convert mask to 2D that can be displayed (viewed from +z)."""
         if image.ndim == 3:
             image = np.sum(image, axis=2)
         elif image.ndim != 2:
@@ -367,14 +279,12 @@ class MaskPreview(QtWidgets.QLabel):
         image /= image.max()
         return image
 
-    def to_8bit(self, image):
-        """Converts image (np.ndarray) to 8bit."""
-
+    def to_8bit(self, image: np.ndarray) -> np.ndarray:
+        """Convert image (np.ndarray) to 8bit."""
         return np.round(255 * image).astype("uint8")
-    
-    def get_qimage(self, image):
-        """Applies magma cmap to the image and converts it to QImage."""
 
+    def get_qimage(self, image: np.ndarray) -> QtGui.QImage:
+        """Apply magma cmap to the image and converts it to QImage."""
         Y, X = image.shape
         bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
         cmap = np.uint8(
@@ -394,9 +304,8 @@ class MaskPreview(QtWidgets.QLabel):
         )
         return qimage
 
-    def draw_scalebar(self, image):
-        """Draws scalebar onto image."""
-
+    def draw_scalebar(self, image: np.ndarray) -> np.ndarray | None:
+        """Draw scalebar onto image."""
         if image is None or not self.mask_tab.scalebar_check.isChecked():
             return image
         
@@ -412,11 +321,10 @@ class MaskPreview(QtWidgets.QLabel):
         y = self.height() - 35
         painter.drawRect(x, y, length_display, 10)   
         painter.end()
-        return image    
-    
-    def save_current_view(self):
-        """Saves self.image (QImage, the current view) as png or tif."""
+        return image
 
+    def save_current_view(self) -> None:
+        """Save self.image (QImage, the current view) as png or tif."""
         out_path = self.mask_tab.locs_path.replace(".hdf5", "")
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save current view", filter="*.png;;*.tif"
@@ -424,26 +332,31 @@ class MaskPreview(QtWidgets.QLabel):
         if path:
             self.qimage.save(path)
 
-    def viewport_size(self):
+    def viewport_size(self) -> tuple[int, int] | None:
+        """Get the size of the viewport."""
         if self.viewport is not None:
             width = self.viewport[1][1] - self.viewport[0][1]
             height = self.viewport[1][0] - self.viewport[0][0]
             return height, width
 
-    def viewport_center(self):
+    def viewport_center(self) -> tuple[float, float] | None:
+        """Get the center of the viewport."""
         if self.viewport is not None:
             (y_min, x_min), (y_max, x_max) = self.viewport
             yc = (y_max + y_min) / 2
             xc = (x_max + x_min) / 2
             return (yc, xc)
 
-    def zoom_in(self):
+    def zoom_in(self) -> None:
+        """Zoom in the viewport."""
         self.zoom(1 / MASK_PREVIEW_ZOOM)
 
-    def zoom_out(self):
+    def zoom_out(self) -> None:
+        """Zoom out the viewport."""
         self.zoom(MASK_PREVIEW_ZOOM)
-    
-    def zoom(self, factor):
+
+    def zoom(self, factor) -> None:
+        """Zoom the viewport by the given factor."""
         vh, vw = self.viewport_size() # viewport height and width
         yc, xc = self.viewport_center()
         # new viewport height and width
@@ -460,29 +373,24 @@ class MaskPreview(QtWidgets.QLabel):
         self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
         self.render_image()
 
-    def up(self):
-        """Moves viewport one unit up."""
-
+    def up(self) -> None:
+        """Move viewport one unit up."""
         self.move_viewport(-MASK_PREVIEW_PADDING, 0)
-    
-    def down(self):
-        """Moves viewport one unit down."""
 
+    def down(self) -> None:
+        """Move viewport one unit down."""
         self.move_viewport(MASK_PREVIEW_PADDING, 0)
-    
-    def left(self):
-        """Moves viewport one unit left."""
 
+    def left(self) -> None:
+        """Move viewport one unit left."""
         self.move_viewport(0, -MASK_PREVIEW_PADDING)
 
-    def right(self):
-        """Moves viewport one unit right."""
-
+    def right(self) -> None:
+        """Move viewport one unit right."""
         self.move_viewport(0, MASK_PREVIEW_PADDING)
 
-    def move_viewport(self, dy, dx):
-        """Moves viewport by proportions given by dy and dx."""
-
+    def move_viewport(self, dy: float, dx: float) -> None:
+        """Move viewport by proportions given by dy and dx."""
         vh, vw = self.viewport_size()
         x_move = self.get_viewport_shift(int(dx * vw))
         y_move = self.get_viewport_shift(int(dy * vh))
@@ -497,9 +405,8 @@ class MaskPreview(QtWidgets.QLabel):
         self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
         self.render_image()
 
-    def get_viewport_shift(self, value):
-        """Gives viewport shift that is at least 3 pixels. """
-
+    def get_viewport_shift(self, value: int) -> int:
+        """Return viewport shift that is at least 3 pixels."""
         if value: # if non-zero
             if value < 0:
                 value = min(value, -3)
@@ -507,9 +414,15 @@ class MaskPreview(QtWidgets.QLabel):
                 value = max(value, 3)
         return value
 
-    def verify_boundaries(self, x_min, x_max, y_min, y_max):
-        """Checks if the boundaries lie within the mask boundaries."""
-
+    def verify_boundaries(
+        self, 
+        x_min: int, 
+        x_max: int, 
+        y_min: int,
+        y_max: int,
+    ) -> tuple[int, int, int, int]:
+        """Check if the boundaries lie within the mask boundaries. 
+        Return the verified boundaries."""
         vh, vw = self.viewport_size()
         vh = y_max - y_min
         vw = x_max - x_min
@@ -531,7 +444,7 @@ class MaskPreview(QtWidgets.QLabel):
 
 
 class MaskGeneratorTab(QtWidgets.QDialog):
-    """Tab for generating masks for heterogenous simulations.
+    """Tab for generating masks for heterogenous density simulations.
     
     ...
     
@@ -580,31 +493,9 @@ class MaskGeneratorTab(QtWidgets.QDialog):
     thresholding_stack : QtWidgets.QStackedWidget
         Stack of widgets that are shown/hidden depending on the mask
         type.
-    
-    Methods
-    -------
-    apply_threshold()
-        Applies the threshold to the density map.
-    generate_mask()
-        Generates the mask with currently loaded settings.
-    get_mask_area()
-        Finds the string with mask area/volume.
-    get_mask_dimensions()
-        Returns the dimensions (pixels/voxels) of the mask.
-    get_mask_size()
-        Finds the string with mask size in MB/GB.
-    load_locs()
-        Loads localizations / molecules for mask generation.
-    on_mask_type_changed()
-        Shows/hides the thresholding options for the density map mask 
-        type.
-    save_mask()
-        Saves the mask.
-    update_mask_info()
-        Updates the mask info.
     """
 
-    def __init__(self, window):
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         # self.window = window
         layout = QtWidgets.QGridLayout(self)
@@ -791,9 +682,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         mask_info_layout.addWidget(self.mask_info_display1)
         mask_info_layout.addWidget(self.mask_info_display2)
 
-    def load_locs(self):
-        """Loads localizations / molecules for mask generation."""
-
+    def load_locs(self) -> None:
+        """Load localizations / molecules for mask generation."""
         # get localizations file
         self.locs_path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load molecules for mask generation", filter="*.hdf5"
@@ -810,10 +700,9 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             self.load_locs_button.setText(
                 "Molecules loaded, ready for mask generation"
             )
-        
-    def generate_mask(self):
-        """Generates mask with the currently loaded settings."""
 
+    def generate_mask(self) -> None:
+        """Generate a mask with the currently loaded settings."""
         binsize = self.mask_binsize.value()
         sigma = self.mask_blur.value()
         ndim = int(self.mask_ndim.currentText()[0])
@@ -839,12 +728,11 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             for button in self.navigation_buttons:
                 button.setEnabled(True)
 
-    def apply_threshold(self, state):
-        """Applies the threshold to the density map."""
-
+    def apply_threshold(self, state: int) -> None:
+        """Apply the threshold to the density map."""
         if self.mask is None:
             return
-        
+
         if state == 0: # unchecked
             self.mask = deepcopy(self.mask_generator.mask)
         elif state == 2: # checked
@@ -853,9 +741,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.preview.on_mask_generated(full_fov=False)
         self.update_mask_info()
         
-    def save_mask(self):
-        """Saves generated mask."""
-
+    def save_mask(self) -> None:
+        """Save the generated mask."""
         if self.mask is not None:
             path, _ = QtWidgets.QFileDialog.getSaveFileName(
                 self, 
@@ -870,9 +757,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                     self.mask_generator.thresh = self.thresholding_value.value()
                 self.mask_generator.save_mask(path)
 
-    def update_mask_info(self):
-        """Updates mask info (area, dimensions, size)."""
-
+    def update_mask_info(self) -> None:
+        """Update the mask info (area, dimensions, size)."""
         if self.mask is None:
             return
 
@@ -885,9 +771,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         )
         self.mask_info_display2.setText(f"{area}\n{dimensions}\n{size}")
 
-    def get_mask_area(self):
-        """Finds the string with mask area/volume."""
-
+    def get_mask_area(self) -> tuple[str, float]:
+        """Find the string with mask area/volume."""
         if self.mask is None:
             area_str = "Area (\u03bcm\u00b2):"
             area = "-"
@@ -904,9 +789,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                 area = 1e-9 * self.mask_generator.binsize ** 3 * count 
         return area_str, np.round(area, 2)
 
-    def get_mask_dimensions(self):
-        """Returns the dimensions (pixels/voxels) of the mask."""
-
+    def get_mask_dimensions(self) -> str:
+        """Return the dimensions (pixels/voxels) of the mask."""
         if self.mask is None:
             dimensions = "-"
         else:
@@ -917,9 +801,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                 dimensions = f"{dims[0]}x{dims[1]}x{dims[2]}"
         return dimensions
 
-    def get_mask_size(self):
-        """Finds the string with mask size in MB/GB."""
-
+    def get_mask_size(self) -> str:
+        """Find the string with mask size in MB/GB."""
         if self.mask is None:
             size = "-"
         size_mb = self.mask.nbytes / (1024**2)
@@ -928,11 +811,10 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         else:
             size = f"{np.round(size_mb, 2)} MB"
         return size
-    
-    def on_mask_type_changed(self):
-        """Shows/hides the thresholding options for the density map mask 
-        type."""
 
+    def on_mask_type_changed(self) -> None:
+        """Show/hide the thresholding options for the density map mask 
+        type."""
         if self.mask_type.currentIndex() == 0: # density map
             self.thresholding_stack.setCurrentIndex(0)
         elif self.mask_type.currentIndex() == 1:
@@ -968,48 +850,9 @@ class StructurePreview(QtWidgets.QLabel):
     rotation : list
         List of rotation angles. Resets whenever the structure is
         no longer being rotated.
-    
-    Methods
-    -------
-    add_molecular_target_mouse(x, y)
-        Adds a molecular target at the mouse position.
-    draw_legend(qimage)
-        Draws legend onto qimage.
-    draw_molecular_targets(qimage)
-        Draws molecular targets onto qimage.
-    draw_title(qimage)
-        Draws structure title onto qimage.
-    draw_scalebar(qimage)
-        Draws scalebar onto qimage.
-    extract_coordinates()
-        Extracts x, y and z coordinates of the loaded structure (no
-        rotation). Also finds the scaling factor (from nm to pixels).
-    generate_background()
-        Generates black background for display.
-    get_colors()
-        Returns colors for each molecular target species.
-    mouseMoveEvent(event)
-        Rotates the structure at mouse movement.
-    mousePressEvent(event)
-        Starts rotation at mouse left button press.
-    mouseReleaseEvent(event)
-        Stops rotation at mouse left button release. Adds a molecular
-        target with the right button release.
-    render()
-        Renders image into self. By defualt, a black square is
-        rendered if no structure is loaded.
-    rotate(coords)
-        Rotates coordinates of each molecular target species.
-    scale(coords)
-        Scales molecular targets' coordinates from nm to display 
-        pixels.
-    shift(coords)
-        Shifts x and y coordinates towards self.ORIGIN.
-    update_scene()
-        Renders currently loaded structure.
     """
 
-    def __init__(self, structure_tab):
+    def __init__(self, structure_tab: StructuresTab) -> None:
         super().__init__(structure_tab)
         self.structure_tab = structure_tab
         self.setFixedWidth(STRUCTURE_PREVIEW_SIZE)
@@ -1031,9 +874,8 @@ class StructurePreview(QtWidgets.QLabel):
         self._rotation = []
         self.render()
 
-    def update_scene(self):
-        """Renders currently loaded structure."""
-
+    def update_scene(self) -> None:
+        """Render currently loaded structure."""
         if self.structure is not None and self.structure.targets:
             coords = self.extract_coordinates()
             coords = self.rotate(coords)
@@ -1045,8 +887,8 @@ class StructurePreview(QtWidgets.QLabel):
         
         self.render()
 
-    def extract_coordinates(self):
-        """Extracts x, y and z coordinates of the loaded structure (no
+    def extract_coordinates(self) -> np.ndarray:
+        """Extract x, y and z coordinates of the loaded structure (no
         rotation). Also finds the scaling factor (from nm to pixels).
         
         Returns
@@ -1055,7 +897,6 @@ class StructurePreview(QtWidgets.QLabel):
             Each element contains the x,y,z coordinates of each 
             molecular target species in self.structure.
         """
-
         coords = []
         for target in self.structure.targets:
             x = self.structure.x[target]
@@ -1073,11 +914,10 @@ class StructurePreview(QtWidgets.QLabel):
         if max_dif: # if non zero
             factor /= max_dif
         self.factor = factor
-
         return coords
     
-    def rotate(self, coords):
-        """Rotates coordinates of each molecular target species.
+    def rotate(self, coords: list[np.ndarray]) -> list[np.ndarray]:
+        """Rotate coordinates of each molecular target species.
 
         Parameters
         ----------
@@ -1090,13 +930,12 @@ class StructurePreview(QtWidgets.QLabel):
         coords_rot : lists of np.2darrays
             Rotated coordinates.
         """
-
         rot = Rotation.from_euler('zyx', (self.angz, self.angy, self.angx))
         coords_rot = [rot.apply(_) for _ in coords]
         return coords_rot
-    
-    def scale(self, coords):
-        """Scales molecular targets' coordinates from nm to display
+
+    def scale(self, coords: list[np.ndarray]) -> list[np.ndarray]:
+        """Scale molecular targets' coordinates from nm to display
         pixels.
         
         Parameters
@@ -1110,16 +949,15 @@ class StructurePreview(QtWidgets.QLabel):
         coords_scaled : list of np.2darrays
             Scaled coordinates (in pixels).
         """
-
         coords_scaled = []
         for coord in coords:
             coord[:, 1] = coord[:, 1] * -1
             coords_scaled.append(coord * self.factor)
         return coords_scaled
 
-    def shift(self, coords):
-        """Shifts x and y coordinates towards self.ORIGIN.
-        
+    def shift(self, coords: list[np.ndarray]) -> list[np.ndarray]:
+        """Shift x and y coordinates towards self.ORIGIN.
+
         Parameters
         ----------
         coords : lists of np.2darrays
@@ -1131,14 +969,12 @@ class StructurePreview(QtWidgets.QLabel):
         coords_shifted : lists of lists
             Shifted coordinates converted to integers.
         """
-
         coords_shifted = [_ + self.ORIGIN for _ in coords]
         return [_.astype(int) for _ in coords_shifted]
 
-    def render(self):
-        """Renders image into self. By defualt, a black square is 
+    def render(self) -> None:
+        """Render image into self. By default, a black square is 
         rendered if no structure is loaded."""
-
         image = self.generate_background()
         qimage = QtGui.QImage(
             image.data,
@@ -1153,18 +989,16 @@ class StructurePreview(QtWidgets.QLabel):
         self.qimage = self.draw_rotation(qimage)
         self.setPixmap(QtGui.QPixmap.fromImage(self.qimage))
 
-    def generate_background(self):
-        """Generates black background for display."""
-
+    def generate_background(self) -> np.ndarray:
+        """Generate black background for display."""
         image = np.zeros(
             (STRUCTURE_PREVIEW_SIZE, STRUCTURE_PREVIEW_SIZE, 4), dtype=np.uint8
         )
         image[:, :, 3].fill(255)
         return image
-    
-    def draw_molecular_targets(self, image):
-        """Draws molecular targets (from self.coords) onto image."""
 
+    def draw_molecular_targets(self, image: np.ndarray) -> np.ndarray:
+        """Draw molecular targets (from self.coords) onto image."""
         if self.coords is None:
             return image
 
@@ -1184,10 +1018,9 @@ class StructurePreview(QtWidgets.QLabel):
                 )
         painter.end()
         return image
-    
-    def draw_title(self, image):
-        """Draws title of the loaded structure onto image."""
 
+    def draw_title(self, image: np.ndarray) -> np.ndarray:
+        """Draw title of the loaded structure onto image."""
         if self.structure is None:
             title = "Please load a structure."
         else:
@@ -1202,9 +1035,8 @@ class StructurePreview(QtWidgets.QLabel):
         painter.end()
         return image
 
-    def draw_legend(self, image):
-        """Draws legend onto image."""
-
+    def draw_legend(self, image: np.ndarray) -> np.ndarray:
+        """Draw legend onto image."""
         # make sure that a non-empty structure is loaded
         if (
             self.coords is None 
@@ -1228,9 +1060,8 @@ class StructurePreview(QtWidgets.QLabel):
         painter.end()
         return image
 
-    def draw_scalebar(self, image):
-        """Draws scalebar onto image."""
-
+    def draw_scalebar(self, image: np.ndarray) -> np.ndarray:
+        """Draw scalebar onto image."""
         if (
             self.coords is None
             or not self.structure_tab.show_scalebar_check.isChecked()
@@ -1247,29 +1078,12 @@ class StructurePreview(QtWidgets.QLabel):
         x = STRUCTURE_PREVIEW_SIZE - length - 35
         y = STRUCTURE_PREVIEW_SIZE - height - 20
         painter.drawRect(x, y, length, height)
-        # # draw text with scalebar length
-        # font = painter.font()
-        # font.setPixelSize(18)
-        # painter.setFont(font)
-        # painter.setPen(QtGui.QColor("white"))
-        # t_spacer = 40
-        # t_width = length + 2 * t_spacer
-        # painter.drawText(
-        #     x-t_spacer, 
-        #     y-25, 
-        #     t_width, 
-        #     t_spacer, 
-        #     QtCore.Qt.AlignHCenter, 
-        #     f"{np.round(self.structure_tab.scalebar_length.value(), 1)} nm"
-        # )
         painter.end()      
         return image
-    
-    def draw_rotation(self, image):
-        """
-        Draws a small 3 axes icon that rotates with the molecular, 
-        targets displayed in the bottom left corner."""
 
+    def draw_rotation(self, image: np.ndarray) -> np.ndarray:
+        """Draw a small 3 axes icon that rotates with the molecular, 
+        targets displayed in the bottom left corner."""
         painter = QtGui.QPainter(image)
         length = 30
         x = self.width() - 60
@@ -1323,20 +1137,17 @@ class StructurePreview(QtWidgets.QLabel):
         painter.drawLine(line_z)
         painter.end()
         return image
-    
-    def mousePressEvent(self, event):
-        """Defines the action when mouse is clicked. If left button is
-        clicked, the structure starts to be rotated."""
 
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Define the action when mouse is clicked. If left button is
+        clicked, the structure starts to be rotated."""
         if event.button() == QtCore.Qt.LeftButton:
             self.rotating = True
             self._rotation.append([event.x(), event.y()])
-            # event.accept()
-        
-    def mouseMoveEvent(self, event):
-        """Defines the action when mouse is moved. If self.rotating, 
-        the rotation angles are updated."""
 
+    def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Define the action when mouse is moved. If self.rotating, 
+        the rotation angles are updated."""
         if self.rotating:
             self._rotation.append([event.x(), event.y()])
             rel_pos_x = self._rotation[-1][0] - self._rotation[-2][0]
@@ -1349,13 +1160,11 @@ class StructurePreview(QtWidgets.QLabel):
                 self.angy += 2 * np.pi * rel_pos_x / STRUCTURE_PREVIEW_SIZE
                 self.angx += 2 * np.pi * rel_pos_y / STRUCTURE_PREVIEW_SIZE
             self.update_scene()
-            # event.accept()
 
-    def mouseReleaseEvent(self, event):
-        """Defines the action when mouse is released. If left button is
+    def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Define the action when mouse is released. If left button is
         released, the rotation stops. If right button is released, a
         new molecular target is added."""
-
         if event.button() == QtCore.Qt.LeftButton:
             self.rotating = False
             self._rotation = []
@@ -1363,15 +1172,14 @@ class StructurePreview(QtWidgets.QLabel):
         elif event.button() == QtCore.Qt.RightButton:
             self.add_molecular_target_mouse(event.x(), event.y())
 
-    def add_molecular_target_mouse(self, x, y):
-        """Adds a new molecular target at a right mouse button click.
+    def add_molecular_target_mouse(self, x: float, y: float) -> None:
+        """Add a new molecular target at a right mouse button click.
         
         Parameters
         ----------
         x, y : floats
             Display coordinates where the molecular target is added.
         """
-
         if (
             self.structure is None
             or self.structure_tab.mol_tar_box.content_layout.count() < 15
@@ -1408,12 +1216,11 @@ class StructurePreview(QtWidgets.QLabel):
                 widget.setValue(z)
         self.update_scene()
 
-    def get_colors(self):
-        """Finds colors for each molecular target species."""
-
+    def get_colors(self) -> dict:
+        """Find colors for each molecular target species."""
         if self.structure is None:
-            return
-        
+            return {}
+
         # find unique molecular targets
         all_targets = []
         for structure in self.structure_tab.structures:
@@ -1457,40 +1264,9 @@ class StructuresTab(QtWidgets.QDialog):
         Checkbox for showing/hiding legend.
     show_scalebar_check : QtWidgets.QCheckBox
         Checkbox for showing/hiding scalebar.
-    
-    Methods
-    -------
-    add_molecular_target()
-        Adds a new molecular target to the molecules box of the current
-        structure.
-    add_structure() 
-        Adds a new structure to the structures box and loads attributes.
-    delete_molecular_target(name)
-        Deletes a molecular target with name from the molecular targets
-        box of the current structure.
-    find_structure_by_title(title)
-        Returns the structure with the given title.
-    load_structures()
-        Loads structures from a .yaml file.
-    on_structure_clicked(title)
-        Changes focus onto the structure with title.
-    on_structure_deleted(title)
-        Deletes the structure with title.
-    save_structures()
-        Saves structures to a .yaml file.
-    save_preview()
-        Saves the current view of the preview.
-    update_current_structure()
-        Saves info about the current structure.
-    update_mol_tar_box()
-        Updates the molecular targets box.
-    update_structure_box()
-        Updates the structures box.
-    update_preview()
-        Updates information for rendering in self.preview.
     """
 
-    def __init__(self, window):
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         # self.window = window
         layout = QtWidgets.QGridLayout(self)
@@ -1540,7 +1316,7 @@ class StructuresTab(QtWidgets.QDialog):
 
 
         ### STRUCTURES SUMMARY
-        self.structures_box = ScrollableGroupBox("Structures summary")
+        self.structures_box = lib.ScrollableGroupBox("Structures summary")
         self.structures_box.setFixedHeight(250)
         layout.addWidget(self.structures_box, 0, 1)
 
@@ -1558,7 +1334,7 @@ class StructuresTab(QtWidgets.QDialog):
 
 
         ### MOLECULAR TARGETS IN THE CURRENT STRCTURE
-        self.mol_tar_box = ScrollableGroupBox("Molecular targets")
+        self.mol_tar_box = lib.ScrollableGroupBox("Molecular targets")
         self.mol_tar_box.setFixedHeight(446)
         layout.addWidget(self.mol_tar_box, 1, 1)
 
@@ -1572,9 +1348,8 @@ class StructuresTab(QtWidgets.QDialog):
         add_mol_tar_button.released.connect(self.add_molecular_target)
         self.mol_tar_box.layout().addWidget(add_mol_tar_button, 1, 0, 1, 2)
 
-    def update_preview(self, reset_angles=False):
-        """Updates information for rendering in self.preview."""
-
+    def update_preview(self, reset_angles: bool = False) -> None:
+        """Update information for rendering in self.preview."""
         self.update_current_structure()
         self.preview.structure = (
             self.find_structure_by_title(self.current_structure)
@@ -1585,10 +1360,9 @@ class StructuresTab(QtWidgets.QDialog):
             self.preview.angz = 0
         self.preview.update_scene()
 
-    def add_structure(self):
-        """Adds a new structure as the attribute and the corresponding
+    def add_structure(self) -> None:
+        """Add a new structure as the attribute and the corresponding
         widgets."""
-        
         structure_title, ok = QtWidgets.QInputDialog.getText(
             self, 
             "", 
@@ -1613,10 +1387,9 @@ class StructuresTab(QtWidgets.QDialog):
             self.update_mol_tar_box()
             self.update_preview(reset_angles=True)
 
-    def update_structure_box(self):
-        """Removes all widgets from the structures' box and adds the
+    def update_structure_box(self) -> None:
+        """Remove all widgets from the structures' box and adds the
         currently loaded structures (from self.structures)."""
-
         self.structures_box.remove_all_widgets()
 
         for i in range(len(self.structures)):
@@ -1634,9 +1407,8 @@ class StructuresTab(QtWidgets.QDialog):
             )
             self.structures_box.add_widget(delete_button, row_count, 1)
 
-    def update_current_structure(self):
-        """Saves info about the current structure."""
-
+    def update_current_structure(self) -> None:
+        """Save info about the current structure."""
         if not self.structures:
             return
             
@@ -1667,10 +1439,9 @@ class StructuresTab(QtWidgets.QDialog):
         
         for target, x, y, z in zip(targets, xs, ys, zs):
             structure.define_coordinates(target, [x], [y], [z])
-            
-    def on_structure_clicked(self, title):
-        """Changes focus onto the clicked structure."""
 
+    def on_structure_clicked(self, title: str) -> None:
+        """Change focus onto the clicked structure."""
         # save the changes to the current structure
         self.update_current_structure() 
         # change to the new structure
@@ -1678,9 +1449,8 @@ class StructuresTab(QtWidgets.QDialog):
         self.update_mol_tar_box()
         self.update_preview(reset_angles=True)
 
-    def on_structure_deleted(self, title):
-        """Deletes the given structure."""
-        
+    def on_structure_deleted(self, title: str) -> None:
+        """Delete the given structure."""
         structure = self.find_structure_by_title(title)
         self.structures.remove(structure)
         self.update_structure_box()
@@ -1692,9 +1462,8 @@ class StructuresTab(QtWidgets.QDialog):
         self.update_mol_tar_box()
         self.update_preview(reset_angles=True)
 
-    def save_structures(self):
-        """Saves current structures as a .yaml file."""
-
+    def save_structures(self) -> None:
+        """Save current structures as a .yaml file."""
         self.update_current_structure() # in case it was not saved yet
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save structures", filter="*.yaml"
@@ -1713,9 +1482,8 @@ class StructuresTab(QtWidgets.QDialog):
                 info.append(m_info)
             io.save_info(path, info)
 
-    def load_structures(self):
-        """Loads structures saved in a .yaml file."""
-
+    def load_structures(self) -> None:
+        """Load structures from in a .yaml file."""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load structures", filter="*.yaml"
         )
@@ -1748,18 +1516,16 @@ class StructuresTab(QtWidgets.QDialog):
             self.update_mol_tar_box()
             self.update_preview(reset_angles=True)
 
-    def find_structure_by_title(self, title):
-        """Returns the structure with the given title."""
-
+    def find_structure_by_title(self, title: str) -> spinna.Structure | None:
+        """Return the structure with the given title."""
         if title is None:
             return None
         for structure in self.structures:
             if title == structure.title:
                 return structure
 
-    def add_molecular_target(self):
-        """Adds a new molecular target to the current structure."""
-
+    def add_molecular_target(self) -> None:
+        """Add a new molecular target to the current structure."""
         if self.current_structure is None:
             text = (
                 "No structure has been selected. Please click on one of the"
@@ -1808,10 +1574,9 @@ class StructuresTab(QtWidgets.QDialog):
         self.n_mol_tar += 1
         self.update_preview()
 
-    def delete_molecular_target(self, name):
-        """Deletes the widgets in the molecular targets box 
-        corresponding to the chosen molecular target."""
-
+    def delete_molecular_target(self, name: str) -> None:
+        """Delete the widgets in the molecular targets box corresponding
+        to the chosen molecular target."""
         name = name[3:] # extract the number after 'del'
         widgets = [
             self.mol_tar_box.content_layout.itemAt(i).widget() 
@@ -1835,8 +1600,8 @@ class StructuresTab(QtWidgets.QDialog):
         self.n_mol_tar -= 1
         self.update_preview()
 
-    def update_mol_tar_box(self):
-        """Deletes widgets from the molecular targets box and loads the
+    def update_mol_tar_box(self) -> None:
+        """Delete widgets from the molecular targets box and load the
         widgets corresponding to the currently loaded structure."""
 
         if self.mol_tar_box.content_layout.count() > 5:
@@ -1894,10 +1659,9 @@ class StructuresTab(QtWidgets.QDialog):
                 self.mol_tar_box.add_widget(delete_button, row, 4)
 
                 self.n_mol_tar += 1
-            
-    def save_preview(self):
-        """Saves current preview."""
 
+    def save_preview(self) -> None:
+        """Save current preview."""
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save current view", filter="*.png;;.tif"
         )
@@ -1906,9 +1670,9 @@ class StructuresTab(QtWidgets.QDialog):
 
 
 class GenerateSearchSpaceDialog(QtWidgets.QDialog):
-    """Input dialog to get the input parameters for generating numbers
-    of structures (stoichiometries) for SPINNA fitting.
-    
+    """Input dialog to get the parameters for generating numbers of
+    structures (stoichiometries) for SPINNA fitting.
+
     ...
     
     Attributes
@@ -1922,15 +1686,9 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         structures are tested.
     save_check : QtWidgets.QCheckBox
         Checkbox for saving the results as a .csv file.
-    
-    Methods
-    -------
-    getParams(parent, targets)
-        Creates the dialog and returns the number of simulations, 
-        granularity, check if the results are to be saved.
     """
 
-    def __init__(self, sim_tab):
+    def __init__(self, sim_tab: QtWidgets.QWidget) -> None:
         super().__init__(sim_tab)
         self.setWindowTitle("Enter parameters")
         vbox = QtWidgets.QVBoxLayout(self)
@@ -1967,11 +1725,10 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         self.buttons.rejected.connect(self.reject)
 
     @staticmethod
-    def getParams(parent):
-        """Creates the dialog and returns the numbers of molecular 
-        targets per simulation, number of simulations, resolution 
+    def getParams(parent: QtWidgets.QWidget) -> list[int | bool]:
+        """Create the dialog and returns the numbers of molecular
+        targets per simulation, number of simulations, resolution
         factor, check if the results are to be saved."""
-
         dialog = GenerateSearchSpaceDialog(parent)
         result = dialog.exec_()
         return [
@@ -2015,21 +1772,9 @@ class CompareModelsDialog(QtWidgets.QDialog):
         Simulation tab, parent widget.
     targets : list of str
         Names of the molecular targets in the models.
-    
-    Methods
-    -------
-    getParams(parent, targets)
-        Creates the dialog and returns the models, label uncertainties,
-        check if the fit scores are to be saved.
-    on_add_model()
-        Adds a new model (list of structures) to the dialog.
-    on_label_unc_toggled(state)
-        Enables/disables the label uncertainties spin boxes.
-    on_model_clicked(path)
-        Removes the model with the given path.
     """
 
-    def __init__(self, sim_tab, targets):
+    def __init__(self, sim_tab: SimulationsTab, targets: list[str]) -> None:
         super().__init__(sim_tab)
         self.setWindowTitle("Compare models")
         self.setModal(True)
@@ -2092,7 +1837,7 @@ class CompareModelsDialog(QtWidgets.QDialog):
             )
 
         ### models
-        self.models_box = ScrollableGroupBox("Models (click to remove)")
+        self.models_box = lib.ScrollableGroupBox("Models (click to remove)")
         self.models_box.setMinimumHeight(250)
         layout.addWidget(self.models_box)
         add_model_button = QtWidgets.QPushButton("Add a model")
@@ -2116,7 +1861,10 @@ class CompareModelsDialog(QtWidgets.QDialog):
         self.buttons.rejected.connect(self.reject)
 
     @staticmethod
-    def getParams(parent, targets):
+    def getParams(
+        parent: QtWidgets.QWidget, 
+        targets: list[str],
+    ) -> tuple[list[dict], list[str], dict[str, np.ndarray], bool, bool]:
         dialog = CompareModelsDialog(parent, targets)
         result = dialog.exec_()
         label_unc = {}
@@ -2137,18 +1885,16 @@ class CompareModelsDialog(QtWidgets.QDialog):
             dialog.save_fit_scores.isChecked(),
             result == QtWidgets.QDialog.Accepted,
         )
-    
-    def on_label_unc_toggled(self, state):
-        """Enables/disables the label uncertainties spin boxes."""
 
+    def on_label_unc_toggled(self, state: bool) -> None:
+        """Enable/disable the label uncertainties spin boxes."""
         for target in self.targets:
             self.label_unc_from_spins[target].setEnabled(state)
             self.label_unc_to_spins[target].setEnabled(state)
             self.label_unc_step_spins[target].setEnabled(state)
 
-    def on_add_model(self):
-        """Adds a new model (list of structures) to the dialog."""
-
+    def on_add_model(self) -> None:
+        """Add a new model (list of structures) to the dialog."""
         paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
             self, "Choose model(s)", filter="*.yaml"
         )
@@ -2183,11 +1929,9 @@ class CompareModelsDialog(QtWidgets.QDialog):
             self.model_paths.append(path)
             self.model_buttons.append(model_button)
 
-
-    def on_model_clicked(self, path):
-        """Removes the model from the dialog (model box) and the 
+    def on_model_clicked(self, path: str) -> None:
+        """Remove the model from the dialog (model box) and the
         dialog's attributes."""
-
         index = self.model_paths.index(path)
         self.models_box.content_layout.removeWidget(self.model_buttons[index])
         self.model_buttons[index].setParent(None)
@@ -2219,17 +1963,9 @@ class OptionalSettingsDialog(QtWidgets.QDialog):
         Widget for choosing the rotations mode (2D, 3D, none).
     sim_tab : spinna.SimulationsTab
         The parent tab.
-
-    Methods
-    -------
-    on_auto_nn_checked(state)
-        Adjusts the number of neighbors to consider at fitting.
-    update_neighbors_widgets()
-        Deletes the old widgets and adds new ones for setting the
-        numbers of neighbors to consider at fitting.    
     """
 
-    def __init__(self, sim_tab):
+    def __init__(self, sim_tab: spinna.SimulationsTab) -> None:
         super().__init__(sim_tab)
         self.sim_tab = sim_tab
         self.setWindowTitle("Optional settings")
@@ -2262,9 +1998,8 @@ class OptionalSettingsDialog(QtWidgets.QDialog):
         self.neighbors_layout = QtWidgets.QFormLayout()
         layout.addLayout(self.neighbors_layout)
 
-    def on_auto_nn_checked(self, state):
-        """Adjusts the number of neighbors to consider at fitting."""
-
+    def on_auto_nn_checked(self, state: int) -> None:
+        """Adjust the number of neighbors to consider at fitting."""
         if state == 0: # unchecked
             for spin in self.nn_counts.values():
                 spin.setEnabled(True)
@@ -2276,11 +2011,10 @@ class OptionalSettingsDialog(QtWidgets.QDialog):
 
         for spin in self.nn_counts.values():
             spin.setEnabled(not self.auto_nn_check.isChecked())
- 
-    def update_neighbors_widgets(self):
-        """Deletes the old widgets and adds new ones for setting the
-        numbers of neighbors to consider at fitting."""
 
+    def update_neighbors_widgets(self) -> None:
+        """Delete the old widgets and add new ones for setting the
+        numbers of neighbors to consider at fitting."""
         # delete old widgets
         for i in reversed(range(self.neighbors_layout.count())): 
             self.neighbors_layout.itemAt(i).widget().setParent(None)
@@ -2335,21 +2069,9 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         X-axis label.
     ylabel : QtWidgets.QLineEdit
         Y-axis label.
-    
-    Methods 
-    -------
-    check_color_labels()
-        Checks if colors are valid.
-    extract_params()
-        Extracts the parameters from the dialog.
-    update_neighbors_widgets()
-        Deletes the old widgets and adds new ones for setting the
-        numbers of neighbors to plot.
-    update_plots()
-        Updates the nearest neighbors plots.    
     """
 
-    def __init__(self, sim_tab):
+    def __init__(self, sim_tab: spinna.SimulationsTab) -> None:
         super().__init__(sim_tab)
         self.sim_tab = sim_tab
         self.setWindowTitle("Nearest neighbors plots")
@@ -2447,10 +2169,9 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.neighbors_layout = QtWidgets.QFormLayout()
         main_layout.addLayout(self.neighbors_layout)
 
-    def update_neighbors_widgets(self):
-        """Deletes the old widgets and adds new ones for setting the
+    def update_neighbors_widgets(self) -> None:
+        """Delete the old widgets and add new ones for setting the
         numbers of neighbors to plot."""
-
         # delete old widgets
         for i in reversed(range(self.neighbors_layout.count())): 
             self.neighbors_layout.itemAt(i).widget().setParent(None)
@@ -2479,10 +2200,9 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
                     )
                     self.nn_counts[name] = spin
 
-    def check_color_labels(self):
-        """Checks if colors are valid, see:
+    def check_color_labels(self) -> None:
+        """Check if colors are valid, see:
         https://matplotlib.org/stable/tutorials/colors/colors.html."""
-
         for color in self.colors:
             if color.text().lower() == "none" or color.text() == "":
                 continue
@@ -2497,24 +2217,22 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
                 )
                 QtWidgets.QMessageBox.warning(self, "Warning", message)
 
-    def update_plots(self):
-        """Runs a single simulation (if data loaded) or updates the
-        plots of the experimental NNDs only."""
-
+    def update_plots(self) -> None:
+        """Run a single simulation (if data loaded) or update the plots
+        of the experimental NNDs only."""
         if self.sim_tab.mixer is None: # plot experimental data only
             self.sim_tab.plot_exp_nnds()
         else: # simulation
             self.sim_tab.run_single_sim()
 
-    def extract_params(self):
-        """Extracts the parameters from the dialog. 
+    def extract_params(self) -> dict:
+        """Extract the parameters from the dialog.
 
         Returns
         -------
         params : dict
             Parameters for plotting the nearest neighbors plots.
         """
-
         mindist = self.min_dist.value()
         maxdist = self.max_dist.value()
         if mindist > maxdist:
@@ -2563,11 +2281,10 @@ class SimulationsPlotWindow(QtWidgets.QLabel):
         self.setFixedWidth(NND_PLOT_SIZE)
 
     def display(self, fig):
-        """Displays fig - plt.Figure. Uses a somewhat unsual method to
+        """Display fig - plt.Figure. Uses a somewhat unsual method to
         draw the canvas by saving the .svg format of the figure and 
         then creating the QImage isntance. This way, downsampling of
         the image is avoided after drawing on the canvas."""
-
         # render the figure as .svg
         buffer = python_io.BytesIO()
         fig.savefig(buffer, format='svg')
@@ -2715,103 +2432,9 @@ class SimulationsTab(QtWidgets.QDialog):
         Names of all unique molecular targets in the loaded structures.
     window : QtWidgets.QMainWindow
         Main window.
-
-    Methods
-    -------
-    check_dimensionalities()
-        Checks if masks, loaded experimental data and the requested 
-        dimensionality of the simulation(s) are consistent.
-    check_exp_data_loaded()
-        Checks if experimental data are loaded for all targets.
-    check_masks_loaded()
-        Checks if masks are loaded for all targets.
-    check_input_props()
-        Checks if the input proportions of structures for a single
-        simulation sum up to 100%.
-    display_current_nnd_plot()
-        Displays the NND plot with the index self.current_nnd_idx.
-    display_proportions()
-        Displays the proportions of structures that best fit the
-        experimental data.
-    estimate_fit_time(n):
-        Estimates the time it takes to fit n combinations of numbers
-        of structures.
-    find_n_mol_from_target(target)
-        Finds number of molecular targets of the given species that are
-        to be simulated in fitting.
-    find_roi(mode)
-        Finds width, height, depth to conduct simulation(s) with 
-        homogeneous distribution.
-    find_roi_fit()
-        Finds width, height, depth to conduct simulation(s) with 
-        homogeneous distribution for fitting.
-    find_roi_single_sim()
-        Finds width, height, depth to conduct a single simulation with
-        homogeneous distribution.
-    fit_n_str()
-        Fits the combinations of numbers of structures to the
-        experimental data.
-    generate_search_space()
-        Generates combinations of numbers of structures for fitting.
-    load_densities_widgets()
-        Loads the widgets for inputting observed densities of each
-        target.
-    load_exp_data(name)
-        Loads experimental data for the given molecular target species.
-    load_exp_data_widgets()
-        Loads the widgets for loading experimental data for each
-        target.
-    load_label_unc_widgets()
-        Loads the widgets for inputting label uncertainty for each
-        target.
-    load_le_widgets()
-        Loads the widgets for inputting labelling efficiency for each
-        target.
-    load_mask(name)
-        Loads a mask for the given molecular target species.
-    load_masks_widgets()
-        Loads the widgets for loading masks for each target.
-    load_structures()
-        Loads structures from a .yaml file. 
-    load_search_space()
-        Loads combinations of numbers of structures for fitting.
-    load_single_sim_n_str_widgets()
-        Loads the widgets for inputting number of structures to be
-        simulated in a single simulation.
-    load_target_names()
-        Loads all unique names of molecular targets in self.structures
-        to attribute self.targets.
-    on_depth_button_clicked()
-        Opens a dialog for setting the depth (nm) of a homogenous 
-        distribution simulation.
-    on_dim_changed(index)
-        Updates widgets for 2D/3D simulation.
-    on_left_nnd_clicked()
-        Displays the previous NND plot.
-    on_right_nnd_clicked()
-        Displays the next NND plot.
-    on_roi_button_clicked()
-        Opens a dialog for setting the area/volume of a homogenous
-        distribution simulation for a single simulation.
-    run_single_sim()
-        Runs a single simulation and plots NNDs
-    save_nnd_plots()
-        Saves all NND plots as .png/.svg files.
-    save_nnd_values()
-        Saves all NND values (bin centers and bin heights) as .csv 
-        files.
-    set_mask_den_stack(name)
-        Switches self.mask_den_stack to the mask stack or the 
-        homogenous distribution stack (observed densities).   
-    setup_mixer(mode)
-        Sets up the mixer for the fitting - extracts label 
-        uncertainties, labelling efficiencies, masks or ROI.
-    sim_and_plot_NND()
-        Runs multiple simulations (number is defined by
-        self.n_sim_plot_spin) and plots resulting NNDs.
     """
 
-    def __init__(self, window):
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         layout = QtWidgets.QGridLayout(self)
         left_column = QtWidgets.QGridLayout()
@@ -2878,15 +2501,15 @@ class SimulationsTab(QtWidgets.QDialog):
         self.depth_stack.addWidget(self.depth_button)
         self.depth_stack.setCurrentIndex(0)
 
-        self.load_exp_data_box = ScrollableGroupBox("Experimental data")
+        self.load_exp_data_box = lib.ScrollableGroupBox("Experimental data")
         load_data_layout.addWidget(self.load_exp_data_box, 0, 1)
 
-        self.label_unc_box = ScrollableGroupBox(
+        self.label_unc_box = lib.ScrollableGroupBox(
             "Label uncertainty (nm)", layout="form"
         )
         load_data_layout.addWidget(self.label_unc_box, 1, 0)
 
-        self.le_box = ScrollableGroupBox(
+        self.le_box = lib.ScrollableGroupBox(
             "Labelling efficiency (%)", layout="form"
         )
         load_data_layout.addWidget(self.le_box, 1, 1)
@@ -2910,9 +2533,9 @@ class SimulationsTab(QtWidgets.QDialog):
 
         self.mask_den_stack = QtWidgets.QStackedWidget()
         load_data_layout.addWidget(self.mask_den_stack, 2, 1)
-        self.load_mask_box = ScrollableGroupBox("Masks")
+        self.load_mask_box = lib.ScrollableGroupBox("Masks")
         self.mask_den_stack.addWidget(self.load_mask_box)
-        self.densities_box = ScrollableGroupBox(
+        self.densities_box = lib.ScrollableGroupBox(
             "Observed densities (\u03bcm\u207b\u00b2)", layout="form"
         )
         self.mask_den_stack.addWidget(self.densities_box)   
@@ -3007,7 +2630,7 @@ class SimulationsTab(QtWidgets.QDialog):
         right_column.addWidget(single_sim_box, 1, 0)
         single_sim_layout = QtWidgets.QGridLayout(single_sim_box)
 
-        self.prop_str_input = ScrollableGroupBox(
+        self.prop_str_input = lib.ScrollableGroupBox(
             "Input proportions of structures (%)", layout="grid"
         )
         single_sim_layout.addWidget(self.prop_str_input, 0, 0, 1, 3)
@@ -3028,9 +2651,8 @@ class SimulationsTab(QtWidgets.QDialog):
         self.run_single_sim_button.released.connect(self.run_single_sim)
         single_sim_layout.addWidget(self.run_single_sim_button, 1, 2)        
 
-    def load_structures(self):
-        """Loads structures from .yaml file."""
-
+    def load_structures(self) -> None:
+        """Load structures from .yaml file."""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load structures", filter="*.yaml"
         )
@@ -3062,20 +2684,18 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.fit_results_display.setText("  ")
 
-    def load_target_names(self):
-        """Loads all unique names of molecular targets in 
+    def load_target_names(self) -> None:
+        """Load all unique names of molecular targets in 
         self.structures to attribute self.targets."""
-
         self.targets = []
         for structure in self.structures:
             for target in structure.targets:
                 if target not in self.targets:
                     self.targets.append(target)
 
-    def load_exp_data(self, name):
-        """Loads experimental data for the specified molecular 
+    def load_exp_data(self, name: str) -> None:
+        """Load experimental data for the specified molecular 
         target species."""
-
         target = name[3:]
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, f"Load molecules for {target}", filter="*.hdf5"
@@ -3119,10 +2739,9 @@ class SimulationsTab(QtWidgets.QDialog):
             # for experimental data only
             if self.check_exp_loaded():
                 self.plot_exp_nnds()
-                
-    def load_mask(self, name):
-        """Loads mask for the given molecular target species."""
 
+    def load_mask(self, name: str) -> None:
+        """Load mask for the given molecular target species."""
         target = name[4:]
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, f"Load mask for {target}", filter="*.npy"
@@ -3140,9 +2759,8 @@ class SimulationsTab(QtWidgets.QDialog):
                     button.setText(f"{target} loaded")
                     break
 
-    def on_dim_changed(self, index):
-        """Updates widgets for 2D/3D simulation."""
-
+    def on_dim_changed(self, index: int) -> None:
+        """Update widgets for 2D/3D simulation."""
         if index == 0: # 2D
             self.densities_box.setTitle(
                 "Observed densities (\u03bcm\u207b\u00b2)"
@@ -3159,10 +2777,9 @@ class SimulationsTab(QtWidgets.QDialog):
             self.roi_button.setText("Volume (\u03bcm\u00b3)")
             self.single_sim_mass = None
 
-    def on_depth_button_clicked(self):
-        """Asks the user to input the depth (nm) for a homogenous
+    def on_depth_button_clicked(self) -> None:
+        """Ask the user to input the depth (nm) for a homogenous
         distribution simulation."""
-
         if self.mask_den_stack.currentIndex() == 0:
             return
         
@@ -3174,10 +2791,9 @@ class SimulationsTab(QtWidgets.QDialog):
             self.depth = depth
             self.depth_button.setText(f"Z range: {depth} nm")
 
-    def load_densities_widgets(self):
-        """Loads the widgets for inputting observed densities of each
+    def load_densities_widgets(self) -> None:
+        """Load the widgets for inputting observed densities of each
         target."""
-
         if not self.structures or not self.targets:
             return
         
@@ -3194,9 +2810,8 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.densities_spins.append(target_spin)
 
-    def load_exp_data_widgets(self):
-        """Loads the widgets to the load experimental data box."""
-
+    def load_exp_data_widgets(self) -> None:
+        """Load the widgets to the load experimental data box."""
         if not self.structures or not self.targets:
             return
         
@@ -3215,9 +2830,8 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.load_exp_data_buttons.append(target_button)
 
-    def load_masks_widgets(self):
-        """Loads the widgets to the load masks box."""
-
+    def load_masks_widgets(self) -> None:
+        """Load the widgets to the load masks box."""
         if not self.structures or not self.targets:
             return
         
@@ -3232,10 +2846,9 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.load_mask_box.add_widget(target_button, row, 0)
             self.load_mask_buttons.append(target_button)
-                
-    def load_label_unc_widgets(self):
-        """Loads the widgets to the load label uncertainty box."""
 
+    def load_label_unc_widgets(self) -> None:
+        """Load the widgets to the load label uncertainty box."""
         if not self.structures or not self.targets:
             return
         
@@ -3252,9 +2865,8 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.label_unc_spins.append(target_spin)
 
-    def load_le_widgets(self):
-        """Loads the widgets to the load labelling efficiency box."""
-
+    def load_le_widgets(self) -> None:
+        """Load the widgets to the load labelling efficiency box."""
         if not self.structures or not self.targets:
             return
         
@@ -3272,10 +2884,9 @@ class SimulationsTab(QtWidgets.QDialog):
             self.le_spins.append(target_spin)
 
     @check_structures_loaded
-    def load_single_sim_n_str_widgets(self):
-        """Loads the widgets to the input numbers of structures for a
+    def load_single_sim_n_str_widgets(self) -> None:
+        """Load the widgets to the input numbers of structures for a
         single simulation box."""
-        
         self.prop_str_input.remove_all_widgets()
         self.prop_str_input_spins = []
         for structure in self.structures:
@@ -3296,10 +2907,9 @@ class SimulationsTab(QtWidgets.QDialog):
             self.prop_str_input_spins.append(title_spin)
         self.prop_str_input_spins[0].setValue(100) # set the last value to 100
 
-    def set_mask_den_stack(self, name):
-        """Switches self.mask_den_stack to the mask stack or the 
+    def set_mask_den_stack(self, name: str):
+        """Switches self.mask_den_stack to the mask stack or the
         homogenous distribution stack (observed densities)."""
-    
         if name == "Masks":
             self.mask_den_stack.setCurrentIndex(0)
             self.mask_button.setStyleSheet("background-color : lightgreen")
@@ -3320,9 +2930,8 @@ class SimulationsTab(QtWidgets.QDialog):
         
     @check_structures_loaded
     @check_exp_data_loaded
-    def generate_search_space(self):
-        """Generates combinations numbers of structures for fitting."""
-
+    def generate_search_space(self) -> None:
+        """Generate combinations numbers of structures for fitting."""
         n_sim_fit, granularity, save, ok = (
             GenerateSearchSpaceDialog.getParams(self)
         )
@@ -3360,8 +2969,8 @@ class SimulationsTab(QtWidgets.QDialog):
             f"\nEstimated time (hh:mm:ss): {estimated_time}"
         )
 
-    def estimate_fit_time(self, n):
-        """Estimates the time it takes to fit n combinations of numbers
+    def estimate_fit_time(self, n: int) -> str:
+        """Estimate the time it takes to fit n combinations of numbers
         of structures. Assumes that StructureMixer and other necessary
         parameters are set.
         
@@ -3375,7 +2984,6 @@ class SimulationsTab(QtWidgets.QDialog):
         estimated_time : str
             Estimated time in hours, minutes and seconds.
         """
-
         if n < 1:
             return "--:--:--"
         
@@ -3414,9 +3022,8 @@ class SimulationsTab(QtWidgets.QDialog):
         return estimated_time
 
     @check_structures_loaded
-    def load_search_space(self):
-        """Loads combinations of numbers of structures for fitting."""
-        
+    def load_search_space(self) -> None:
+        """Load combinations of numbers of structures for fitting."""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load numbers of structures", filter="*.csv"
         )
@@ -3451,10 +3058,9 @@ class SimulationsTab(QtWidgets.QDialog):
     @check_structures_loaded
     @check_exp_data_loaded
     @check_search_space_loaded
-    def fit_n_str(self):
-        """Fits the combinations of numbers of structures to the
+    def fit_n_str(self) -> None:
+        """Fit the combinations of numbers of structures to the
         experimental data."""
-
         self.mixer = self.setup_mixer(mode='fit')
         if self.mixer is None:
             return
@@ -3511,11 +3117,10 @@ class SimulationsTab(QtWidgets.QDialog):
         self.mixer = self.setup_mixer(mode='single_sim')
         self.sim_and_plot_NND()
 
-    def update_prop_str_input_spins(self, prop_str):
-        """Updates the values of the input proportions of structures 
+    def update_prop_str_input_spins(self, prop_str: np.ndarray) -> None:
+        """Update the values of the input proportions of structures 
         for a single simulation and adds a button to retrieve these 
         results."""
-
         # extract the mean values if bootstrap was used (then a tuple
         # with mean and std is given)
         if len(np.asarray(prop_str).shape) == 2:
@@ -3549,10 +3154,9 @@ class SimulationsTab(QtWidgets.QDialog):
             button, self.prop_str_input.content_layout.rowCount(), 0, 1, 2
         )
 
-    def display_proportions(self, prop_str):
-        """Displays the proportions of the best fitting numbers of
+    def display_proportions(self, prop_str: np.ndarray) -> None:
+        """Display the proportions of the best fitting numbers of
         structures."""
-
         # different display if bootstrap results are to be displayed
         # or not
         text = ""
@@ -3564,9 +3168,8 @@ class SimulationsTab(QtWidgets.QDialog):
                 text = text + f"{structure.title} - {prop:.2f}%, "
         self.fit_results_display.setText(text[:-2]) # remove the last comma
 
-    def save_fit_results(self):
-        """Saves fit results in .txt with all parameters used."""
-
+    def save_fit_results(self) -> None:
+        """Save fit results in .txt with all parameters used."""
         metadata = {}
         metadata["Date"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         metadata["File location of structures"] = self.structures_path
@@ -3648,10 +3251,9 @@ class SimulationsTab(QtWidgets.QDialog):
     @check_structures_loaded
     @check_exp_data_loaded
     @check_search_space_loaded
-    def compare_models(self):
-        """Opens the dialog to compare the goodness of fit for 
+    def compare_models(self) -> None:
+        """Open the dialog to compare the goodness of fit for 
         different models of structures and runs the test."""
-
         (
             models, model_names, label_unc, save_scores, ok 
         ) = CompareModelsDialog.getParams(self, self.targets)
@@ -3678,7 +3280,7 @@ class SimulationsTab(QtWidgets.QDialog):
         progress = lib.ProgressDialog(
             "Comparing models, please wait...", 0, 1, self
         )
-        score, idx, best_label_unc, best_mixer, opt_props = spinna.compare_models(
+        _, idx, best_label_unc, best_mixer, opt_props = spinna.compare_models(
             models=models,
             exp_data=self.exp_data,
             granularity=self.granularity,
@@ -3725,10 +3327,9 @@ class SimulationsTab(QtWidgets.QDialog):
         )
         self.fit_results_display.setText(text)
 
-    def on_roi_button_clicked(self):
-        """Asks the user to input the area/volume to be simulated for a
+    def on_roi_button_clicked(self) -> None:
+        """Ask the user to input the area/volume to be simulated for a
         single simulation."""
-
         if self.mask_den_stack.currentIndex() == 1: # rectangular ROI
             # here mass refers to area/volume
             if self.dim_widget.currentIndex() == 0: # 2D
@@ -3747,9 +3348,9 @@ class SimulationsTab(QtWidgets.QDialog):
                     self.roi_button.setText(f"Volume: {mass:.0f} \u03bcm\u00b3")
 
     @check_structures_loaded
-    def single_sim_n_total(self):
-        """Finds the total number of molecules for a single simulation.
-        Either takes the number of molecules from experimental data
+    def single_sim_n_total(self) -> int:
+        """Find the total number of molecules for a single simulation.
+        Either take the number of molecules from experimental data
         (masked) or from input observed densities and the
         area / volume. Note that the total number of molecules is
         adjusted for labeling efficiency, i.e., it is the number of
@@ -3760,7 +3361,6 @@ class SimulationsTab(QtWidgets.QDialog):
         n_total : int
             Total number of molecules to simulate.
         """
-
         if self.mask_den_stack.currentIndex() == 0: # mask
             n_total = int(sum([
                 len(self.exp_data[t])
@@ -3776,9 +3376,8 @@ class SimulationsTab(QtWidgets.QDialog):
         return n_total
 
     @check_structures_loaded
-    def run_single_sim(self):
-        """Runs a single simulation and plots NNDs."""
-
+    def run_single_sim(self) -> None:
+        """Run a single simulation and plot NNDs."""
         # check input proportions sum to 100%
         ok, sum_ = self.check_input_props()
         if not ok:
@@ -3820,13 +3419,14 @@ class SimulationsTab(QtWidgets.QDialog):
             )
 
     @check_structures_loaded
-    def sim_and_plot_NND(self):
-        """Simulates and plots nearest neighbor distances of simulated 
+    def sim_and_plot_NND(self) -> None:
+        """Simulate and plot nearest neighbor distances of simulated 
         molecules and optionally experimental data for comparison. 
+        
         Takes the numbers of structures from the single simulation box. 
         Number of simulations and plotting parameters are taken from 
-        the NND plotting box."""
-        
+        the NND plotting box.
+        """
         # close figures in the NND plotting box
         for fig in self.nnd_plots:
             plt.close(fig)
@@ -3894,10 +3494,9 @@ class SimulationsTab(QtWidgets.QDialog):
         self.display_current_nnd_plot()
 
     @check_exp_data_loaded
-    def plot_exp_nnds(self):
-        """Plots NNDs of experimental data only, according to the 
+    def plot_exp_nnds(self) -> None:
+        """Plot NNDs of experimental data only, according to the 
         chosen plot settings."""
-
         # close figures in the NND plotting box
         for fig in self.nnd_plots:
             plt.close(fig)
@@ -3930,16 +3529,15 @@ class SimulationsTab(QtWidgets.QDialog):
         self.display_current_nnd_plot()
 
     @check_structures_loaded
-    def setup_mixer(self, mode='fit'):
-        """Initializes the class used for simulations.
+    def setup_mixer(self, mode: Literal['fit', 'single_sim'] = 'fit') -> None:
+        """Initialize the class used for simulations.
         
         Parameters
         ----------
-        mode : {'fit' or 'single_sim'}
+        mode : {'fit', 'single_sim'}
             Specifies how to find the numbers of structures to be 
             considered.
         """
-        
         # extract label uncertainty and LE
         label_unc = {}
         le = {}
@@ -4009,31 +3607,27 @@ class SimulationsTab(QtWidgets.QDialog):
             nn_counts=nn_counts,
         )
         return mixer
-    
-    def check_masks_loaded(self):
-        """Verifies if all masks have been loaded."""
 
+    def check_masks_loaded(self) -> bool:
+        """Verify if all masks have been loaded."""
         if self.targets is None:
             return False
-        
         for target in self.targets:
             if not target in self.masks.keys():
                 return False
         return True
-    
-    def check_exp_loaded(self):
-        """Verifies if all exp data have been loaded."""
 
+    def check_exp_loaded(self) -> bool:
+        """Verify if all exp data have been loaded."""
         if self.targets is None:
             return False
-        
         for target in self.targets:
             if not target in self.exp_data.keys():
                 return False
         return True
 
-    def check_dimensionalities(self):
-        """Checks if masks, loaded experimental data and the requested 
+    def check_dimensionalities(self) -> tuple[bool, str]:
+        """Check if masks, loaded experimental data and the requested 
         dimensionality of the simulation(s) are consistent.
         
         Returns
@@ -4045,7 +3639,6 @@ class SimulationsTab(QtWidgets.QDialog):
             If ok is False, message will show the warning message to 
             the user.
         """
-
         ok = True
         message = ""
 
@@ -4081,10 +3674,10 @@ class SimulationsTab(QtWidgets.QDialog):
                     return ok, message
 
         return ok, message
-    
-    def check_input_props(self):
-        """Checks if the input proportions of structures sum to 100%.
-        
+
+    def check_input_props(self) -> tuple[bool, float]:
+        """Check if the input proportions of structures sum to 100%.
+
         Returns
         -------
         ok : bool
@@ -4092,13 +3685,15 @@ class SimulationsTab(QtWidgets.QDialog):
         sum_ : float
             Sum of the input proportions.
         """
-
         sum_ = sum([_.value() for _ in self.prop_str_input_spins])
         ok = True if isclose(sum_, 100, abs_tol=1e-3) else False
         return ok, sum_
-        
-    def find_roi(self, mode='fit'):
-        """Finds width, height, depth to conduct simulation(s) with 
+
+    def find_roi(
+        self, 
+        mode: Literal['fit', 'single_sim'] = 'fit',
+    ) -> tuple[float, float, float]:
+        """Find width, height, depth to conduct simulation(s) with
         homogeneous distribution.
 
         Parameters
@@ -4112,7 +3707,6 @@ class SimulationsTab(QtWidgets.QDialog):
         result : tuple
             Width, height, depth (all nm).
         """
-
         assert mode in ['fit', 'single_sim']
 
         if mode == 'fit':
@@ -4120,11 +3714,10 @@ class SimulationsTab(QtWidgets.QDialog):
         elif mode == "single_sim":
             return self.find_roi_single_sim()
 
-    def find_roi_fit(self):
-        """Finds width, height, depth to conduct simulation(s) with 
-        homogeneous distribution for fitting, based on the input 
+    def find_roi_fit(self) -> tuple[float, float, float]:
+        """Find width, height, depth to conduct simulation(s) with
+        homogeneous distribution for fitting, based on the input
         densities and the exp. data."""
-
         target = self.targets[0]
         density = self.densities_spins[0].value()
         # convert density from um^-2 to nm^-2
@@ -4148,12 +3741,11 @@ class SimulationsTab(QtWidgets.QDialog):
         else:
             width = height = np.sqrt(n_mol / tot_density / depth)
         return width, height, depth
-    
-    def find_roi_single_sim(self):
-        """Finds width, height, depth to conduct a single simulation with
-        homogeneous distribution, based on the user-selected 
-        area/volume."""
 
+    def find_roi_single_sim(self) -> tuple[float, float, float]:
+        """Find width, height, depth to conduct a single simulation with
+        homogeneous distribution, based on the user-selected
+        area/volume."""
         if self.single_sim_mass is None:
             message = "Please input the area/volume of the ROI first."
             QtWidgets.QMessageBox.information(self, "Warning", message)
@@ -4167,9 +3759,9 @@ class SimulationsTab(QtWidgets.QDialog):
             width = height = np.sqrt(self.single_sim_mass * 1e9 / depth)
 
         return width, height, depth
-    
-    def find_n_mol_from_target(self, target):
-        """Finds number of molecules of the given molecular target that
+
+    def find_n_mol_from_target(self, target: str) -> int:
+        """Find number of molecules of the given molecular target that
         are to be simulated in fitting.
         
         Paramaters
@@ -4182,7 +3774,6 @@ class SimulationsTab(QtWidgets.QDialog):
         n_tar : int
             Number of molecules to be simulated.
         """
-        
         # find targets counts per structure:
         t_counts = spinna.find_target_counts(self.targets, self.structures)
         # extract the row from t_counts that specifies number of the
@@ -4197,9 +3788,8 @@ class SimulationsTab(QtWidgets.QDialog):
         n_tar = (t_counts * N_str).sum()
         return n_tar
 
-    def display_current_nnd_plot(self):
-        """Displays currently indexed NND plot."""
-
+    def display_current_nnd_plot(self) -> None:
+        """Display currently indexed NND plot."""
         if not self.nnd_plots:
             return
 
@@ -4215,9 +3805,8 @@ class SimulationsTab(QtWidgets.QDialog):
                 fig.axes[0].legend_.remove()
         self.nnd_plot_box.display(fig)
 
-    def on_left_nnd_clicked(self):
-        """Displays the previous NND plot."""
-
+    def on_left_nnd_clicked(self) -> None:
+        """Display the previous NND plot."""
         N = len(self.nnd_plots)
         if N == 1:
             self.display_current_nnd_plot()
@@ -4229,9 +3818,8 @@ class SimulationsTab(QtWidgets.QDialog):
             self.current_nnd_idx -= 1
         self.display_current_nnd_plot()        
 
-    def on_right_nnd_clicked(self):
-        """Displays the next NND plot."""
-
+    def on_right_nnd_clicked(self) -> None:
+        """Display the next NND plot."""
         N = len(self.nnd_plots)
         if N == 1:
             self.display_current_nnd_plot()
@@ -4243,9 +3831,8 @@ class SimulationsTab(QtWidgets.QDialog):
             self.current_nnd_idx += 1
         self.display_current_nnd_plot()
 
-    def save_nnd_plots(self):
-        """Saves all the loaded NND plots as .png/.svg files."""
-
+    def save_nnd_plots(self) -> None:
+        """Save all the loaded NND plots as .png/.svg files."""
         if self.nnd_plots:
             out_path = self.structures_path.replace(".yaml", "_NND_plots")
             path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -4263,10 +3850,9 @@ class SimulationsTab(QtWidgets.QDialog):
             fig.savefig(outpath)
             i += 1
 
-    def save_nnd_values(self):
-        """Saves all NND values (bin centers and bin heights) as .csv 
+    def save_nnd_values(self) -> None:
+        """Save all NND values (bin centers and bin heights) as .csv 
         files."""
-        
         if self.nnd_plots:
             out_path = self.structures_path.replace(".yaml", "_NND_values")
             path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -4325,7 +3911,7 @@ class Window(QtWidgets.QMainWindow):
     """The main window. Constists of three tabs: mask generation,
     heterostructures design and simulations."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: SPINNA")
         this_directory = os.path.dirname(os.path.realpath(__file__))

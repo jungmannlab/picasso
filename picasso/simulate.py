@@ -185,7 +185,7 @@ def paintgen(
     photonratestd : float
         Standard deviation of the photon rate (in photons per frame).
     photonbudget : float
-        Maximum number of photons that can be emitted in one on-event.  
+        Maximum number of photons that can be emitted by one emitter.  
 
     Returns
     -------
@@ -346,7 +346,7 @@ def distphotons(
     photonratestd : float
         Standard deviation of the photon rate (in photons per frame).
     photonbudget : float
-        Maximum number of photons that can be emitted in one on-event.
+        Maximum number of photons that can be emitted by one emitter.
 
     Returns
     -------

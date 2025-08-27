@@ -1,5 +1,5 @@
 """
-    gui/nanotron
+    picasso.gui.nanotron
     ~~~~~~~~~~~~~~~~~~~~
 
     Graphical user interface for classification using deep learning
@@ -8,54 +8,95 @@
     :copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
 """
 
-import os.path as _ospath
+from __future__ import annotations
+
 import os
 import sys
 import traceback
-import importlib, pkgutil
+import importlib
+import pkgutil
 import datetime
-from time import sleep
-
-import matplotlib.pyplot as plt
-import numpy as np
-
-from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
-
 import threading
 import multiprocessing
+import joblib
+import yaml
 import concurrent.futures
+from time import sleep
 
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
-import joblib
-import yaml
+
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtGui import QIcon
 
 from .. import io, lib, render, nanotron, __version__
 
-DEFAULT_MODEL_PATH = _ospath.join(os.sep, "picasso", "model", "default_model.sav")
+DEFAULT_MODEL_PATH = os.path.join(os.sep, "picasso", "model", "default_model.sav")
 default_model = False
 
 
 class Generator(QtCore.QThread):
+    """Class for generating (and optionally augmenting) images from
+    localizations.
+    
+    ...
+    
+    Attributes
+    ----------
+    classes : list of str
+        The class labels for the localization datasets.
+    expand : bool
+        Whether to expand the dataset by rotating images (augmentation).
+    export : bool
+        Whether to export the generated images.
+    export_paths : list of str
+        Paths to save the exported images.
+    locs_files : dict
+        Each entry is a localization dataset with 'group' field.
+    n_datasets : int
+        Number of localization datasets (classes).
+    oversampling : float
+        Number of display pixels per camera pixel.
+    pick_radius : float
+        Pick radius used for picking.
+
+    Parameters
+    ----------
+    locs : dict
+        Localization datasets with 'group' field.
+    classes : list of str
+        The class labels for the localization datasets.
+    pick_radius : float
+        Pick radius used for picking.
+    oversampling : float
+        Number of display pixels per camera pixel.
+    expand : bool
+        Whether to expand the dataset by rotating images (augmentation).
+    expand_paths : list of str
+        Paths to save the expanded images.
+    parent : QWidget, optional
+        Parent widget for the generator thread. None by default.
+    """
 
     datasets_made = QtCore.pyqtSignal(int, int, int, int)
     datasets_finished = QtCore.pyqtSignal(list, list)
 
     def __init__(
         self,
-        locs,
-        classes,
-        pick_radius,
-        oversampling,
-        expand,
-        export,
-        export_paths,
-        parent=None,
-    ):
+        locs: dict,
+        classes: list[str],
+        pick_radius: float,
+        oversampling: float,
+        expand: bool,
+        export: bool,
+        export_paths: list[str],
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
         super().__init__()
         self.locs_files = locs.copy()
         self.pick_radius = pick_radius
@@ -66,20 +107,22 @@ class Generator(QtCore.QThread):
         self.export = export
         self.export_paths = export_paths
 
-    def combine_data_sets(self, X_files, Y_files):
-
+    def combine_data_sets(
+        self, 
+        X_files: list[list[np.ndarray]], 
+        Y_files: list[list[int]],
+    ) -> tuple[list[np.ndarray], list[int]]:
+        """Merges multiple datasets into one."""
         X = []
         Y = []
         for img in X_files:
             X += img
-
         for label in Y_files:
             Y += label
-
         return X, Y
 
-    def run(self):
-
+    def run(self) -> None:
+        """Generates images from localization datasets."""
         X_files = []
         Y_files = []
 
@@ -91,7 +134,7 @@ class Generator(QtCore.QThread):
             label = self.classes[id]
             n_locs = locs.group.max()
 
-            export_path = _ospath.dirname(self.export_paths[id]) + "/"
+            export_path = os.path.dirname(self.export_paths[id]) + "/"
 
             for c, pick in enumerate(np.unique(locs.group)):
 
@@ -140,15 +183,57 @@ class Generator(QtCore.QThread):
             Y_files.append(labels)
 
         X_train, Y_train = self.combine_data_sets(X_files, Y_files)
-
         self.datasets_finished.emit(X_train, Y_train)
 
 
 class Trainer(QtCore.QThread):
+    """Trains a machine learning model.
+    
+    ...
+    
+    Attributes
+    ----------
+    activation : {'relu', 'identity', 'logistic', 'tanh'}
+        The activation function to use.
+    cm_list : list
+        A list to store the confusion matrices.
+    iterations : int
+        The number of training iterations.
+    learning_rate : float
+        The learning rate for the optimizer.
+    mlp_list : list
+        A list to store the MLPClassifier instances.
+    network : MLPClassifier
+        The neural network model.
+    solver : {'lbfgs', 'sgd', 'adam'}
+        The solver for weight optimization.
+    X_train, X_test : np.ndarray
+        The training and testing data.
+    Y_train, Y_test : np.ndarray
+        The training and testing labels.
+
+    Parameters
+    ----------
+    X_train : np.ndarray
+        The training data.
+    Y_train : np.ndarray
+        The training labels.
+    parameter : dict
+        A dictionary containing the model parameters. See class 
+        attributes for details.
+    parent : QWidget, optional
+        The parent widget. None by default.
+    """
 
     training_finished = QtCore.pyqtSignal(list, float, float, list)
 
-    def __init__(self, X_train, Y_train, parameter, parent=None):
+    def __init__(
+        self, 
+        X_train: np.ndarray, 
+        Y_train: np.ndarray, 
+        parameter: dict, 
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
         super().__init__()
         self.network = parameter["network"]
         self.activation = parameter["activation"]
@@ -161,7 +246,8 @@ class Trainer(QtCore.QThread):
         self.mlp_list = []  # container to carry mlp class
         self.cm_list = []  # container to carry confusion_matrix
 
-    def run(self):
+    def run(self) -> None:
+        """Train the MLPClassifier model."""
         self.mlp_list = []
         hidden_layer_sizes = tuple(self.network.values())
 
@@ -192,51 +278,88 @@ class Trainer(QtCore.QThread):
 
 
 class Predictor(QtCore.QThread):
+    """Predicts the labels for the input data using the trained model.
+
+    ...
+
+    Attributes
+    ----------
+    locs : np.recarray
+        The input localizations for the model. Must contain the 'group'
+        field.
+    model : MLPClassifier
+        The trained MLPClassifier model.
+    n_groups : int
+        Number of groups, i.e., picks.
+    n_locs : int
+        Number of localizations.
+    oversampling : float
+        Number of display pixels per camera pixel.
+    pick_radius : float
+        The radius used for picking localizations.
+    prediction : np.recarray
+        The predicted labels for the input localizations, one per group,
+        i.e., pick.
+
+    Parameters
+    ----------
+    mlp : MLPClassifier
+        The trained MLPClassifier model.
+    locs : np.recarray
+        The input localizations for the model. Must contain the 'group'
+        field.
+    pick_radius : float
+        The radius used for picking localizations.
+    oversampling : float
+        The factor by which to oversample the localizations.
+    parent : QWidget, optional
+        The parent widget. None by default.
+    """
 
     predictions_made = QtCore.pyqtSignal(int, int)
     prediction_finished = QtCore.pyqtSignal(np.recarray)
 
-    def __init__(self, mlp, locs, pick_radius, oversampling, parent=None):
+    def __init__(
+        self, 
+        mlp: MLPClassifier, 
+        locs: np.recarray, 
+        pick_radius: float, 
+        oversampling: float, 
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
         super().__init__()
         self.model = mlp
         self.locs = locs.copy()
         self.pick_radius = pick_radius
         self.oversampling = oversampling
-
         self.n_locs = len(self.locs["group"])
         self.prediction = np.zeros(
             len(np.unique(self.locs["group"])),
             dtype=[("group", "u4"), ("prediction", "i4"), ("score", "f4")],
         )
-
         self.prediction["group"] = np.unique(self.locs["group"])
-
         self.n_groups = len(np.unique(self.locs["group"]))
 
-        self.p_locs = np.zeros(
-            len(self.locs["group"]),
-            dtype=[("group", "u4"), ("prediction", "i4"), ("score", "f4")],
-        )
-
-    def checkConsecutive(self, l):
+    def checkConsecutive(self, l: np.ndarray) -> bool:
         n = len(l) - 1
         return sum(np.diff(sorted(l)) == 1) >= n
 
     def _worker(
         self,
-        mlp,
-        locs,
-        picks,
-        pick_radius,
-        oversampling,
-        current,
-        lock,
-        n_picks,
-        predicitions,
-        probabilities,
-        finished,
-    ):
-
+        mlp: MLPClassifier,
+        locs: np.recarray,
+        picks: np.ndarray,
+        pick_radius: float,
+        oversampling: float,
+        current: list[int],
+        lock: threading.Lock,
+        n_picks: int,
+        predictions: np.ndarray,
+        probabilities: np.ndarray,
+        finished: list[int],
+    ) -> None:
+        """Worker thread for making predictions allowing for parallel
+        execution."""
         while True:
             with lock:
                 index = current[0]
@@ -252,14 +375,22 @@ class Predictor(QtCore.QThread):
                 pick_radius=pick_radius,
                 oversampling=oversampling,
             )
-            predicitions[index] = pred[0]
+            predictions[index] = pred[0]
             probabilities[index] = pred_proba.max()
 
             with lock:
                 finished[0] += 1
 
-    def predict_async(self, model, locs, picks, pick_radius, oversampling):
-
+    def _predict_async(
+        self, 
+        model: MLPClassifier, 
+        locs: np.recarray, 
+        picks: np.ndarray, 
+        pick_radius: float, 
+        oversampling: float,
+    ) -> None:
+        """Make predictions asynchronously, i.e., using 
+        multiprocessing."""
         n_picks = len(picks)
 
         predictions = np.zeros(n_picks)
@@ -293,12 +424,12 @@ class Predictor(QtCore.QThread):
         executor.shutdown(wait=False)
         return current, predictions, probabilities, finished
 
-    def run(self):
-
+    def run(self) -> None:
+        """Runs predictions."""
         N = len(self.prediction["group"])
         picks = self.prediction["group"]
 
-        current, predictions, probabilities, finished = self.predict_async(
+        current, predictions, probabilities, finished = self._predict_async(
             self.model, self.locs, picks, self.pick_radius, self.oversampling
         )
 
@@ -319,26 +450,9 @@ class Predictor(QtCore.QThread):
         self.prediction_finished.emit(self.locs)
 
 
-class GenericPlotWindow(QtWidgets.QTabWidget):
-    def __init__(self, window_title):
-        super().__init__()
-        self.setWindowTitle(window_title)
-        this_directory = os.path.dirname(os.path.realpath(__file__))
-        icon_path = os.path.join(this_directory, "icons", "nanotron.ico")
-        icon = QtGui.QIcon(icon_path)
-        self.setWindowIcon(icon)
-        self.resize(1000, 500)
-        self.figure = plt.Figure()
-        self.canvas = FigureCanvas(self.figure)
-        vbox = QtWidgets.QVBoxLayout()
-        self.setLayout(vbox)
-        vbox.addWidget(self.canvas)
-
-        self.toolbar = NavigationToolbar(self.canvas, self)
-        vbox.addWidget(self.toolbar)
-
-
 class train_dialog(QtWidgets.QDialog):
+    """Dialog for choosing model training parameters."""
+
     def __init__(self, window):
         super().__init__(window)
         self.window = window
@@ -530,7 +644,7 @@ class train_dialog(QtWidgets.QDialog):
                 ".sav",
             )
 
-            base, ext = _ospath.splitext(fname)
+            base, ext = os.path.splitext(fname)
             fname = base + ".sav"
 
             self.train_log["Model"] = fname
@@ -578,7 +692,7 @@ class train_dialog(QtWidgets.QDialog):
     def show_learning_stats(self):
         if self.mlp is not None:
 
-            canvas = GenericPlotWindow("Learning history")
+            canvas = lib.GenericPlotWindow("Learning history", "nanotron")
             canvas.figure.clear()
 
             ax1, ax2 = canvas.figure.subplots(1, 2)
@@ -824,6 +938,8 @@ class train_dialog(QtWidgets.QDialog):
 
 
 class View(QtWidgets.QLabel):
+    """Custom QLabel for displaying rendered localizations."""
+
     def __init__(self, window):
         super().__init__()
         self.window = window
@@ -888,6 +1004,8 @@ class View(QtWidgets.QLabel):
 
 
 class Window(QtWidgets.QMainWindow):
+    """Main window."""
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Picasso v{__version__}: nanoTRON")
@@ -1038,7 +1156,7 @@ class Window(QtWidgets.QMainWindow):
                 msgBox.exec_()
             else:
 
-                canvas = GenericPlotWindow("Probabilities")
+                canvas = lib.GenericPlotWindow("Probabilities", "nanotron")
                 canvas.figure.clear()
 
                 probabilities_per_pick = np.zeros(len(np.unique(self.locs.group)))

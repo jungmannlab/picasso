@@ -1,15 +1,16 @@
 #!/usr/bin/env python
 """
-    gui/toraw
-    ~~~~~~~~~~~~~~~~~~~~
+    picasso.gui.toraw
+    ~~~~~~~~~~~~~~~~~
 
-    Graphical user interface for converting movies to raw files
+    Graphical user interface for converting movies to raw files.
 
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 
-import sys, os, importlib, pkgutil
+import sys, os, importlib
+import pkgutil
 import os.path
 from PyQt5 import QtCore, QtGui, QtWidgets
 import traceback
@@ -17,6 +18,8 @@ from .. import io, lib, __version__
 
 
 class TextEdit(QtWidgets.QTextEdit):
+    """Interface for inputing a path."""
+
     def __init__(self, parent=None):
         super().__init__(parent)
         # self.setAcceptDrops(True)
@@ -54,6 +57,8 @@ class TextEdit(QtWidgets.QTextEdit):
 
 
 class Window(QtWidgets.QWidget):
+    """Main window."""
+
     def __init__(self):
         super().__init__()
         # Init GUI
@@ -124,7 +129,8 @@ class Window(QtWidgets.QWidget):
 
 
 class Worker(QtCore.QThread):
-
+    """Worker thread for processing movie groups."""
+    
     progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(int)
     interrupted = QtCore.pyqtSignal()

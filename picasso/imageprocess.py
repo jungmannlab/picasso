@@ -155,7 +155,7 @@ def rcc(
     segments: list[_np.ndarray], 
     max_shift: float | None = None, 
     callback: Callable[[int], None] | None = None,
-) -> _np.ndarray:
+) -> tuple[_np.ndarray, _np.ndarray]:
     """Computes RCC, see Wang, Schnitzbauer, et al. Optics Express, 
     2014. Returns the shifts in x and y directions for each pair of
     segments. 
@@ -176,9 +176,9 @@ def rcc(
     
     Returns
     -------
-    shifts : np.ndarray
-        A 2D numpy array containing the shifts in x and y directions for
-        each pair of segments. The shape of the array is 
+    shifts_x, shifts_y : np.ndarray
+        2D numpy arrays containing the shifts in x and y directions for
+        each pair of segments. The shape of the arrays is 
         (n_segments, n_segments), where n_segments is the number of 
         segments provided.
     """
