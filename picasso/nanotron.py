@@ -1,8 +1,8 @@
 """
     picasso.nanotron
-    ~~~~~~~~~~
+    ~~~~~~~~~~~~~~~~
 
-    Deep learning library for classification of picked localizations
+    Deep learning library for classification of picked localizations.
 
     :author: Alexander Auer, Maximilian Strauss 2020
     :copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
@@ -41,7 +41,6 @@ def prepare_img(
     img : np.ndarray
         Prepared image.
     """
-
     img = alpha * img - bg
     img = img.astype('float')
     img = img / img.max()
@@ -63,10 +62,9 @@ def rotate_img(img: np.ndarray, angle: float) -> np.ndarray:
     
     Returns
     -------
-    np.ndarray
+    rot_img : np.ndarray
         Rotated image.
     """
-
     rot_img = ndimage.rotate(img, angle, reshape=False)
 
     return rot_img
@@ -102,7 +100,6 @@ def roi_to_img(
     pick_img : np.ndarray
         Image of the picked localizations.
     """
-
     # Isolate locs from pick
     pick_locs = []
     if picks is None:
@@ -181,7 +178,6 @@ def prepare_data(
     labels : list[int]
         List of labels corresponding to the images.
     """
-
     img_shape = int(2 * pick_radius * oversampling)
     data = []
     labels = []
@@ -237,7 +233,6 @@ def predict_structure(
     pred_proba : np.ndarray
         Predicted probabilities for each class.
     """
-
     img_shape = int(2 * pick_radius * oversampling)
     img = roi_to_img(locs, pick=pick, radius=pick_radius, oversampling=oversampling, picks=picks)
     img = prepare_img(img, img_shape=img_shape, alpha=10, bg=1)

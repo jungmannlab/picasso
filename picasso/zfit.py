@@ -1,34 +1,44 @@
-import numpy as _np
-import numba as _numba
-import multiprocessing as _multiprocessing
-import concurrent.futures as _futures
-from concurrent.futures import ProcessPoolExecutor as _ProcessPoolExecutor
-from scipy.optimize import minimize_scalar as _minimize_scalar
-from tqdm import tqdm as _tqdm
-import yaml as _yaml
-import matplotlib.pyplot as _plt
-from . import lib as _lib
+"""
+    picasso.zfit
+    ~~~~~~~~~~~~
+
+    Fitting z coordinates using astigmatism.
+
+    :author: Joerg Schnitzbauer, 2016
+    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+"""
+
+import multiprocessing
+from concurrent import futures
+from concurrent.futures import ProcessPoolExecutor
+
+import numba
+import yaml
+import numpy as np
+import matplotlib.pyplot as plt
+from tqdm import tqdm
+from scipy.optimize import minimize_scalar
+
+from . import lib
 
 
-_plt.style.use("ggplot")
+plt.style.use("ggplot")
 
 
-def nan_index(y: _np.ndarray) -> tuple[_np.ndarray, callable]:
+def nan_index(y: np.ndarray) -> tuple[np.ndarray, callable]:
     """Find indices of NaN values in an array."""
+    return np.isnan(y), lambda z: z.nonzero()[0]
 
-    return _np.isnan(y), lambda z: z.nonzero()[0]
 
-
-def interpolate_nan(data: _np.ndarray) -> _np.ndarray:
-    """Linear interpolattion of NaN values in an array `data`."""
-
+def interpolate_nan(data: np.ndarray) -> np.ndarray:
+    """Linear interpolattion of NaN values in an array ``data``."""
     nans, x = nan_index(data)
-    data[nans] = _np.interp(x(nans), x(~nans), data[~nans])
+    data[nans] = np.interp(x(nans), x(~nans), data[~nans])
     return data
 
 
 def calibrate_z(
-    locs: _np.recarray, 
+    locs: np.recarray, 
     info: list[dict], 
     d: float, 
     magnification_factor: float, 
@@ -41,7 +51,7 @@ def calibrate_z(
     
     Parameters
     ----------
-    locs : _np.recarray
+    locs : np.recarray
         Localizations of a calibration sample.
     info : list of dicts
         Information about the calibration sample, including the number 
@@ -64,17 +74,16 @@ def calibrate_z(
         polynomial coefficients), number of frames, step size, and
         magnification factor.
     """
-
     n_frames = info[0]["Frames"]
     range = (n_frames - 1) * d
-    frame_range = _np.arange(n_frames)
+    frame_range = np.arange(n_frames)
     z_range = -(frame_range * d - range / 2)  # negative so that the first frames of
     # a bottom-to-up scan are positive z coordinates.
 
-    mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
-    mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
-    var_sx = _np.array([_np.var(locs.sx[locs.frame == _]) for _ in frame_range])
-    var_sy = _np.array([_np.var(locs.sy[locs.frame == _]) for _ in frame_range])
+    mean_sx = np.array([np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
+    mean_sy = np.array([np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
+    var_sx = np.array([np.var(locs.sx[locs.frame == _]) for _ in frame_range])
+    var_sy = np.array([np.var(locs.sy[locs.frame == _]) for _ in frame_range])
 
     keep_x = (locs.sx - mean_sx[locs.frame]) ** 2 < var_sx[locs.frame]
     keep_y = (locs.sy - mean_sy[locs.frame]) ** 2 < var_sy[locs.frame]
@@ -82,20 +91,20 @@ def calibrate_z(
     locs = locs[keep]
 
     # Fits calibration curve to the mean of each frame
-    mean_sx = _np.array([_np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
-    mean_sy = _np.array([_np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
+    mean_sx = np.array([np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
+    mean_sy = np.array([np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
 
     # Fix nan
     mean_sx = interpolate_nan(mean_sx)
     mean_sy = interpolate_nan(mean_sy)
 
-    cx = _np.polyfit(z_range, mean_sx, 6, full=False)
-    cy = _np.polyfit(z_range, mean_sy, 6, full=False)
+    cx = np.polyfit(z_range, mean_sx, 6, full=False)
+    cy = np.polyfit(z_range, mean_sy, 6, full=False)
 
     # Fits calibration curve to each localization
     # true_z = locs.frame * d - range / 2
-    # cx = _np.polyfit(true_z, locs.sx, 6, full=False)
-    # cy = _np.polyfit(true_z, locs.sy, 6, full=False)
+    # cx = np.polyfit(true_z, locs.sx, 6, full=False)
+    # cy = np.polyfit(true_z, locs.sy, 6, full=False)
 
     calibration = {
         "X Coefficients": [float(_) for _ in cx],
@@ -106,108 +115,108 @@ def calibrate_z(
     }
     if path is not None:
         with open(path, "w") as f:
-            _yaml.dump(calibration, f, default_flow_style=False)
+            yaml.dump(calibration, f, default_flow_style=False)
 
     locs = fit_z(locs, info, calibration, magnification_factor)
     locs.z /= magnification_factor
 
-    _plt.figure(figsize=(18, 10))
+    plt.figure(figsize=(18, 10))
 
-    _plt.subplot(231)
+    plt.subplot(231)
     # Plot this if calibration curve is fitted to each localization
-    # _plt.plot(true_z, locs.sx, '.', label='x', alpha=0.2)
-    # _plt.plot(true_z, locs.sy, '.', label='y', alpha=0.2)
-    # _plt.plot(true_z, _np.polyval(cx, true_z), '0.3', lw=1.5, label='x fit')
-    # _plt.plot(true_z, _np.polyval(cy, true_z), '0.3', lw=1.5, label='y fit')
-    _plt.plot(z_range, mean_sx, ".-", label="x")
-    _plt.plot(z_range, mean_sy, ".-", label="y")
-    _plt.plot(z_range, _np.polyval(cx, z_range), "0.3", lw=1.5, label="x fit")
-    _plt.plot(z_range, _np.polyval(cy, z_range), "0.3", lw=1.5, label="y fit")
-    _plt.xlabel("Stage position")
-    _plt.ylabel("Mean spot width/height")
-    _plt.xlim(z_range.min(), z_range.max())
-    _plt.legend(loc="best")
+    # plt.plot(true_z, locs.sx, '.', label='x', alpha=0.2)
+    # plt.plot(true_z, locs.sy, '.', label='y', alpha=0.2)
+    # plt.plot(true_z, np.polyval(cx, true_z), '0.3', lw=1.5, label='x fit')
+    # plt.plot(true_z, np.polyval(cy, true_z), '0.3', lw=1.5, label='y fit')
+    plt.plot(z_range, mean_sx, ".-", label="x")
+    plt.plot(z_range, mean_sy, ".-", label="y")
+    plt.plot(z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="x fit")
+    plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5, label="y fit")
+    plt.xlabel("Stage position")
+    plt.ylabel("Mean spot width/height")
+    plt.xlim(z_range.min(), z_range.max())
+    plt.legend(loc="best")
 
-    ax = _plt.subplot(232)
-    _plt.scatter(locs.sx, locs.sy, c="k", lw=0, alpha=0.1)
-    _plt.plot(
-        _np.polyval(cx, z_range),
-        _np.polyval(cy, z_range),
+    ax = plt.subplot(232)
+    plt.scatter(locs.sx, locs.sy, c="k", lw=0, alpha=0.1)
+    plt.plot(
+        np.polyval(cx, z_range),
+        np.polyval(cy, z_range),
         lw=1.5,
         label="calibration from fit of mean width/height",
     )
-    _plt.plot()
+    plt.plot()
     ax.set_aspect("equal")
-    _plt.xlabel("Spot width")
-    _plt.ylabel("Spot height")
-    _plt.legend(loc="best")
+    plt.xlabel("Spot width")
+    plt.ylabel("Spot height")
+    plt.legend(loc="best")
 
-    _plt.subplot(233)
-    _plt.plot(locs.z, locs.sx, ".", label="x", alpha=0.2)
-    _plt.plot(locs.z, locs.sy, ".", label="y", alpha=0.2)
-    _plt.plot(z_range, _np.polyval(cx, z_range), "0.3", lw=1.5, label="calibration")
-    _plt.plot(z_range, _np.polyval(cy, z_range), "0.3", lw=1.5)
-    _plt.xlim(z_range.min(), z_range.max())
-    _plt.xlabel("Estimated z")
-    _plt.ylabel("Spot width/height")
-    _plt.legend(loc="best")
+    plt.subplot(233)
+    plt.plot(locs.z, locs.sx, ".", label="x", alpha=0.2)
+    plt.plot(locs.z, locs.sy, ".", label="y", alpha=0.2)
+    plt.plot(z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="calibration")
+    plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5)
+    plt.xlim(z_range.min(), z_range.max())
+    plt.xlabel("Estimated z")
+    plt.ylabel("Spot width/height")
+    plt.legend(loc="best")
 
-    ax = _plt.subplot(234)
-    _plt.plot(z_range[locs.frame], locs.z, ".k", alpha=0.1)
-    _plt.plot(
+    ax = plt.subplot(234)
+    plt.plot(z_range[locs.frame], locs.z, ".k", alpha=0.1)
+    plt.plot(
         [z_range.min(), z_range.max()],
         [z_range.min(), z_range.max()],
         lw=1.5,
         label="identity",
     )
-    _plt.xlim(z_range.min(), z_range.max())
-    _plt.ylim(z_range.min(), z_range.max())
+    plt.xlim(z_range.min(), z_range.max())
+    plt.ylim(z_range.min(), z_range.max())
     ax.set_aspect("equal")
-    _plt.xlabel("Stage position")
-    _plt.ylabel("Estimated z")
-    _plt.legend(loc="best")
+    plt.xlabel("Stage position")
+    plt.ylabel("Estimated z")
+    plt.legend(loc="best")
 
-    ax = _plt.subplot(235)
+    ax = plt.subplot(235)
     deviation = locs.z - z_range[locs.frame]
-    bins = _lib.calculate_optimal_bins(deviation, max_n_bins=1000)
-    _plt.hist(deviation, bins)
-    _plt.xlabel("Deviation to true position")
-    _plt.ylabel("Occurence")
+    bins = lib.calculate_optimal_bins(deviation, max_n_bins=1000)
+    plt.hist(deviation, bins)
+    plt.xlabel("Deviation to true position")
+    plt.ylabel("Occurence")
 
-    ax = _plt.subplot(236)
+    ax = plt.subplot(236)
     square_deviation = deviation**2
     mean_square_deviation_frame = [
-        _np.mean(square_deviation[locs.frame == _]) for _ in frame_range
+        np.mean(square_deviation[locs.frame == _]) for _ in frame_range
     ]
-    rmsd_frame = _np.sqrt(mean_square_deviation_frame)
-    _plt.plot(z_range, rmsd_frame, ".-", color="0.3")
-    _plt.xlim(z_range.min(), z_range.max())
-    _plt.gca().set_ylim(bottom=0)
-    _plt.xlabel("Stage position")
-    _plt.ylabel("Mean z precision")
+    rmsd_frame = np.sqrt(mean_square_deviation_frame)
+    plt.plot(z_range, rmsd_frame, ".-", color="0.3")
+    plt.xlim(z_range.min(), z_range.max())
+    plt.gca().set_ylim(bottom=0)
+    plt.xlabel("Stage position")
+    plt.ylabel("Mean z precision")
 
-    _plt.tight_layout(pad=2)
+    plt.tight_layout(pad=2)
 
     if path is not None:
         dirname = path[0:-5]
-        _plt.savefig(dirname + ".png", format="png", dpi=300)
+        plt.savefig(dirname + ".png", format="png", dpi=300)
 
-    _plt.show()
+    plt.show()
 
     export = False
     # Export
     if export:
         print("Exporting...")
-        _np.savetxt("mean_sx.txt", mean_sx, delimiter="/t")
-        _np.savetxt("mean_sy.txt", mean_sy, delimiter="/t")
-        _np.savetxt("locs_sx.txt", locs.sx, delimiter="/t")
-        _np.savetxt("locs_sy.txt", locs.sy, delimiter="/t")
-        _np.savetxt("cx.txt", cx, delimiter="/t")
-        _np.savetxt("cy.txt", cy, delimiter="/t")
-        _np.savetxt("z_range.txt", z_range, delimiter="/t")
-        _np.savetxt("locs_z.txt", locs.z, delimiter="/t")
-        _np.savetxt("z_range_locs_frame.txt", z_range[locs.frame], delimiter="/t")
-        _np.savetxt("rmsd_frame.txt", rmsd_frame, delimiter="/t")
+        np.savetxt("mean_sx.txt", mean_sx, delimiter="/t")
+        np.savetxt("mean_sy.txt", mean_sy, delimiter="/t")
+        np.savetxt("locs_sx.txt", locs.sx, delimiter="/t")
+        np.savetxt("locs_sy.txt", locs.sy, delimiter="/t")
+        np.savetxt("cx.txt", cx, delimiter="/t")
+        np.savetxt("cy.txt", cy, delimiter="/t")
+        np.savetxt("z_range.txt", z_range, delimiter="/t")
+        np.savetxt("locs_z.txt", locs.z, delimiter="/t")
+        np.savetxt("z_range_locs_frame.txt", z_range[locs.frame], delimiter="/t")
+        np.savetxt("rmsd_frame.txt", rmsd_frame, delimiter="/t")
 
     # np.savetxt('test.out', x, delimiter=',')   # X is an array
     # np.savetxt('test.out', (x,y,z))   # x,y,z equal sized 1D arrays
@@ -216,20 +225,19 @@ def calibrate_z(
     return calibration
 
 
-@_numba.jit(nopython=True, nogil=True)
+@numba.jit(nopython=True, nogil=True)
 def _fit_z_target(
-    z: _np.array, 
-    sx: _np.array, 
-    sy: _np.array, 
-    cx: _np.array, 
-    cy: _np.array,
-) -> _np.array:
+    z: np.array, 
+    sx: np.array, 
+    sy: np.array, 
+    cx: np.array, 
+    cy: np.array,
+) -> np.array:
     """Target function that's to be minimized for fitting the z 
     coordinates given the single-emitter image width and height as well
     as the calibration curve coefficients. It calculates the difference 
     between the square root of the spot width/height and the polynomial 
     fit of the z-axis calibration curve."""
-
     z2 = z * z
     z3 = z * z2
     z4 = z * z3
@@ -260,18 +268,18 @@ def _fit_z_target(
 
 
 def fit_z(
-    locs: _np.recarray, 
+    locs: np.recarray, 
     info: list[dict], 
     calibration: dict, 
     magnification_factor: float, 
     filter: int = 2
-) -> _np.recarray:
-    """Fits z coordinates to the localizations based on the calibration
+) -> np.recarray:
+    """Fit z coordinates to the localizations based on the calibration
     curve coefficients and the single-emitter image width and height.
     
     Parameters
     ----------
-    locs : _np.recarray
+    locs : np.recarray
         Localizations to fit the z-axis calibration curve to.
     info : list of dicts
         Information about the localizations, including the number of 
@@ -291,19 +299,18 @@ def fit_z(
     
     Returns
     -------
-    locs : _np.recarray
+    locs : np.recarray
         Localizations with the fitted z coordinates and their residuals
         (d_zcalib).
     """
-    
-    cx = _np.array(calibration["X Coefficients"])
-    cy = _np.array(calibration["Y Coefficients"])
-    z = _np.zeros_like(locs.x)
-    square_d_zcalib = _np.zeros_like(z)
+    cx = np.array(calibration["X Coefficients"])
+    cy = np.array(calibration["Y Coefficients"])
+    z = np.zeros_like(locs.x)
+    square_d_zcalib = np.zeros_like(z)
     sx = locs.sx
     sy = locs.sy
     for i in range(len(z)):
-        result = _minimize_scalar(
+        result = minimize_scalar(
             _fit_z_target, 
             bounds=[-1000, 1000], # to avoid potential gaps in the calibration curve, credits to Loek Andriessen
             args=(sx[i], sy[i], cx, cy)
@@ -311,27 +318,27 @@ def fit_z(
         z[i] = result.x
         square_d_zcalib[i] = result.fun
     z *= magnification_factor
-    locs = _lib.append_to_rec(locs, z, "z")
-    locs = _lib.append_to_rec(locs, _np.sqrt(square_d_zcalib), "d_zcalib")
-    locs = _lib.ensure_sanity(locs, info)
+    locs = lib.append_to_rec(locs, z, "z")
+    locs = lib.append_to_rec(locs, np.sqrt(square_d_zcalib), "d_zcalib")
+    locs = lib.ensure_sanity(locs, info)
     return filter_z_fits(locs, filter)
 
 
 def fit_z_parallel(
-    locs: _np.recarray, 
+    locs: np.recarray, 
     info: list[dict], 
     calibration: dict, 
     magnification_factor: float, 
     filter: int = 2, 
     asynch: bool = False,
-) -> _np.recarray | list[_futures.Future]:
-    """Fits z coordinates to the localizations based on the calibration
+) -> np.recarray | list[futures.Future]:
+    """Fit z coordinates to the localizations based on the calibration
     curve coefficients and the single-emitter image width and height,
     optionally using multiprocessing.
     
     Parameters
     ----------
-    locs : _np.recarray
+    locs : np.recarray
         Localizations to fit the z-axis calibration curve to.
     info : list of dicts
         Information about the localizations, including the number of 
@@ -356,15 +363,14 @@ def fit_z_parallel(
         
     Returns
     -------
-    locs : _np.recarray or list of _futures.Future
+    locs : np.recarray or list of futures.Future
         If `asynch` is False, returns a recarray of localizations with
         the fitted z coordinates and their residuals (d_zcalib).
         If `asynch` is True, returns a list of futures that can be
         used to retrieve the results asynchronously.
     """
-    
     n_workers = min(
-        60, max(1, int(0.75 * _multiprocessing.cpu_count()))
+        60, max(1, int(0.75 * multiprocessing.cpu_count()))
     ) # Python crashes when using >64 cores
     n_locs = len(locs)
     n_tasks = 100 * n_workers
@@ -372,9 +378,9 @@ def fit_z_parallel(
         int(n_locs / n_tasks + 1) if _ < n_locs % n_tasks else int(n_locs / n_tasks)
         for _ in range(n_tasks)
     ]
-    start_indices = _np.cumsum([0] + spots_per_task[:-1])
+    start_indices = np.cumsum([0] + spots_per_task[:-1])
     fs = []
-    executor = _ProcessPoolExecutor(n_workers)
+    executor = ProcessPoolExecutor(n_workers)
     for i, n_locs_task in zip(start_indices, spots_per_task):
         fs.append(
             executor.submit(
@@ -388,23 +394,23 @@ def fit_z_parallel(
         )
     if asynch:
         return fs
-    with _tqdm(total=n_tasks, unit="task") as progress_bar:
-        for f in _futures.as_completed(fs):
+    with tqdm(total=n_tasks, unit="task") as progress_bar:
+        for f in futures.as_completed(fs):
             progress_bar.update()
     return locs_from_futures(fs, filter=filter)
 
 
 def locs_from_futures(
-    futures: list[_futures.Future], 
+    futures: list[futures.Future], 
     filter: int = 2
-) -> _np.recarray:
-    """Combines the results from a list of futures (i.e., 
+) -> np.recarray:
+    """Combine the results from a list of futures (i.e., 
     multiprocessing results) into a single recarray of localizations
     with fitted z coordinates and their residuals (d_zcalib).
     
     Parameters
     ----------
-    futures : list of _futures.Future
+    futures : list of futures.Future
         List of futures that contain the results of the z fits.
     filter : int, optional
         Filter for the z fits. If set to 0, no filtering is applied.
@@ -413,25 +419,24 @@ def locs_from_futures(
     
     Returns
     -------
-    locs : _np.recarray
+    locs : np.recarray
         Recarray of localizations with the fitted z coordinates and
         their residuals (d_zcalib).
     """
-
     locs = [_.result() for _ in futures]
-    locs = _np.hstack(locs).view(_np.recarray)
+    locs = np.hstack(locs).view(np.recarray)
     return filter_z_fits(locs, filter)
 
 
-def filter_z_fits(locs: _np.recarray, range: int) -> _np.recarray:
-    """Filters the z fits based on the root mean square deviation (RMSD)
-    of the z calibration (d_zcalib residual). If `range` is set to 0, no 
-    filtering is applied. If `range` is greater than 0, the 
+def filter_z_fits(locs: np.recarray, range: int) -> np.recarray:
+    """Filter the z fits based on the root mean square deviation (RMSD)
+    of the z calibration (d_zcalib residual). If `range` is set to 0, no
+    filtering is applied. If `range` is greater than 0, the
     localizations with a RMSD greater than `range` are removed.
 
     Parameters
     ----------
-    locs : _np.recarray
+    locs : np.recarray
         Localizations with fitted z coordinates and their residuals
         (d_zcalib).
     range : int
@@ -442,12 +447,11 @@ def filter_z_fits(locs: _np.recarray, range: int) -> _np.recarray:
 
     Returns
     -------
-    locs : _np.recarray
+    locs : np.recarray
         Recarray of localizations with the fitted z coordinates and
         their residuals (d_zcalib) after filtering.
     """
-
     if range > 0:
-        rmsd = _np.sqrt(_np.nanmean(locs.d_zcalib**2))
+        rmsd = np.sqrt(np.nanmean(locs.d_zcalib**2))
         locs = locs[locs.d_zcalib <= range * rmsd]
     return locs

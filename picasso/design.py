@@ -1,21 +1,21 @@
 """
     picasso.design
-    ~~~~~~~~~~~~~~~~
+    ~~~~~~~~~~~~~~
 
-    Design rectangular rothemund origami (RRO)
+    Design rectangular rothemund origami (RRO).
 
     :author: Maximilian Thomas Strauss, 2016-2018
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 import csv
-from . import io as _io
+
+from . import io
 
 
 def saveInfo(filename: str, info: dict) -> None:
-    """Saves information to a YAML file."""
-    
-    _io.save_info(filename, [info], default_flow_style=True)
+    """Save information to a YAML file."""
+    io.save_info(filename, [info], default_flow_style=True)
 
 
 def convertPlateIndex(plate: list, platename: str) -> list:
@@ -38,7 +38,6 @@ def convertPlateIndex(plate: list, platename: str) -> list:
     """
     # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
     # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
-
     platerow = [
         "A",
         "B",
@@ -124,7 +123,6 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
     """
     # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
     # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE, COLOR]
-
     platerow = [
         "A",
         "B",
@@ -193,7 +191,7 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
 
 
 def readPlate(filename: str) -> list:
-    """Reads a plate file and returns its content as a list of lists.
+    """Read a plate file and returns its content as a list of lists.
 
     Parameters
     ----------
@@ -205,7 +203,6 @@ def readPlate(filename: str) -> list:
     data : list
         A list of lists containing the data from the file.
     """
-
     File = open(filename)
     Reader = csv.reader(File)
     data = list(Reader)
@@ -213,7 +210,7 @@ def readPlate(filename: str) -> list:
 
 
 def savePlate(filename: str, data: list) -> None:
-    """Saves the plate data to a CSV file.
+    """Save the plate data to a CSV file.
 
     Parameters
     ----------
@@ -222,7 +219,6 @@ def savePlate(filename: str, data: list) -> None:
     data : list
         A list of lists containing the plate data to save.
     """
-    
     with open(filename, "w", newline="") as csvfile:
         Writer = csv.writer(
             csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL

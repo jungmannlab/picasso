@@ -1238,7 +1238,8 @@ class Window(QtWidgets.QMainWindow):
             for i in range(0, noexchangecolors):
 
                 if noexchangecolors > 1:
-                    fileName = io.multiple_filenames(fileNameOld, i)
+                    base, ext = os.path.splitext(fileNameOld)
+                    fileName = f"{base}_{i}{ext}"
                     partstruct = struct[:, struct[2, :] == exchangecolors[i]]
                 elif self.concatExchangeEdit.checkState():
                     fileName = fileNameOld

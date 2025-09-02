@@ -1,9 +1,8 @@
-#!/usr/bin/env python
 """
-    ..__main__.py
-    ~~~~~~~~~~~~~~~~
+    __main__.py
+    ~~~~~~~~~~~
 
-    Picasso command line interface
+    Picasso command line interface.
 
     :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss
     :copyright: Copyright (c) 2016-2019 Jungmann Lab, MPI of Biochemistry
@@ -15,8 +14,7 @@ from . import __version__
 
 
 def picasso_logo():
-    """Prints the Picasso logo to the console."""
-
+    """Print the Picasso logo to the console."""
     print("    ____  _____________   __________ ____ ")
     print("   / __ \\/  _/ ____/   | / ___/ ___// __ \\")
     print("  / /_/ // // /   / /| | \\__ \\\\__ \\/ / / /")
@@ -37,7 +35,6 @@ def _average(args: argparse.Namespace) -> None:
     file : list of str
         List of file paths to the localization files to be averaged.
     """
-
     from glob import glob
     from .io import load_locs, NoMetadataFileError
     from picasso.gui import average
@@ -66,7 +63,6 @@ def _hdf2visp(path: str, pixel_size: float) -> None:
     pixel_size : float
         Camera pixel size in nanometers.
     """
-
     from glob import glob
 
     paths = glob(path)
@@ -100,7 +96,6 @@ def _csv2hdf(path: str, pixelsize: float) -> None:
     pixelsize : float
         Camera pixel size in nanometers.
     """
-
     from glob import glob
     from tqdm import tqdm as _tqdm
     import pandas as pd
@@ -195,7 +190,6 @@ def _csv2hdf(path: str, pixelsize: float) -> None:
 
 def _hdf2csv(path: str) -> None:
     """Convert HDF5 localization files to CSV format."""
-
     from glob import glob
     import pandas as pd
     from tqdm import tqdm as _tqdm
@@ -224,7 +218,6 @@ def _hdf2csv(path: str) -> None:
 def _link(files: str, d_max: float, tolerance: float) -> None:
     """Link localizations in HDF5 files, see ``postprocess.link`` for
     details."""
-
     import numpy as _np
     from tqdm import tqdm as _tqdm
     from . import lib as _lib
@@ -300,7 +293,6 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
 def _cluster_combine(files: str) -> None:
     """Combine clusters in HDF5 files. See 
     ``postprocess.cluster_combine`` for details."""
-
     import glob
 
     paths = glob.glob(files)
@@ -322,7 +314,6 @@ def _cluster_combine(files: str) -> None:
 def _cluster_combine_dist(files: str) -> None:
     """Combine clusters in HDF5 files based on distance. See
     ``postprocess.cluster_combine_dist`` for details."""
-
     import glob
 
     paths = glob.glob(files)
@@ -363,7 +354,6 @@ def _clusterfilter(
     maxval : float
         Maximum value for the parameter.
     """
-
     from glob import glob
     from tqdm import tqdm
     import numpy as np
@@ -446,10 +436,9 @@ def _undrift(
     display: bool = True, 
     fromfile: str | None = None,
 ) -> None:
-    """Runs RCC undrifting on the given files. See 
+    """Run RCC undrifting on the given files. See 
     ``postprocess.undrift`` for details. Alternatively, it can read the
     drift .txt file to apply the drift correction."""
-
     import glob
     from . import io, postprocess
     from numpy import genfromtxt, savetxt
@@ -511,9 +500,8 @@ def _undrift_aim(
     intersectdist: float = 20/130, 
     roiradius: float = 60/130
 ) -> None:
-    """Runs AIM undrifting on the given files. See ``aim.aim`` for 
+    """Run AIM undrifting on the given files. See ``aim.aim`` for 
     details."""
-
     import glob
     from . import io, aim
     from numpy import savetxt
@@ -534,7 +522,6 @@ def _undrift_aim(
 def _density(files: str, radius: float) -> None:
     """Compute local density of localizations in HDF5 files. See
     ``postprocess.compute_local_density`` for details."""
-
     import glob
 
     paths = glob.glob(files)
@@ -561,7 +548,6 @@ def _dbscan(
 ) -> None:
     """Run DBSCAN clustering on localizations in HDF5 files. See
     ``clusterer.dbscan`` for details."""
-
     import glob
 
     paths = glob.glob(files)
@@ -597,7 +583,6 @@ def _hdbscan(
 ) -> None:
     """Run HDBSCAN clustering on localizations in HDF5 files. See
     ``clusterer.hdbscan`` for details."""
-
     import glob
 
     paths = glob.glob(files)
@@ -634,7 +619,6 @@ def _smlm_clusterer(
 ) -> None:
     """Run SMLM clustering on localizations in HDF5 files. See
     ``clusterer.cluster`` for details."""
-
     import glob
 
     paths = glob.glob(files)
@@ -675,7 +659,6 @@ def _nneighbor(files: str) -> None:
     text file with the same name as the input file, but with a
     `_minval.txt` suffix. The distances are calculated using the
     Euclidean distance metric."""
-
     import glob
     import h5py as _h5py
     import numpy as np
@@ -701,7 +684,6 @@ def _nneighbor(files: str) -> None:
 def _dark(files: str) -> None:
     """Compute dark times for localizations in HDF5 files. See
     ``postprocess.compute_dark_times`` for details."""
-
     import glob
 
     paths = glob.glob(files)
@@ -718,9 +700,8 @@ def _dark(files: str) -> None:
 
 
 def _align(files: str, display: bool) -> None:
-    """Aligns localization files using RCC, see ``postprocess.align`` 
+    """Align localization files using RCC, see ``postprocess.align`` 
     for details."""
-
     from glob import glob
     from itertools import chain
     from .io import load_locs, save_locs
@@ -744,7 +725,6 @@ def _align(files: str, display: bool) -> None:
 
 def _join(files: list[str], keep_index: bool = True) -> None:
     """Join multiple localization files into one."""
-
     from .io import load_locs, save_locs
     from os.path import splitext
     from numpy import append
@@ -780,7 +760,6 @@ def _join(files: list[str], keep_index: bool = True) -> None:
 def _groupprops(files: str) -> None:
     """Calculate group properties for localizations in HDF5 files.
     See ``postprocess.groupprops`` for details."""
-
     import glob
 
     paths = glob.glob(files)
@@ -799,7 +778,6 @@ def _groupprops(files: str) -> None:
 def _pair_correlation(files: str, bin_size: float, r_max: float) -> None:
     """Calculate pair-correlation for localizations in HDF5 files. See
     ``postprocess.pair_correlation`` for details."""
-
     from glob import glob
 
     paths = glob(files)
@@ -823,7 +801,6 @@ def _pair_correlation(files: str, bin_size: float, r_max: float) -> None:
 
 def _start_server() -> None:
     """Start the Streamlit server for the Picasso GUI."""
-
     import os
     import sys
     from streamlit.web import cli as stcli
@@ -890,7 +867,6 @@ def _nanotron(args: argparse.Namespace) -> None:
     model_pth : str
         Path to the nanoTRON model weights file.
     """
-
     from glob import glob
     from os.path import isdir
     from .io import load_locs, NoMetadataFileError
@@ -946,7 +922,6 @@ def _localize(args: argparse.Namespace) -> None:
     qe : float
         Not used in the calculations.
     """
-
     files = args.files
     from glob import glob
     from .io import load_movie, save_locs, save_info
@@ -1252,7 +1227,6 @@ def _render(args: argparse.Namespace) -> None:
     silent : bool
         If True, the rendered images are not opened automatically.
     """
-
     from .lib import locs_glob_map
     from .render import render
     from os.path import splitext
@@ -1413,11 +1387,6 @@ def _spinna_batch_analysis(
     verbose : bool (default=True)
         If True, progress bar for each row is printed to the console.
     """
-
-    # print(f"asynch: {asynch}")
-    # print(f"bootstrap: {bootstrap}")
-    # print(f"verbose: {verbose}")
-
     import os
     import yaml
     from datetime import datetime

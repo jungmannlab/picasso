@@ -822,7 +822,7 @@ class ViewRotation(QtWidgets.QLabel):
                     index = self.window.dataset_dialog.default_colors.index(
                         color
                         )
-                    colors[i] = tuple(self.window.dataset_dialog.rgbf[index])
+                    colors[i] = tuple(self.window.dataset_dialog.rgb[index])
                 # if hexadecimal is given
                 elif lib.is_hexadecimal(color):
                     colorstring = color.lstrip("#")
@@ -1886,8 +1886,8 @@ class ViewRotation(QtWidgets.QLabel):
     ) -> float:
         """Return optimal oversampling, i.e., the number of display
         pixels per camera pixel."""
-        os_horizontal = self.width(viewport) / self.viewport_width(viewport)
-        os_vertical = self.height(viewport) / self.viewport_height(viewport)
+        os_horizontal = self.width() / self.viewport_width(viewport)
+        os_vertical = self.height() / self.viewport_height(viewport)
         # The values should be identical, but just in case,
         # we choose the maximum value:
         return max(os_horizontal, os_vertical)

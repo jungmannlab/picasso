@@ -12,45 +12,43 @@
     :copyright: Copyright (c) 2016-2024 Jungmann Lab, MPI of Biochemistry
 """
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
-from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
+import numpy as np
+from scipy.interpolate import InterpolatedUnivariateSpline
+from tqdm import tqdm
 
-import numpy as _np
-from scipy.interpolate import InterpolatedUnivariateSpline as \
-    _InterpolatedUnivariateSpline
-from tqdm import tqdm as _tqdm
 from . import __version__
 
 
 def intersect1d(
-    a: _np.ndarray, 
-    b: _np.ndarray,
-) -> tuple[_np.ndarray, _np.ndarray]:
-    """Slightly faster implementation of _np.intersect1d without 
-    unnecessary checks, etc.
-    
-    Finds the indices of common elements in two 1D arrays (a and b). 
-    Both a and b are assumed to be sorted and contain only unique 
+    a: np.ndarray, 
+    b: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Find the indices of common elements in two 1D arrays (a and b). 
+    Both a and b are assumed to be sorted and contain only unique
     values.
+    
+    Slightly faster implementation of ``np.intersect1d`` without 
+    unnecessary checks, etc.
     
     Parameters
     ----------
-    a : _np.ndarray
+    a : np.ndarray
         1D array of integers.
-    b : _np.ndarray
+    b : np.ndarray
         1D array of integers.
     
     Returns
     -------
-    a_indices : _np.ndarray
+    a_indices : np.ndarray
         Indices of common elements in a.
-    b_indices : _np.ndarray
+    b_indices : np.ndarray
         Indices of common elements in b.
     """
-
-    aux = _np.concatenate((a, b))
-    aux_sort_indices = _np.argsort(aux, kind='mergesort')
+    aux = np.concatenate((a, b))
+    aux_sort_indices = np.argsort(aux, kind='mergesort')
     aux = aux[aux_sort_indices]
 
     mask = aux[1:] == aux[:-1]
@@ -61,12 +59,12 @@ def intersect1d(
 
 
 def count_intersections(
-    l0_coords: _np.ndarray, 
-    l0_counts: _np.ndarray, 
-    l1_coords: _np.ndarray, 
-    l1_counts: _np.ndarray,
+    l0_coords: np.ndarray, 
+    l0_counts: np.ndarray, 
+    l1_coords: np.ndarray, 
+    l1_counts: np.ndarray,
 ) -> int:
-    """Counts the number of intersected localizations between the two
+    """Count the number of intersected localizations between the two
     datasets. We assume that the intersection distance is 1 and since 
     the coordinates are expressed in the units of intersection distance,
     we require the coordinates to be exactly the same to count as 
@@ -75,13 +73,13 @@ def count_intersections(
 
     Parameters
     ----------
-    l0_coords : _np.ndarray
+    l0_coords : np.ndarray
         Unique coordinates of the reference localizations.
-    l0_counts : _np.ndarray
+    l0_counts : np.ndarray
         Counts of the unique values of reference localizations.
-    l1_coords : _np.ndarray
+    l1_coords : np.ndarray
         Unique coordinates of the target localizations.
-    l1_counts : _np.ndarray
+    l1_counts : np.ndarray
         Counts of the unique values of target localizations.
     
     Returns
@@ -89,7 +87,6 @@ def count_intersections(
     n_intersections : int
         Number of intersections.
     """
-
     # indices of common elements
     idx0, idx1 = intersect1d(l0_coords, l1_coords) 
     # extract the counts of these elements
@@ -97,50 +94,49 @@ def count_intersections(
     l1_counts_subset = l1_counts[idx1]
     # for each overlapping coordinate, take the minimum count from l0
     # and l1, sum up across all overlapping coordinates
-    n_intersections = _np.sum(
-        _np.minimum(l0_counts_subset, l1_counts_subset)
+    n_intersections = np.sum(
+        np.minimum(l0_counts_subset, l1_counts_subset)
     )
     return n_intersections
 
 
 def run_intersections(
-    l0_coords: _np.ndarray, 
-    l0_counts: _np.ndarray, 
-    l1_coords: _np.ndarray, 
-    l1_counts: _np.ndarray, 
-    shifts_xy: _np.ndarray, 
+    l0_coords: np.ndarray, 
+    l0_counts: np.ndarray, 
+    l1_coords: np.ndarray, 
+    l1_counts: np.ndarray, 
+    shifts_xy: np.ndarray, 
     box: int,
-) -> _np.ndarray:
-    """Run intersection counting across the local search region. Returns
+) -> np.ndarray:
+    """Run intersection counting across the local search region. Return
     the 2D array with number of intersections across the local search
     region.
     
     Parameters
     ----------
-    l0_coords : _np.ndarray
+    l0_coords : np.ndarray
         Unique coordinates of the reference localizations.
-    l0_counts : _np.ndarray
+    l0_counts : np.ndarray
         Counts of the reference localizations.
-    l1_coords : _np.ndarray
+    l1_coords : np.ndarray
         Unique coordinates of the target localizations.
-    l1_counts : _np.ndarray
+    l1_counts : np.ndarray
         Counts of the target localizations.
-    shifts_xy : _np.ndarray
+    shifts_xy : np.ndarray
         1D array with x and y shifts.
     box : int  
         Side length of the local search region.
     
     Returns
     -------
-    roi_cc : _np.ndarray
+    roi_cc : np.ndarray
         2D array with number of intersections across the local search 
         region.
     """
-    
     # create the 2D array with shifts
-    roi_cc = _np.zeros(shifts_xy.shape, dtype=_np.int32)
+    roi_cc = np.zeros(shifts_xy.shape, dtype=np.int32)
     # shift target coordinates
-    l1_coords_shifted = l1_coords[:, _np.newaxis] + shifts_xy
+    l1_coords_shifted = l1_coords[:, np.newaxis] + shifts_xy
     # go through each element in the local search region
     for i in range(len(shifts_xy)):
         n_intersections = count_intersections(
@@ -151,44 +147,43 @@ def run_intersections(
 
 
 def run_intersections_multithread(
-    l0_coords: _np.ndarray, 
-    l0_counts: _np.ndarray, 
-    l1_coords: _np.ndarray, 
-    l1_counts: _np.ndarray, 
-    shifts_xy: _np.ndarray, 
+    l0_coords: np.ndarray, 
+    l0_counts: np.ndarray, 
+    l1_coords: np.ndarray, 
+    l1_counts: np.ndarray, 
+    shifts_xy: np.ndarray, 
     box: int,
-) -> _np.ndarray:
-    """Run intersection counting across the local search region. Returns
+) -> np.ndarray:
+    """Run intersection counting across the local search region. Return
     the 2D array with number of intersections across the local search
     region. Uses multithreading.
     
     Parameters
     ----------
-    l0_coords : _np.ndarray
+    l0_coords : np.ndarray
         Unique coordinates of the reference localizations.
-    l0_counts : _np.ndarray
+    l0_counts : np.ndarray
         Counts of the reference localizations.
-    l1_coords : _np.ndarray
+    l1_coords : np.ndarray
         Unique coordinates of the target localizations.
-    l1_counts : _np.ndarray
+    l1_counts : np.ndarray
         Counts of the target localizations.
-    shifts_xy : _np.ndarray
+    shifts_xy : np.ndarray
         1D array with x and y shifts.
     box : int  
         Side length of the local search region.
     
     Returns
     -------
-    roi_cc : _np.ndarray
+    roi_cc : np.ndarray
         2D array with number of intersections across the local search 
         region.
     """
-    
     # shift target coordinates
-    l1_coords_shifted = l1_coords[:, _np.newaxis] + shifts_xy
+    l1_coords_shifted = l1_coords[:, np.newaxis] + shifts_xy
     # run multiple threads
     n_workers = len(shifts_xy) 
-    executor = _ThreadPoolExecutor(n_workers)
+    executor = ThreadPoolExecutor(n_workers)
     f = [
         executor.submit(
             count_intersections, 
@@ -201,56 +196,55 @@ def run_intersections_multithread(
     ]
     executor.shutdown(wait=True)
     if box == 1: # z intersection only, for z undrifting
-        roi_cc = _np.array([_.result() for _ in f])
+        roi_cc = np.array([_.result() for _ in f])
     else: # 2D intersection
-        roi_cc = _np.array([_.result() for _ in f]).reshape(box, box)
+        roi_cc = np.array([_.result() for _ in f]).reshape(box, box)
     return roi_cc
 
 
 def point_intersect_2d(
-    l0_coords: _np.ndarray, 
-    l0_counts: _np.ndarray, 
-    x1: _np.ndarray, 
-    y1: _np.ndarray, 
+    l0_coords: np.ndarray, 
+    l0_counts: np.ndarray, 
+    x1: np.ndarray, 
+    y1: np.ndarray, 
     intersect_d: float, 
     width_units: int, 
-    shifts_xy: _np.ndarray, 
+    shifts_xy: np.ndarray, 
     box: int,
-) -> _np.ndarray:
-    """Converts target coordinates into a 1D array in units of 
-    intersect_d and counts the number of intersections in the local
+) -> np.ndarray:
+    """Convert target coordinates into a 1D array in units of 
+    ``intersect_d`` and count the number of intersections in the local
     search region.
     
     Parameters
     ----------
-    l0_coords : _np.ndarray
+    l0_coords : np.ndarray
         Unique values of the reference localizations.
-    l0_counts : _np.ndarray
+    l0_counts : np.ndarray
         Counts of the unique values of reference localizations.
-    x1, y1 : _np.ndarray
+    x1, y1 : np.ndarray
         x and y coordinates of the target (currently undrifted) localizations.
     intersect_d : float
         Intersect distance in camera pixels.
     width_units : int 
         Width of the camera image in units of intersect_d.
-    shifts_xy : _np.ndarray
+    shifts_xy : np.ndarray
         1D array with x and y shifts.
     box : int  
         Final side length of the local search region.
     
     Returns
     -------
-    roi_cc : _np.ndarray
+    roi_cc : np.ndarray
         2D array with numbers of intersections in the local search 
         region.
     """
-
     # convert target coordinates to a 1D array in intersect_d units
-    x1_units = _np.round(x1 / intersect_d)
-    y1_units = _np.round(y1 / intersect_d)
-    l1 = _np.int32(x1_units + y1_units * width_units) # 1d list
+    x1_units = np.round(x1 / intersect_d)
+    y1_units = np.round(y1 / intersect_d)
+    l1 = np.int32(x1_units + y1_units * width_units) # 1d list
     # get unique values and counts of the target localizations
-    l1_coords, l1_counts = _np.unique(l1, return_counts=True)
+    l1_coords, l1_counts = np.unique(l1, return_counts=True)
     # run the intersections counting
     roi_cc = run_intersections_multithread(
         l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box
@@ -259,27 +253,27 @@ def point_intersect_2d(
 
 
 def point_intersect_3d(
-    l0_coords: _np.ndarray, 
-    l0_counts: _np.ndarray, 
-    x1: _np.ndarray, 
-    y1: _np.ndarray, 
-    z1: _np.ndarray, 
+    l0_coords: np.ndarray, 
+    l0_counts: np.ndarray, 
+    x1: np.ndarray, 
+    y1: np.ndarray, 
+    z1: np.ndarray, 
     intersect_d: float, 
     width_units: int, 
     height_units: int, 
-    shifts_z: _np.ndarray,
+    shifts_z: np.ndarray,
 ): 
-    """Converts target coordinates into a 1D array in units of 
-    intersect_d and counts the number of intersections in the local
+    """Convert target coordinates into a 1D array in units of 
+    ``intersect_d`` and count the number of intersections in the local
     search region.
     
     Parameters
     ----------
-    l0_coords : _np.ndarray
+    l0_coords : np.ndarray
         Unique values of the reference localizations.
-    l0_counts : _np.ndarray
+    l0_counts : np.ndarray
         Counts of the unique values of reference localizations.
-    x1, y1, z1 : _np.ndarray
+    x1, y1, z1 : np.ndarray
         x, y, and z coordinates of the target (currently undrifted) 
         localizations.
     intersect_d : float
@@ -288,27 +282,26 @@ def point_intersect_3d(
         Width of the camera image in units of intersect_d.
     height_units : int
         Height of the camera image in units of intersect_d.
-    shifts_z : _np.ndarray
+    shifts_z : np.ndarray
         1D array with z shifts.
     
     Returns
     -------
-    roi_cc : _np.ndarray
+    roi_cc : np.ndarray
         2D array with numbers of intersections in the local search 
         region.
     """
-
     # convert target coordinates to a 1D array in intersect_d units
-    x1_units = _np.round(x1 / intersect_d)
-    y1_units = _np.round(y1 / intersect_d)
-    z1_units = _np.round(z1 / intersect_d)
-    l1 = _np.int32(
+    x1_units = np.round(x1 / intersect_d)
+    y1_units = np.round(y1 / intersect_d)
+    z1_units = np.round(z1 / intersect_d)
+    l1 = np.int32(
         x1_units 
         + y1_units * width_units 
         + z1_units * width_units * height_units
     ) # 1d list
     # get unique values and counts of the target localizations
-    l1_coords, l1_counts = _np.unique(l1, return_counts=True)
+    l1_coords, l1_counts = np.unique(l1, return_counts=True)
     # run the intersections counting
     roi_cc = run_intersections_multithread(
         l0_coords, l0_counts, l1_coords, l1_counts, shifts_z, 1
@@ -316,13 +309,13 @@ def point_intersect_3d(
     return roi_cc
 
 
-def get_fft_peak(roi_cc: _np.ndarray, roi_size: int) -> tuple[float, float]:
-    """Estimate the precise sub-pixel position of the peak of roi_cc 
+def get_fft_peak(roi_cc: np.ndarray, roi_size: int) -> tuple[float, float]:
+    """Estimate the precise sub-pixel position of the peak of ``roi_cc`` 
     with FFT.
     
     Parameters
     ----------
-    roi_cc : _np.ndarray
+    roi_cc : np.ndarray
         2D array with numbers of intersections in the local search region.
     roi_size : int
         Size of the local search region.
@@ -334,31 +327,31 @@ def get_fft_peak(roi_cc: _np.ndarray, roi_size: int) -> tuple[float, float]:
     py : float
         Estimated y-coordinate of the peak.
     """
-    
-    fft_values = _np.fft.fft2(roi_cc.T) 
-    ang_x = _np.angle(fft_values[0, 1]) 
-    ang_x = ang_x - 2 * _np.pi * (ang_x > 0) # normalize
+    fft_values = np.fft.fft2(roi_cc.T) 
+    ang_x = np.angle(fft_values[0, 1]) 
+    ang_x = ang_x - 2 * np.pi * (ang_x > 0) # normalize
     px = (
-        _np.abs(ang_x) / (2 * _np.pi / roi_cc.shape[0])
+        np.abs(ang_x) / (2 * np.pi / roi_cc.shape[0])
         - (roi_cc.shape[0] - 1) / 2
     ) # peak in x
     px *= roi_size / roi_cc.shape[0] # convert to intersect_d units
-    ang_y = _np.angle(fft_values[1, 0]) 
-    ang_y = ang_y - 2 * _np.pi * (ang_y > 0) # normalize 
+    ang_y = np.angle(fft_values[1, 0]) 
+    ang_y = ang_y - 2 * np.pi * (ang_y > 0) # normalize 
     py = (
-        _np.abs(ang_y) / (2 * _np.pi / roi_cc.shape[1])
+        np.abs(ang_y) / (2 * np.pi / roi_cc.shape[1])
         - (roi_cc.shape[1] - 1) / 2
     ) # peak in y
     py *= roi_size / roi_cc.shape[1] # convert to intersect_d units
     return px, py
 
 
-def get_fft_peak_z(roi_cc: _np.ndarray, roi_size: int) -> float:
-    """Estimate the precise sub-pixel position of the peak of 1D roi_cc.
+def get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
+    """Estimate the precise sub-pixel position of the peak of 1D 
+    ``roi_cc``.
     
     Parameters
     ----------
-    roi_cc : _np.ndarray
+    roi_cc : np.ndarray
         1D array with numbers of intersections in the local search 
         region.
     roi_size : int
@@ -369,12 +362,11 @@ def get_fft_peak_z(roi_cc: _np.ndarray, roi_size: int) -> float:
     pz : float
         Estimated z-coordinate of the peak.
     """
-
-    fft_values = _np.fft.fft(roi_cc) 
-    ang_z = _np.angle(fft_values[1]) 
-    ang_z = ang_z - 2 * _np.pi * (ang_z > 0) # normalize
+    fft_values = np.fft.fft(roi_cc) 
+    ang_z = np.angle(fft_values[1]) 
+    ang_z = ang_z - 2 * np.pi * (ang_z > 0) # normalize
     pz = (
-        _np.abs(ang_z) / (2 * _np.pi / roi_cc.size)
+        np.abs(ang_z) / (2 * np.pi / roi_cc.size)
         - (roi_cc.size - 1) / 2
     ) # peak in z
     pz *= roi_size / roi_cc.size # convert to intersect_d units
@@ -382,29 +374,29 @@ def get_fft_peak_z(roi_cc: _np.ndarray, roi_size: int) -> float:
 
 
 def intersection_max(
-    x: _np.ndarray, 
-    y: _np.ndarray, 
-    ref_x: _np.ndarray, 
-    ref_y: _np.ndarray,
-    frame: _np.ndarray, 
-    seg_bounds: _np.ndarray, 
+    x: np.ndarray, 
+    y: np.ndarray, 
+    ref_x: np.ndarray, 
+    ref_y: np.ndarray,
+    frame: np.ndarray, 
+    seg_bounds: np.ndarray, 
     intersect_d: float, 
     roi_r: float, 
     width: int,
     aim_round: int = 1,
     progress: Callable[[int], None] | None = None,
-) -> tuple[_np.ndarray, _np.ndarray, _np.ndarray, _np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Maximize intersection (undrift) for 2D localizations.
     
     Parameters
     ----------
-    x, y : _np.ndarray
+    x, y : np.ndarray
         x and y coordinates of the localizations.
-    ref_x_list, ref_y_list : _np.ndarray
+    ref_x_list, ref_y_list : np.ndarray
         x and y coordinates of the reference localizations.
-    frame : _np.ndarray
+    frame : np.ndarray
         Frame indices of localizations.
-    seg_bounds : _np.ndarray
+    seg_bounds : np.ndarray
         Frame indices of the segmentation bounds. Defines temporal 
         intervals used to estimate drift.
     intersect_d : float
@@ -424,16 +416,15 @@ def intersection_max(
     
     Returns
     -------
-    x_pdc : _np.ndarray
+    x_pdc : np.ndarray
         Undrifted x-coordinates.
-    y_pdc : _np.ndarray
+    y_pdc : np.ndarray
         Undrifted y-coordinates.
-    drift_x : _np.ndarray
+    drift_x : np.ndarray
         Drift in x-direction.
-    drift_y : _np.ndarray
+    drift_y : np.ndarray
         Drift in y-direction.
     """
-
     assert aim_round in [1, 2], "aim_round must be 1 or 2."
 
     # number of segments
@@ -442,14 +433,14 @@ def intersection_max(
     rel_drift_y = 0
 
     # drift in x and y
-    drift_x = _np.zeros(n_segments) 
-    drift_y = _np.zeros(n_segments) 
+    drift_x = np.zeros(n_segments) 
+    drift_y = np.zeros(n_segments) 
 
     # find shifts for the local search region (in units of intersect_d)
-    roi_units = int(_np.ceil(roi_r / intersect_d))
-    steps = _np.arange(-roi_units, roi_units + 1, 1)
+    roi_units = int(np.ceil(roi_r / intersect_d))
+    steps = np.arange(-roi_units, roi_units + 1, 1)
     box = len(steps)
-    shifts_xy = _np.zeros((box, box), dtype=_np.int32)
+    shifts_xy = np.zeros((box, box), dtype=np.int32)
     width_units = width / intersect_d
     for i, shift_x in enumerate(steps):
         for j, shift_y in enumerate(steps):
@@ -458,17 +449,17 @@ def intersection_max(
 
     # convert reference to a 1D array in units of intersect_d and find
     # unique values and counts
-    x0_units = _np.round(ref_x / intersect_d)
-    y0_units = _np.round(ref_y / intersect_d)
-    l0 = _np.int32(x0_units + y0_units * width_units) # 1d list
-    l0_coords, l0_counts = _np.unique(l0, return_counts=True)
+    x0_units = np.round(ref_x / intersect_d)
+    y0_units = np.round(ref_y / intersect_d)
+    l0 = np.int32(x0_units + y0_units * width_units) # 1d list
+    l0_coords, l0_counts = np.unique(l0, return_counts=True)
 
     # initialize progress such that if GUI is used, tqdm is omitted
     start_idx = 1 if aim_round == 1 else 0
     if progress is not None:
         iterator = range(start_idx, n_segments)
     else:
-        iterator = _tqdm(
+        iterator = tqdm(
             range(start_idx, n_segments), 
             desc=f"Undrifting ({aim_round}/2)", 
             unit="segment",
@@ -517,9 +508,9 @@ def intersection_max(
 
     # interpolate the drifts (cubic spline) for all frames
     t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
-    drift_x_pol = _InterpolatedUnivariateSpline(t, drift_x, k=3)
-    drift_y_pol = _InterpolatedUnivariateSpline(t, drift_y, k=3)
-    t_inter = _np.arange(seg_bounds[-1]) + 1
+    drift_x_pol = InterpolatedUnivariateSpline(t, drift_x, k=3)
+    drift_y_pol = InterpolatedUnivariateSpline(t, drift_y, k=3)
+    t_inter = np.arange(seg_bounds[-1]) + 1
     drift_x = drift_x_pol(t_inter)
     drift_y = drift_y_pol(t_inter)
 
@@ -531,14 +522,14 @@ def intersection_max(
 
 
 def intersection_max_z(
-    x: _np.ndarray, 
-    y: _np.ndarray, 
-    z: _np.ndarray, 
-    ref_x: _np.ndarray, 
-    ref_y: _np.ndarray, 
-    ref_z: _np.ndarray,
-    frame: _np.ndarray, 
-    seg_bounds: _np.ndarray, 
+    x: np.ndarray, 
+    y: np.ndarray, 
+    z: np.ndarray, 
+    ref_x: np.ndarray, 
+    ref_y: np.ndarray, 
+    ref_z: np.ndarray,
+    frame: np.ndarray, 
+    seg_bounds: np.ndarray, 
     intersect_d: float, 
     roi_r: float, 
     width: int, 
@@ -546,13 +537,12 @@ def intersection_max_z(
     pixelsize: float,
     aim_round: int = 1, 
     progress: Callable[[int], None] | None = None,
-) -> tuple[_np.ndarray, _np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray]:
     """Maximize intersection (undrift) for 3D localizations. Assumes
     that x and y coordinates were already undrifted. x and y are in
     units of camera pixels, z is in nm.
     
-    See intersection_max for more details."""
-
+    See ``intersection_max`` for more details."""
     # convert z to camera pixels
     z = z.copy() / pixelsize
     ref_z = ref_z.copy() / pixelsize #TODO: remember to convert back to nm, also for drift_z
@@ -562,34 +552,34 @@ def intersection_max_z(
     rel_drift_z = 0 # adaptive drift (updated at each interval)
 
     # drift in z
-    drift_z = _np.zeros(n_segments)
+    drift_z = np.zeros(n_segments)
 
     # find shifts for the local search region (in units of intersect_d)
-    roi_units = int(_np.ceil(roi_r / intersect_d))
-    steps = _np.arange(-roi_units, roi_units + 1, 1)
+    roi_units = int(np.ceil(roi_r / intersect_d))
+    steps = np.arange(-roi_units, roi_units + 1, 1)
     box = len(steps)
     width_units = width / intersect_d
     height_units = height / intersect_d
-    shifts_z = steps.astype(_np.int32) * width_units * height_units
+    shifts_z = steps.astype(np.int32) * width_units * height_units
 
     # convert reference to a 1D array in units of intersect_d and find
     # unique values and counts
-    x0_units = _np.round(ref_x / intersect_d)
-    y0_units = _np.round(ref_y / intersect_d)
-    z0_units = _np.round(ref_z / intersect_d)
-    l0 = _np.int32(
+    x0_units = np.round(ref_x / intersect_d)
+    y0_units = np.round(ref_y / intersect_d)
+    z0_units = np.round(ref_z / intersect_d)
+    l0 = np.int32(
         x0_units 
         + y0_units * width_units 
         + z0_units * width_units * height_units
     ) # 1d list
-    l0_coords, l0_counts = _np.unique(l0, return_counts=True) 
+    l0_coords, l0_counts = np.unique(l0, return_counts=True) 
 
     # initialize progress such that if GUI is used, tqdm is omitted
     start_idx = 1 if aim_round == 1 else 0
     if progress is not None:
         iterator = range(start_idx, n_segments)
     else:
-        iterator = _tqdm(
+        iterator = tqdm(
             range(start_idx, n_segments), 
             desc=f"Undrifting z ({aim_round}/2)", 
             unit="segment",
@@ -636,8 +626,8 @@ def intersection_max_z(
 
     # interpolate the drifts (cubic spline) for all frames
     t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
-    drift_z_pol = _InterpolatedUnivariateSpline(t, drift_z, k=3)
-    t_inter = _np.arange(seg_bounds[-1]) + 1
+    drift_z_pol = InterpolatedUnivariateSpline(t, drift_z, k=3)
+    t_inter = np.arange(seg_bounds[-1]) + 1
     drift_z = drift_z_pol(t_inter)
 
     # undrift the localizations
@@ -651,18 +641,18 @@ def intersection_max_z(
 
 
 def aim(
-    locs: _np.recarray, 
+    locs: np.recarray, 
     info: list[dict],
     segmentation: int = 100, 
     intersect_d: float = 20/130, 
     roi_r: float = 60/130,
     progress: Callable[[int], None] | None = None,
-) -> tuple[_np.recarray, list[dict], _np.recarray]:
+) -> tuple[np.recarray, list[dict], np.recarray]:
     """Apply AIM undrifting to the localizations.
 
     Parameters
     ----------
-    locs : _np.recarray
+    locs : np.recarray
         Localizations list to be undrifted.
     info : list of dicts
         Localizations list's metadata.
@@ -675,23 +665,22 @@ def aim(
         larger than the  maximum expected drift within segmentation.
     progress : picasso.lib.ProgressDialog, optional
         Progress dialog. If None, progress is displayed with into the 
-        console.
+        console. Default is None.
     
     Returns
     -------
-    locs : _np.recarray
+    locs : np.recarray
         Undrifted localizations.
     new_info : list of 1 dict
         Updated metadata.
-    drift : _np.recarray
+    drift : np.recarray
         Drift in x and y directions (and z if applicable).
     """
-
     # extract metadata
-    width = _np.nan
-    height = _np.nan
-    pixelsize = _np.nan
-    n_frames = _np.nan
+    width = np.nan
+    height = np.nan
+    pixelsize = np.nan
+    n_frames = np.nan
     for inf in info:
         if val := inf.get("Width"):
             width = val
@@ -701,7 +690,7 @@ def aim(
             n_frames = val - locs["frame"].min()
         if val := inf.get("Pixelsize"):
             pixelsize = val
-    if _np.isnan(width * height * pixelsize * n_frames):
+    if np.isnan(width * height * pixelsize * n_frames):
         raise KeyError(
             "Insufficient metadata available. Please specify 'Width', 'Height',"
             " 'Frames' and 'Pixelsize' in the metadata .yaml."
@@ -711,8 +700,8 @@ def aim(
     frame = locs["frame"] + 1 - locs["frame"].min()
 
     # find the segmentation bounds (temporal intervals)
-    seg_bounds = _np.concatenate((
-        _np.arange(0, n_frames, segmentation), [n_frames]
+    seg_bounds = np.concatenate((
+        np.arange(0, n_frames, segmentation), [n_frames]
     ))
 
     # get the reference localizations (first interval)
@@ -740,15 +729,15 @@ def aim(
     drift_y = drift_y1 + drift_y2
 
     # shift the drifts by the mean value
-    shift_x = _np.mean(drift_x)
-    shift_y = _np.mean(drift_y)
+    shift_x = np.mean(drift_x)
+    shift_y = np.mean(drift_y)
     drift_x -= shift_x
     drift_y -= shift_y
     x_pdc += shift_x
     y_pdc += shift_y
 
     # combine to Picasso format
-    drift = _np.rec.array((drift_x, drift_y), dtype=[("x", "f"), ("y", "f")])
+    drift = np.rec.array((drift_x, drift_y), dtype=[("x", "f"), ("y", "f")])
 
     # 3D undrifting
     if hasattr(locs, "z"):
@@ -770,10 +759,10 @@ def aim(
             aim_round=2, progress=progress,
         )
         drift_z = drift_z1 + drift_z2
-        shift_z = _np.mean(drift_z)
+        shift_z = np.mean(drift_z)
         drift_z -= shift_z
         z_pdc += shift_z
-        drift = _np.rec.array(
+        drift = np.rec.array(
             (drift_x, drift_y, drift_z), 
             dtype=[("x", "f"), ("y", "f"), ("z", "f")]
         )
