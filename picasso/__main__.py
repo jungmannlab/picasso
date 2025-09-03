@@ -1483,7 +1483,10 @@ def _spinna_batch_analysis(
                     raise ValueError(
                         f"Column {col_name} not found in the parameters file."
                     )
-            if f"le_{target}" not in row.index and ("le_fitting" in row.index and row["le_fitting"] == 0):
+            if (
+                f"le_{target}" not in row.index
+                and ("le_fitting" in row.index and row["le_fitting"] == 0)
+            ):
                 raise ValueError(
                     f"Column le_{target} not found in the parameters file."
                 )
@@ -1638,8 +1641,12 @@ def _spinna_batch_analysis(
         # relative proportions of structures for each target
         if len(targets) > 1:
             for target in targets:
+                if isinstance(opt_props, tuple):
+                    opt_props_ = opt_props[0]
+                else:
+                    opt_props_ = opt_props
                 rel_props = mixer.convert_props_for_target(
-                    opt_props, target, n_simulated,
+                    opt_props_, target, n_simulated,
                 )
                 idx_valid = np.where(rel_props != np.inf)[0]
                 value = ", ".join([
