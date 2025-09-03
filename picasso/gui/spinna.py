@@ -2351,10 +2351,12 @@ class SimulationsTab(QtWidgets.QDialog):
     label_unc_spins : list of QtWidgets.QDoubleSpinBox
         Spin boxes for setting label uncertainty (nm) for each target.
     le_box : ScrollableGroupBox
-        Box with spin boxes for setting labelling efficiency (%) for
+        Box with spin boxes for setting labeling efficiency (%) for
         each target.
+    le_fitting_check : QtWidgets.QCheckBox
+        Check box for enabling/disabling fitting of labeling efficiency.
     le_spins : list of QtWidgets.QDoubleSpinBox
-        Spin boxes for setting labelling efficiency (%) for each target.
+        Spin boxes for setting labeling efficiency (%) for each target.
     load_exp_data_box : ScrollableGroupBox
         Box with buttons for loading experimental data.
     load_exp_data_buttons : list of QtWidgets.QPushButton
@@ -2395,7 +2397,7 @@ class SimulationsTab(QtWidgets.QDialog):
     n_total : dict
         Total number of molecules to be simulated for each molecular 
         target, i.e., number of observed molecules divided by the
-        corresponding labelling efficiency.
+        corresponding labeling efficiency.
     prop_str_input : ScrollableGroupBox
         Box for setting the number of structures to be simulated in a 
         single simulation.
@@ -2510,7 +2512,7 @@ class SimulationsTab(QtWidgets.QDialog):
         load_data_layout.addWidget(self.label_unc_box, 1, 0)
 
         self.le_box = lib.ScrollableGroupBox(
-            "Labelling efficiency (%)", layout="form"
+            "labeling efficiency (%)", layout="form"
         )
         load_data_layout.addWidget(self.le_box, 1, 1)
 
@@ -2616,6 +2618,12 @@ class SimulationsTab(QtWidgets.QDialog):
         self.bootstrap_check.setChecked(False)
         fitting_layout.addWidget(self.bootstrap_check, 1, 1)
 
+        self.le_fitting_check = QtWidgets.QCheckBox("Fit labeling efficiency")
+        self.le_fitting_check.setChecked(False)
+        self.le_fitting_check.setVisible(False)
+        self.le_fitting_check.toggled.connect(self.on_le_fitting_toggled)
+        fitting_layout.addWidget(self.le_fitting_check, 1, 2)
+
         self.fit_button = QtWidgets.QPushButton("Find best fitting stoichiometry")
         self.fit_button.released.connect(self.fit_n_str)
         fitting_layout.addWidget(self.fit_button, 2, 0, 1, 3)
@@ -2683,6 +2691,11 @@ class SimulationsTab(QtWidgets.QDialog):
                 "background-color : lightgreen"
             )
             self.fit_results_display.setText("  ")
+            self.le_fitting_check.setChecked(False)
+            if self.check_le_fitting_structures_loaded():
+                self.le_fitting_check.setVisible(True)
+            else:
+                self.le_fitting_check.setVisible(False)
 
     def load_target_names(self) -> None:
         """Load all unique names of molecular targets in 
@@ -2791,6 +2804,15 @@ class SimulationsTab(QtWidgets.QDialog):
             self.depth = depth
             self.depth_button.setText(f"Z range: {depth} nm")
 
+    def on_le_fitting_toggled(self, state: bool) -> None:
+        """If LE fitting box is checked, freeze LE values, else unfreeze
+        them."""
+
+        for le_box in self.le_spins:
+            if state:
+                le_box.setValue(100.0)
+            le_box.setEnabled(not state)
+
     def load_densities_widgets(self) -> None:
         """Load the widgets for inputting observed densities of each
         target."""
@@ -2866,7 +2888,7 @@ class SimulationsTab(QtWidgets.QDialog):
             self.label_unc_spins.append(target_spin)
 
     def load_le_widgets(self) -> None:
-        """Load the widgets to the load labelling efficiency box."""
+        """Load the widgets to the load labeling efficiency box."""
         if not self.structures or not self.targets:
             return
         
@@ -2906,6 +2928,57 @@ class SimulationsTab(QtWidgets.QDialog):
             self.prop_str_input.add_widget(title_spin, row, column + 1)
             self.prop_str_input_spins.append(title_spin)
         self.prop_str_input_spins[0].setValue(100) # set the last value to 100
+
+    def check_le_fitting_structures_loaded(self) -> bool:
+        """Check if the structures loaded can be used for finding LE.
+        
+        This means:
+            * 2 molecular target species loaded.
+            * The structures loaded are: monomer A, monomer B, 
+              heterodimer.
+        
+        Returns
+        -------
+        bool
+            True if structures loaded can be used for finding LE.
+        """
+        # 2 targets are present
+        if len(self.targets) != 2:
+            return False
+        
+        # 3 structures are present
+        if len(self.structures) != 3:
+            return False
+        
+        # search through structures - monomers and heterodimer
+        flag_le_structures = {"A": False, "B": False, "AB": False}
+        target_a = self.targets[0]
+        target_b = self.targets[1]
+        for structure in self.structures:
+            # monomer A?
+            if (
+                len(structure.targets) == 1
+                and structure.targets[0] == target_a
+                and len(structure.x[target_a]) == 1
+            ):
+                flag_le_structures["A"] = True
+            # monomer B?
+            if (
+                len(structure.targets) == 1
+                and structure.targets[0] == target_b
+                and len(structure.x[target_b]) == 1
+            ):
+                flag_le_structures["B"] = True
+            # heterodimer?
+            if (
+                len(structure.targets) == 2
+                and target_a in structure.targets
+                and target_b in structure.targets
+                and len(structure.x[target_a]) == 1
+                and len(structure.x[target_b]) == 1
+            ):
+                flag_le_structures["AB"] = True
+        return all(flag_le_structures.values())
 
     def set_mask_den_stack(self, name: str):
         """Switches self.mask_den_stack to the mask stack or the
@@ -3059,8 +3132,8 @@ class SimulationsTab(QtWidgets.QDialog):
     @check_exp_data_loaded
     @check_search_space_loaded
     def fit_n_str(self) -> None:
-        """Fit the combinations of numbers of structures to the
-        experimental data."""
+        """Find the best fitting combination of numbers of structures to
+        the experimental data."""
         self.mixer = self.setup_mixer(mode='fit')
         if self.mixer is None:
             return
@@ -3156,7 +3229,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
     def display_proportions(self, prop_str: np.ndarray) -> None:
         """Display the proportions of the best fitting numbers of
-        structures."""
+        structures."""  
         # different display if bootstrap results are to be displayed
         # or not
         text = ""
@@ -3166,7 +3239,50 @@ class SimulationsTab(QtWidgets.QDialog):
         else: # single fit, no bootstraping
             for structure, prop in zip(self.structures, prop_str):
                 text = text + f"{structure.title} - {prop:.2f}%, "
-        self.fit_results_display.setText(text[:-2]) # remove the last comma
+        text = text[:-2] # remove last comma and space
+        if self.le_fitting_check.isChecked():
+            # extract the le values based on the recovered proportions
+            props_ = {}
+            target_a = self.targets[0]
+            target_b = self.targets[1]
+            if isinstance(self.opt_props, tuple):
+                opt_props = self.opt_props[0]
+            else:
+                opt_props = self.opt_props
+            for idx, structure in enumerate(self.structures):
+                # monomer A?
+                if (
+                    len(structure.targets) == 1
+                    and structure.targets[0] == target_a
+                    and len(structure.x[target_a]) == 1
+                ):
+                    props_["A"] = opt_props[idx]
+                # monomer B?
+                if (
+                    len(structure.targets) == 1
+                    and structure.targets[0] == target_b
+                    and len(structure.x[target_b]) == 1
+                ):
+                    props_["B"] = opt_props[idx]
+                # heterodimer?
+                if (
+                    len(structure.targets) == 2
+                    and target_a in structure.targets
+                    and target_b in structure.targets
+                    and len(structure.x[target_a]) == 1
+                    and len(structure.x[target_b]) == 1
+                ):
+                    props_["AB"] = opt_props[idx]
+            # we need the proportion of structures, not molecules in 
+            # structures
+            props_["AB"] = props_["AB"] / 2 
+            le_value_a = props_["AB"] / (props_["B"] + props_["AB"]) * 100
+            le_value_b = props_["AB"] / (props_["A"] + props_["AB"]) * 100
+            text += (
+                f"\nLE {self.targets[0]}: {le_value_a:.1f}%,"
+                f" LE {self.targets[1]}: {le_value_b:.1f}%"
+            )
+        self.fit_results_display.setText(text)
 
     def save_fit_results(self) -> None:
         """Save fit results in .txt with all parameters used."""
@@ -3189,7 +3305,7 @@ class SimulationsTab(QtWidgets.QDialog):
         metadata["Label uncertainties (nm)"] = (
             ", ".join([str(_.value()) for _ in self.label_unc_spins])
         )
-        metadata["Labelling efficiencies (%)"] = (
+        metadata["labeling efficiencies (%)"] = (
             ", ".join([str(_.value()) for _ in self.le_spins])
         )
         metadata["Rotations mode"] = (

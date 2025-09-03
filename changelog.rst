@@ -6,6 +6,7 @@ Last change: 29-AUG-2025 MTS
 0.8.3-4
 -------
 - GUI docstrings added in all scripts; cleaned up docstrings in Picasso modules
+- SPINNA - easy fitting of labeling efficiency
 - Design: fix export plates and pipetting schemes
 - Design: set default biotin excess to 25 (previously set to 1)
 - Render by property allows different colormaps
