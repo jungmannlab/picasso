@@ -1320,7 +1320,7 @@ class Structure():
 
 class StructureSimulator():
     """Simulate positions of one structure using CSR, taking into
-    account labelling efficiency and label uncertainty for each
+    account labeling efficiency and label uncertainty for each
     molecular target as well as the number of structures to be
     simulated. Rotates each structure randomly as a rigid body in 2D or
     3D.
@@ -1357,7 +1357,7 @@ class StructureSimulator():
         the order specified in self.structures.targets. Lies in the range
         (0, inf).
     le : float or list of floats
-        Labelling efficiency of each molecular target simulated. Must
+        labeling efficiency of each molecular target simulated. Must
         follow the order specified in self.structures.targets. Lies in the
         range [0, 1].
     mask : np.ndarray
@@ -1375,11 +1375,11 @@ class StructureSimulator():
         targets' names and their positions for a single structure.
     pos : dict
         Simulated positions of all molecular target species, offset by
-        structure centers and label uncertainty (before labelling
+        structure centers and label uncertainty (before labeling
         efficiency).
     pos_obs : dict
         Observed positions of all molecular targets' species (after
-        labelling efficiency).
+        labeling efficiency).
     random_rot_mode : {"3D", "2D", None} (default="2D")
         Mode of random rotation of structures. If "3D", structures are
         rotated randomly in 3D. If "2D", structures are rotated
@@ -1400,7 +1400,7 @@ class StructureSimulator():
     N_structures : int
         Number of structures to be simulated.
     le : float or list of floats
-        Labelling efficiency of each molecular target (nm). Must
+        labeling efficiency of each molecular target (nm). Must
         follow the order specified in self.structures.targets. Lies in
         the range [0, 1].
     label_unc : float or list of floats
@@ -1778,7 +1778,7 @@ class StructureSimulator():
             positions.
         save_obs_mol : bool (default=False)
             Whether or not to save observed positions of molecular
-            targets, i.e., after labelling efficiency correction.
+            targets, i.e., after labeling efficiency correction.
         path_base : str (default=None)
             Path base for saving files. Suffixes are automatically
             generated for each molecular target species.
@@ -1829,7 +1829,7 @@ class StructureSimulator():
             positions.
         obs_mol : bool (default=True)
             Whether or not to save observed positions of molecular
-            targets, i.e., after labelling efficiency correction.
+            targets, i.e., after labeling efficiency correction.
         pixelsize : int (default=130)
             Camera pixel size to be used to save in Picasso format.
             Should be specified if no mask is given. Otherwise, the
@@ -1927,7 +1927,7 @@ class StructureMixer():
     Attributes
     ----------
     label_unc : dict
-        Dictionary with molecular target names as keys and labelling
+        Dictionary with molecular target names as keys and labeling
         uncertainty (due to the probe size) of these targets in nm as
         values. These are used as sigmas of Gaussian distributions
         that are used to shift the coordinates of the molecules. The
@@ -1935,7 +1935,7 @@ class StructureMixer():
         self.structures. Alternatively, "ALL" can be used as the key and
         this will be applied to all molecular targets.
     le : dict
-        Dictionary with molecular target names as keys and labelling
+        Dictionary with molecular target names as keys and labeling
         efficiencies of these targets as values (float between 0 and
         1). The molecular target names given must be the same as in
         self.structures. Alternatively, "ALL" can be used as the key and
@@ -1994,7 +1994,7 @@ class StructureMixer():
         List of structures to be simulated.
     label_unc : dict
         Dictionary with molecular target names as keys and their
-        labelling uncertainties in nm as values.
+        labeling uncertainties in nm as values.
     le : dict
         Dictionary with molecular target names as keys and their
         localisation errors in nm as values.
@@ -2098,9 +2098,9 @@ class StructureMixer():
         """Check if self.label_unc has correct format."""
         if type(self.label_unc) != dict:
             raise TypeError(
-                "Labelling uncertainties must be input as a dictionary.\n"
+                "labeling uncertainties must be input as a dictionary.\n"
                 "Please provide molecular target name(s) as key(s) and"
-                " labelling uncertainties in nm as corresponding values,"
+                " labeling uncertainties in nm as corresponding values,"
                 " e.g.:\n"
                 '{"CD80", 2.3, "PDL1", 1.89}.'
             )
@@ -2109,30 +2109,30 @@ class StructureMixer():
             for label_unc in self.label_unc.values()
         ]):
             raise TypeError(
-                "Labelling uncertainties must be positive numbers."
+                "labeling uncertainties must be positive numbers."
             )
         if not all([label_unc >= 0 for label_unc in self.label_unc.values()]):
             raise ValueError(
-                "Labelling uncertainties must be positive numbers."
+                "labeling uncertainties must be positive numbers."
             )
 
     def check_le(self) -> None:
         """Check if ``self.le`` has correct format."""
         if type(self.le) != dict:
             raise TypeError(
-                "Labelling efficiencies must be input as a dictionary.\n"
+                "labeling efficiencies must be input as a dictionary.\n"
                 "Please provide molecular target name(s) as key(s) and"
-                " labelling efficiencies (between 0.0 and 1.0) as"
+                " labeling efficiencies (between 0.0 and 1.0) as"
                 " corresponding values, e.g.:\n"
                 '{"CD80", 0.53, "PDL1", 0.6}.'
             )
         if not all([isinstance(le, Number) for le in self.le.values()]):
             raise TypeError(
-                "Labelling efficiencies must be floats between zero and one."
+                "labeling efficiencies must be floats between zero and one."
             )
         if not all([0 < le <= 1 for le in self.le.values()]):
             raise ValueError(
-                "Labelling efficiencies must be floats between zero and one."
+                "labeling efficiencies must be floats between zero and one."
             )
 
     def check_mask_and_roi(self) -> None:
@@ -2253,7 +2253,7 @@ class StructureMixer():
         for i, structure in enumerate(self.structures):
             ### get inputs for random distribution
             targets = structure.targets
-            # labelling efficiency
+            # labeling efficiency
             if "ALL" in self.le.keys():
                 le = [self.le["ALL"] for _ in targets]
             else:
@@ -2475,7 +2475,7 @@ class StructureMixer():
             {
                 "Generated by": f"Picasso v{__version__} SPINNA",
                 "Label uncertainty (nm)": label_unc,
-                "Labelling efficiency (%)": int(100 * le),
+                "labeling efficiency (%)": int(100 * le),
                 "Rotations mode": self.random_rot_mode,
             }, # simulation info
         ]
@@ -3187,7 +3187,7 @@ def compare_models(
         target species. Keys specify the species and values are lists
         of floats.
     le : dict
-        Dictionary specifying the labelling efficiency for each
+        Dictionary specifying the labeling efficiency for each
         molecular target species. Keys specify the species and values
         are floats. 
     N_sim : int, optional
@@ -3384,7 +3384,7 @@ def compare_models_given_label_unc(
         Dictionary specifying the label uncertainty for each molecular
         target species. Keys specify the species and values are floats.
     le : dict
-        Dictionary specifying the labelling efficiency for each
+        Dictionary specifying the labeling efficiency for each
         molecular target species. Keys specify the species and values
         are floats. 
     mask_dict : dict, optional

@@ -3,10 +3,13 @@ SPINNA
 
 SPINNA is a module for analyzing the oligomerization of proteins using super-resolution microscopy data. For more information, please refer to the publication `L. A. Masullo, R. Kowalewski, et al. Nature Comm, 2025 <https://doi.org/10.1038/s41467-025-59500-z>`_.
 
+As of Picasso 0.8.4., SPINNA supports labeling efficiency fitting as described in `J. Hellmeier, S. Strauss, et al. Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02242-5>`_. See the "Fitting" section below for instructions.
+
 Overview of the GUI
 -------------------
 
 The GUI consists of three tabs that can be navigated at the top of the screen: 
+
 1. *Structures*: to define the structures used in simulations.
 2. *Simulate*: to simulate any combination of structures with user-defined parameters as well as to fit the proportions of structures to experimental data.
 3. *Mask generation*: to generate masks for simulations with heterogeneous densities of molecular targets.
@@ -15,10 +18,10 @@ Structures tab
 --------------
 
 .. image:: ../docs/spinna_structures_tab.png
-   :scale: 60 %
    :alt: structures_tab
 
 This tab allows the user to define the model structures for SPINNA. The outline of the tab is shown above. Follow these steps to create new structures:
+
 1. Click *Add a new structure* in the *Structures summary box* (top right corner).
 2. Enter the name of the structure in the new dialog and confirm by clicking *OK*.
 3. The structure is now loaded and its name is displayed in the *Preview* box (left panel).
@@ -37,7 +40,6 @@ Simulate tab
 ------------
 
 .. image:: ../docs/spinna_simulate_tab_before_load.png
-   :scale: 60 %
    :alt: simulate_tab_before_load
 
 This tab is used for fitting the SPINNA model (see **Structures tab** above) to experimental data, displaying nearest neighbor distances (NND) and saving simulated molecules that can later be loaded into Picasso: Render. The image above shows the outline of the tab before loading data.
@@ -54,6 +56,7 @@ Fitting
 ~~~~~~~
 
 Within the *Fitting* box:
+
 1. To generate the search space, i.e., the set of stoichiometries tested in SPINNA, click the button *Generate parameter search space* and define the number of simulation repeats and granularity. For more information, see Supplementary Figure 2 in the `SPINNA publication <https://doi.org/10.1038/s41467-025-59500-z>`_.
 2. To save the fitting scores for each tested stoichiometry, tick *Save fitting scores*. The user will be asked to input the name of the resulting .csv file.
 3. To obtain the result’s uncertainty, check the *Bootstrap* box, which will resample from the best fitting model 20 times and rerun SPINNA on the resampled datasets. Note that this will increase the computation time.
@@ -61,8 +64,15 @@ Within the *Fitting* box:
 5. To run SPINNA, click *Find best fitting combination*. The progress dialog will be displayed.
 6. After the fitting is finished, specify the name for saving a fit summary file (.txt). This file includes all the information about the fitting, the parameters and the results. The user may also choose not to save the file by clicking *Cancel* in the dialog. Additionally, the fitted stoichiometry is displayed in the *Single simulation* box and the NND histograms are shown in the *Plotting* box, see image below.
 
+If labeling efficiency values are to be fitted, the user needs to load structures first which consists of:
+
+* Monomer of the reference protein
+* Monomer of the target protein
+* Heterodimer of the reference and target protein
+
+SPINNA will automatically detect if these conditions are met. If so, an extra check box will appear in the *Fitting* box, titled "Fit labeling efficiency". By checking it, LE used for simulations is kept at 100% and the reported fit result will only show the LE values of the reference and target proteins (in practice, which target is named reference or target does not matter and they can be interchanged). Additionally, the saved ``.txt`` file will contain the same information.
+
 .. image:: ../docs/spinna_simulate_tab_after_fit.png
-   :scale: 60 %
    :alt: simulate_tab_after_fit
 
 Single simulation
@@ -85,7 +95,6 @@ Plotting
 - *Plot settings* opens a new dialog that allows the user to show/hide plot legend, adjust the histogram bin size and min. and max. plotted distances, among others, see below.
 
 .. image:: ../docs/spinna_nnd_plot_settings.png
-   :scale: 60 %
    :alt: nnd_plot_settings
 
 If the loaded structures include several molecular target species, several NND histograms are plotted, one for each pair of molecular target species which can be explored by clicking left and right arrows in the *Plotting* box.
@@ -94,7 +103,6 @@ Mask generation tab
 -------------------
 
 .. image:: ../docs/spinna_mask_generation_tab.png
-   :scale: 60 %
    :alt: mask_generation_tab
 
 This tab allows the user to create a density/binary mask capable of recovering the heterogeneous density distribution present in the experimental data. 
@@ -117,6 +125,7 @@ SPINNA can be run directly from the command window to allow fast and efficient b
 - ``-b`` or ``--bootstrap`` switches on the bootstrap mode, i.e., the best fitting model is resampled 20 times and SPINNA is rerun on the resampled datasets. If not specified, the bootstrap mode is off.
 
 Each row in the .csv file will specify parameters for which SPINNA is run. In the file, define the following column names (i.e., the values typed into the first row) as follows:
+
 - *structures_filename* : Path to the file with structures saved (.yaml), see **Structures tab** above.
 - *exp_data_TARGET* : Path to the file with experimental data (.hdf5) for each molecular target species. Each target in the structures must have a corresponding column, for example, *exp_data_EGFR".
 - *le_TARGET* : Labeling efficiency (%) for each molecular target species. 
@@ -139,6 +148,7 @@ For a heterogeneous distribution:
 Optional columns are:
 - *rotation_mode* : Random rotations mode used in analysis. Values must be one of {*3D*, *2D*, *None*}. Default: *3D*.
 - *nn_plotted* : Number of nearest neighbors plotted, default: 4.
+- *le_fitting* : 0 if standard SPINNA is ran, 1 if labeling efficiency fitting is to be performed. Then, 100% LE is used in the pipeline and different output file is saved. If the column is not provided, standard SPINNA is ran.
 
 
 SPINNA in Python

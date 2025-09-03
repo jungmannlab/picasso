@@ -1491,7 +1491,7 @@ def _spinna_batch_analysis(
                     f"Column le_{target} not found in the parameters file."
                 )
 
-            # load label uncertainy and labelling efficiency
+            # load label uncertainy and labeling efficiency
             label_unc[target] = float(row[f"label_unc_{target}"])
             le[target] = float(row[f"le_{target}"]) / 100
 
@@ -1514,7 +1514,7 @@ def _spinna_batch_analysis(
                 ).T
                 dim = 2
 
-            # number of simulated molecules (after labelling efficiency
+            # number of simulated molecules (after labeling efficiency
             # correction)
             n_simulated[target] = int(len(locs) / le[target])
 
@@ -1618,7 +1618,7 @@ def _spinna_batch_analysis(
         results["File location of experimenal data"] = [
             str(row[f"exp_data_{target}"]) for target in targets
         ]
-        results["Labelling efficiency (%)"] = [
+        results["Labeling efficiency (%)"] = [
             le[target] * 100 for target in targets
         ]
         results["Label uncertainty (nm)"] = list(label_unc.values())
