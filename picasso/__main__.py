@@ -1372,6 +1372,12 @@ def _spinna_batch_analysis(
         must be one of {"3D", "2D", "None"}. Default: "2D".
     - "nn_plotted" : Number of nearest neighbors plotted in the NND. 
         Only integer values are accepted. Default: 4.
+    - "le_fitting" : 0 if standard SPINNA is ran, 1 if labeling 
+        efficiency fitting is to be performed. Then, 100% LE is used in 
+        the pipeline and different output file is saved. If the column 
+        is not provided, standard SPINNA is ran. For more details about 
+        the LE fitting, see Hellmeier, Strauss, et al. Nature Methods 
+        2024.
     
     When saving, each analysis run index is used as the prefix for 
     filename, for example, "analysis_run1_fit_summary.txt".
@@ -1471,13 +1477,17 @@ def _spinna_batch_analysis(
         for target in targets:
             for col_name in [
                 f"{_}_{target}" 
-                for _ in ["label_unc", "le", "exp_data"]
+                for _ in ["label_unc", "exp_data"]
             ]:
                 if col_name not in row.index:
                     raise ValueError(
                         f"Column {col_name} not found in the parameters file."
                     )
-            
+            if f"le_{target}" not in row.index and ("le_fitting" in row.index and row["le_fitting"] == 0):
+                raise ValueError(
+                    f"Column le_{target} not found in the parameters file."
+                )
+
             # load label uncertainy and labelling efficiency
             label_unc[target] = float(row[f"label_unc_{target}"])
             le[target] = float(row[f"le_{target}"]) / 100
@@ -1539,7 +1549,13 @@ def _spinna_batch_analysis(
                     )
                 else:
                     mask_paths[target] = row[f"mask_filename_{target}"]
-            
+
+        # if le fitting is ran (see the docstring above), set LE to 100%
+        if "le_fitting" in row.index and row["le_fitting"] == 1:
+            # check that the structures are valid
+
+            le = {target: 1.0 for target in targets}
+
         # generate search space for fitting
         N_structures = spinna.generate_N_structures(
             structures, n_simulated, granularity
@@ -1642,6 +1658,15 @@ def _spinna_batch_analysis(
             elif dim == 3:
                 results["Volume (um^3)"] = volume
                 results["Z range (nm)"] = z_range
+        
+        # if le fitting was ran, output the result
+        if "le_fitting" in row.index and row["le_fitting"] == 1:
+            le_values = spinna.get_le_from_props(structures, opt_props)
+            results["Labeling efficiency fitting"] = (
+                f"LE {targets[0]}: {le_values[targets[0]]:.1f}%,"
+                f" LE {targets[1]}: {le_values[targets[1]]:.1f}%"
+            )
+
         # save .txt with summary of the results
         with open(f"{save_filename}_fit_summary.txt", "w") as f:
             for key, value in results.items():

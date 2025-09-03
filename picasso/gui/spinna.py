@@ -2692,7 +2692,7 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.fit_results_display.setText("  ")
             self.le_fitting_check.setChecked(False)
-            if self.check_le_fitting_structures_loaded():
+            if spinna.check_structures_valid_for_fitting(self.structures):
                 self.le_fitting_check.setVisible(True)
             else:
                 self.le_fitting_check.setVisible(False)
@@ -2928,57 +2928,6 @@ class SimulationsTab(QtWidgets.QDialog):
             self.prop_str_input.add_widget(title_spin, row, column + 1)
             self.prop_str_input_spins.append(title_spin)
         self.prop_str_input_spins[0].setValue(100) # set the last value to 100
-
-    def check_le_fitting_structures_loaded(self) -> bool:
-        """Check if the structures loaded can be used for finding LE.
-        
-        This means:
-            * 2 molecular target species loaded.
-            * The structures loaded are: monomer A, monomer B, 
-              heterodimer.
-        
-        Returns
-        -------
-        bool
-            True if structures loaded can be used for finding LE.
-        """
-        # 2 targets are present
-        if len(self.targets) != 2:
-            return False
-        
-        # 3 structures are present
-        if len(self.structures) != 3:
-            return False
-        
-        # search through structures - monomers and heterodimer
-        flag_le_structures = {"A": False, "B": False, "AB": False}
-        target_a = self.targets[0]
-        target_b = self.targets[1]
-        for structure in self.structures:
-            # monomer A?
-            if (
-                len(structure.targets) == 1
-                and structure.targets[0] == target_a
-                and len(structure.x[target_a]) == 1
-            ):
-                flag_le_structures["A"] = True
-            # monomer B?
-            if (
-                len(structure.targets) == 1
-                and structure.targets[0] == target_b
-                and len(structure.x[target_b]) == 1
-            ):
-                flag_le_structures["B"] = True
-            # heterodimer?
-            if (
-                len(structure.targets) == 2
-                and target_a in structure.targets
-                and target_b in structure.targets
-                and len(structure.x[target_a]) == 1
-                and len(structure.x[target_b]) == 1
-            ):
-                flag_le_structures["AB"] = True
-        return all(flag_le_structures.values())
 
     def set_mask_den_stack(self, name: str):
         """Switches self.mask_den_stack to the mask stack or the
@@ -3242,46 +3191,13 @@ class SimulationsTab(QtWidgets.QDialog):
         text = text[:-2] # remove last comma and space
         if self.le_fitting_check.isChecked():
             # extract the le values based on the recovered proportions
-            props_ = {}
-            target_a = self.targets[0]
-            target_b = self.targets[1]
-            if isinstance(self.opt_props, tuple):
-                opt_props = self.opt_props[0]
-            else:
-                opt_props = self.opt_props
-            for idx, structure in enumerate(self.structures):
-                # monomer A?
-                if (
-                    len(structure.targets) == 1
-                    and structure.targets[0] == target_a
-                    and len(structure.x[target_a]) == 1
-                ):
-                    props_["A"] = opt_props[idx]
-                # monomer B?
-                if (
-                    len(structure.targets) == 1
-                    and structure.targets[0] == target_b
-                    and len(structure.x[target_b]) == 1
-                ):
-                    props_["B"] = opt_props[idx]
-                # heterodimer?
-                if (
-                    len(structure.targets) == 2
-                    and target_a in structure.targets
-                    and target_b in structure.targets
-                    and len(structure.x[target_a]) == 1
-                    and len(structure.x[target_b]) == 1
-                ):
-                    props_["AB"] = opt_props[idx]
-            # we need the proportion of structures, not molecules in 
-            # structures
-            props_["AB"] = props_["AB"] / 2 
-            le_value_a = props_["AB"] / (props_["B"] + props_["AB"]) * 100
-            le_value_b = props_["AB"] / (props_["A"] + props_["AB"]) * 100
-            text += (
-                f"\nLE {self.targets[0]}: {le_value_a:.1f}%,"
-                f" LE {self.targets[1]}: {le_value_b:.1f}%"
+            le_values = spinna.get_le_from_props(
+                self.structures, self.opt_props,
             )
+            text = (
+                f"LE {self.targets[0]}: {le_values[self.targets[0]]:.1f}%,"
+                f" LE {self.targets[1]}: {le_values[self.targets[1]]:.1f}%"
+            ) # only display the information about LE result
         self.fit_results_display.setText(text)
 
     def save_fit_results(self) -> None:
@@ -3353,7 +3269,13 @@ class SimulationsTab(QtWidgets.QDialog):
                 metadata[f"Number of neighbors at fitting ({key})"] = (
                     self.mixer.get_neighbor_counts(t1, t2)
                 )
-            
+
+        # labeling efficiency fitting
+        if self.le_fitting_check.isChecked():
+            metadata["Labeling efficiency fitting"] = (
+                self.fit_results_display.text()
+            )
+
         # save metadata
         out_path = self.structures_path.replace(".yaml", "_fit_summary.txt")
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -3571,7 +3493,7 @@ class SimulationsTab(QtWidgets.QDialog):
             self.current_score = spinna.NND_score(dist_exp, dist_sim)
 
         for i, (t1, t2, _) in enumerate(
-            self.mixer.get_neighbor_idx(duplicate=True)
+        self.mixer.get_neighbor_idx(duplicate=True)
         ):
             # plot simulated distances
             fig, ax = spinna.plot_NN(

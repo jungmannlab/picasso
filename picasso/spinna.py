@@ -3494,3 +3494,125 @@ def compare_models_given_label_unc(
             best_idx = i
             best_props = opt_props
     return best_score, best_idx, best_mixer, best_props
+
+
+def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:
+    """Check if the structures loaded can be used for finding LE.
+    
+    This means:
+        * 2 molecular target species loaded.
+        * The structures loaded are: monomer A, monomer B, 
+            heterodimer.
+    
+    Returns
+    -------
+    bool
+        True if structures loaded can be used for finding LE.
+    """
+    targets = list(set([structure.targets[0] for structure in structures]))
+    # 2 targets are present
+    if len(targets) != 2:
+        return False
+    
+    # 3 structures are present
+    if len(structures) != 3:
+        return False
+    
+    # search through structures - monomers and heterodimer
+    flag_le_structures = {"A": False, "B": False, "AB": False}
+    target_a = targets[0]
+    target_b = targets[1]
+    for structure in structures:
+        # monomer A?
+        if (
+            len(structure.targets) == 1
+            and structure.targets[0] == target_a
+            and len(structure.x[target_a]) == 1
+        ):
+            flag_le_structures["A"] = True
+        # monomer B?
+        if (
+            len(structure.targets) == 1
+            and structure.targets[0] == target_b
+            and len(structure.x[target_b]) == 1
+        ):
+            flag_le_structures["B"] = True
+        # heterodimer?
+        if (
+            len(structure.targets) == 2
+            and target_a in structure.targets
+            and target_b in structure.targets
+            and len(structure.x[target_a]) == 1
+            and len(structure.x[target_b]) == 1
+        ):
+            flag_le_structures["AB"] = True
+    return all(flag_le_structures.values())
+
+
+def get_le_from_props(
+    structures: list[Structure], 
+    opt_props: np.ndarray | tuple[np.ndarray, np.ndarray],
+) -> dict:
+    """Based on the fitted proportions of structures, extract the
+    LE values.
+    
+    Parameters
+    ----------
+    structures : list of Structure
+        List of the structures used for fitting. 
+    opt_props : np.ndarray or tuple
+        Fitted proportions of the structures. If bootstraping was used,
+        the tuple is accepted and only the mean value is used.
+
+    Returns
+    -------
+    le_values : dict
+        Dictionary with LE values for the two targets.
+    
+    Raises
+    ------
+    ValueError
+        If the structures are not valid for fitting. See 
+        ``check_structures_valid_for_fitting`` for details.
+    """
+    if not check_structures_valid_for_fitting(structures):
+        raise ValueError("Invalid structures for fitting.")
+    
+    targets = list(set([structure.targets[0] for structure in structures]))
+    props_ = {}
+    target_a = targets[0]
+    target_b = targets[1]
+    if isinstance(opt_props, tuple):
+        opt_props = opt_props[0]
+    for idx, structure in enumerate(structures):
+        # monomer A?
+        if (
+            len(structure.targets) == 1
+            and structure.targets[0] == target_a
+            and len(structure.x[target_a]) == 1
+        ):
+            props_["A"] = opt_props[idx]
+        # monomer B?
+        if (
+            len(structure.targets) == 1
+            and structure.targets[0] == target_b
+            and len(structure.x[target_b]) == 1
+        ):
+            props_["B"] = opt_props[idx]
+        # heterodimer?
+        if (
+            len(structure.targets) == 2
+            and target_a in structure.targets
+            and target_b in structure.targets
+            and len(structure.x[target_a]) == 1
+            and len(structure.x[target_b]) == 1
+        ):
+            props_["AB"] = opt_props[idx]
+    # we need the proportion of structures, not molecules in 
+    # structures
+    props_["AB"] = props_["AB"] / 2 
+    le_values = {
+        target_a: props_["AB"] / (props_["B"] + props_["AB"]) * 100,
+        target_b: props_["AB"] / (props_["A"] + props_["AB"]) * 100,
+    }
+    return le_values
