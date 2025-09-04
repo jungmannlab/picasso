@@ -37,6 +37,8 @@ INITIAL_REL_MAXIMUM = 2.0
 ZOOM = 10 / 7
 N_GROUP_COLORS = 8
 
+print("Deprecation Warning: The module 'average3' is deprecated and will be removed in version 1.0. Please consider using alternative tools for 3D averaging.")
+
 
 @numba.jit(nopython=True, nogil=True)
 def render_hist(x, y, oversampling, t_min, t_max):
