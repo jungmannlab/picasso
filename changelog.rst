@@ -1,12 +1,17 @@
 Changelog
 =========
 
-Last change: 29-AUG-2025 MTS
+Last change: 05-SEP-2025 MTS
 
-0.8.3-4
--------
-- GUI docstrings added in all scripts; cleaned up docstrings in Picasso modules
+0.8.4
+-----
 - SPINNA - easy fitting of labeling efficiency
+- GUI docstrings added in all scripts; cleaned up docstrings in Picasso modules
+- Render: pick size chosen in nm, not camera pixels
+- Other bug fixes and code clean up
+
+0.8.3
+-----
 - Design: fix export plates and pipetting schemes
 - Design: set default biotin excess to 25 (previously set to 1)
 - Render by property allows different colormaps
@@ -166,14 +171,8 @@ Last change: 29-AUG-2025 MTS
 - NeNA can be calculated many times
 - Bug fixes
 
-0.5.1-4
+0.5.0-4
 -------
-- Sensitivity is a float number in Server: Watcher
-- One-click-installer available
-- Bug fixes
-
-0.5.0
------
 - 3D rendering rotation window
 - Multiple .hdf5 files can be loaded when using File->Open
 - Localizations can be combined when saving
@@ -194,11 +193,12 @@ Last change: 29-AUG-2025 MTS
 - New file format in Localize - .nd2 
 - Localize can read NDTiffStack.tif files
 - Docstrings for Render
+- Sensitivity is a float number in Server: Watcher
 - `Plugins <https://picassosr.readthedocs.io/en/latest/plugins.html>`_ can be added to all Picasso modules
 - Many other improvements, bug fixes, etc.
 
 
-0.4.6-10
+0.4.6-11
 --------
 - Logging for Watcher of Picasso Server
 - Mode for multiple parameter groups for Watcher

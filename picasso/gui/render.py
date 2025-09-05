@@ -2224,10 +2224,15 @@ class TestClustererDialog(QtWidgets.QDialog):
         """Check if region of interest has changed since the last 
         rendering."""
         pick = self.window.view._picks[0]
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if self.window.tools_settings_dialog.pick_shape == "Circle":
-            pick_size = self.window.tools_settings_dialog.pick_diameter.value()
+            pick_size = (
+                self.window.tools_settings_dialog.pick_diameter.value()
+            ) / pixelsize
         else:
-            pick_size = self.window.tools_settings_dialog.pick_width.value()
+            pick_size = (
+                self.window.tools_settings_dialog.pick_width.value()
+            ) / pixelsize
         if pick != self.pick or pick_size != self.pick_size:
             self.pick = pick
             self.pick_size = pick_size
@@ -3513,12 +3518,12 @@ class PickToolCircleSettings(QtWidgets.QWidget):
         super().__init__()
         self.grid = QtWidgets.QGridLayout(self)
         self.window = window
-        self.grid.addWidget(QtWidgets.QLabel("Diameter (cam. pixel):"), 0, 0)
+        self.grid.addWidget(QtWidgets.QLabel("Diameter (nm):"), 0, 0)
         self.pick_diameter = QtWidgets.QDoubleSpinBox()
-        self.pick_diameter.setRange(0.001, 999999)
-        self.pick_diameter.setValue(1)
-        self.pick_diameter.setSingleStep(0.1)
-        self.pick_diameter.setDecimals(3)
+        self.pick_diameter.setRange(0.1, 99999999)
+        self.pick_diameter.setValue(100.)
+        self.pick_diameter.setSingleStep(5.)
+        self.pick_diameter.setDecimals(1)
         self.pick_diameter.setKeyboardTracking(False)
         self.pick_diameter.valueChanged.connect(
             tools_settings_dialog.on_pick_dimension_changed
@@ -3546,12 +3551,12 @@ class PickToolRectangleSettings(QtWidgets.QWidget):
         super().__init__()
         self.window = window
         self.grid = QtWidgets.QGridLayout(self)
-        self.grid.addWidget(QtWidgets.QLabel("Width (cam. pixel):"), 0, 0)
+        self.grid.addWidget(QtWidgets.QLabel("Width (nm):"), 0, 0)
         self.pick_width = QtWidgets.QDoubleSpinBox()
-        self.pick_width.setRange(0.001, 999999)
-        self.pick_width.setValue(1)
-        self.pick_width.setSingleStep(0.1)
-        self.pick_width.setDecimals(3)
+        self.pick_width.setRange(0.1, 99999999.)
+        self.pick_width.setValue(100.)
+        self.pick_width.setSingleStep(5.)
+        self.pick_width.setDecimals(1)
         self.pick_width.setKeyboardTracking(False)
         self.pick_width.valueChanged.connect(
             tools_settings_dialog.on_pick_dimension_changed
@@ -3571,11 +3576,12 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
     pick_annotation : QCheckBox
         Tick to display picks' indeces.
     pick_diameter : QDoubleSpinBox
-        Contains the diameter of circular picks (camera pixels).
+        Contains the diameter of circular picks (nm)).
     pick_shape : QComboBox
-        Contains the str with the shape of picks (circle or rectangle).
+        Contains the str with the shape of picks (circle, rectangle or
+        polygon).
     pick_width : QDoubleSpinBox
-        Contains the width of rectangular picks (camera pixels).
+        Contains the width of rectangular picks (nm).
     point_picks : QCheckBox
         Tick to display circular picks as 3-pixels-wide points.
     """
@@ -5724,6 +5730,7 @@ class View(QtWidgets.QLabel):
         """
         image = image.copy()
         t_dialog = self.window.tools_settings_dialog
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         # draw circular picks
         if self._pick_shape == "Circle":
@@ -5752,7 +5759,7 @@ class View(QtWidgets.QLabel):
 
             # draw circles
             else:
-                d = t_dialog.pick_diameter.value()
+                d = t_dialog.pick_diameter.value() / pixelsize
                 d *= self.width() / self.viewport_width()
                 d = int(d)
 
@@ -5778,7 +5785,7 @@ class View(QtWidgets.QLabel):
 
         # draw rectangular picks
         elif self._pick_shape == "Rectangle":
-            w = t_dialog.pick_width.value()
+            w = t_dialog.pick_width.value() / pixelsize
             w *= self.width() / self.viewport_width()
 
             painter = QtGui.QPainter(image)
@@ -5868,7 +5875,8 @@ class View(QtWidgets.QLabel):
             self.rectangle_pick_current_y,
         )
 
-        w = self.window.tools_settings_dialog.pick_width.value()
+        px = self.window.display_settings_dlg.pixelsize.value()
+        w = self.window.tools_settings_dialog.pick_width.value() / px
 
         # convert from camera units to display units
         w *= self.width() / self.viewport_width()
@@ -6220,10 +6228,11 @@ class View(QtWidgets.QLabel):
             if pick_no >= len(self._picks):
                 raise ValueError("Pick number provided too high")
             else: # calculate new viewport
+                pixelsize = self.window.display_settings_dlg.pixelsize.value()
                 if self._pick_shape == "Circle":
                     r = (
                         self.window.tools_settings_dialog.pick_diameter.value()
-                        / 2
+                        / 2 / pixelsize
                     )
                     x, y = self._picks[pick_no]
                     x_min = x - 1.4 * r
@@ -6234,7 +6243,10 @@ class View(QtWidgets.QLabel):
                     (xs, ys), (xe, ye) = self._picks[pick_no]
                     xc = np.mean([xs, xe])
                     yc = np.mean([ys, ye])
-                    w = self.window.tools_settings_dialog.pick_width.value()
+                    w = (
+                        self.window.tools_settings_dialog.pick_width.value() 
+                        / pixelsize
+                    )
                     X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, w)
                     x_min = min(X) - (0.2 * (xc - min(X)))
                     x_max = max(X) + (0.2 * (max(X) - xc))
@@ -6531,12 +6543,12 @@ class View(QtWidgets.QLabel):
         if loaded_shape == "Circle":
             self._picks = regions["Centers"]
             self.window.tools_settings_dialog.pick_diameter.setValue(
-                regions["Diameter"]
+                regions["Diameter (nm)"]
             )
         elif loaded_shape == "Rectangle":
             self._picks = regions["Center-Axis-Points"]
             self.window.tools_settings_dialog.pick_width.setValue(
-                regions["Width"]
+                regions["Width (nm)"]
             )
         elif loaded_shape == "Polygon":
             self._picks = regions["Vertices"]
@@ -6589,7 +6601,7 @@ class View(QtWidgets.QLabel):
 
             self.update_pick_info_short()
             self.window.tools_settings_dialog.pick_diameter.setValue(
-                regions["Diameter"]
+                regions["Diameter (nm)"]
             )
             self.update_scene(picks_only=True)
 
@@ -7102,7 +7114,8 @@ class View(QtWidgets.QLabel):
             n_channels = len(self.locs_paths)
             colors = lib.get_colors(n_channels)
             tools_dialog = self.window.tools_settings_dialog
-            r = tools_dialog.pick_diameter.value() / 2
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            r = tools_dialog.pick_diameter.value() / 2 / pixelsize
             if channel is (len(self.locs_paths)):
                 all_picked_locs = []
                 for k in range(len(self.locs_paths)):
@@ -7504,7 +7517,7 @@ class View(QtWidgets.QLabel):
                     d = self.window.tools_settings_dialog.pick_diameter.value()
                     pick_info = {
                         "Generated by:": f"Picasso v{__version__} Render",
-                        "Pick Diameter:": d,
+                        "Pick Diameter (nm):": d,
                     }
                     io.save_locs(
                         path, saved_locs, self.infos[channel] + [pick_info]
@@ -7571,7 +7584,7 @@ class View(QtWidgets.QLabel):
             locs = self.all_locs[channel]
             info = self.infos[channel]
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            r = d / 2
+            r = d / 2 / self.window.display_settings_dlg.pixelsize.value()
             # index locs in a grid
             index_blocks = self.get_index_blocks(channel)
 
@@ -7678,7 +7691,7 @@ class View(QtWidgets.QLabel):
             locs = self.all_locs[channel]
         info = self.infos[channel]
         d = self.window.tools_settings_dialog.pick_diameter.value()
-        size = d / 2
+        size = d / 2 / self.window.display_settings_dlg.pixelsize.value()
         status = lib.StatusDialog("Indexing localizations...", self.window)
         index_blocks = postprocess.get_index_blocks(
             locs, info, size
@@ -7706,13 +7719,14 @@ class View(QtWidgets.QLabel):
         areas : np.ndarray
             Areas of all picks.
         """
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            r = d / 2
+            r = d / 2 / pixelsize
             # no need for repeating, same area for all picks
             areas = np.array([np.pi * r ** 2]) # list for consistency
         elif self._pick_shape == "Rectangle":
-            w = self.window.tools_settings_dialog.pick_width.value()
+            w = self.window.tools_settings_dialog.pick_width.value() / pixelsize
             areas = lib.pick_areas_rectangle(self._picks, w)
         elif self._pick_shape == "Polygon":
             areas = lib.pick_areas_polygon(self._picks)
@@ -7740,6 +7754,7 @@ class View(QtWidgets.QLabel):
         locs = self.all_locs[channel]
         info = self.infos[channel]
         picks, box = imageprocess.find_fiducials(locs, info)
+        box *= self.window.display_settings_dlg.pixelsize.value()
 
         if len(picks) == 0:
             message = "No fiducials found, manual picking is required."
@@ -7770,7 +7785,7 @@ class View(QtWidgets.QLabel):
         if channel is not None:
             info = self.infos[channel]
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            r = d / 2
+            r = d / 2 / self.window.display_settings_dlg.pixelsize.value()
             d2 = d ** 2
             std_range = (
                 self.window.tools_settings_dialog.pick_similar_range.value()
@@ -7868,11 +7883,14 @@ class View(QtWidgets.QLabel):
                 locs = self.all_locs[channel].copy()
 
             # find pick size (radius or width)
+            px = self.window.display_settings_dlg.pixelsize.value()
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
-                pick_size = d / 2
+                pick_size = d / 2 / px
             elif self._pick_shape == "Rectangle":
-                pick_size = self.window.tools_settings_dialog.pick_width.value()
+                pick_size = (
+                    self.window.tools_settings_dialog.pick_width.value() / px
+                )
             else:
                 pick_size = None
     
@@ -7899,16 +7917,19 @@ class View(QtWidgets.QLabel):
 
         x, y = position
         new_picks = [] # picks to be kept
+        px = self.window.display_settings_dlg.pixelsize.value()
         if self._pick_shape == "Circle":
             pick_diameter_2 = (
-                self.window.tools_settings_dialog.pick_diameter.value() ** 2
+                (
+                    self.window.tools_settings_dialog.pick_diameter.value() / px
+                ) ** 2
             )
             for x_, y_ in self._picks:
                 d2 = (x - x_) ** 2 + (y - y_) ** 2
                 if d2 > pick_diameter_2:
                     new_picks.append((x_, y_))
         elif self._pick_shape == "Rectangle":
-            width = self.window.tools_settings_dialog.pick_width.value()
+            width = self.window.tools_settings_dialog.pick_width.value() / px
             x = np.array([x])
             y = np.array([y])
             for pick in self._picks:
@@ -8348,14 +8369,14 @@ class View(QtWidgets.QLabel):
             }
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
-                pick_info["Pick Diameter"] = d
+                pick_info["Pick Diameter (nm)"] = d
                 # correct for the total area
                 pick_info["Area (um^2)"] = (
                     pick_info["Area (um^2)"] * len(self._picks)
                 )
             elif self._pick_shape == "Rectangle":
                 w = self.window.tools_settings_dialog.pick_width.value()
-                pick_info["Pick Width"] = w
+                pick_info["Pick Width (nm)"] = w
             # if polygon pick and the last not closed, ignore the last pick
             elif (
                 self._pick_shape == "Polygon" 
@@ -8390,14 +8411,14 @@ class View(QtWidgets.QLabel):
                 }
                 if self._pick_shape == "Circle":
                     d = self.window.tools_settings_dialog.pick_diameter.value()
-                    pick_info["Pick Diameter"] = d
+                    pick_info["Pick Diameter (nm)"] = d
                     # correct for the total area
                     pick_info["Area (um^2)"] = (
                         pick_info["Area (um^2)"] * len(self._picks)
                     )
                 elif self._pick_shape == "Rectangle":
                     w = self.window.tools_settings_dialog.pick_width.value()
-                    pick_info["Pick Width"] = w
+                    pick_info["Pick Width (nm)"] = w
                 # if polygon pick and the last not closed, ignore the last pick
                 elif (
                     self._pick_shape == "Polygon" 
@@ -8444,10 +8465,10 @@ class View(QtWidgets.QLabel):
             }
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
-                pick_info["Pick Diameter"] = d
+                pick_info["Pick Diameter (nm)"] = d
             elif self._pick_shape == "Rectangle":
                 w = self.window.tools_settings_dialog.pick_width.value()
-                pick_info["Pick Width"] = w
+                pick_info["Pick Width (nm)"] = w
             io.save_locs(path, locs, self.infos[0] + [pick_info])
 
     def save_picked_locs_multi_sep(self, path: str) -> None:
@@ -8483,14 +8504,14 @@ class View(QtWidgets.QLabel):
                 }
                 if self._pick_shape == "Circle":
                     d = self.window.tools_settings_dialog.pick_diameter.value()
-                    pick_info["Pick Diameter"] = d
+                    pick_info["Pick Diameter (nm)"] = d
                     # correct for the total area
                     pick_info["Area (um^2)"] = (
                         pick_info["Area (um^2)"] * len(self._picks)
                     )
                 elif self._pick_shape == "Rectangle":
                     w = self.window.tools_settings_dialog.pick_width.value()
-                    pick_info["Pick Width"] = w
+                    pick_info["Pick Width (nm)"] = w
                 # if polygon pick and the last not closed, ignore the last pick
                 elif (
                     self._pick_shape == "Polygon" 
@@ -8518,7 +8539,8 @@ class View(QtWidgets.QLabel):
         """
         picked_locs = self.picked_locs(channel)
         pick_diameter = self.window.tools_settings_dialog.pick_diameter.value()
-        r_max = min(pick_diameter, 1)
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        r_max = min(pick_diameter / pixelsize, 1)
         max_dark = self.window.info_dialog.max_dark_time.value()
         out_locs = []
         progress = lib.ProgressDialog(
@@ -8582,11 +8604,11 @@ class View(QtWidgets.QLabel):
         picks = {}
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
-            picks["Diameter"] = float(d)
+            picks["Diameter (nm)"] = float(d)
             picks["Centers"] = [[float(_[0]), float(_[1])] for _ in self._picks]
         elif self._pick_shape == "Rectangle":
             w = self.window.tools_settings_dialog.pick_width.value()
-            picks["Width"] = float(w)
+            picks["Width (nm)"] = float(w)
             picks["Center-Axis-Points"] = [
                 [
                     [float(s[0]), float(s[1])], 
@@ -9377,7 +9399,7 @@ class View(QtWidgets.QLabel):
             if self._pick_shape == "Circle": # circle
                 diameter = (
                     self.window.tools_settings_dialog.pick_diameter.value()
-                )
+                ) / self.window.display_settings_dlg.pixelsize.value()
                 diameter = int(self.width() * diameter / self.viewport_width())
                 # remote desktop crashes sometimes for high diameter
                 if diameter < 100:
@@ -9427,6 +9449,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel("Calculate pick info")
         if channel is not None:
             d = self.window.tools_settings_dialog.pick_diameter.value()
+            d /= self.window.display_settings_dlg.pixelsize.value()
             t = self.window.info_dialog.max_dark_time.value()
             r_max = min(d, 1)
             info = self.infos[channel]
@@ -11139,11 +11162,11 @@ class Window(QtWidgets.QMainWindow):
                 self.view._pick_shape = self.view.infos[0][-1]["Pick shape"]
                 if self.view._pick_shape == "Circle":
                     self.tools_settings_dialog.pick_diameter.setValue(
-                        self.view.infos[0][-1]["Pick size"]
+                        self.view.infos[0][-1]["Pick size (nm)"]
                     )
                 else:
                     self.tools_settings_dialog.pick_width.setValue(
-                        self.view.infos[0][-1]["Pick size"]
+                        self.view.infos[0][-1]["Pick size (nm)"]
                     )
                 self.window_rot.view_rot.angx = self.view.infos[0][-1]["angx"]
                 self.window_rot.view_rot.angy = self.view.infos[0][-1]["angy"]
