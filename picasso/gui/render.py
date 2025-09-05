@@ -2913,7 +2913,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.n_localizations_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_localizations_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("RMSD to COM:"), row, 0)
+        self.picks_grid.addWidget(QtWidgets.QLabel("RMSD to COM (nm):"), row, 0)
         self.rmsd_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_mean, row, 1)
         self.rmsd_std = QtWidgets.QLabel()
@@ -9451,6 +9451,7 @@ class View(QtWidgets.QLabel):
             d = self.window.tools_settings_dialog.pick_diameter.value()
             d /= self.window.display_settings_dlg.pixelsize.value()
             t = self.window.info_dialog.max_dark_time.value()
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
             r_max = min(d, 1)
             info = self.infos[channel]
             picked_locs = self.picked_locs(channel)
@@ -9474,7 +9475,7 @@ class View(QtWidgets.QLabel):
                     com_y = np.mean(locs.y)
                     rmsd[i] = np.sqrt(
                         np.mean((locs.x - com_x) ** 2 + (locs.y - com_y) ** 2)
-                    )
+                    ) * pixelsize
                     if has_z:
                         rmsd_z[i] = np.sqrt(
                             np.mean((locs.z - np.mean(locs.z)) ** 2)
