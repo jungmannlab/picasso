@@ -522,14 +522,10 @@ class ParametersDialog(QtWidgets.QDialog):
 
     Attributes
     ----------
-    astig_label : QtWidgets.QLabel
-        Label for displaying astigmatism information (3D fitting).
     baseline : QtWidgets.QDoubleSpinBox
         Spin box for selecting camera baseline (background amplitude).
     box_spinbox : OddSpinBox
         Spin box for selecting the box size.
-    calib_astig_checkbox : QtWidgets.QCheckBox
-        Checkbox for enabling/disabling calibration for astigmatism.
     camera : QtWidgets.QComboBox
         Combo box for selecting the camera.
     cam_combos : CamSettingComboBoxDict
@@ -767,7 +763,8 @@ class ParametersDialog(QtWidgets.QDialog):
         photon_grid.addWidget(self.sensitivity, 2, 1)
 
         # QE
-        photon_grid.addWidget(QtWidgets.QLabel("Quantum Efficiency:"), 3, 0)
+        qe_label = QtWidgets.QLabel("Quantum Efficiency:")
+        photon_grid.addWidget(qe_label, 3, 0)
         self.qe = QtWidgets.QDoubleSpinBox()
         self.qe.setRange(0, 1)
         self.qe.setValue(1)
@@ -877,27 +874,6 @@ class ParametersDialog(QtWidgets.QDialog):
                     and "Sensitivity Categories" in camera_config
                 ):
                     self.update_sensitivity()
-
-        astig_groupbox = QtWidgets.QGroupBox("Astigmatism-Correction")
-        vbox.addWidget(astig_groupbox)
-        astig_grid = QtWidgets.QGridLayout(astig_groupbox)
-        load_astig_calib = QtWidgets.QPushButton("Load correction")
-        load_astig_calib.setAutoDefault(False)
-        load_astig_calib.clicked.connect(self.load_astig_calib)
-
-        astig_groupbox.setVisible(False)
-
-        astig_grid.addWidget(load_astig_calib, 1, 1)
-        self.calib_astig_checkbox = QtWidgets.QCheckBox("Correct Astigmatism")
-        self.calib_astig_checkbox.setEnabled(False)
-
-        astig_grid.addWidget(self.calib_astig_checkbox, 3, 1)
-        self.astig_label = QtWidgets.QLabel("-- no calibration loaded --")
-        self.astig_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.astig_label.setSizePolicy(
-            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed
-        )
-        astig_grid.addWidget(self.astig_label, 1, 0)
 
         # Sample quality
         quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
@@ -1017,21 +993,6 @@ class ParametersDialog(QtWidgets.QDialog):
         self.q_worker.progressMade.connect(self.quality_progress)
         self.q_worker.finished.connect(self.quality_progress_finished)
         self.q_worker.start()
-
-    def load_astig_calib(self) -> None:
-        """Load the astigmatism calibration from a user-selected YAML
-        file."""
-        path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load astigmatism calibration", directory=None, filter="*.pkl"
-        )
-        if path:
-            with open(path, "r") as f:
-                # self.astig_calibration = yaml.load(f)
-                self.astig_calibration_path = path
-            self.astig_label.setAlignment(QtCore.Qt.AlignRight)
-            self.astig_label.setText(os.path.basename(path))
-            self.calib_astig_checkbox.setEnabled(True)
-            self.calib_astig_checkbox.setChecked(True)
 
     def on_box_changed(self) -> None:
         """Handle changes to the parameter boxes."""
@@ -2129,8 +2090,6 @@ class Window(QtWidgets.QMainWindow):
             ] = self.parameters_dialog.z_calibration_path
             localize_info["Z Calibration"] = self.parameters_dialog.z_calibration
         info = self.info + [localize_info | self.camera_info]
-        if self.parameters_dialog.calib_astig_checkbox.isChecked():
-            print("Correcting astigmatism...")
 
         io.save_locs(path, self.locs, info)
 
