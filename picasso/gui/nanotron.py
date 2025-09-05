@@ -799,6 +799,13 @@ class train_dialog(QtWidgets.QDialog):
             if "Pick Diameter" in file:
                 diameter = info[num]["Pick Diameter"]
                 radius = diameter / 2
+            if "Pick Diameter (nm)" in file:
+                diameter = info[num]["Pick Diameter (nm)"]
+                if "Pixel Size (nm)" in file:
+                    px_size = info[num]["Pixel Size (nm)"]
+                    radius = (diameter / px_size) / 2
+                else:
+                    radius = diameter / 2
         return radius
 
     def check_set(self):

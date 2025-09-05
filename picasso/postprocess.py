@@ -402,7 +402,14 @@ def pick_similar(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Find similar picks based on the number of localizations and 
     RMSD. Only implemented for circular picks.
-    
+
+    Takes the grid of overlapping picks of the given size (defined by 
+    ``x``, ``y_shift`` and ``y_base``) and shifts each pick towards the
+    center of mass of the localizations within the pick. If the picked
+    localizations have the required number of localizations and the
+    RMSD, it is added to the output list (``x_similar`` and
+    ``y_similar``).
+
     Parameters
     ----------
     x : np.ndarray

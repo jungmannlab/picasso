@@ -6933,7 +6933,7 @@ class View(QtWidgets.QLabel):
         """
         msgBox = QtWidgets.QMessageBox(self)
         msgBox.setWindowTitle("Select picks")
-        msgBox.setWindowIcon(self.icon)
+        msgBox.setWindowIcon(self.window.icon)
 
         if params["i"] == 0:
             keep_ratio = 0
@@ -7784,8 +7784,10 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel("Pick similar")
         if channel is not None:
             info = self.infos[channel]
-            d = self.window.tools_settings_dialog.pick_diameter.value()
-            r = d / 2 / self.window.display_settings_dlg.pixelsize.value()
+            d = (
+                self.window.tools_settings_dialog.pick_diameter.value()
+            ) / self.window.display_settings_dlg.pixelsize.value()
+            r = d / 2
             d2 = d ** 2
             std_range = (
                 self.window.tools_settings_dialog.pick_similar_range.value()
@@ -7822,21 +7824,19 @@ class View(QtWidgets.QLabel):
             locs_temp, size, _, _, block_starts, block_ends, K, L = (
                 index_blocks
             )
-            locs_x = locs_temp.x
-            locs_y = locs_temp.y
-            locs_xy = np.stack((locs_x, locs_y))
+            locs_xy = np.stack((locs_temp.x, locs_temp.y))
             x_r = np.uint64(x_range / size)
             y_r1 = np.uint64(y_range_shift / size)
             y_r2 = np.uint64(y_range_base / size)
             status = lib.StatusDialog("Picking similar...", self.window)
             # pick similar
             x_similar, y_similar = postprocess.pick_similar(
-                    x_range, y_range_shift, y_range_base,
-                    min_n_locs, max_n_locs, min_rmsd, max_rmsd, 
-                    x_r, y_r1, y_r2,
-                    locs_xy, block_starts, block_ends, K, L,        
-                    x_similar, y_similar, r, d2,
-                )
+                x_range, y_range_shift, y_range_base,
+                min_n_locs, max_n_locs, min_rmsd, max_rmsd, 
+                x_r, y_r1, y_r2,
+                locs_xy, block_starts, block_ends, K, L,        
+                x_similar, y_similar, r, d2,
+            )
             # add picks
             similar = list(zip(x_similar, y_similar))
             self._picks = []
