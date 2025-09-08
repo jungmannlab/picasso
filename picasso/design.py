@@ -1,35 +1,35 @@
 """
     picasso.design
-    ~~~~~~~~~~~~~~~~
+    ~~~~~~~~~~~~~~
 
-    Design rectangular rothemund origami (RRO)
+    Design rectangular rothemund origami (RRO).
 
     :author: Maximilian Thomas Strauss, 2016-2018
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 import csv
-from . import io as _io
+
+from . import io
 
 
 def saveInfo(filename: str, info: dict) -> None:
-    """Saves information to a YAML file."""
-    
-    _io.save_info(filename, [info], default_flow_style=True)
+    """Save information to a YAML file."""
+    io.save_info(filename, [info], default_flow_style=True)
 
 
 def convertPlateIndex(plate: list, platename: str) -> list:
-    """Convert plate index from canvas index format to a structured 
+    """Convert plate index from canvas index format to a structured
     format for ordering the sequences.
-    
+
     Parameters
     ----------
     plate : list
-        List of lists containing plate information in canvas index 
+        List of lists containing plate information in canvas index
         format.
     platename : str
         Name of the plate to be used in the output.
-    
+
     Returns
     -------
     newplate : list
@@ -38,7 +38,6 @@ def convertPlateIndex(plate: list, platename: str) -> list:
     """
     # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
     # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE]
-
     platerow = [
         "A",
         "B",
@@ -105,17 +104,17 @@ def convertPlateIndex(plate: list, platename: str) -> list:
 
 
 def convertPlateIndexColor(plate: list, platename: str) -> list:
-    """Convert plate index from canvas index format to a structured 
+    """Convert plate index from canvas index format to a structured
     format for ordering the sequences, including color information.
-    
+
     Parameters
     ----------
     plate : list
-        List of lists containing plate information in canvas index 
+        List of lists containing plate information in canvas index
         format.
     platename : str
         Name of the plate to be used in the output.
-        
+
     Returns
     -------
     newplate : list
@@ -123,8 +122,8 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
         format for ordering the sequences, including color information.
     """
     # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
-    # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE, COLOR]
-
+    # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE,
+    # COLOR]
     platerow = [
         "A",
         "B",
@@ -164,7 +163,9 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
     ]
     structurecol = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
-    newplate = [["PLATE NAME", "PLATE POSITION", "OLIGO NAME", "SEQUENCE", "COLOR"]]
+    newplate = [
+        ["PLATE NAME", "PLATE POSITION", "OLIGO NAME", "SEQUENCE", "COLOR"]
+    ]
     for row in range(0, len(platerow)):
         for col in range(0, len(platecol)):
             if row < 8:
@@ -193,19 +194,18 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
 
 
 def readPlate(filename: str) -> list:
-    """Reads a plate file and returns its content as a list of lists.
+    """Read a plate file and returns its content as a list of lists.
 
     Parameters
     ----------
     filename : str
-        The name of the file to read.   
-    
+        The name of the file to read.
+
     Returns
     -------
     data : list
         A list of lists containing the data from the file.
     """
-
     File = open(filename)
     Reader = csv.reader(File)
     data = list(Reader)
@@ -213,7 +213,7 @@ def readPlate(filename: str) -> list:
 
 
 def savePlate(filename: str, data: list) -> None:
-    """Saves the plate data to a CSV file.
+    """Save the plate data to a CSV file.
 
     Parameters
     ----------
@@ -222,7 +222,6 @@ def savePlate(filename: str, data: list) -> None:
     data : list
         A list of lists containing the plate data to save.
     """
-    
     with open(filename, "w", newline="") as csvfile:
         Writer = csv.writer(
             csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL

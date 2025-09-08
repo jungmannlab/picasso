@@ -1,7 +1,7 @@
 """
     ext/bitplane
-    ~~~~~~~~~~~~~~~~~~~~
-    Utility functions to handle bitplane data
+    ~~~~~~~~~~~~
+    Utility functions to handle bitplane data.
     :author: Maximilian T Strauss, 2021-2022
     :copyright: Copyright (c) 2021-2022 Maximilian T Strauss
 """
@@ -12,7 +12,7 @@ import h5py
 import datetime
 
 try:
-    from PyImarisWriter.ImarisWriterCtypes import *
+    # from PyImarisWriter.ImarisWriterCtypes import *
     from PyImarisWriter import PyImarisWriter as PW
 
     IMSWRITER = True
@@ -26,7 +26,17 @@ if IMSWRITER:
         MovieMapper class to map ims files.
         """
 
-        def __init__(self, file, RL, lookup_dict, channel, frames, x, y, dtype):
+        def __init__(
+            self,
+            file,
+            RL,
+            lookup_dict,
+            channel,
+            frames,
+            x,
+            y,
+            dtype,
+        ):
             self.file = file
             self.RL = RL
             self.lookup_dict = lookup_dict
@@ -37,9 +47,9 @@ if IMSWRITER:
             self.dtype = dtype
 
         def __getitem__(self, item):
-            return self.file["DataSet"][self.RL][self.lookup_dict[item]][self.channel][
-                "Data"
-            ][0][: self.y, : self.x]
+            return self.file["DataSet"][self.RL][self.lookup_dict[item]][
+                self.channel
+            ]["Data"][0][: self.y, : self.x]
 
         def __len__(self):
             return len(self.frames)
@@ -64,18 +74,18 @@ if IMSWRITER:
             self.n_frames = n_frames
 
         def __getitem__(self, item):
-            return self.file["DataSet"][self.RL][self.frames[0]][self.channel]["Data"][
-                item, :, :
-            ]
+            return self.file["DataSet"][self.RL][self.frames[0]][self.channel][
+                "Data"
+            ][item, :, :]
 
         def __len__(self):
             return self.n_frames
 
         def __iter__(self):
             for item in range(self.n_frames):
-                yield self.file["DataSet"][self.RL][self.frames[0]][self.channel][
-                    "Data"
-                ][item, :, :]
+                yield self.file["DataSet"][self.RL][self.frames[0]][
+                    self.channel
+                ]["Data"][item, :, :]
 
     class IMSFile:
         """
@@ -100,7 +110,9 @@ if IMSWRITER:
 
             self.frames = list(self.file["DataSet"][self.RL].keys())
             self.n_frames = len(self.frames)
-            self.channels = list(self.file["DataSet"][self.RL][self.frames[0]].keys())
+            self.channels = list(
+                self.file["DataSet"][self.RL][self.frames[0]].keys()
+            )
 
             self.set_channel(self.channels[0])
 
@@ -110,10 +122,14 @@ if IMSWRITER:
         def set_channel(self, channel):
             self.channel = channel
             self.img_size = np.array(
-                self.file["DataSet"][self.RL][self.frames[0]][self.channel]["Data"]
+                self.file["DataSet"][self.RL][self.frames[0]][self.channel][
+                    "Data"
+                ]
             ).shape
             self.dtype = np.array(
-                self.file["DataSet"][self.RL][self.frames[0]][self.channel]["Data"]
+                self.file["DataSet"][self.RL][self.frames[0]][self.channel][
+                    "Data"
+                ]
             ).dtype
 
             try:
@@ -121,7 +137,9 @@ if IMSWRITER:
                     "".join(
                         [
                             _.decode()
-                            for _ in self.file["DataSetInfo"]["Image"].attrs["Z"]
+                            for _ in self.file["DataSetInfo"]["Image"].attrs[
+                                "Z"
+                            ]
                         ]
                     )
                 )
@@ -134,7 +152,9 @@ if IMSWRITER:
                     "".join(
                         [
                             _.decode()
-                            for _ in self.file["DataSetInfo"]["Image"].attrs["X"]
+                            for _ in self.file["DataSetInfo"]["Image"].attrs[
+                                "X"
+                            ]
                         ]
                     )
                 )
@@ -142,7 +162,9 @@ if IMSWRITER:
                     "".join(
                         [
                             _.decode()
-                            for _ in self.file["DataSetInfo"]["Image"].attrs["Y"]
+                            for _ in self.file["DataSetInfo"]["Image"].attrs[
+                                "Y"
+                            ]
                         ]
                     )
                 )
@@ -156,7 +178,9 @@ if IMSWRITER:
                 "".join(
                     [
                         _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMax0"]
+                        for _ in self.file["DataSetInfo"]["Image"].attrs[
+                            "ExtMax0"
+                        ]
                     ]
                 )
             )
@@ -164,7 +188,9 @@ if IMSWRITER:
                 "".join(
                     [
                         _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMin0"]
+                        for _ in self.file["DataSetInfo"]["Image"].attrs[
+                            "ExtMin0"
+                        ]
                     ]
                 )
             )
@@ -173,7 +199,9 @@ if IMSWRITER:
                 "".join(
                     [
                         _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMax1"]
+                        for _ in self.file["DataSetInfo"]["Image"].attrs[
+                            "ExtMax1"
+                        ]
                     ]
                 )
             )
@@ -181,7 +209,9 @@ if IMSWRITER:
                 "".join(
                     [
                         _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMin1"]
+                        for _ in self.file["DataSetInfo"]["Image"].attrs[
+                            "ExtMin1"
+                        ]
                     ]
                 )
             )
@@ -190,7 +220,9 @@ if IMSWRITER:
                 "".join(
                     [
                         _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMax2"]
+                        for _ in self.file["DataSetInfo"]["Image"].attrs[
+                            "ExtMax2"
+                        ]
                     ]
                 )
             )
@@ -198,7 +230,9 @@ if IMSWRITER:
                 "".join(
                     [
                         _.decode()
-                        for _ in self.file["DataSetInfo"]["Image"].attrs["ExtMin2"]
+                        for _ in self.file["DataSetInfo"]["Image"].attrs[
+                            "ExtMin2"
+                        ]
                     ]
                 )
             )
@@ -212,7 +246,8 @@ if IMSWRITER:
             px_nm = (px_x + px_y) / 2
 
             print(
-                f"Image dimensions X: {delta_x} um Y: {delta_y} um. Pixelsize x {px_x}, y {px_y}, p {px_nm}"
+                f"Image dimensions X: {delta_x} um Y: {delta_y} um. "
+                f"Pixelsize x {px_x}, y {px_y}, p {px_nm}."
             )
 
             self.pixelsize = px_nm
@@ -237,15 +272,20 @@ if IMSWRITER:
         def read_frame(self, frame):
             if not self.lookup_dict:
                 self.read_frames()
-            return self.file["DataSet"][self.RL][self.lookup_dict[frame]][self.channel][
-                "Data"
-            ][0]
+            return self.file["DataSet"][self.RL][self.lookup_dict[frame]][
+                self.channel
+            ]["Data"][0]
 
         def read_z_stack(self):
             print("Reading stack")
             self.n_frames = self.z
             self.movie = MovieMapperStack(
-                self.file, self.RL, self.channel, self.frames, self.dtype, self.n_frames
+                self.file,
+                self.RL,
+                self.channel,
+                self.frames,
+                self.dtype,
+                self.n_frames,
             )
 
         def read_stack(self):
@@ -286,7 +326,15 @@ if IMSWRITER:
                 # )
 
     def numpy_to_imaris(
-        array, filename, colors, oversampling, viewport, info, z_min, z_max, pixelsize
+        array,
+        filename,
+        colors,
+        oversampling,
+        viewport,
+        info,
+        z_min,
+        z_max,
+        pixelsize
     ):
 
         if len(array.shape) == 3:
@@ -401,7 +449,11 @@ if IMSWRITER:
             color_infos[idx].set_base_color(color)
 
         converter.Finish(
-            image_extents, parameters, time_infos, color_infos, adjust_color_range
+            image_extents,
+            parameters,
+            time_infos,
+            color_infos,
+            adjust_color_range,
         )
         converter.Destroy()
         print("Wrote {} to {}".format("Minimal Example", output_filename))

@@ -1,4 +1,4 @@
-"""DNA sequences origami designs."""
+"""DNA sequences in the origami designs."""
 
 base_sequences = [
     ["Position", "Name", "Sequence"],

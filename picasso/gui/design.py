@@ -1,16 +1,19 @@
 """
-    picasso.design-gui
-    ~~~~~~~~~~~~~~~~
+    picasso.gui.design
+    ~~~~~~~~~~~~~~~~~~
 
-    GUI for design :
-    Design rectangular rothemund origami
+    GUI for designing rectangular rothemund origami.
 
-    :author: Maximilian Thomas Strauss,  2016
-    :copyright: Copyright (c) 2016 Jungmann Lab,  MPI of Biochemistry
+    :author: Maximilian Thomas Strauss, 2016
+    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
-import glob, os, sys, traceback, importlib, pkgutil
-import os.path as _ospath
+import glob
+import os
+import sys
+import traceback
+import importlib
+import pkgutil
 from math import sqrt
 from copy import deepcopy
 
@@ -28,7 +31,28 @@ BASE_SEQUENCES = design_sequences.base_sequences
 PAINT_SEQUENCES = design_sequences.paint_sequences
 
 
-def plotPlate(selection, selectioncolors, platename):
+def plotPlate(
+    selection: list[str],
+    selectioncolors: list[float],
+    platename: str,
+) -> plt.Figure:
+    """Plot a 96-well plate with docking strands color-coded.
+
+    Parameters
+    ----------
+    selection : list of strs
+        Names of wells, e.g., 'A1', 'G10'.
+    selectioncolors : list of floats
+        Color codes  (RGB, from 0 to 1) for the corresponding wells.
+    platename : str
+        Figure title base, set to 'Custom_1' or 'Custom_2'.
+
+    Returns
+    -------
+    fig : plt.Figure
+        The figure object containing the plotted 96-well plate.
+    """
+
     inch = 25.4
     radius = 4.5 / inch  # diameter of 96 well plates is 9mm
     radiusc = 4 / inch
@@ -73,9 +97,9 @@ def plotPlate(selection, selectioncolors, platename):
                 )
             ax.add_artist(circle)
     # inner rectangle
-    ax.add_patch(
-        patches.Rectangle((0, 0), cols * 2 * radius, rows * 2 * radius, fill=False)
-    )
+    ax.add_patch(patches.Rectangle(
+        (0, 0), cols * 2 * radius, rows * 2 * radius, fill=False,
+    ))
     # outer Rectangle
     ax.add_patch(
         patches.Rectangle(
@@ -255,7 +279,8 @@ defaultcolor = allcolors[0]
 maxcolor = 8
 
 
-def indextoHex(y, x):
+def indextoHex(y: float, x: float) -> tuple[float, float]:
+    """Convert 2D index (row, col) to hexagonal coordinates."""
     hex_center_x = x * 1.5 * HEX_SIDE_HALF
     if _np.mod(x, 2) == 0:
         hex_center_y = -y * sqrt(3) / 2 * HEX_SIDE_HALF * 2
@@ -264,7 +289,8 @@ def indextoHex(y, x):
     return hex_center_x, hex_center_y
 
 
-def indextoStr(x, y):
+def indextoStr(x: float, y: float) -> tuple[str, int]:
+    """Convert 2D index (col, row) to string representation."""
     rowStr = rowIndex[y]
     colStr = columnIndex[x]
     strIndex = (rowStr, colStr)
@@ -272,7 +298,31 @@ def indextoStr(x, y):
 
 
 class PipettingDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None):
+    """Dialog for selecting the folder to create the .pdf file with
+    displayed 96-well plated based on the .csv file with sequence
+    information.
+
+    ...
+
+    Attributes
+    ----------
+    buttons : QtWidgets.QDialogButtonBox
+        Button box containing the OK and Cancel buttons.
+    csvCounter : QtWidgets.QLabel
+        Label displaying the number of detected .csv files.
+    folderEdit : QtWidgets.QLabel
+        String displaying the selected folder.
+    fulllist : list
+        List containing the full data from the .csv files.
+    loadButton : QtWidgets.QPushButton
+        Button for selecting the folder.
+    plateCounter : QtWidgets.QLabel
+        Label displaying the number of detected plates.
+    uniqueCounter : QtWidgets.QLabel
+        Label displaying the number of detected unique sequences.
+    """
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super(PipettingDialog, self).__init__(parent)
         layout = QtWidgets.QVBoxLayout(self)
         self.setWindowTitle("Pipetting dialog")
@@ -304,13 +354,17 @@ class PipettingDialog(QtWidgets.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
-    def loadFolder(self):
+    def loadFolder(self) -> None:
+        """Load the selected folder and update the UI with the detected
+        .csv files."""
         if hasattr(self, "pwd"):
             path = QtWidgets.QFileDialog.getExistingDirectory(
                 self, "Select Directory", self.pwd
             )
         else:
-            path = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Directory")
+            path = QtWidgets.QFileDialog.getExistingDirectory(
+                self, "Select Directory",
+            )
         if path:
             self.folderEdit.setText(path)
             csvFiles = glob.glob(os.path.join(path, "*.csv"))
@@ -329,7 +383,9 @@ class PipettingDialog(QtWidgets.QDialog):
                     self.fulllist.append(data[i][0:4])
 
             self.plateCounter.setText(
-                "A total of " + str(len(set(platelist)) - 1) + "  plates detected."
+                "A total of "
+                + str(len(set(platelist)) - 1)
+                + "  plates detected."
             )
             self.uniqueCounter.setText(
                 "A total of "
@@ -337,12 +393,17 @@ class PipettingDialog(QtWidgets.QDialog):
                 + "  unique sequences detected."
             )
 
-    def getfulllist(self):
+    def getfulllist(self) -> list:
+        """Return the fulllist attribute."""
         fulllist = self.fulllist
         return fulllist
 
     @staticmethod
-    def getSchemes(parent=None, pwd=None):
+    def getSchemes(
+        parent: QtWidgets.QWidget | None = None,
+        pwd: str | None = None,
+    ) -> tuple[list, bool]:
+        """Open the dialog and returns the results."""
         dialog = PipettingDialog(parent)
         if pwd:
             dialog.pwd = pwd
@@ -353,7 +414,24 @@ class PipettingDialog(QtWidgets.QDialog):
 
 
 class SeqDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None):
+    """Dialog for setting extensions based on the UI selection.
+
+    ...
+
+    Attributes
+    ----------
+    buttons : QtWidgets.QDialogButtonBox
+        The button box containing the OK and Cancel buttons.
+    ImagersLong : list of str
+        The list of long names for the docking sequences (i.e., the
+        sequences).
+    ImagersShort : list of str
+        The list of short names of the docking sequences (e.g., 5xR1).
+    table : QtWidgets.QTableWidget
+        The table widget displaying the extension information.
+    """
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super(SeqDialog, self).__init__(parent)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -382,16 +460,35 @@ class SeqDialog(QtWidgets.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
-    def initTable(self, colorcounts, tableshort, tablelong):
+    def initTable(
+        self,
+        colorcounts: list[int],
+        tableshort: list[str],
+        tablelong: list[str],
+    ) -> None:
+        """Start the table given the selected colors.
+
+        Parameters
+        ----------
+        colorcounts : list of int
+            Number of times each color was selected in the UI.
+        tableshort : list of str
+            Short names for the docking sequences (e.g., 5xR1)
+        tablelong : list of str
+            Long names for the docking sequences (i.e., the DNA
+            sequences).
+        """
         noseq = _np.count_nonzero(colorcounts)
         # table defintion
         self.table.setRowCount(noseq - 1)
         rowRunner = 0
         for i in range(len(colorcounts) - 1):
             if colorcounts[i] > 0:
-                self.table.setItem(rowRunner, 0, QtWidgets.QTableWidgetItem(str(i + 1)))
                 self.table.setItem(
-                    rowRunner, 1, QtWidgets.QTableWidgetItem("Ext " + str(i + 1))
+                    rowRunner, 0, QtWidgets.QTableWidgetItem(str(i + 1)),
+                )
+                self.table.setItem(
+                    rowRunner, 1, QtWidgets.QTableWidgetItem(f"Ext {i + 1}")
                 )
                 self.table.item(rowRunner, 1).setBackground(allcolors[i + 1])
                 self.table.setItem(
@@ -420,8 +517,8 @@ class SeqDialog(QtWidgets.QDialog):
                 lambda state, indexval=i: self.changeComb(indexval)
             )
 
-    def changeComb(self, indexval):
-
+    def changeComb(self, indexval: int) -> None:
+        """Update the table based on the selected combination."""
         sender = self.sender()
         comboval = sender.currentIndex()
         if comboval == 0:
@@ -434,27 +531,39 @@ class SeqDialog(QtWidgets.QDialog):
                 QtWidgets.QTableWidgetItem(self.ImagersShort[comboval]),
             )
             self.table.setItem(
-                indexval, 4, QtWidgets.QTableWidgetItem(self.ImagersLong[comboval])
+                indexval,
+                4,
+                QtWidgets.QTableWidgetItem(self.ImagersLong[comboval]),
             )
 
-    def readoutTable(self):
+    def readoutTable(self) -> tuple[list[str], list[str]]:
+        """Read the docking sequences (short and long names) based on
+        the state of the dialog.
+
+        Returns
+        -------
+        tablelong : list of str
+            Long names for the docking sequences (i.e., the DNA sequences).
+        tableshort : list of str
+            Short names for the docking sequences (e.g., 5xR1)
+        """
         tableshort = ["None", "None", "None", "None", "None", "None", "None"]
         tablelong = ["None", "None", "None", "None", "None", "None", "None"]
 
         for i in range(self.table.rowCount()):
             try:
-                tableshort[int(self.table.item(i, 0).text()) - 1] = self.table.item(
-                    i, 3
-                ).text()
+                tableshort[
+                    int(self.table.item(i, 0).text()) - 1
+                ] = self.table.item(i, 3).text()
                 if tableshort[i] == "":
                     tableshort[i] = "None"
             except AttributeError:
                 tableshort[i] = "None"
 
             try:
-                tablelong[int(self.table.item(i, 0).text()) - 1] = self.table.item(
-                    i, 4
-                ).text()
+                tablelong[
+                    int(self.table.item(i, 0).text()) - 1
+                ] = self.table.item(i, 4).text()
                 if tablelong[i] == "":
                     tablelong[i] = "None"
             except AttributeError:
@@ -463,7 +572,22 @@ class SeqDialog(QtWidgets.QDialog):
 
 
 class FoldingDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None):
+    """Dialog for calculating the volumes of reagents for preparing the
+    given DNA origami.
+
+    ...
+
+    Attributes
+    ----------
+    clcButton : QPushButton
+        The button to trigger recalculation of the folding information.
+    exportButton : QPushButton
+        The button to trigger export of the folding information.
+    table : QTableWidget
+        The table widget displaying the folding information.
+    """
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super(FoldingDialog, self).__init__(parent)
 
         layout = QtWidgets.QVBoxLayout(self)
@@ -497,8 +621,8 @@ class FoldingDialog(QtWidgets.QDialog):
         layout.addWidget(self.exportButton)
         self.table.resizeColumnsToContents()
 
-    def exportTable(self):
-
+    def exportTable(self) -> None:
+        """Export the current table content to a .csv file."""
         table = dict()
         tablecontent = []
         tablecontent.append(
@@ -520,7 +644,7 @@ class FoldingDialog(QtWidgets.QDialog):
                     rowdata.append(item.text())
                 else:
                     rowdata.append("")
-            tablecontent.append(rowdata[:-1]) # do not save colorcode
+            tablecontent.append(rowdata[:-1])  # do not save colorcode
 
         table[0] = tablecontent
         if hasattr(self, "pwd"):
@@ -534,7 +658,9 @@ class FoldingDialog(QtWidgets.QDialog):
         if path:
             design.savePlate(path, table)
 
-    def clcExcess(self):
+    def clcExcess(self) -> None:
+        """Calculate and update volumes to match desired
+        concentrations."""
         rowCount = self.table.rowCount()
         self.resize(800, 285 + (rowCount - 6) * 30)
 
@@ -551,7 +677,7 @@ class FoldingDialog(QtWidgets.QDialog):
         for i in range(rowCount - 3):
             iconc = float(self.table.item(i, 1).text())
             parts = int(self.table.item(i, 2).text())
-            content = _np.round((iconc / parts * 1000), decimals = 3)
+            content = _np.round((iconc / parts * 1000), decimals=3)
             self.writeTable(i, 3, str(content))
 
         # Calculate Volume based on pool and final concentration
@@ -573,15 +699,19 @@ class FoldingDialog(QtWidgets.QDialog):
         if water < 0:
             self.table.item(rowCount - 3, 5).setBackground(QtGui.QColor("red"))
         else:
-            self.table.item(rowCount - 3, 5).setBackground(QtGui.QColor("white"))
+            self.table.item(rowCount - 3, 5).setBackground(
+                QtGui.QColor("white")
+            )
 
-    def writeTable(self, row, col, content):
+    def writeTable(self, row: int, col: int, content: str) -> None:
         self.table.setItem(row, col, QtWidgets.QTableWidgetItem(content))
 
-    def colorTable(self, row, col, color):
+    def colorTable(self, row: int, col: int, color: QtGui.QColor) -> None:
         self.table.item(row, col).setBackground(color)
 
-    def setExt(parent=None):
+    def setExt(
+        parent: QtWidgets.QWidget | None = None
+    ) -> tuple[list[str], list[str], bool]:
         dialog = FoldingDialog(parent)
         result = dialog.exec_()
         tablelong, tableshort = dialog.evalTable()
@@ -589,7 +719,25 @@ class FoldingDialog(QtWidgets.QDialog):
 
 
 class PlateDialog(QtWidgets.QDialog):
-    def __init__(self, parent=None):
+    """Dialog for selecting plate export options.
+
+    The user can choose either to export only the sequences needed for
+    this design or to export full 2 full plates for all sequences used.
+    Usually, the first option is preferred.
+
+    Attributes
+    ----------
+    buttons : QtWidgets.QDialogButtonBox
+        Button box with OK and Cancel buttons.
+    info : QtWidgets.QLabel
+        'Please make selection: '
+    radio1 : QtWidgets.QRadioButton
+        Button for selecting only the sequences needed for this design.
+    radio2 : QtWidgets.QRadioButton
+        Button for selecting full 2 full plates for all sequences used.
+    """
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super(PlateDialog, self).__init__(parent)
         layout = QtWidgets.QVBoxLayout(self)
         self.info = QtWidgets.QLabel("Please make selection:  ")
@@ -622,7 +770,9 @@ class PlateDialog(QtWidgets.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
-    def evalSelection(self):
+    def evalSelection(self) -> int:
+        """Evaluate the selected export option:
+        0 = Cancel, 1 = Design, 2 = Full Plates"""
         if self.radio1.isChecked():
             selection = 1
         elif self.radio2.isChecked():
@@ -632,7 +782,9 @@ class PlateDialog(QtWidgets.QDialog):
         return selection
 
     @staticmethod
-    def getSelection(parent=None):
+    def getSelection(
+        parent: QtWidgets.QWidget | None = None
+    ) -> tuple[int, bool]:
         dialog = PlateDialog(parent)
         result = dialog.exec_()
         selection = dialog.evalSelection()
@@ -640,17 +792,56 @@ class PlateDialog(QtWidgets.QDialog):
 
 
 class BindingSiteItem(QtWidgets.QGraphicsPolygonItem):
-    def __init__(self, y, x):
+    """Convenience class for creating the hexagonal polygon object.
+
+    ...
+
+    Parameters
+    ----------
+    y, x : int
+        The row and column indices of the binding site.
+    """
+
+    def __init__(self, y: int, x: int) -> None:
         hex_center_x, hex_center_y = indextoHex(y, x)
         center = QtCore.QPointF(hex_center_x, hex_center_y)
-        points = [
-            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(-1, 0) + center,
-            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(-0.5, sqrt(3) / 2) + center,
-            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(0.5, sqrt(3) / 2) + center,
-            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(1, 0) + center,
-            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(0.5, -sqrt(3) / 2) + center,
-            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(-0.5, -sqrt(3) / 2) + center,
-        ]
+        point1 = (
+            HEX_SCALE
+            * HEX_SIDE_HALF
+            * QtCore.QPointF(-1, 0)
+            + center
+        )
+        point2 = (
+            HEX_SCALE
+            * HEX_SIDE_HALF
+            * QtCore.QPointF(-0.5, sqrt(3) / 2)
+            + center
+        )
+        point3 = (
+            HEX_SCALE
+            * HEX_SIDE_HALF
+            * QtCore.QPointF(0.5, sqrt(3) / 2)
+            + center
+        )
+        point4 = (
+            HEX_SCALE
+            * HEX_SIDE_HALF
+            * QtCore.QPointF(1, 0)
+            + center
+        )
+        point5 = (
+            HEX_SCALE
+            * HEX_SIDE_HALF
+            * QtCore.QPointF(0.5, -sqrt(3) / 2)
+            + center
+        )
+        point6 = (
+            HEX_SCALE
+            * HEX_SIDE_HALF
+            * QtCore.QPointF(-0.5, -sqrt(3) / 2)
+            + center
+        )
+        points = [point1, point2, point3, point4, point5, point6]
 
         hexagonPointsF = QtGui.QPolygonF(points)
         super().__init__(hexagonPointsF)
@@ -659,7 +850,40 @@ class BindingSiteItem(QtWidgets.QGraphicsPolygonItem):
 
 
 class Scene(QtWidgets.QGraphicsScene):
-    def __init__(self, window):
+    """Display of the design consisting of hexagonal binding sites. Lets
+    the user interact with the design by adding and removing docking
+    strands.
+
+    ...
+
+    Attributes
+    ----------
+    allcords : list of tuples
+        The coordinates of all binding sites.
+    alllbl : dict
+        The labels for all binding sites. These are the hexagons on the
+        right side of the GUI showing the binding site names.
+    alllblseq : dict
+        The labels for all binding sites (sequences).
+    cclabel : QtWidgets.QGraphicsTextItem
+        Display of the currently selected color (found in the top right
+        corner of the GUI).
+    indices : list of int
+        The indices of all binding sites.
+    origamicoords : list of tuples
+        The coordinates of all origami sites in hexagonal layout.
+    origamiindices : list of int
+        The indices of all origami sites as strings.
+    tablelong : list of str
+        Long names of docking sequences, i.e., the DNA sequences (if
+        selected).
+    tableshort : list of str
+        Short names of docking sequences, e.g., 5xR1.
+    window : QtWidgets.QMainWindow
+        The main window of the application.
+    """
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
         self.window = window
         for coords in BINDING_SITES:
@@ -706,7 +930,9 @@ class Scene(QtWidgets.QGraphicsScene):
 
             self.origamiindices.append((indextoStr(y, x)))
             hex_center_x, hex_center_y = indextoHex(y, x)
-            self.origamicoords.append((hex_center_x * 0.125, hex_center_y * 0.125))
+            self.origamicoords.append(
+                (hex_center_x * 0.125, hex_center_y * 0.125)
+            )
 
         # color palette
         allitems = self.items()
@@ -733,7 +959,11 @@ class Scene(QtWidgets.QGraphicsScene):
                 *(
                     1.5
                     * HEX_SIDE_HALF
-                    * (labelspacer + COLOR_SITES[7 - paletteindex - i][1] + xoff),
+                    * (
+                        labelspacer
+                        + COLOR_SITES[7 - paletteindex - i][1]
+                        + xoff
+                    ),
                     -labelspacer
                     - sqrt(3)
                     * HEX_SIDE_HALF
@@ -747,7 +977,11 @@ class Scene(QtWidgets.QGraphicsScene):
                 *(
                     1.5
                     * HEX_SIDE_HALF
-                    * (labelspacer + COLOR_SITES[7 - paletteindex - i][1] + xofflbl),
+                    * (
+                        labelspacer
+                        + COLOR_SITES[7 - paletteindex - i][1]
+                        + xofflbl
+                    ),
                     -labelspacer
                     - sqrt(3)
                     * HEX_SIDE_HALF
@@ -764,7 +998,9 @@ class Scene(QtWidgets.QGraphicsScene):
                 * HEX_SIDE_HALF
                 * (labelspacer + COLOR_SITES[8 - paletteindex][1] + xofflbl),
                 -labelspacer
-                - sqrt(3) * HEX_SIDE_HALF * (COLOR_SITES[8 - paletteindex][0] + yoff),
+                - sqrt(3) * HEX_SIDE_HALF * (
+                    COLOR_SITES[8 - paletteindex][0] + yoff
+                ),
             )
         )
         self.addItem(self.cclabel)
@@ -783,14 +1019,20 @@ class Scene(QtWidgets.QGraphicsScene):
                 hex_center_x - 0.5 * HEX_SIDE_HALF,
                 hex_center_y - 0.5 * HEX_SIDE_HALF + 2,
             )
-            midpoint = QtCore.QPointF(hex_center_x, hex_center_y + 0.5 * HEX_SIDE_HALF)
+            midpoint = QtCore.QPointF(
+                hex_center_x, hex_center_y + 0.5 * HEX_SIDE_HALF
+            )
             endpoint = QtCore.QPointF(
                 hex_center_x + 0.5 * HEX_SIDE_HALF,
                 hex_center_y - 0.5 * HEX_SIDE_HALF + 2,
             )
 
-            line1[i] = QtWidgets.QGraphicsLineItem(QtCore.QLineF(startpoint, midpoint))
-            line2[i] = QtWidgets.QGraphicsLineItem(QtCore.QLineF(midpoint, endpoint))
+            line1[i] = QtWidgets.QGraphicsLineItem(
+                QtCore.QLineF(startpoint, midpoint)
+            )
+            line2[i] = QtWidgets.QGraphicsLineItem(
+                QtCore.QLineF(midpoint, endpoint)
+            )
 
             line1[i].setPen(LINE_PEN)
             line2[i].setPen(LINE_PEN)
@@ -800,8 +1042,12 @@ class Scene(QtWidgets.QGraphicsScene):
 
         self.evaluateCanvas()
 
-    def mousePressEvent(self, event):
-        clicked_item = self.itemAt(event.scenePos(), self.window.view.transform())
+    def mousePressEvent(self, event: QtCore.QEvent) -> None:
+        """Handle mouse press events on the canvas. Colors the selected
+        origami binding site or changes selected color."""
+        clicked_item = self.itemAt(
+            event.scenePos(), self.window.view.transform()
+        )
         if clicked_item:
             if clicked_item.type() == 5:
                 allitems = self.items()
@@ -846,8 +1092,9 @@ class Scene(QtWidgets.QGraphicsScene):
                         clicked_item.setBrush(QtGui.QBrush(selectedcolor))
                 self.evaluateCanvas()
 
-    def evaluateCanvas(self):
-        # READS OUT COLOR VALUES AND MAKES A LIST WITH CORRESPONDING COLORS
+    def evaluateCanvas(self) -> list[int]:
+        """Read out color values and make a list with corresponding
+        colors."""
         allitems = self.items()
         lenitems = len(allitems)
         bindingitems = len(BINDING_SITES)
@@ -872,12 +1119,9 @@ class Scene(QtWidgets.QGraphicsScene):
             self.colorcounts.append(count)
         return canvascolors
 
-    def updateExtensions(self, tableshort):
-        # Takes a list of tableshort and updates the display
-        allitems = self.items()
-        lenitems = len(allitems)
-        bindingitems = len(BINDING_SITES)
-
+    def updateExtensions(self, tableshort: list[str]) -> None:
+        """Take a list of short extension names (e.g., 5xR1) and update
+        the display."""
         for i in range(0, maxcolor - 1):
             if tableshort[i] == "None":
                 self.alllblseq[i].setPlainText("   ")
@@ -885,11 +1129,17 @@ class Scene(QtWidgets.QGraphicsScene):
                 self.alllblseq[i].setPlainText(tableshort[i])
                 #
 
-    def saveExtensions(self, tableshort, tablelong):
+    def saveExtensions(
+        self,
+        tableshort: list[str],
+        tablelong: list[str],
+    ) -> None:
+        """Change the attributes to store docking sequences."""
         self.tableshort = tableshort
         self.tablelong = tablelong
 
-    def clearCanvas(self):
+    def clearCanvas(self) -> None:
+        """Reset to the initial state (no docking strands)."""
         allitems = self.items()
         lenitems = len(allitems)
         bindingitems = len(BINDING_SITES)
@@ -903,20 +1153,26 @@ class Scene(QtWidgets.QGraphicsScene):
             ["None", "None", "None", "None", "None", "None", "None"],
             ["None", "None", "None", "None", "None", "None", "None"],
         )
-        self.updateExtensions(["None", "None", "None", "None", "None", "None", "None"])
+        self.updateExtensions(
+            ["None", "None", "None", "None", "None", "None", "None"]
+        )
         self.evaluateCanvas()
 
-    def vectorToString(self, x):
+    def vectorToString(self, x: _np.ndarray) -> str:
+        """Convert a numpy vector to a string representation."""
         x_arrstr = _np.char.mod("%f", x)
         x_str = ", ".join(x_arrstr)
         return x_str
 
-    def vectorToStringInt(self, x):
+    def vectorToStringInt(self, x: _np.ndarray) -> str:
+        """Convert a numpy vector of integers to a string
+        representation."""
         x_arrstr = _np.char.mod("%i", x)
         x_str = ", ".join(x_arrstr)
         return x_str
 
-    def saveCanvas(self, path):
+    def saveCanvas(self, path: str) -> None:
+        """Save the current origami to the given path."""
         canvascolors = self.evaluateCanvas()[::-1]
         structurec = []
         structureInd = []
@@ -958,12 +1214,15 @@ class Scene(QtWidgets.QGraphicsScene):
         }
         design.saveInfo(path, info)
 
-    def loadCanvas(self, path):
+    def loadCanvas(self, path: str) -> None:
+        """Load the origami design from the given path."""
         info = _io.load_info(path)
         try:
             structure = info[0]["Structure"]
         except KeyError:
-            self.window.statusBar().showMessage("Error. Filetype not recognized")
+            self.window.statusBar().showMessage(
+                "Error. Filetype not recognized"
+            )
         structure = structure[::-1]
         allitems = self.items()
         lenitems = len(allitems)
@@ -973,14 +1232,18 @@ class Scene(QtWidgets.QGraphicsScene):
 
         for i in range(0, origamiitems):
             colorindex = structure[i][2]
-            allitems[paletteindex + i].setBrush(QtGui.QBrush(allcolors[colorindex]))
+            allitems[paletteindex + i].setBrush(
+                QtGui.QBrush(allcolors[colorindex])
+            )
 
         self.evaluateCanvas()
         self.tableshort = info[0]["Extensions Short"]
         self.tablelong = info[0]["Extensions Long"]
         self.updateExtensions(self.tableshort)
 
-    def readCanvas(self):
+    def readCanvas(self) -> dict:
+        """Load the designed origami into plates containing the plate
+        name, position, docking sequences and their names and colors."""
         allplates = dict()
         canvascolors = self.evaluateCanvas()[::-1]
         ExportPlate = deepcopy(BASE_SEQUENCES)
@@ -997,10 +1260,13 @@ class Scene(QtWidgets.QGraphicsScene):
                 pass
             else:
                 ExportPlate[1 + i][2] = (
-                    ExportPlate[1 + i][2] + " " + self.tablelong[canvascolors[i] - 1]
+                    ExportPlate[1 + i][2]
+                    + " "
+                    + self.tablelong[canvascolors[i] - 1]
                 )
                 ExportPlate[1 + i][1] = (
-                    ExportPlate[1 + i][1][:-3] + self.tableshort[canvascolors[i] - 1]
+                    ExportPlate[1 + i][1][:-3]
+                    + self.tableshort[canvascolors[i] - 1]
                 )
                 ExportPlate[1 + i] = [
                     ExportPlate[1 + i][0],
@@ -1012,7 +1278,10 @@ class Scene(QtWidgets.QGraphicsScene):
         allplates[0] = design.convertPlateIndexColor(ExportPlate, "CUSTOM")
         return allplates
 
-    def preparePlate(self, mode):
+    def preparePlate(self, mode: int) -> dict:
+        """Read out the canvas and prepare plates for either only the
+        chosen docking strands modifications or for all sequences."""
+
         # reads out the canvas, modifies BasePlate
         canvascolors = self.evaluateCanvas()[::-1]
 
@@ -1031,10 +1300,13 @@ class Scene(QtWidgets.QGraphicsScene):
                     ExportPlate = deepcopy(BASE_SEQUENCES)
                     for i in range(0, len(canvascolors)):
                         ExportPlate[1 + i][2] = (
-                            ExportPlate[1 + i][2] + " " + self.tablelong[colors[j] - 1]
+                            ExportPlate[1 + i][2]
+                            + " "
+                            + self.tablelong[colors[j] - 1]
                         )
                         ExportPlate[1 + i][1] = (
-                            ExportPlate[1 + i][1][:-3] + self.tableshort[colors[j] - 1]
+                            ExportPlate[1 + i][1][:-3]
+                            + self.tableshort[colors[j] - 1]
                         )
                     allplates[j] = design.convertPlateIndex(
                         ExportPlate, self.tableshort[colors[j] - 1]
@@ -1062,7 +1334,21 @@ class Scene(QtWidgets.QGraphicsScene):
 
 
 class Window(QtWidgets.QMainWindow):
-    def __init__(self):
+    """Main window displaying the origami and providing the interface.
+
+    ...
+
+    Attributes
+    ----------
+    mainscene : Scene
+        The main scene displaying the origami design.
+    pwd : str
+        The current working directory.
+    view : QtWidgets.QGraphicsView
+        The main view displaying the origami design.
+    """
+
+    def __init__(self) -> None:
         super().__init__()
         self.mainscene = Scene(self)
         self.view = QtWidgets.QGraphicsView(self.mainscene)
@@ -1072,7 +1358,8 @@ class Window(QtWidgets.QMainWindow):
             "Ready."
         )  # . . Sequences loaded from " + BaseSequencesFile + ".")
 
-    def openDialog(self):
+    def openDialog(self) -> None:
+        """Open a dialog to select a design file."""
         if hasattr(self, "pwd"):
             path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Open design", self.pwd, filter="*.yaml"
@@ -1086,9 +1373,12 @@ class Window(QtWidgets.QMainWindow):
             self.statusBar().showMessage("File loaded from: " + path)
             self.pwd = os.path.dirname(path)
         else:
-            self.statusBar().showMessage("Filename not specified. File not loaded.")
+            self.statusBar().showMessage(
+                "Filename not specified. File not loaded."
+            )
 
-    def saveDialog(self):
+    def saveDialog(self) -> None:
+        """Open a dialog to save the design file."""
         if hasattr(self, "pwd"):
             path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self, "Save design to..", self.pwd, filter="*.yaml"
@@ -1102,13 +1392,17 @@ class Window(QtWidgets.QMainWindow):
             self.statusBar().showMessage("File saved as: " + path)
             self.pwd = os.path.dirname(path)
         else:
-            self.statusBar().showMessage("Filename not specified. Design not saved.")
+            self.statusBar().showMessage(
+                "Filename not specified. Design not saved."
+            )
 
-    def clearDialog(self):
+    def clearDialog(self) -> None:
+        """Reset the origami design."""
         self.mainscene.clearCanvas()
-        self.statusBar().showMessage("Clearead.")
+        self.statusBar().showMessage("Cleared.")
 
-    def takeScreenshot(self):
+    def takeScreenshot(self) -> None:
+        """Screenshot the current view."""
         filetypes = "*.png;;*.pdf"
         if hasattr(self, "pwd"):
             path, filter = QtWidgets.QFileDialog.getSaveFileName(
@@ -1138,12 +1432,11 @@ class Window(QtWidgets.QMainWindow):
                 "Filename not specified. Screenshot not saved."
             )
 
-    def setSeq(self):
-
+    def setSeq(self) -> None:
+        """Set the sequence of the origami design, i.e., choose the
+        dockings sequences."""
         colorcounts = self.mainscene.colorcounts
-
         if sum(colorcounts[0:-1]) > 0:
-
             sdialog = SeqDialog()
             sdialog.initTable(
                 colorcounts,
@@ -1151,18 +1444,22 @@ class Window(QtWidgets.QMainWindow):
                 self.mainscene.tablelong,
             )
             ok = sdialog.exec()
-
             tablelong, tableshort = sdialog.readoutTable()
-
             if ok:
                 self.mainscene.updateExtensions(tableshort)
                 self.mainscene.saveExtensions(tableshort, tablelong)
                 self.statusBar().showMessage("Extensions set.")
-
         else:
-            self.statusBar().showMessage("No hexagons marked. Please select first.")
+            self.statusBar().showMessage(
+                "No hexagons marked. Please select first."
+            )
 
-    def checkSeq(self):
+    def checkSeq(self) -> int:
+        """Check the sequence of the origami design.
+
+        Returns the number of errors founds which happen when the
+        docking strands are not named but the DNA sequence is specified
+        or vice versa."""
         colorcounts = self.mainscene.colorcounts
         tableshort = self.mainscene.tableshort
         errors = 0
@@ -1172,7 +1469,9 @@ class Window(QtWidgets.QMainWindow):
 
         return errors
 
-    def generatePlates(self):
+    def generatePlates(self) -> None:
+        """Generate the plates for ordering DNA sequences for the
+        specific origami design, saved in a .csv format."""
         seqcheck = self.checkSeq()
         if self.mainscene.tableshort == [
             "None",
@@ -1184,7 +1483,8 @@ class Window(QtWidgets.QMainWindow):
             "None",
         ]:
             self.statusBar().showMessage(
-                ("Error: No extensions have been set." " Please set extensions first.")
+                "Error: No extensions have been set."
+                " Please set extensions first."
             )
         elif seqcheck >= 1:
             self.statusBar().showMessage(
@@ -1200,7 +1500,9 @@ class Window(QtWidgets.QMainWindow):
                 else:
                     allplates = self.mainscene.preparePlate(selection)
                     self.statusBar().showMessage(
-                        "A total of " + str(len(allplates) * 2) + " Plates generated."
+                        "A total of "
+                        + str(len(allplates) * 2)
+                        + " Plates generated."
                     )
                     if hasattr(self, "pwd"):
                         path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -1215,14 +1517,18 @@ class Window(QtWidgets.QMainWindow):
                         )
                     if path:
                         design.savePlate(path, allplates)
-                        self.statusBar().showMessage("Plates saved to : " + path)
+                        self.statusBar().showMessage(
+                            "Plates saved to : " + path
+                        )
                         self.pwd = os.path.dirname(path)
                     else:
                         self.statusBar().showMessage(
                             "Filename not specified. Plates not saved."
                         )
 
-    def pipettingScheme(self):
+    def pipettingScheme(self) -> None:
+        """Creates the pipetting scheme (i.e., the .pdf file showing
+        which wells in the 96-well plates should be used)."""
         seqcheck = self.checkSeq()
         if self.mainscene.tableshort == [
             "None",
@@ -1234,7 +1540,8 @@ class Window(QtWidgets.QMainWindow):
             "None",
         ]:
             self.statusBar().showMessage(
-                ("Error: No extensions have been set." " Please set extensions first.")
+                "Error: No extensions have been set."
+                " Please set extensions first."
             )
         elif seqcheck >= 1:
             self.statusBar().showMessage(
@@ -1259,7 +1566,9 @@ class Window(QtWidgets.QMainWindow):
                 pwd = []
             fulllist, ok = PipettingDialog.getSchemes(pwd=pwd)
             if fulllist == []:
-                self.statusBar().showMessage("No *.csv found. Scheme not created.")
+                self.statusBar().showMessage(
+                    "No *.csv found. Scheme not created."
+                )
             else:
                 pipettlist = []
                 platelist = []
@@ -1321,7 +1630,9 @@ class Window(QtWidgets.QMainWindow):
                             selection.append(pipettlist[y][1])
                             selectioncolors.append(pipettlist[y][4])
 
-                    allfig[x] = plotPlate(selection, selectioncolors, platename)
+                    allfig[x] = plotPlate(
+                        selection, selectioncolors, platename,
+                    )
                 if hasattr(self, "pwd"):
                     path, ext = QtWidgets.QFileDialog.getSaveFileName(
                         self,
@@ -1354,11 +1665,13 @@ class Window(QtWidgets.QMainWindow):
                             # csv_path = base + ".csv"
                             # design.savePlate(csv_path, exportlist)
                     progress.close()
-                    self.statusBar().showMessage("Pippetting scheme saved to: " + path)
+                    self.statusBar().showMessage(
+                        "Pippetting scheme saved to: " + path
+                    )
                     self.pwd = os.path.dirname(path)
 
-    def foldingScheme(self):
-
+    def foldingScheme(self) -> None:
+        """Run the folding dialog to get volumes to mix."""
         fdialog = FoldingDialog()  # Intitialize FoldingDialog Class
         # Fill with Data
         colorcounts = self.mainscene.colorcounts
@@ -1388,7 +1701,9 @@ class Window(QtWidgets.QMainWindow):
 
         for i in range(len(colorcounts) - 1):
             if colorcounts[i] != 0:
-                fdialog.writeTable(mixno + 2, 0, self.mainscene.tableshort[i] + " Mix")
+                fdialog.writeTable(
+                    mixno + 2, 0, self.mainscene.tableshort[i] + " Mix",
+                )
                 fdialog.writeTable(mixno + 2, 2, str(colorcounts[i]))
                 fdialog.writeTable(mixno + 2, 1, str(100))
                 fdialog.writeTable(mixno + 2, 6, str(100))
@@ -1413,10 +1728,12 @@ class Window(QtWidgets.QMainWindow):
         fdialog.clcExcess()
 
         # MAKE TABLE INTERACTIVE
-        result = fdialog.exec()
+        fdialog.exec()
 
 
 class MainWindow(QtWidgets.QWidget):
+    """Main window for the Picasso application."""
+
     def __init__(self):
         super(MainWindow, self).__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Design")
@@ -1499,7 +1816,9 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtWidgets.QMessageBox.critical(
+            window, "An error occured", message,
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

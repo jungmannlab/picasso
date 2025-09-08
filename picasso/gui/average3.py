@@ -1,6 +1,9 @@
 """
     gui/average3
-    ~~~~~~~~~~~~~~~~~~~~
+    ~~~~~~~~~~~~
+
+    This module is depracated as new tools have been published by other
+    groups. The module is planned to be removed in v1.0.0.
 
     Graphical user interface for three-dimensional averaging of particles
 
@@ -33,6 +36,8 @@ DEFAULT_OVERSAMPLING = 1.0
 INITIAL_REL_MAXIMUM = 2.0
 ZOOM = 10 / 7
 N_GROUP_COLORS = 8
+
+print("Deprecation Warning: The module 'average3' is deprecated and will be removed in version 1.0. Please consider using alternative tools for 3D averaging.")
 
 
 @numba.jit(nopython=True, nogil=True)
