@@ -5,11 +5,7 @@ import pandas as pd
 import os
 import numpy as np
 from picasso import io
-from picasso import render
-from picasso import lib
-import matplotlib.pyplot as plt
 import plotly.express as px
-import plotly.graph_objects as go
 
 
 @st.cache_data
@@ -66,7 +62,12 @@ def locs_per_frame_plot(hdf_dict: dict):
     plot_df = pd.concat(summary, axis=0)
 
     fig = px.line(
-        plot_df, x="frame", y="count", title="Locs per Frame", color="file", height=600
+        plot_df,
+        x="frame",
+        y="count",
+        title="Locs per Frame",
+        color="file",
+        height=600,
     )
 
     fig.update_layout(
@@ -131,7 +132,12 @@ def hist_plot(hdf_dict: dict, locs: pd.DataFrame):
         plot_df = pd.concat(summary, axis=0)
 
         fig = px.line(
-            plot_df, x=field, y="count", title=f"{field}", color="file", height=600
+            plot_df,
+            x=field,
+            y="count",
+            title=f"{field}",
+            color="file",
+            height=600,
         )
 
         fig.update_layout(
@@ -151,7 +157,8 @@ def compare():
     st.write("# Compare")
 
     st.write(
-        "Compare multiple files from the database. All hdf files with the same base path as the movie will be selectable."
+        "Compare multiple files from the database. All hdf files with the same"
+        " base path as the movie will be selectable."
     )
 
     engine = create_engine("sqlite:///" + _db_filename(), echo=False)
@@ -161,7 +168,9 @@ def compare():
 
         files = df["filename"].unique()
 
-        selected = st.multiselect("Select files (Hover to see full path)", files)
+        selected = st.multiselect(
+            "Select files (Hover to see full path)", files,
+        )
 
         if len(selected) > 0:
 
@@ -187,7 +196,8 @@ def compare():
                                 hdf_dict[locs_filename] = locs
                 except FileNotFoundError:
                     st.error(
-                        f"File **{file}** was not found. Please check that this file exists."
+                        f"File **{file}** was not found. Please check that "
+                        "this file exists."
                     )
 
             st.write("## Plot")
@@ -204,6 +214,5 @@ def compare():
             else:
                 st.warning("Please select HDF files.")
 
-    except ValueError as e:
-
+    except ValueError:
         st.warning("Database empty. Process files first.")

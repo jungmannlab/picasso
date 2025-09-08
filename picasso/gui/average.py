@@ -1,17 +1,23 @@
 """
-    gui/average
-    ~~~~~~~~~~~~~~~~~~~~
-    Graphical user interface for averaging particles
+    picasso.gui.average
+    ~~~~~~~~~~~~~~~~~~~
+
+    Graphical user interface for averaging particles.
+
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
+
+from __future__ import annotations
+
 import functools
 import multiprocessing
 import os.path
 import sys
 import time
 import traceback
-import importlib, pkgutil
+import importlib
+import pkgutil
 from multiprocessing import sharedctypes
 
 import matplotlib.pyplot as plt
@@ -24,7 +30,30 @@ from .. import io, lib, render, __version__
 
 
 @numba.jit(nopython=True, nogil=True)
-def render_hist(x, y, oversampling, t_min, t_max):
+def render_hist(
+    x: np.ndarray,
+    y: np.ndarray,
+    oversampling: float,
+    t_min: float,
+    t_max: float,
+) -> tuple[int, np.ndarray]:
+    """Calculate 2D histogram of xy coordinates.
+
+    Parameters
+    ----------
+    x, y : np.ndarray
+        1D arrays of xy coordinates.
+    oversampling : float
+        Number of histogram pixels per camera pixel.
+    t_min, t_max : float
+        Minimum and maximum bounds of the histogram.
+
+    Returns
+    n : int
+        Number of localizations in the histogram.
+    image : np.ndarray
+        2D histogram of xy coordinates.
+    """
     n_pixel = int(np.ceil(oversampling * (t_max - t_min)))
     in_view = (x > t_min) & (y > t_min) & (x < t_max) & (y < t_max)
     x = x[in_view]
@@ -36,23 +65,58 @@ def render_hist(x, y, oversampling, t_min, t_max):
     return len(x), image
 
 
-def compute_xcorr(CF_image_avg, image):
+def compute_xcorr(CF_image_avg: np.ndarray, image: np.ndarray) -> np.ndarray:
+    """Compute cross-correlation between two images.
+
+    Parameters
+    ----------
+    CF_image_avg : np.ndarray
+        Conjugate Fourier transform of the average image.
+    image : np.ndarray
+        Image to correlate with the average image.
+
+    Returns
+    -------
+    xcorr : np.ndarray
+        Cross-correlation of the two images.
+    """
     F_image = np.fft.fft2(image)
     xcorr = np.fft.fftshift(np.real(np.fft.ifft2((F_image * CF_image_avg))))
     return xcorr
 
 
 def align_group(
-    angles,
-    oversampling,
-    t_min,
-    t_max,
-    CF_image_avg,
-    image_half,
-    counter,
-    lock,
-    group,
-):
+    angles: np.ndarray,
+    oversampling: float,
+    t_min: float,
+    t_max: float,
+    CF_image_avg: np.ndarray,
+    image_half: float,
+    counter: None,
+    lock: None,
+    group: int,
+) -> None:
+    """Align (shift and rotate) images.
+
+    Parameters
+    ----------
+    angles : np.ndarray
+        Array of rotation angles.
+    oversampling : float
+        Number of display pixels per camera pixel.
+    t_min, t_max : float
+        Minimum and maximum bounds for the histogram.
+    CF_image_avg : np.ndarray
+        Conjugate Fourier transform of the average image.
+    image_half : float
+        Half the size of the rendered image.
+    counter : multiprocessing.Manager.Value
+        Counter for the number of processed groups.
+    lock : multiprocessing.Manager.Lock
+        Lock for synchronizing access to shared resources.
+    group : int
+        Index of the group to align.
+    """
     with lock:
         counter.value += 1
     index = group_index[group].nonzero()[1]
@@ -82,7 +146,12 @@ def align_group(
     y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
 
 
-def init_pool(x_, y_, group_index_):
+def init_pool(
+    x_: np.ndarray,
+    y_: np.ndarray,
+    group_index_: np.ndarray,
+) -> None:
+    """Initialize pool process variables."""
     global x, y, group_index
     x = np.ctypeslib.as_array(x_)
     y = np.ctypeslib.as_array(y_)
@@ -90,10 +159,36 @@ def init_pool(x_, y_, group_index_):
 
 
 class Worker(QtCore.QThread):
+    """Worker thread for processing image alignment.
+
+    ...
+
+    Attributes
+    ----------
+    group_index : np.ndarray
+        Indexes of the groups.
+    iterations : int
+        Number of iterations to average over.
+    locs : np.recarray
+        Localizations with group indeces.
+    oversampling : float
+        Number of display pixels per camera pixel.
+    r : float
+        Radius for rendering. See View.open() for details.
+    t_min, t_max : float
+        Minimum and maximum bounds for the histogram. Set to -r and r.
+    """
 
     progressMade = QtCore.pyqtSignal(int, int, int, int, np.recarray, bool)
 
-    def __init__(self, locs, r, group_index, oversampling, iterations):
+    def __init__(
+        self,
+        locs: np.recarray,
+        r: float,
+        group_index: np.ndarray,
+        oversampling: float,
+        iterations: int
+    ) -> None:
         super().__init__()
         self.locs = locs.copy()
         self.r = r
@@ -103,13 +198,15 @@ class Worker(QtCore.QThread):
         self.oversampling = oversampling
         self.iterations = iterations
 
-    def run(self):
+    def run(self) -> None:
+        """Run averaging across a number of iterations given the average
+        image."""
         n_groups = self.group_index.shape[0]
         a_step = np.arcsin(1 / (self.oversampling * self.r))
         angles = np.arange(0, 2 * np.pi, a_step)
         n_workers = min(
             60, max(1, int(0.75 * multiprocessing.cpu_count()))
-        ) # Python crashes when using >64 cores
+        )  # Python crashes when using >64 cores
         manager = multiprocessing.Manager()
         counter = manager.Value("d", 0)
         lock = manager.Lock()
@@ -166,7 +263,22 @@ class Worker(QtCore.QThread):
 
 
 class ParametersDialog(QtWidgets.QDialog):
-    def __init__(self, window):
+    """Dialog for setting parameters - oversampling and iterations.
+
+    ...
+
+    Attributes
+    ----------
+    iterations : QtWidgets.QSpinBox
+        Spin box for setting the number of iterations.
+    oversampling : QtWidgets.QDoubleSpinBox
+        Spin box for setting the number of display pixels per camera
+        pixel.
+    window : QtWidgets.QMainWindow
+        Main window instance.
+    """
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Parameters")
@@ -190,7 +302,23 @@ class ParametersDialog(QtWidgets.QDialog):
 
 
 class View(QtWidgets.QLabel):
-    def __init__(self, window):
+    """QLabel for displaying the averaged image.
+
+    ...
+
+    Attributes
+    ----------
+    _pixmap : QtGui.QPixmap
+        Pixmap for displaying the averaged image.
+    running : bool
+        Flag indicating whether the averaging process is running.
+    thread : Worker
+        Worker thread for performing the averaging.
+    window : QtWidgets.QMainWindow
+        Main window instance.
+    """
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
         self.window = window
         self.setMinimumSize(1, 1)
@@ -211,32 +339,47 @@ class View(QtWidgets.QLabel):
             self.thread.finished.connect(self.on_finished)
             self.thread.start()
 
-    def dragEnterEvent(self, event):
+    def dragEnterEvent(self, event: QtGui.QDragEnterEvent) -> None:
         if event.mimeData().hasUrls():
             event.accept()
         else:
             event.ignore()
 
-    def dropEvent(self, event):
+    def dropEvent(self, event: QtGui.QDropEvent) -> None:
         urls = event.mimeData().urls()
         path = urls[0].toLocalFile()
         ext = os.path.splitext(path)[1].lower()
         if ext == ".hdf5":
             self.open(path)
 
-    def on_finished(self):
-        self.window.status_bar.showMessage("Done!")
+    def on_finished(self) -> None:
+        self.window.statusBar().showMessage("Done!")
         self.running = False
 
-    def on_progress(self, it, total_it, g, n_groups, locs, update_image):
+    def on_progress(
+        self,
+        it: int,
+        total_it: int,
+        g: int,
+        n_groups: int,
+        locs: np.recarray,
+        update_image: bool,
+    ) -> None:
         self.locs = locs.copy()
         if update_image:
             self.update_image()
-        self.window.status_bar.showMessage(
-            "Iteration {:,}/{:,}, Group {:,}/{:,}".format(it, total_it, g, n_groups)
+        self.window.statusBar().showMessage(
+            f"Iteration {it}/{total_it}, Group {g}/{n_groups}"
         )
 
-    def open(self, path):
+    def open(self, path: str) -> None:
+        """Load a localization file and preset the pool process.
+
+        Parameters
+        ----------
+        path : str
+            Path to the localization file.
+        """
         self.path = path
         try:
             self.locs, self.info = io.load_locs(path, qt_parent=self)
@@ -252,8 +395,12 @@ class View(QtWidgets.QLabel):
         groups = np.unique(self.locs.group)
         n_groups = len(groups)
         n_locs = len(self.locs)
-        self.group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=bool)
-        progress = lib.ProgressDialog("Creating group index", 0, len(groups), self)
+        self.group_index = scipy.sparse.lil_matrix(
+            (n_groups, n_locs), dtype=bool,
+        )
+        progress = lib.ProgressDialog(
+            "Creating group index", 0, len(groups), self,
+        )
         progress.set_value(0)
         for i, group in enumerate(groups):
             index = np.where(self.locs.group == group)[0]
@@ -280,26 +427,44 @@ class View(QtWidgets.QLabel):
         y = sharedctypes.RawArray("f", self.locs.y)
         n_workers = min(
             60, max(1, int(0.75 * multiprocessing.cpu_count()))
-        ) # Python crashes when using >64 cores
-        pool = multiprocessing.Pool(n_workers, init_pool, (x, y, self.group_index))
-        self.window.status_bar.showMessage("Ready for processing!")
+        )  # Python crashes when using >64 cores
+        pool = multiprocessing.Pool(
+            n_workers, init_pool, (x, y, self.group_index),
+        )
+        self.window.statusBar().showMessage("Ready for processing!")
         status.close()
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
         if self._pixmap is not None:
             self.set_pixmap(self._pixmap)
 
-    def save(self, path):
+    def save(self, path: str) -> None:
+        """Save averaged localizations.
+
+        Parameters
+        ----------
+        path : str
+            Path to save localizations.
+        """
         cx = self.info[0]["Width"] / 2
         cy = self.info[0]["Height"] / 2
         self.locs.x += cx
         self.locs.y += cy
-        info = self.info + [{"Generated by": f"Picasso v{__version__} Average"}]
+        info = self.info + [{
+            "Generated by": f"Picasso v{__version__} Average"
+        }]
         out_locs = self.locs
         io.save_locs(path, out_locs, info)
-        self.window.status_bar.showMessage("File saved to {}.".format(path))
+        self.window.statusBar().showMessage("File saved to {}.".format(path))
 
-    def set_image(self, image):
+    def set_image(self, image: np.ndarray) -> None:
+        """Sets the new image to be displayed.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            The image to be displayed. Shape (height, width).
+        """
         cmap = np.uint8(np.round(255 * plt.get_cmap("magma")(np.arange(256))))
         image /= image.max()
         image = np.minimum(image, 1.0)
@@ -313,7 +478,7 @@ class View(QtWidgets.QLabel):
         self._pixmap = QtGui.QPixmap.fromImage(qimage)
         self.set_pixmap(self._pixmap)
 
-    def set_pixmap(self, pixmap):
+    def set_pixmap(self, pixmap: QtGui.QPixmap) -> None:
         self.setPixmap(
             pixmap.scaled(
                 self.width(),
@@ -323,7 +488,9 @@ class View(QtWidgets.QLabel):
             )
         )
 
-    def update_image(self, *args):
+    def update_image(self, *args) -> None:
+        """Update the displayed image based on the changed display
+        parameters."""
         oversampling = self.window.parameters_dialog.oversampling.value()
         t_min = -self.r
         t_max = self.r
@@ -334,7 +501,19 @@ class View(QtWidgets.QLabel):
 
 
 class Window(QtWidgets.QMainWindow):
-    def __init__(self):
+    """Main window.
+
+    ...
+
+    Attributes
+    ----------
+    view : View
+        The main view widget for displayed averaged image.
+    parameters_dialog : ParametersDialog
+        The dialog for adjusting processing parameters.
+    """
+
+    def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Average")
         self.resize(512, 512)
@@ -362,16 +541,17 @@ class Window(QtWidgets.QMainWindow):
         average_action = process_menu.addAction("Average")
         average_action.setShortcut("Ctrl+A")
         average_action.triggered.connect(self.view.average)
-        self.status_bar = self.statusBar()
 
-    def open(self):
+    def open(self) -> None:
+        """Open the dialog for opening a file to load."""
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open localizations", filter="*.hdf5"
         )
         if path:
             self.view.open(path)
 
-    def save(self):
+    def save(self) -> None:
+        """Open the dialog for saving averaged localizations."""
         out_path = os.path.splitext(self.view.path)[0] + "_avg.hdf5"
         path, exe = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save localizations", out_path, filter="*.hdf5"
@@ -380,7 +560,7 @@ class Window(QtWidgets.QMainWindow):
             self.view.save(path)
 
 
-def main():
+def main() -> None:
 
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
@@ -399,14 +579,16 @@ def main():
     for plugin in plugins:
         p = plugin.Plugin(window)
         if p.name == "average":
-            p.execute()  
-              
+            p.execute()
+
     window.show()
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtWidgets.QMessageBox.critical(
+            window, "An error occured", message,
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

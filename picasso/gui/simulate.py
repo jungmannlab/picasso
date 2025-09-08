@@ -1,45 +1,43 @@
 """
-    picasso.simulate-gui
-    ~~~~~~~~~~~~~~~~
+    picasso.gui.simulate
+    ~~~~~~~~~~~~~~~~~~~~
 
-    GUI for Simulate :
-    Simulate single molcule fluorescence data
+    GUI for simulating single molecule fluorescence data.
 
     :author: Maximilian Thomas Strauss, 2016
     :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
+
+from __future__ import annotations
 
 import csv
 import glob as _glob
 import os
 import sys
 import time
-import importlib, pkgutil
-
+import importlib
+import pkgutil
 import yaml
+from typing import Literal
 
+import numpy as np
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
-import numpy as _np
 from matplotlib.backends.backend_qt5agg import FigureCanvas
-from matplotlib.backends.backend_qt5agg import (
-    NavigationToolbar2QT as NavigationToolbar,
-)
-from PyQt5 import QtCore, QtGui, QtWidgets
-
 from scipy.optimize import curve_fit
 from scipy.stats import norm
-import os.path as _ospath
+from PyQt5 import QtCore, QtGui, QtWidgets
 
-from .. import io as _io
-from .. import lib, simulate, __version__
+from .. import io, lib, simulate, __version__
 
 
-def fitFuncBg(x, a, b):
+def fitFuncBg(x: np.ndarray, a: float, b: float) -> float:
+    """Background fitting function."""
     return (a + b * x[0]) * x[1] * x[2]
 
 
-def fitFuncStd(x, a, b, c):
+def fitFuncStd(x: np.ndarray, a: float, b: float, c: float) -> float:
+    """Standard fitting function."""
     return a * x[0] * x[1] + b * x[2] + c
 
 
@@ -114,6 +112,141 @@ CY_DEFAULT = [
 
 
 class Window(QtWidgets.QMainWindow):
+    """Main window for the simulation GUI.
+
+    ADVANCED_MODE set to 1 allows for more intricate noise modeling,
+    based on experimental data. For more details, see the
+    ``changeNoise`` method.
+
+    ...
+
+    Attributes
+    ----------
+    backgroundlevelEdit : QtWidgets.QSpinBox
+        Spin box for the background level. See ``changeNoise`` for
+        details on how this is translated to the number of background
+        photons per frame.
+    BgoffsetEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the background offset (photons) used for advanced
+        noise modeling. See ``changeNoise`` for more details.
+    BgStdoffsetEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the background standard deviation offset (photons)
+        used for advanced noise modeling. See ``changeNoise`` for more
+        details.
+    camerasizeEdit : QtWidgets.QSpinBox
+        Spin box for the camera size (pixels).
+    canvas1, canvas2 : matplotlib.backends.backend_qt5agg.FigureCanvas
+        Canvases for figure1 and figure2.
+    concatExchangeEdit : QtWidgets.QCheckbox
+        Check box for concatenating exchange rounds.
+    currentround : int
+        Current round of the simulation (Exchange-PAINT).
+    cx, cy : list of floats
+        Calibration coefficients.
+    EquationAEdit, EquationBEdit, EquationCEdit : QtWidgets.QDoubleSpinBox
+        Spin boxes for the coefficients of the background equation used
+        for advanced noise modeling. See ``changeNoise`` for more
+        details.
+    exchangeroundsEdit : QtWidgets.QSpinBox
+        Spin box for controlling the number of exchange rounds to be
+        simulated.
+    exportkinetics : QtWidgets.QCheckbox
+        Save binding kinetics information to a .yaml file.
+    figure1, figure2 : plt.Figure
+        Figures for displaying the simulated ROI and designed structure,
+        respectively.
+    framesEdit : QtWidgets.QSpinBox
+        Spin box for the number of frames.
+    grid : QtWidgets.QGridLayout
+        Grid layout for the main window.
+    imagercEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the imager coefficient used for advanced noise
+        modeling. See ``changeNoise`` for more details.
+    imagerconcentrationEdit : QtWidgets.QSpinBox
+        Spin box for the imager concentration (nM).
+    integrationtimeEdit : QtWidgets.QSpinBox
+        Spin box for the integration (exposure) time (ms).
+    konEdit : QtWidgets.QSpinBox
+        Spin box for k_on (M^-1 s^-1).
+    lasercEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the laser coefficient used for advanced noise
+        modeling. See ``changeNoise`` for more details.
+    laserpowerEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the laser power density (kW cm^-2) if
+        ADVANCED_MODE is set to 0, or laser power (mW) if ADVANCED_MODE
+        is set to 1.
+    mode3DEdit : QtWidgets.QCheckBox
+        Check box for enabling 3D mode.
+    photonbudgetEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the photon budget (photons), i.e., the number of
+        photons an emitter is able to emit.
+    photonsframeEdit : QtWidgets.QLabel
+        Label displaying mean number of photons emitted per frame per
+        molecule.
+    photonrateEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the photon rate (photons/s). Only used if
+        ADVANCED_MODE is set to 1.
+    photonratestdEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the standard deviation of the photon rate
+        (photons/s). Only used if ADVANCED_MODE is set to 1.
+    photonslopeEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the photon detection rate
+        (photons ms^-1 kW^-1 cm^2).
+    photonslopemodeEdit : QtWidgets.QCheckBox
+        Check box for constant photon detection rate.
+    photonslopeStdEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the standard deviation of the photon detection rate
+        (photons ms^-1 kW^-1 cm^2). Only used if ADVANCED_MODE is set to
+        1.
+    photonstdframeEdit : QtWidgets.QLabel
+        Label displaying the standard deviation of photons per emitter
+        per frame.
+    pixelsizeEdit : QtWidgets.QSpinBox
+        Spin box for the pixel size (nm).
+    psfEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the point spread function (PSD) width (pixels).
+    psf_fwhmEdit : QtWidgets.QLabel
+        Label displaying the full width at half maximum (FWHM) of the
+        point spread function (PSF) in nm.
+    structure1, structure2, structure3 : QtWidgets.QLabel
+        Labels for structure definitions. For example, for a grid
+        structure, they display 'Columns', 'Rows' and 'Spacing X, Y',
+        respectively.
+    structure1Edit, structure2Edit, structure3Edit : QtWidgets.QSpinBox
+        Spin boxes for determining the values of structure1, structure2
+        and structure3.
+    structure3Label : QtWidgets.QLabel
+        Label displaying the units of structure3.
+    structurecombo : QtWidgets.QComboBox()
+        Combo box for selecting the type of structure simulated.
+    structurenoEdit : QtWidgets.QSpinBox
+        Spin box for the number of structures to simulate.
+    structureMode : bool
+        Whether the structure mode is active, i.e., False if handles
+        are imported, True otherwise.
+    structureframeEdit : QtWidgets.QSpinBox
+        Spin box for the frame size to leave around the edges of the
+        image.
+    structureIncorporationEdit : QtWidgets.QDoubleSpinBox
+        Spin box for the probability that dockings strands are
+        incorporated (%).
+    structurexxEdit, structureyyEdit, structure3DEdit, structureexEdit
+        : QtWidgets.QLineEdit
+        Input windows for docking strand positions in the structure
+        (x, y, z) in nm and the exchange round id.
+    structurerandomEdit : QtWidgets.QCheckBox
+        Check box for random arrangement of the structures in the
+        simulated ROI.
+    structurerandomOrientationEdit : QtWidgets.QCheckBox
+        Check box for random orientation of docking strands.
+    taubEdit : QtWidgets.QSpinBox
+        Spin box for the mean bright time (ms).
+    taudEdit : QtWidgets.QLabel
+        Label displaying the resulting mean dark time (ms).
+    totaltimeEdit : QtWidgets.QLabel
+        Label for the total acquisition time.
+    """
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Simulate")
@@ -187,7 +320,9 @@ class Window(QtWidgets.QMainWindow):
 
         cgrid.addItem(
             QtWidgets.QSpacerItem(
-                1, 1, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding
+                1,
+                1,
+                QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding,
             )
         )
 
@@ -233,7 +368,9 @@ class Window(QtWidgets.QMainWindow):
         pgrid.addWidget(QtWidgets.QLabel("ms"), 4, 2)
         pgrid.addItem(
             QtWidgets.QSpacerItem(
-                1, 1, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding
+                1,
+                1,
+                QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding,
             )
         )
 
@@ -274,7 +411,7 @@ class Window(QtWidgets.QMainWindow):
         self.photonbudgetEdit.setSingleStep(100000)
         self.photonbudgetEdit.setDecimals(0)
 
-        self.photonslopeEdit = QtWidgets.QSpinBox()
+        self.photonslopeEdit = QtWidgets.QDoubleSpinBox()
         self.photonslopeStdEdit = QtWidgets.QDoubleSpinBox()
 
         self.laserpowerEdit.setValue(LASERPOWER_DEFAULT)
@@ -307,9 +444,10 @@ class Window(QtWidgets.QMainWindow):
 
         igrid.addWidget(laserpower, 2, 0)
         igrid.addWidget(self.laserpowerEdit, 2, 1)
-        igrid.addWidget(QtWidgets.QLabel("kW cm<sup>-2<sup>"), 2, 2)
         if ADVANCEDMODE:
             igrid.addWidget(QtWidgets.QLabel("mW"), 2, 2)
+        else:
+            igrid.addWidget(QtWidgets.QLabel("kW cm<sup>-2<sup>"), 2, 2)
 
         igridindex = 1
         if ADVANCEDMODE:
@@ -346,7 +484,9 @@ class Window(QtWidgets.QMainWindow):
         igrid.addWidget(photonslopeUnit, 8 - igridindex, 2)
 
         igrid.addWidget(self.photonslopemodeEdit, 9 - igridindex, 1)
-        igrid.addWidget(QtWidgets.QLabel("Constant detection rate"), 9 - igridindex, 0)
+        igrid.addWidget(
+            QtWidgets.QLabel("Constant detection rate"), 9 - igridindex, 0,
+        )
 
         if ADVANCEDMODE:
             igrid.addWidget(photonslopeStd, 10 - igridindex, 0)
@@ -379,8 +519,8 @@ class Window(QtWidgets.QMainWindow):
         noise_groupbox = QtWidgets.QGroupBox("Noise Model")
         ngrid = QtWidgets.QGridLayout(noise_groupbox)
 
-        laserc = QtWidgets.QLabel("Lasercoefficient")
-        imagerc = QtWidgets.QLabel("Imagercoefficient")
+        laserc = QtWidgets.QLabel("Laser coefficient")
+        imagerc = QtWidgets.QLabel("Imager coefficient")
 
         EquationA = QtWidgets.QLabel("Equation A")
         EquationB = QtWidgets.QLabel("Equation B")
@@ -574,10 +714,16 @@ class Window(QtWidgets.QMainWindow):
         structurerandomOrientation = QtWidgets.QLabel("Random orientation")
 
         self.structurerandomEdit.stateChanged.connect(self.generatePositions)
-        self.structurerandomOrientationEdit.stateChanged.connect(self.generatePositions)
-        self.structureIncorporationEdit.valueChanged.connect(self.generatePositions)
+        self.structurerandomOrientationEdit.stateChanged.connect(
+            self.generatePositions
+        )
+        self.structureIncorporationEdit.valueChanged.connect(
+            self.generatePositions
+        )
 
-        self.structurecombo.currentIndexChanged.connect(self.changeStructureType)
+        self.structurecombo.currentIndexChanged.connect(
+            self.changeStructureType
+        )
 
         sgrid.addWidget(structureno, 1, 0)
         sgrid.addWidget(self.structurenoEdit, 1, 1)
@@ -629,7 +775,9 @@ class Window(QtWidgets.QMainWindow):
         sgrid.addWidget(generateButton, 17 + sindex, 0, 1, 3)
         cgrid.addItem(
             QtWidgets.QSpacerItem(
-                1, 1, QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding
+                1,
+                1,
+                QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding,
             )
         )
 
@@ -643,7 +791,9 @@ class Window(QtWidgets.QMainWindow):
         quitButton.clicked.connect(QtCore.QCoreApplication.instance().quit)
         quitButton.resize(quitButton.sizeHint())
 
-        loadButton = QtWidgets.QPushButton("Load settings from previous simulation")
+        loadButton = QtWidgets.QPushButton(
+            "Load settings from previous simulation"
+        )
 
         btngridR = QtWidgets.QGridLayout()
 
@@ -651,9 +801,13 @@ class Window(QtWidgets.QMainWindow):
         self.exportkinetics = QtWidgets.QCheckBox()
 
         btngridR.addWidget(loadButton, 0, 0, 1, 2)
-        btngridR.addWidget(QtWidgets.QLabel("Exchange rounds to be simulated:"), 1, 0)
+        btngridR.addWidget(
+            QtWidgets.QLabel("Exchange rounds to be simulated:"), 1, 0,
+        )
         btngridR.addWidget(self.exchangeroundsEdit, 1, 1)
-        btngridR.addWidget(QtWidgets.QLabel("Concatenate several rounds:"), 2, 0)
+        btngridR.addWidget(
+            QtWidgets.QLabel("Concatenate several rounds:"), 2, 0,
+        )
         btngridR.addWidget(self.conroundsEdit, 2, 1)
         btngridR.addWidget(QtWidgets.QLabel("Concatenate Exchange"))
         btngridR.addWidget(self.concatExchangeEdit, 3, 1)
@@ -728,10 +882,8 @@ class Window(QtWidgets.QMainWindow):
         self.mainpbar.setValue(0)
         self.statusBar().showMessage("Simulate ready.")
 
-    def load3dCalibration(self):
-        # if hasattr(self.window, 'movie_path'):
-        #    dir = os.path.dirname(self.window.movie_path)
-        # else:
+    def load3dCalibration(self) -> None:
+        """Load 3D calibration data from a YAML file."""
         dir = None
         path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load 3d calibration", directory=dir, filter="*.yaml"
@@ -743,7 +895,9 @@ class Window(QtWidgets.QMainWindow):
                 self.cy = [_ for _ in z_calibration["Y Coefficients"]]
                 self.statusBar().showMessage("Caliration loaded from: " + path)
 
-    def changeTime(self):
+    def changeTime(self) -> None:
+        """Update the total acquisition time based on the current
+        settings."""
         laserpower = self.laserpowerEdit.value()
         itime = self.integrationtimeEdit.value()
         frames = self.framesEdit.value()
@@ -766,20 +920,25 @@ class Window(QtWidgets.QMainWindow):
 
         self.changeNoise()
 
-    def changePaint(self):
+    def changePaint(self) -> None:
+        """Calculate the mean dark time given the current settings and
+        updates noise/background."""
         kon = self.konEdit.value()
         imagerconcentration = self.imagerconcentrationEdit.value()
         taud = round(1 / (kon * imagerconcentration * 1 / 10**9) * 1000)
         self.taudEdit.setText(str(taud))
         self.changeNoise()
 
-    def changePSF(self):
+    def changePSF(self) -> None:
+        """Update the PSF (Point Spread Function) based on the current
+        settings."""
         psf = self.psfEdit.value()
         pixelsize = self.pixelsizeEdit.value()
         psf_fwhm = round(psf * pixelsize * 2.355)
         self.psf_fwhmEdit.setText(str(psf_fwhm))
 
-    def changeImager(self):
+    def changeImager(self) -> None:
+        """Update photon rate and noise given the current settings."""
         laserpower = self.laserpowerEdit.value()
 
         itime = self.integrationtimeEdit.value()
@@ -800,7 +959,9 @@ class Window(QtWidgets.QMainWindow):
         self.photonratestdEdit.setValue((photonratestd))
         self.changeNoise()
 
-    def changeNoise(self):
+    def changeNoise(self) -> None:
+        """Update the noise and background level based on the current
+        settings."""
         itime = self.integrationtimeEdit.value()
         imagerconcentration = self.imagerconcentrationEdit.value()
         laserpower = self.laserpowerEdit.value() * POWERDENSITY_CONVERSION
@@ -834,7 +995,9 @@ class Window(QtWidgets.QMainWindow):
             )
             self.backgroundframesimpleEdit.setText(str(int(bgmodel)))
 
-    def changeStructureType(self):
+    def changeStructureType(self) -> None:
+        """Update the structure input and parameters based on the
+        current settings."""
         typeindex = self.structurecombo.currentIndex()
         # TYPEINDEX: 0 = GRID, 1 = CIRCLE, 2 = CUSTOM, 3 = Handles
 
@@ -886,8 +1049,9 @@ class Window(QtWidgets.QMainWindow):
 
         self.changeStructDefinition()
 
-    def changeStructDefinition(self):
-
+    def changeStructDefinition(self) -> None:
+        """Update the structure definition based on the current
+        settings."""
         typeindex = self.structurecombo.currentIndex()
 
         if typeindex == 0:  # grid
@@ -895,7 +1059,7 @@ class Window(QtWidgets.QMainWindow):
             rows = self.structure1Edit.value()
             cols = self.structure2Edit.value()
 
-            spacingtxt = _np.asarray((self.structure3Edit.text()).split(","))
+            spacingtxt = np.asarray((self.structure3Edit.text()).split(","))
             try:
                 spacingx = float(spacingtxt[0])
             except ValueError:
@@ -932,7 +1096,7 @@ class Window(QtWidgets.QMainWindow):
 
         elif typeindex == 1:  # CIRCLE
             labels = self.structure2Edit.value()
-            diametertxt = _np.asarray((self.structure3Edit.text()).split(","))
+            diametertxt = np.asarray((self.structure3Edit.text()).split(","))
             try:
                 diameter = float(diametertxt[0])
             except ValueError:
@@ -940,10 +1104,10 @@ class Window(QtWidgets.QMainWindow):
 
             twopi = 2 * 3.1415926535
 
-            circdata = _np.arange(0, twopi, twopi / labels)
+            circdata = np.arange(0, twopi, twopi / labels)
 
-            xxval = _np.round(_np.cos(circdata) * diameter / 2 * 100) / 100
-            yyval = _np.round(_np.sin(circdata) * diameter / 2 * 100) / 100
+            xxval = np.round(np.cos(circdata) * diameter / 2 * 100) / 100
+            yyval = np.round(np.sin(circdata) * diameter / 2 * 100) / 100
 
             structurexx = ""
             structureyy = ""
@@ -972,18 +1136,21 @@ class Window(QtWidgets.QMainWindow):
         elif typeindex == 3:  # Handles
             print("Handles will be displayed..")
 
-    def keyPressEvent(self, e):
-
+    def keyPressEvent(self, e: QtGui.QKeyEvent) -> None:
         if e.key() == QtCore.Qt.Key_Escape:
             self.close()
 
-    def vectorToString(self, x):
-        x_arrstr = _np.char.mod("%f", x)
+    def vectorToString(self, x: np.ndarray) -> str:
+        """Convert a numpy array to a comma-separated string."""
+        x_arrstr = np.char.mod("%f", x)
         x_str = ",".join(x_arrstr)
         return x_str
 
-    def simulate(self):
-        exchangeroundstoSim = _np.asarray((self.exchangeroundsEdit.text()).split(","))
+    def simulate(self) -> None:
+        """Run the simulation with the current parameters."""
+        exchangeroundstoSim = np.asarray(
+            (self.exchangeroundsEdit.text()).split(",")
+        )
         exchangeroundstoSim = exchangeroundstoSim.astype(int)
 
         noexchangecolors = len(set(exchangeroundstoSim))
@@ -1018,7 +1185,9 @@ class Window(QtWidgets.QMainWindow):
             structureFrame = self.structureframeEdit.value()
             structureIncorporation = self.structureIncorporationEdit.value()
             structureArrangement = int(self.structurerandomEdit.checkState())
-            structureOrientation = int(self.structurerandomOrientationEdit.checkState())
+            structureOrientation = int(
+                self.structurerandomOrientationEdit.checkState()
+            )
             structurex = self.structurexxEdit.text()
             structurey = self.structureyyEdit.text()
             structureextxt = self.structureexEdit.text()
@@ -1064,7 +1233,7 @@ class Window(QtWidgets.QMainWindow):
                 bgstdoffset = self.BgStdoffsetEdit.value()
             else:
                 background = int(self.backgroundframesimpleEdit.text())
-                noise = _np.sqrt(background)
+                noise = np.sqrt(background)
                 laserc = LASERC_DEFAULT
                 imagerc = IMAGERC_DEFAULT
                 bgoffset = BGOFFSET_DEFAULT
@@ -1073,7 +1242,7 @@ class Window(QtWidgets.QMainWindow):
                 equationC = EQC_DEFAULT
                 bgstdoffset = BGSTDOFFSET_DEFAULT
 
-            structurexx, structureyy, structureex, structure3d = self.readStructure()
+            self.readStructure()
 
             self.statusBar().showMessage("Simulation started")
             struct = self.newstruct
@@ -1089,12 +1258,14 @@ class Window(QtWidgets.QMainWindow):
             t0 = time.time()
 
             if self.concatExchangeEdit.checkState():
-                noexchangecolors = 1  # Overwrite the number to not trigger the for loop
+                # Overwrite the number to not trigger the for loop
+                noexchangecolors = 1
 
             for i in range(0, noexchangecolors):
 
                 if noexchangecolors > 1:
-                    fileName = _io.multiple_filenames(fileNameOld, i)
+                    base, ext = os.path.splitext(fileNameOld)
+                    fileName = f"{base}_{i}{ext}"
                     partstruct = struct[:, struct[2, :] == exchangecolors[i]]
                 elif self.concatExchangeEdit.checkState():
                     fileName = fileNameOld
@@ -1110,13 +1281,13 @@ class Window(QtWidgets.QMainWindow):
 
                 bindingsitesx = partstruct[0, :]
 
-                nosites = len(bindingsitesx)  # number of binding sites in image
-                photondist = _np.zeros((nosites, frames), dtype=int)
-                spotkinetics = _np.zeros((nosites, 4), dtype=float)
+                nsites = len(bindingsitesx)  # number of binding sites in image
+                photondist = np.zeros((nsites, frames), dtype=int)
+                spotkinetics = np.zeros((nsites, 4), dtype=float)
 
                 timetrace = {}
 
-                for i in range(0, nosites):
+                for i in range(0, nsites):
                     p_temp, t_temp, k_temp = simulate.distphotons(
                         partstruct,
                         itime,
@@ -1132,11 +1303,13 @@ class Window(QtWidgets.QMainWindow):
                     timetrace[i] = self.vectorToString(t_temp)
                     outputmsg = (
                         "Distributing photons ... "
-                        + str(_np.round(i / nosites * 1000) / 10)
+                        + str(np.round(i / nsites * 1000) / 10)
                         + " %"
                     )
                     self.statusBar().showMessage(outputmsg)
-                    self.mainpbar.setValue(int(_np.round(i / nosites * 1000) / 10))
+                    self.mainpbar.setValue(
+                        int(np.round(i / nsites * 1000) / 10)
+                    )
 
                 self.statusBar().showMessage("Converting to image ... ")
                 onevents = self.vectorToString(spotkinetics[:, 0])
@@ -1144,7 +1317,7 @@ class Window(QtWidgets.QMainWindow):
                 meandarksim = self.vectorToString(spotkinetics[:, 2])
                 meanbrightsim = self.vectorToString(spotkinetics[:, 3])
 
-                movie = _np.zeros(shape=(frames, imagesize, imagesize))
+                movie = np.zeros(shape=(frames, imagesize, imagesize))
 
                 info = {
                     "Generated by": f"Picasso v{__version__} Simulate",
@@ -1221,12 +1394,14 @@ class Window(QtWidgets.QMainWindow):
                         )
                         outputmsg = (
                             "Converting to Image ... "
-                            + str(_np.round(runner / frames * 1000) / 10)
+                            + str(np.round(runner / frames * 1000) / 10)
                             + " %"
                         )
 
                         self.statusBar().showMessage(outputmsg)
-                        self.mainpbar.setValue(_np.round(runner / frames * 1000) / 10)
+                        self.mainpbar.setValue(
+                            np.round(runner / frames * 1000) / 10
+                        )
                         app.processEvents()
 
                     if self.currentround == 1:
@@ -1243,13 +1418,17 @@ class Window(QtWidgets.QMainWindow):
                         + ". Please set and start next round."
                     )
                     if self.currentround == conrounds:
-                        self.statusBar().showMessage("Adding noise to movie ...")
+                        self.statusBar().showMessage(
+                            "Adding noise to movie ..."
+                        )
                         movie = simulate.noisy_p(movie, background)
                         movie = simulate.check_type(movie)
                         self.statusBar().showMessage("Saving movie ...")
 
                         simulate.saveMovie(fileName, movie, info)
-                        self.statusBar().showMessage("Movie saved to: " + fileName)
+                        self.statusBar().showMessage(
+                            "Movie saved to: " + fileName
+                        )
                         dt = time.time() - t0
                         self.statusBar().showMessage(
                             "All computations finished. Last file saved to: "
@@ -1260,24 +1439,26 @@ class Window(QtWidgets.QMainWindow):
                     else:  # just save info file
                         # self.statusBar().showMessage('Saving yaml ...')
                         info_path = (
-                            _ospath.splitext(fileName)[0]
+                            os.path.splitext(fileName)[0]
                             + "_"
                             + str(self.currentround)
                             + ".yaml"
                         )
-                        _io.save_info(info_path, [info])
+                        io.save_info(info_path, [info])
 
                         if self.exportkinetics.isChecked():
                             # Export the kinetic data if this is checked
                             kinfo_path = (
-                                _ospath.splitext(fileName)[0]
+                                os.path.splitext(fileName)[0]
                                 + "_"
                                 + str(self.currentround)
                                 + "_kinetics.yaml"
                             )
-                            _io.save_info(kinfo_path, [timetrace])
+                            io.save_info(kinfo_path, [timetrace])
 
-                        self.statusBar().showMessage("Movie saved to: " + fileName)
+                        self.statusBar().showMessage(
+                            "Movie saved to: " + fileName
+                        )
 
                 else:
                     app = QtCore.QCoreApplication.instance()
@@ -1298,25 +1479,31 @@ class Window(QtWidgets.QMainWindow):
                         )
                         outputmsg = (
                             "Converting to Image ... "
-                            + str(_np.round(runner / frames * 1000) / 10)
+                            + str(np.round(runner / frames * 1000) / 10)
                             + " %"
                         )
 
                         self.statusBar().showMessage(outputmsg)
-                        self.mainpbar.setValue(int(_np.round(runner / frames * 1000) / 10))
+                        self.mainpbar.setValue(
+                            int(np.round(runner / frames * 1000) / 10)
+                        )
                         app.processEvents()
 
                     movie = simulate.noisy_p(movie, background)
                     movie = simulate.check_type(movie)
                     self.mainpbar.setValue(100)
-                    self.statusBar().showMessage("Converting to image ... complete.")
+                    self.statusBar().showMessage(
+                        "Converting to image ... complete."
+                    )
                     self.statusBar().showMessage("Saving movie ...")
 
                     simulate.saveMovie(fileName, movie, info)
                     if self.exportkinetics.isChecked():
                         # Export the kinetic data if this is checked
-                        kinfo_path = _ospath.splitext(fileName)[0] + "_kinetics.yaml"
-                        _io.save_info(kinfo_path, [timetrace])
+                        kinfo_path = (
+                            os.path.splitext(fileName)[0] + "_kinetics.yaml"
+                        )
+                        io.save_info(kinfo_path, [timetrace])
                     self.statusBar().showMessage("Movie saved to: " + fileName)
                     dt = time.time() - t0
                     self.statusBar().showMessage(
@@ -1326,12 +1513,13 @@ class Window(QtWidgets.QMainWindow):
                     )
                     self.currentround = 0
 
-    def loadSettings(self):  # TODO: re-write exceptions, check key
+    def loadSettings(self) -> None:  # TODO: re-write exceptions, check key
+        """Load simulation settings from a YAML file."""
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml"
         )
         if path:
-            info = _io.load_info(path)
+            info = io.load_info(path)
             self.framesEdit.setValue(info[0]["Frames"])
 
             self.structureframeEdit.setValue(info[0]["Structure.Frame"])
@@ -1356,13 +1544,19 @@ class Window(QtWidgets.QMainWindow):
                 pass
 
             try:
-                self.backgroundlevelEdit.setValue(info[0]["Imager.BackgroundLevel"])
+                self.backgroundlevelEdit.setValue(
+                    info[0]["Imager.BackgroundLevel"]
+                )
             except Exception as e:
                 print(e)
                 pass
-            self.structureIncorporationEdit.setValue(info[0]["Structure.Incorporation"])
+            self.structureIncorporationEdit.setValue(
+                info[0]["Structure.Incorporation"]
+            )
 
-            self.structurerandomEdit.setCheckState(info[0]["Structure.Arrangement"])
+            self.structurerandomEdit.setCheckState(
+                info[0]["Structure.Arrangement"]
+            )
             self.structurerandomOrientationEdit.setCheckState(
                 info[0]["Structure.Orientation"]
             )
@@ -1380,7 +1574,9 @@ class Window(QtWidgets.QMainWindow):
             self.photonslopeStdEdit.setValue(info[0]["Imager.PhotonslopeStd"])
 
             self.camerasizeEdit.setValue(info[0]["Camera.Image Size"])
-            self.integrationtimeEdit.setValue(info[0]["Camera.Integration Time"])
+            self.integrationtimeEdit.setValue(
+                info[0]["Camera.Integration Time"]
+            )
             self.framesEdit.setValue(info[0]["Camera.Frames"])
             self.pixelsizeEdit.setValue(info[0]["Camera.Pixelsize"])
 
@@ -1392,13 +1588,17 @@ class Window(QtWidgets.QMainWindow):
                 self.EquationAEdit.setValue(info[0]["Noise.EquationA"])
                 self.EquationBEdit.setValue(info[0]["Noise.EquationB"])
                 self.EquationCEdit.setValue(info[0]["Noise.EquationC"])
-                self.BgStdoffsetEdit.setValue(info[0]["Noise.BackgroundStdOff"])
+                self.BgStdoffsetEdit.setValue(
+                    info[0]["Noise.BackgroundStdOff"]
+                )
 
             # SET POSITIONS
-            handlexx = _np.asarray((info[0]["Structure.HandleX"]).split(","))
-            handleyy = _np.asarray((info[0]["Structure.HandleY"]).split(","))
-            handleex = _np.asarray((info[0]["Structure.HandleEx"]).split(","))
-            handless = _np.asarray((info[0]["Structure.HandleStruct"]).split(","))
+            handlexx = np.asarray((info[0]["Structure.HandleX"]).split(","))
+            handleyy = np.asarray((info[0]["Structure.HandleY"]).split(","))
+            handleex = np.asarray((info[0]["Structure.HandleEx"]).split(","))
+            handless = np.asarray(
+                (info[0]["Structure.HandleStruct"]).split(",")
+            )
 
             handlexx = handlexx.astype(float)
             handleyy = handleyy.astype(float)
@@ -1408,21 +1608,24 @@ class Window(QtWidgets.QMainWindow):
             handleex = handleex.astype(int)
             handless = handless.astype(int)
 
-            handle3d = _np.asarray((info[0]["Structure.Handle3d"]).split(","))
+            handle3d = np.asarray((info[0]["Structure.Handle3d"]).split(","))
             handle3d = handle3d.astype(float)
-            structure = _np.array([handlexx, handleyy, handleex, handless, handle3d])
+            structure = np.array(
+                [handlexx, handleyy, handleex, handless, handle3d]
+            )
 
             self.structurecombo.setCurrentIndex(2)
             self.newstruct = structure
             self.plotPositions()
             self.statusBar().showMessage("Settings loaded from: " + path)
 
-    def importDesign(self):
+    def importDesign(self) -> None:
+        """Import DNA origami design generated by Picasso: Design."""
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml"
         )
         if path:
-            info = _io.load_info(path)
+            info = io.load_info(path)
             self.structurexxEdit.setText(info[0]["Structure.StructureX"])
             self.structureyyEdit.setText(info[0]["Structure.StructureY"])
             self.structureexEdit.setText(info[0]["Structure.StructureEx"])
@@ -1433,11 +1636,17 @@ class Window(QtWidgets.QMainWindow):
             self.structure3DEdit.setText(structure3d)
             self.structurecombo.setCurrentIndex(2)
 
-    def readLine(self, linetxt, type="float", textmode=True):
+    def readLine(
+        self,
+        linetxt: str,
+        type: Literal["float", "int"] = "float",
+        textmode: bool = True,
+    ) -> np.ndarray:
+        """Convert line text to a numpy array."""
         if textmode:
-            line = _np.asarray((linetxt.text()).split(","))
+            line = np.asarray((linetxt.text()).split(","))
         else:
-            line = _np.asarray((linetxt.split(",")))
+            line = np.asarray((linetxt.split(",")))
 
         values = []
         for element in line:
@@ -1451,20 +1660,24 @@ class Window(QtWidgets.QMainWindow):
                 pass
         return values
 
-    def importHandles(self):
-        # Import structure <>
+    def importHandles(self) -> None:
+        """Import structure handles."""
         self.handles = {}
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml *.hdf5"
         )
         if path:
-            splitpath = _ospath.splitext(path)
+            splitpath = os.path.splitext(path)
             if splitpath[-1] == ".yaml":
 
-                info = _io.load_info(path)
+                info = io.load_info(path)
 
-                x = self.readLine(info[0]["Structure.StructureX"], textmode=False)
-                y = self.readLine(info[0]["Structure.StructureY"], textmode=False)
+                x = self.readLine(
+                    info[0]["Structure.StructureX"], textmode=False,
+                )
+                y = self.readLine(
+                    info[0]["Structure.StructureY"], textmode=False,
+                )
                 try:
                     ex = self.readLine(
                         info[0]["Structure.StructureEx"],
@@ -1473,13 +1686,13 @@ class Window(QtWidgets.QMainWindow):
                     )
                 except Exception as e:
                     print(e)
-                    ex = _np.ones_like(x)
+                    ex = np.ones_like(x)
 
                 try:
                     z = self.readLine(info[0]["Structure.Structure3D"])
                 except Exception as e:
                     print(e)
-                    z = _np.zeros_like(x)
+                    z = np.zeros_like(x)
 
                 minlen = min(len(x), len(y), len(ex), len(z))
 
@@ -1490,7 +1703,7 @@ class Window(QtWidgets.QMainWindow):
 
             else:
 
-                clusters = _io.load_clusters(path)
+                clusters = io.load_clusters(path)
 
                 pixelsize = self.pixelsizeEdit.value()
                 imagesize = self.camerasizeEdit.value()
@@ -1499,8 +1712,8 @@ class Window(QtWidgets.QMainWindow):
                 y = clusters["com_y"]
 
                 # Align in the center of window:
-                x = x - _np.mean(x) + imagesize / 2
-                y = -(y - _np.mean(y)) + imagesize / 2
+                x = x - np.mean(x) + imagesize / 2
+                y = -(y - np.mean(y)) + imagesize / 2
 
                 x = x * pixelsize
                 y = y * pixelsize
@@ -1509,9 +1722,9 @@ class Window(QtWidgets.QMainWindow):
                     z = clusters["com_z"]
                 except Exception as e:
                     print(e)
-                    z = _np.zeros_like(x)
+                    z = np.zeros_like(x)
 
-                ex = _np.ones_like(x)
+                ex = np.ones_like(x)
                 minlen = len(x)
 
             self.handles["x"] = x
@@ -1529,9 +1742,13 @@ class Window(QtWidgets.QMainWindow):
             self.structureMode = False
             self.generatePositions()
 
-            self.statusBar().showMessage("A total of {} points loaded.".format(minlen))
+            self.statusBar().showMessage(f"A total of {minlen} points loaded.")
 
-    def readStructure(self):
+    def readStructure(
+        self,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        """Extract x,y,z coordinates and exchange round information from
+        the GUI."""
         structurexx = self.readLine(self.structurexxEdit)
         structureyy = self.readLine(self.structureyyEdit)
         structureex = self.readLine(self.structureexEdit, "int")
@@ -1551,9 +1768,9 @@ class Window(QtWidgets.QMainWindow):
 
         return structurexx, structureyy, structureex, structure3d
 
-    def plotStructure(self):
-
-        structurexx, structureyy, structureex, structure3d = self.readStructure()
+    def plotStructure(self) -> None:
+        """Plot the structure and display it."""
+        structurexx, structureyy, structureex, _ = self.readStructure()
         noexchangecolors = len(set(structureex))
         exchangecolors = list(set(structureex))
         # self.figure2.suptitle('Structure [nm]')
@@ -1582,11 +1799,15 @@ class Window(QtWidgets.QMainWindow):
         # UPDATE THE EXCHANGE COLORS IN BUTTON TO BE simulated
         self.exchangeroundsEdit.setText(str(exchangecolorsList))
 
-    def generatePositions(self):
+    def generatePositions(self) -> None:
+        """Generate the positions across the ROI to simulate
+        structures."""
         self.plotStructure()
         pixelsize = self.pixelsizeEdit.value()
         if self.structureMode:
-            structurexx, structureyy, structureex, structure3d = self.readStructure()
+            (
+                structurexx, structureyy, structureex, structure3d
+            ) = self.readStructure()
             structure = simulate.defineStructure(
                 structurexx, structureyy, structureex, structure3d, pixelsize
             )
@@ -1608,7 +1829,9 @@ class Window(QtWidgets.QMainWindow):
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
         arrangement = int(self.structurerandomEdit.checkState())
-        gridpos = simulate.generatePositions(number, imageSize, frame, arrangement)
+        gridpos = simulate.generatePositions(
+            number, imageSize, frame, arrangement
+        )
 
         orientation = int(self.structurerandomOrientationEdit.checkState())
         incorporation = self.structureIncorporationEdit.value() / 100
@@ -1626,22 +1849,22 @@ class Window(QtWidgets.QMainWindow):
         else:
             self.newstruct = simulate.prepareStructures(
                 structure,
-                _np.array([[0, 0]]),
+                np.array([[0, 0]]),
                 orientation,
                 number,
                 incorporation,
                 exchange,
             )
 
-            in_x = _np.logical_and(
+            in_x = np.logical_and(
                 self.newstruct[0, :] < (imageSize - frame),
                 self.newstruct[0, :] > frame,
             )
-            in_y = _np.logical_and(
+            in_y = np.logical_and(
                 self.newstruct[1, :] < (imageSize - frame),
                 self.newstruct[1, :] > frame,
             )
-            in_frame = _np.logical_and(in_x, in_y)
+            in_frame = np.logical_and(in_x, in_y)
             self.newstruct = self.newstruct[:, in_frame]
 
         # self.figure1.suptitle('Positions [Px]')
@@ -1682,8 +1905,8 @@ class Window(QtWidgets.QMainWindow):
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
         structureex = struct1[2, :]
-        structurexx_nm = _np.multiply(structurexx - min(structurexx), pixelsize)
-        structureyy_nm = _np.multiply(structureyy - min(structureyy), pixelsize)
+        structurexx_nm = np.multiply(structurexx - min(structurexx), pixelsize)
+        structureyy_nm = np.multiply(structureyy - min(structureyy), pixelsize)
 
         for i in range(0, noexchangecolors):
             plotxx = []
@@ -1705,22 +1928,12 @@ class Window(QtWidgets.QMainWindow):
             )
         self.canvas2.draw()
 
-    def plotPositions(self):
-        structurexx, structureyy, structureex, structure3d = self.readStructure()
+    def plotPositions(self) -> None:
+        """Plot the generated positions."""
+        structurexx, structureyy, structureex, _ = self.readStructure()
         pixelsize = self.pixelsizeEdit.value()
-        structure = simulate.defineStructure(
-            structurexx, structureyy, structureex, structure3d, pixelsize
-        )
-
-        number = self.structurenoEdit.value()
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
-        arrangement = int(self.structurerandomEdit.checkState())
-        gridpos = simulate.generatePositions(number, imageSize, frame, arrangement)
-
-        orientation = int(self.structurerandomOrientationEdit.checkState())
-        incorporation = self.structureIncorporationEdit.value() / 100
-        exchange = 0
 
         # self.figure1.suptitle('Positions [Px]')
         ax1 = self.figure1.add_subplot(111)
@@ -1759,8 +1972,8 @@ class Window(QtWidgets.QMainWindow):
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
         structureex = struct1[2, :]
-        structurexx_nm = _np.multiply(structurexx - min(structurexx), pixelsize)
-        structureyy_nm = _np.multiply(structureyy - min(structureyy), pixelsize)
+        structurexx_nm = np.multiply(structurexx - min(structurexx), pixelsize)
+        structureyy_nm = np.multiply(structureyy - min(structureyy), pixelsize)
 
         for i in range(0, noexchangecolors):
             plotxx = []
@@ -1782,7 +1995,8 @@ class Window(QtWidgets.QMainWindow):
             )
         self.canvas2.draw()
 
-    def openDialog(self):
+    def openDialog(self) -> None:
+        """Open a dialog to select a design file."""
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open design", filter="*.yaml"
         )
@@ -1790,35 +2004,37 @@ class Window(QtWidgets.QMainWindow):
             self.mainscene.loadCanvas(path)
             self.statusBar().showMessage("File loaded from: " + path)
 
-    def importhdf5(self):
+    def importhdf5(self) -> None:
+        """Open a dialog to load HDF5 localizations."""
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open localizations", filter="*.hdf5"
         )
         if path:
             self.readhdf5(path)
 
-    def calibrateNoise(self):
-
+    def calibrateNoise(self) -> None:
+        """Calibrate noise model coefficients given experimental data.
+        Only available when ADVANCED_MODE is set to 1."""
         bg, bgstd, las, time, conc, ok = CalibrationDialog.setExt()
 
-        _np.asarray(bg)
-        _np.asarray(bgstd)
-        _np.asarray(las)
-        _np.asarray(time)
-        _np.asarray(conc)
+        np.asarray(bg)
+        np.asarray(bgstd)
+        np.asarray(las)
+        np.asarray(time)
+        np.asarray(conc)
 
-        x_3d = _np.array([conc, las, time])
+        x_3d = np.array([conc, las, time])
         p0 = [1, 1]
-        fitParamsBg, fitCovariances = curve_fit(fitFuncBg, x_3d, bg, p0)
+        fitParamsBg, _ = curve_fit(fitFuncBg, x_3d, bg, p0)
         print(" fit coefficients :\n", fitParamsBg)
 
         # SET VALUES TO PARAMETER
         self.lasercEdit.setValue(fitParamsBg[0])
         self.imagercEdit.setValue(fitParamsBg[1])
 
-        x_3dStd = _np.array([las, time, bg])
+        x_3dStd = np.array([las, time, bg])
         p0S = [1, 1, 1]
-        fitParamsStd, fitCovariances = curve_fit(fitFuncStd, x_3dStd, bgstd, p0S)
+        fitParamsStd, _ = curve_fit(fitFuncStd, x_3dStd, bgstd, p0S)
 
         print(" fit coefficients2:\n", fitParamsStd)
 
@@ -1835,7 +2051,7 @@ class Window(QtWidgets.QMainWindow):
         ax1 = figure4.add_subplot(121)
         ax1.cla()
         ax1.plot(bg, bgmodel, "o")
-        x = _np.linspace(*ax1.get_xlim())
+        x = np.linspace(*ax1.get_xlim())
         ax1.plot(x, x)
         title = "Background Model:"
         ax1.set_title(title)
@@ -1847,26 +2063,27 @@ class Window(QtWidgets.QMainWindow):
         ax2 = figure4.add_subplot(122)
         ax2.cla()
         ax2.plot(bgstd, bgmodelstd, "o")
-        x = _np.linspace(*ax2.get_xlim())
+        x = np.linspace(*ax2.get_xlim())
         ax2.plot(x, x)
         title = "Background Model Std:"
         ax2.set_title(title)
 
         figure4.show()
 
-    def sigmafilter(self, data, sigmas):
-        # Filter data to be withing +- sigma
-        sigma = _np.std(data)
-        mean = _np.mean(data)
+    def sigmafilter(self, data: np.ndarray, sigmas: float) -> np.ndarray:
+        """Filter data to be within +- sigma."""
+        sigma = np.std(data)
+        mean = np.mean(data)
 
         datanew = data[data < (mean + sigmas * sigma)]
         datanew = datanew[datanew > (mean - sigmas * sigma)]
         return datanew
 
-    def readhdf5(self, path):
+    def readhdf5(self, path: str) -> None:
+        """Read HDF5 localizations from a file."""
         try:
-            locs, self.info = _io.load_locs(path, qt_parent=self)
-        except _io.NoMetadataFileError:
+            locs, self.info = io.load_locs(path, qt_parent=self)
+        except io.NoMetadataFileError:
             return
         integrationtime, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter integration time in ms:"
@@ -1911,7 +2128,7 @@ class Window(QtWidgets.QMainWindow):
                     # ax1.hold(True) # TODO: Investigate again what this causes
                     ax1.hist(photons, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
-                    x = _np.linspace(xmin, xmax, 100)
+                    x = np.linspace(xmin, xmax, 100)
                     p = norm.pdf(x, photonsmu, photonsstd)
                     ax1.plot(x, p)
                     title = "Photons:\n mu = %.2f\n  std = %.2f" % (
@@ -1921,14 +2138,14 @@ class Window(QtWidgets.QMainWindow):
                     ax1.set_title(title)
 
                     # Sigma X & Sigma Y
-                    sigma = _np.concatenate((sigmax, sigmay), axis=0)
+                    sigma = np.concatenate((sigmax, sigmay), axis=0)
                     sigmamu, sigmastd = norm.fit(sigma)
                     ax2 = figure3.add_subplot(132)
                     ax2.cla()
                     # ax2.hold(True)
                     ax2.hist(sigma, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
-                    x = _np.linspace(xmin, xmax, 100)
+                    x = np.linspace(xmin, xmax, 100)
                     p = norm.pdf(x, sigmamu, sigmastd)
                     ax2.plot(x, p)
                     title = "PSF:\n mu = %.2f\n  std = %.2f" % (
@@ -1945,7 +2162,7 @@ class Window(QtWidgets.QMainWindow):
                     # Plot the histogram.
                     ax3.hist(bg, bins=25, normed=True, alpha=0.6)
                     xmin, xmax = plt.xlim()
-                    x = _np.linspace(xmin, xmax, 100)
+                    x = np.linspace(xmin, xmax, 100)
                     p = norm.pdf(x, bgmu, bgstd)
                     ax3.plot(x, p)
                     title = "Background:\n mu = %.2f\n  std = %.2f" % (
@@ -1991,7 +2208,9 @@ class Window(QtWidgets.QMainWindow):
                     self.photonrateEdit.setValue(photonrate)
                     self.photonratestdEdit.setValue(photonratestd)
                     self.photonslopeEdit.setValue(photonrate / laserpower)
-                    self.photonslopeStdEdit.setValue(photonratestd / laserpower)
+                    self.photonslopeStdEdit.setValue(
+                        photonratestd / laserpower
+                    )
 
                     # SET NOISE AND FRAME
                     self.BgoffsetEdit.setValue(bgmu - bgmodel)
@@ -2002,6 +2221,25 @@ class Window(QtWidgets.QMainWindow):
 
 
 class CalibrationDialog(QtWidgets.QDialog):
+    """Dialog for inputting calibration parameters and data (.tif files)
+    for noise modeling.
+
+    ...
+
+    Attributes
+    ----------
+    buttons : QtWidgets.QDialogButtonBox
+        The button box for the dialog: OK and cancel.
+    evalTifButton : QtWidgets.QPushButton
+        The button for evaluating .tif files.
+    loadTifButton : QtWidgets.QPushButton
+        The button for loading .tif files.
+    pbar : QtWidgets.QProgressBar
+        The progress bar for displaying loading progress.
+    table : QtWidgets.QTableWidget
+        The table widget for displaying calibration data.
+    """
+
     def __init__(self, parent=None):
         super(CalibrationDialog, self).__init__(parent)
 
@@ -2039,8 +2277,8 @@ class CalibrationDialog(QtWidgets.QDialog):
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
 
-    def exportTable(self):
-
+    def exportTable(self) -> None:
+        """Export the calibration table to a CSV file."""
         table = dict()
         tablecontent = []
         tablecontent.append(
@@ -2070,7 +2308,8 @@ class CalibrationDialog(QtWidgets.QDialog):
         if path:
             self.savePlate(path, table)
 
-    def savePlate(self, filename, data):
+    def savePlate(self, filename: str, data: dict) -> None:
+        """Save the calibration table to a CSV file."""
         with open(filename, "w", newline="") as csvfile:
             Writer = csv.writer(
                 csvfile,
@@ -2083,8 +2322,8 @@ class CalibrationDialog(QtWidgets.QDialog):
                 for i in range(0, len(exportdata)):
                     Writer.writerow(exportdata[i])
 
-    def evalTif(self):
-
+    def evalTif(self) -> None:
+        """Extract calibration parameters from .tif files."""
         baseline, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter Camera Baseline:"
         )
@@ -2103,41 +2342,52 @@ class CalibrationDialog(QtWidgets.QDialog):
 
         counter = 0
         for element in self.tifFiles:
-            counter = counter + 1
+            counter += 1
             self.pbar.setValue((counter - 1) / self.tifCounter * 100)
-            print("Current Dataset: " + str(counter) + " of " + str(self.tifCounter))
+            print(f"Current Dataset: {counter} of {self.tifCounter}")
             QtWidgets.qApp.processEvents()
-            movie, info = _io.load_movie(element)
+            movie, info = io.load_movie(element)
 
             movie = movie[0:100, :, :]
 
             movie = (movie - baseline) * sensitvity
             self.table.setItem(
-                counter - 1, 4, QtWidgets.QTableWidgetItem(str((_np.mean(movie))))
+                counter - 1,
+                4,
+                QtWidgets.QTableWidgetItem(str((np.mean(movie)))),
             )
             self.table.setItem(
-                counter - 1, 5, QtWidgets.QTableWidgetItem(str((_np.std(movie))))
+                counter - 1,
+                5,
+                QtWidgets.QTableWidgetItem(str((np.std(movie)))),
             )
 
             self.table.setItem(
                 counter - 1,
                 1,
-                QtWidgets.QTableWidgetItem(str((self.ValueFind(element, "nM_")))),
+                QtWidgets.QTableWidgetItem(
+                    str((self.ValueFind(element, "nM_")))
+                ),
             )
             self.table.setItem(
                 counter - 1,
                 2,
-                QtWidgets.QTableWidgetItem(str((self.ValueFind(element, "ms_")))),
+                QtWidgets.QTableWidgetItem(
+                    str((self.ValueFind(element, "ms_")))
+                ),
             )
             self.table.setItem(
                 counter - 1,
                 3,
-                QtWidgets.QTableWidgetItem(str((self.ValueFind(element, "mW_")))),
+                QtWidgets.QTableWidgetItem(
+                    str((self.ValueFind(element, "mW_")))
+                ),
             )
 
         self.pbar.setValue(100)
 
-    def ValueFind(self, filename, unit):
+    def ValueFind(self, filename: str, unit: str) -> int:
+        """Find the value of a specific unit in the filename."""
         index = filename.index(unit)
 
         value = 0
@@ -2150,11 +2400,12 @@ class CalibrationDialog(QtWidgets.QDialog):
 
         return value
 
-    def loadTif(self):
-
-        self.path = QtWidgets.QFileDialog.getExistingDirectory(self, "Select Directory")
+    def loadTif(self) -> None:
+        """Load .tif files from a directory."""
+        self.path = QtWidgets.QFileDialog.getExistingDirectory(
+            self, "Select Directory",
+        )
         if self.path:
-
             self.tifCounter = len(_glob.glob1(self.path, "*.tif"))
             self.tifFiles = _glob.glob(os.path.join(self.path, "*.tif"))
 
@@ -2172,10 +2423,12 @@ class CalibrationDialog(QtWidgets.QDialog):
             )
 
             for i in range(0, self.tifCounter):
-                self.table.setItem(i, 0, QtWidgets.QTableWidgetItem(self.tifFiles[i]))
+                self.table.setItem(
+                    i, 0, QtWidgets.QTableWidgetItem(self.tifFiles[i]),
+                )
 
-    def changeComb(self, indexval):
-
+    def changeComb(self, indexval: int) -> None:
+        """Update the table based on the selected combobox value."""
         sender = self.sender()
         comboval = sender.currentIndex()
         if comboval == 0:
@@ -2188,10 +2441,13 @@ class CalibrationDialog(QtWidgets.QDialog):
                 QtWidgets.QTableWidgetItem(self.ImagersShort[comboval]),
             )
             self.table.setItem(
-                indexval, 3, QtWidgets.QTableWidgetItem(self.ImagersLong[comboval])
+                indexval,
+                3,
+                QtWidgets.QTableWidgetItem(self.ImagersLong[comboval]),
             )
 
-    def readoutTable(self):
+    def readoutTable(self) -> tuple[dict, dict]:
+        """Read out the values from the table."""
         tableshort = dict()
         tablelong = dict()
         maxcolor = 15
@@ -2211,8 +2467,8 @@ class CalibrationDialog(QtWidgets.QDialog):
                 tablelong[i] = "None"
         return tablelong, tableshort
 
-    # get current date and time from the dialog
-    def evalTable(self):
+    def evalTable(self) -> tuple[list, list, list, list, list]:
+        """Get current date and time from the dialog."""
         conc = []
         time = []
         las = []
@@ -2228,13 +2484,15 @@ class CalibrationDialog(QtWidgets.QDialog):
         # self.exportTable()
         return bg, bgstd, las, time, conc
 
-    # static method to create the dialog and return (date, time, accepted)
     @staticmethod
-    def setExt(parent=None):
+    def setExt(
+        parent: QtWidgets.QWidget | None = None,
+    ) -> tuple[list, list, list, list, list, bool]:
+        """Create the dialog and return (date, time, accepted)."""
         dialog = CalibrationDialog(parent)
         result = dialog.exec_()
         bg, bgstd, las, time, conc = dialog.evalTable()
-        return (bg, bgstd, las, time, conc, result == QtWidgets.QDialog.Accepted)
+        return bg, bgstd, las, time, conc, result == QtWidgets.QDialog.Accepted
 
 
 def main():
@@ -2264,7 +2522,9 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(tback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtWidgets.QMessageBox.critical(
+            window, "An error occured", message,
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

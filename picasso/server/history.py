@@ -1,10 +1,8 @@
 import streamlit as st
 from helper import fetch_db
-from sqlalchemy import create_engine
 import pandas as pd
 import plotly.express as px
 import datetime
-import plotly.graph_objs as go
 import warnings
 
 DEFAULT_PLOTS = [
@@ -34,7 +32,8 @@ def convert_df(df: pd.DataFrame):
 def parse_input(input_: str):
     """
     Parses an input string and looks for & and |.
-    Keywords with & will be added to an include list and keywords with | to an exclude list.
+    Keywords with & will be added to an include list and keywords with
+    | to an exclude list.
 
     Args:
         input_ (str): Input string
@@ -91,15 +90,21 @@ def filter_db(df_: pd.DataFrame):
         "Minimum acquisition date",
         df["file_created"].min() - datetime.timedelta(days=1),
     )
-    min_date = datetime.datetime.combine(min_date, datetime.datetime.min.time())
+    min_date = datetime.datetime.combine(
+        min_date, datetime.datetime.min.time()
+    )
 
     max_date = c2.date_input(
         "Maximum acquisition date",
         df["file_created"].max() + datetime.timedelta(days=1),
     )
-    max_date = datetime.datetime.combine(max_date, datetime.datetime.min.time())
+    max_date = datetime.datetime.combine(
+        max_date, datetime.datetime.min.time()
+    )
 
-    input = c3.text_input("Filter for tag in filename (use & and | to add and exclude)")
+    input = c3.text_input(
+        "Filter for tag in filename (use & and | to add and exclude)"
+    )
 
     input = input.replace(" ", "")
 
@@ -107,7 +112,8 @@ def filter_db(df_: pd.DataFrame):
         to_add, to_exclude = parse_input(input)
         if (len(to_add) > 0) & (len(to_exclude) > 0):
             st.text(
-                f"Filtering for filenames containing {to_add} but not {to_exclude}."
+                f"Filtering for filenames containing {to_add} but "
+                f"not {to_exclude}."
             )
 
         elif (len(to_add)) > 0:
@@ -118,7 +124,9 @@ def filter_db(df_: pd.DataFrame):
 
         df = filter_by_tags(df, to_add, to_exclude)
 
-    df = df[(df["file_created"] >= min_date) & (df["file_created"] <= max_date)]
+    df = df[
+        (df["file_created"] >= min_date) & (df["file_created"] <= max_date)
+    ]
 
     st.text(f"From {len(df_):,} Database entries, {len(df):,} are remaining.")
 
@@ -127,7 +135,8 @@ def filter_db(df_: pd.DataFrame):
 
 def filter_by_tags(df: pd.DataFrame, to_add: list, to_exclude: list):
     """
-    Filters the entries of a dataframe according to an to_add and to_exclude list.
+    Filters the entries of a dataframe according to an to_add and to_exclude
+    list.
     Rows will be removed according to their filename.
 
     Args:
@@ -139,7 +148,9 @@ def filter_by_tags(df: pd.DataFrame, to_add: list, to_exclude: list):
         _type_: _description_
     """
 
-    add = df["filename"].apply(lambda x: True if any(i in x for i in to_add) else False)
+    add = df["filename"].apply(
+        lambda x: True if any(i in x for i in to_add) else False
+    )
 
     if len(to_exclude) > 0:
         exclude = df["filename"].apply(
@@ -224,7 +235,8 @@ def history():
                     if st.checkbox("Barchart in column"):
                         table_style = table.style.bar(color="lightgray")
                         st.write(
-                            table_style.to_html(escape=False), unsafe_allow_html=True
+                            table_style.to_html(escape=False),
+                            unsafe_allow_html=True,
                         )
                     else:
                         st.dataframe(table)
@@ -232,7 +244,7 @@ def history():
                     csv = convert_df(table)
 
                     st.download_button(
-                        f"Click to download as (csv)",
+                        "Click to download as (csv)",
                         csv,
                         "file.csv",
                         "text/csv",
