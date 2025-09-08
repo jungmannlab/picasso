@@ -19,17 +19,17 @@ def saveInfo(filename: str, info: dict) -> None:
 
 
 def convertPlateIndex(plate: list, platename: str) -> list:
-    """Convert plate index from canvas index format to a structured 
+    """Convert plate index from canvas index format to a structured
     format for ordering the sequences.
-    
+
     Parameters
     ----------
     plate : list
-        List of lists containing plate information in canvas index 
+        List of lists containing plate information in canvas index
         format.
     platename : str
         Name of the plate to be used in the output.
-    
+
     Returns
     -------
     newplate : list
@@ -104,17 +104,17 @@ def convertPlateIndex(plate: list, platename: str) -> list:
 
 
 def convertPlateIndexColor(plate: list, platename: str) -> list:
-    """Convert plate index from canvas index format to a structured 
+    """Convert plate index from canvas index format to a structured
     format for ordering the sequences, including color information.
-    
+
     Parameters
     ----------
     plate : list
-        List of lists containing plate information in canvas index 
+        List of lists containing plate information in canvas index
         format.
     platename : str
         Name of the plate to be used in the output.
-        
+
     Returns
     -------
     newplate : list
@@ -122,7 +122,8 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
         format for ordering the sequences, including color information.
     """
     # convert from canvas index [CANVAS_INDEX, OLIGONAME, SEQUENCE]
-    # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE, COLOR]
+    # format for ordering [PLATE NAME, PLATE POSITION, OLIGONAME, SEQUENCE,
+    # COLOR]
     platerow = [
         "A",
         "B",
@@ -162,7 +163,9 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
     ]
     structurecol = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 
-    newplate = [["PLATE NAME", "PLATE POSITION", "OLIGO NAME", "SEQUENCE", "COLOR"]]
+    newplate = [
+        ["PLATE NAME", "PLATE POSITION", "OLIGO NAME", "SEQUENCE", "COLOR"]
+    ]
     for row in range(0, len(platerow)):
         for col in range(0, len(platecol)):
             if row < 8:
@@ -196,8 +199,8 @@ def readPlate(filename: str) -> list:
     Parameters
     ----------
     filename : str
-        The name of the file to read.   
-    
+        The name of the file to read.
+
     Returns
     -------
     data : list

@@ -3,7 +3,7 @@
     ~~~~~~~~~~~~~~~~
 
     Maximum likelihood fits for single particle localization. Based on
-    Smith, et al. Nature Methods, 2010. 
+    Smith, et al. Nature Methods, 2010.
 
     :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
     :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
@@ -25,7 +25,7 @@ GAMMA = np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 @numba.jit(nopython=True, nogil=True)
 def _sum_and_center_of_mass(
-    spot: np.ndarray, 
+    spot: np.ndarray,
     size: int,
 ) -> tuple[float, float, float]:
     """Calculate the sum and center of mass of a 2D spot."""
@@ -44,9 +44,9 @@ def _sum_and_center_of_mass(
 
 @numba.jit(nopython=True, nogil=True)
 def mean_filter(spot: np.ndarray, size: int) -> np.ndarray:
-    """Apply a mean filter to the spot. This function computes the mean 
+    """Apply a mean filter to the spot. This function computes the mean
     of each pixel in a 3x3 neighborhood.
-    
+
     Parameters
     ----------
     spot : np.ndarray
@@ -61,25 +61,25 @@ def mean_filter(spot: np.ndarray, size: int) -> np.ndarray:
     """
     filtered_spot = np.zeros_like(spot)
     for k in range(size):
-        for l in range(size):
+        for ll in range(size):
             min_m = np.maximum(0, k - 1)
             max_m = np.minimum(size, k + 2)
-            min_n = np.maximum(0, l - 1)
-            max_n = np.minimum(size, l + 2)
+            min_n = np.maximum(0, ll - 1)
+            max_n = np.minimum(size, ll + 2)
             N = (max_m - min_m) * (max_n - min_n)
             Nsum = 0.0
             for m in range(min_m, max_m):
                 for n in range(min_n, max_n):
                     Nsum += spot[m, n]
-            filtered_spot[k, l] = Nsum / N
+            filtered_spot[k, ll] = Nsum / N
     return filtered_spot
 
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_sigmas(
-    spot: np.ndarray, 
-    y: None, 
-    x: None, 
+    spot: np.ndarray,
+    y: None,
+    x: None,
     size: int,
 ) -> tuple[float, float]:
     """Initialize the sizes of the single-emitter images (sigmas of the
@@ -110,7 +110,7 @@ def _initial_sigmas(
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_parameters(
-    spot: np.ndarray, 
+    spot: np.ndarray,
     size: int,
 ) -> tuple[float, float, float, float, float, float]:
     """Initialize the parameters for the Gaussian fit - x, y, photons,
@@ -125,11 +125,13 @@ def _initial_parameters(
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_theta_sigma(spot: np.ndarray, size: int) -> np.ndarray:
-    """Initialize the parameters for the Gaussian fit with a single 
-    sigma for both x and y dimensions - x, y, photons, background, 
+    """Initialize the parameters for the Gaussian fit with a single
+    sigma for both x and y dimensions - x, y, photons, background,
     sigma."""
     theta = np.zeros(5, dtype=np.float32)
-    theta[0], theta[1], theta[2], theta[3], sx, sy = _initial_parameters(spot, size)
+    theta[0], theta[1], theta[2], theta[3], sx, sy = (
+        _initial_parameters(spot, size)
+    )
     theta[4] = (sx + sy) / 2
     return theta
 
@@ -140,15 +142,15 @@ def _initial_theta_sigmaxy(spot: np.ndarray, size: int) -> np.ndarray:
     sigmas for x and y dimensions - x, y, photons, background, sigma_x
     and sigma_y."""
     theta = np.zeros(6, dtype=np.float32)
-    theta[0], theta[1], theta[2], theta[3], theta[4], theta[5] = _initial_parameters(
-        spot, size
+    theta[0], theta[1], theta[2], theta[3], theta[4], theta[5] = (
+        _initial_parameters(spot, size)
     )
     return theta
 
 
 @numba.vectorize(nopython=True)
 def _erf(x: float) -> float:
-    """Currently not needed, but might be useful for a CUDA 
+    """Currently not needed, but might be useful for a CUDA
     implementation."""
     ax = np.abs(x)
     if ax < 0.5:
@@ -176,7 +178,11 @@ def _erf(x: float) -> float:
                 (
                     (
                         (
-                            (-1.36864857382717e-07 * ax + 5.64195517478974e-01) * ax
+                            (
+                                -1.36864857382717e-07
+                                * ax
+                                + 5.64195517478974e-01
+                            ) * ax
                             + 7.21175825088309e00
                         )
                         * ax
@@ -195,9 +201,11 @@ def _erf(x: float) -> float:
             (
                 (
                     (
-                        ((1.0 * ax + 1.27827273196294e01) * ax + 7.70001529352295e01)
-                        * ax
-                        + 2.77585444743988e02
+                        (
+                            (1.0 * ax + 1.27827273196294e01)
+                            * ax
+                            + 7.70001529352295e01
+                        ) * ax + 2.77585444743988e02
                     )
                     * ax
                     + 6.38980264465631e02
@@ -216,14 +224,18 @@ def _erf(x: float) -> float:
         x2 = x * x
         t = 1.0 / x2
         top = (
-            ((2.10144126479064e00 * t + 2.62370141675169e01) * t + 2.13688200555087e01)
-            * t
-            + 4.65807828718470e00
+            (
+                (2.10144126479064e00 * t + 2.62370141675169e01)
+                * t
+                + 2.13688200555087e01
+            ) * t + 4.65807828718470e00
         ) * t + 2.82094791773523e-01
         bot = (
-            ((9.41537750555460e01 * t + 1.87114811799590e02) * t + 9.90191814623914e01)
-            * t
-            + 1.80124575948747e01
+            (
+                (9.41537750555460e01 * t + 1.87114811799590e02)
+                * t
+                + 9.90191814623914e01
+            ) * t + 1.80124575948747e01
         ) * t + 1.0
         erf = (0.564189583547756e0 - top / (x2 * bot)) / ax
         erf = 0.5 + (0.5 - np.exp(-x2) * erf)
@@ -233,21 +245,24 @@ def _erf(x: float) -> float:
     return np.sign(x)
 
 
+# TODO: check this is correct?
 @numba.jit(nopython=True, nogil=True, cache=False)
-def _gaussian_integral(x: float, mu: float, sigma: float) -> float: #TODO: check this is correct?
-    """Calculate the integral of a Gaussian function from negative 
+def _gaussian_integral(x: float, mu: float, sigma: float) -> float:
+    """Calculate the integral of a Gaussian function from negative
     infinity to x."""
     sq_norm = 0.70710678118654757 / sigma  # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
-    return 0.5 * (math.erf((d + 0.5) * sq_norm) - math.erf((d - 0.5) * sq_norm))
+    return 0.5 * (
+        math.erf((d + 0.5) * sq_norm) - math.erf((d - 0.5) * sq_norm)
+    )
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral(
-    x: float, 
-    mu: float, 
-    sigma: float, 
-    photons: float, 
+    x: float,
+    mu: float,
+    sigma: float,
+    photons: float,
     PSFc: float,
 ) -> tuple[float, float]:
     """Calculate the first and second derivatives of the integral of a
@@ -267,10 +282,10 @@ def _derivative_gaussian_integral(
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral_1d_sigma(
-    x: float, 
-    mu: float, 
-    sigma: float, 
-    photons: float, 
+    x: float,
+    mu: float,
+    sigma: float,
+    photons: float,
     PSFc: float,
 ) -> tuple[float, float]:
     """Calculate the first and second derivatives of the integral of a
@@ -291,19 +306,23 @@ def _derivative_gaussian_integral_1d_sigma(
 
 @numba.jit(nopython=True, nogil=True)
 def _derivative_gaussian_integral_2d_sigma(
-    x: float, 
-    y: float, 
-    mu: float, 
-    nu: float, 
-    sigma: float, 
-    photons: float, 
-    PSFx: float, 
+    x: float,
+    y: float,
+    mu: float,
+    nu: float,
+    sigma: float,
+    photons: float,
+    PSFx: float,
     PSFy: float
 ) -> tuple[float, float]:
     """Calculate the first and second derivatives of the integral of a
     Gaussian function with respect to sigma in 2D."""
-    dSx, ddSx = _derivative_gaussian_integral_1d_sigma(x, mu, sigma, photons, PSFy)
-    dSy, ddSy = _derivative_gaussian_integral_1d_sigma(y, nu, sigma, photons, PSFx)
+    dSx, ddSx = _derivative_gaussian_integral_1d_sigma(
+        x, mu, sigma, photons, PSFy,
+    )
+    dSy, ddSy = _derivative_gaussian_integral_1d_sigma(
+        y, nu, sigma, photons, PSFx,
+    )
     dudt = dSx + dSy
     d2udt2 = ddSx + ddSy
     return dudt, d2udt2
@@ -333,18 +352,18 @@ def _worker(
 
 
 def gaussmle(
-    spots: np.ndarray, 
-    eps: float, 
-    max_it: int, 
+    spots: np.ndarray,
+    eps: float,
+    max_it: int,
     method: Literal["sigma", "sigmaxy"] = "sigma",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the
     extracted spots.
-    
+
     Parameters
     ----------
     spots : np.ndarray
-        The input image patches containing the spots of shape 
+        The input image patches containing the spots of shape
         (N, size, size), where N is the number of spots and size is the
         size of the square patch.
     eps : float
@@ -357,8 +376,8 @@ def gaussmle(
     Returns
     -------
     thetas : np.ndarray
-        The fitted parameters for each spot, shape (N, 6) or (N, 5) 
-        depending on the method. The columns are x, y, photons, 
+        The fitted parameters for each spot, shape (N, 6) or (N, 5)
+        depending on the method. The columns are x, y, photons,
         background and sigma (or sigmax, sigmay).
     CRLBs : np.ndarray
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
@@ -386,15 +405,15 @@ def gaussmle(
 
 
 def gaussmle_async(
-    spots: np.ndarray, 
-    eps: float, 
-    max_it: int, 
+    spots: np.ndarray,
+    eps: float,
+    max_it: int,
     method: Literal["sigma", "sigmaxy"] = "sigma",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Runs ``gaussmle`` asynchronously (multiprocessing) to fit
     Gaussians using Maximum Likelihood Estimation (MLE) to the
     extracted spots. See ``gaussmle`` for parameter details.
-    
+
     Returns
     -------
     current : np.ndarray
@@ -410,7 +429,7 @@ def gaussmle_async(
     iterations = np.zeros(N, dtype=np.int32)
     n_workers = min(
         60, max(1, int(0.75 * multiprocessing.cpu_count()))
-    ) # Python crashes when using >64 cores
+    )  # Python crashes when using >64 cores
     lock = threading.Lock()
     current = [0]
     if method == "sigma":
@@ -444,13 +463,13 @@ def gaussmle_async(
 
 @numba.jit(nopython=True, nogil=True)
 def _mlefit_sigma(
-    spots: np.ndarray, 
-    index: int, 
-    thetas: np.ndarray, 
-    CRLBs: np.ndarray, 
-    likelihoods: np.ndarray, 
-    iterations: np.ndarray, 
-    eps: float, 
+    spots: np.ndarray,
+    index: int,
+    thetas: np.ndarray,
+    CRLBs: np.ndarray,
+    likelihoods: np.ndarray,
+    iterations: np.ndarray,
+    eps: float,
     max_it: int,
 ) -> None:
     """Fits a Gaussian to a single spot using Maximum Likelihood
@@ -539,7 +558,10 @@ def _mlefit_sigma(
         theta[4] = np.minimum(theta[4], size)
 
         # Check for convergence
-        if (np.abs(old_x - theta[0]) < eps) and (np.abs(old_y - theta[1]) < eps):
+        if (
+            (np.abs(old_x - theta[0]) < eps) and
+            (np.abs(old_y - theta[1]) < eps)
+        ):
             break
         else:
             old_x = theta[0]
@@ -582,7 +604,14 @@ def _mlefit_sigma(
             if model > 0:
                 data = spot[ii, jj]
                 if data > 0:
-                    Div += data * np.log(model) - model - data * np.log(data) + data
+                    Div += (
+                        data
+                        * np.log(model)
+                        - model
+                        - data
+                        * np.log(data)
+                        + data
+                    )
                 else:
                     Div += -model
 
@@ -599,12 +628,12 @@ def _mlefit_sigma(
 
 @numba.jit(nopython=True, nogil=True)
 def _mlefit_sigmaxy(
-    spots: np.ndarray, 
-    index: int, 
-    thetas: np.ndarray, 
-    CRLBs: np.ndarray, 
-    likelihoods: np.ndarray, 
-    iterations: np.ndarray, 
+    spots: np.ndarray,
+    index: int,
+    thetas: np.ndarray,
+    CRLBs: np.ndarray,
+    likelihoods: np.ndarray,
+    iterations: np.ndarray,
     eps: float,
     max_it: int,
 ) -> None:
@@ -747,7 +776,14 @@ def _mlefit_sigmaxy(
             if model > 0:
                 data = spot[ii, jj]
                 if data > 0:
-                    Div += data * np.log(model) - model - data * np.log(data) + data
+                    Div += (
+                        data
+                        * np.log(model)
+                        - model
+                        - data
+                        * np.log(data)
+                        + data
+                    )
                 else:
                     Div += -model
 
@@ -762,37 +798,37 @@ def _mlefit_sigmaxy(
 
 
 def locs_from_fits(
-    identifications: np.recarray, 
-    theta: np.ndarray, 
-    CRLBs: np.ndarray, 
-    likelihoods: np.ndarray, 
-    iterations: np.ndarray, 
+    identifications: np.recarray,
+    theta: np.ndarray,
+    CRLBs: np.ndarray,
+    likelihoods: np.ndarray,
+    iterations: np.ndarray,
     box: int,
 ) -> np.recarray:
     """Convert the results of Gaussian fits into a structured array
     suitable for further analysis or visualization.
-    
+
     Parameters
     ----------
     identifications : np.recarray
-        The structured array containing the identifications of the 
-        spots, which should include 'frame', 'x', 'y' and 
+        The structured array containing the identifications of the
+        spots, which should include 'frame', 'x', 'y' and
         'net_gradient'.
     theta : np.ndarray
-        The fitted parameters for each spot, shape (N, 6) or (N, 5) 
+        The fitted parameters for each spot, shape (N, 6) or (N, 5)
         depending on the method used.
     CRLBs : np.ndarray
         The Cramer-Rao Lower Bounds for the fitted parameters, shape
         (N, 6) or (N, 5).
     likelihoods : np.ndarray
-        The log-likelihoods for each fitted spot, shape (N,).  
+        The log-likelihoods for each fitted spot, shape (N,).
     iterations : np.ndarray
         The number of iterations taken to converge for each spot,
         shape (N,).
     box : int
         The size of the box used for fitting, which is used to
         calculate the offsets for the x and y coordinates.
-    
+
     Returns
     -------
     locs : np.recarray

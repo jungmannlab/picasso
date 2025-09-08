@@ -46,7 +46,8 @@ def preview():
     st.write("# Preview")
 
     st.write(
-        "Select a movie from the database. All hdf files with the same base path as the movie will be selectable."
+        "Select a movie from the database. All hdf files with the same base "
+        "path as the movie will be selectable."
     )
     engine = create_engine("sqlite:///" + _db_filename(), echo=False)
 
@@ -61,7 +62,9 @@ def preview():
         if os.path.isdir(folder):
 
             files = os.listdir(folder)
-            files = [f for f in files if f.startswith(base) and f.endswith(".hdf5")]
+            files = [
+                f for f in files if f.startswith(base) and f.endswith(".hdf5")
+            ]
 
             hdf_file = st.selectbox("Select hdf file", [None] + files)
 
@@ -69,7 +72,8 @@ def preview():
                 st.write("## File preview")
 
                 st.info(
-                    "Performance Warning: This preview will render the full image, so it might be slow for large oversmapling."
+                    "Performance Warning: This preview will render the full "
+                    "image, so it might be slow for large oversampling."
                 )
 
                 with st.spinner("Loading file"):
@@ -87,7 +91,10 @@ def preview():
                         c1, c2, c3 = st.columns(3)
 
                         oversampling = c1.number_input(
-                            "Oversampling", value=5.0, min_value=1., max_value=40.
+                            "Oversampling",
+                            value=5.0,
+                            min_value=1.,
+                            max_value=40.,
                         )
 
                         image = picasso_render(locs, viewport, oversampling)
@@ -102,7 +109,7 @@ def preview():
                         # plt.imshow(image, cmap='hot', vmax=10)
                         fig, ax = plt.subplots()
                         st.write(f"Image with dimensions {image.shape}")
-                        im = ax.imshow(image, cmap="hot", vmin=vmin, vmax=vmax)
+                        ax.imshow(image, cmap="hot", vmin=vmin, vmax=vmax)
                         # Hide grid lines
                         ax.grid(False)
 
@@ -117,7 +124,8 @@ def preview():
                         st.warning(f"File {hdf_file} not found.")
         else:
             st.error(
-                f"Couldn't find folder {folder}. Please check if folder was deleted or moved."
+                f"Couldn't find folder {folder}. Please check if folder was "
+                "deleted or moved."
             )
 
     except ValueError:

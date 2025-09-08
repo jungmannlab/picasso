@@ -18,13 +18,13 @@ from . import render, lib
 
 
 def prepare_img(
-    img: np.ndarray, 
-    img_shape: int, 
-    alpha: float = 1, 
+    img: np.ndarray,
+    img_shape: int,
+    alpha: float = 1,
     bg: float = 0,
 ) -> np.ndarray:
     """Prepare image for classification.
-    
+
     Parameters
     ----------
     img : np.ndarray
@@ -35,7 +35,7 @@ def prepare_img(
         Scaling factor for the image, by default 1.
     bg : float, optional
         Background value to be subtracted, by default 0.
-    
+
     Returns
     -------
     img : np.ndarray
@@ -59,7 +59,7 @@ def rotate_img(img: np.ndarray, angle: float) -> np.ndarray:
         Input image to be rotated.
     angle : float
         Angle in degrees by which to rotate the image.
-    
+
     Returns
     -------
     rot_img : np.ndarray
@@ -69,16 +69,17 @@ def rotate_img(img: np.ndarray, angle: float) -> np.ndarray:
 
     return rot_img
 
+
 def roi_to_img(
-    locs: np.recarray, 
-    pick: int, 
-    radius: float, 
-    oversampling: float, 
+    locs: np.recarray,
+    pick: int,
+    radius: float,
+    oversampling: float,
     picks: tuple[float, float] | None = None,
 ) -> np.ndarray:
-    """Convert a region of interest (ROI) defined by localizations to an 
+    """Convert a region of interest (ROI) defined by localizations to an
     image.
-    
+
     Parameters
     ----------
     locs : np.recarray
@@ -86,7 +87,7 @@ def roi_to_img(
     pick : int
         The group number of the localizations to be picked.
     radius : float
-        Radius around the mean position of the localizations to define 
+        Radius around the mean position of the localizations to define
         the ROI.
     oversampling : float
         Number of super-resolution pixels per camera pixel.
@@ -94,7 +95,7 @@ def roi_to_img(
         Specific coordinates (x, y) to isolate localizations from, by
         default None. If None, uses the mean position of the localizations
         in the specified group.
-        
+
     Returns
     -------
     pick_img : np.ndarray
@@ -131,27 +132,27 @@ def roi_to_img(
         print('viewport: {}'.format(viewport))
 
     # Render locs with Picasso render function
-    try: 
+    try:
         len_x, pick_img = render.render(pick_locs, viewport=viewport,
                                         oversampling=oversampling,
                                         blur_method='smooth')
-    except:
+    except Exception:
         pass
     return pick_img
 
 
 def prepare_data(
-    locs: np.recarray, 
-    label: int, 
+    locs: np.recarray,
+    label: int,
     pick_radius: float,
-    oversampling: float, 
+    oversampling: float,
     alpha: float = 10,
-    bg: float = 1, 
+    bg: float = 1,
     export: bool = False,
 ) -> tuple[list[np.ndarray], list[int]]:
-    """Prepare data for classification by extracting images of 
-    localizations. 
-    
+    """Prepare data for classification by extracting images of
+    localizations.
+
     Parameters
     ----------
     locs : np.recarray
@@ -159,7 +160,7 @@ def prepare_data(
     label : int
         Label for the data, typically the group number.
     pick_radius : float
-        Radius around the mean position of the localizations to define 
+        Radius around the mean position of the localizations to define
         the ROI.
     oversampling : float
         Number of super-resolution pixels per camera pixel.
@@ -168,9 +169,9 @@ def prepare_data(
     bg : float, optional
         Background value to be subtracted, by default 1.
     export : bool, optional
-        If True, saves the images to the './img/' directory, by default 
+        If True, saves the images to the './img/' directory, by default
         False.
-        
+
     Returns
     -------
     data : list[np.ndarray]
@@ -190,9 +191,15 @@ def prepare_data(
 
         if export is True and pick < 10:
             filename = 'label' + str(label) + '-' + str(pick)
-            plt.imsave('./img/' + filename + '.png', (alpha*pick_img-bg), cmap='Greys', vmax=10)
+            plt.imsave(
+                './img/' + filename + '.png', (alpha*pick_img-bg),
+                cmap='Greys',
+                vmax=10,
+            )
 
-        pick_img = prepare_img(pick_img, img_shape=img_shape, alpha=alpha, bg=bg)
+        pick_img = prepare_img(
+            pick_img, img_shape=img_shape, alpha=alpha, bg=bg,
+        )
 
         data.append(pick_img)
         labels.append(label)
@@ -201,11 +208,11 @@ def prepare_data(
 
 
 def predict_structure(
-    mlp: MLPClassifier, 
-    locs: np.recarray, 
-    pick: int, 
-    pick_radius: float, 
-    oversampling: float, 
+    mlp: MLPClassifier,
+    locs: np.recarray,
+    pick: int,
+    pick_radius: float,
+    oversampling: float,
     picks: tuple[float, float] | None = None,
 ) -> tuple[int, np.ndarray]:
     """Predict the structure of localizations using a trained MLP
@@ -234,7 +241,13 @@ def predict_structure(
         Predicted probabilities for each class.
     """
     img_shape = int(2 * pick_radius * oversampling)
-    img = roi_to_img(locs, pick=pick, radius=pick_radius, oversampling=oversampling, picks=picks)
+    img = roi_to_img(
+        locs,
+        pick=pick,
+        radius=pick_radius,
+        oversampling=oversampling,
+        picks=picks,
+    )
     img = prepare_img(img, img_shape=img_shape, alpha=10, bg=1)
     img = img.reshape(1, img_shape**2)
 

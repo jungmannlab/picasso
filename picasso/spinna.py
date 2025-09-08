@@ -2,7 +2,7 @@
     picasso.spinna
     ~~~~~~~~~~~~~~
 
-    Single protein simulations in DNA-PAINT for recovery of 
+    Single protein simulations in DNA-PAINT for recovery of
     stoichiometries of oligomerization states.
 
     :authors: Luciano A Masullo, Rafal Kowalewski, 2022-2025
@@ -75,7 +75,7 @@ def rref(M: np.ndarray) -> np.ndarray:
     """
     M = M.copy()
 
-    lead = 0 # leading column
+    lead = 0  # leading column
     n_rows, n_cols = M.shape
     for r in range(n_rows):
         if n_cols <= lead:
@@ -89,7 +89,7 @@ def rref(M: np.ndarray) -> np.ndarray:
                 lead += 1
                 if n_cols == lead:
                     break
-        M[[r, i], :] = M[[i, r], :] # swap rows i and r
+        M[[r, i], :] = M[[i, r], :]  # swap rows i and r
         # transfor the pivot to 1
         if M[r, lead] != 0:
             M[r, :] = M[r, :] / M[r, lead]
@@ -103,7 +103,7 @@ def rref(M: np.ndarray) -> np.ndarray:
 
 
 def find_target_counts(
-    targets: list[str], 
+    targets: list[str],
     structures: list[Structure],
 ) -> np.ndarray:
     """Find the number of each molecular target in structures.
@@ -152,7 +152,7 @@ def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
         The permutation array, shape (S,).
     """
     n_t, n_s = t_counts.shape
-    perm = np.arange(n_s) # initiate the permutation array
+    perm = np.arange(n_s)  # initiate the permutation array
 
     # run reduced row echelon form to check if the matrix is valid
     red = rref(t_counts)
@@ -161,7 +161,7 @@ def get_structures_permutation(t_counts: np.ndarray) -> np.ndarray:
     # free-parameter columns, i.e., we shift the pivot columns to the
     # left such that they correspond to the dependent parameters, see
     # documentation
-    lpc = n_t # last permutated column
+    lpc = n_t  # last permutated column
     for i in range(n_t):
         if red[i, i] != 1:
             perm[i] = lpc
@@ -188,7 +188,7 @@ def generate_N_structures(
         Keys give the names of the targets and the corresponding values
         give the total number of molecules to be simulated for each
         species. The numbers specify the total (not observed!) number of
-        molecules to be simulated for each species, i.e., corrected for 
+        molecules to be simulated for each species, i.e., corrected for
         labeling efficiency: n_observed / LE.
     granularity : int
         Controls how many structure counts are
@@ -231,7 +231,7 @@ def generate_N_structures(
     t_counts = t_counts[:, p]
     structures = [structures[_] for _ in p]
 
-    # convert N_total to a 1D array for simplicity, keep only the 
+    # convert N_total to a 1D array for simplicity, keep only the
     # targets that are present in the structures
     N_total = np.asarray([N_total[target] for target in targets])
 
@@ -261,7 +261,7 @@ def generate_N_structures(
     # number of combinations of structure counts that are examined in
     # the later stages
     max_vals = N_total.max() * np.ones_like(t_free)
-    np.divide(N_total.reshape(-1, 1), t_free, out=max_vals, where=t_free!=0)
+    np.divide(N_total.reshape(-1, 1), t_free, out=max_vals, where=t_free != 0)
     max_vals = max_vals.min(axis=0).astype(np.int32)
 
     # now we find the free structure counts that will be examined; to
@@ -288,7 +288,7 @@ def generate_N_structures(
     # this is done, the next dependent structure can be found by
     # repeating the process with the second to last row of eqs, and so
     # on.
-    for i in range(n_t): # iterate over each dependent structure
+    for i in range(n_t):  # iterate over each dependent structure
         # take the coefficients from eqs; we start from the last row
         # and take only the coefficients that are to the right side of
         # the leading one
@@ -315,14 +315,15 @@ def generate_N_structures(
     for i, structure in enumerate(structures):
         structure_counts[structure.title] = N_structures[:, i]
 
-    if save: # if path for saving was provided
-        # find proportions first, just like in StructureMixer.convert_counts_to_props
+    if save:  # if path for saving was provided
+        # find proportions first, just like in
+        # StructureMixer.convert_counts_to_props
         props = np.zeros(N_structures.shape, dtype=np.float32)
         for i, structure in enumerate(structures):
             N_str_total = np.zeros(N_structures.shape[0], dtype=np.float32)
             N_per_target = structure.get_ind_target_count(targets)
             for N_mol in N_per_target:
-                N_str_total = N_str_total +  N_mol * N_structures[:, i]
+                N_str_total = N_str_total + N_mol * N_structures[:, i]
             prop = np.round(100 * N_str_total / N_total, 2)
             props[:, i] = prop
         # if rounding error occurs, delete from the first non-zero element
@@ -332,7 +333,7 @@ def generate_N_structures(
                 i for i, prop in enumerate(props[row, :]) if prop > 0
             )
             props[row, first_non_zero_idx] -= np.sum(props[row, :]) - 100
-        
+
         # save as a .csv file
         df = pd.DataFrame(
             np.hstack((N_structures, props)),
@@ -386,7 +387,7 @@ def otsu(image: np.ndarray) -> float:
 
 
 def random_rotation_matrices(
-    num: int, 
+    num: int,
     mode: Literal["3D", "2D"] | None = "2D",
 ) -> np.ndarray:
     """Generate num-many random rotation matrices. By default, 2D
@@ -409,7 +410,7 @@ def random_rotation_matrices(
         Array of shape (num, 3, 3) specifying num-many random rotation
         matrices.
     """
-    if type(num) != int or num <= 0:
+    if not isinstance(num, int) or num <= 0:
         raise TypeError("Number of rotations must be a positive integer.")
 
     if mode == '3D':
@@ -426,9 +427,9 @@ def random_rotation_matrices(
 
 
 def coords_to_locs(
-    coords: np.ndarray, 
-    lp: float = 1., 
-    pixelsize : int = 130,
+    coords: np.ndarray,
+    lp: float = 1.,
+    pixelsize: int = 130,
 ) -> np.recarray:
     """Convert ``coords`` array into localization list that can be read
     in Picasso Render.
@@ -473,27 +474,27 @@ def coords_to_locs(
 
 
 def plot_NN(
-    data1: np.ndarray | None = None, 
-    data2: np.ndarray | None = None, 
-    n_neighbors: int = 1, 
+    data1: np.ndarray | None = None,
+    data2: np.ndarray | None = None,
+    n_neighbors: int = 1,
     dist: np.ndarray | None = None,
     mode: Literal['hist', 'plot'] = 'hist',
-    fig: plt.Figure | None =None, 
+    fig: plt.Figure | None = None,
     ax: plt.axes | None = None,
-    figsize: tuple[float, float] = (6,6), 
+    figsize: tuple[float, float] = (6, 6),
     dpi: int = 200,
-    binsize: float = 4.0, 
-    xlim: tuple[float, float] | None = (0, 200), 
+    binsize: float = 4.0,
+    xlim: tuple[float, float] | None = (0, 200),
     ylim: tuple[float, float] | None = None,
     colors: list = NN_COLORS,
     title: str = "Nearest neighbor distances",
     xlabel: str = "Distances (nm)",
     ylabel: str = "Norm. frequency",
     show_legend: bool = True,
-    alpha: float = 0.6, 
+    alpha: float = 0.6,
     edgecolor: str = 'black',
-    show: bool = False, 
-    return_fig: bool = False, 
+    show: bool = False,
+    return_fig: bool = False,
     savefig: str = '',
 ) -> tuple[plt.Figure, plt.axes] | None:
     """Plot a nearest neighbor distances histogram.
@@ -576,7 +577,7 @@ def plot_NN(
                 color=colors[i],
                 label=f"exp {i+1}th NN",
                 alpha=alpha,
-                linewidth=0.4, # 0.1
+                linewidth=0.4,  # 0.1
                 density=True,
             )
         elif mode == 'plot':
@@ -590,7 +591,7 @@ def plot_NN(
                 bin_centers,
                 counts,
                 color=colors[i],
-                linewidth=0.9, # 2
+                linewidth=0.9,  # 2
                 alpha=alpha,
                 label=f"sim {i+1}th NN",
             )
@@ -624,8 +625,8 @@ def plot_NN(
 
 
 def get_NN_dist(
-    data1: np.ndarray, 
-    data2: np.ndarray, 
+    data1: np.ndarray,
+    data2: np.ndarray,
     n_neighbors: int,
 ) -> np.ndarray:
     """Find nearest neighbors distances between data1 and data2 for
@@ -652,7 +653,7 @@ def get_NN_dist(
     # if empty list passed, return empty array
     if len(data1) == 0 or len(data2) == 0:
         return np.array([])
-    
+
     # check that data1 and data2 have the same dimensionalities
     if data1.shape[1] != data2.shape[1]:
         raise ValueError(
@@ -678,12 +679,12 @@ def get_NN_dist(
 
 
 def get_NN_dist_experimental(
-    coords: dict, 
-    mixer: StructureMixer, 
+    coords: dict,
+    mixer: StructureMixer,
     duplicate: bool = False,
 ) -> list[np.ndarray]:
     """Calculate nearest neighbor distances for experimental data.
-    
+
     Parameters
     ----------
     coords : dict
@@ -695,7 +696,7 @@ def get_NN_dist_experimental(
         If True, the NN distances are found for each pair of molecular
         targets in both directions, e.g., CD80 -> CD86 as well as
         CD86 -> CD80. If False, only one direction is considered.
-    
+
     Returns
     -------
     dists : list of np.2darrays
@@ -720,9 +721,9 @@ def get_NN_dist_experimental(
 
 
 def get_NN_dist_simulated(
-    N_str: list[np.ndarray], 
-    N_sim: int, 
-    mixer: StructureMixer, 
+    N_str: list[np.ndarray],
+    N_sim: int,
+    mixer: StructureMixer,
     duplicate: bool = False,
 ) -> list[np.ndarray]:
     """Calculate nearest neighbor distances across many simulations
@@ -780,7 +781,7 @@ def NND_score(dists1: list[np.ndarray], dists2: list[np.ndarray]) -> float:
     ----------
     dists1, dists2: list of np.ndarray
         Lists of arrays of shape (N, n_neighbors) where N is the
-        number of distances measured and n_neighbors is the number 
+        number of distances measured and n_neighbors is the number
         of neighbors considered. See get_NN_dist_simulated and
         get_NN_dist_experimental, which return such dists arrays.
 
@@ -792,7 +793,7 @@ def NND_score(dists1: list[np.ndarray], dists2: list[np.ndarray]) -> float:
     """
     scores = []
     norm = 0
-    for d1, d2 in zip(dists1, dists2): # iterate over each pair of molecules
+    for d1, d2 in zip(dists1, dists2):  # iterate over each pair of molecules
         for n in range(d1.shape[1]):
             scores.append(ks_2samp(d1[:, n], d2[:, n]).statistic)
             norm += 1
@@ -823,7 +824,7 @@ def load_structures(path: str) -> tuple[list[Structure], list[str]]:
                 "Incorrect file. Please choose a file that was created"
                 " that was created with Picasso SPINNA."
             )
-        if not "Structure title" in info[0]:
+        if "Structure title" not in info[0]:
             raise TypeError(
                 "Incorrect file. Please choose a file that was created"
                 " that was created with Picasso SPINNA."
@@ -905,7 +906,7 @@ class MaskGenerator():
         Sigma used for gaussian filtering (nm). Default is 65.
     ndim : int, optional
         Dimensionality of the mask (2 or 3). If None, the dimensionality
-        is taken from the loaded localizations/molecules. Default is 
+        is taken from the loaded localizations/molecules. Default is
         None.
     run_checks : bool, optional
         Whether to run input checks during initialization. Default is
@@ -947,7 +948,10 @@ class MaskGenerator():
 
         # camera pixelsize (like in Picasso Render.View.add())
         for element in info:
-            if "Picasso" in element.values() and "Localize" in element.values():
+            if (
+                "Picasso" in element.values() and
+                "Localize" in element.values()
+            ):
                 if "Pixelsize" in element:
                     self.pixelsize = element["Pixelsize"]
                     break
@@ -963,7 +967,7 @@ class MaskGenerator():
     def ensure_correct_inputs(self) -> None:
         """Ensure correct data types used in initialization."""
         # path
-        if type(self.locs_path) != str:
+        if not isinstance(self.locs_path, str):
             raise TypeError(
                 "Path to localizations must be a string ending with .hdf5."
             )
@@ -972,10 +976,14 @@ class MaskGenerator():
                 "Path to localizations must be a string ending with .hdf5."
             )
         # binsize
-        if not(isinstance(self.binsize, float) or isinstance(self.binsize, int)):
+        if not (
+            isinstance(self.binsize, float) or isinstance(self.binsize, int)
+        ):
             raise TypeError("Binsize must be a number.")
         # sigma
-        if not(isinstance(self.sigma, float) or isinstance(self.sigma, int)):
+        if not (
+            isinstance(self.sigma, float) or isinstance(self.sigma, int)
+        ):
             raise TypeError("Sigma must be a number.")
         # ndim
         if self.ndim is not None:
@@ -1094,10 +1102,10 @@ class MaskGenerator():
             outpath = path.replace(".npy", ".png")
             if self.mask.ndim == 3:
                 mask_ = np.sum(self.mask, axis=2)
-                mask_ /= mask_.max() # normalize to save image
+                mask_ /= mask_.max()  # normalize to save image
             else:
                 mask_ = self.mask.copy()
-                mask_ /= mask_.max() # normalize to save image
+                mask_ /= mask_.max()  # normalize to save image
             im = Image.fromarray(np.uint8(mask_*255))
             im.save(outpath)
 
@@ -1126,13 +1134,13 @@ class MaskGenerator():
             "Dimensionality": f"{self.mask.ndim}D",
             "Threshold value": float(self.thresh),
         }
-        if self.mask.ndim == 3: # 3D mask
+        if self.mask.ndim == 3:  # 3D mask
             info["z_min"] = float(self.z_min)
             info["z_max"] = float(self.z_max)
             info["Volume (um^3)"] = float(
                 1e-9 * self.binsize ** 3 * (self.mask > self.thresh).sum()
             )
-        else: # 2D mask
+        else:  # 2D mask
             info["Area (um^2)"] = float(
                 1e-6 * self.binsize ** 2 * (self.mask > self.thresh).sum()
             )
@@ -1188,10 +1196,10 @@ class Structure():
         return "\n".join(display) + "\n"
 
     def define_coordinates(
-        self, 
-        target: str, 
-        x: list[float], 
-        y: list[float], 
+        self,
+        target: str,
+        x: list[float],
+        y: list[float],
         z: list[float] | None = None,
     ) -> Structure:
         """Manually define coordinates of a given molecular target.
@@ -1212,29 +1220,29 @@ class Structure():
         -------
         self: Structure
         """
-        if z is not None: # 3D
+        if z is not None:  # 3D
             # assert equal lengths
             if not ((len(x) == len(y)) and (len(x) == len(z))):
                 raise ValueError(
                     "x, y and z coordinates must have equal length."
                 )
-        else: # 2D
-            if not (len(x) == len(y)): # assert equal lengths
+        else:  # 2D
+            if not (len(x) == len(y)):  # assert equal lengths
                 raise ValueError(
                     "x and y coordinates must have equal length."
                 )
             z = [0] * len(x)
 
         # add name to self.targets if not present already
-        if not target in self.targets:
+        if target not in self.targets:
             self.targets.append(target)
             self.x[target] = x
             self.y[target] = y
             self.z[target] = z
-        else: # append to the target info
+        else:  # append to the target info
             self.x[target].extend(x)
             self.y[target].extend(y)
-            self.z[target].extend(z)           
+            self.z[target].extend(z)
         return self
 
     def delete_target(self, target: str) -> None:
@@ -1284,7 +1292,7 @@ class Structure():
             else:
                 n.append(0)
         return n
-    
+
     def get_max_nn(self, target1: str, target2: str) -> int:
         """Find the maximum number of nearest neighbors between two
         molecular targets in the structure.
@@ -1299,7 +1307,7 @@ class Structure():
         n : int
             Maximum number of nearest neighbors between the two targets.
         """
-        if not target1 in self.targets or not target2 in self.targets:
+        if target1 not in self.targets or target2 not in self.targets:
             return 0
         elif target1 == target2:
             return max(len(self.x[target1]) - 1, 0)
@@ -1428,10 +1436,10 @@ class StructureSimulator():
         N_structures: int,
         le: float | list[float],
         label_unc: float | list[float],
-        mask: np.ndarray | None = None, 
+        mask: np.ndarray | None = None,
         mask_info: dict | None = None,
-        width: float | None = None, 
-        height: float | None = None, 
+        width: float | None = None,
+        height: float | None = None,
         depth: float | None = None,
         random_rot_mode: Literal["2D", "3D"] | None = "2D",
     ) -> None:
@@ -1447,18 +1455,18 @@ class StructureSimulator():
         self.read_mask_and_ROI(mask, mask_info, width, height, depth)
 
     def read_mask_and_ROI(
-        self, 
-        mask: np.ndarray | None = None, 
+        self,
+        mask: np.ndarray | None = None,
         mask_info: dict | None = None,
-        width: float | None = None, 
-        height: float | None = None, 
+        width: float | None = None,
+        height: float | None = None,
         depth: float | None = None,
     ) -> None:
         """Read mask and/or ROI.
 
         By default, one of the two must be specified. If both are
         given, mask overwrites the ROI."""
-        ### ROI: width, height and depth
+        # ROI: width, height and depth #
         if mask is None:
             self.mask = None
             self.mask_info = None
@@ -1481,7 +1489,7 @@ class StructureSimulator():
 
             return
 
-        ### Mask is given
+        # Mask is given #
         elif mask is not None and mask_info is not None:
             # Load the ROI and mask attributes
             pixelsize = mask_info["Camera pixelsize (nm)"]
@@ -1490,14 +1498,14 @@ class StructureSimulator():
             self.y_min = mask_info["y_min"] * pixelsize
             self.y_max = mask_info["y_max"] * pixelsize
 
-            self.width = self.x_max - self.x_min # width in nm
-            self.height = self.y_max - self.y_min # height in nm
+            self.width = self.x_max - self.x_min  # width in nm
+            self.height = self.y_max - self.y_min  # height in nm
 
             if mask.ndim == 3:
                 # z coordiantes are given in nm already (picasso)
                 self.z_min = mask_info["z_min"]
                 self.z_max = mask_info["z_max"]
-                self.depth = (self.z_max - self.z_min) # depth in nm
+                self.depth = (self.z_max - self.z_min)  # depth in nm
             else:
                 self.z_min = None
                 self.z_max = None
@@ -1562,19 +1570,19 @@ class StructureSimulator():
         multinomial distribution (provided by the mask). Then,
         generate random positions of structure centers within each
         mask pixel."""
-        ## Get mask pixel size
+        # Get mask pixel size #
         binsize = self.mask_info["Binsize (nm)"]
 
-        ## Draw from multinomial distribution
+        # Draw from multinomial distribution #
         rng = np.random.default_rng()
         # find the number of structures to be simulated in each mask
         # pixel; numpy function only allows 1D arrays, thus this needs
         # to be later modified
         counts = rng.multinomial(self.N, pvals=self.mask.ravel())
 
-        ## CSR positions are generated using np.random.uniform();
-        ## It takes in inputs low and high specyfing the min and max
-        ## value of the random float generated.
+        # CSR positions are generated using np.random.uniform();     #
+        # It takes in inputs low and high specifying the min and max #
+        # value of the random float generated.                       #
         # The first step is to generate a meshgrid; this will be used
         # when counting number of locs per mask pixel/voxel;
         # Lastly, let us consider the 'low' argument at first, since
@@ -1596,7 +1604,7 @@ class StructureSimulator():
         x = np.random.uniform(lows_x, highs_x)
         y = np.random.uniform(lows_y, highs_y)
 
-        ## Save center positions
+        # Save center positions #
         self.c_pos = np.stack((x, y)).T
 
     def simulate_centers_mask_3D(self) -> None:
@@ -1641,7 +1649,7 @@ class StructureSimulator():
             for i, target in enumerate(self.structure.targets):
                 x = self.structure.x[target]
                 y = self.structure.y[target]
-                z = self.structure.z[target] # required for 3D rotation
+                z = self.structure.z[target]  # required for 3D rotation
 
                 # initialize x,y,z coordinates for each structure
                 coords = self.initialize_coordinates(x, y, z)
@@ -1661,9 +1669,9 @@ class StructureSimulator():
                 self.pos[target] = coords
 
     def initialize_coordinates(
-        self, 
-        x: list[float], 
-        y: list[float], 
+        self,
+        x: list[float],
+        y: list[float],
         z: list[float],
     ) -> np.ndarray:
         """Initialize coordinates of molecular targets as a 3D array.
@@ -1687,8 +1695,8 @@ class StructureSimulator():
         return coords
 
     def rotate_structures(
-        self, 
-        coords: np.ndarray, 
+        self,
+        coords: np.ndarray,
         rotations: np.ndarray,
     ) -> np.ndarray:
         """Rotate coordinates of each molecular target with a defined
@@ -1749,7 +1757,7 @@ class StructureSimulator():
             self.pos_obs = {}
             # iterate over all molecular targets species
             for i, target in enumerate(self.pos.keys()):
-                N = len(self.pos[target]) # total number of molecules
+                N = len(self.pos[target])  # total number of molecules
                 # indeces to be kept after LE correction
                 le_idx = np.random.choice(
                     N, size=int(N * self.le[i]), replace=False
@@ -1766,7 +1774,7 @@ class StructureSimulator():
     ) -> StructureSimulator:
         """Simulate positions of structure centers, arrangement of
         molecular targets around structures and labeling efficiency.
-        
+
         Allows saving of molecular targets and structure centers.
 
         Parameters
@@ -1843,16 +1851,16 @@ class StructureSimulator():
             {
                 "Height": int(self.height / pixelsize),
                 "Width": int(self.width / pixelsize),
-                "Frames": 1, # some arbitrary number
+                "Frames": 1,  # some arbitrary number
             },
             {
                 "Pixelsize": pixelsize,
                 "Generated by": "Picasso Localize",
-            }, # Render requires the second element to read the file
+            },  # Render requires the second element to read the file
         ]
 
         # centers
-        if centers and not self.c_pos is None:
+        if centers and self.c_pos is not None:
             path = f"{path_base}_centers.hdf5"
             frame = np.ones(self.N)
             lpx = np.ones(self.N) / pixelsize
@@ -1860,7 +1868,7 @@ class StructureSimulator():
             x = self.c_pos[:, 0] / pixelsize
             y = self.c_pos[:, 1] / pixelsize
             if self.depth is not None:
-                z = self.c_pos[:, 2] # not scaled for picasso compatibility
+                z = self.c_pos[:, 2]  # not scaled for picasso compatibility
                 locs = np.rec.array(
                     (frame, x, y, z, lpx, lpy),
                     dtype=LOCS_DTYPE_3D,
@@ -1883,7 +1891,7 @@ class StructureSimulator():
                 x = pos[:, 0] / pixelsize
                 y = pos[:, 1] / pixelsize
                 if pos.shape[1] == 3:
-                    z = pos[:, 2] # not scaled for picasso compatibility
+                    z = pos[:, 2]  # not scaled for picasso compatibility
                     locs = np.rec.array(
                         (frame, x, y, z, lpx, lpy),
                         dtype=LOCS_DTYPE_3D,
@@ -1906,7 +1914,7 @@ class StructureSimulator():
                 x = pos_obs[:, 0] / pixelsize
                 y = pos_obs[:, 1] / pixelsize
                 if pos_obs.shape[1] == 3:
-                    z = pos_obs[:, 2] # not scaled for picasso compatibility
+                    z = pos_obs[:, 2]  # not scaled for picasso compatibility
                     locs = np.rec.array(
                         (frame, x, y, z, lpx, lpy),
                         dtype=LOCS_DTYPE_3D,
@@ -2009,10 +2017,10 @@ class StructureMixer():
     width, height, depth : float or None
         Dimensions of the simulated region of interest (ROI) in nm.
         If mask is provided, ROI is overwritten using the mask metadata.
-        If width, height and depth are None, mask_dict must be 
-        specified. If width and height are given, but no mask and depth 
-        is provided, 2D simulation will be conducted. If width, height 
-        and depth are given but no mask is provided, 3D simulation will 
+        If width, height and depth are None, mask_dict must be
+        specified. If width and height are given, but no mask and depth
+        is provided, 2D simulation will be conducted. If width, height
+        and depth are given but no mask is provided, 3D simulation will
         be conducted.
     random_rot_mode : {'2D', '3D'} or None
         Mode of random rotation of structures. If "3D", structures are
@@ -2033,8 +2041,8 @@ class StructureMixer():
         label_unc: dict,
         le: dict,
         mask_dict: dict | None = None,
-        width: float | None = None, 
-        height: float | None = None, 
+        width: float | None = None,
+        height: float | None = None,
         depth: float | None = None,
         random_rot_mode: Literal["2D", "3D"] | None = "2D",
         nn_counts: Literal["auto"] | dict = "auto",
@@ -2046,7 +2054,8 @@ class StructureMixer():
         self.roi = [width, height, depth]
         self.random_rot_mode = random_rot_mode
         self.nn_counts = nn_counts
-        self.simulators = [] # StructureSimulator instances (one for each structure)
+        # StructureSimulator instances (one for each structure)
+        self.simulators = []
 
         # check for correct input types
         self.ensure_correct_input()
@@ -2085,18 +2094,18 @@ class StructureMixer():
 
     def check_structures(self) -> None:
         """Check if self.structures has correct format."""
-        if type(self.structures) == Structure: # single structure case
+        if isinstance(self.structures, Structure):  # single structure case
             self.structures = [self.structures]
-        elif type(self.structures) != list:
+        elif not isinstance(self.structures, list):
             raise TypeError("Please input structures as a list.")
-        elif any([type(m) != Structure for m in self.structures]):
+        elif any([not isinstance(m, Structure) for m in self.structures]):
             raise TypeError(
                 "All structures must be instances of the Structure class."
             )
 
     def check_label_unc(self) -> None:
         """Check if self.label_unc has correct format."""
-        if type(self.label_unc) != dict:
+        if not isinstance(self.label_unc, dict):
             raise TypeError(
                 "labeling uncertainties must be input as a dictionary.\n"
                 "Please provide molecular target name(s) as key(s) and"
@@ -2118,7 +2127,7 @@ class StructureMixer():
 
     def check_le(self) -> None:
         """Check if ``self.le`` has correct format."""
-        if type(self.le) != dict:
+        if not isinstance(self.le, dict):
             raise TypeError(
                 "labeling efficiencies must be input as a dictionary.\n"
                 "Please provide molecular target name(s) as key(s) and"
@@ -2136,7 +2145,7 @@ class StructureMixer():
             )
 
     def check_mask_and_roi(self) -> None:
-        """Check if ``self.mask_dict`` and ``self.roi`` have correct 
+        """Check if ``self.mask_dict`` and ``self.roi`` have correct
         format."""
         if self.mask_dict is None:
             if self.roi[0] is not None and self.roi[1] is not None:
@@ -2159,14 +2168,14 @@ class StructureMixer():
         try:
             width = float(width)
             height = float(height)
-        except:
+        except ValueError:
             raise TypeError("Width and height must be positive numbers.")
         if width <= 0 or height <= 0:
             raise ValueError("Width and height must be positive numbers.")
         if depth is not None:
             try:
                 depth = float(depth)
-            except:
+            except ValueError:
                 raise TypeError("Depth must be a positive numbers.")
             if depth <= 0:
                 raise ValueError("Depth must be a positive numbers.")
@@ -2178,16 +2187,16 @@ class StructureMixer():
         ``self.__init__()``."""
         for target in self.targets:
             if (
-              not "ALL" in self.label_unc.keys()
-              and not target in self.label_unc.keys()
+              "ALL" not in self.label_unc.keys()
+              and target not in self.label_unc.keys()
             ):
                 raise KeyError(
                     f"{target} defined in the model was not specified in"
                     " self.label_unc."
                 )
             if (
-              not "ALL" in self.le.keys()
-              and not target in self.le.keys()
+              "ALL" not in self.le.keys()
+              and target not in self.le.keys()
             ):
                 raise KeyError(
                     f"{target} defined in the model was not specified in"
@@ -2197,7 +2206,7 @@ class StructureMixer():
             if isinstance(self.nn_counts, dict):
                 for i, target1 in enumerate(self.targets):
                     for target2 in self.targets[i:]:
-                        if not f"{target1}-{target2}" in self.nn_counts.keys():
+                        if f"{target1}-{target2}" not in self.nn_counts.keys():
                             raise KeyError(
                                 f"{target1}-{target2} defined in"
                                 " the model was not specified in"
@@ -2210,8 +2219,8 @@ class StructureMixer():
                 )
 
     def run_simulation(
-        self, 
-        N_structures: list | np.ndarray, 
+        self,
+        N_structures: list | np.ndarray,
         path: str = '',
     ) -> dict:
         """Run a simulation with the given numbers of structures.
@@ -2251,7 +2260,7 @@ class StructureMixer():
         sim_results = []
         self.simulators = []
         for i, structure in enumerate(self.structures):
-            ### get inputs for random distribution
+            # get inputs for random distribution #
             targets = structure.targets
             # labeling efficiency
             if "ALL" in self.le.keys():
@@ -2288,22 +2297,22 @@ class StructureMixer():
             self.save(path, all_locs)
 
         return all_locs
-    
+
     def extract_mask(
-        self, 
+        self,
         structure: Structure,
     ) -> tuple[np.ndarray, dict] | tuple[None, None]:
         """Extract masks and metadata for the given structure.
-        
+
         If a heteromultimer is simulated, weighted average of masks is
-        used. In this case, it is assumed that masks have the same 
+        used. In this case, it is assumed that masks have the same
         shape.
-        
+
         Parameters
         ----------
         structure : Structure
             Structure to be simulated.
-        
+
         Returns
         -------
         mask : np.ndarray or None
@@ -2319,13 +2328,13 @@ class StructureMixer():
             else:
                 if len(targets) == 1:
                     mask = self.mask[targets[0]]
-                else: # multiplied masks
+                else:  # multiplied masks
                     mask = np.ones_like(self.mask[targets[0]])
                     n_molecules = structure.get_ind_target_count(targets)
                     for n, target in zip(n_molecules, targets):
                         mask *= n * self.mask[target]
-                    mask /= mask.sum() # normalize
-                mask_info = self.mask_info[targets[0]] 
+                    mask /= mask.sum()  # normalize
+                mask_info = self.mask_info[targets[0]]
         else:
             mask = None
             mask_info = None
@@ -2369,10 +2378,10 @@ class StructureMixer():
         return all_locs
 
     def save(
-        self, 
-        path: str, 
+        self,
+        path: str,
         all_locs: dict,
-        lp: float = 1.0, 
+        lp: float = 1.0,
         pixelsize: int | None = None,
     ) -> None:
         """Save observed molecules. Each molecular target is saved in
@@ -2429,10 +2438,10 @@ class StructureMixer():
                 io.save_locs(outpath, locs, info)
 
     def get_metadata(
-        self, 
-        target: str, 
-        width: float, 
-        height: float, 
+        self,
+        target: str,
+        width: float,
+        height: float,
         pixelsize: int,
     ) -> list[dict]:
         """Return metadata for saving molecules in Picasso format, i.e.,
@@ -2456,7 +2465,7 @@ class StructureMixer():
             label_unc = self.label_unc["ALL"]
         else:
             label_unc = self.label_unc[target]
-            
+
         if "ALL" in self.le.keys():
             le = self.le["ALL"]
         else:
@@ -2467,17 +2476,17 @@ class StructureMixer():
                 "Height": int(height / pixelsize),
                 "Width": int(width / pixelsize),
                 "Frames": 1,
-            }, # necessary to use in Picasso Render
+            },  # necessary to use in Picasso Render
             {
                 "Pixelsize": pixelsize,
                 "Generated by": "Picasso Localize",
-            }, # necessary to use in Picasso Render
+            },  # necessary to use in Picasso Render
             {
                 "Generated by": f"Picasso v{__version__} SPINNA",
                 "Label uncertainty (nm)": label_unc,
                 "labeling efficiency (%)": int(100 * le),
                 "Rotations mode": self.random_rot_mode,
-            }, # simulation info
+            },  # simulation info
         ]
         return info
 
@@ -2503,7 +2512,7 @@ class StructureMixer():
             count = 0
             for structure in self.structures:
                 current_count = structure.get_max_nn(target1, target2)
-                count = max(count, current_count)     
+                count = max(count, current_count)
         else:
             count = self.nn_counts[f"{target1}-{target2}"]
         return count
@@ -2555,20 +2564,20 @@ class StructureMixer():
     def get_structure_names(self) -> list[str]:
         """Return names of all structures in a list."""
         return [m.title for m in self.structures]
-    
+
     def convert_props_for_target(
-        self, 
-        props: np.ndarray, 
+        self,
+        props: np.ndarray,
         target: str,
         n_mols: dict,
     ) -> np.ndarray:
         """Convert the given proportions of structures to the relative
         proportions of the given molecular target.
-        
+
         Parameters
         ----------
         props : np.ndarray
-            Relative proportions of structures (0 to 100). Can be 1D or 
+            Relative proportions of structures (0 to 100). Can be 1D or
             2D.
         target : str
             Name of the molecular target for which the proportions are
@@ -2577,7 +2586,7 @@ class StructureMixer():
             Dictionary with molecular target names as keys and numbers
             of molecules of these targets as values. The molecular
             target names given must be the same as in self.structures.
-            
+
         Returns
         -------
         props_target : np.ndarray
@@ -2590,11 +2599,11 @@ class StructureMixer():
         n_str = props * n_total / targets_per_str
         props_target = n_str * t_counts / n_target
         # ignore the structures where the target is not present
-        props_target[t_counts == 0] = np.inf 
+        props_target[t_counts == 0] = np.inf
         return props_target
 
     def convert_counts_to_props(
-        self, 
+        self,
         N_structures: list | np.ndarray,
     ) -> np.ndarray:
         """Convert numbers of structures to their relative
@@ -2621,7 +2630,7 @@ class StructureMixer():
         if isinstance(N_structures, list):
             N_structures = np.int32(N_structures)
         elif isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0]) # number of simulations
+            N = len(list(N_structures.values())[0])  # number of simulations
             N_structures_ = np.zeros(
                 (N, len(self.mixer.structures)),
                 dtype=np.int32,
@@ -2629,7 +2638,7 @@ class StructureMixer():
             for i, structure in enumerate(self.mixer.structures):
                 N_structures_[:, i] = N_structures[structure.title]
             N_structures = N_structures_
-        
+
         if N_structures.ndim == 1:
             N_structures = N_structures.reshape(1, -1)
         elif N_structures.ndim != 2:
@@ -2661,7 +2670,7 @@ class StructureMixer():
             N_str_total = np.zeros(N_structures.shape[0], dtype=np.float32)
             N_per_target = structure.get_ind_target_count(self.targets)
             for N_mol in N_per_target:
-                N_str_total = N_str_total +  N_mol * N_structures[:, i]
+                N_str_total = N_str_total + N_mol * N_structures[:, i]
             prop = np.round(100 * N_str_total / N_total, 2)
             props[:, i] = prop
 
@@ -2679,8 +2688,8 @@ class StructureMixer():
         return props
 
     def convert_props_to_counts(
-        self, 
-        proportions: list | np.ndarray, 
+        self,
+        proportions: list | np.ndarray,
         N_total: int | np.ndarray,
     ) -> np.ndarray:
         """Convert relative proportions (%) of structures to their
@@ -2696,7 +2705,7 @@ class StructureMixer():
             number of elements (1D) or columns (2D) as self.structures
             as well as the same ordering.
         N_total : int or np.ndarray
-            Total number of molecular targets (if different molecular 
+            Total number of molecular targets (if different molecular
             species are present, they should be summed together in this
             value).
 
@@ -2722,11 +2731,10 @@ class StructureMixer():
                 "Please input proportions of structures for each structure"
                 " in self.structures."
             )
-        
-        N_total = np.int32(N_total) # assert numpy array
+
+        N_total = np.int32(N_total)  # assert numpy array
         N_structures = np.zeros(proportions.shape, dtype=np.int32)
         for i, structure in enumerate(self.structures):
-            t_counts = structure.get_all_targets_count()
             N_structures[:, i] = np.int32(
                 N_total
                 * proportions[:, i] / 100
@@ -2741,24 +2749,23 @@ class StructureMixer():
     def roi_size(self) -> float:
         """Returns the size of the ROI in um^2 or um^3."""
 
-        if self.mask is not None: # extract mask area/volume
+        if self.mask is not None:  # extract mask area/volume
             mask_info = list(self.mask_info.values())[0]
             if mask_info["Dimensionality"] == "2D":
                 return mask_info["Area (um^2)"]
             else:
                 return mask_info["Volume (um^3)"]
-        else: # CSR simualtion, use width, height, and optionally depth
+        else:  # CSR simualtion, use width, height, and optionally depth
             if self.roi[2] is None:
                 return self.roi[0] * self.roi[1] * 1e-6
             else:
                 return self.roi[0] * self.roi[1] * self.roi[2] * 1e-9
 
 
-
 class SPINNA():
-    """Fit simulations produced from ``StructureMixer`` to the 
-    experimental data by comparing their nearest neighbors distances 
-    (NND) across different combinations of the numbers of the 
+    """Fit simulations produced from ``StructureMixer`` to the
+    experimental data by comparing their nearest neighbors distances
+    (NND) across different combinations of the numbers of the
     structures.
 
     Provides support for multiprocessing (80% CPU cores used by
@@ -2811,23 +2818,26 @@ class SPINNA():
         # data but 2D simulation, the third dimension is ignored. But if
         # masking is used, we assume that the dimensions are the same
         # for both exp. and sim. data.
-        if mixer.roi[0] is not None and mixer.roi[2] is None: # 2D CSR sim.
+        if mixer.roi[0] is not None and mixer.roi[2] is None:  # 2D CSR sim.
             gt_coords = {k: v[:, :2] for k, v in gt_coords.items()}
         self.gt_coords = gt_coords
         self.dists_gt = get_NN_dist_experimental(gt_coords, mixer)
 
     def fit(
-        self, 
-        N_structures: np.ndarray | dict, 
-        save: str = '', 
-        asynch: bool = True, 
+        self,
+        N_structures: np.ndarray | dict,
+        save: str = '',
+        asynch: bool = True,
         bootstrap: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
-    ) -> tuple[np.ndarray, float] | tuple[tuple[np.ndarray, ...], tuple[float, ...]]:
+    ) -> (
+        tuple[np.ndarray, float] |
+        tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+    ):
         """Find fitting error for every combination of ``N_structures``
         using NND comparison to ground truth. Applies multiprocessing
         and provides progress tracking. Outputs the optimal combination
-        of structures and the correspodning score. Uses 2-sample 
+        of structures and the correspodning score. Uses 2-sample
         Kolmogorov-Smirnov to compare the fitting scores.
 
         Parameters
@@ -2870,17 +2880,20 @@ class SPINNA():
         )
 
     def fit_stoichiometry(
-        self, 
-        N_structures: np.ndarray | dict, 
-        save: str = '', 
-        asynch: bool = True, 
+        self,
+        N_structures: np.ndarray | dict,
+        save: str = '',
+        asynch: bool = True,
         bootstrap: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
-    ) -> tuple[np.ndarray, float] | tuple[tuple[np.ndarray, ...], tuple[float, ...]]:
+    ) -> (
+        tuple[np.ndarray, float] |
+        tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+    ):
         """Alias for ``self.fit()``."""
         # check and optionally convert N_structures
         if isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0]) # number of simulations
+            N = len(list(N_structures.values())[0])  # number of simulations
             N_structures_ = np.zeros(
                 (N, len(self.mixer.structures)),
                 dtype=np.int32,
@@ -2894,13 +2907,13 @@ class SPINNA():
         ):
             raise TypeError("N_structures must be a 2D array or a dictionary.")
 
-        if asynch: # fit with multiprocessing
+        if asynch:  # fit with multiprocessing
             fs = self.fit_stoichiometry_parallel(N_structures)
             N = len(fs)
             N_ = N_structures.shape[0]
             if callback == "console":
                 progress_bar = tqdm(range(N_), desc=self.progress_title)
-            while self.n_futures_done(fs) < N: # display progress
+            while self.n_futures_done(fs) < N:  # display progress
                 fd = self.n_futures_done(fs)
                 fd_ = int(fd * N_ / N)
                 if fd > 0 and isinstance(callback, lib.ProgressDialog):
@@ -2915,7 +2928,7 @@ class SPINNA():
                 progress_bar.update(fd_ - progress_bar.n)
                 progress_bar.close()
             N_structures, scores = self.scores_from_futures(fs)
-        else: # fit in a single thread
+        else:  # fit in a single thread
             N_structures, scores = self.NN_scorer(
                 N_structures, callback=callback
             )
@@ -2938,8 +2951,8 @@ class SPINNA():
         opt_proportions = self.mixer.convert_counts_to_props(opt_N_structures)
 
         if bootstrap:
-            exp_dists_gt = deepcopy(self.dists_gt) # keep original exp. distances
-            
+            exp_dists_gt = deepcopy(self.dists_gt)
+
             N_structures_subset = self.get_subset_N_structures(
                 N_structures, opt_N_structures,
             )
@@ -2954,7 +2967,7 @@ class SPINNA():
                     f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
                 )
                 # gt_coords_boot = self.mixer.run_simulation(opt_N_structures_)
-                gt_coords_boot = self.mixer.run_simulation(opt_N_structures) 
+                gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
                 self.dists_gt = get_NN_dist_experimental(
                     gt_coords_boot, self.mixer
                 )
@@ -2995,7 +3008,7 @@ class SPINNA():
         # get number of threads and tasks
         n_workers = min(
             60, max(1, int(0.75 * cpu_count()))
-        ) # Python crashes when using >64 cores
+        )  # Python crashes when using >64 cores
 
         # split N_structures into groups that are tested by each Process
         # separately
@@ -3011,17 +3024,17 @@ class SPINNA():
         for i, n_neighbors_task in zip(start_indices, structures_per_task):
             fs.append(executor.submit(
                 self.NN_scorer,
-                N_structures[i : i + n_neighbors_task],
+                N_structures[i:i + n_neighbors_task],
             ))
         return fs
 
     def NN_scorer(
-        self, 
-        N_structures: np.ndarray, 
+        self,
+        N_structures: np.ndarray,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Score the simulations similarity to the ground truth dataset
-        based on their nearest neighbor distances distribution using 
+        based on their nearest neighbor distances distribution using
         Kolmogorov-Smirnov 2 sample test.
 
         Uses least squares to determine the best fitting structure
@@ -3046,7 +3059,7 @@ class SPINNA():
         scores : np.ndarray
             1D array with fit scores for each combination of structures.
         """
-        ### Run simulations for each structure count and score them
+        # Run simulations for each structure count and score them #
         scores = np.zeros((N_structures.shape[0],))
         if callback == "console":
             iterator = tqdm(
@@ -3069,11 +3082,11 @@ class SPINNA():
                 )
                 callback.set_value(ii)
         return N_structures, scores
-    
+
     def get_subset_N_structures(
-        self, 
+        self,
         N_structures: np.ndarray,
-        center_N_structures: np.ndarray, 
+        center_N_structures: np.ndarray,
         radius: float = BOOTSTRAP_DISTANCE,
         p: float = BOOTSTRAP_DISTANCE_METRIC,
     ) -> np.ndarray:
@@ -3085,7 +3098,7 @@ class SPINNA():
         N_structures : np.ndarray
             Array where each row specifies each structures count tested.
         center_N_structures : np.ndarray
-            Array with the numbers of the structures that are considered 
+            Array with the numbers of the structures that are considered
             as the center of the subset (ground-truth).
         radius : float (default=30.0)
             Radius of the hypersphere around the center_proportions.
@@ -3099,7 +3112,7 @@ class SPINNA():
             center_proportions.
         """
         if isinstance(N_structures, dict):
-            N = len(list(N_structures.values())[0]) # number of simulations
+            N = len(list(N_structures.values())[0])  # number of simulations
             N_structures_ = np.zeros(
                 (N, len(self.mixer.structures)),
                 dtype=np.int32,
@@ -3107,9 +3120,11 @@ class SPINNA():
             for i, structure in enumerate(self.mixer.structures):
                 N_structures_[:, i] = N_structures[structure.title]
             N_structures = N_structures_
-        
+
         proportions = self.mixer.convert_counts_to_props(N_structures)
-        center_proportions = self.mixer.convert_counts_to_props(center_N_structures)
+        center_proportions = (
+            self.mixer.convert_counts_to_props(center_N_structures)
+        )
 
         proportions_tree = KDTree(proportions)
         indices = proportions_tree.query_ball_point(
@@ -3150,7 +3165,7 @@ class SPINNA():
         N_structures = np.vstack([res[0] for res in res_list])
         scores = np.concatenate([res[1] for res in res_list])
         return N_structures, scores
-    
+
 
 def compare_models(
     models: list[list[Structure]],
@@ -3169,15 +3184,15 @@ def compare_models(
     callback: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> tuple[float, int, dict, StructureMixer, np.ndarray]:
     """Compare different models, i.e., ``StructureMixer``'s with label
-    uncertainties given the experimental dataset and 
+    uncertainties given the experimental dataset and
     stoichiometries-search-space.
-    
+
     Parameters
     ----------
     models : list of lists of SingleStructures
         Each element contains the list of SingleStructures that form
         a SPINNA model.
-    exp_data : dict 
+    exp_data : dict
         Dictionary with molecular targets' names as keys and spatial
         coordinates of the observed molecules as values.
     granularity : int
@@ -3189,7 +3204,7 @@ def compare_models(
     le : dict
         Dictionary specifying the labeling efficiency for each
         molecular target species. Keys specify the species and values
-        are floats. 
+        are floats.
     N_sim : int, optional
         Number of times each simulation is repeated to obtain smoother
         NND histograms. Default is 1.
@@ -3202,8 +3217,8 @@ def compare_models(
         provided, ROI is overwritten using the mask metadata. If width,
         height and depth are None, mask_dict must be specified. If
         width and height are given, but no mask and depth is provided,
-        2D CSR simulation will be conducted. If width, height and depth 
-        are given but no mask is provided, 3D CSR simulation will be 
+        2D CSR simulation will be conducted. If width, height and depth
+        are given but no mask is provided, 3D CSR simulation will be
         conducted. Default is None
     random_rot_mode : {"2D", "3D"} or None, optional
         Mode of random rotation of structures. If "3D", structures are
@@ -3215,7 +3230,7 @@ def compare_models(
         thread is used. Default is True.
     savedir : str, optional
         Path to the directory where the fitting scores are saved as
-        .csv files. If "" is given, the files are not saved. Default 
+        .csv files. If "" is given, the files are not saved. Default
         is "".
     callback : {lib.ProgressDialog, "console", None}, optional
         Progress bar to track fitting progress. If "console", the
@@ -3231,10 +3246,10 @@ def compare_models(
     label_unc : dict
         The best fitting label uncertainties for each molecular target
         species.
-    best_mixer : StructureMixer 
+    best_mixer : StructureMixer
         The best fitting StructureMixer.
     best_props : np.ndarray
-        The stoichiometry of structures that gives the best fit to the 
+        The stoichiometry of structures that gives the best fit to the
         data.
     """
     # extract the molecular targets from the models
@@ -3260,7 +3275,7 @@ def compare_models(
         best_score = np.inf
         best_l_unc = 5.0
         l_unc = label_unc[target]
-        if len(l_unc) == 1: # no search space for label uncertainty
+        if len(l_unc) == 1:  # no search space for label uncertainty
             label_unc[target] = l_unc[0]
             continue
 
@@ -3273,11 +3288,11 @@ def compare_models(
                     target_structures.append(structure)
             target_models.append(target_structures)
 
-        # specify nn counts to be considered for fitting (only the 
+        # specify nn counts to be considered for fitting (only the
         # target to itself, 1st NN, the rest is ignored)
         nn_counts = {key: 0 for key in nn_counts.keys()}
         nn_counts[f"{target}-{target}"] = 1
-    
+
         # test the range of label uncertainties for the target
         for l_unc_ in l_unc:
             progress_title = (
@@ -3306,12 +3321,12 @@ def compare_models(
             if score < best_score:
                 best_score = score
                 best_l_unc = l_unc_
-        
+
         # save the best fitting label uncertainty for the given target
         label_unc[target] = best_l_unc
 
     # test the models with the best fitting label uncertainties; note
-    # that here we'd like to pay the attention to the NNDs that are 
+    # that here we'd like to pay the attention to the NNDs that are
     # present in all models, i.e., if a simpler model does not contain
     # a structure with a dimer of a certain species, it should still aim
     # to fit the "dimer" NNDs.
@@ -3326,7 +3341,7 @@ def compare_models(
     # compare the models
     progress_title = f"Spinning with label uncertainties: {label_unc}"
     (
-        best_score, best_idx, best_mixer, best_props 
+        best_score, best_idx, best_mixer, best_props
     ) = compare_models_given_label_unc(
         models=models,
         exp_data=exp_data,
@@ -3345,7 +3360,7 @@ def compare_models(
         callback=callback,
         progress_title=progress_title,
     )
-    return best_score, best_idx, label_unc, best_mixer, best_props 
+    return best_score, best_idx, label_unc, best_mixer, best_props
 
 
 def compare_models_given_label_unc(
@@ -3366,16 +3381,16 @@ def compare_models_given_label_unc(
     callback: lib.ProgressDialog | Literal["console"] | None = None,
     progress_title: str = "Spinning structures",
 ) -> tuple[float, int, StructureMixer, np.ndarray]:
-    """Compare different models, i.e., ``StructureMixer``'s given the 
-    experimental dataset, stoichiometries-search-space and label 
+    """Compare different models, i.e., ``StructureMixer``'s given the
+    experimental dataset, stoichiometries-search-space and label
     position uncertainty.
-    
+
     Parameters
     ----------
     models : list of lists of SingleStructures
         Each element contains the list of SingleStructures that form
         a SPINNA model.
-    exp_data : dict 
+    exp_data : dict
         Dictionary with molecular targets' names as keys and spatial
         coordinates of the observed molecules as values.
     granularity : int
@@ -3386,7 +3401,7 @@ def compare_models_given_label_unc(
     le : dict
         Dictionary specifying the labeling efficiency for each
         molecular target species. Keys specify the species and values
-        are floats. 
+        are floats.
     mask_dict : dict, optional
         Dictionary of the form {"mask": mask, "info": mask_info}, where
         mask and mask_info are defined as in StructureMixer. Only used
@@ -3396,8 +3411,8 @@ def compare_models_given_label_unc(
         provided, ROI is overwritten using the mask metadata. If width,
         height and depth are None, mask_dict must be specified. If
         width and height are given, but no mask and depth is provided,
-        2D CSR simulation will be conducted. If width, height and depth 
-        are given but no mask is provided, 3D CSR simulation will be 
+        2D CSR simulation will be conducted. If width, height and depth
+        are given but no mask is provided, 3D CSR simulation will be
         conducted. Default is None.
     random_rot_mode : {"2D", "3D", None}, optional
         Mode of random rotation of structures. If "3D", structures are
@@ -3435,16 +3450,16 @@ def compare_models_given_label_unc(
         Best fitting score (KS2).
     best_idx : int
         Index of the best fitting model in the models list.
-    best_mixer : StructureMixer 
+    best_mixer : StructureMixer
         The best fitting StructureMixer.
     best_props : np.ndarray
-        The stoichiometry of structures that gives the best fit to the 
+        The stoichiometry of structures that gives the best fit to the
         data.
     """
     # initialize
     best_mixer = None
     best_idx = None
-    best_score = np.inf    
+    best_score = np.inf
     N_total = {
         target: int(len(exp_data[target]) / le[target])
         for target in exp_data.keys()
@@ -3467,13 +3482,15 @@ def compare_models_given_label_unc(
             mixer=mixer,
             gt_coords=exp_data,
             N_sim=N_sim,
-            progress_title=f"{progress_title} and model nr {i+1}/{len(models)}",
+            progress_title=(
+                f"{progress_title} and model nr {i+1}/{len(models)}"
+            ),
         )
         savepath = ""
         if savedir:
-            suffix = ("_").join(
-                [f"{target}_{lunc:2f}_nm" for target, lunc in label_unc.items()]
-            )
+            suffix = ("_").join([
+                f"{target}_{lunc:2f}_nm" for target, lunc in label_unc.items()
+            ])
             savepath = os.path.join(
                 savedir, f"fit_scores_model_{i+1}_label_unc_{suffix}.csv"
             )
@@ -3498,12 +3515,12 @@ def compare_models_given_label_unc(
 
 def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:
     """Check if the structures loaded can be used for finding LE.
-    
+
     This means:
         * 2 molecular target species loaded.
-        * The structures loaded are: monomer A, monomer B, 
+        * The structures loaded are: monomer A, monomer B,
             heterodimer.
-    
+
     Returns
     -------
     bool
@@ -3513,11 +3530,11 @@ def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:
     # 2 targets are present
     if len(targets) != 2:
         return False
-    
+
     # 3 structures are present
     if len(structures) != 3:
         return False
-    
+
     # search through structures - monomers and heterodimer
     flag_le_structures = {"A": False, "B": False, "AB": False}
     target_a = targets[0]
@@ -3550,16 +3567,16 @@ def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:
 
 
 def get_le_from_props(
-    structures: list[Structure], 
+    structures: list[Structure],
     opt_props: np.ndarray | tuple[np.ndarray, np.ndarray],
 ) -> dict:
     """Based on the fitted proportions of structures, extract the
     LE values.
-    
+
     Parameters
     ----------
     structures : list of Structure
-        List of the structures used for fitting. 
+        List of the structures used for fitting.
     opt_props : np.ndarray or tuple
         Fitted proportions of the structures. If bootstraping was used,
         the tuple is accepted and only the mean value is used.
@@ -3568,16 +3585,16 @@ def get_le_from_props(
     -------
     le_values : dict
         Dictionary with LE values for the two targets.
-    
+
     Raises
     ------
     ValueError
-        If the structures are not valid for fitting. See 
+        If the structures are not valid for fitting. See
         ``check_structures_valid_for_fitting`` for details.
     """
     if not check_structures_valid_for_fitting(structures):
         raise ValueError("Invalid structures for fitting.")
-    
+
     targets = list(set([structure.targets[0] for structure in structures]))
     props_ = {}
     target_a = targets[0]
@@ -3608,9 +3625,9 @@ def get_le_from_props(
             and len(structure.x[target_b]) == 1
         ):
             props_["AB"] = opt_props[idx]
-    # we need the proportion of structures, not molecules in 
+    # we need the proportion of structures, not molecules in
     # structures
-    props_["AB"] = props_["AB"] / 2 
+    props_["AB"] = props_["AB"] / 2
     le_values = {
         target_a: props_["AB"] / (props_["B"] + props_["AB"]) * 100,
         target_b: props_["AB"] / (props_["A"] + props_["AB"]) * 100,

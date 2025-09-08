@@ -45,8 +45,8 @@ def _user_settings_filename() -> str:
 
 
 def load_raw(
-    path: str, 
-    prompt_info: Callable[[None], tuple[dict, bool]] | None = None, 
+    path: str,
+    prompt_info: Callable[[None], tuple[dict, bool]] | None = None,
     progress: None = None,
 ) -> tuple[np.memmap, list[dict]]:
     """Load a raw movie file and its metadata.
@@ -57,13 +57,13 @@ def load_raw(
         The path to the raw movie file.
     prompt_info : Callable, optional
         A function to call for additional information if needed.
-    progress : None, optional 
+    progress : None, optional
         A placeholder for progress tracking, not used in this function.
-    
+
     Returns
     -------
     movie : np.memmap
-        A memory-mapped numpy array representing the movie, i.e., an 
+        A memory-mapped numpy array representing the movie, i.e., an
         array that's only partially loaded into memory.
     info : list of dicts
         A list containing a dictionary with metadata about the movie.
@@ -94,7 +94,7 @@ def load_raw(
 
 
 def load_ims(
-    path: str, 
+    path: str,
     prompt_info: Callable[[list[str]], str] | None = None,
 ) -> tuple[np.memmap, list[dict]]:
     """Load a Bitplane IMS movie file and its metadata.
@@ -156,7 +156,7 @@ def load_ims(
 
 
 def load_ims_all(path: str) -> tuple[list[np.memmap], list[list[dict]]]:
-    """Load all channels of a Bitplane IMS movie file and their 
+    """Load all channels of a Bitplane IMS movie file and their
     metadata.
 
     Parameters
@@ -167,7 +167,7 @@ def load_ims_all(path: str) -> tuple[list[np.memmap], list[list[dict]]]:
     Returns
     -------
     movies : list of np.memmaps
-        A list of memory-mapped numpy arrays representing the movie 
+        A list of memory-mapped numpy arrays representing the movie
         channels.
     infos : list of lists of dicts
         A list of lists containing dictionaries with metadata about each
@@ -245,7 +245,7 @@ def save_raw(path: str, movie: np.ndarray, info: dict) -> None:
 
 def load_tif(path: str, progress=None) -> tuple[np.memmap, list[dict]]:
     """Load a TIFF movie file and its metadata.
-    
+
     Parameters
     ----------
     path : str
@@ -266,9 +266,10 @@ def load_tif(path: str, progress=None) -> tuple[np.memmap, list[dict]]:
     info = movie.info()
     return movie, [info]
 
-def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]: 
+
+def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]:
     """Load a Nikon ND2 movie file and its metadata.
-    
+
     Parameters
     ----------
     path : str
@@ -285,13 +286,14 @@ def load_nd2(path: str) -> tuple[ND2Movie, list[dict]]:
     info = movie.info()
     return movie, [info]
 
+
 def load_movie(
-    path: str, 
-    prompt_info=None, 
+    path: str,
+    prompt_info=None,
     progress=None,
 ) -> tuple[AbstractPicassoMovie, list[dict]]:
-    """Load a movie file based on its extension and returns the movie 
-    object and its metadata. Accepted format are ``.raw``, ``ome.tif``, 
+    """Load a movie file based on its extension and returns the movie
+    object and its metadata. Accepted format are ``.raw``, ``ome.tif``,
     ``.ims``, and ``.nd2``.
 
     Parameters
@@ -325,7 +327,7 @@ def load_movie(
 
 
 def load_info(
-    path: str, 
+    path: str,
     qt_parent: QWidget | None = None,
 ) -> list[dict]:
     """Load metadata from a YAML file associated with the movie file.
@@ -333,12 +335,12 @@ def load_info(
     Parameters
     ----------
     path : str
-        The path to the movie file, which is used to derive the metadata 
+        The path to the movie file, which is used to derive the metadata
         file name.
     qt_parent : QWidget or None, optional
         The parent widget for any error messages displayed using Qt.
         Default is None.
-    
+
     Returns
     -------
     info : list of dict
@@ -350,23 +352,23 @@ def load_info(
         with open(filename, "r") as info_file:
             info = list(yaml.load_all(info_file, Loader=yaml.UnsafeLoader))
     except FileNotFoundError as e:
-        print("\nAn error occured. Could not find metadata file:\n{}".format(filename))
+        print(f"\nAn error occured. Could not find metadata file:\n{filename}")
         if qt_parent is not None:
             QMessageBox.critical(
                 qt_parent,
                 "An error occured",
-                "Could not find metadata file:\n{}".format(filename),
+                f"Could not find metadata file:\n{filename}",
             )
         raise NoMetadataFileError(e)
     return info
 
 
 def load_mask(
-    path: str, 
+    path: str,
     qt_parent: QWidget | None = None,
 ) -> tuple[np.ndarray, dict]:
     """Load a mask generated with ``spinna.MaskGenerator``.
-    
+
     Parameters
     ----------
     path : str
@@ -422,8 +424,8 @@ def load_user_settings() -> lib.AutoDict:
 
 
 def save_info(
-    path: str, 
-    info: list[dict], 
+    path: str,
+    info: list[dict],
     default_flow_style: bool = False,
 ) -> None:
     """Save metadata to a YAML file.
@@ -435,7 +437,7 @@ def save_info(
     info : list of dict
         A list containing a dictionary with metadata about the movie.
     default_flow_style : bool, optional
-        If True, the YAML will be written in flow style; otherwise, it 
+        If True, the YAML will be written in flow style; otherwise, it
         will be written in block style.
     """
     with open(path, "w") as file:
@@ -443,7 +445,7 @@ def save_info(
 
 
 def _to_dict_walk(node: dict) -> dict:
-    """Convert mapping objects (subclassed from dict) to actual dict 
+    """Convert mapping objects (subclassed from dict) to actual dict
     objects, including nested ones."""
     node = dict(node)
     for key, val in node.items():
@@ -453,7 +455,7 @@ def _to_dict_walk(node: dict) -> dict:
 
 
 def save_user_settings(settings: dict) -> None:
-    """Save user settings, for example, the default directory for 
+    """Save user settings, for example, the default directory for
     loading/saving files to a YAML file."""
     settings = _to_dict_walk(settings)
     settings_filename = _user_settings_filename()
@@ -463,7 +465,7 @@ def save_user_settings(settings: dict) -> None:
 
 
 class AbstractPicassoMovie(abc.ABC):
-    """An abstract class defining the minimal interfaces of a 
+    """An abstract class defining the minimal interfaces of a
     PicassoMovie used throughout Picasso."""
 
     @abc.abstractmethod
@@ -499,11 +501,11 @@ class AbstractPicassoMovie(abc.ABC):
         config : dict
             Description of camera parameters (for all possible settings)
             comes from the config.yaml file.
-        
+
         Returns
         -------
         parameters : dict
-            Keys: gain, qe, wavelength, cam_index, camera. Values are 
+            Keys: gain, qe, wavelength, cam_index, camera. Values are
             lists.
         """
         return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0,
@@ -539,20 +541,20 @@ class AbstractPicassoMovie(abc.ABC):
 
 
 class ND2Movie(AbstractPicassoMovie):
-    """Subclass of the AbstractPicassoMovie to implement reading Nikon 
+    """Subclass of the AbstractPicassoMovie to implement reading Nikon
     nd2 files.
-    Two packages for reading nd2 files have been tested and are used 
+    Two packages for reading nd2 files have been tested and are used
     here:
     * nd2.ND2File - makes all metadata accessible, and uses dask arrays
-      which is good for multiprocessing. Nonetheless, converting all 
-      data to numpy arrays takes long (2000 frames/s for dask planes; 20 
+      which is good for multiprocessing. Nonetheless, converting all
+      data to numpy arrays takes long (2000 frames/s for dask planes; 20
       frames/s with compute() on dask planes to get numpy)
-    * nd2reader.ND2Reader - image reading is a bit faster than 
-    TiffMultiMap (ca 800 frames/s), and the file is realizable for 
+    * nd2reader.ND2Reader - image reading is a bit faster than
+    TiffMultiMap (ca 800 frames/s), and the file is realizable for
     multiprocessing. However, very limited metadata is available.
 
     This class implements a hybrid version which uses both packages:
-    nd2 for metadata retrieval, and nd2reader for image data 
+    nd2 for metadata retrieval, and nd2reader for image data
     retrieval."""
 
     def __init__(self, path: str, verbose: bool = False):
@@ -583,7 +585,7 @@ class ND2Movie(AbstractPicassoMovie):
             self.nd2data.metadata['width'],
             self.nd2data.metadata['height'],
         ]
-        nd2file.close() # may crash without closing the file!
+        nd2file.close()  # may crash without closing the file!
 
     def info(self) -> dict:
         return self.meta
@@ -596,7 +598,7 @@ class ND2Movie(AbstractPicassoMovie):
         ----------
         nd2file : nd2.ND2File
             Object holding the image incl metadata.
-        
+
         Returns
         -------
         info : dict
@@ -624,7 +626,7 @@ class ND2Movie(AbstractPicassoMovie):
         # 'Sensitivity Categories': ['PixelReadoutRate', 'ReadoutMode']
         # 'Sensitivity':
         #     '540 MHz':
-        #         'Rolling Shutter at 16-bit': sensitivityvalue  # or sensival directly behind 540 MHz?
+        #         'Rolling Shutter at 16-bit': sensitivityvalue
         # 'Channel Device':
         #     'Name': 'Filter'
         #     'Emission Wavelengths':
@@ -651,7 +653,9 @@ class ND2Movie(AbstractPicassoMovie):
         sensitivity_category2 = 'Sensitivity/DynamicRange'
         info["Micro-Manager Metadata"] = {
             camera_name + '-' + sensitivity_category: readout_rate,
-            camera_name + '-' + sensitivity_category2: readout_mode + ' ' + conversion_gain,
+            camera_name + '-' + sensitivity_category2: (
+                readout_mode + ' ' + conversion_gain
+            ),
             'Filter': filter,
             }
         info["Picasso Metadata"] = {
@@ -666,14 +670,14 @@ class ND2Movie(AbstractPicassoMovie):
         return info
 
     def metadata_to_dict(self, nd2file: nd2.ND2File) -> dict:
-        """Extract all types of metadata in the file and returns it in 
+        """Extract all types of metadata in the file and returns it in
         a dict.
 
         Parameters
         ----------
         nd2file : nd2.ND2File
             Object holding the image incl metadata.
-        
+
         Returns
         -------
         mmmeta : dict
@@ -683,22 +687,24 @@ class ND2Movie(AbstractPicassoMovie):
 
         text_info = nd2file.text_info
         try:
-            mmmeta['capturing'] = self.nikontext_to_dict(text_info['capturing'])
-        except:
+            mmmeta['capturing'] = (
+                self.nikontext_to_dict(text_info['capturing'])
+            )
+        except Exception:
             pass
         try:
             mmmeta['AcquisitionDate'] = text_info['date']
-        except:
+        except Exception:
             pass
         try:
             mmmeta['description'] = (
                 self.nikontext_to_dict(text_info['description'])
             )
-        except:
+        except Exception:
             pass
         try:
             mmmeta['optics'] = self.nikontext_to_dict(text_info['optics'])
-        except:
+        except Exception:
             pass
 
         mmmeta['custom_data'] = nd2file.custom_data
@@ -717,7 +723,7 @@ class ND2Movie(AbstractPicassoMovie):
         ----------
         text : str
             Nikon-style metadata description text.
-        
+
         Returns
         -------
         out : dict
@@ -727,14 +733,14 @@ class ND2Movie(AbstractPicassoMovie):
         curr_keys = []
         for i, item in enumerate(text.split('\r\n')):
             itparts = item.split(':')
-            itparts = [it.strip() for it in itparts if it.strip()!='']
-            if len(itparts)==1:
+            itparts = [it.strip() for it in itparts if it.strip() != '']
+            if len(itparts) == 1:
                 curr_keys.append(itparts[0])
                 cls.set_nested_dict_entry(out, curr_keys, {})
-            elif len(itparts)==2:
+            elif len(itparts) == 2:
                 cls.set_nested_dict_entry(
                     out, curr_keys+[itparts[0]], itparts[1])
-            elif len(itparts)==3:
+            elif len(itparts) == 3:
                 curr_keys.append(itparts[0])
                 cls.set_nested_dict_entry(out, curr_keys, {})
                 cls.set_nested_dict_entry(
@@ -751,7 +757,7 @@ class ND2Movie(AbstractPicassoMovie):
 
     @classmethod
     def nd2metadata_to_dict(cls, meta: dict) -> dict:
-        """Restructure the 'metadata' field from the package nd2 into a 
+        """Restructure the 'metadata' field from the package nd2 into a
         dict for independent use.
         https://github.com/tlambert03/nd2/blob/main/src/nd2/structures.py
 
@@ -759,11 +765,11 @@ class ND2Movie(AbstractPicassoMovie):
         ----------
         meta : nd2 metadata structure
             The 'metadata' part of nd2 metadata.
-        
+
         Returns
         -------
         out : dict
-            The content as a dict.  
+            The content as a dict.
         """
         out = {}
         out['contents'] = meta.contents.__dict__
@@ -882,13 +888,13 @@ class ND2Movie(AbstractPicassoMovie):
         Parameters
         ----------
         config : dict
-            Description of camera parameters (for all possible 
+            Description of camera parameters (for all possible
             settings).
-        
+
         Returns
         -------
         parameters : dict
-            Keys: gain, qe, wavelength, cam_index, camera. Values are 
+            Keys: gain, qe, wavelength, cam_index, camera. Values are
             lists.
         """
         parameters = {}
@@ -896,8 +902,7 @@ class ND2Movie(AbstractPicassoMovie):
 
         try:
             assert "Cameras" in config.keys() and "Camera" in info.keys()
-        except:
-            # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+        except Exception:
             raise KeyError("'camera' key not found in metadata or config.")
 
         cameras = config['Cameras']
@@ -905,8 +910,7 @@ class ND2Movie(AbstractPicassoMovie):
 
         try:
             assert camera in cameras.keys()
-        except:
-            # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+        except Exception:
             raise KeyError('camera from metadata not found in config.')
 
         index = sorted(list(cameras.keys())).index(camera)
@@ -915,28 +919,30 @@ class ND2Movie(AbstractPicassoMovie):
 
         try:
             assert "Picasso Metadata" in info
-        except:
+        except Exception:
             return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
 
         pm_info = info["Picasso Metadata"]
-        mm_info = info["nd2 Metadata"]
+        # mm_info = info["nd2 Metadata"]
         cam_config = config["Cameras"][camera]
         if "Gain Property Name" in cam_config:
-            raise NotImplementedError('extracting Gain from nd2 files is not implemented yet.')
-            gain_property_name = cam_config["Gain Property Name"]
-            gain = pm_info['gain']
-            if "EM Switch Property" in cam_config:
-                switch_property_name = cam_config[
-                    "EM Switch Property"
-                ]["Name"]
-                switch_property_value = mm_info[
-                    camera + "-" + switch_property_name
-                ]
-                if (
-                    switch_property_value
-                    == cam_config["EM Switch Property"][True]
-                ):
-                    parameters['gain'] = int(gain)
+            raise NotImplementedError(
+                'Extracting Gain from nd2 files is not implemented yet.'
+            )
+            # gain_property_name = cam_config["Gain Property Name"]
+            # gain = pm_info['gain']
+            # if "EM Switch Property" in cam_config:
+            #     switch_property_name = cam_config[
+            #         "EM Switch Property"
+            #     ]["Name"]
+            #     switch_property_value = mm_info[
+            #         camera + "-" + switch_property_name
+            #     ]
+            #     if (
+            #         switch_property_value
+            #         == cam_config["EM Switch Property"][True]
+            #     ):
+            #         parameters['gain'] = int(gain)
         if 'gain' not in parameters.keys():
             parameters['gain'] = [1]
 
@@ -967,7 +973,7 @@ class ND2Movie(AbstractPicassoMovie):
 
 class TiffMap:
     """Read TIFF files and return a memory-mapped numpy array
-    representing the TIFF image data. This class is used for 
+    representing the TIFF image data. This class is used for
     single-frame TIFF files, not multi-page TIFFs."""
 
     TIFF_TYPES = {1: "B", 2: "c", 3: "H", 4: "L", 5: "RATIONAL"}
@@ -1075,7 +1081,9 @@ class TiffMap:
                 indices = range(*it.indices(self.n_frames))
                 return np.array([self.get_frame(_) for _ in indices])
             elif it == Ellipsis:
-                return np.array([self.get_frame(_) for _ in range(self.n_frames)])
+                return np.array(
+                    [self.get_frame(_) for _ in range(self.n_frames)]
+                )
             elif isinstance(it, int) or np.issubdtype(it, np.integer):
                 return self.get_frame(it)
             raise TypeError
@@ -1090,7 +1098,7 @@ class TiffMap:
     def info(self) -> dict:
         """Extract metadata from the TIFF file and returns it in a
         dictionary format. This includes byte order, file path, height,
-        width, data type, number of frames, and Micro-Manager 
+        width, data type, number of frames, and Micro-Manager
         metadata."""
         info = {
             "Byte Order": self._tif_byte_order,
@@ -1150,8 +1158,11 @@ class TiffMap:
                 if readout == 84720485:  # Acquisition comments
                     count = self.read("L")
                     readout = self.file.read(4 * count).strip(b"\0")
-                    readout_s = readout.decode() + ' '  # for generality in indexing in line below
-                    readout_s = readout_s[readout_s.index('{'):-readout_s[::-1].index('}')]
+                    # for generality in indexing in line below
+                    readout_s = readout.decode() + ' '
+                    readout_s = readout_s[
+                        readout_s.index('{'):-readout_s[::-1].index('}')
+                    ]
                     comments = json.loads(readout_s)["Summary"].split("\n")
                     break
 
@@ -1162,7 +1173,9 @@ class TiffMap:
         """Load one frame of the TIFF movie."""
         self.file.seek(self.image_offsets[index])
         frame = np.reshape(
-            np.fromfile(self.file, dtype=self._tif_dtype, count=self.frame_size),
+            np.fromfile(
+                self.file, dtype=self._tif_dtype, count=self.frame_size,
+            ),
             self.frame_shape,
         )
         # We only want to deal with little endian byte order downstream:
@@ -1204,32 +1217,34 @@ class TiffMultiMap(AbstractPicassoMovie):
     files, each accessed by ``TiffMap``."""
 
     def __init__(
-        self, 
-        path: str, 
-        memmap_frames: bool = False, 
+        self,
+        path: str,
+        memmap_frames: bool = False,
         verbose: bool = False,
     ):
         super().__init__()
         self.path = os.path.abspath(path)
         self.dir = os.path.dirname(self.path)
-        
+
         # This matches the basename + an appendix of the file number
         filename = os.path.basename(self.path)
-        if "NDTiffStack" in filename: 
+        if "NDTiffStack" in filename:
             # only one extension (.tif)
-            base, ext = os.path.splitext(self.path)  
+            base, ext = os.path.splitext(self.path)
             base = re.escape(base)
             pattern = re.compile(base + r"_(\d*).tif")
         else:
             # split two extensions as in .ome.tif
-            base, ext = os.path.splitext(os.path.splitext(self.path)[0])  
+            base, ext = os.path.splitext(os.path.splitext(self.path)[0])
             base = re.escape(base)
             pattern = re.compile(base + r"_(\d*).ome.tif")
         entries = [_.path for _ in os.scandir(self.dir) if _.is_file()]
         matches = [re.match(pattern, _) for _ in entries]
         matches = [_ for _ in matches if _ is not None]
         paths_indices = [(int(_.group(1)), _.group(0)) for _ in matches]
-        self.paths = [self.path] + [path for index, path in sorted(paths_indices)]
+        self.paths = [self.path] + [
+            path for index, path in sorted(paths_indices)
+        ]
         self.maps = [TiffMap(path, verbose=verbose) for path in self.paths]
         self.n_maps = len(self.maps)
         self.n_frames_per_map = [_.n_frames for _ in self.maps]
@@ -1324,13 +1339,13 @@ class TiffMultiMap(AbstractPicassoMovie):
 
         Args:
         config : dict
-            Description of camera parameters (for all possible 
+            Description of camera parameters (for all possible
             settings).
-        
+
         Returns
         -------
-        parameters : dict 
-            Keys: gain, qe, wavelength, cam_index, camera. Values are 
+        parameters : dict
+            Keys: gain, qe, wavelength, cam_index, camera. Values are
             lists.
         """
         # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
@@ -1339,7 +1354,7 @@ class TiffMultiMap(AbstractPicassoMovie):
 
         try:
             assert "Cameras" in config and "Camera" in info
-        except:
+        except Exception:
             return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
             # raise KeyError("'camera' key not found in metadata or config.")
 
@@ -1348,7 +1363,7 @@ class TiffMultiMap(AbstractPicassoMovie):
 
         try:
             assert camera in list(cameras.keys())
-        except:
+        except Exception:
             return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
             # raise KeyError('camera from metadata not found in config.')
 
@@ -1358,7 +1373,7 @@ class TiffMultiMap(AbstractPicassoMovie):
 
         try:
             assert "Micro-Manager Metadata" in info
-        except:
+        except Exception:
             return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
 
         mm_info = info["Micro-Manager Metadata"]
@@ -1414,9 +1429,9 @@ class TiffMultiMap(AbstractPicassoMovie):
 
 
 def to_raw_combined(basename: str, paths: list[str]) -> None:
-    """Combine multiple TIFF files into a single raw file in the OME 
+    """Combine multiple TIFF files into a single raw file in the OME
     format.
-    
+
     Parameters
     ----------
     basename : str
@@ -1447,12 +1462,12 @@ def get_movie_groups(paths: list[str]) -> dict[str, list[str]]:
     """Group movie files by their base name, allowing for an optional
     appendix of the file number. This is useful for handling OME-TIFF
     files that may have multiple parts or versions.
-    
+
     Parameters
     ----------
     paths : list[str]
         List of file paths to be grouped.
-        
+
     Returns
     -------
     groups : dict[str, list[str]]
@@ -1475,7 +1490,9 @@ def get_movie_groups(paths: list[str]) -> dict[str, list[str]]:
                 match_info["index"] = int(match_info["index"])
         basenames = set([_["base"] for _ in match_infos])
         for basename in basenames:
-            match_infos_group = [_ for _ in match_infos if _["base"] == basename]
+            match_infos_group = [
+                _ for _ in match_infos if _["base"] == basename
+            ]
             group = [_["path"] for _ in match_infos_group]
             indices = [_["index"] for _ in match_infos_group]
             group = [path for (index, path) in sorted(zip(indices, group))]
@@ -1517,7 +1534,7 @@ def save_datasets(path: str, info: dict, **kwargs) -> None:
 
 def save_locs(path: str, locs: np.recarray, info: list[dict]) -> None:
     """Save localization data to an HDF5 file.
-    
+
     Parameters
     ----------
     path : str
@@ -1525,7 +1542,7 @@ def save_locs(path: str, locs: np.recarray, info: list[dict]) -> None:
     locs : np.recarray
         The localization data to be saved, typically a structured array.
     info : list of dict
-        Metadata information to be saved alongside the localization 
+        Metadata information to be saved alongside the localization
         data.
     """
     locs = lib.ensure_sanity(locs, info)
@@ -1541,14 +1558,14 @@ def load_locs(
     qt_parent: QWidget | None = None
 ) -> tuple[np.recarray, list[dict]]:
     """Load localization data from an HDF5 file.
-    
+
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing localization data.
     qt_parent : QWidget or None, optional
         Parent widget for any Qt-related operations, default is None.
-    
+
     Returns
     -------
     locs : np.recarray
@@ -1568,7 +1585,7 @@ def load_locs(
 
 
 def load_clusters(
-    path: str, 
+    path: str,
     qt_parent: QWidget | None = None
 ) -> np.recarray:
     """Load cluster data from an HDF5 file.
@@ -1598,21 +1615,21 @@ def load_clusters(
 
 
 def load_filter(
-    path: str, 
+    path: str,
     qt_parent: QWidget | None = None,
 ):
     """Load localization data from an HDF5 file, checking for different
     possible keys for the localization data. This function is used to
     handle files that may contain localization data under different
     keys such as 'locs', 'groups', or 'clusters'.
-    
+
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing localization data.
     qt_parent : QWidget | None, optional
         Parent widget for any Qt-related operations, default is None.
-        
+
     Returns
     -------
     locs : np.recarray

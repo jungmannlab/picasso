@@ -22,10 +22,8 @@ from . import postprocess
 
 try:
     from pygpufit import gpufit as gf
-
-    gpufit_installed = True
 except ImportError:
-    gpufit_installed = False
+    pass
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -46,7 +44,7 @@ def integrated_gaussian(mu, sigma, grid):
 
 @numba.jit(nopython=True, nogil=True)
 def _sum_and_center_of_mass(
-    spot: np.ndarray, 
+    spot: np.ndarray,
     size: int,
 ) -> tuple[float, float, float]:
     """Calculate the sum and center of mass of a 2D spot."""
@@ -65,10 +63,10 @@ def _sum_and_center_of_mass(
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_sigmas(
-    spot: np.ndarray, 
-    y: float, 
-    x: float, 
-    sum: float, 
+    spot: np.ndarray,
+    y: float,
+    x: float,
+    sum: float,
     size: int,
 ) -> tuple[float, float]:
     """Initialize the sizes of the single-emitter images (sigmas of the
@@ -86,11 +84,11 @@ def _initial_sigmas(
 
 @numba.jit(nopython=True, nogil=True)
 def _initial_parameters(
-    spot: np.ndarray, 
-    size: int, 
+    spot: np.ndarray,
+    size: int,
     size_half: int,
 ) -> np.ndarray:
-    """Initialize the parameters for the Gaussian fit - x, y, photons, 
+    """Initialize the parameters for the Gaussian fit - x, y, photons,
     background, sigma_x, sigma_y."""
     theta = np.zeros(6, dtype=np.float32)
     theta[3] = np.min(spot)
@@ -105,7 +103,7 @@ def _initial_parameters(
 
 
 def initial_parameters_gpufit(spots: np.ndarray, size: int) -> np.ndarray:
-    """Initialize the parameters for the GPU fit - photons, x, y, sx, 
+    """Initialize the parameters for the GPU fit - photons, x, y, sx,
     sy, bg."""
     center = (size / 2.0) - 0.5
     initial_width = np.amax([size / 5.0, 1.0])
@@ -127,11 +125,11 @@ def initial_parameters_gpufit(spots: np.ndarray, size: int) -> np.ndarray:
 
 @numba.jit(nopython=True, nogil=True)
 def _outer(
-    a: np.ndarray, 
-    b: np.ndarray, 
-    size: int, 
-    model: np.ndarray, 
-    n: float, 
+    a: np.ndarray,
+    b: np.ndarray,
+    size: int,
+    model: np.ndarray,
+    n: float,
     bg: float
 ) -> None:
     """Compute the outer product of two vectors a and b, scaled by n and
@@ -143,15 +141,15 @@ def _outer(
 
 @numba.jit(nopython=True, nogil=True)
 def _compute_model(
-    theta: np.ndarray, 
-    grid: np.ndarray, 
-    size: int, 
-    model_x: np.ndarray, 
-    model_y: np.ndarray, 
+    theta: np.ndarray,
+    grid: np.ndarray,
+    size: int,
+    model_x: np.ndarray,
+    model_y: np.ndarray,
     model: np.ndarray,
 ) -> np.ndarray:
-    """Compute the model of a Gaussian spot (2D) based on the parameters 
-    in theta, which contains the x and y positions, the number of 
+    """Compute the model of a Gaussian spot (2D) based on the parameters
+    in theta, which contains the x and y positions, the number of
     photons, background, and the sigmas in x and y."""
     model_x[:] = _gaussian(
         theta[0], theta[4], grid
@@ -165,17 +163,17 @@ def _compute_model(
 
 @numba.jit(nopython=True, nogil=True)
 def _compute_residuals(
-    theta: np.ndarray, 
-    spot: np.ndarray, 
-    grid: np.ndarray, 
-    size: int, 
-    model_x: np.ndarray, 
-    model_y: np.ndarray, 
-    model: np.ndarray, 
+    theta: np.ndarray,
+    spot: np.ndarray,
+    grid: np.ndarray,
+    size: int,
+    model_x: np.ndarray,
+    model_y: np.ndarray,
+    model: np.ndarray,
     residuals: np.ndarray,
 ) -> np.ndarray:
-    """Compute the residuals (i.e., the difference in pixel values) 
-    between the observed spot and the model computed from the parameters 
+    """Compute the residuals (i.e., the difference in pixel values)
+    between the observed spot and the model computed from the parameters
     in theta."""
     _compute_model(theta, grid, size, model_x, model_y, model)
     residuals[:, :] = spot - model
@@ -184,19 +182,19 @@ def _compute_residuals(
 
 def fit_spot(spot: np.ndarray) -> np.ndarray:
     """Fit a single spot using least squares optimization. The spot is a
-    2D array representing the pixel values of the spot image. The 
+    2D array representing the pixel values of the spot image. The
     function returns the optimized parameters as a 1D array with the
     following order: [x, y, photons, bg, sx, sy].
-    
+
     The parameters are initialized based on the spot's pixel values, and
     the optimization is performed using the least squares method. The
     optimization minimizes the residuals between the observed spot and
     the model computed from the parameters.
-    
+
     Parameters
     ----------
     spot : np.ndarray
-        A 2D array representing the pixel values of the spot image. 
+        A 2D array representing the pixel values of the spot image.
         The shape of the array should be (size, size), where size is the
         length of one side of the square spot image.
 
@@ -247,7 +245,7 @@ def fit_spots(spots: np.ndarray) -> np.ndarray:
         number of spots and size is the length of one side of the square
         spot image. Each slice along the first axis represents a single
         spot image.
-    
+
     Returns
     -------
     theta : np.ndarray
@@ -262,12 +260,12 @@ def fit_spots(spots: np.ndarray) -> np.ndarray:
 
 
 def fit_spots_parallel(
-    spots: np.ndarray, 
+    spots: np.ndarray,
     asynch: bool = False,
 ) -> np.ndarray | list[futures.Future]:
-    """Allows for running ``fit_spots`` asynchronously 
+    """Allows for running ``fit_spots`` asynchronously
     (multiprocessing).
-    
+
     Parameters
     ----------
     spots : np.ndarray
@@ -279,30 +277,32 @@ def fit_spots_parallel(
         If True, the function returns a list of futures that can be
         processed asynchronously. If False, the function waits for all
         futures to complete and returns the results as a 2D array.
-        
+
     Returns
     -------
     np.ndarray | list[_futures.Future]
         If `asynch` is False, returns a 2D array with the optimized
         parameters for each spot, where each row corresponds to a spot
         and the columns are the parameters in the following order:
-        [x, y, photons, bg, sx, sy]. If `asynch` is True, returns a list 
+        [x, y, photons, bg, sx, sy]. If `asynch` is True, returns a list
         of futures that can be processed asynchronously.
     """
     n_workers = min(
         60, max(1, int(0.75 * multiprocessing.cpu_count()))
-    ) # Python crashes when using >64 cores
+    )  # Python crashes when using >64 cores
     n_spots = len(spots)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(n_spots / n_tasks)
+        int(n_spots / n_tasks + 1)
+        if _ < n_spots % n_tasks
+        else int(n_spots / n_tasks)
         for _ in range(n_tasks)
     ]
     start_indices = np.cumsum([0] + spots_per_task[:-1])
     fs = []
     executor = futures.ProcessPoolExecutor(n_workers)
     for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
+        fs.append(executor.submit(fit_spots, spots[i:i + n_spots_task]))
     if asynch:
         return fs
     with tqdm(desc="LQ fitting", total=n_tasks, unit="task") as progress_bar:
@@ -318,9 +318,9 @@ def fit_spots_gpufit(spots: np.ndarray) -> np.ndarray:
     spot, where each row corresponds to a spot and the columns are the
     parameters in the following order: [photons, x, y, sx, sy, bg].
 
-    Cite: Przybylski, et al. Scientific Reports, 2017. 
+    Cite: Przybylski, et al. Scientific Reports, 2017.
     DOI: 10.1038/s41598-017-15313-9
-    
+
     Parameters
     ----------
     spots : np.ndarray
@@ -328,7 +328,7 @@ def fit_spots_gpufit(spots: np.ndarray) -> np.ndarray:
         number of spots and size is the length of one side of the square
         spot image. Each slice along the first axis represents a single
         spot image.
-        
+
     Returns
     -------
     parameters : np.ndarray
@@ -361,13 +361,13 @@ def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
 
 
 def locs_from_fits(
-    identifications: np.recarray, 
-    theta: np.ndarray, 
-    box: int, 
+    identifications: np.recarray,
+    theta: np.ndarray,
+    box: int,
     em: bool,
 ) -> np.recarray:
     """Convert the fit results into a structured array of localizations.
-    
+
     Parameters
     ----------
     identifications : np.recarray
@@ -375,14 +375,14 @@ def locs_from_fits(
         including frame numbers, x and y coordinates, and net gradient.
     theta : np.ndarray
         A 2D array with the optimized parameters for each spot, where
-        each row corresponds to a spot and the columns are the 
+        each row corresponds to a spot and the columns are the
         parameters in the following order: [x, y, photons, bg, sx, sy].
-    box : int   
+    box : int
         The size of the box used for localization, which is used to
         calculate the offsets for the x and y coordinates.
     em : bool
         Whether EMCCD was used for the localization.
-    
+
     Returns
     -------
     locs : np.recarray
@@ -467,14 +467,14 @@ def locs_from_fits(
 
 
 def locs_from_fits_gpufit(
-    identifications: np.recarray, 
-    theta: np.ndarray, 
-    box: int, 
+    identifications: np.recarray,
+    theta: np.ndarray,
+    box: int,
     em: bool,
 ) -> np.recarray:
     """Convert the fit results from GPU-based fitting into a structured
     array of localizations.
-    
+
     Parameters
     ----------
     identifications : np.recarray
@@ -482,14 +482,14 @@ def locs_from_fits_gpufit(
         including frame numbers, x and y coordinates, and net gradient.
     theta : np.ndarray
         A 2D array with the optimized parameters for each spot, where
-        each row corresponds to a spot and the columns are the 
+        each row corresponds to a spot and the columns are the
         parameters in the following order: [photons, x, y, sx, sy, bg].
     box : int
         The size of the box used for localization, which is used to
         calculate the offsets for the x and y coordinates.
     em : bool
-        Whether EMCCD was used for the localization.   
-    
+        Whether EMCCD was used for the localization.
+
     Returns
     -------
     locs : np.recarray

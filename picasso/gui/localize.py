@@ -27,6 +27,7 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 
 try:
     from pygpufit import gpufit
+    print(f"pygpufit version: {gpufit.__version__}")
     GPUFIT_INSTALLED = True
 except ImportError:
     GPUFIT_INSTALLED = False
@@ -52,11 +53,11 @@ class RubberBand(QtWidgets.QRubberBand):
 
 
 class View(QtWidgets.QGraphicsView):
-    """Central widget which shows ``Scene`` objects of individual 
+    """Central widget which shows ``Scene`` objects of individual
     frames.
-    
+
     ...
-    
+
     Attributes
     ----------
     hscrollbar, vscrollbar : QtWidgets.QScrollBar
@@ -93,7 +94,9 @@ class View(QtWidgets.QGraphicsView):
         view."""
         if event.button() == QtCore.Qt.LeftButton and not self.numeric_roi:
             self.roi_origin = QtCore.QPoint(event.pos())
-            self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, QtCore.QSize()))
+            self.rubberband.setGeometry(
+                QtCore.QRect(self.roi_origin, QtCore.QSize())
+            )
             self.rubberband.show()
         elif event.button() == QtCore.Qt.RightButton:
             self.pan = True
@@ -107,7 +110,9 @@ class View(QtWidgets.QGraphicsView):
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Update the rubber band or pan the view."""
         if event.buttons() == QtCore.Qt.LeftButton and not self.numeric_roi:
-            self.rubberband.setGeometry(QtCore.QRect(self.roi_origin, event.pos()))
+            self.rubberband.setGeometry(
+                QtCore.QRect(self.roi_origin, event.pos())
+            )
         if self.pan:
             self.hscrollbar.setValue(
                 self.hscrollbar.value() - event.x() + self.pan_start_x
@@ -160,8 +165,8 @@ class Scene(QtWidgets.QGraphicsScene):
     """Render individual frames, displayed in a ``View`` widget."""
 
     def __init__(
-        self, 
-        window: QtWidgets.QMainWindow, 
+        self,
+        window: QtWidgets.QMainWindow,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -202,10 +207,10 @@ class Scene(QtWidgets.QGraphicsScene):
 class FitMarker(QtWidgets.QGraphicsItemGroup):
     """Marker showing fitted position."""
     def __init__(
-        self, 
-        x: float, 
-        y: float, 
-        size: float, 
+        self,
+        x: float,
+        y: float,
+        size: float,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -234,31 +239,31 @@ class OddSpinBox(QtWidgets.QSpinBox):
 
 class CamSettingComboBox(QtWidgets.QComboBox):
     """Combo box for selecting camera settings.
-    
+
     ...
 
     Attributes
     ----------
     cam_combos : dict
-        keys: Available cameras. 
+        keys: Available cameras.
 
-        values: list of CamSettingComboBoxes 
-            one for each sensitivity category, described in the CONFIG 
+        values: list of CamSettingComboBoxes
+            one for each sensitivity category, described in the CONFIG
             entry for the respective camera.
     camera : str
         Camera name this CamSettingComboBox belongs to.
     categories : list of str
         Sensitivity categories of the camera.
     index : int
-        Index of sensitivity category this CamSettingComboBox belongs 
+        Index of sensitivity category this CamSettingComboBox belongs
         to.
     """
 
     def __init__(
-        self, 
-        cam_combos: dict, 
-        camera: str, 
-        index: int, 
+        self,
+        cam_combos: dict,
+        camera: str,
+        index: int,
         sensitivity_categories: list[str] = [],
     ) -> None:
         super().__init__()
@@ -268,7 +273,7 @@ class CamSettingComboBox(QtWidgets.QComboBox):
         self.categories = sensitivity_categories
 
     def change_target_choices(self, index: int) -> None:
-        """Update the target choices based on the selected camera 
+        """Update the target choices based on the selected camera
         settings."""
         cam_combos = self.cam_combos[self.camera]
         sensitivity = CONFIG["Cameras"][self.camera]["Sensitivity"]
@@ -305,7 +310,7 @@ class CamSettingComboBoxDict(UserDict):
         self.sensitivity_categories = {}
 
     def add_categories(self, cam: str, categories: list[str]) -> None:
-        """Call this when setting combo boxes for a new camera, to 
+        """Call this when setting combo boxes for a new camera, to
         accompany it with the corresponding sensitivity categories."""
         self.sensitivity_categories[cam] = categories
 
@@ -352,7 +357,7 @@ class CamSettingComboBoxDict(UserDict):
 class EmissionComboBoxDict(UserDict):
     """Dictionary holding ``QComboBox``'s for different emission
     wavelengths.
-    
+
     keys: str
         Camera names.
     values: QtWidgets.QComboBox
@@ -381,7 +386,7 @@ class EmissionComboBoxDict(UserDict):
 
 class PromptInfoDialog(QtWidgets.QDialog):
     """Enter movie metadata.
-    
+
     ...
 
     Attributes
@@ -410,7 +415,9 @@ class PromptInfoDialog(QtWidgets.QDialog):
         grid = QtWidgets.QGridLayout()
         grid.addWidget(QtWidgets.QLabel("Byte Order:"), 0, 0)
         self.byte_order = QtWidgets.QComboBox()
-        self.byte_order.addItems(["Little Endian (loads faster)", "Big Endian"])
+        self.byte_order.addItems(
+            ["Little Endian (loads faster)", "Big Endian"]
+        )
         grid.addWidget(self.byte_order, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Data Type:"), 1, 0)
         self.dtype = QtWidgets.QComboBox()
@@ -517,7 +524,7 @@ class PromptChannelDialog(QtWidgets.QDialog):
 
 class ParametersDialog(QtWidgets.QDialog):
     """Choose analysis parameters.
-    
+
     ...
 
     Attributes
@@ -595,7 +602,9 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Box Size
         identification_label = QtWidgets.QLabel("Box side length:")
-        identification_label.setToolTip("Box size in pixels for identification")
+        identification_label.setToolTip(
+            "Box size in pixels for identification"
+        )
         identification_grid.addWidget(identification_label, 0, 0)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
@@ -604,7 +613,9 @@ class ParametersDialog(QtWidgets.QDialog):
         identification_grid.addWidget(self.box_spinbox, 0, 1)
 
         # Min. Net Gradient
-        identification_grid.addWidget(QtWidgets.QLabel("Min.  Net Gradient:"), 1, 0)
+        identification_grid.addWidget(
+            QtWidgets.QLabel("Min.  Net Gradient:"), 1, 0,
+        )
         self.mng_spinbox = QtWidgets.QSpinBox()
         self.mng_spinbox.setRange(0, int(1e9))
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
@@ -648,7 +659,7 @@ class ParametersDialog(QtWidgets.QDialog):
             QtWidgets.QLabel("ROI (y_min,x_min,y_max,x_max):"), 5, 0,
         )
         self.roi_edit = QtWidgets.QLineEdit()
-        regex = r"\d+,\d+,\d+,\d+" # regex for 4 integers separated by commas
+        regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
         validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
         self.roi_edit.setValidator(validator)
         self.roi_edit.editingFinished.connect(self.on_roi_edit_finished)
@@ -694,7 +705,9 @@ class ParametersDialog(QtWidgets.QDialog):
                             cam_grid.addWidget(
                                 QtWidgets.QLabel(category + ":"), row_count, 0
                             )
-                            cat_combo = CamSettingComboBox(self.cam_combos, cam, i)
+                            cat_combo = CamSettingComboBox(
+                                self.cam_combos, cam, i,
+                            )
                             cam_grid.addWidget(cat_combo, row_count, 1)
                             self.cam_combos[cam].append(cat_combo)
                         self.cam_combos[cam][0].addItems(
@@ -716,7 +729,9 @@ class ParametersDialog(QtWidgets.QDialog):
                     else:
                         row_count = cam_grid.rowCount()
                         cam_grid.addWidget(
-                            QtWidgets.QLabel("Emission Wavelength:"), row_count, 0
+                            QtWidgets.QLabel("Emission Wavelength:"),
+                            row_count,
+                            0,
                         )
                         emission_combo = QtWidgets.QComboBox()
                         cam_grid.addWidget(emission_combo, row_count, 1)
@@ -728,7 +743,8 @@ class ParametersDialog(QtWidgets.QDialog):
                         self.emission_combos[cam] = emission_combo
                 spacer = QtWidgets.QWidget()
                 spacer.setSizePolicy(
-                    QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Expanding
+                    QtWidgets.QSizePolicy.Preferred,
+                    QtWidgets.QSizePolicy.Expanding,
                 )
                 cam_grid.addWidget(spacer, cam_grid.rowCount(), 0)
 
@@ -841,7 +857,9 @@ class ParametersDialog(QtWidgets.QDialog):
 
         z_grid = QtWidgets.QGridLayout(z_groupbox)
         z_grid.addWidget(
-            QtWidgets.QLabel("Non-integrated Gaussian fitting is recommend! (LQ)"),
+            QtWidgets.QLabel(
+                "Non-integrated Gaussian fitting is recommend! (LQ)"
+            ),
             0, 0, 1, 2,
         )
         load_z_calib = QtWidgets.QPushButton("Load calibration")
@@ -922,7 +940,7 @@ class ParametersDialog(QtWidgets.QDialog):
     def on_roi_edit_changed(self) -> None:
         """Handle changes to the ROI edit field."""
         if self.roi_edit.text() == "":
-            self.window.view.numeric_roi = False            
+            self.window.view.numeric_roi = False
             self.window.view.roi = None
             self.window.view.rubberband.hide()
             self.window.draw_frame()
@@ -946,7 +964,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.window.view.numeric_roi = True
 
     def on_fit_method_changed(self) -> None:
-        """Enable/disable GPU fitting checkbox based on selected fit 
+        """Enable/disable GPU fitting checkbox based on selected fit
         method."""
         if self.fit_method.currentText() == "LQ, Gaussian":
             self.gpufit_checkbox.setDisabled(False)
@@ -988,7 +1006,10 @@ class ParametersDialog(QtWidgets.QDialog):
             _.setVisible(True)
 
         self.q_worker = QualityWorker(
-            self.window.locs, self.window.info, self.window.movie_path, self.pixelsize
+            self.window.locs,
+            self.window.info,
+            self.window.movie_path,
+            self.pixelsize,
         )
         self.q_worker.progressMade.connect(self.quality_progress)
         self.q_worker.finished.connect(self.quality_progress_finished)
@@ -1062,10 +1083,12 @@ class ParametersDialog(QtWidgets.QDialog):
         self.window.draw_frame()
 
     def set_camera_parameters(self, info: dict) -> None:
-        """Set the camera parameters based on the provided camera 
+        """Set the camera parameters based on the provided camera
         info."""
         if "Cameras" in CONFIG and "Camera" in info:
-            cameras = [self.camera.itemText(_) for _ in range(self.camera.count())]
+            cameras = [
+                self.camera.itemText(_) for _ in range(self.camera.count())
+            ]
             camera = info["Camera"]
             if camera in cameras:
                 index = cameras.index(camera)
@@ -1077,9 +1100,9 @@ class ParametersDialog(QtWidgets.QDialog):
                         gain_property_name = cam_config["Gain Property Name"]
                         gain = mm_info[camera + "-" + gain_property_name]
                         if "EM Switch Property" in cam_config:
-                            switch_property_name = cam_config["EM Switch Property"][
-                                "Name"
-                            ]
+                            switch_property_name = cam_config[
+                                "EM Switch Property"
+                            ]["Name"]
                             switch_property_value = mm_info[
                                 camera + "-" + switch_property_name
                             ]
@@ -1096,15 +1119,17 @@ class ParametersDialog(QtWidgets.QDialog):
                         for i, category in enumerate(categories):
                             property_name = camera + "-" + category
                             if property_name in mm_info:
-                                exp_setting = mm_info[camera + "-" + category]
+                                e_setting = mm_info[camera + "-" + category]
                                 cam_combo = cam_combos[i]
                                 for index in range(cam_combo.count()):
-                                    if cam_combo.itemText(index) == exp_setting:
+                                    if cam_combo.itemText(index) == e_setting:
                                         cam_combo.setCurrentIndex(index)
                                         break
                     if "Quantum Efficiency" in cam_config:
                         if "Channel Device" in cam_config:
-                            channel_device_name = cam_config["Channel Device"]["Name"]
+                            channel_device_name = cam_config["Channel Device"][
+                                "Name"
+                            ]
                             channel = mm_info[channel_device_name]
                             channels = cam_config["Channel Device"][
                                 "Emission Wavelengths"
@@ -1195,7 +1220,7 @@ class ContrastDialog(QtWidgets.QDialog):
 
 class Window(QtWidgets.QMainWindow):
     """The main window.
-    
+
     ...
 
     Attributes
@@ -1295,7 +1320,9 @@ class Window(QtWidgets.QMainWindow):
             settings["Localize"][
                 "box_size"
             ] = self.parameters_dialog.box_spinbox.value()
-            settings["Localize"]["gradient"] = self.parameters_dialog.mng_slider.value()
+            settings["Localize"]["gradient"] = (
+                self.parameters_dialog.mng_slider.value()
+            )
         io.save_user_settings(settings)
         QtWidgets.qApp.closeAllWindows()
 
@@ -1309,7 +1336,9 @@ class Window(QtWidgets.QMainWindow):
         open_action.setShortcut("Ctrl+O")
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
-        load_picks_action = file_menu.addAction("Load picks as identifications")
+        load_picks_action = file_menu.addAction(
+            "Load picks as identifications"
+        )
         load_picks_action.triggered.connect(self.open_picks)
         load_locs_action = file_menu.addAction("Load locs as identifications")
         load_locs_action.triggered.connect(self.open_locs)
@@ -1321,15 +1350,6 @@ class Window(QtWidgets.QMainWindow):
         save_spots_action.setShortcut("Ctrl+Shift+S")
         save_spots_action.triggered.connect(self.save_spots_dialog)
         file_menu.addAction(save_spots_action)
-        # file_menu.addSeparator()
-        # open_parameters_action = file_menu.addAction('Load parameters')
-        # open_parameters_action.setShortcut('Ctrl+Shift+O')
-        # open_parameters_action.triggered.connect(self.open_parameters)
-        # file_menu.addAction(open_parameters_action)
-        # save_parameters_action = file_menu.addAction('Save parameters')
-        # save_parameters_action.setShortcut('Ctrl+Shift+S')
-        # save_parameters_action.triggered.connect(self.save_parameters)
-        # file_menu.addAction(save_parameters_action)
         file_menu.addSeparator()
         export_current_action = file_menu.addAction("Export current view")
         export_current_action.setShortcut("Ctrl+E")
@@ -1426,9 +1446,9 @@ class Window(QtWidgets.QMainWindow):
             dir = self.pwd
 
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, 
-            "Open image sequence", 
-            directory=dir, 
+            self,
+            "Open image sequence",
+            directory=dir,
             filter=(
                 "All supported formats (*.raw *.tif *.nd2 *.ims *.tiff)"
                 ";;Raw files (*.raw)"
@@ -1463,7 +1483,9 @@ class Window(QtWidgets.QMainWindow):
             self.set_frame(0)
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
-            self.status_bar.showMessage("Opened movie in {:.2f} seconds.".format(dt))
+            self.status_bar.showMessage(
+                "Opened movie in {:.2f} seconds.".format(dt)
+            )
 
             if "Pixelsize" in self.info[0]:
                 self.parameters_dialog.pixelsize.setValue(
@@ -1471,7 +1493,7 @@ class Window(QtWidgets.QMainWindow):
                 )
 
         self.setWindowTitle(
-            "Picasso v{}: Localize. File: {}".format(__version__, os.path.basename(path))
+            f"Picasso v{__version__}: Localize. File: {os.path.basename(path)}"
         )
         self.parameters_dialog.reset_quality_check()
 
@@ -1605,14 +1627,27 @@ class Window(QtWidgets.QMainWindow):
             n_id = 0
             for element in locs:
                 currframe = element["frame"]
-                if currframe > n_frames and currframe < (max_frames - n_frames):
-                    xloc = np.ones((2 * n_frames + 1,), dtype=float) * element["x"]
-                    yloc = np.ones((2 * n_frames + 1,), dtype=float) * element["y"]
-                    frames = np.arange(currframe - n_frames, currframe + n_frames + 1)
+                if (
+                    currframe > n_frames and
+                    currframe < (max_frames - n_frames)
+                ):
+                    xloc = (
+                        np.ones((2 * n_frames + 1,), dtype=float)
+                        * element["x"]
+                    )
+                    yloc = (
+                        np.ones((2 * n_frames + 1,), dtype=float)
+                        * element["y"]
+                    )
+                    frames = np.arange(
+                        currframe - n_frames, currframe + n_frames + 1,
+                    )
                     gradient = np.ones(2 * n_frames + 1) + 100
                     n_id_all = np.ones(2 * n_frames + 1) + n_id
                     temp = np.array([frames, xloc, yloc, gradient, n_id_all])
-                    data.append([tuple(temp[:, j]) for j in range(temp.shape[1])])
+                    data.append(
+                        [tuple(temp[:, j]) for j in range(temp.shape[1])]
+                    )
                 n_id += 1
 
             data = [item for sublist in data for item in sublist]
@@ -1722,7 +1757,7 @@ class Window(QtWidgets.QMainWindow):
         )
 
     def draw_frame(self) -> None:
-        """Draw the current frame - show the movie frame, apply 
+        """Draw the current frame - show the movie frame, apply
         contrast, add identifications and fit markers, if applicable."""
         if self.movie is not None:
             frame = self.movie[self.curr_frame_number]
@@ -1775,14 +1810,16 @@ class Window(QtWidgets.QMainWindow):
                 else:
                     self.status_bar.showMessage("")
             if self.locs is not None:
-                locs_frame = self.locs[self.locs.frame == self.curr_frame_number]
+                locs_frame = self.locs[
+                    self.locs.frame == self.curr_frame_number
+                ]
                 for loc in locs_frame:
                     self.scene.addItem(FitMarker(loc.x + 0.5, loc.y + 0.5, 1))
 
     def draw_identifications(
-        self, 
-        identifications: np.recarray, 
-        box: int, 
+        self,
+        identifications: np.recarray,
+        box: int,
         color: QtGui.QColor,
     ) -> None:
         """Draw identification boxes in the scene."""
@@ -1791,33 +1828,6 @@ class Window(QtWidgets.QMainWindow):
             x = identification.x
             y = identification.y
             self.scene.addRect(x - box_half, y - box_half, box, box, color)
-
-    # def open_parameters(self):
-    #     if self.pwd == []:
-    #         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-    #             self, "Open parameters", filter="*.yaml"
-    #         )
-    #     else:
-    #         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-    #             self, "Open parameters", directory=self.pwd, filter="*.yaml"
-    #         )
-    #     if path:
-    #         self.load_parameters(path)
-
-    # def load_parameters(self, path):
-    #     with open(path, "r") as file:
-    #         parameters = yaml.full_load(file)
-    #         self.parameters_dialog.box_spinbox.setValue(parameters["Box Size"])
-    #         self.parameters_dialog.mng_spinbox.setValue(parameters["Min. Net Gradient"])
-    #         self.status_bar.showMessage("Parameter file {} loaded.".format(path))
-
-    # def save_parameters(self):
-    #     path, exe = QtWidgets.QFileDialog.getSaveFileName(
-    #         self, "Save parameters", filter="*.yaml"
-    #     )
-    #     if path:
-    #         with open(path, "w") as file:
-    #             yaml.dump(self.parameters, file)
 
     @property
     def parameters(self) -> dict:
@@ -1834,19 +1844,19 @@ class Window(QtWidgets.QMainWindow):
         self.draw_frame()
 
     def identify(
-        self, 
-        fit_afterwards: bool = False, 
+        self,
+        fit_afterwards: bool = False,
         calibrate_z: bool = False,
     ) -> None:
         """Identify spots in the loaded movie.
-        
+
         Parameters
         ----------
         fit_afterwards : bool, optional
-            Whether to automatically fit the identified spots 
+            Whether to automatically fit the identified spots
             afterwards. Default is False.
         calibrate_z : bool, optional
-            Whether to run z-calibration for 3D fitting after 
+            Whether to run z-calibration for 3D fitting after
             identification. Default is False.
         """
         if self.movie is not None:
@@ -1854,12 +1864,20 @@ class Window(QtWidgets.QMainWindow):
             self.identification_worker = IdentificationWorker(
                 self, fit_afterwards, calibrate_z
             )
-            self.identification_worker.progressMade.connect(self.on_identify_progress)
-            self.identification_worker.finished.connect(self.on_identify_finished)
+            self.identification_worker.progressMade.connect(
+                self.on_identify_progress
+            )
+            self.identification_worker.finished.connect(
+                self.on_identify_finished
+            )
             self.identification_worker.start()
 
-    def on_identify_progress(self, frame_number: int, parameters: dict) -> None:
-        """Update the status bar with the current identification 
+    def on_identify_progress(
+        self,
+        frame_number: int,
+        parameters: dict,
+    ) -> None:
+        """Update the status bar with the current identification
         progress."""
         n_frames = self.info[0]["Frames"]
         box = parameters["Box Size"]
@@ -1871,11 +1889,11 @@ class Window(QtWidgets.QMainWindow):
         self.status_bar.showMessage(message)
 
     def on_identify_finished(
-        self, 
-        parameters: dict, 
-        roi: list[int], 
-        identifications: np.recarray, 
-        fit_afterwards: bool, 
+        self,
+        parameters: dict,
+        roi: list[int],
+        identifications: np.recarray,
+        fit_afterwards: bool,
         calibrate_z: bool,
     ) -> None:
         """Handle the completion of the identification process. Save
@@ -1904,7 +1922,7 @@ class Window(QtWidgets.QMainWindow):
         Parameters
         ----------
         calibrate_z : bool, optional
-            Whether to perform z-calibration during fitting. Default is 
+            Whether to perform z-calibration during fitting. Default is
             False.
         """
         if self.movie is not None and self.ready_for_fit:
@@ -1958,17 +1976,17 @@ class Window(QtWidgets.QMainWindow):
             self.status_bar.showMessage(message)
 
     def on_fit_finished(
-        self, 
-        locs: np.recarray, 
-        elapsed_time: float, 
-        fit_z: bool, 
+        self,
+        locs: np.recarray,
+        elapsed_time: float,
+        fit_z: bool,
         calibrate_z: bool,
     ) -> None:
-        """Handle the completion of the fitting process. Draw fit 
+        """Handle the completion of the fitting process. Draw fit
         markers, fit/calibration z coordinates, if requested, save
         localizations."""
         self.status_bar.showMessage(
-            "Fitted {:,} spots in {:.2f} seconds.".format(len(locs), elapsed_time)
+            f"Fitted {len(locs)} spots in {elapsed_time:.2f} seconds."
         )
         self.locs = locs
         self.draw_frame()
@@ -2006,7 +2024,11 @@ class Window(QtWidgets.QMainWindow):
         message = "Fitting z coordinate {:,} / {:,} ...".format(curr, total)
         self.status_bar.showMessage(message)
 
-    def on_fit_z_finished(self, locs: np.recarray, elapsed_time: float) -> None:
+    def on_fit_z_finished(
+        self,
+        locs: np.recarray,
+        elapsed_time: float,
+    ) -> None:
         """Handle the completion of the z fitting process."""
         self.status_bar.showMessage(
             "Fitted {:,} z coordinates in {:.2f} seconds.".format(
@@ -2083,12 +2105,16 @@ class Window(QtWidgets.QMainWindow):
         localize_info = self.last_identification_info.copy()
         localize_info["Generated by"] = f"Picasso v{__version__} Localize"
         localize_info["Pixelsize"] = self.parameters_dialog.pixelsize.value()
-        localize_info["Fit method"] = self.parameters_dialog.fit_method.currentText()
+        localize_info["Fit method"] = (
+            self.parameters_dialog.fit_method.currentText()
+        )
         if self.parameters_dialog.fit_z_checkbox.isChecked():
             localize_info[
                 "Z Calibration Path"
             ] = self.parameters_dialog.z_calibration_path
-            localize_info["Z Calibration"] = self.parameters_dialog.z_calibration
+            localize_info["Z Calibration"] = (
+                self.parameters_dialog.z_calibration
+            )
         info = self.info + [localize_info | self.camera_info]
 
         io.save_locs(path, self.locs, info)
@@ -2108,7 +2134,7 @@ class Window(QtWidgets.QMainWindow):
 
     def localize(self, calibrate_z: bool = False) -> None:
         """Identify and fit, see ``identify`` and ``fit``.
-        
+
         Parameters
         ----------
         calibrate_z : bool, optional
@@ -2120,7 +2146,7 @@ class Window(QtWidgets.QMainWindow):
             self.fit(calibrate_z=calibrate_z)
         else:
             self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
-            
+
 
 class IdentificationWorker(QtCore.QThread):
     """Identify spots in the movie using multiprocessing.
@@ -2132,9 +2158,9 @@ class IdentificationWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(dict, object, np.recarray, bool, bool)
 
     def __init__(
-        self, 
-        window: QtWidgets.QMainWindow, 
-        fit_afterwards: bool, 
+        self,
+        window: QtWidgets.QMainWindow,
+        fit_afterwards: bool,
         calibrate_z: bool,
     ) -> None:
         super().__init__()
@@ -2168,7 +2194,7 @@ class IdentificationWorker(QtCore.QThread):
 
 
 class FitWorker(QtCore.QThread):
-    """Fit single molecules to the identified spots using 
+    """Fit single molecules to the identified spots using
     multiprocessing and update the status bar accordingly."""
 
     progressMade = QtCore.pyqtSignal(int, int)
@@ -2223,7 +2249,12 @@ class FitWorker(QtCore.QThread):
                     time.sleep(0.2)
                 theta = gausslq.fits_from_futures(fs)
                 em = self.camera_info["Gain"] > 1
-                locs = gausslq.locs_from_fits(self.identifications, theta, self.box, em)
+                locs = gausslq.locs_from_fits(
+                    self.identifications,
+                    theta,
+                    self.box,
+                    em,
+                )
         elif self.method == "mle":
             curr, thetas, CRLBs, llhoods, iterations = gaussmle.gaussmle_async(
                 spots, self.eps, self.max_it, method="sigmaxy"
@@ -2245,11 +2276,15 @@ class FitWorker(QtCore.QThread):
             fs = avgroi.fit_spots_parallel(spots, asynch=True)
             n_tasks = len(fs)
             while lib.n_futures_done(fs) < n_tasks:
-                self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
+                self.progressMade.emit(
+                    round(N * lib.n_futures_done(fs) / n_tasks), N,
+                )
                 time.sleep(0.2)
             theta = avgroi.fits_from_futures(fs)
             em = self.camera_info["Gain"] > 1
-            locs = avgroi.locs_from_fits(self.identifications, theta, self.box, em)
+            locs = avgroi.locs_from_fits(
+                self.identifications, theta, self.box, em,
+            )
         else:
             print("This should never happen...")
         self.progressMade.emit(N + 1, N)
@@ -2265,10 +2300,10 @@ class FitZWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(np.recarray, float)
 
     def __init__(
-        self, 
-        locs: np.recarray, 
-        info: dict, 
-        calibration: dict, 
+        self,
+        locs: np.recarray,
+        info: dict,
+        calibration: dict,
         magnification_factor: float,
     ) -> None:
         super().__init__()
@@ -2290,7 +2325,9 @@ class FitZWorker(QtCore.QThread):
         )
         n_tasks = len(fs)
         while lib.n_futures_done(fs) < n_tasks:
-            self.progressMade.emit(round(N * lib.n_futures_done(fs) / n_tasks), N)
+            self.progressMade.emit(
+                round(N * lib.n_futures_done(fs) / n_tasks), N,
+            )
             time.sleep(0.2)
         locs = zfit.locs_from_futures(fs, filter=0)
         dt = time.time() - t0
@@ -2306,10 +2343,10 @@ class QualityWorker(QtCore.QThread):
     finished = QtCore.pyqtSignal(str)
 
     def __init__(
-        self, 
-        locs: np.recarray, 
-        info: dict, 
-        path: str, 
+        self,
+        locs: np.recarray,
+        info: dict,
+        path: str,
         pixelsize: float
     ) -> None:
         super().__init__()
@@ -2331,7 +2368,9 @@ class QualityWorker(QtCore.QThread):
         self.progressMade.emit("Checking Quality (2/4) NeNA ..", 0, "")
 
         def nena_callback(x):
-            self.progressMade.emit(f"Checking Quality (2/4) NeNA: {x} %", 0, "")
+            self.progressMade.emit(
+                f"Checking Quality (2/4) NeNA: {x} %", 0, "",
+            )
 
         nena_px = localize.check_nena(sane_locs, self.info, nena_callback)
         nena_nm = float(self.pixelsize.value() * nena_px)
@@ -2341,12 +2380,16 @@ class QualityWorker(QtCore.QThread):
         self.progressMade.emit("Checking Quality (3/4) Drift ..", 0, "")
 
         def drift_callback(x):
-            self.progressMade.emit(f"Checking Quality (3/4) Drift {x} %", 0, "")
+            self.progressMade.emit(
+                f"Checking Quality (3/4) Drift {x} %", 0, "",
+            )
 
         drift_x, drift_y = localize.check_drift(
             sane_locs, self.info, callback=drift_callback
         )
-        self.progressMade.emit("", 2, f"X: {drift_x:.3f} px / Y: {drift_y:.3f} px")
+        self.progressMade.emit(
+            "", 2, f"X: {drift_x:.3f} px / Y: {drift_y:.3f} px",
+        )
 
         # Kinetics
         self.progressMade.emit("Checking Quality (4/4) Kinetics ..", 0, "")
@@ -2356,9 +2399,12 @@ class QualityWorker(QtCore.QThread):
         print(f"Quality {nena_px} {drift_x} {drift_y} {len_mean}")
 
         localize.add_file_to_db(
-            self.path, None, drift=(drift_x, drift_y), len_mean=len_mean, nena=nena_px
+            self.path,
+            None,
+            drift=(drift_x, drift_y),
+            len_mean=len_mean,
+            nena=nena_px,
         )
-
         self.finished.emit("Quality parameters complete.")
 
 
@@ -2387,7 +2433,9 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtWidgets.QMessageBox.critical(
+            window, "An error occured", message,
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

@@ -32,11 +32,12 @@ plt.style.use("ggplot")
 
 ROW_HEIGHT = 30
 
+
 class TableModel(QtCore.QAbstractTableModel):
     """Class for handling the localization data.
-    
+
     ...
-    
+
     Attributes
     ----------
     _column_count : int
@@ -59,9 +60,9 @@ class TableModel(QtCore.QAbstractTableModel):
     """
 
     def __init__(
-        self, 
-        locs: np.recarray, 
-        index: QtCore.QModelIndex, 
+        self,
+        locs: np.recarray,
+        index: QtCore.QModelIndex,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -80,8 +81,8 @@ class TableModel(QtCore.QAbstractTableModel):
         return self._row_count
 
     def data(
-        self, 
-        index: QtCore.QModelIndex, 
+        self,
+        index: QtCore.QModelIndex,
         role: int = QtCore.Qt.DisplayRole,
     ) -> str | None:
         if role == QtCore.Qt.DisplayRole:
@@ -90,9 +91,9 @@ class TableModel(QtCore.QAbstractTableModel):
         return None
 
     def headerData(
-        self, 
-        section: int, 
-        orientation: QtCore.Qt.Orientation, 
+        self,
+        section: int,
+        orientation: QtCore.Qt.Orientation,
         role: int,
     ) -> str | None:
         if role == QtCore.Qt.DisplayRole:
@@ -105,7 +106,7 @@ class TableModel(QtCore.QAbstractTableModel):
 
 class TableView(QtWidgets.QTableView):
     """Custom table view for displaying localization data.
-    
+
     ...
 
     Attributes
@@ -122,8 +123,8 @@ class TableView(QtWidgets.QTableView):
     """
 
     def __init__(
-        self, 
-        window: QtWidgets.QMainWindow, 
+        self,
+        window: QtWidgets.QMainWindow,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -154,9 +155,9 @@ class TableView(QtWidgets.QTableView):
 
 class PlotWindow(QtWidgets.QWidget):
     """Window for displaying 1D/2D histograms.
-    
+
     ...
-    
+
     Attributes
     ----------
     main_window : QtWidgets.QMainWindow
@@ -173,9 +174,10 @@ class PlotWindow(QtWidgets.QWidget):
     locs : np.recarray
         Localization data.
     """
+
     def __init__(
-        self, 
-        main_window: QtWidgets.QMainWindow, 
+        self,
+        main_window: QtWidgets.QMainWindow,
         locs: np.recarray,
     ) -> None:
         super().__init__()
@@ -203,9 +205,9 @@ class PlotWindow(QtWidgets.QWidget):
 
 class HistWindow(PlotWindow):
     """Window for displaying 1D histograms.
-    
+
     ...
-    
+
     Attributes
     ----------
     field : str
@@ -222,9 +224,9 @@ class HistWindow(PlotWindow):
     """
 
     def __init__(
-        self, 
-        main_window: QtWidgets.QMainWindow, 
-        locs: np.recarray, 
+        self,
+        main_window: QtWidgets.QMainWindow,
+        locs: np.recarray,
         field: str,
     ) -> None:
         self.field = field
@@ -241,7 +243,9 @@ class HistWindow(PlotWindow):
         axes = self.figure.add_subplot(111)
         axes.hist(data, bins, rwidth=1, linewidth=0)
         data_range = data.ptp()
-        axes.set_xlim([bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range])
+        axes.set_xlim(
+            [bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range]
+        )
         self.span = SpanSelector(
             axes,
             self.on_span_select,
@@ -269,9 +273,9 @@ class HistWindow(PlotWindow):
 
 class Hist2DWindow(PlotWindow):
     """Window for displaying 2D histograms.
-    
+
     ...
-    
+
     Attributes
     ----------
     field_x, field_y : str
@@ -335,10 +339,10 @@ class Hist2DWindow(PlotWindow):
 
     def on_rect_select(
         self,
-        press_event: QtGui.QMouseEvent, 
+        press_event: QtGui.QMouseEvent,
         release_event: QtGui.QMouseEvent,
     ) -> None:
-        """Handle rectangle selection over the 2D histogram. Update 
+        """Handle rectangle selection over the 2D histogram. Update
         localizations."""
         x1, y1 = press_event.xdata, press_event.ydata
         x2, y2 = release_event.xdata, release_event.ydata
@@ -366,9 +370,9 @@ class Hist2DWindow(PlotWindow):
 
 class FilterNum(QtWidgets.QDialog):
     """Dialog for filtering localizations by numeric values.
-    
+
     ...
-    
+
     Attributes
     ----------
     attributes : QtWidgets.QComboBox
@@ -441,7 +445,7 @@ class FilterNum(QtWidgets.QDialog):
             locs = self.window.locs
             locs = locs[(locs[field] > xmin) & (locs[field] < xmax)]
             self.window.update_locs(locs)
-            self.window.log_filter(field, xmin, xmax)        
+            self.window.log_filter(field, xmin, xmax)
 
     def on_locs_loaded(self) -> None:
         """Changes attributes in the dialog according to locs.dtypes."""
@@ -449,19 +453,19 @@ class FilterNum(QtWidgets.QDialog):
             self.attributes.removeItem(0)
         names = self.window.locs.dtype.names
         for name in names:
-            self.attributes.addItem(name)   
+            self.attributes.addItem(name)
 
 
 class Window(QtWidgets.QMainWindow):
     """Main window for the application.
-    
+
     ...
-    
+
     Attributes
     ----------
     filter_log : dict
         Dictionary of filter logs, i.e., data on what attribute/field
-        of ``self.locs`` was filtered and the corresponding min/max 
+        of ``self.locs`` was filtered and the corresponding min/max
         values.
     filter_num : FilterNum
         Filter dialog for numeric values.
@@ -570,7 +574,9 @@ class Window(QtWidgets.QMainWindow):
             self.filter_log[field] = None
         self.filter_num.on_locs_loaded()
 
-        self.setWindowTitle("Picasso v{}: Filter. File: {}".format(__version__, os.path.basename(path)))
+        self.setWindowTitle(
+            f"Picasso v{__version__}: Filter. File: {os.path.basename(path)}"
+        )
         self.pwd = os.path.dirname(path)
 
     def plot_histogram(self) -> None:
@@ -581,7 +587,9 @@ class Window(QtWidgets.QMainWindow):
                 index = index.column()
                 field = self.locs.dtype.names[index]
                 if not self.hist_windows[field]:
-                    self.hist_windows[field] = HistWindow(self, self.locs, field)
+                    self.hist_windows[field] = HistWindow(
+                        self, self.locs, field,
+                    )
                 self.hist_windows[field].show()
 
     def plot_hist2d(self) -> None:
@@ -589,7 +597,9 @@ class Window(QtWidgets.QMainWindow):
         indices = selection_model.selectedColumns()
         if len(indices) == 2:
             indices = [index.column() for index in indices]
-            field_x, field_y = [self.locs.dtype.names[index] for index in indices]
+            field_x, field_y = [
+                self.locs.dtype.names[index] for index in indices
+            ]
             if not self.hist2d_windows[field_x][field_y]:
                 self.hist2d_windows[field_x][field_y] = Hist2DWindow(
                     self, self.locs, field_x, field_y
@@ -612,7 +622,9 @@ class Window(QtWidgets.QMainWindow):
         if self.locs is not None:
             view_height = self.table_view.viewport().height()
             n_rows = int(view_height / ROW_HEIGHT) + 2
-            table_model = TableModel(self.locs[index : index + n_rows], index, self)
+            table_model = TableModel(
+                self.locs[index:index + n_rows], index, self,
+            )
             self.table_view.setModel(table_model)
 
     def log_filter(self, field: str, xmin: float, xmax: float) -> None:
@@ -631,14 +643,18 @@ class Window(QtWidgets.QMainWindow):
             )
             if path:
                 filter_info = self.filter_log.copy()
-                filter_info.update({"Generated by": f"Picasso v{__version__} Filter"})
+                filter_info.update({
+                    "Generated by": f"Picasso v{__version__} Filter"
+                })
                 info = self.info + [filter_info]
                 io.save_locs(path, self.locs, info)
         else:
             raise NotImplementedError("Saving only implmented for locs.")
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
-        new_value = self.vertical_scrollbar.value() - 0.1 * event.angleDelta().y()
+        new_value = (
+            self.vertical_scrollbar.value() - 0.1 * event.angleDelta().y()
+        )
         self.vertical_scrollbar.setValue(int(new_value))
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
@@ -671,13 +687,15 @@ def main():
         p = plugin.Plugin(window)
         if p.name == "filter":
             p.execute()
-            
+
     window.show()
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtWidgets.QMessageBox.critical(
+            window, "An error occured", message,
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

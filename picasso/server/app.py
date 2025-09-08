@@ -6,9 +6,7 @@ import os
 import socket
 from PIL import Image
 import streamlit as st
-import pandas as pd
 from sqlalchemy import create_engine
-from datetime import datetime
 
 from picasso import localize
 from status import status

@@ -2,7 +2,7 @@
     picasso.avgroi
     ~~~~~~~~~~~~~~
 
-    Fits spots, i.e., finds the average of the pixels in a region of 
+    Fits spots, i.e., finds the average of the pixels in a region of
     interest (ROI).
 
     :author: Maximilian Thomas Strauss, 2016
@@ -49,24 +49,26 @@ def fit_spots(spots: np.ndarray) -> np.ndarray:
 
 
 def fit_spots_parallel(
-    spots: np.ndarray, 
+    spots: np.ndarray,
     asynch: bool = False,
 ) -> np.ndarray | list[futures.Future]:
     """Fit spots in parallel (if ``asynch`` is True)."""
     n_workers = min(
         60, max(1, int(0.75 * multiprocessing.cpu_count()))
-    ) # Python crashes when using >64 cores
+    )  # Python crashes when using >64 cores
     n_spots = len(spots)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(n_spots / n_tasks)
+        int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(
+            n_spots / n_tasks
+        )
         for _ in range(n_tasks)
     ]
     start_indices = np.cumsum([0] + spots_per_task[:-1])
     fs = []
     executor = futures.ProcessPoolExecutor(n_workers)
     for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
+        fs.append(executor.submit(fit_spots, spots[i:i + n_spots_task]))
     if asynch:
         return fs
     with tqdm(total=n_tasks, unit="task") as progress_bar:
@@ -82,9 +84,9 @@ def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
 
 
 def locs_from_fits(
-    identifications: np.recarray, 
-    theta: np.ndarray, 
-    box: int, 
+    identifications: np.recarray,
+    theta: np.ndarray,
+    box: int,
     em: float,
 ) -> np.recarray:
     """Convert fit results to localization recarray."""

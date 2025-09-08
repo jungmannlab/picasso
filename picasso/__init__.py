@@ -2,8 +2,10 @@
     picasso.__init__.py
     ~~~~~~~~~~~~~~~~~~~
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, Rafal Kowalewski 2016-2025
-    :copyright: Copyright (c) 2016-2025 Jungmann Lab, MPI of Biochemistry
+    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
+        Rafal Kowalewski 2016-2025
+    :copyright: Copyright (c) 2016-2025 Jungmann Lab, MPI of
+        Biochemistry
 """
 
 import os.path

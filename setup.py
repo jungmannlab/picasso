@@ -10,15 +10,27 @@ setup(
     name="picassosr",
     version="0.8.3",
     author="Joerg Schnitzbauer, Maximilian T. Strauss, Rafal Kowalewski",
-    author_email=("joschnitzbauer@gmail.com, straussmaximilian@gmail.com, rafalkowalewski998@gmail.com"),
+    author_email=(
+        "joschnitzbauer@gmail.com, "
+        "straussmaximilian@gmail.com, "
+        "rafalkowalewski998@gmail.com"
+    ),
     url="https://github.com/jungmannlab/picasso",
     long_description=long_description,
     long_description_content_type="text/x-rst",
-    packages=["picasso", "picasso.gui", "picasso.gui.plugins", "picasso.server", "picasso.ext"],
+    packages=[
+        "picasso",
+        "picasso.gui",
+        "picasso.gui.plugins",
+        "picasso.server",
+        "picasso.ext",
+    ],
     entry_points={
         "console_scripts": ["picasso=picasso.__main__:main"],
     },
-    install_requires=requirements + ["PyImarisWriter==0.7.0; sys_platform=='win32'"],
+    install_requires=(
+        requirements + ["PyImarisWriter==0.7.0; sys_platform=='win32'"]
+    ),
     classifiers=[
         "Programming Language :: Python",
         "Programming Language :: Python :: 3.10",

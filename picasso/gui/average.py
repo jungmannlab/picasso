@@ -3,7 +3,7 @@
     ~~~~~~~~~~~~~~~~~~~
 
     Graphical user interface for averaging particles.
-    
+
     :author: Joerg Schnitzbauer, 2015
     :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
@@ -31,20 +31,20 @@ from .. import io, lib, render, __version__
 
 @numba.jit(nopython=True, nogil=True)
 def render_hist(
-    x: np.ndarray, 
-    y: np.ndarray, 
-    oversampling: float, 
-    t_min: float, 
+    x: np.ndarray,
+    y: np.ndarray,
+    oversampling: float,
+    t_min: float,
     t_max: float,
 ) -> tuple[int, np.ndarray]:
     """Calculate 2D histogram of xy coordinates.
-    
+
     Parameters
     ----------
     x, y : np.ndarray
         1D arrays of xy coordinates.
     oversampling : float
-        Number of histogram pixels per camera pixel. 
+        Number of histogram pixels per camera pixel.
     t_min, t_max : float
         Minimum and maximum bounds of the histogram.
 
@@ -67,7 +67,7 @@ def render_hist(
 
 def compute_xcorr(CF_image_avg: np.ndarray, image: np.ndarray) -> np.ndarray:
     """Compute cross-correlation between two images.
-    
+
     Parameters
     ----------
     CF_image_avg : np.ndarray
@@ -97,7 +97,7 @@ def align_group(
     group: int,
 ) -> None:
     """Align (shift and rotate) images.
-    
+
     Parameters
     ----------
     angles : np.ndarray
@@ -146,7 +146,11 @@ def align_group(
     y[index] = np.sin(rot) * x_original + np.cos(rot) * y_original - dy
 
 
-def init_pool(x_: np.ndarray, y_: np.ndarray, group_index_: np.ndarray) -> None:
+def init_pool(
+    x_: np.ndarray,
+    y_: np.ndarray,
+    group_index_: np.ndarray,
+) -> None:
     """Initialize pool process variables."""
     global x, y, group_index
     x = np.ctypeslib.as_array(x_)
@@ -156,9 +160,9 @@ def init_pool(x_: np.ndarray, y_: np.ndarray, group_index_: np.ndarray) -> None:
 
 class Worker(QtCore.QThread):
     """Worker thread for processing image alignment.
-    
+
     ...
-    
+
     Attributes
     ----------
     group_index : np.ndarray
@@ -178,11 +182,11 @@ class Worker(QtCore.QThread):
     progressMade = QtCore.pyqtSignal(int, int, int, int, np.recarray, bool)
 
     def __init__(
-        self, 
-        locs: np.recarray, 
-        r: float, 
-        group_index: np.ndarray, 
-        oversampling: float, 
+        self,
+        locs: np.recarray,
+        r: float,
+        group_index: np.ndarray,
+        oversampling: float,
         iterations: int
     ) -> None:
         super().__init__()
@@ -202,7 +206,7 @@ class Worker(QtCore.QThread):
         angles = np.arange(0, 2 * np.pi, a_step)
         n_workers = min(
             60, max(1, int(0.75 * multiprocessing.cpu_count()))
-        ) # Python crashes when using >64 cores
+        )  # Python crashes when using >64 cores
         manager = multiprocessing.Manager()
         counter = manager.Value("d", 0)
         lock = manager.Lock()
@@ -260,15 +264,15 @@ class Worker(QtCore.QThread):
 
 class ParametersDialog(QtWidgets.QDialog):
     """Dialog for setting parameters - oversampling and iterations.
-    
+
     ...
-    
+
     Attributes
     ----------
     iterations : QtWidgets.QSpinBox
         Spin box for setting the number of iterations.
     oversampling : QtWidgets.QDoubleSpinBox
-        Spin box for setting the number of display pixels per camera 
+        Spin box for setting the number of display pixels per camera
         pixel.
     window : QtWidgets.QMainWindow
         Main window instance.
@@ -299,7 +303,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
 class View(QtWidgets.QLabel):
     """QLabel for displaying the averaged image.
-    
+
     ...
 
     Attributes
@@ -353,24 +357,24 @@ class View(QtWidgets.QLabel):
         self.running = False
 
     def on_progress(
-        self, 
-        it: int, 
-        total_it: int, 
-        g: int, 
-        n_groups: int, 
-        locs: np.recarray, 
+        self,
+        it: int,
+        total_it: int,
+        g: int,
+        n_groups: int,
+        locs: np.recarray,
         update_image: bool,
     ) -> None:
         self.locs = locs.copy()
         if update_image:
             self.update_image()
         self.window.statusBar().showMessage(
-            "Iteration {:,}/{:,}, Group {:,}/{:,}".format(it, total_it, g, n_groups)
+            f"Iteration {it}/{total_it}, Group {g}/{n_groups}"
         )
 
     def open(self, path: str) -> None:
         """Load a localization file and preset the pool process.
-        
+
         Parameters
         ----------
         path : str
@@ -391,8 +395,12 @@ class View(QtWidgets.QLabel):
         groups = np.unique(self.locs.group)
         n_groups = len(groups)
         n_locs = len(self.locs)
-        self.group_index = scipy.sparse.lil_matrix((n_groups, n_locs), dtype=bool)
-        progress = lib.ProgressDialog("Creating group index", 0, len(groups), self)
+        self.group_index = scipy.sparse.lil_matrix(
+            (n_groups, n_locs), dtype=bool,
+        )
+        progress = lib.ProgressDialog(
+            "Creating group index", 0, len(groups), self,
+        )
         progress.set_value(0)
         for i, group in enumerate(groups):
             index = np.where(self.locs.group == group)[0]
@@ -419,8 +427,10 @@ class View(QtWidgets.QLabel):
         y = sharedctypes.RawArray("f", self.locs.y)
         n_workers = min(
             60, max(1, int(0.75 * multiprocessing.cpu_count()))
-        ) # Python crashes when using >64 cores
-        pool = multiprocessing.Pool(n_workers, init_pool, (x, y, self.group_index))
+        )  # Python crashes when using >64 cores
+        pool = multiprocessing.Pool(
+            n_workers, init_pool, (x, y, self.group_index),
+        )
         self.window.statusBar().showMessage("Ready for processing!")
         status.close()
 
@@ -430,7 +440,7 @@ class View(QtWidgets.QLabel):
 
     def save(self, path: str) -> None:
         """Save averaged localizations.
-        
+
         Parameters
         ----------
         path : str
@@ -440,14 +450,16 @@ class View(QtWidgets.QLabel):
         cy = self.info[0]["Height"] / 2
         self.locs.x += cx
         self.locs.y += cy
-        info = self.info + [{"Generated by": f"Picasso v{__version__} Average"}]
+        info = self.info + [{
+            "Generated by": f"Picasso v{__version__} Average"
+        }]
         out_locs = self.locs
         io.save_locs(path, out_locs, info)
         self.window.statusBar().showMessage("File saved to {}.".format(path))
 
     def set_image(self, image: np.ndarray) -> None:
         """Sets the new image to be displayed.
-        
+
         Parameters
         ----------
         image : np.ndarray
@@ -490,7 +502,7 @@ class View(QtWidgets.QLabel):
 
 class Window(QtWidgets.QMainWindow):
     """Main window.
-    
+
     ...
 
     Attributes
@@ -529,7 +541,7 @@ class Window(QtWidgets.QMainWindow):
         average_action = process_menu.addAction("Average")
         average_action.setShortcut("Ctrl+A")
         average_action.triggered.connect(self.view.average)
-        
+
     def open(self) -> None:
         """Open the dialog for opening a file to load."""
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
@@ -567,14 +579,16 @@ def main() -> None:
     for plugin in plugins:
         p = plugin.Plugin(window)
         if p.name == "average":
-            p.execute()  
-              
+            p.execute()
+
     window.show()
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtWidgets.QMessageBox.critical(
+            window, "An error occured", message,
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

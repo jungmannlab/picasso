@@ -9,7 +9,9 @@
     :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 
-import sys, os, importlib
+import sys
+import os
+import importlib
 import pkgutil
 import os.path
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -130,7 +132,7 @@ class Window(QtWidgets.QWidget):
 
 class Worker(QtCore.QThread):
     """Worker thread for processing movie groups."""
-    
+
     progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(int)
     interrupted = QtCore.pyqtSignal()
@@ -171,7 +173,9 @@ def main():
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtWidgets.QMessageBox.critical(
+            window, "An error occured", message,
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 

@@ -25,13 +25,13 @@ plt.style.use("ggplot")
 
 def xcorr(imageA: np.ndarray, imageB: np.ndarray) -> np.ndarray:
     """Compute the cross-correlation of two images using FFT.
-    
+
     Parameters
     ----------
     imageA, imageB : np.ndarray
-        Input images to be cross-correlated. They should have the same 
+        Input images to be cross-correlated. They should have the same
         shape.
-    
+
     Returns
     -------
     res : np.ndarray
@@ -41,21 +41,21 @@ def xcorr(imageA: np.ndarray, imageB: np.ndarray) -> np.ndarray:
     """
     FimageA = np.fft.fft2(imageA)
     CFimageB = np.conj(np.fft.fft2(imageB))
-    res = np.fft.fftshift(np.real(np.fft.ifft2((FimageA * CFimageB)))) / np.sqrt(
-        imageA.size
-    )
+    res = np.fft.fftshift(
+        np.real(np.fft.ifft2((FimageA * CFimageB)))
+    ) / np.sqrt(imageA.size)
     return res
 
 
 def get_image_shift(
-    imageA: np.ndarray, 
-    imageB: np.ndarray, 
-    box: int, 
-    roi: int | None = None, 
+    imageA: np.ndarray,
+    imageB: np.ndarray,
+    box: int,
+    roi: int | None = None,
     display: bool = False,
 ) -> tuple[float, float]:
     """Compute the shift from ``imageA`` to ``imageB``.
-    
+
     Parameters
     ----------
     imageA, imageB : np.ndarray
@@ -64,12 +64,12 @@ def get_image_shift(
     box : int
         Size of the box used for fitting the cross-correlation peak.
     roi : int, optional
-        Region of interest size to cut out the center of the 
+        Region of interest size to cut out the center of the
         cross-correlation image. If None, the entire cross-correlation
         image is used.
     display : bool, optional
         If True, displays the images and the cross-correlation result.
-    
+
     Returns
     -------
     yc, xc : float
@@ -99,12 +99,12 @@ def get_image_shift(
     # A quarter of the fit ROI
     fit_X = int(box / 2)
     # A coordinate grid for the fitting ROI
-    y, x = np.mgrid[-fit_X : fit_X + 1, -fit_X : fit_X + 1]
+    y, x = np.mgrid[-fit_X:fit_X + 1, -fit_X:fit_X + 1]
     # Find the brightest pixel and cut out the fit ROI
     y_max_, x_max_ = np.unravel_index(XCorr.argmax(), XCorr.shape)
     FitROI = XCorr[
-        y_max_ - fit_X : y_max_ + fit_X + 1,
-        x_max_ - fit_X : x_max_ + fit_X + 1,
+        y_max_ - fit_X:y_max_ + fit_X + 1,
+        x_max_ - fit_X:x_max_ + fit_X + 1,
     ]
 
     dimensions = FitROI.shape
@@ -116,10 +116,10 @@ def get_image_shift(
             x, y = coords
             A = a * np.exp(-0.5 * ((x - xc) ** 2 + (y - yc) ** 2) / s**2) + b
             return A.flatten()
-        
+
         p0 = [FitROI.max(), 0, 0, 1, FitROI.min()]
         bounds = (
-            [0, -np.inf, -np.inf, 0, 0], 
+            [0, -np.inf, -np.inf, 0, 0],
             [np.inf, np.inf, np.inf, np.inf, np.inf],
         )
         popt, _ = curve_fit(
@@ -150,14 +150,14 @@ def get_image_shift(
 
 
 def rcc(
-    segments: list[np.ndarray], 
-    max_shift: float | None = None, 
+    segments: list[np.ndarray],
+    max_shift: float | None = None,
     callback: Callable[[int], None] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Compute RCC, see Wang, Schnitzbauer, et al. Optics Express, 
+    """Compute RCC, see Wang, Schnitzbauer, et al. Optics Express,
     2014. Return the shifts in x and y directions for each pair of
-    segments. 
-    
+    segments.
+
     Parameters
     ----------
     segments : list of np.ndarray
@@ -171,13 +171,13 @@ def rcc(
         after processing each pair of segments. This can be used to
         update a progress bar or perform other actions during the
         computation.
-    
+
     Returns
     -------
     shifts_x, shifts_y : np.ndarray
         2D numpy arrays containing the shifts in x and y directions for
-        each pair of segments. The shape of the arrays is 
-        (n_segments, n_segments), where n_segments is the number of 
+        each pair of segments. The shape of the arrays is
+        (n_segments, n_segments), where n_segments is the number of
         segments provided.
     """
     n_segments = len(segments)
@@ -205,33 +205,32 @@ def rcc(
                 )
                 flag += 1
                 callback(flag)
-        
+
     return lib.minimize_shifts(shifts_x, shifts_y)
 
 
 def find_fiducials(
-    locs: np.recarray, 
+    locs: np.recarray,
     info: list[dict],
 ) -> tuple[list[tuple[int, int]], int]:
-    """Find the xy coordinates of regions with high density of 
-    localizations, likely originating from fiducial markers. 
+    """Find the xy coordinates of regions with high density of
+    localizations, likely originating from fiducial markers.
 
-    Uses ``picasso.localize.identify_in_image`` with threshold set to 
-    99th percentile of the image histogram. The image is rendered using 
+    Uses ``picasso.localize.identify_in_image`` with threshold set to
+    99th percentile of the image histogram. The image is rendered using
     one-pixel-blur, see picasso.render.render.
 
-    
     Parameters
     ----------
     locs : np.recarray
         Localizations.
     info : list of dicts
         Localizations' metadata (from the corresponding .yaml file).
-        
+
     Returns
     -------
     picks : list of (2,) tuples
-        Coordinates of fiducial markers. Each list element corresponds 
+        Coordinates of fiducial markers. Each list element corresponds
         to (x, y) coordinates of one fiducial marker.
     box : int
         Size of the box used for the fiducial marker identification.
@@ -242,12 +241,12 @@ def find_fiducials(
         info=info,
         oversampling=1,
         viewport=None,
-        blur_method="smooth",        
+        blur_method="smooth",
     )[1]
     # hist = np.histogram(image.flatten(), bins=256)
     threshold = np.percentile(image.flatten(), 99)
     # box size should be an odd number, corresponding to approximately
-    # 900 nm 
+    # 900 nm
     pixelsize = 130
     for inf in info:
         if val := inf.get("Pixelsize"):

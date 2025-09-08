@@ -13,11 +13,17 @@ except ImportError:
     )
     raise
 
-SUBCMD = ("average", "design", "filter", "localize", "render", "simulate", "spinna")
+SUBCMD = (
+    "average", "design", "filter", "localize", "render", "simulate", "spinna",
+)
 SCRIPT_PATH_ROOT = (os.sep, "usr", "bin", "picasso")
-DESKTOP_PATH_ROOT = (os.sep, "usr", "share", "applications", "picasso_{subcmd}.desktop")
+DESKTOP_PATH_ROOT = (
+    os.sep, "usr", "share", "applications", "picasso_{subcmd}.desktop",
+)
 SCRIPT_PATH_USER = ("~", "bin", "picasso")
-DESKTOP_PATH_USER = ("~", ".local", "share", "applications", "picasso_{subcmd}.desktop")
+DESKTOP_PATH_USER = (
+    "~", ".local", "share", "applications", "picasso_{subcmd}.desktop",
+)
 
 DESKTOP_TEMPLATE = """[Desktop Entry]
 Name=Picasso {subcmd_cap}

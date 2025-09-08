@@ -38,52 +38,60 @@ def interpolate_nan(data: np.ndarray) -> np.ndarray:
 
 
 def calibrate_z(
-    locs: np.recarray, 
-    info: list[dict], 
-    d: float, 
-    magnification_factor: float, 
+    locs: np.recarray,
+    info: list[dict],
+    d: float,
+    magnification_factor: float,
     path: str | None = None,
 ) -> dict:
     """Given localizations of a calibration sample (e.g., gold beads at
     different z positions), calibrate the z-axis by fitting a polynomial
     to the mean spot width/height of each frame. See Huang et al.
     Science, 2008. DOI: 10.1126/science.1153529.
-    
+
     Parameters
     ----------
     locs : np.recarray
         Localizations of a calibration sample.
     info : list of dicts
-        Information about the calibration sample, including the number 
+        Information about the calibration sample, including the number
         of frames.
     d : float
         Step size in nm, i.e., the distance between the z positions of
         the calibration sample.
     magnification_factor : float
         Magnification factor of the microscope, i.e., the ratio between
-        the actual z position of the calibration sample and the 
+        the actual z position of the calibration sample and the
         estimated z position from the localization data.
     path : str, optional
         Path to save the calibration data as a YAML file. If None, the
         calibration data will not be saved. Default is None.
-    
+
     Returns
     -------
     calibration : dict
-        Dictionary containing the calibration coefficients (i.e., 
+        Dictionary containing the calibration coefficients (i.e.,
         polynomial coefficients), number of frames, step size, and
         magnification factor.
     """
     n_frames = info[0]["Frames"]
     range = (n_frames - 1) * d
     frame_range = np.arange(n_frames)
-    z_range = -(frame_range * d - range / 2)  # negative so that the first frames of
-    # a bottom-to-up scan are positive z coordinates.
+    z_range = -(frame_range * d - range / 2)  # negative so that the
+    # first frames of a bottom-to-up scan are positive z coordinates.
 
-    mean_sx = np.array([np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
-    mean_sy = np.array([np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
-    var_sx = np.array([np.var(locs.sx[locs.frame == _]) for _ in frame_range])
-    var_sy = np.array([np.var(locs.sy[locs.frame == _]) for _ in frame_range])
+    mean_sx = np.array(
+        [np.mean(locs.sx[locs.frame == _]) for _ in frame_range]
+    )
+    mean_sy = np.array(
+        [np.mean(locs.sy[locs.frame == _]) for _ in frame_range]
+    )
+    var_sx = np.array(
+        [np.var(locs.sx[locs.frame == _]) for _ in frame_range]
+    )
+    var_sy = np.array(
+        [np.var(locs.sy[locs.frame == _]) for _ in frame_range]
+    )
 
     keep_x = (locs.sx - mean_sx[locs.frame]) ** 2 < var_sx[locs.frame]
     keep_y = (locs.sy - mean_sy[locs.frame]) ** 2 < var_sy[locs.frame]
@@ -91,8 +99,12 @@ def calibrate_z(
     locs = locs[keep]
 
     # Fits calibration curve to the mean of each frame
-    mean_sx = np.array([np.mean(locs.sx[locs.frame == _]) for _ in frame_range])
-    mean_sy = np.array([np.mean(locs.sy[locs.frame == _]) for _ in frame_range])
+    mean_sx = np.array(
+        [np.mean(locs.sx[locs.frame == _]) for _ in frame_range]
+    )
+    mean_sy = np.array(
+        [np.mean(locs.sy[locs.frame == _]) for _ in frame_range]
+    )
 
     # Fix nan
     mean_sx = interpolate_nan(mean_sx)
@@ -154,7 +166,9 @@ def calibrate_z(
     plt.subplot(233)
     plt.plot(locs.z, locs.sx, ".", label="x", alpha=0.2)
     plt.plot(locs.z, locs.sy, ".", label="y", alpha=0.2)
-    plt.plot(z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="calibration")
+    plt.plot(
+        z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="calibration",
+    )
     plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5)
     plt.xlim(z_range.min(), z_range.max())
     plt.xlabel("Estimated z")
@@ -215,7 +229,9 @@ def calibrate_z(
         np.savetxt("cy.txt", cy, delimiter="/t")
         np.savetxt("z_range.txt", z_range, delimiter="/t")
         np.savetxt("locs_z.txt", locs.z, delimiter="/t")
-        np.savetxt("z_range_locs_frame.txt", z_range[locs.frame], delimiter="/t")
+        np.savetxt(
+            "z_range_locs_frame.txt", z_range[locs.frame], delimiter="/t",
+        )
         np.savetxt("rmsd_frame.txt", rmsd_frame, delimiter="/t")
 
     # np.savetxt('test.out', x, delimiter=',')   # X is an array
@@ -227,16 +243,16 @@ def calibrate_z(
 
 @numba.jit(nopython=True, nogil=True)
 def _fit_z_target(
-    z: np.array, 
-    sx: np.array, 
-    sy: np.array, 
-    cx: np.array, 
+    z: np.array,
+    sx: np.array,
+    sy: np.array,
+    cx: np.array,
     cy: np.array,
 ) -> np.array:
-    """Target function that's to be minimized for fitting the z 
+    """Target function that's to be minimized for fitting the z
     coordinates given the single-emitter image width and height as well
-    as the calibration curve coefficients. It calculates the difference 
-    between the square root of the spot width/height and the polynomial 
+    as the calibration curve coefficients. It calculates the difference
+    between the square root of the spot width/height and the polynomial
     fit of the z-axis calibration curve."""
     z2 = z * z
     z3 = z * z2
@@ -268,21 +284,21 @@ def _fit_z_target(
 
 
 def fit_z(
-    locs: np.recarray, 
-    info: list[dict], 
-    calibration: dict, 
-    magnification_factor: float, 
+    locs: np.recarray,
+    info: list[dict],
+    calibration: dict,
+    magnification_factor: float,
     filter: int = 2
 ) -> np.recarray:
     """Fit z coordinates to the localizations based on the calibration
     curve coefficients and the single-emitter image width and height.
-    
+
     Parameters
     ----------
     locs : np.recarray
         Localizations to fit the z-axis calibration curve to.
     info : list of dicts
-        Information about the localizations, including the number of 
+        Information about the localizations, including the number of
         frames.
     calibration : dict
         Calibration data containing the polynomial coefficients for
@@ -290,13 +306,13 @@ def fit_z(
         factor.
     magnification_factor : float
         Magnification factor of the microscope, i.e., the ratio between
-        the actual z position of the calibration sample and the 
+        the actual z position of the calibration sample and the
         estimated z position from the localization data.
     filter : int, optional
         Filter for the z fits. If set to 0, no filtering is applied.
-        If set to 2, the z fits are filtered based on the root mean 
+        If set to 2, the z fits are filtered based on the root mean
         square deviation (RMSD) of the z calibration. Default is 2.
-    
+
     Returns
     -------
     locs : np.recarray
@@ -310,9 +326,11 @@ def fit_z(
     sx = locs.sx
     sy = locs.sy
     for i in range(len(z)):
+        # set bounds to avoid potential gaps in the calibration curve,
+        # credits to Loek Andriessen
         result = minimize_scalar(
-            _fit_z_target, 
-            bounds=[-1000, 1000], # to avoid potential gaps in the calibration curve, credits to Loek Andriessen
+            _fit_z_target,
+            bounds=[-1000, 1000],
             args=(sx[i], sy[i], cx, cy)
         )
         z[i] = result.x
@@ -325,23 +343,23 @@ def fit_z(
 
 
 def fit_z_parallel(
-    locs: np.recarray, 
-    info: list[dict], 
-    calibration: dict, 
-    magnification_factor: float, 
-    filter: int = 2, 
+    locs: np.recarray,
+    info: list[dict],
+    calibration: dict,
+    magnification_factor: float,
+    filter: int = 2,
     asynch: bool = False,
 ) -> np.recarray | list[futures.Future]:
     """Fit z coordinates to the localizations based on the calibration
     curve coefficients and the single-emitter image width and height,
     optionally using multiprocessing.
-    
+
     Parameters
     ----------
     locs : np.recarray
         Localizations to fit the z-axis calibration curve to.
     info : list of dicts
-        Information about the localizations, including the number of 
+        Information about the localizations, including the number of
         frames.
     calibration : dict
         Calibration data containing the polynomial coefficients for
@@ -349,18 +367,18 @@ def fit_z_parallel(
         factor.
     magnification_factor : float
         Magnification factor of the microscope, i.e., the ratio between
-        the actual z position of the calibration sample and the 
+        the actual z position of the calibration sample and the
         estimated z position from the localization data.
     filter : int, optional
         Filter for the z fits. If set to 0, no filtering is applied.
         If set to 2, the z fits are filtered based on the root mean
         square deviation (RMSD) of the z calibration. Default is 2.
     asynch : bool, optional
-        If True, use multiprocessing. Then, a list of futures that can 
-        be used to retrieve the results asynchronously is returned. If 
-        False, the function waits for all tasks to complete and returns 
+        If True, use multiprocessing. Then, a list of futures that can
+        be used to retrieve the results asynchronously is returned. If
+        False, the function waits for all tasks to complete and returns
         the combined results. Default is False.
-        
+
     Returns
     -------
     locs : np.recarray or list of futures.Future
@@ -371,11 +389,13 @@ def fit_z_parallel(
     """
     n_workers = min(
         60, max(1, int(0.75 * multiprocessing.cpu_count()))
-    ) # Python crashes when using >64 cores
+    )  # Python crashes when using >64 cores
     n_locs = len(locs)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_locs / n_tasks + 1) if _ < n_locs % n_tasks else int(n_locs / n_tasks)
+        int(n_locs / n_tasks + 1)
+        if _ < n_locs % n_tasks
+        else int(n_locs / n_tasks)
         for _ in range(n_tasks)
     ]
     start_indices = np.cumsum([0] + spots_per_task[:-1])
@@ -385,7 +405,7 @@ def fit_z_parallel(
         fs.append(
             executor.submit(
                 fit_z,
-                locs[i : i + n_locs_task],
+                locs[i:i + n_locs_task],
                 info,
                 calibration,
                 magnification_factor,
@@ -401,13 +421,13 @@ def fit_z_parallel(
 
 
 def locs_from_futures(
-    futures: list[futures.Future], 
+    futures: list[futures.Future],
     filter: int = 2
 ) -> np.recarray:
-    """Combine the results from a list of futures (i.e., 
+    """Combine the results from a list of futures (i.e.,
     multiprocessing results) into a single recarray of localizations
     with fitted z coordinates and their residuals (d_zcalib).
-    
+
     Parameters
     ----------
     futures : list of futures.Future
@@ -415,8 +435,8 @@ def locs_from_futures(
     filter : int, optional
         Filter for the z fits. If set to 0, no filtering is applied.
         If set to 2, the z fits are filtered based on the root mean
-        square deviation (RMSD) of the z calibration. Default is 2. 
-    
+        square deviation (RMSD) of the z calibration. Default is 2.
+
     Returns
     -------
     locs : np.recarray

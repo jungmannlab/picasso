@@ -8,18 +8,16 @@ Date:
 # Space to import packages
 import numpy as np
 
+
 # Do not change the part below unless stated otherwise
 class Plugin():
     def __init__(self, window):
-        self.name = "render" # change if the plugin works for another application
+        self.name = "render"  # change if the plugin works for another app
         self.window = window
 
     def execute(self):
-        """
-        This function is called when opening a GUI.
-
-        It should add buttons to the menu bar, connect such actions
-        to fucntions, etc.
-        """
+        """This function is called when opening a GUI. It should add
+        buttons to the menu bar, connect such actions to functions,
+        etc."""
 
         pass

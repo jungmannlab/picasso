@@ -15,7 +15,7 @@ from scipy import signal
 from scipy.spatial.transform import Rotation
 
 
-_DRAW_MAX_SIGMA = 3 # max. sigma from mean to render (mu +/- 3 sigma)
+_DRAW_MAX_SIGMA = 3  # max. sigma from mean to render (mu +/- 3 sigma)
 
 
 def render(
@@ -23,10 +23,12 @@ def render(
     info: dict | None = None,
     oversampling: float = 1,
     viewport: list | None = None,
-    blur_method: Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None = None,
+    blur_method: (
+        Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
+    ) = None,
     min_blur_width: float = 0,
     ang: tuple | None = None,
-) -> tuple[int, np.ndarray]:  
+) -> tuple[int, np.ndarray]:
     """Render localizations given FOV and blur method.
 
     Parameters
@@ -34,26 +36,27 @@ def render(
     locs : np.recarray
         Localizations to be rendered.
     info : dict, optional
-        Contains metadata for locs. Needed only if no viewport 
+        Contains metadata for locs. Needed only if no viewport
         specified.
-    oversampling : float, optional 
+    oversampling : float, optional
         Number of super-resolution pixels per camera pixel.
     viewport : list or tuple, optional
         Field of view to be rendered. If None, all locs are rendered
-    blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, optional
-        Defines localizations' blur. The string has to be one of 
+    blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
+            optional
+        Defines localizations' blur. The string has to be one of
         'gaussian', 'gaussian_iso', 'smooth', 'convolve'. If None, no
         blurring is applied.
     min_blur_width : float, optional
         Minimum size of blur (camera pixels).
     ang : tuple, optional
-        Rotation angles of locs around x, y and z axes in radians. If 
+        Rotation angles of locs around x, y and z axes in radians. If
         None, locs are not rotated.
 
     Raises
     ------
     Exception
-        If blur_method not one of 'gaussian', 'gaussian_iso', 'smooth', 
+        If blur_method not one of 'gaussian', 'gaussian_iso', 'smooth',
         'convolve' or None.
 
     Returns
@@ -73,45 +76,45 @@ def render(
     if blur_method is None:
         # no blur
         return render_hist(
-            locs, 
-            oversampling, 
-            y_min, x_min, y_max, x_max, 
-            ang=ang, 
+            locs,
+            oversampling,
+            y_min, x_min, y_max, x_max,
+            ang=ang,
         )
     elif blur_method == "gaussian":
         # individual localization precision
         return render_gaussian(
-            locs, 
-            oversampling, 
-            y_min, x_min, y_max, x_max, 
-            min_blur_width, 
-            ang=ang, 
+            locs,
+            oversampling,
+            y_min, x_min, y_max, x_max,
+            min_blur_width,
+            ang=ang,
         )
     elif blur_method == "gaussian_iso":
         # individual localization precision (same for x and y)
         return render_gaussian_iso(
-            locs, 
-            oversampling, 
-            y_min, x_min, y_max, x_max, 
-            min_blur_width, 
-            ang=ang, 
+            locs,
+            oversampling,
+            y_min, x_min, y_max, x_max,
+            min_blur_width,
+            ang=ang,
         )
     elif blur_method == "smooth":
         # one pixel blur
         return render_smooth(
-            locs, 
-            oversampling, 
-            y_min, x_min, y_max, x_max, 
-            ang=ang, 
+            locs,
+            oversampling,
+            y_min, x_min, y_max, x_max,
+            ang=ang,
         )
     elif blur_method == "convolve":
         # global localization precision
         return render_convolve(
-            locs, 
-            oversampling, 
-            y_min, x_min, y_max, x_max, 
-            min_blur_width, 
-            ang=ang, 
+            locs,
+            oversampling,
+            y_min, x_min, y_max, x_max,
+            min_blur_width,
+            ang=ang,
         )
     else:
         raise Exception("blur_method not understood.")
@@ -119,11 +122,11 @@ def render(
 
 @numba.njit
 def _render_setup(
-    locs: np.recarray, 
-    oversampling: float, 
+    locs: np.recarray,
+    oversampling: float,
     y_min: float, x_min: float, y_max: float, x_max: float,
 ) -> tuple[np.ndarray, int, int, np.ndarray, np.ndarray, np.ndarray]:
-    """Find coordinates to be rendered and sets up an empty image 
+    """Find coordinates to be rendered and sets up an empty image
     array.
 
     Parameters
@@ -167,14 +170,23 @@ def _render_setup(
 
 @numba.njit
 def _render_setup3d(
-    locs: np.recarray, 
-    oversampling: float, 
-    y_min: float, x_min: float, 
-    y_max: float, x_max: float, 
-    z_min: float, z_max: float, 
+    locs: np.recarray,
+    oversampling: float,
+    y_min: float, x_min: float,
+    y_max: float, x_max: float,
+    z_min: float, z_max: float,
     pixelsize: float,
-) -> tuple[np.ndarray, int, int, int, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Find coordinates to be rendered in 3D and sets up an empty image 
+) -> tuple[
+    np.ndarray,
+    int,
+    int,
+    int,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    """Find coordinates to be rendered in 3D and sets up an empty image
     array. Used by Picasso: Average3.
 
     Parameters
@@ -264,9 +276,9 @@ def _fill(image: np.ndarray, x: np.ndarray, y: np.ndarray) -> None:
 
 @numba.njit
 def _fill3d(
-    image: np.ndarray, 
-    x: np.ndarray, 
-    y: np.ndarray, 
+    image: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
     z: np.ndarray
 ) -> None:
     """Fill image with x, y and z coordinates. Image is not blurred.
@@ -282,23 +294,23 @@ def _fill3d(
     x = x.astype(np.int32)
     y = y.astype(np.int32)
     z = z.astype(np.int32)
-    z += np.min(z) # because z takes also negative values
+    z += np.min(z)  # because z takes also negative values
     for i, j, k in zip(x, y, z):
         image[j, i, k] += 1
 
 
 @numba.njit
 def _fill_gaussian(
-    image: np.ndarray, 
-    x: np.ndarray, 
-    y: np.ndarray, 
-    sx: np.ndarray, 
-    sy: np.ndarray, 
-    n_pixel_x: int, 
+    image: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    sx: np.ndarray,
+    sy: np.ndarray,
+    n_pixel_x: int,
     n_pixel_y: int,
 ) -> None:
-    """Fill image with blurred x and y coordinates. Each localization 
-    is rendered as a 2D Gaussian centered at (x, y) with standard 
+    """Fill image with blurred x and y coordinates. Each localization
+    is rendered as a 2D Gaussian centered at (x, y) with standard
     deviations (sx, sy).
 
     Parameters
@@ -344,15 +356,15 @@ def _fill_gaussian(
 
 @numba.njit
 def _fill_gaussian_rot(
-    image: np.ndarray, 
-    x: np.ndarray, 
-    y: np.ndarray, 
-    z: np.ndarray, 
-    sx: np.ndarray, 
-    sy: np.ndarray, 
-    sz: np.ndarray, 
-    n_pixel_x: int, 
-    n_pixel_y: int, 
+    image: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    sx: np.ndarray,
+    sy: np.ndarray,
+    sz: np.ndarray,
+    n_pixel_x: int,
+    n_pixel_y: int,
     ang: tuple[float, float, float],
 ) -> None:
     """Fill image with rotated gaussian-blurred localizations.
@@ -375,7 +387,7 @@ def _fill_gaussian_rot(
     ang : tuple
         Rotation angles of locs around x, y and z axes (radians).
     """
-    (angx, angy, angz) = ang # rotation angles
+    (angx, angy, angz) = ang  # rotation angles
 
     rot_mat_x = np.array(
         [
@@ -383,23 +395,23 @@ def _fill_gaussian_rot(
             [0.0, np.cos(angx), np.sin(angx)],
             [0.0, -np.sin(angx), np.cos(angx)],
         ], dtype=np.float32
-    ) # rotation matrix around x axis
+    )  # rotation matrix around x axis
     rot_mat_y = np.array(
         [
             [np.cos(angy), 0.0, np.sin(angy)],
             [0.0, 1.0, 0.0],
             [-np.sin(angy), 0.0, np.cos(angy)],
         ], dtype=np.float32
-    ) # rotation matrix around y axis
+    )  # rotation matrix around y axis
     rot_mat_z = np.array(
         [
             [np.cos(angz), -np.sin(angz), 0.0],
             [np.sin(angz), np.cos(angz), 0.0],
             [0.0, 0.0, 1.0],
         ], dtype=np.float32
-    ) # rotation matrix around z axis
-    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z # rotation matrix
-    rot_matrixT = np.transpose(rot_matrix) # ...and its transpose
+    )  # rotation matrix around z axis
+    rot_matrix = rot_mat_x @ rot_mat_y @ rot_mat_z  # rotation matrix
+    rot_matrixT = np.transpose(rot_matrix)  # ...and its transpose
 
     # draw each localization separately
     for x_, y_, z_, sx_, sy_, sz_ in zip(x, y, z, sx, sy, sz):
@@ -419,45 +431,51 @@ def _fill_gaussian_rot(
         j_max = int(x_ + max_x + 1)
         if j_max > n_pixel_x:
             j_max = n_pixel_x
-        max_z = (_DRAW_MAX_SIGMA * 2.5) * sz_ 
+        max_z = (_DRAW_MAX_SIGMA * 2.5) * sz_
         k_min = int(z_ - max_z)
         k_max = int(z_ + max_z + 1)
 
         # rotate localization precisions in 3D
         cov_matrix = np.array(
             [
-                [sx_**2, 0, 0], 
-                [0, sy_**2, 0], 
+                [sx_**2, 0, 0],
+                [0, sy_**2, 0],
                 [0, 0, sz_**2],
             ], dtype=np.float32
-        ) # covariance matrix (CM)
-        cov_rot = rot_matrix @ cov_matrix @ rot_matrixT # rotated CM
-        cri = inverse_3x3(cov_rot) # inverse of rotated CM
-        dcr = determinant_3x3(cov_rot) # determinant of rotated CM
+        )  # covariance matrix (CM)
+        cov_rot = rot_matrix @ cov_matrix @ rot_matrixT  # rotated CM
+        cri = inverse_3x3(cov_rot)  # inverse of rotated CM
+        dcr = determinant_3x3(cov_rot)  # determinant of rotated CM
 
         # draw a localization in 2D - sum z coordinates;
-        # PDF of a rotated gaussian in 3D is calculated and 
+        # PDF of a rotated gaussian in 3D is calculated and
         # image is summed over z axis
         for i in range(i_min, i_max):
             b = np.float32(i + 0.5 - y_)
             for j in range(j_min, j_max):
                 a = np.float32(j + 0.5 - x_)
-                for k in range(k_min, k_max):   
+                for k in range(k_min, k_max):
                     c = np.float32(k + 0.5 - z_)
                     exponent = (
-                        a*a * cri[0,0] + a*b * cri[0,1] + a*c * cri[0,2] 
-                        + a*b * cri[1,0] + b*b * cri[1,1] + b*c * cri[1,2]
-                        + a*c * cri[2,0] + b*c * cri[2,1] + c*c * cri[2,2]
-                    ) # Mahalanobis distance
-                    image[i,j] += (
+                        a * a * cri[0, 0]
+                        + a * b * cri[0, 1]
+                        + a * c * cri[0, 2]
+                        + a * b * cri[1, 0]
+                        + b * b * cri[1, 1]
+                        + b * c * cri[1, 2]
+                        + a * c * cri[2, 0]
+                        + b * c * cri[2, 1]
+                        + c * c * cri[2, 2]
+                    )  # Mahalanobis distance
+                    image[i, j] += (
                         np.exp(-0.5 * exponent)
-                        / (((2*np.pi) ** 3 * dcr) ** 0.5)
+                        / (((2 * np.pi) ** 3 * dcr) ** 0.5)
                     )
 
 
 @numba.njit
 def inverse_3x3(a: np.ndarray) -> np.ndarray:
-    """Calculate inverse of a 3x3 matrix. This function is faster than 
+    """Calculate inverse of a 3x3 matrix. This function is faster than
     ``np.linalg.inv``.
 
     Parameters
@@ -470,27 +488,27 @@ def inverse_3x3(a: np.ndarray) -> np.ndarray:
     c : np.ndarray
         Inverse of ``a``.
     """
-    c = np.zeros((3,3), dtype=np.float32)
+    c = np.zeros((3, 3), dtype=np.float32)
     det = determinant_3x3(a)
 
-    c[0,0] = (a[1,1] * a[2,2] - a[1,2] * a[2,1]) / det
-    c[0,1] = (a[0,2] * a[2,1] - a[0,1] * a[2,2]) / det
-    c[0,2] = (a[0,1] * a[1,2] - a[0,2] * a[1,1]) / det
+    c[0, 0] = (a[1, 1] * a[2, 2] - a[1, 2] * a[2, 1]) / det
+    c[0, 1] = (a[0, 2] * a[2, 1] - a[0, 1] * a[2, 2]) / det
+    c[0, 2] = (a[0, 1] * a[1, 2] - a[0, 2] * a[1, 1]) / det
 
-    c[1,0] = (a[1,2] * a[2,0] - a[1,0] * a[2,2]) / det
-    c[1,1] = (a[0,0] * a[2,2] - a[0,2] * a[2,0]) / det
-    c[1,2] = (a[0,2] * a[1,0] - a[0,0] * a[1,2]) / det
+    c[1, 0] = (a[1, 2] * a[2, 0] - a[1, 0] * a[2, 2]) / det
+    c[1, 1] = (a[0, 0] * a[2, 2] - a[0, 2] * a[2, 0]) / det
+    c[1, 2] = (a[0, 2] * a[1, 0] - a[0, 0] * a[1, 2]) / det
 
-    c[2,0] = (a[1,0] * a[2,1] - a[1,1] * a[2,0]) / det
-    c[2,1] = (a[0,1] * a[2,0] - a[0,0] * a[2,1]) / det
-    c[2,2] = (a[0,0] * a[1,1] - a[0,1] * a[1,0]) / det
+    c[2, 0] = (a[1, 0] * a[2, 1] - a[1, 1] * a[2, 0]) / det
+    c[2, 1] = (a[0, 1] * a[2, 0] - a[0, 0] * a[2, 1]) / det
+    c[2, 2] = (a[0, 0] * a[1, 1] - a[0, 1] * a[1, 0]) / det
 
-    return c    
+    return c
 
 
 @numba.njit
 def determinant_3x3(a: np.ndarray) -> np.float32:
-    """Calculate determinant of a 3x3 matrix. This function is faster 
+    """Calculate determinant of a 3x3 matrix. This function is faster
     than ``np.linalg.det``.
 
     Parameters
@@ -504,18 +522,18 @@ def determinant_3x3(a: np.ndarray) -> np.float32:
         Determinant of ``a``.
     """
     det = np.float32(
-        a[0,0] * (a[1,1] * a[2,2] - a[1,2] * a[2,1]) 
-        - a[0,1] * (a[1,0] * a[2,2] - a[2,0] * a[1,2]) 
-        + a[0,2] * (a[1,0] * a[2,1] - a[2,0] * a[1,1])
+        a[0, 0] * (a[1, 1] * a[2, 2] - a[1, 2] * a[2, 1])
+        - a[0, 1] * (a[1, 0] * a[2, 2] - a[2, 0] * a[1, 2])
+        + a[0, 2] * (a[1, 0] * a[2, 1] - a[2, 0] * a[1, 1])
     )
     return det
 
 
 def render_hist(
-    locs: np.recarray, 
-    oversampling: float, 
-    y_min: float, x_min: float, y_max: float, x_max: float, 
-    ang: tuple[float, float, float] | None = None, 
+    locs: np.recarray,
+    oversampling: float,
+    y_min: float, x_min: float, y_max: float, x_max: float,
+    ang: tuple[float, float, float] | None = None,
 ) -> tuple[int, np.ndarray]:
     """Render localizations with no blur by assigning them to pixels.
 
@@ -523,14 +541,14 @@ def render_hist(
     ----------
     locs : np.recarray
         Localizations to be rendered.
-    oversampling : float 
+    oversampling : float
         Number of super-resolution pixels per camera pixel.
     y_min, x_min : float
         Minimum y and x coordinates to be rendered (camera pixels)
     y_max, x_max : float
         Maximum y and x coordinates to be rendered (camera pixels)
     ang : tuple (default=None)
-        Rotation angles of locs around x, y and z axes in radians. If 
+        Rotation angles of locs around x, y and z axes in radians. If
         None, locs are not rotated.
 
     Returns
@@ -541,16 +559,16 @@ def render_hist(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs, 
-        oversampling, 
+        locs,
+        oversampling,
         y_min, x_min, y_max, x_max,
     )
     if ang:
         x, y, _, _ = locs_rotation(
-            locs, 
+            locs,
             oversampling,
-            x_min, x_max, y_min, y_max, 
-            ang, 
+            x_min, x_max, y_min, y_max,
+            ang,
         )
     _fill(image, x, y)
     n = len(x)
@@ -568,14 +586,14 @@ def render_hist(
 
 @numba.jit(nopython=True, nogil=True)
 def render_hist3d(
-    locs: np.recarray, 
-    oversampling: float, 
-    y_min: float, x_min: float, 
-    y_max: float, x_max: float, 
-    z_min: float, z_max: float, 
+    locs: np.recarray,
+    oversampling: float,
+    y_min: float, x_min: float,
+    y_max: float, x_max: float,
+    z_min: float, z_max: float,
     pixelsize: float,
 ) -> tuple[int, np.ndarray]:
-    """Render localizations in 3D with no blur by assigning them to 
+    """Render localizations in 3D with no blur by assigning them to
     pixels. Used by ``Picasso: Average3``.
 
     Parameters
@@ -606,9 +624,9 @@ def render_hist3d(
     z_max = z_max / pixelsize
 
     image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(
-        locs, 
-        oversampling, 
-        y_min, x_min, y_max, x_max, z_min, z_max, 
+        locs,
+        oversampling,
+        y_min, x_min, y_max, x_max, z_min, z_max,
         pixelsize,
     )
     _fill3d(image, x, y, z)
@@ -617,11 +635,11 @@ def render_hist3d(
 
 
 def render_gaussian(
-    locs: np.recarray, 
-    oversampling: float, 
-    y_min: float, x_min: float, y_max: float, x_max: float, 
-    min_blur_width: float, 
-    ang: tuple[float, float, float] | None = None, 
+    locs: np.recarray,
+    oversampling: float,
+    y_min: float, x_min: float, y_max: float, x_max: float,
+    min_blur_width: float,
+    ang: tuple[float, float, float] | None = None,
 ) -> tuple[int, np.ndarray]:
     """Render localizations with with individual localization precision
     which differs in x and y.
@@ -639,7 +657,7 @@ def render_gaussian(
     min_blur_width : float
         Minimum localization precision (camera pixels).
     ang : tuple, optional
-        Rotation angles of locs around x, y and z axes in radians. If 
+        Rotation angles of locs around x, y and z axes in radians. If
         None, locs are not rotated.
 
     Returns
@@ -650,31 +668,31 @@ def render_gaussian(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs, 
-        oversampling, 
+        locs,
+        oversampling,
         y_min, x_min, y_max, x_max,
     )
 
-    if not ang: # not rotated
+    if not ang:  # not rotated
         blur_width = oversampling * np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * np.maximum(locs.lpy, min_blur_width)
         sy = blur_height[in_view]
         sx = blur_width[in_view]
-    
+
         _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y)
 
-    else: # rotated
+    else:  # rotated
         x, y, in_view, z = locs_rotation(
-            locs, 
-            oversampling, 
-            x_min, x_max, y_min, y_max, 
-            ang, 
+            locs,
+            oversampling,
+            x_min, x_max, y_min, y_max,
+            ang,
         )
         blur_width = oversampling * np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * np.maximum(locs.lpy, min_blur_width)
         # for now, let lpz be twice the mean of lpx and lpy (TODO):
         if hasattr(locs, "lpz"):
-            lpz = locs.lpz #NOTE: lpz must be in the same units as lpx
+            lpz = locs.lpz  # NOTE: lpz must be in the same units as lpx
         else:
             lpz = 2 * np.mean(np.stack((locs.lpx, locs.lpy)), axis=0)
         blur_depth = oversampling * np.maximum(lpz, min_blur_width)
@@ -692,40 +710,40 @@ def render_gaussian(
 
 
 def render_gaussian_iso(
-    locs: np.recarray, 
-    oversampling: float, 
-    y_min: float, x_min: float, y_max: float, x_max: float, 
-    min_blur_width: float, 
-    ang: tuple[float, float, float] | None = None, 
+    locs: np.recarray,
+    oversampling: float,
+    y_min: float, x_min: float, y_max: float, x_max: float,
+    min_blur_width: float,
+    ang: tuple[float, float, float] | None = None,
 ) -> tuple[int, np.ndarray]:
     """Same as ``render_gaussian``, but uses the same localization
     precision in x and y."""
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs, 
-        oversampling, 
+        locs,
+        oversampling,
         y_min, x_min, y_max, x_max,
     )
 
-    if not ang: # not rotated
+    if not ang:  # not rotated
         blur_width = oversampling * np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * np.maximum(locs.lpy, min_blur_width)
         sy = (blur_height[in_view] + blur_width[in_view]) / 2
         sx = sy
-    
+
         _fill_gaussian(image, x, y, sx, sy, n_pixel_x, n_pixel_y)
 
-    else: # rotated
+    else:  # rotated
         x, y, in_view, z = locs_rotation(
-            locs, 
-            oversampling, 
-            x_min, x_max, y_min, y_max, 
-            ang, 
+            locs,
+            oversampling,
+            x_min, x_max, y_min, y_max,
+            ang,
         )
         blur_width = oversampling * np.maximum(locs.lpx, min_blur_width)
         blur_height = oversampling * np.maximum(locs.lpy, min_blur_width)
         # for now, let lpz be twice the mean of lpx and lpy (TODO):
         if hasattr(locs, "lpz"):
-            lpz = locs.lpz #NOTE: lpz must be in the same units as lpx
+            lpz = locs.lpz  # NOTE: lpz must be in the same units as lpx
         else:
             lpz = 2 * np.mean(np.stack((locs.lpx, locs.lpy)), axis=0)
         blur_depth = oversampling * np.maximum(lpz, min_blur_width)
@@ -742,14 +760,14 @@ def render_gaussian_iso(
 
 
 def render_convolve(
-    locs: np.recarray, 
-    oversampling: float, 
-    y_min: float, x_min: float, y_max: float, x_max: float, 
-    min_blur_width: float, 
-    ang: tuple[float, float, float] | None = None, 
+    locs: np.recarray,
+    oversampling: float,
+    y_min: float, x_min: float, y_max: float, x_max: float,
+    min_blur_width: float,
+    ang: tuple[float, float, float] | None = None,
 ) -> tuple[int, np.ndarray]:
-    """Render localizations with with global localization precision, 
-    i.e. each localization is blurred by the median localization 
+    """Render localizations with with global localization precision,
+    i.e. each localization is blurred by the median localization
     precision in x and y.
 
     Parameters
@@ -765,7 +783,7 @@ def render_convolve(
     min_blur_width : float
         Minimum localization precision (camera pixels).
     ang : tuple, optional
-        Rotation angles of locs around x, y and z axes in radians. If 
+        Rotation angles of locs around x, y and z axes in radians. If
         None, locs are not rotated.
 
     Returns
@@ -776,19 +794,19 @@ def render_convolve(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs, 
-        oversampling, 
+        locs,
+        oversampling,
         y_min, x_min, y_max, x_max,
     )
-    if ang: # rotate
+    if ang:  # rotate
         x, y, in_view, _ = locs_rotation(
-            locs, 
-            oversampling, 
-            x_min, x_max, y_min, y_max, 
-            ang, 
-        ) 
+            locs,
+            oversampling,
+            x_min, x_max, y_min, y_max,
+            ang,
+        )
 
-    n =  len(x)
+    n = len(x)
     if n == 0:
         return 0, image
     else:
@@ -803,26 +821,26 @@ def render_convolve(
 
 
 def render_smooth(
-    locs: np.recarray, 
-    oversampling: float, 
-    y_min: float, x_min: float, y_max: float, x_max: float, 
-    ang: tuple[float, float, float] | None = None, 
+    locs: np.recarray,
+    oversampling: float,
+    y_min: float, x_min: float, y_max: float, x_max: float,
+    ang: tuple[float, float, float] | None = None,
 ) -> tuple[int, np.ndarray]:
-    """Render localizations with with blur of one display pixel (set by 
+    """Render localizations with with blur of one display pixel (set by
     oversampling).
 
     Parameters
     ----------
     locs : np.recarray
         Localizations to be rendered.
-    oversampling : float 
+    oversampling : float
         Number of super-resolution pixels per camera pixel.
     y_min, x_min : float
         Minimum y and x coordinates to be rendered (camera pixels).
     y_max, x_max : float
         Maximum y and x coordinates to be rendered (camera pixels).
     ang : tuple, optional
-        Rotation angles of locs around x, y and z axes in radians. If 
+        Rotation angles of locs around x, y and z axes in radians. If
         None, locs are not rotated.
 
     Returns
@@ -833,17 +851,17 @@ def render_smooth(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs, 
-        oversampling, 
+        locs,
+        oversampling,
         y_min, x_min, y_max, x_max,
     )
 
     if ang:
         x, y, _, _ = locs_rotation(
-            locs, 
-            oversampling, 
-            x_min, x_max, y_min, y_max, 
-            ang, 
+            locs,
+            oversampling,
+            x_min, x_max, y_min, y_max,
+            ang,
         )
 
     n = len(x)
@@ -855,8 +873,8 @@ def render_smooth(
 
 
 def _fftconvolve(
-    image: np.ndarray, 
-    blur_width: float, 
+    image: np.ndarray,
+    blur_width: float,
     blur_height: float,
 ) -> np.ndarray:
     """Blur (convolves) 2D image using fast fourier transform.
@@ -900,31 +918,31 @@ def rotation_matrix(angx: float, angy: float, angz: float) -> Rotation:
         [
             [1.0, 0.0, 0.0],
             [0.0, np.cos(angx), np.sin(angx)],
-            [0.0,-np.sin(angx), np.cos(angx)],
+            [0.0, -np.sin(angx), np.cos(angx)],
         ]
-    ) # rotation matrix around x axis
+    )  # rotation matrix around x axis
     rot_mat_y = np.array(
         [
             [np.cos(angy), 0.0, np.sin(angy)],
             [0.0, 1.0, 0.0],
             [-np.sin(angy), 0.0, np.cos(angy)],
         ]
-    ) # rotation matrix around y axis
+    )  # rotation matrix around y axis
     rot_mat_z = np.array(
         [
             [np.cos(angz), -np.sin(angz), 0.0],
             [np.sin(angz), np.cos(angz), 0.0],
             [0.0, 0.0, 1.0],
         ]
-    ) # rotation matrix around z axis
+    )  # rotation matrix around z axis
     rot_mat = rot_mat_x @ rot_mat_y @ rot_mat_z
     return Rotation.from_matrix(rot_mat)
 
 
 def locs_rotation(
-    locs: np.recarray, 
+    locs: np.recarray,
     oversampling: float,
-    x_min: float, x_max: float, y_min: float, y_max: float, 
+    x_min: float, x_max: float, y_min: float, y_max: float,
     ang: tuple[float, float, float]
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Rotate localizations within a FOV.
@@ -954,7 +972,7 @@ def locs_rotation(
         New z coordinates
     """
     # z is translated to pixels
-    locs_coord = np.stack((locs.x ,locs.y, locs.z)).T
+    locs_coord = np.stack((locs.x, locs.y, locs.z)).T
 
     # x and y are in range (x_min/y_min, x_max/y_max) so they need to be
     # shifted (scipy rotation is around origin)
@@ -966,17 +984,17 @@ def locs_rotation(
     locs_coord = R.apply(locs_coord)
 
     # unshift locs
-    locs_coord[:,0] += x_min + (x_max - x_min) / 2
-    locs_coord[:,1] += y_min + (y_max - y_min) / 2
+    locs_coord[:, 0] += x_min + (x_max - x_min) / 2
+    locs_coord[:, 1] += y_min + (y_max - y_min) / 2
 
     # output
-    x = locs_coord[:,0]
-    y = locs_coord[:,1]
-    z = locs_coord[:,2]
+    x = locs_coord[:, 0]
+    y = locs_coord[:, 1]
+    z = locs_coord[:, 2]
     in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
-    x = x[in_view]        
+    x = x[in_view]
     y = y[in_view]
-    z = z[in_view] 
+    z = z[in_view]
     x = oversampling * (x - x_min)
     y = oversampling * (y - y_min)
     z *= oversampling

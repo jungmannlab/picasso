@@ -25,8 +25,6 @@ from time import sleep
 
 import numpy as np
 import matplotlib.pyplot as plt
-from matplotlib.backends.backend_qt5agg import FigureCanvas as FigureCanvas
-from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
@@ -36,16 +34,18 @@ from PyQt5.QtGui import QIcon
 
 from .. import io, lib, render, nanotron, __version__
 
-DEFAULT_MODEL_PATH = os.path.join(os.sep, "picasso", "model", "default_model.sav")
+DEFAULT_MODEL_PATH = os.path.join(
+    os.sep, "picasso", "model", "default_model.sav",
+)
 default_model = False
 
 
 class Generator(QtCore.QThread):
     """Class for generating (and optionally augmenting) images from
     localizations.
-    
+
     ...
-    
+
     Attributes
     ----------
     classes : list of str
@@ -108,8 +108,8 @@ class Generator(QtCore.QThread):
         self.export_paths = export_paths
 
     def combine_data_sets(
-        self, 
-        X_files: list[list[np.ndarray]], 
+        self,
+        X_files: list[list[np.ndarray]],
         Y_files: list[list[int]],
     ) -> tuple[list[np.ndarray], list[int]]:
         """Merges multiple datasets into one."""
@@ -146,7 +146,9 @@ class Generator(QtCore.QThread):
                 )
 
                 if self.export is True and pick < 10:
-                    filename = str(label).replace(" ", "_").lower() + "-" + str(pick)
+                    filename = (
+                        str(label).replace(" ", "_").lower() + "-" + str(pick)
+                    )
                     plt.imsave(
                         export_path + filename + ".png",
                         (10 * pick_img - 1),
@@ -167,10 +169,18 @@ class Generator(QtCore.QThread):
                         data.append(rot_img)
 
                     self.datasets_made.emit(
-                        id + 1, self.n_datasets, splits * (c + 1), splits * (n_locs + 1)
+                        id + 1,
+                        self.n_datasets,
+                        splits * (c + 1),
+                        splits * (n_locs + 1),
                     )
                 else:
-                    self.datasets_made.emit(id + 1, self.n_datasets, c + 1, n_locs + 1)
+                    self.datasets_made.emit(
+                        id + 1,
+                        self.n_datasets,
+                        c + 1,
+                        n_locs + 1,
+                    )
 
                 pick_img = nanotron.prepare_img(
                     pick_img, img_shape=img_shape, alpha=10, bg=1
@@ -188,9 +198,9 @@ class Generator(QtCore.QThread):
 
 class Trainer(QtCore.QThread):
     """Trains a machine learning model.
-    
+
     ...
-    
+
     Attributes
     ----------
     activation : {'relu', 'identity', 'logistic', 'tanh'}
@@ -219,7 +229,7 @@ class Trainer(QtCore.QThread):
     Y_train : np.ndarray
         The training labels.
     parameter : dict
-        A dictionary containing the model parameters. See class 
+        A dictionary containing the model parameters. See class
         attributes for details.
     parent : QWidget, optional
         The parent widget. None by default.
@@ -228,10 +238,10 @@ class Trainer(QtCore.QThread):
     training_finished = QtCore.pyqtSignal(list, float, float, list)
 
     def __init__(
-        self, 
-        X_train: np.ndarray, 
-        Y_train: np.ndarray, 
-        parameter: dict, 
+        self,
+        X_train: np.ndarray,
+        Y_train: np.ndarray,
+        parameter: dict,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__()
@@ -240,7 +250,9 @@ class Trainer(QtCore.QThread):
         self.iterations = parameter["iterations"]
         self.learning_rate = parameter["learning_rate"]
         self.solver = parameter["solver"]
-        self.X_train, self.X_test, self.Y_train, self.Y_test = train_test_split(
+        (
+            self.X_train, self.X_test, self.Y_train, self.Y_test
+        ) = train_test_split(
             X_train, Y_train, test_size=0.30, random_state=42
         )
         self.mlp_list = []  # container to carry mlp class
@@ -274,7 +286,9 @@ class Trainer(QtCore.QThread):
         cm = confusion_matrix(self.Y_test, Y_pred)
         self.cm_list.append(cm)
 
-        self.training_finished.emit(self.mlp_list, score, test_score, self.cm_list)
+        self.training_finished.emit(
+            self.mlp_list, score, test_score, self.cm_list,
+        )
 
 
 class Predictor(QtCore.QThread):
@@ -320,11 +334,11 @@ class Predictor(QtCore.QThread):
     prediction_finished = QtCore.pyqtSignal(np.recarray)
 
     def __init__(
-        self, 
-        mlp: MLPClassifier, 
-        locs: np.recarray, 
-        pick_radius: float, 
-        oversampling: float, 
+        self,
+        mlp: MLPClassifier,
+        locs: np.recarray,
+        pick_radius: float,
+        oversampling: float,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
         super().__init__()
@@ -340,9 +354,9 @@ class Predictor(QtCore.QThread):
         self.prediction["group"] = np.unique(self.locs["group"])
         self.n_groups = len(np.unique(self.locs["group"]))
 
-    def checkConsecutive(self, l: np.ndarray) -> bool:
-        n = len(l) - 1
-        return sum(np.diff(sorted(l)) == 1) >= n
+    def checkConsecutive(self, ll: np.ndarray) -> bool:
+        n = len(ll) - 1
+        return sum(np.diff(sorted(ll)) == 1) >= n
 
     def _worker(
         self,
@@ -382,14 +396,14 @@ class Predictor(QtCore.QThread):
                 finished[0] += 1
 
     def _predict_async(
-        self, 
-        model: MLPClassifier, 
-        locs: np.recarray, 
-        picks: np.ndarray, 
-        pick_radius: float, 
+        self,
+        model: MLPClassifier,
+        locs: np.recarray,
+        picks: np.ndarray,
+        pick_radius: float,
         oversampling: float,
     ) -> None:
-        """Make predictions asynchronously, i.e., using 
+        """Make predictions asynchronously, i.e., using
         multiprocessing."""
         n_picks = len(picks)
 
@@ -400,7 +414,7 @@ class Predictor(QtCore.QThread):
 
         n_workers = min(
             60, max(1, int(0.75 * multiprocessing.cpu_count()))
-        ) # Python crashes when using >64 cores
+        )  # Python crashes when using >64 cores
 
         current = [0]
         finished = [0]
@@ -445,7 +459,9 @@ class Predictor(QtCore.QThread):
         self.locs = lib.append_to_rec(
             self.locs, classes[self.locs["group"]], "prediction"
         )
-        self.locs = lib.append_to_rec(self.locs, probas[self.locs["group"]], "score")
+        self.locs = lib.append_to_rec(
+            self.locs, probas[self.locs["group"]], "score"
+        )
 
         self.prediction_finished.emit(self.locs)
 
@@ -550,7 +566,9 @@ class train_dialog(QtWidgets.QDialog):
         self.iterations.setRange(0, int(1e4))
         self.iterations.setValue(400)
         train_parameter_grid.addWidget(self.iterations, 0, 1)
-        train_parameter_grid.addWidget(QtWidgets.QLabel("Learning Rate:"), 1, 0)
+        train_parameter_grid.addWidget(
+            QtWidgets.QLabel("Learning Rate:"), 1, 0,
+        )
         self.learing_rate = QtWidgets.QDoubleSpinBox()
         self.learing_rate.resize(200, 50)
         self.learing_rate.setRange(0.00001, 10)
@@ -564,7 +582,9 @@ class train_dialog(QtWidgets.QDialog):
         self.train_btn.setDisabled(True)
         self.train_label = QtWidgets.QLabel("")
         self.train_label.setAlignment(QtCore.Qt.AlignCenter)
-        self.learning_curve_btn = QtWidgets.QPushButton("Show Learning History")
+        self.learning_curve_btn = QtWidgets.QPushButton(
+            "Show Learning History"
+        )
         self.learning_curve_btn.clicked.connect(self.show_learning_stats)
         self.learning_curve_btn.setVisible(False)
 
@@ -648,7 +668,9 @@ class train_dialog(QtWidgets.QDialog):
             fname = base + ".sav"
 
             self.train_log["Model"] = fname
-            self.train_log["Generated by"] = f"Picasso v{__version__} nanoTRON : Train"
+            self.train_log["Generated by"] = (
+                f"Picasso v{__version__} nanoTRON : Train"
+            )
             import sklearn
 
             self.train_log["Scikit-Learn Version"] = sklearn.__version__
@@ -702,7 +724,9 @@ class train_dialog(QtWidgets.QDialog):
             ax1.set_xlabel("Iterations")
             ax1.set_ylabel("Loss")
 
-            im = ax2.imshow(self.cm, interpolation="nearest", cmap=plt.cm.Blues)
+            im = ax2.imshow(
+                self.cm, interpolation="nearest", cmap=plt.cm.Blues,
+            )
             ax2.figure.colorbar(im, ax=ax2)
             ax2.set(
                 xticks=np.arange(self.cm.shape[1]),
@@ -749,11 +773,13 @@ class train_dialog(QtWidgets.QDialog):
                 self.train_files_grid.addWidget(c, file, 0)
 
                 self.f_btn = QtWidgets.QPushButton("Load File", self)
-                self.f_btn.clicked.connect(lambda _, fi=file: self.load_train_file(fi))
+                self.f_btn.clicked.connect(
+                    lambda _, fi=file: self.load_train_file(fi)
+                )
                 self.train_files_grid.addWidget(self.f_btn, file, 1)
                 self.f_btns.append(self.f_btn)
 
-                la = QtWidgets.QLabel("Name:".format(file))
+                la = QtWidgets.QLabel("Name:")
                 self.train_files_grid.addWidget(la, file, 2)
 
                 id = QtWidgets.QLineEdit(self)
@@ -840,7 +866,9 @@ class train_dialog(QtWidgets.QDialog):
 
                 if val >= 1.5:
                     print("Dataset {} will be downsampled.".format(key))
-                    self.training_files[key] = file[file["group"] <= median_length]
+                    self.training_files[key] = (
+                        file[file["group"] <= median_length]
+                    )
 
                     msgBox = QtWidgets.QMessageBox(self)
                     msgBox.setIcon(QtWidgets.QMessageBox.Information)
@@ -858,7 +886,9 @@ class train_dialog(QtWidgets.QDialog):
                     msgBox = QtWidgets.QMessageBox(self)
                     msgBox.setIcon(QtWidgets.QMessageBox.Information)
                     msgBox.setWindowTitle("Info")
-                    msgBox.setText("Class {} is to small. Not enough picks".format(key))
+                    msgBox.setText(
+                        f"Class {key} is to small. Not enough picks"
+                    )
                     msgBox.setInformativeText(
                         "Datasets are inbalanced. "
                         "This can cause training artifacts. "
@@ -879,13 +909,17 @@ class train_dialog(QtWidgets.QDialog):
         elif self.check_set():
             self.generator_running = True
 
-            max_key = max(self.pick_radii, key=lambda x: self.pick_radii.get(x))
+            max_key = max(
+                self.pick_radii, key=lambda x: self.pick_radii.get(x)
+            )
             self.pick_radius = self.pick_radii[max_key]
             self.oversampling = self.oversampling_box.value()
 
             self.train_log["Pick Diameter"] = 2 * self.pick_radius
             self.train_log["Oversampling"] = self.oversampling
-            self.train_log["Expand Trainig Set"] = self.expand_training.isChecked()
+            self.train_log["Expand Training Set"] = (
+                self.expand_training.isChecked()
+            )
 
             self.generate_thread = Generator(
                 locs=self.training_files,
@@ -898,7 +932,9 @@ class train_dialog(QtWidgets.QDialog):
             )
 
             self.generate_thread.datasets_made.connect(self.prepare_progress)
-            self.generate_thread.datasets_finished.connect(self.prepare_finished)
+            self.generate_thread.datasets_finished.connect(
+                self.prepare_finished
+            )
             self.generate_thread.start()
 
         else:
@@ -912,10 +948,12 @@ class train_dialog(QtWidgets.QDialog):
             )
             msgBox.exec_()
 
-    def prepare_progress(self, current_dataset, last_dataset, current_img, last_img):
+    def prepare_progress(
+        self, current_dataset, last_dataset, current_img, last_img,
+    ):
 
-        self.progress_sets_label.setText("{}/{}".format(current_dataset, last_dataset))
-        self.progress_imgs_label.setText("{}/{}".format(current_img, last_img))
+        self.progress_sets_label.setText(f"{current_dataset}/{last_dataset}")
+        self.progress_imgs_label.setText(f"{current_img}/{last_img}")
         self.progress_bar.setMaximum(last_img)
         self.progress_bar.setValue(current_img)
 
@@ -955,7 +993,9 @@ class View(QtWidgets.QLabel):
         self.setAcceptDrops(True)
         self._pixmap = None
         self.locs = None
-        self.rubberband = QtWidgets.QRubberBand(QtWidgets.QRubberBand.Rectangle, self)
+        self.rubberband = QtWidgets.QRubberBand(
+            QtWidgets.QRubberBand.Rectangle, self,
+        )
         self.rubberband.setStyleSheet("selection-background-color: white")
 
     def dragEnterEvent(self, event):
@@ -1012,7 +1052,7 @@ class View(QtWidgets.QLabel):
 
 class Window(QtWidgets.QMainWindow):
     """Main window."""
-    
+
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(f"Picasso v{__version__}: nanoTRON")
@@ -1083,7 +1123,9 @@ class Window(QtWidgets.QMainWindow):
 
         accuracy_box = QtWidgets.QGroupBox("Filter export")
         accuracy_grid = QtWidgets.QGridLayout(accuracy_box)
-        self.filter_accuracy_btn = QtWidgets.QCheckBox("Filter Probabilities >=")
+        self.filter_accuracy_btn = QtWidgets.QCheckBox(
+            "Filter Probabilities >="
+        )
         self.export_accuracy = QtWidgets.QDoubleSpinBox()
         self.export_accuracy.resize(50, 50)
         self.export_accuracy.setDecimals(2)
@@ -1166,7 +1208,9 @@ class Window(QtWidgets.QMainWindow):
                 canvas = lib.GenericPlotWindow("Probabilities", "nanotron")
                 canvas.figure.clear()
 
-                probabilities_per_pick = np.zeros(len(np.unique(self.locs.group)))
+                probabilities_per_pick = np.zeros(
+                    len(np.unique(self.locs.group))
+                )
                 for c, group_number in enumerate(np.unique(self.locs.group)):
                     pick = self.locs[self.locs.group == group_number]
                     pick_score = np.unique(pick.score)[0]
@@ -1202,9 +1246,8 @@ class Window(QtWidgets.QMainWindow):
             )
         else:
             self.status_bar.showMessage(
-                "Predicting... Please wait. From {} picks - predicted {}".format(
-                    total_picks, pick
-                )
+                f"Predicting... Please wait. From {total_picks} picks - "
+                f"predicted {pick}"
             )
 
     def open(self):
@@ -1242,11 +1285,11 @@ class Window(QtWidgets.QMainWindow):
             self.locs_loaded = True
             self.dist_btn.setDisabled(True)
             self.view.update_image()
-            self.status_bar.showMessage("{} picks loaded.".format(str(groups_max)))
+            self.status_bar.showMessage(f"{groups_max} picks loaded.")
 
         if self.model_loaded is False:
             self.status_bar.showMessage(
-                "{} picks loaded. Load model to predict".format(str(groups_max))
+                f"{groups_max} picks loaded. Load model to predict"
             )
         else:
             self.predict_btn.setDisabled(False)
@@ -1349,7 +1392,8 @@ class Window(QtWidgets.QMainWindow):
         pick_regions = {}
 
         checks = (
-            self.classbox_grid.itemAt(i) for i in range(self.classbox_grid.count())
+            self.classbox_grid.itemAt(i)
+            for i in range(self.classbox_grid.count())
         )
         for btn in checks:
 
@@ -1388,7 +1432,9 @@ class Window(QtWidgets.QMainWindow):
             progress.set_value(count)
             count += 1
 
-            filtered_locs = export_locs[export_locs["prediction"] == prediction]
+            filtered_locs = export_locs[
+                export_locs["prediction"] == prediction
+            ]
             n_groups = np.unique(filtered_locs["group"])
 
             if self.regroup_btn.isChecked():
@@ -1397,10 +1443,12 @@ class Window(QtWidgets.QMainWindow):
                 regroup_dict = dict(zip(n_groups, n_new_groups))
                 regroup_map = [regroup_dict[_] for _ in filtered_locs["group"]]
                 filtered_locs["group"] = regroup_map
-                print("Regrouped datatset {} to {} picks.".format(name, len(n_groups)))
+                print(f"Regrouped datatset {name} to {len(n_groups)} picks.")
 
             nanotron_info = self.nanotron_log.copy()
-            nanotron_info.update({"Generated by": f"Picasso v{__version__} Nanotron"})
+            nanotron_info.update(
+                {"Generated by": f"Picasso v{__version__} Nanotron"}
+            )
             info = self.info + [nanotron_info]
 
             out_filename = "_" + name.replace(" ", "_").lower()
@@ -1413,15 +1461,17 @@ class Window(QtWidgets.QMainWindow):
 
                 for pick in np.unique(filtered_locs["group"]):
                     pick_locs = filtered_locs[filtered_locs["group"] == pick]
-                    pick_centers.append(
-                        [float(np.mean(pick_locs.x)), float(np.mean(pick_locs.y))]
-                    )
+                    pick_centers.append([
+                        float(np.mean(pick_locs.x)),
+                        float(np.mean(pick_locs.y)),
+                    ])
 
                 pick_regions["Centers"] = pick_centers
                 pick_regions["Diameter"] = self.model_info["Pick Diameter"]
                 pick_regions["Shape"] = "Circle"
                 pick_out_path = (
-                    os.path.splitext(self.path)[0] + out_filename + "_picks.yaml"
+                    f"{os.path.splitext(self.path)[0]}_{out_filename}_picks"
+                    + ".yaml"
                 )
                 with open(pick_out_path, "w") as f:
                     yaml.dump(pick_regions, f)
@@ -1456,13 +1506,15 @@ def main():
         p = plugin.Plugin(window)
         if p.name == "nanotron":
             p.execute()
-            
+
     window.show()
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(window, "An error occured", message)
+        errorbox = QtWidgets.QMessageBox.critical(
+            window, "An error occured", message,
+        )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 
