@@ -676,7 +676,7 @@ class DatasetDialog(QtWidgets.QDialog):
                 del self._drift[i]
                 del self._driftfiles[i]
                 del self.currentdrift[i]
-            except IndexError:
+            except Exception:
                 pass
 
             # update the window and adjust the size of the
@@ -6465,9 +6465,7 @@ class View(QtWidgets.QLabel):
             ]
 
         # oversampling
-        optimal_oversampling = (
-            self.display_pixels_per_viewport_pixels()
-        )
+        optimal_oversampling = self.display_pixels_per_viewport_pixels()
         if disp_dlg.dynamic_disp_px.isChecked():
             oversampling = optimal_oversampling
             disp_dlg.set_disp_px_silently(
@@ -8991,7 +8989,7 @@ class View(QtWidgets.QLabel):
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
             # get parameters for AIM
-            params, ok = AIMDialog.getParams()
+            params, ok = AIMDialog.getParams(self.window)
             params["intersect_d"] = params["intersect_d"] / pixelsize
             params["roi_r"] = params["roi_r"] / pixelsize
             if ok:

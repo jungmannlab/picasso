@@ -1840,23 +1840,21 @@ class ViewRotation(QtWidgets.QLabel):
             width.
         """
         disp_dlg = self.window.display_settings_dlg
+        pixelsize = self.window.window.display_settings_dlg.pixelsize.value()
+
         # blur method
         blur_button = disp_dlg.blur_buttongroup.checkedButton()
         # oversampling
         if not animation:
-            optimal_oversampling = (
+            opt_oversampling = (
                 self.display_pixels_per_viewport_pixels(viewport=viewport)
             )
             if disp_dlg.dynamic_disp_px.isChecked():
-                oversampling = optimal_oversampling
-                disp_dlg.set_disp_px_silently(
-                    disp_dlg.pixelsize.value() / optimal_oversampling
-                )
+                oversampling = opt_oversampling
+                disp_dlg.set_disp_px_silently(pixelsize / opt_oversampling)
             else:
-                oversampling = float(
-                    disp_dlg.pixelsize.value() / disp_dlg.disp_px_size.value()
-                )
-                if oversampling > optimal_oversampling:
+                oversampling = float(pixelsize / disp_dlg.disp_px_size.value())
+                if oversampling > opt_oversampling:
                     QtWidgets.QMessageBox.information(
                         self,
                         "Display pixel size too low",
@@ -1865,14 +1863,10 @@ class ViewRotation(QtWidgets.QLabel):
                             " match the display pixel density."
                         ),
                     )
-                    oversampling = optimal_oversampling
-                    disp_dlg.set_disp_px_silently(
-                        disp_dlg.pixelsize.value() / optimal_oversampling
-                    )
-        else:  # if animating, the message box may appear
-            oversampling = float(
-                disp_dlg.pixelsize.value() / disp_dlg.disp_px_size.value()
-            )
+                    oversampling = opt_oversampling
+                    disp_dlg.set_disp_px_silently(pixelsize / opt_oversampling)
+        else:  # keep oversampling constant during animation
+            oversampling = float(pixelsize / disp_dlg.disp_px_size.value())
 
         # viewport
         if viewport is None:

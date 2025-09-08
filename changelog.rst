@@ -8,7 +8,8 @@ Last change: 08-SEP-2025 MTS
 - SPINNA - easy fitting of labeling efficiency
 - GUI docstrings added in all scripts; cleaned up docstrings in Picasso modules
 - Render: pick size chosen in nm, not camera pixels
-- Other bug fixes and code clean up (flake8 compliant)
+- Code clean up (flake8 compliant)
+- Other bug fixes
 
 0.8.3
 -----
