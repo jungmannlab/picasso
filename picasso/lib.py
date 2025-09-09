@@ -29,6 +29,7 @@ from matplotlib.backends.backend_qt5agg import (
     FigureCanvas, NavigationToolbar2QT
 )
 from PyQt5 import QtCore, QtWidgets, QtGui
+from playsound3 import playsound
 
 from picasso import io
 
@@ -36,6 +37,10 @@ from picasso import io
 # In case of an exception, we close them all,
 # so that the GUI remains responsive.
 _dialogs = []
+
+# Min. time to use sound notification when ProcessDialog or
+# StatusDialog is finished
+SOUND_NOTIFICATION_DURATION = 60  # seconds
 
 
 class ProgressDialog(QtWidgets.QProgressDialog):
@@ -61,6 +66,9 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.t0 = time.time()
         self.app = QtCore.QCoreApplication.instance()
         self.initalized = True
+        self.finished = False
+        # sound notification
+        self.sound_notification_path = get_sound_notification_path()
 
     def set_value(self, value):
         if not self.initalized:
@@ -84,16 +92,30 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             f"\nEstimated time remaining: {time_estimate}"
         )
         self.setLabelText(description)
+        if value >= self.maximum() and self.finished is False:
+            self.finished = True
+            self.play_sound_notification()
         self.app.processEvents()
 
     def closeEvent(self, event):
         _dialogs.remove(self)
+        if self.finished is False:
+            self.finished = True
+            self.play_sound_notification()
 
     def zero_progress(self, description=None):
         """Set progress dialog to zero and changes title if given."""
         if description:
             self.setLabelText(description)
+            self.description_base = description
         self.set_value(0)
+
+    def play_sound_notification(self):
+        """Play a sound notification if a sound file is specified and
+        at least a minute has passed since the dialog was opened."""
+        if self.sound_notification_path is not None:
+            if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
+                playsound(self.sound_notification_path, block=False)
 
 
 class StatusDialog(QtWidgets.QDialog):
@@ -107,11 +129,16 @@ class StatusDialog(QtWidgets.QDialog):
         vbox = QtWidgets.QVBoxLayout(self)
         label = QtWidgets.QLabel(description)
         vbox.addWidget(label)
+        self.sound_notification_path = get_sound_notification_path()
+        self.t0 = time.time()
         self.show()
         QtCore.QCoreApplication.instance().processEvents()
 
     def closeEvent(self, event):
         _dialogs.remove(self)
+        if self.sound_notification_path is not None:
+            if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
+                playsound(self.sound_notification_path, block=False)
 
 
 class ScrollableGroupBox(QtWidgets.QGroupBox):
@@ -197,6 +224,83 @@ def cancel_dialogs():
         else:
             dialog.close()
     QtCore.QCoreApplication.instance().processEvents()  # just in case...
+
+
+def get_sound_notification_path() -> str | None:
+    """Return the path to the sound notification file from the user
+    settings file. If the file is not found or not specified, return
+    None.
+
+    Returns
+    -------
+    path : str or None
+        Path to the sound notification file or None if not found or not
+        specified.
+    """
+    settings = io.load_user_settings()
+    if "Sound_notification" not in settings:  # add default settings (no sound)
+        settings["Sound_notification"]["filename"] = None
+        io.save_user_settings(settings)
+    filename = settings["Sound_notification"]["filename"]
+    sounds_dir = _sound_notification_dir()
+    if (
+        filename is not None and
+        os.path.isfile(os.path.join(sounds_dir, filename))
+    ):
+        ext = os.path.splitext(filename)[1].lower()
+        if ext not in [".mp3", ".wav"]:
+            path = None
+        else:
+            path = os.path.join(sounds_dir, filename)
+    else:
+        path = None
+    return path
+
+
+def get_available_sound_notifications() -> list[str | None]:
+    """Get a list of file names of the available sound notifications in
+    the folder ``resources/notification_sounds``.
+
+    Returns
+    -------
+    filenames : list of strs
+        List of file names of the available sound notifications.
+    """
+    sounds_dir = _sound_notification_dir()
+    filenames = [
+        _ for _ in os.listdir(sounds_dir)
+        if os.path.isfile(os.path.join(sounds_dir, _)) and
+        os.path.splitext(_)[1].lower() in [".mp3", ".wav"]
+    ]
+    filenames = ["None"] + filenames
+    return filenames
+
+
+def set_sound_notification(action: QtWidgets.QAction) -> None:
+    """Save the selected sound notification in the user settings
+    file.
+
+    Parameters
+    ----------
+    action : QtWidgets.QAction
+        The action representing the selected sound notification.
+    """
+    settings = io.load_user_settings()
+    selected_sound = action.objectName()  # file name with extension
+    settings["Sound_notification"]["filename"] = selected_sound
+    io.save_user_settings(settings)
+    # play selected sound as a preview
+    play_path = get_sound_notification_path()
+    playsound(play_path, block=False) if play_path is not None else None
+
+
+def _sound_notification_dir() -> str:
+    """Return the path to the sound notification folder."""
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
+        "resources",
+        "notification_sounds",
+    )
 
 
 def get_colors(n_channels):

@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 08-SEP-2025 MTS
+Last change: 09-SEP-2025 CEST
+
+0.8.5
+-----
+- Sound notifications when long processes finish, see # TODO for details
 
 0.8.4
 -----

@@ -24,13 +24,13 @@ If you installed Picasso using ``pip install picassosr``, you can add plugins by
 
 One click installer
 ~~~~~~~~~~~~~~~~~~~
-**NOTE**: After deinstalling Picasso, ``Program Files/Picasso`` folder needs to be deleted manually, as the uninstaller currently does not remove the plugins automatically.
+**NOTE**: After uninstalling Picasso, ``Picasso`` folder needs to be deleted manually, as the uninstaller currently does not remove the plugins automatically.
 
-- Find the location where you installed Picasso. By default, it is ``C:/Program Files/Picasso``.
+- Find the location where you installed Picasso. By default, it is ``C:/Picasso``.
 - Go to the following subfolder in the `Picasso` directory: ``picasso/gui/plugins``.
 - Copy the plugin(s) to this folder.
 
-.. **NOTE**: Plugins added in this distribution will not be able to use packages that are not installed automatically (from the file ``requirements.txt``).
+**NOTE**: Plugins added in this distribution will not be able to use packages that are not installed automatically (from the file ``requirements.txt``).
 
 For developers
 --------------

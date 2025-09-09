@@ -27,7 +27,7 @@ In MATLAB, execute the command ``locs = h5read(filename, dataset)``. Replace dat
 
 In Origin, select ``File > Import > HDF5`` or drag and drop the file into the main window.
 
-Picasso uses ``h5py``. To load localizations, Picasso uses the function ``load_locs(filename)``` located in the ``io.py`` package of Picasso.
+Picasso uses ``h5py``. To load localizations, Picasso uses the function ``load_locs(filename)`` located in the ``io.py`` package of Picasso.
 
 Localization HDF5 Files
 -----------------------

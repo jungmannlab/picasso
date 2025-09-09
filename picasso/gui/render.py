@@ -10000,6 +10000,23 @@ class Window(QtWidgets.QMainWindow):
         delete_action = file_menu.addAction("Remove all localizations")
         delete_action.triggered.connect(self.remove_locs)
 
+        # sound notification submenu
+        file_menu.addSeparator()
+        sounds_menu = file_menu.addMenu("Sound notifications")
+        sounds_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
+        default_sound_path = lib.get_sound_notification_path()  # last used
+        default_sound_name = os.path.basename(str(default_sound_path))
+        for sound in lib.get_available_sound_notifications():
+            sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
+            action = sounds_actiongroup.addAction(
+                QtWidgets.QAction(sound_name, sounds_menu, checkable=True)
+            )
+            action.setObjectName(sound)  # store full name
+            if default_sound_name == sound:
+                action.setChecked(True)
+            sounds_menu.addAction(action)
+        sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+
         # menu bar - View
         view_menu = self.menu_bar.addMenu("View")
         display_settings_action = view_menu.addAction("Display settings")
