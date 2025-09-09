@@ -2733,8 +2733,8 @@ class SimulationsTab(QtWidgets.QDialog):
                     if "Pixelsize" in element and pixelsize is None:
                         pixelsize = element["Pixelsize"]
                 if "Render : Pick" in element.values():
-                    if "Total Picked Area (um^2)" in element:
-                        area = element["Total Picked Area (um^2)"]
+                    if "Area (um^2)" in element:
+                        area = element["Area (um^2)"]
                         # set the observed density of the molecules
                         idx = self.targets.index(target)
                         self.densities_spins[idx].setValue(len(locs) / area)
