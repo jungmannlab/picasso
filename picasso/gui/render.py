@@ -1,5 +1,5 @@
 """
-    picasos.gui.render
+    picasso.gui.render
     ~~~~~~~~~~~~~~~~~~
 
     Graphical user interface for rendering localization images.
@@ -419,14 +419,16 @@ class DatasetDialog(QtWidgets.QDialog):
         self.window = window
         self.setWindowTitle("Datasets")
         self.setModal(False)
-        self.layout = QtWidgets.QGridLayout()
         self.checks = []
         self.title = []
         self.closebuttons = []
         self.colorselection = []
         self.colordisp_all = []
         self.intensitysettings = []
-        self.setLayout(self.layout)
+        layout = QtWidgets.QGridLayout()
+        self.setLayout(layout)
+
+        # add non-scrollable elements - left side
         self.legend = QtWidgets.QCheckBox("Show legend")
         self.wbackground = QtWidgets.QCheckBox(
             "Invert colors / white background"
@@ -434,34 +436,47 @@ class DatasetDialog(QtWidgets.QDialog):
         self.auto_display = QtWidgets.QCheckBox("Automatic display update")
         self.auto_display.setChecked(True)
         self.auto_colors = QtWidgets.QCheckBox("Automatic coloring")
-        self.layout.addWidget(self.legend, 0, 0, 1, 2)
-        self.layout.addWidget(self.auto_display, 1, 0, 1, 2)
-        self.layout.addWidget(self.wbackground, 2, 0, 1, 2)
-        self.layout.addWidget(self.auto_colors, 3, 0, 1, 2)
-        self.layout.addWidget(QtWidgets.QLabel("Files"), 4, 0)
-        self.layout.addWidget(QtWidgets.QLabel("Change title"), 4, 1)
-        self.layout.addWidget(QtWidgets.QLabel("Color"), 4, 2)
-        self.layout.addWidget(QtWidgets.QLabel(""), 4, 3)
-        self.layout.addWidget(QtWidgets.QLabel("Rel. Intensity"), 4, 4)
-        self.layout.addWidget(QtWidgets.QLabel("Close"), 4, 5)
+        layout.addWidget(self.legend, 0, 0)
+        layout.addWidget(self.auto_display, 1, 0)
+        layout.addWidget(self.wbackground, 2, 0)
+        layout.addWidget(self.auto_colors, 3, 0)
+
+        # add buttons to save/load colors - right side
+        save_button = QtWidgets.QPushButton("Save colors")
+        layout.addWidget(save_button, 0, 2)
+        save_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        save_button.clicked.connect(self.save_colors)
+        load_button = QtWidgets.QPushButton("Load colors")
+        layout.addWidget(load_button, 1, 2)
+        load_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        load_button.clicked.connect(self.load_colors)
+
+        # add scrollable area which will display all channels, below
+        # the non-scrollable elements
+        self.scroll_area = lib.ScrollableGroupBox("", self)
+
+        def size_hint() -> QtCore.QSize:
+            return QtCore.QSize(600, 300)
+        self.scroll_area.sizeHint = size_hint
+
+        layout.addWidget(self.scroll_area, 4, 0, 1, 3)
+        self.checks = []
+        self.title = []
+        self.closebuttons = []
+        self.colorselection = []
+        self.colordisp_all = []
+        self.intensitysettings = []
+        self.scroll_area.add_widget(QtWidgets.QLabel("Files"), 0, 0)
+        self.scroll_area.add_widget(QtWidgets.QLabel("Change title"), 0, 1)
+        self.scroll_area.add_widget(QtWidgets.QLabel("Color"), 0, 2)
+        self.scroll_area.add_widget(QtWidgets.QLabel(""), 0, 3)
+        self.scroll_area.add_widget(QtWidgets.QLabel("Rel. Intensity"), 0, 4)
+        self.scroll_area.add_widget(QtWidgets.QLabel("Close"), 0, 5)
+
         self.legend.stateChanged.connect(self.update_viewport)
         self.wbackground.stateChanged.connect(self.update_viewport)
         self.auto_display.stateChanged.connect(self.update_viewport)
         self.auto_colors.stateChanged.connect(self.update_colors)
-
-        # save and load color list
-        save_button = QtWidgets.QPushButton("Save colors")
-        self.layout.addWidget(
-            save_button, 0, self.layout.columnCount() - 2, 1, 2
-        )
-        save_button.setFocusPolicy(QtCore.Qt.NoFocus)
-        save_button.clicked.connect(self.save_colors)
-        load_button = QtWidgets.QPushButton("Load colors")
-        self.layout.addWidget(
-            load_button, 1, self.layout.columnCount() - 2, 1, 2
-        )
-        load_button.setFocusPolicy(QtCore.Qt.NoFocus)
-        load_button.clicked.connect(self.load_colors)
 
         self.default_colors = [
             "red",
@@ -505,7 +520,7 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # Create 3 buttons for checking, naming and closing the channel
         c = QtWidgets.QCheckBox(path)
-        currentline = self.layout.rowCount()
+        currentline = self.scroll_area.content_layout.rowCount()
         t = QtWidgets.QPushButton("#")
         t.setObjectName(str(currentline))
         p = QtWidgets.QPushButton("x")
@@ -575,12 +590,12 @@ class DatasetDialog(QtWidgets.QDialog):
         self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
 
         # add all the widgets to the Dataset Dialog
-        self.layout.addWidget(c, currentline, 0)
-        self.layout.addWidget(t, currentline, 1)
-        self.layout.addWidget(colordrop, currentline, 2)
-        self.layout.addWidget(colordisp, currentline, 3)
-        self.layout.addWidget(intensity, currentline, 4)
-        self.layout.addWidget(p, currentline, 5)
+        self.scroll_area.add_widget(c, currentline, 0)
+        self.scroll_area.add_widget(t, currentline, 1)
+        self.scroll_area.add_widget(colordrop, currentline, 2)
+        self.scroll_area.add_widget(colordisp, currentline, 3)
+        self.scroll_area.add_widget(intensity, currentline, 4)
+        self.scroll_area.add_widget(p, currentline, 5)
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -631,12 +646,12 @@ class DatasetDialog(QtWidgets.QDialog):
             self.window.remove_locs()
         else:
             # remove widgets from the Dataset Dialog
-            self.layout.removeWidget(self.checks[i])
-            self.layout.removeWidget(self.title[i])
-            self.layout.removeWidget(self.colorselection[i])
-            self.layout.removeWidget(self.colordisp_all[i])
-            self.layout.removeWidget(self.intensitysettings[i])
-            self.layout.removeWidget(self.closebuttons[i])
+            self.scroll_area.remove_widget(self.checks[i])
+            self.scroll_area.remove_widget(self.title[i])
+            self.scroll_area.remove_widget(self.colorselection[i])
+            self.scroll_area.remove_widget(self.colordisp_all[i])
+            self.scroll_area.remove_widget(self.intensitysettings[i])
+            self.scroll_area.remove_widget(self.closebuttons[i])
 
             # delete the widgets from the lists
             del self.checks[i]
@@ -3150,7 +3165,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
     save_mask_button : QPushButton
         Used for saving the current mask as a .npy file.
     _size_hint : tuple
-        Determines the minimum size of the dialog.
+        Determines the recommended size of the dialog.
     window : QMainWindow
         Instance of the main window.
     x_max : float

@@ -171,6 +171,11 @@ class ScrollableGroupBox(QtWidgets.QGroupBox):
         """Add a widget to the grid layout inside the scroll area."""
         self.content_layout.addWidget(widget, row, column, height, width)
 
+    def remove_widget(self, widget):
+        """Remove a widget from the grid layout inside the scroll 
+        area."""
+        self.content_layout.removeWidget(widget)
+
     def remove_all_widgets(self, keep_labels=False):
         """Remove all widgets. If ``keep_labels`` is True, the QLabels
         are kept."""
