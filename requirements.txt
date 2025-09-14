@@ -16,3 +16,4 @@ watchdog==3.0.0
 psutil==5.9.5
 nd2reader==3.3.0
 playsound3==3.2.6
+imageio[ffmpeg]==2.37.0
