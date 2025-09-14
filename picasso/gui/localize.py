@@ -592,12 +592,15 @@ class ParametersDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.window = parent
         self.setWindowTitle("Parameters")
-        self.resize(300, 0)
         self.setModal(False)
 
-        vbox = QtWidgets.QVBoxLayout(self)
+        scroll_box = lib.ScrollableGroupBox("", self)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self.layout().addWidget(scroll_box)
+        self.resize(600, 800)
+
         identification_groupbox = QtWidgets.QGroupBox("Identification")
-        vbox.addWidget(identification_groupbox)
+        scroll_box.add_widget(identification_groupbox, 0, 0)
         identification_grid = QtWidgets.QGridLayout(identification_groupbox)
 
         # Box Size
@@ -655,9 +658,11 @@ class ParametersDialog(QtWidgets.QDialog):
         hbox.addWidget(self.mng_max_spinbox)
 
         # ROI
-        identification_grid.addWidget(
-            QtWidgets.QLabel("ROI (y_min,x_min,y_max,x_max):"), 5, 0,
+        label = QtWidgets.QLabel(
+            "ROI (y<sub>min</sub>,x<sub>min</sub>,"
+            "y<sub>max</sub>,x<sub>max</sub>):"
         )
+        identification_grid.addWidget(label, 5, 0,)
         self.roi_edit = QtWidgets.QLineEdit()
         regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
         validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
@@ -676,7 +681,7 @@ class ParametersDialog(QtWidgets.QDialog):
         if "Cameras" in CONFIG:
             # Experiment settings
             exp_groupbox = QtWidgets.QGroupBox("Experiment settings")
-            vbox.addWidget(exp_groupbox)
+            scroll_box.add_widget(exp_groupbox, 1, 0)
             exp_grid = QtWidgets.QGridLayout(exp_groupbox)
             exp_grid.addWidget(QtWidgets.QLabel("Camera:"), 0, 0)
             self.camera = QtWidgets.QComboBox()
@@ -750,7 +755,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Photon conversion
         photon_groupbox = QtWidgets.QGroupBox("Photon Conversion")
-        vbox.addWidget(photon_groupbox)
+        scroll_box.add_widget(photon_groupbox, 2, 0)
         photon_grid = QtWidgets.QGridLayout(photon_groupbox)
 
         # EM Gain
@@ -798,7 +803,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Fit Settings
         fit_groupbox = QtWidgets.QGroupBox("Fit Settings")
-        vbox.addWidget(fit_groupbox)
+        scroll_box.add_widget(fit_groupbox, 3, 0)
         fit_grid = QtWidgets.QGridLayout(fit_groupbox)
 
         fit_grid.addWidget(QtWidgets.QLabel("Method:"), 1, 0)
@@ -853,7 +858,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # 3D
         z_groupbox = QtWidgets.QGroupBox("3D via Astigmatism")
-        vbox.addWidget(z_groupbox)
+        scroll_box.add_widget(z_groupbox, 4, 0)
 
         z_grid = QtWidgets.QGridLayout(z_groupbox)
         z_grid.addWidget(
@@ -895,7 +900,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Sample quality
         quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
-        vbox.addWidget(quality_groupbox)
+        scroll_box.add_widget(quality_groupbox, 5, 0)
         quality_grid = QtWidgets.QGridLayout(quality_groupbox)
         self.quality_check = QtWidgets.QPushButton(
             "Estimate and add to database"
