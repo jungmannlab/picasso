@@ -2853,10 +2853,14 @@ class InfoDialog(QtWidgets.QDialog):
         self.lp = None
         self.nena_calculated = False
         self.change_fov = ChangeFOV(self.window)
-        vbox = QtWidgets.QVBoxLayout(self)
+        scroll_box = lib.ScrollableGroupBox("", self)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self.layout().addWidget(scroll_box)
+        self.setMinimumSize(300, 600)
+
         # Display
         display_groupbox = QtWidgets.QGroupBox("Display")
-        vbox.addWidget(display_groupbox)
+        scroll_box.add_widget(display_groupbox, 0, 0)
         display_grid = QtWidgets.QGridLayout(display_groupbox)
         display_grid.addWidget(QtWidgets.QLabel("Image width:"), 0, 0)
         self.width_label = QtWidgets.QLabel()
@@ -2879,7 +2883,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # Movie
         movie_groupbox = QtWidgets.QGroupBox("Movie")
-        vbox.addWidget(movie_groupbox)
+        scroll_box.add_widget(movie_groupbox, 1, 0)
         self.movie_grid = QtWidgets.QGridLayout(movie_groupbox)
         self.movie_grid.addWidget(
             QtWidgets.QLabel("Median fit precision:"), 0, 0
@@ -2894,7 +2898,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.movie_grid.addWidget(self.nena_button, 1, 1)
         # FOV
         fov_groupbox = QtWidgets.QGroupBox("Field of view")
-        vbox.addWidget(fov_groupbox)
+        scroll_box.add_widget(fov_groupbox, 2, 0)
         fov_grid = QtWidgets.QGridLayout(fov_groupbox)
         fov_grid.addWidget(QtWidgets.QLabel("# Localizations:"), 0, 0)
         self.locs_label = QtWidgets.QLabel()
@@ -2902,7 +2906,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # Picks
         picks_groupbox = QtWidgets.QGroupBox("Picks")
-        vbox.addWidget(picks_groupbox)
+        scroll_box.add_widget(picks_groupbox, 3, 0)
         self.picks_grid = QtWidgets.QGridLayout(picks_groupbox)
         self.picks_grid.addWidget(QtWidgets.QLabel("# Picks:"), 0, 0)
         self.n_picks = QtWidgets.QLabel()
