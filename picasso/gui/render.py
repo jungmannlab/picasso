@@ -430,15 +430,19 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # add non-scrollable elements - left side
         self.legend = QtWidgets.QCheckBox("Show legend")
+        self.legend.stateChanged.connect(self.update_viewport)
+        layout.addWidget(self.legend, 0, 0)
         self.wbackground = QtWidgets.QCheckBox(
             "Invert colors / white background"
         )
+        self.wbackground.stateChanged.connect(self.update_viewport)
+        layout.addWidget(self.wbackground, 2, 0)
         self.auto_display = QtWidgets.QCheckBox("Automatic display update")
         self.auto_display.setChecked(True)
-        self.auto_colors = QtWidgets.QCheckBox("Automatic coloring")
-        layout.addWidget(self.legend, 0, 0)
+        self.auto_display.stateChanged.connect(self.update_viewport)
         layout.addWidget(self.auto_display, 1, 0)
-        layout.addWidget(self.wbackground, 2, 0)
+        self.auto_colors = QtWidgets.QCheckBox("Automatic coloring")
+        self.auto_colors.stateChanged.connect(self.update_colors)
         layout.addWidget(self.auto_colors, 3, 0)
 
         # add buttons to save/load colors - right side
@@ -454,10 +458,7 @@ class DatasetDialog(QtWidgets.QDialog):
         # add scrollable area which will display all channels, below
         # the non-scrollable elements
         self.scroll_area = lib.ScrollableGroupBox("", self)
-
-        def size_hint() -> QtCore.QSize:
-            return QtCore.QSize(600, 300)
-        self.scroll_area.sizeHint = size_hint
+        self.scroll_area.sizeHint = lambda: QtCore.QSize(600, 300)
 
         layout.addWidget(self.scroll_area, 4, 0, 1, 3)
         self.checks = []
@@ -472,11 +473,6 @@ class DatasetDialog(QtWidgets.QDialog):
         self.scroll_area.add_widget(QtWidgets.QLabel(""), 0, 3)
         self.scroll_area.add_widget(QtWidgets.QLabel("Rel. Intensity"), 0, 4)
         self.scroll_area.add_widget(QtWidgets.QLabel("Close"), 0, 5)
-
-        self.legend.stateChanged.connect(self.update_viewport)
-        self.wbackground.stateChanged.connect(self.update_viewport)
-        self.auto_display.stateChanged.connect(self.update_viewport)
-        self.auto_colors.stateChanged.connect(self.update_colors)
 
         self.default_colors = [
             "red",
@@ -513,7 +509,7 @@ class DatasetDialog(QtWidgets.QDialog):
 
     def add_entry(self, path: str) -> None:
         """Add the new channel for the given path."""
-        # display only the characters after the last '/' for a long path
+        # Display only the characters after the last '/' for a long path
         if len(path) > 40:
             path = os.path.basename(path)
             path, ext = os.path.splitext(path)
@@ -570,12 +566,7 @@ class DatasetDialog(QtWidgets.QDialog):
         else:
             palette.setColor(
                 QtGui.QPalette.Window,
-                QtGui.QColor.fromRgbF(
-                    self.rgb[index][0],
-                    self.rgb[index][1],
-                    self.rgb[index][2],
-                    1,
-                )
+                QtGui.QColor.fromRgbF(*self.rgb[index], 1),
             )
         colordisp.setAutoFillBackground(True)
         colordisp.setPalette(palette)

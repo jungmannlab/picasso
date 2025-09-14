@@ -172,7 +172,7 @@ class ScrollableGroupBox(QtWidgets.QGroupBox):
         self.content_layout.addWidget(widget, row, column, height, width)
 
     def remove_widget(self, widget):
-        """Remove a widget from the grid layout inside the scroll 
+        """Remove a widget from the grid layout inside the scroll
         area."""
         self.content_layout.removeWidget(widget)
 
