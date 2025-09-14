@@ -458,8 +458,6 @@ class DatasetDialog(QtWidgets.QDialog):
         # add scrollable area which will display all channels, below
         # the non-scrollable elements
         self.scroll_area = lib.ScrollableGroupBox("", self)
-        self.scroll_area.sizeHint = lambda: QtCore.QSize(600, 300)
-
         layout.addWidget(self.scroll_area, 4, 0, 1, 3)
         self.checks = []
         self.title = []
@@ -786,6 +784,9 @@ class DatasetDialog(QtWidgets.QDialog):
             for i, color_ in enumerate(self.colorselection):
                 color_.setCurrentText(colornames[i])
             self.update_colors()
+
+    def sizeHint(self) -> QtCore.QSize:
+        return QtCore.QSize(600, 350)
 
 
 class PlotDialog(QtWidgets.QDialog):
@@ -4039,11 +4040,14 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Display Settings")
         self.resize(200, 0)
         self.setModal(False)
-        vbox = QtWidgets.QVBoxLayout(self)
+        scroll_box = lib.ScrollableGroupBox("", self)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self.layout().addWidget(scroll_box)
+        self.setMinimumSize(400, 600)
 
         # General
         general_groupbox = QtWidgets.QGroupBox("General")
-        vbox.addWidget(general_groupbox)
+        scroll_box.add_widget(general_groupbox, 0, 0)
         general_grid = QtWidgets.QGridLayout(general_groupbox)
         general_grid.addWidget(QtWidgets.QLabel("Zoom:"), 0, 0)
         self.zoom = QtWidgets.QDoubleSpinBox()
@@ -4052,7 +4056,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.zoom.valueChanged.connect(self.on_zoom_changed)
         general_grid.addWidget(self.zoom, 0, 1)
         general_grid.addWidget(
-            QtWidgets.QLabel("Display pixel size [nm]:"), 1, 0
+            QtWidgets.QLabel("Display pixel size (nm):"), 1, 0
         )
         self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
@@ -4075,7 +4079,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         # Contrast
         contrast_groupbox = QtWidgets.QGroupBox("Contrast")
-        vbox.addWidget(contrast_groupbox)
+        scroll_box.add_widget(contrast_groupbox, 1, 0)
         contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
         minimum_label = QtWidgets.QLabel("Min. Density:")
         contrast_grid.addWidget(minimum_label, 0, 0)
@@ -4146,7 +4150,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.min_blur_width.valueChanged.connect(self.render_scene)
         blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
 
-        vbox.addWidget(blur_groupbox)
+        scroll_box.add_widget(blur_groupbox, 2, 0)
         self.blur_methods = {
             points_button: None,
             smooth_button: "smooth",
@@ -4165,14 +4169,14 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.pixelsize.setKeyboardTracking(False)
         self.pixelsize.valueChanged.connect(self.update_scene)
         self.camera_grid.addWidget(self.pixelsize, 0, 1)
-        vbox.addWidget(camera_groupbox)
+        scroll_box.add_widget(camera_groupbox, 3, 0)
 
         # Scalebar
         self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.update_scene)
-        vbox.addWidget(self.scalebar_groupbox)
+        scroll_box.add_widget(self.scalebar_groupbox, 4, 0)
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
         scalebar_grid.addWidget(
             QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
@@ -4191,7 +4195,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         # Render
         self.render_groupbox = QtWidgets.QGroupBox("Render properties")
 
-        vbox.addWidget(self.render_groupbox)
+        scroll_box.add_widget(self.render_groupbox, 5, 0)
         render_grid = QtWidgets.QGridLayout(self.render_groupbox)
         render_grid.addWidget(QtWidgets.QLabel("Parameter:"), 0, 0)
         self.parameter = QtWidgets.QComboBox()
