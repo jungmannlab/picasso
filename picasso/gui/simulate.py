@@ -263,8 +263,8 @@ class Window(QtWidgets.QMainWindow):
         self.currentround = CURRENTROUND
         self.structureMode = True
 
-        self.grid = QtWidgets.QGridLayout()
-        self.grid.setSpacing(5)
+        scroll_box = lib.ScrollableGroupBox("", self)
+        self.setMinimumSize(800, 800)
 
         # CAMERA PARAMETERS
         camera_groupbox = QtWidgets.QGroupBox("Camera parameters")
@@ -825,14 +825,14 @@ class Window(QtWidgets.QMainWindow):
         self.changeNoise()
         self.changePaint()
 
-        pos_groupbox = QtWidgets.QGroupBox("Positions [Px]")
-        str_groupbox = QtWidgets.QGroupBox("Structure [nm]")
+        pos_groupbox = QtWidgets.QGroupBox("Positions (px)")
+        str_groupbox = QtWidgets.QGroupBox("Structure (nm)")
 
         posgrid = QtWidgets.QGridLayout(pos_groupbox)
         strgrid = QtWidgets.QGridLayout(str_groupbox)
 
-        self.figure1 = plt.figure()
-        self.figure2 = plt.figure()
+        self.figure1 = plt.figure(figsize=(2, 2), constrained_layout=True)
+        self.figure2 = plt.figure(figsize=(2, 2), constrained_layout=True)
         self.canvas1 = FigureCanvas(self.figure1)
         csize = 180
         self.canvas1.setMinimumSize(csize, csize)
@@ -846,35 +846,37 @@ class Window(QtWidgets.QMainWindow):
         self.mainpbar = QtWidgets.QProgressBar(self)
         # Arrange Buttons
         if ADVANCEDMODE:
-            self.grid.addWidget(pos_groupbox, 1, 0)
-            self.grid.addWidget(str_groupbox, 1, 1)
-            self.grid.addWidget(structure_groupbox, 2, 0, 2, 1)
-            self.grid.addWidget(camera_groupbox, 1, 2)
-            self.grid.addWidget(paint_groupbox, 3, 1)
-            self.grid.addWidget(imager_groupbox, 2, 1)
-            self.grid.addWidget(noise_groupbox, 2, 2)
-            self.grid.addLayout(btngridR, 3, 2)
-            self.grid.addWidget(self.mainpbar, 5, 0, 1, 4)
-            self.grid.addWidget(threed_groupbox, 4, 0)
-            self.grid.addWidget(handles_groupbox, 4, 1)
+            scroll_box.add_widget(pos_groupbox, 1, 0)
+            scroll_box.add_widget(str_groupbox, 1, 1)
+            scroll_box.add_widget(structure_groupbox, 2, 0, 2, 1)
+            scroll_box.add_widget(camera_groupbox, 1, 2)
+            scroll_box.add_widget(paint_groupbox, 3, 1)
+            scroll_box.add_widget(imager_groupbox, 2, 1)
+            scroll_box.add_widget(noise_groupbox, 2, 2)
+            scroll_box.content_layout.addLayout(btngridR, 3, 2)
+            scroll_box.add_widget(self.mainpbar, 5, 0, 1, 4)
+            scroll_box.add_widget(threed_groupbox, 4, 0)
+            scroll_box.add_widget(handles_groupbox, 4, 1)
         else:
             # Left side
-            self.grid.addWidget(pos_groupbox, 1, 0)
-            self.grid.addWidget(str_groupbox, 1, 1)
-            self.grid.addWidget(structure_groupbox, 2, 0)
-            self.grid.addWidget(paint_groupbox, 3, 0)
-            self.grid.addWidget(handles_groupbox, 4, 0)
-            self.grid.addWidget(threed_groupbox, 5, 0)
+            scroll_box.add_widget(pos_groupbox, 1, 0)
+            scroll_box.add_widget(str_groupbox, 1, 1)
+            scroll_box.add_widget(structure_groupbox, 2, 0)
+            scroll_box.add_widget(paint_groupbox, 3, 0)
+            scroll_box.add_widget(handles_groupbox, 4, 0)
+            scroll_box.add_widget(threed_groupbox, 5, 0)
 
             # Right side
-            self.grid.addWidget(imager_groupbox, 2, 1)
-            self.grid.addWidget(camera_groupbox, 3, 1)
-            self.grid.addLayout(btngridR, 4, 1, 2, 1)
-            self.grid.addWidget(self.mainpbar, 8, 0, 1, 4)
+            scroll_box.add_widget(imager_groupbox, 2, 1)
+            scroll_box.add_widget(camera_groupbox, 3, 1)
+            scroll_box.content_layout.addLayout(btngridR, 4, 1, 2, 1)
+            scroll_box.add_widget(self.mainpbar, 8, 0, 1, 4)
 
         mainWidget = QtWidgets.QWidget()
-        mainWidget.setLayout(self.grid)
+        layout = QtWidgets.QVBoxLayout()
+        mainWidget.setLayout(layout)
         self.setCentralWidget(mainWidget)
+        layout.addWidget(scroll_box)
         self.setGeometry(300, 300, 300, 150)
         # CALL FUNCTIONS
         self.generatePositions()
