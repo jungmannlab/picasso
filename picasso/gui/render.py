@@ -10010,10 +10010,6 @@ class Window(QtWidgets.QMainWindow):
             export_ims_action = file_menu.addAction("Export ROI for Imaris")
             export_ims_action.triggered.connect(self.export_fov_ims)
 
-        file_menu.addSeparator()
-        delete_action = file_menu.addAction("Remove all localizations")
-        delete_action.triggered.connect(self.remove_locs)
-
         # sound notification submenu
         file_menu.addSeparator()
         sounds_menu = file_menu.addMenu("Sound notifications")
@@ -10030,6 +10026,11 @@ class Window(QtWidgets.QMainWindow):
                 action.setChecked(True)
             sounds_menu.addAction(action)
         sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+
+        # remove all locs
+        file_menu.addSeparator()
+        delete_action = file_menu.addAction("Remove all localizations")
+        delete_action.triggered.connect(self.remove_locs)
 
         # menu bar - View
         view_menu = self.menu_bar.addMenu("View")
