@@ -23,7 +23,6 @@ import yaml
 import h5py
 import nd2
 import numpy as np
-from nd2reader import ND2Reader
 from PyQt5.QtWidgets import QWidget, QMessageBox
 
 from . import lib, __version__
@@ -543,49 +542,36 @@ class AbstractPicassoMovie(abc.ABC):
 class ND2Movie(AbstractPicassoMovie):
     """Subclass of the AbstractPicassoMovie to implement reading Nikon
     nd2 files.
-    Two packages for reading nd2 files have been tested and are used
-    here:
-    * nd2.ND2File - makes all metadata accessible, and uses dask arrays
-      which is good for multiprocessing. Nonetheless, converting all
-      data to numpy arrays takes long (2000 frames/s for dask planes; 20
-      frames/s with compute() on dask planes to get numpy)
-    * nd2reader.ND2Reader - image reading is a bit faster than
-    TiffMultiMap (ca 800 frames/s), and the file is realizable for
-    multiprocessing. However, very limited metadata is available.
 
-    This class implements a hybrid version which uses both packages:
-    nd2 for metadata retrieval, and nd2reader for image data
-    retrieval."""
+    This class implements a version which uses only ``nd2``."""
 
     def __init__(self, path: str, verbose: bool = False):
         super().__init__()
         if verbose:
             print("Reading info from {}".format(path))
         self.path = os.path.abspath(path)
-        nd2file = nd2.ND2File(path)
-        self.sizes = nd2file.sizes
+        self.nd2file = nd2.ND2File(path)
+        self.dask = self.nd2file.to_dask()
+        self.sizes = self.nd2file.sizes
 
         required_dims = ['T', 'Y', 'X']  # exactly these, not more
         for dim in required_dims:
-            if dim not in nd2file.sizes.keys():
+            if dim not in self.nd2file.sizes.keys():
                 raise KeyError(
                     'Required dimension {:s} not in file {:s}'.format(
                         dim, self.path))
-        if nd2file.ndim != len(required_dims):
+        if self.nd2file.ndim != len(required_dims):
             raise KeyError(
                 'File {:s} has dimensions {:s} '.format(
-                    self.path, str(nd2file.sizes.keys())) +
+                    self.path, str(self.nd2file.sizes.keys())) +
                 'but should have exactly {:s}.'.format(str(required_dims)))
 
-        self.meta = self.get_metadata(nd2file)
-
-        self.nd2data = ND2Reader(self.path)
+        self.meta = self.get_metadata(self.nd2file)
         self._shape = [
-            self.nd2data.metadata['num_frames'],
-            self.nd2data.metadata['width'],
-            self.nd2data.metadata['height'],
+            self.nd2file.sizes['T'],
+            self.nd2file.sizes['X'],
+            self.nd2file.sizes['Y'],
         ]
-        nd2file.close()  # may crash without closing the file!
 
     def info(self) -> dict:
         return self.meta
@@ -813,7 +799,7 @@ class ND2Movie(AbstractPicassoMovie):
         currlvl[keys[-1]] = val
 
     def __enter__(self) -> ND2Movie:
-        return self.nd2data
+        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
@@ -833,7 +819,7 @@ class ND2Movie(AbstractPicassoMovie):
         return self._shape
 
     def close(self):
-        self.nd2data.close()
+        self.nd2file.close()
 
     def get_frame(self, index: int) -> np.ndarray:
         """Load one frame of the movie
@@ -848,7 +834,7 @@ class ND2Movie(AbstractPicassoMovie):
         frame : np.ndarray
             2D array representing the image data of the frame
         """
-        return self.nd2data[index]
+        return self.dask[index].compute()
 
     def tofile(self, file_handle, byte_order=None):
         raise NotImplementedError('Cannot write .nd2 file.')

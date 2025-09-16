@@ -24,6 +24,7 @@ import numpy as np
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi, \
     __version__
 from PyQt5 import QtCore, QtGui, QtWidgets
+from playsound3 import playsound
 
 try:
     from pygpufit import gpufit
@@ -592,12 +593,15 @@ class ParametersDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.window = parent
         self.setWindowTitle("Parameters")
-        self.resize(300, 0)
         self.setModal(False)
 
-        vbox = QtWidgets.QVBoxLayout(self)
+        scroll_box = lib.ScrollableGroupBox("", self)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self.layout().addWidget(scroll_box)
+        self.resize(600, 800)
+
         identification_groupbox = QtWidgets.QGroupBox("Identification")
-        vbox.addWidget(identification_groupbox)
+        scroll_box.add_widget(identification_groupbox, 0, 0)
         identification_grid = QtWidgets.QGridLayout(identification_groupbox)
 
         # Box Size
@@ -655,9 +659,11 @@ class ParametersDialog(QtWidgets.QDialog):
         hbox.addWidget(self.mng_max_spinbox)
 
         # ROI
-        identification_grid.addWidget(
-            QtWidgets.QLabel("ROI (y_min,x_min,y_max,x_max):"), 5, 0,
+        label = QtWidgets.QLabel(
+            "ROI (y<sub>min</sub>,x<sub>min</sub>,"
+            "y<sub>max</sub>,x<sub>max</sub>):"
         )
+        identification_grid.addWidget(label, 5, 0,)
         self.roi_edit = QtWidgets.QLineEdit()
         regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
         validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
@@ -676,7 +682,7 @@ class ParametersDialog(QtWidgets.QDialog):
         if "Cameras" in CONFIG:
             # Experiment settings
             exp_groupbox = QtWidgets.QGroupBox("Experiment settings")
-            vbox.addWidget(exp_groupbox)
+            scroll_box.add_widget(exp_groupbox, 1, 0)
             exp_grid = QtWidgets.QGridLayout(exp_groupbox)
             exp_grid.addWidget(QtWidgets.QLabel("Camera:"), 0, 0)
             self.camera = QtWidgets.QComboBox()
@@ -750,7 +756,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Photon conversion
         photon_groupbox = QtWidgets.QGroupBox("Photon Conversion")
-        vbox.addWidget(photon_groupbox)
+        scroll_box.add_widget(photon_groupbox, 2, 0)
         photon_grid = QtWidgets.QGridLayout(photon_groupbox)
 
         # EM Gain
@@ -798,7 +804,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Fit Settings
         fit_groupbox = QtWidgets.QGroupBox("Fit Settings")
-        vbox.addWidget(fit_groupbox)
+        scroll_box.add_widget(fit_groupbox, 3, 0)
         fit_grid = QtWidgets.QGridLayout(fit_groupbox)
 
         fit_grid.addWidget(QtWidgets.QLabel("Method:"), 1, 0)
@@ -853,7 +859,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # 3D
         z_groupbox = QtWidgets.QGroupBox("3D via Astigmatism")
-        vbox.addWidget(z_groupbox)
+        scroll_box.add_widget(z_groupbox, 4, 0)
 
         z_grid = QtWidgets.QGridLayout(z_groupbox)
         z_grid.addWidget(
@@ -895,7 +901,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Sample quality
         quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
-        vbox.addWidget(quality_groupbox)
+        scroll_box.add_widget(quality_groupbox, 5, 0)
         quality_grid = QtWidgets.QGridLayout(quality_groupbox)
         self.quality_check = QtWidgets.QPushButton(
             "Estimate and add to database"
@@ -1354,6 +1360,22 @@ class Window(QtWidgets.QMainWindow):
         export_current_action = file_menu.addAction("Export current view")
         export_current_action.setShortcut("Ctrl+E")
         export_current_action.triggered.connect(self.export_current)
+
+        file_menu.addSeparator()
+        sounds_menu = file_menu.addMenu("Sound notifications")
+        sounds_actiongroup = QtWidgets.QActionGroup(file_menu)
+        default_sound_path = lib.get_sound_notification_path()  # last used
+        default_sound_name = os.path.basename(str(default_sound_path))
+        for sound in lib.get_available_sound_notifications():
+            sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
+            action = sounds_actiongroup.addAction(
+                QtWidgets.QAction(sound_name, sounds_menu, checkable=True)
+            )
+            action.setObjectName(sound)  # store full name
+            if default_sound_name == sound:
+                action.setChecked(True)
+            sounds_menu.addAction(action)
+        sounds_actiongroup.triggered.connect(lib.set_sound_notification)
 
         """ View """
         view_menu = menu_bar.addMenu("View")
@@ -1883,15 +1905,16 @@ class Window(QtWidgets.QMainWindow):
         box = parameters["Box Size"]
         mng = parameters["Min. Net Gradient"]
         message = (
-            "Identifying in frame {:,} / {:,}"
-            " (Box Size: {:,}; Min. Net Gradient: {:,}) ..."
-        ).format(frame_number, n_frames, box, mng)
+            f"Identifying in frame {frame_number} / {n_frames}"
+            f" (Box Size: {box}; Min. Net Gradient: {mng}) ..."
+        )
         self.status_bar.showMessage(message)
 
     def on_identify_finished(
         self,
         parameters: dict,
         roi: list[int],
+        elapsed_time: float,
         identifications: np.recarray,
         fit_afterwards: bool,
         calibrate_z: bool,
@@ -1906,13 +1929,18 @@ class Window(QtWidgets.QMainWindow):
             box = parameters["Box Size"]
             mng = parameters["Min. Net Gradient"]
             message = (
-                "Identified {:,} spots (Box Size: {:,}; "
-                "Min. Net Gradient: {:,}). Ready for fit."
-            ).format(n_identifications, box, mng)
+                f"Identified {n_identifications} spots (Box Size: {box}; "
+                f"Min. Net Gradient: {mng}). Ready for fit."
+            )
             self.status_bar.showMessage(message)
             self.identifications = identifications
             self.ready_for_fit = True
             self.draw_frame()
+            # sound notification
+            if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
+                sound_path = lib.get_sound_notification_path()
+                if sound_path is not None:
+                    playsound(sound_path, block=False)
             if fit_afterwards:
                 self.fit(calibrate_z=calibrate_z)
 
@@ -1972,7 +2000,7 @@ class Window(QtWidgets.QMainWindow):
         if self.parameters_dialog.gpufit_checkbox.isChecked():
             self.status_bar.showMessage("Fitting spots by GPUfit...")
         else:
-            message = "Fitting spot {:,} / {:,} ...".format(curr, total)
+            message = f"Fitting spot {curr} / {total} ..."
             self.status_bar.showMessage(message)
 
     def on_fit_finished(
@@ -1990,6 +2018,11 @@ class Window(QtWidgets.QMainWindow):
         )
         self.locs = locs
         self.draw_frame()
+        # sound notification
+        if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
+            sound_path = lib.get_sound_notification_path()
+            if sound_path is not None:
+                playsound(sound_path, block=False)
         base, ext = os.path.splitext(self.movie_path)
         if calibrate_z:
             step, ok = QtWidgets.QInputDialog.getDouble(
@@ -2006,12 +2039,21 @@ class Window(QtWidgets.QMainWindow):
                     self, "Save 3D calibration", out_path, filter="*.yaml"
                 )
                 if path:
+                    t0 = time.time()
                     zfit.calibrate_z(
                         locs,
                         self.info,
                         step,
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,
+                    )
+                    dt = time.time() - t0
+                    if dt > lib.SOUND_NOTIFICATION_DURATION:
+                        sound_path = lib.get_sound_notification_path()
+                        if sound_path is not None:
+                            playsound(sound_path, block=False)
+                    self.status_bar.showMessage(
+                        f"3D calibrated in {dt:.2f} seconds."
                     )
         else:
             if fit_z:
@@ -2031,12 +2073,15 @@ class Window(QtWidgets.QMainWindow):
     ) -> None:
         """Handle the completion of the z fitting process."""
         self.status_bar.showMessage(
-            "Fitted {:,} z coordinates in {:.2f} seconds.".format(
-                len(locs), elapsed_time
-            )
+            f"Fitted {len(locs)} z coordinates in {elapsed_time:.2f} seconds."
         )
         self.locs = locs
         self.save_locs_after_fit()
+        # sound notification
+        if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
+            sound_path = lib.get_sound_notification_path()
+            if sound_path is not None:
+                playsound(sound_path, block=False)
 
     def save_locs_after_fit(self) -> None:
         """Save localizations after fitting to an .hdf5 file."""
@@ -2155,7 +2200,7 @@ class IdentificationWorker(QtCore.QThread):
     progress."""
 
     progressMade = QtCore.pyqtSignal(int, dict)
-    finished = QtCore.pyqtSignal(dict, object, np.recarray, bool, bool)
+    finished = QtCore.pyqtSignal(dict, object, float, np.recarray, bool, bool)
 
     def __init__(
         self,
@@ -2173,6 +2218,7 @@ class IdentificationWorker(QtCore.QThread):
 
     def run(self) -> None:
         N = len(self.movie)
+        t0 = time.time()
         curr, futures = localize.identify_async(
             self.movie,
             self.parameters["Min. Net Gradient"],
@@ -2184,9 +2230,11 @@ class IdentificationWorker(QtCore.QThread):
             time.sleep(0.2)
         self.progressMade.emit(curr[0], self.parameters)
         identifications = localize.identifications_from_futures(futures)
+        elapsed_time = time.time() - t0
         self.finished.emit(
             self.parameters,
             self.roi,
+            elapsed_time,
             identifications,
             self.fit_afterwards,
             self.calibrate_z,

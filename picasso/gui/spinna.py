@@ -2733,8 +2733,8 @@ class SimulationsTab(QtWidgets.QDialog):
                     if "Pixelsize" in element and pixelsize is None:
                         pixelsize = element["Pixelsize"]
                 if "Render : Pick" in element.values():
-                    if "Total Picked Area (um^2)" in element:
-                        area = element["Total Picked Area (um^2)"]
+                    if "Area (um^2)" in element:
+                        area = element["Area (um^2)"]
                         # set the observed density of the molecules
                         idx = self.targets.index(target)
                         self.densities_spins[idx].setValue(len(locs) / area)
@@ -4007,6 +4007,24 @@ class Window(QtWidgets.QMainWindow):
         self.tabs.addTab(self.mask_generator_tab, "Mask generation")
 
         self.tabs.setCurrentIndex(0)
+
+        # menu bar
+        self.menu_bar = self.menuBar()
+        file_menu = self.menu_bar.addMenu("File")
+        sounds_menu = file_menu.addMenu("Sound notifications")
+        sounds_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
+        default_sound_path = lib.get_sound_notification_path()  # last used
+        default_sound_name = os.path.basename(str(default_sound_path))
+        for sound in lib.get_available_sound_notifications():
+            sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
+            action = sounds_actiongroup.addAction(
+                QtWidgets.QAction(sound_name, sounds_menu, checkable=True)
+            )
+            action.setObjectName(sound)  # store full name
+            if default_sound_name == sound:
+                action.setChecked(True)
+            sounds_menu.addAction(action)
+        sounds_actiongroup.triggered.connect(lib.set_sound_notification)
 
 
 def main():

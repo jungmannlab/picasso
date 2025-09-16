@@ -17,6 +17,7 @@ call pip install pyinstaller==5.12
 call pyinstaller ../pyinstaller/picasso.spec -y --clean
 call pyinstaller ../pyinstaller/picassow.spec -y --clean
 call conda deactivate
+call conda remove -n picasso_installer --all -y
 
 call robocopy ../../picasso dist/picasso/picasso /E
 

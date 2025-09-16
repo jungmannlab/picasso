@@ -2848,20 +2848,21 @@ class SPINNA():
             number of simulations to be tested and M is the number of
             structures in mixer. If dict, keys are structure names and
             values are lists of numbers of structures to be simulated.
-        save : str (default='')
+        save : str, optional
             Path to save numbers of structures tested and their
             corresponding scores as a .csv file. If '' is given, the
-            file is not saved.
-        asynch : bool (default=True)
+            file is not saved. Default is ''.
+        asynch : bool, optional
             If True, multiprocessing is used (80% of CPU cores are
-            used). Else, single thread is used for fitting.
-        bootstrap : bool (default=False)
+            used). Else, single thread is used for fitting. Default is
+            True.
+        bootstrap : bool, optional
             If True, bootstrapping is used to estimate the fitting
-            error.
-        callback : {lib.ProgressDialog, "console", None} (default=None)
+            error. Default is False.
+        callback : {lib.ProgressDialog, "console", None}, optional
             Progress bar to track fitting progress. If "console", the
             progress bar is displayed in the console. If None, no
-            progress bar is displayed.
+            progress bar is displayed. Default is None.
 
         Returns
         -------
@@ -2891,6 +2892,12 @@ class SPINNA():
         tuple[tuple[np.ndarray, ...], tuple[float, ...]]
     ):
         """Alias for ``self.fit()``."""
+        assert callback is None or isinstance(callback, lib.ProgressDialog) \
+            or callback == "console", "callback must be a ProgressDialog," \
+            " 'console', or None."
+        if callback is None:
+            callback = lib.MockProgress()
+
         # check and optionally convert N_structures
         if isinstance(N_structures, dict):
             N = len(list(N_structures.values())[0])  # number of simulations
@@ -2916,15 +2923,15 @@ class SPINNA():
             while self.n_futures_done(fs) < N:  # display progress
                 fd = self.n_futures_done(fs)
                 fd_ = int(fd * N_ / N)
-                if fd > 0 and isinstance(callback, lib.ProgressDialog):
+                if fd > 0 and callback != "console":
                     callback.setLabelText(f"{self.progress_title} {fd_}/{N_}")
                     callback.set_value(fd_)
                 elif fd > 0 and callback == "console":
                     progress_bar.update(fd_ - progress_bar.n)
                 time.sleep(0.1)
-            if isinstance(callback, lib.ProgressDialog):
+            if callback != "console":
                 callback.set_value(N_)
-            elif callback == "console":
+            else:
                 progress_bar.update(fd_ - progress_bar.n)
                 progress_bar.close()
             N_structures, scores = self.scores_from_futures(fs)
@@ -2958,7 +2965,7 @@ class SPINNA():
             )
 
             # initialize bootstrapping
-            if isinstance(callback, lib.ProgressDialog):
+            if callback != "console":
                 callback.setMaximum(len(N_structures_subset))
             scores = []
             boot_props = []
@@ -3031,7 +3038,11 @@ class SPINNA():
     def NN_scorer(
         self,
         N_structures: np.ndarray,
-        callback: lib.ProgressDialog | Literal["console"] | None = None,
+        callback: (
+            lib.ProgressDialog
+            | Literal["console"]
+            | lib.MockProgress
+        ) = lib.MockProgress(),
     ) -> tuple[np.ndarray, np.ndarray]:
         """Score the simulations similarity to the ground truth dataset
         based on their nearest neighbor distances distribution using
@@ -3047,10 +3058,10 @@ class SPINNA():
             simulated for each iteration. Shape (N, M), where N is the
             number of simulations to be tested and M is the number of
             structures in mixer.
-        callback : {lib.ProgressDialog, "console", None} (default=None)
+        callback : {lib.ProgressDialog, "console", lib.MockProgress}, optional
             Progress bar to track fitting progress. If "console", the
-            progress bar is displayed in the console. If None, no
-            progress bar is displayed.
+            progress bar is displayed in the console. If MockProgress,
+            no progress bar is displayed. Default is MockProgress.
 
         Returns
         -------
@@ -3076,7 +3087,7 @@ class SPINNA():
             )
             # score the simulation results
             scores[ii] = NND_score(dists_sim, self.dists_gt)
-            if isinstance(callback, lib.ProgressDialog):
+            if callback != "console":
                 callback.setLabelText(
                     f"{self.progress_title} {ii+1}/{N_structures.shape[0]}"
                 )

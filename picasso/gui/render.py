@@ -1,5 +1,5 @@
 """
-    picasos.gui.render
+    picasso.gui.render
     ~~~~~~~~~~~~~~~~~~
 
     Graphical user interface for rendering localization images.
@@ -419,49 +419,58 @@ class DatasetDialog(QtWidgets.QDialog):
         self.window = window
         self.setWindowTitle("Datasets")
         self.setModal(False)
-        self.layout = QtWidgets.QGridLayout()
         self.checks = []
         self.title = []
         self.closebuttons = []
         self.colorselection = []
         self.colordisp_all = []
         self.intensitysettings = []
-        self.setLayout(self.layout)
+        layout = QtWidgets.QGridLayout()
+        self.setLayout(layout)
+
+        # add non-scrollable elements - left side
         self.legend = QtWidgets.QCheckBox("Show legend")
+        self.legend.stateChanged.connect(self.update_viewport)
+        layout.addWidget(self.legend, 0, 0)
         self.wbackground = QtWidgets.QCheckBox(
             "Invert colors / white background"
         )
+        self.wbackground.stateChanged.connect(self.update_viewport)
+        layout.addWidget(self.wbackground, 2, 0)
         self.auto_display = QtWidgets.QCheckBox("Automatic display update")
         self.auto_display.setChecked(True)
-        self.auto_colors = QtWidgets.QCheckBox("Automatic coloring")
-        self.layout.addWidget(self.legend, 0, 0, 1, 2)
-        self.layout.addWidget(self.auto_display, 1, 0, 1, 2)
-        self.layout.addWidget(self.wbackground, 2, 0, 1, 2)
-        self.layout.addWidget(self.auto_colors, 3, 0, 1, 2)
-        self.layout.addWidget(QtWidgets.QLabel("Files"), 4, 0)
-        self.layout.addWidget(QtWidgets.QLabel("Change title"), 4, 1)
-        self.layout.addWidget(QtWidgets.QLabel("Color"), 4, 2)
-        self.layout.addWidget(QtWidgets.QLabel(""), 4, 3)
-        self.layout.addWidget(QtWidgets.QLabel("Rel. Intensity"), 4, 4)
-        self.layout.addWidget(QtWidgets.QLabel("Close"), 4, 5)
-        self.legend.stateChanged.connect(self.update_viewport)
-        self.wbackground.stateChanged.connect(self.update_viewport)
         self.auto_display.stateChanged.connect(self.update_viewport)
+        layout.addWidget(self.auto_display, 1, 0)
+        self.auto_colors = QtWidgets.QCheckBox("Automatic coloring")
         self.auto_colors.stateChanged.connect(self.update_colors)
+        layout.addWidget(self.auto_colors, 3, 0)
 
-        # save and load color list
+        # add buttons to save/load colors - right side
         save_button = QtWidgets.QPushButton("Save colors")
-        self.layout.addWidget(
-            save_button, 0, self.layout.columnCount() - 2, 1, 2
-        )
+        layout.addWidget(save_button, 0, 2)
         save_button.setFocusPolicy(QtCore.Qt.NoFocus)
         save_button.clicked.connect(self.save_colors)
         load_button = QtWidgets.QPushButton("Load colors")
-        self.layout.addWidget(
-            load_button, 1, self.layout.columnCount() - 2, 1, 2
-        )
+        layout.addWidget(load_button, 1, 2)
         load_button.setFocusPolicy(QtCore.Qt.NoFocus)
         load_button.clicked.connect(self.load_colors)
+
+        # add scrollable area which will display all channels, below
+        # the non-scrollable elements
+        self.scroll_area = lib.ScrollableGroupBox("", self)
+        layout.addWidget(self.scroll_area, 4, 0, 1, 3)
+        self.checks = []
+        self.title = []
+        self.closebuttons = []
+        self.colorselection = []
+        self.colordisp_all = []
+        self.intensitysettings = []
+        self.scroll_area.add_widget(QtWidgets.QLabel("Files"), 0, 0)
+        self.scroll_area.add_widget(QtWidgets.QLabel("Change title"), 0, 1)
+        self.scroll_area.add_widget(QtWidgets.QLabel("Color"), 0, 2)
+        self.scroll_area.add_widget(QtWidgets.QLabel(""), 0, 3)
+        self.scroll_area.add_widget(QtWidgets.QLabel("Rel. Intensity"), 0, 4)
+        self.scroll_area.add_widget(QtWidgets.QLabel("Close"), 0, 5)
 
         self.default_colors = [
             "red",
@@ -498,14 +507,14 @@ class DatasetDialog(QtWidgets.QDialog):
 
     def add_entry(self, path: str) -> None:
         """Add the new channel for the given path."""
-        # display only the characters after the last '/' for a long path
+        # Display only the characters after the last '/' for a long path
         if len(path) > 40:
             path = os.path.basename(path)
             path, ext = os.path.splitext(path)
 
         # Create 3 buttons for checking, naming and closing the channel
         c = QtWidgets.QCheckBox(path)
-        currentline = self.layout.rowCount()
+        currentline = self.scroll_area.content_layout.rowCount()
         t = QtWidgets.QPushButton("#")
         t.setObjectName(str(currentline))
         p = QtWidgets.QPushButton("x")
@@ -555,12 +564,7 @@ class DatasetDialog(QtWidgets.QDialog):
         else:
             palette.setColor(
                 QtGui.QPalette.Window,
-                QtGui.QColor.fromRgbF(
-                    self.rgb[index][0],
-                    self.rgb[index][1],
-                    self.rgb[index][2],
-                    1,
-                )
+                QtGui.QColor.fromRgbF(*self.rgb[index], 1),
             )
         colordisp.setAutoFillBackground(True)
         colordisp.setPalette(palette)
@@ -575,12 +579,12 @@ class DatasetDialog(QtWidgets.QDialog):
         self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
 
         # add all the widgets to the Dataset Dialog
-        self.layout.addWidget(c, currentline, 0)
-        self.layout.addWidget(t, currentline, 1)
-        self.layout.addWidget(colordrop, currentline, 2)
-        self.layout.addWidget(colordisp, currentline, 3)
-        self.layout.addWidget(intensity, currentline, 4)
-        self.layout.addWidget(p, currentline, 5)
+        self.scroll_area.add_widget(c, currentline, 0)
+        self.scroll_area.add_widget(t, currentline, 1)
+        self.scroll_area.add_widget(colordrop, currentline, 2)
+        self.scroll_area.add_widget(colordisp, currentline, 3)
+        self.scroll_area.add_widget(intensity, currentline, 4)
+        self.scroll_area.add_widget(p, currentline, 5)
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -631,12 +635,12 @@ class DatasetDialog(QtWidgets.QDialog):
             self.window.remove_locs()
         else:
             # remove widgets from the Dataset Dialog
-            self.layout.removeWidget(self.checks[i])
-            self.layout.removeWidget(self.title[i])
-            self.layout.removeWidget(self.colorselection[i])
-            self.layout.removeWidget(self.colordisp_all[i])
-            self.layout.removeWidget(self.intensitysettings[i])
-            self.layout.removeWidget(self.closebuttons[i])
+            self.scroll_area.remove_widget(self.checks[i])
+            self.scroll_area.remove_widget(self.title[i])
+            self.scroll_area.remove_widget(self.colorselection[i])
+            self.scroll_area.remove_widget(self.colordisp_all[i])
+            self.scroll_area.remove_widget(self.intensitysettings[i])
+            self.scroll_area.remove_widget(self.closebuttons[i])
 
             # delete the widgets from the lists
             del self.checks[i]
@@ -780,6 +784,9 @@ class DatasetDialog(QtWidgets.QDialog):
             for i, color_ in enumerate(self.colorselection):
                 color_.setCurrentText(colornames[i])
             self.update_colors()
+
+    def sizeHint(self) -> QtCore.QSize:
+        return QtCore.QSize(600, 350)
 
 
 class PlotDialog(QtWidgets.QDialog):
@@ -2846,10 +2853,14 @@ class InfoDialog(QtWidgets.QDialog):
         self.lp = None
         self.nena_calculated = False
         self.change_fov = ChangeFOV(self.window)
-        vbox = QtWidgets.QVBoxLayout(self)
+        scroll_box = lib.ScrollableGroupBox("", self)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self.layout().addWidget(scroll_box)
+        self.setMinimumSize(300, 600)
+
         # Display
         display_groupbox = QtWidgets.QGroupBox("Display")
-        vbox.addWidget(display_groupbox)
+        scroll_box.add_widget(display_groupbox, 0, 0)
         display_grid = QtWidgets.QGridLayout(display_groupbox)
         display_grid.addWidget(QtWidgets.QLabel("Image width:"), 0, 0)
         self.width_label = QtWidgets.QLabel()
@@ -2872,7 +2883,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # Movie
         movie_groupbox = QtWidgets.QGroupBox("Movie")
-        vbox.addWidget(movie_groupbox)
+        scroll_box.add_widget(movie_groupbox, 1, 0)
         self.movie_grid = QtWidgets.QGridLayout(movie_groupbox)
         self.movie_grid.addWidget(
             QtWidgets.QLabel("Median fit precision:"), 0, 0
@@ -2887,7 +2898,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.movie_grid.addWidget(self.nena_button, 1, 1)
         # FOV
         fov_groupbox = QtWidgets.QGroupBox("Field of view")
-        vbox.addWidget(fov_groupbox)
+        scroll_box.add_widget(fov_groupbox, 2, 0)
         fov_grid = QtWidgets.QGridLayout(fov_groupbox)
         fov_grid.addWidget(QtWidgets.QLabel("# Localizations:"), 0, 0)
         self.locs_label = QtWidgets.QLabel()
@@ -2895,7 +2906,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # Picks
         picks_groupbox = QtWidgets.QGroupBox("Picks")
-        vbox.addWidget(picks_groupbox)
+        scroll_box.add_widget(picks_groupbox, 3, 0)
         self.picks_grid = QtWidgets.QGridLayout(picks_groupbox)
         self.picks_grid.addWidget(QtWidgets.QLabel("# Picks:"), 0, 0)
         self.n_picks = QtWidgets.QLabel()
@@ -3150,7 +3161,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
     save_mask_button : QPushButton
         Used for saving the current mask as a .npy file.
     _size_hint : tuple
-        Determines the minimum size of the dialog.
+        Determines the recommended size of the dialog.
     window : QMainWindow
         Instance of the main window.
     x_max : float
@@ -4033,11 +4044,14 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Display Settings")
         self.resize(200, 0)
         self.setModal(False)
-        vbox = QtWidgets.QVBoxLayout(self)
+        scroll_box = lib.ScrollableGroupBox("", self)
+        self.setLayout(QtWidgets.QVBoxLayout())
+        self.layout().addWidget(scroll_box)
+        self.setMinimumSize(400, 600)
 
         # General
         general_groupbox = QtWidgets.QGroupBox("General")
-        vbox.addWidget(general_groupbox)
+        scroll_box.add_widget(general_groupbox, 0, 0)
         general_grid = QtWidgets.QGridLayout(general_groupbox)
         general_grid.addWidget(QtWidgets.QLabel("Zoom:"), 0, 0)
         self.zoom = QtWidgets.QDoubleSpinBox()
@@ -4046,7 +4060,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.zoom.valueChanged.connect(self.on_zoom_changed)
         general_grid.addWidget(self.zoom, 0, 1)
         general_grid.addWidget(
-            QtWidgets.QLabel("Display pixel size [nm]:"), 1, 0
+            QtWidgets.QLabel("Display pixel size (nm):"), 1, 0
         )
         self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
@@ -4069,7 +4083,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         # Contrast
         contrast_groupbox = QtWidgets.QGroupBox("Contrast")
-        vbox.addWidget(contrast_groupbox)
+        scroll_box.add_widget(contrast_groupbox, 1, 0)
         contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
         minimum_label = QtWidgets.QLabel("Min. Density:")
         contrast_grid.addWidget(minimum_label, 0, 0)
@@ -4140,7 +4154,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.min_blur_width.valueChanged.connect(self.render_scene)
         blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
 
-        vbox.addWidget(blur_groupbox)
+        scroll_box.add_widget(blur_groupbox, 2, 0)
         self.blur_methods = {
             points_button: None,
             smooth_button: "smooth",
@@ -4159,14 +4173,14 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.pixelsize.setKeyboardTracking(False)
         self.pixelsize.valueChanged.connect(self.update_scene)
         self.camera_grid.addWidget(self.pixelsize, 0, 1)
-        vbox.addWidget(camera_groupbox)
+        scroll_box.add_widget(camera_groupbox, 3, 0)
 
         # Scalebar
         self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.update_scene)
-        vbox.addWidget(self.scalebar_groupbox)
+        scroll_box.add_widget(self.scalebar_groupbox, 4, 0)
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
         scalebar_grid.addWidget(
             QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
@@ -4185,7 +4199,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         # Render
         self.render_groupbox = QtWidgets.QGroupBox("Render properties")
 
-        vbox.addWidget(self.render_groupbox)
+        scroll_box.add_widget(self.render_groupbox, 5, 0)
         render_grid = QtWidgets.QGridLayout(self.render_groupbox)
         render_grid.addWidget(QtWidgets.QLabel("Parameter:"), 0, 0)
         self.parameter = QtWidgets.QComboBox()
@@ -9996,6 +10010,24 @@ class Window(QtWidgets.QMainWindow):
             export_ims_action = file_menu.addAction("Export ROI for Imaris")
             export_ims_action.triggered.connect(self.export_fov_ims)
 
+        # sound notification submenu
+        file_menu.addSeparator()
+        sounds_menu = file_menu.addMenu("Sound notifications")
+        sounds_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
+        default_sound_path = lib.get_sound_notification_path()  # last used
+        default_sound_name = os.path.basename(str(default_sound_path))
+        for sound in lib.get_available_sound_notifications():
+            sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
+            action = sounds_actiongroup.addAction(
+                QtWidgets.QAction(sound_name, sounds_menu, checkable=True)
+            )
+            action.setObjectName(sound)  # store full name
+            if default_sound_name == sound:
+                action.setChecked(True)
+            sounds_menu.addAction(action)
+        sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+
+        # remove all locs
         file_menu.addSeparator()
         delete_action = file_menu.addAction("Remove all localizations")
         delete_action.triggered.connect(self.remove_locs)
