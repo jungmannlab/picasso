@@ -5791,6 +5791,14 @@ class View(QtWidgets.QLabel):
                     painter.setPen(QtGui.QColor("red"))
 
                 for i, pick in enumerate(self._picks):
+                    # check that the pick is within the view
+                    if (
+                        pick[0] < self.viewport[0][1]
+                        or pick[0] > self.viewport[1][1]
+                        or pick[1] < self.viewport[0][0]
+                        or pick[1] > self.viewport[1][0]
+                    ):
+                        continue
 
                     # convert from camera units to display units
                     cx, cy = self.map_to_view(*pick)
