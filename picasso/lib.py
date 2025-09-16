@@ -166,6 +166,12 @@ class MockProgress():
     def close(self):
         pass
 
+    def setLabelText(self, text):
+        pass
+
+    def play_sound_notification(self):
+        pass
+
 
 class ScrollableGroupBox(QtWidgets.QGroupBox):
     """QGroupBox with QScrollArea as the top widget that enables
