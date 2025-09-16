@@ -112,61 +112,6 @@ def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     return n
 
 
-@numba.jit(nopython=True, nogil=True)
-def n_block_locs_at(
-    x: float,
-    y: float,
-    size: float,
-    K: int,
-    L: int,
-    block_starts: np.ndarray,
-    block_ends: np.ndarray,
-) -> int:
-    """Return the number of localizations in the blocks around the
-    given coordinates.
-
-    Parameters
-    ----------
-    x : float
-        x coordinate.
-    y : float
-        y coordinate.
-    size : float
-        Size of the blocks.
-    K : int
-        Number of blocks in y direction.
-    L : int
-        Number of blocks in x direction.
-    block_starts : np.ndarray
-        Block start indices.
-    block_ends : np.ndarray
-        Block end indices.
-
-    Returns
-    -------
-    n_block_locs : int
-        Number of localizations in the blocks around the given
-        coordinates.
-    """
-    x_index = np.uint32(x / size)
-    y_index = np.uint32(y / size)
-    step = 0
-    for k in range(y_index - 1, y_index + 2):
-        if 0 < k < K:
-            for ll in range(x_index - 1, x_index + 2):
-                if 0 < ll < L:
-                    if step == 0:
-                        n_block_locs = np.uint32(
-                            block_ends[k][ll] - block_starts[k][ll]
-                        )
-                        step = 1
-                    else:
-                        n_block_locs += np.uint32(
-                            block_ends[k][ll] - block_starts[k][ll]
-                        )
-    return n_block_locs
-
-
 def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
     """Return the localizations in the blocks around the given
     coordinates.
@@ -460,15 +405,15 @@ def pick_similar(
             y_r = y_r2
         for j, y_grid in enumerate(y):
             y_range = y_r[j]
-            n_block_locs = _n_block_locs_at(
-                x_range, y_range, K, L, block_starts, block_ends
+            n_block_locs = n_block_locs_at(
+                x_range, y_range, K, L, block_starts, block_ends,
             )
             if n_block_locs >= min_n_locs:
-                block_locs_xy = _get_block_locs_at(
+                block_locs_xy = get_block_locs_at_numba(
                     x_range, y_range,
                     locs_xy, block_starts, block_ends, K, L,
                 )
-                picked_locs_xy = _locs_at(
+                picked_locs_xy = locs_at_numba(
                     x_grid, y_grid, block_locs_xy, r
                 )
                 if picked_locs_xy.shape[1] > 1:
@@ -488,7 +433,7 @@ def pick_similar(
                             break
                         x_test_old = x_test
                         y_test_old = y_test
-                        picked_locs_xy = _locs_at(
+                        picked_locs_xy = locs_at_numba(
                             x_test, y_test, block_locs_xy, r
                         )
                         if picked_locs_xy.shape[1] > 1:
@@ -504,7 +449,7 @@ def pick_similar(
                         if min_n_locs <= picked_locs_xy.shape[1] <= max_n_locs:
                             if (
                                 min_rmsd
-                                <= _rmsd_at_com(picked_locs_xy)
+                                <= rmsd_at_com(picked_locs_xy)
                                 <= max_rmsd
                             ):
                                 x_similar = np.append(
@@ -517,7 +462,7 @@ def pick_similar(
 
 
 @numba.jit(nopython=True, nogil=True)
-def _n_block_locs_at(
+def n_block_locs_at(
     x_range: int,
     y_range: int,
     K: int,
@@ -545,7 +490,7 @@ def _n_block_locs_at(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _get_block_locs_at(
+def get_block_locs_at_numba(
     x_range: int,
     y_range: int,
     locs_xy: np.ndarray,
@@ -554,8 +499,9 @@ def _get_block_locs_at(
     K: int,
     L: int,
 ) -> np.ndarray:
-    """Return the localizations in the blocks around the given
-    coordinates."""
+    """Numba implementation of ``get_block_locs_at`` for
+    ``pick_similar``. Return the localizations in the blocks around the
+    given coordinates."""
     step = 0
     for k in range(y_range - 1, y_range + 2):
         if 0 < k < K:
@@ -563,8 +509,7 @@ def _get_block_locs_at(
                 if 0 < ll < L:
                     if block_ends[k, ll] - block_starts[k, ll] > 0:
                         # numba does not work if you attach arange to an
-                        # empty list so the first step is different this
-                        # is because of dtype issues
+                        # empty list so the first step is different
                         if step == 0:
                             indices = np.arange(
                                 float(block_starts[k, ll]),
@@ -585,8 +530,14 @@ def _get_block_locs_at(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _locs_at(x: float, y: float, locs_xy: np.ndarray, r: float) -> np.ndarray:
-    """Return the localizations at the given coordinates within radius
+def locs_at_numba(
+    x: float,
+    y: float,
+    locs_xy: np.ndarray,
+    r: float,
+) -> np.ndarray:
+    """Numba implementation of ``lib.locs_at`` for ``pick_similar``.
+    Return the localizations at the given coordinates within radius
     ``r``."""
     dx = locs_xy[0] - x
     dy = locs_xy[1] - y
@@ -596,7 +547,7 @@ def _locs_at(x: float, y: float, locs_xy: np.ndarray, r: float) -> np.ndarray:
 
 
 @numba.jit(nopython=True, nogil=True)
-def _rmsd_at_com(locs_xy: np.ndarray) -> float:
+def rmsd_at_com(locs_xy: np.ndarray) -> float:
     """Calculate the RMSD of the localizations at the center of mass
     (COM) of the localizations."""
     com_x = np.mean(locs_xy[0])
