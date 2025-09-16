@@ -141,6 +141,32 @@ class StatusDialog(QtWidgets.QDialog):
                 playsound(self.sound_notification_path, block=False)
 
 
+class MockProgress():
+    """Class to mock a progress bar or dialog, allowing for calling
+    the same methods but not displaying anything."""
+
+    def __init__(self, *args):
+        pass
+
+    def init(self):
+        pass
+
+    def set_value(self, value):
+        pass
+
+    def update(self, value):
+        pass
+
+    def closeEvent(self, event):
+        pass
+
+    def zero_progress(self, description=None):
+        pass
+
+    def close(self):
+        pass
+
+
 class ScrollableGroupBox(QtWidgets.QGroupBox):
     """QGroupBox with QScrollArea as the top widget that enables
     scrolling."""

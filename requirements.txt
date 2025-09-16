@@ -9,11 +9,10 @@ pyyaml==6.0.1
 scikit-learn==1.3.1
 tqdm==4.66.1
 streamlit==1.27.0
-nd2==0.7.2
+nd2==0.10.3
 sqlalchemy==2.0.21
 plotly-express==0.4.1
 watchdog==3.0.0
 psutil==5.9.5
-nd2reader==3.3.0
 playsound3==3.2.6
 imageio[ffmpeg]==2.37.0
