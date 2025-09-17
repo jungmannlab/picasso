@@ -11,6 +11,7 @@ Last change: 17-SEP-2025 CEST
 - Render add dependency ``imageio[ffmpeg]`` for building animations
 - Render allow for loading pick regions by dropping a .yaml file onto the window
 - Localize plotted ROI remains the same when zooming in/out and panning
+- Localize Gauss MLE saves number of iterations and fit log-likelihood
 - Other bug fixes and minor improvements
 
 0.8.4

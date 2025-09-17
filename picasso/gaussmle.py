@@ -20,6 +20,8 @@ from typing import Literal
 import numba
 import numpy as np
 
+from . import lib
+
 GAMMA = np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
 
@@ -801,7 +803,7 @@ def locs_from_fits(
     identifications: np.recarray,
     theta: np.ndarray,
     CRLBs: np.ndarray,
-    likelihoods: np.ndarray,
+    log_likelihoods: np.ndarray,
     iterations: np.ndarray,
     box: int,
 ) -> np.recarray:
@@ -847,66 +849,42 @@ def locs_from_fits(
         a = np.maximum(theta[:, 4], theta[:, 5])
         b = np.minimum(theta[:, 4], theta[:, 5])
         ellipticity = (a - b) / a
+    
+    locs = np.rec.array(
+        (
+            identifications.frame,
+            x,
+            y,
+            theta[:, 2],
+            theta[:, 4],
+            theta[:, 5],
+            theta[:, 3],
+            lpx,
+            lpy,
+            ellipticity,
+            identifications.net_gradient,
+            log_likelihoods,
+            iterations,
+        ),
+        dtype=[
+            ("frame", "u4"),
+            ("x", "f4"),
+            ("y", "f4"),
+            ("photons", "f4"),
+            ("sx", "f4"),
+            ("sy", "f4"),
+            ("bg", "f4"),
+            ("lpx", "f4"),
+            ("lpy", "f4"),
+            ("ellipticity", "f4"),
+            ("net_gradient", "f4"),
+            ("log_likelihood", "f4"),
+            ("iterations", "u4"),
+        ],
+    )
     if hasattr(identifications, "n_id"):
-        locs = np.rec.array(
-            (
-                identifications.frame,
-                x,
-                y,
-                theta[:, 2],
-                theta[:, 4],
-                theta[:, 5],
-                theta[:, 3],
-                lpx,
-                lpy,
-                ellipticity,
-                identifications.net_gradient,
-                identifications.n_id,
-            ),
-            dtype=[
-                ("frame", "u4"),
-                ("x", "f4"),
-                ("y", "f4"),
-                ("photons", "f4"),
-                ("sx", "f4"),
-                ("sy", "f4"),
-                ("bg", "f4"),
-                ("lpx", "f4"),
-                ("lpy", "f4"),
-                ("ellipticity", "f4"),
-                ("net_gradient", "f4"),
-                ("n_id", "u4"),
-            ],
-        )
+        locs = lib.append_fields(locs, "n_id", identifications.n_id)
         locs.sort(kind="mergesort", order="n_id")
     else:
-        locs = np.rec.array(
-            (
-                identifications.frame,
-                x,
-                y,
-                theta[:, 2],
-                theta[:, 4],
-                theta[:, 5],
-                theta[:, 3],
-                lpx,
-                lpy,
-                ellipticity,
-                identifications.net_gradient,
-            ),
-            dtype=[
-                ("frame", "u4"),
-                ("x", "f4"),
-                ("y", "f4"),
-                ("photons", "f4"),
-                ("sx", "f4"),
-                ("sy", "f4"),
-                ("bg", "f4"),
-                ("lpx", "f4"),
-                ("lpy", "f4"),
-                ("ellipticity", "f4"),
-                ("net_gradient", "f4"),
-            ],
-        )
         locs.sort(kind="mergesort", order="frame")
     return locs
