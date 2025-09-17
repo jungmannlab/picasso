@@ -4446,6 +4446,7 @@ class FastRenderDialog(QtWidgets.QDialog):
         if idx == 0:  # all channels share the same fraction
             for i in range(len(self.window.view.locs_paths)):
                 n_locs = len(self.window.view.all_locs[i])
+                old_disp_nlocs = len(self.window.view.locs[i])
                 rand_idx = np.random.choice(
                     n_locs,
                     size=int(n_locs * self.fractions[0] / 100),
@@ -4454,9 +4455,13 @@ class FastRenderDialog(QtWidgets.QDialog):
                 self.window.view.locs[i] = (
                     self.window.view.all_locs[i][rand_idx]
                 )  # assign new localizations to be displayed
+                new_disp_nlocs = len(self.window.view.locs[i])
+                factor = new_disp_nlocs / old_disp_nlocs  # to adjust contrast
         else:  # each channel individually
+            factors = []
             for i in range(len(self.window.view.locs_paths)):
                 n_locs = len(self.window.view.all_locs[i])
+                old_disp_nlocs = len(self.window.view.locs[i])
                 rand_idx = np.random.choice(
                     n_locs,
                     size=int(n_locs * self.fractions[i+1] / 100),
@@ -4465,6 +4470,9 @@ class FastRenderDialog(QtWidgets.QDialog):
                 self.window.view.locs[i] = (
                     self.window.view.all_locs[i][rand_idx]
                 )  # assign new localizations to be displayed
+                new_disp_nlocs = len(self.window.view.locs[i])
+                factors.append(new_disp_nlocs / old_disp_nlocs)
+            factor = np.mean(factors)  # to adjust contrast
         #  update view.group_color if needed:
         if (
             len(self.fractions) == 2 and
@@ -4476,6 +4484,10 @@ class FastRenderDialog(QtWidgets.QDialog):
                 )
             )
         self.index_blocks = [None] * len(self.window.view.locs)
+        # adjust contrast
+        self.window.display_settings_dlg.silent_maximum_update(
+            factor * self.window.display_settings_dlg.maximum.value()
+        )
         self.window.view.update_scene()
 
 
