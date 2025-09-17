@@ -390,8 +390,10 @@ class CamSettingComboBoxDict(UserDict):
 
 
 class EmissionComboBoxDict(UserDict):
-    """Dictionary holding ``QComboBox``'s for different emission
-    wavelengths.
+    """Dictionary holding ``QComboBox``'s for different cameras,
+    each having the potential emission wavelengths as options.
+    The ComboBox is only shown if the quantum efficiency is
+    given in the CONFIG, otherwise it is irrelevant for localizing.
 
     keys: str
         Camera names.
