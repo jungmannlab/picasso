@@ -10,6 +10,7 @@ Last change: 17-SEP-2025 CEST
 - SPINNA fix automatic area detection from picked localizations
 - Render add dependency ``imageio[ffmpeg]`` for building animations
 - Render allow for loading pick regions by dropping a .yaml file onto the window
+- Localize plotted ROI remains the same when zooming in/out and panning
 - Other bug fixes and minor improvements
 
 0.8.4

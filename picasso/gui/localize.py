@@ -126,6 +126,7 @@ class View(QtWidgets.QGraphicsView):
             event.accept()
         else:
             event.ignore()
+        self.window.draw_frame()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
         """Select the ROI or stop panning the view."""
@@ -160,6 +161,7 @@ class View(QtWidgets.QGraphicsView):
         """Zoom in/out with the mouse wheel."""
         scale = 1.008 ** (-event.angleDelta().y())
         self.scale(scale, scale)
+        self.window.draw_frame()
 
 
 class Scene(QtWidgets.QGraphicsScene):
@@ -999,15 +1001,6 @@ class ParametersDialog(QtWidgets.QDialog):
         y_min, x_min, y_max, x_max = [int(_) for _ in text]
         # update roi
         self.window.view.roi = [[y_min, x_min], [y_max, x_max]]
-        # draw the rectangle roi
-        topleft_xy = self.window.view.mapFromScene(x_min, y_min)
-        bottomright_xy = self.window.view.mapFromScene(x_max, y_max)
-        topleft = QtCore.QPoint(topleft_xy.x(), topleft_xy.y())
-        bottomright = QtCore.QPoint(bottomright_xy.x(), bottomright_xy.y())
-        self.window.view.rubberband.setGeometry(
-            QtCore.QRect(topleft, bottomright)
-        )
-        self.window.view.rubberband.show()
         self.window.draw_frame()
         self.window.view.numeric_roi = True
 
@@ -1845,6 +1838,19 @@ class Window(QtWidgets.QMainWindow):
             self.scene = Scene(self)
             self.scene.addPixmap(pixmap)
             self.view.setScene(self.scene)
+            # draw the ROI rectangle if applicable
+            if self.view.roi is not None:
+                [[y_min, x_min], [y_max, x_max]] = self.view.roi
+                topleft_xy = self.view.mapFromScene(x_min, y_min)
+                bottomright_xy = self.view.mapFromScene(x_max, y_max)
+                topleft = QtCore.QPoint(topleft_xy.x(), topleft_xy.y())
+                bottomright = QtCore.QPoint(
+                    bottomright_xy.x(), bottomright_xy.y(),
+                )
+                self.view.rubberband.setGeometry(
+                    QtCore.QRect(topleft, bottomright)
+                )
+                self.view.rubberband.show()
             if self.ready_for_fit:
                 identifications_frame = self.identifications[
                     self.identifications.frame == self.curr_frame_number
