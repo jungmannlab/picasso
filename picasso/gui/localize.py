@@ -241,18 +241,21 @@ class OddSpinBox(QtWidgets.QSpinBox):
 class CamSettingComboBox(QtWidgets.QComboBox):
     """Combo box for selecting camera settings which are relevant for
     sensitivity.
-    Datasheets for different camera models specify sensitivity at different
-    degrees of granularity: Some only specify one overall sensitivity,
-    while for others, the sensitivity depends on the readout mode (faster
-    readout leads to lower sensitivity), while others again have nested
-    dependencies (e.g. depending on both readout rate and dynamic range).
-    The sensitivity information is saved in picasso.CONFIG.
-    The aspects the sensitivity depends on are termed 'Sensitivity Categories',
-    and are listed for each camera in CONFIG (if applicable). Another entry
-    for each camera, 'Sensitivity', specifies the sensitivity as a scalar,
-    a simple dict, or a nested dict, depending on the applicable sensitivity
+
+    Datasheets for different camera models specify sensitivity at
+    different degrees of granularity: Some only specify one overall
+    sensitivity, while for others, the sensitivity depends on the
+    readout mode (faster readout leads to lower sensitivity), while
+    others again have nested dependencies (e.g. depending on both
+    readout rate and dynamic range). The sensitivity information is
+    saved in picasso.CONFIG. The aspects the sensitivity depends on are
+    termed 'Sensitivity Categories', and are listed for each camera in
+    CONFIG (if applicable). Another entry for each camera,
+    'Sensitivity', specifies the sensitivity as a scalar, a simple
+    dict, or a nested dict, depending on the applicable sensitivity
     categories. The keys in the nested dict are the potential values of
     the respective sensitivity categories at that index of nesting.
+
     An example for a nested case (Andor Zyla):
         Sensitivity Categories:
           - PixelReadoutRate
@@ -267,15 +270,18 @@ class CamSettingComboBox(QtWidgets.QComboBox):
             12-bit (low noise): 0.24
             16-bit (low noise & high well capacity): 0.53
 
-    This CamSettingComboBox class allows for selecting the value of one
-    sensitivity category (described by its index in the list
+    This ``CamSettingComboBox`` class allows for selecting the value of
+    one sensitivity category (described by its index in the list
     "Sensitivity Categories"). If the user changes the value of the
-    CamSettingComboBox, the entries of the lower levels of sensitivity categories
-    (potentially) need to be adapted. Therefore this CamSettingComboBox holds the
-    CamSettingComboBoxDict cam_combos, which is a CamSettingComboBoxDict with
-    references to the CamSettingComboBoxes of all sensitivity category indices.
-    This way the changed CamSettingComboBox can trigger the next-level
-    CamSettingComboBox to adapt its options.
+    ``CamSettingComboBox``, the entries of the lower levels of
+    sensitivity categories (potentially) need to be adapted. Therefore,
+    this ``CamSettingComboBox`` holds the ``CamSettingComboBoxDict``
+    ``cam_combos``, which is a ``CamSettingComboBoxDict`` with
+    references to the ``CamSettingComboBox``'s of all sensitivity
+    category indices. This way the changed ``CamSettingComboBox`` can
+    trigger the next-level ``CamSettingComboBox`` to adapt its options.
+
+    ...
 
     Attributes
     ----------
