@@ -239,9 +239,43 @@ class OddSpinBox(QtWidgets.QSpinBox):
 
 
 class CamSettingComboBox(QtWidgets.QComboBox):
-    """Combo box for selecting camera settings.
+    """Combo box for selecting camera settings which are relevant for
+    sensitivity.
+    Datasheets for different camera models specify sensitivity at different
+    degrees of granularity: Some only specify one overall sensitivity,
+    while for others, the sensitivity depends on the readout mode (faster
+    readout leads to lower sensitivity), while others again have nested
+    dependencies (e.g. depending on both readout rate and dynamic range).
+    The sensitivity information is saved in picasso.CONFIG.
+    The aspects the sensitivity depends on are termed 'Sensitivity Categories',
+    and are listed for each camera in CONFIG (if applicable). Another entry
+    for each camera, 'Sensitivity', specifies the sensitivity as a scalar,
+    a simple dict, or a nested dict, depending on the applicable sensitivity
+    categories. The keys in the nested dict are the potential values of
+    the respective sensitivity categories at that index of nesting.
+    An example for a nested case (Andor Zyla):
+        Sensitivity Categories:
+          - PixelReadoutRate
+          - Sensitivity/DynamicRange
+        Sensitivity:
+          540 MHz - fastest readout:
+            12-bit (high well capacity): 7.98
+            12-bit (low noise): 0.26
+            16-bit (low noise & high well capacity): 0.51
+          200 MHz - lowest noise:
+            12-bit (high well capacity): 8.2
+            12-bit (low noise): 0.24
+            16-bit (low noise & high well capacity): 0.53
 
-    ...
+    This CamSettingComboBox class allows for selecting the value of one
+    sensitivity category (described by its index in the list
+    "Sensitivity Categories"). If the user changes the value of the
+    CamSettingComboBox, the entries of the lower levels of sensitivity categories
+    (potentially) need to be adapted. Therefore this CamSettingComboBox holds the
+    CamSettingComboBoxDict cam_combos, which is a CamSettingComboBoxDict with
+    references to the CamSettingComboBoxes of all sensitivity category indices.
+    This way the changed CamSettingComboBox can trigger the next-level
+    CamSettingComboBox to adapt its options.
 
     Attributes
     ----------
@@ -316,7 +350,7 @@ class CamSettingComboBoxDict(UserDict):
         self.sensitivity_categories[cam] = categories
 
     def set_camcombo_value(self, cam: str, category: str, value: str) -> None:
-        """Set the value of one combo box.
+        """Set the selected value of one combo box.
 
         Parameters
         ----------
@@ -356,8 +390,10 @@ class CamSettingComboBoxDict(UserDict):
 
 
 class EmissionComboBoxDict(UserDict):
-    """Dictionary holding ``QComboBox``'s for different emission
-    wavelengths.
+    """Dictionary holding ``QComboBox``'s for different cameras,
+    each having the potential emission wavelengths as options.
+    The ComboBox is only shown if the quantum efficiency is
+    given in the CONFIG, otherwise it is irrelevant for localizing.
 
     keys: str
         Camera names.
@@ -369,7 +405,7 @@ class EmissionComboBoxDict(UserDict):
         super().__init__()
 
     def set_emcombo_value(self, cam: str, wavelength: str):
-        """Sets the value of one combo box
+        """Sets the selected value of one combo box
 
         Parameters
         ----------
