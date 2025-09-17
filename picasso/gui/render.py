@@ -6227,12 +6227,21 @@ class View(QtWidgets.QLabel):
 
     def dropEvent(self, event: QtGui.QDropEvent) -> None:
         """When a file is dropped onto the window, if the file ends with
-        ``.hdf5``, try loading localizations."""
+        ``.hdf5``, try loading localizations. If it ends with ``.txt``,
+        try loading a fov file. If it ends with ``.yaml``, try loading
+        pick regions."""
         urls = event.mimeData().urls()
         paths = [_.toLocalFile() for _ in urls]
         extensions = [os.path.splitext(_)[1].lower() for _ in paths]
         if extensions == [".txt"]:  # just one txt dropped
             self.load_fov_drop(paths[0])
+        if extensions == [".yaml"]:  # just one yaml dropped
+            with open(paths[0], "r") as f:
+                regions = yaml.full_load(f)
+            if "Shape" in regions:
+                loaded_shape = regions["Shape"]
+                if loaded_shape in ["Circle", "Rectangle", "Polygon"]:
+                    self.load_picks(paths[0])
         else:
             paths = [
                 path

@@ -9,6 +9,7 @@ Last change: 17-SEP-2025 CEST
 - Several dialogs in Render, Localize and Simulate are now scrollable (*experimental*)
 - SPINNA fix automatic area detection from picked localizations
 - Render add dependency ``imageio[ffmpeg]`` for building animations
+- Render allow for loading pick regions by dropping a .yaml file onto the window
 - Other bug fixes and minor improvements
 
 0.8.4
