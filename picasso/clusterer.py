@@ -580,25 +580,25 @@ def extract_valid_labels(
     return locs
 
 
-def error_sums_wtd(x: float, w: float) -> float:
-    """Find "localization precision" for cluster centers, i.e., weighted
-    standard error of the mean of the localizations in the given
-    cluster.
+# def error_sums_wtd(x: float, w: float) -> float:
+#     """Find "localization precision" for cluster centers, i.e., weighted
+#     standard error of the mean of the localizations in the given
+#     cluster.
 
-    Parameters
-    ----------
-    x : float
-        x or y coordinate of the cluster center.
-    w : float
-        weight (inverse localization precision squared).
+#     Parameters
+#     ----------
+#     x : float
+#         x or y coordinate of the cluster center.
+#     w : float
+#         weight (inverse localization precision squared).
 
-    Returns
-    -------
-    lp : float
-        Weighted standard error of the mean of the cluster center.
-    """
-    lp = (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
-    return lp
+#     Returns
+#     -------
+#     lp : float
+#         Weighted standard error of the mean of the cluster center.
+#     """
+#     lp = (w * (x - (w * x).sum() / w.sum())**2).sum() / w.sum()
+#     return lp
 
 
 def find_cluster_centers(
@@ -746,8 +746,10 @@ def cluster_center(
     frame = grouplocs.frame.mean()
     std_frame = grouplocs.frame.std()
     # average x and y, weighted by lpx, lpy
-    x = np.average(grouplocs.x, weights=1/(grouplocs.lpx)**2)
-    y = np.average(grouplocs.y, weights=1/(grouplocs.lpy)**2)
+    # x = np.average(grouplocs.x, weights=1/(grouplocs.lpx)**2)
+    # y = np.average(grouplocs.y, weights=1/(grouplocs.lpy)**2)
+    x = np.mean(grouplocs.x)
+    y = np.mean(grouplocs.y)
     std_x = grouplocs.x.std()
     std_y = grouplocs.y.std()
     # mean values
@@ -756,14 +758,16 @@ def cluster_center(
     sy = grouplocs.sy.mean()
     bg = grouplocs.bg.mean()
     # weighted mean loc precision
-    lpx = np.sqrt(
-        error_sums_wtd(grouplocs.x, grouplocs.lpx)
-        / (len(grouplocs) - 1)
-    )
-    lpy = np.sqrt(
-        error_sums_wtd(grouplocs.y, grouplocs.lpy)
-        / (len(grouplocs) - 1)
-    )
+    # lpx = np.sqrt(
+    #     error_sums_wtd(grouplocs.x, grouplocs.lpx)
+    #     / (len(grouplocs) - 1)
+    # )
+    # lpy = np.sqrt(
+    #     error_sums_wtd(grouplocs.y, grouplocs.lpy)
+    #     / (len(grouplocs) - 1)
+    # )
+    lpx = np.std(grouplocs.x) / len(grouplocs)**0.5
+    lpy = np.std(grouplocs.y) / len(grouplocs)**0.5
     if not separate_lp:
         lpx = (lpx + lpy) / 2
         lpy = lpx
