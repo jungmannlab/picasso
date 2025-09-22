@@ -273,3 +273,49 @@ def find_fiducials(
         pick for i, pick in enumerate(picks) if len(picked_locs[i]) > min_n
     ]
     return picks, box
+
+
+def central_roi(
+    locs: np.recarray,
+    info: list[dict],
+    size: float,
+) -> tuple[np.recarray, tuple[tuple[float, float], tuple[float, float]]]:
+    """Select localizations within a central square region of interest
+    (ROI) of the given size.
+    
+    Parameters
+    ----------
+    locs : np.recarray
+        Localizations.
+    info : list of dicts
+        Localizations' metadata (from the corresponding .yaml file).
+    size : float
+        Size of the ROI in nm.
+
+    Returns
+    -------
+    locs : np.recarray
+        Localizations within the central ROI.
+    viewport : tuple
+        The viewport of the ROI in camera pixels, given as
+        ((y_min, x_min), (y_max, x_max)).
+    """
+    camera_pixelsize = info[1]["Pixelsize"]  # nm
+    image_width = info[0]["Width"]  # cam. pixels
+    image_height = info[0]["Height"]  # cam. pixels
+    roi_lim_x = size / camera_pixelsize  # cam. pixels
+    roi_lim_y = size / camera_pixelsize  # cam. pixels
+    assert roi_lim_x < image_width and roi_lim_y < image_height, (
+        "Image is smaller than the ROI for FRC calculation."
+    )
+    locs = locs[
+        (locs.x > (image_width - roi_lim_x) // 2)
+        & (locs.x < (image_width + roi_lim_x) // 2)
+        & (locs.y > (image_height - roi_lim_y) // 2)
+        & (locs.y < (image_height + roi_lim_y) // 2)
+    ]
+    viewport = (
+        ((image_height - roi_lim_y) // 2, (image_width - roi_lim_x) // 2),
+        ((image_height + roi_lim_y) // 2, (image_width + roi_lim_x) // 2),
+    )
+    return locs, viewport

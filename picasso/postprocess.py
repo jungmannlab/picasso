@@ -810,6 +810,124 @@ def _fill_dnfl(
                         dnfl[bin] += 1
 
 
+def frc(
+    locs: np.recarray,
+    info: list[dict],
+    callback: Callable[[int], None] | None = None,
+    random_seed: int = 42,
+) -> tuple[dict, float]:
+    """Calculate the Fourier Ring Correlation (FRC) resolution.
+
+    See Nieuwenhuizen et al., Nat. Methods 10, 557–562 (2013).
+
+    Parameters
+    ----------
+    locs : np.recarray
+        Localization list.
+    info : list of dicts
+        Metadata of the localizations list.
+    callback : function or None, optional
+        Function to display progress. If None, no progress is
+        displayed. Default is None.
+    random_seed : int, optional
+        Random seed for splitting the data into halves. Default is 42.
+
+    Returns
+    -------
+    frc_result : dict
+        Dictionary with keys "frc_curve", "frequencies" (for spatial
+        frequencies)
+    resolution : float
+        Estimated resolution in nm, given the 1/7 threshold.
+    """
+    # select a central ROI
+    locs, viewport = imageprocess.central_roi(locs, info, size=1e4)  # 10 um
+    # # split the locs in two random halves
+    np.random.seed(random_seed)
+    random_indices = np.random.permutation(len(locs))
+    locs1 = locs[random_indices[:len(locs) // 2]]
+    locs2 = locs[random_indices[len(locs) // 2:]]
+    # generate pairs of images (splitting locs in half) with pixel size
+    # of 1/2 of median loc. precision
+    median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
+    pixelsize = median_lp / 2  # frc image pixel size (in cam. pixels)
+    camera_pixelsize = info[1]["Pixelsize"]  # nm
+    oversampling = camera_pixelsize / pixelsize
+    im1 = render.render(
+        locs1,
+        info=None,
+        oversampling=oversampling,
+        viewport=viewport,
+        blur_method="convolve",
+    )[1]
+    im2 = render.render(
+        locs2,
+        info=None,
+        oversampling=oversampling,
+        viewport=viewport,
+        blur_method="convolve",
+    )[1]
+    # fourier transform the images and calculate FRC
+    im1 = np.fft.fft2(im1)
+    im2 = np.fft.fft2(im2)
+    frc_numerator = np.real(radialsum(im1 * np.conj(im2)))
+    sq_im1 = np.abs(im1) ** 2
+    sq_im2 = np.abs(im2) ** 2
+    frc_denominator = np.sqrt(np.abs(radialsum(sq_im1) * radialsum(sq_im2)))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        frc_curve = frc_numerator / frc_denominator
+    frc_curve[np.isnan(frc_curve)] = 0  # Remove NaNs
+
+    # smooth the frc curve and get the resolution as 1/7 threshold TODO
+    idx = np.where(frc_curve < 1 / 7)[0]
+    # TODO: check below is correct
+    frequencies = np.fft.fftfreq(
+        len(frc_curve), d=pixelsize,
+    )[:len(frc_curve) // 2]
+    resolution = 1 / frequencies[idx] if len(frequencies) else np.inf
+    resolution *= camera_pixelsize  # convert to nm
+    # TODO: other things that were skipped so far:
+    # - masking of the rendered images (before fourier) (tukey window)
+    # - smoothing of the frc curve
+    frc_result = {
+        "frc_curve": frc_curve,
+        "frequencies": frequencies,
+    }
+    return frc_result, resolution
+
+
+def radialsum(image):
+    """Compute the radial sum of a 2D image.
+
+    Parameters
+    ----------
+    image : 2D numpy array
+        Input image (e.g., Fourier spectrum).
+
+    Returns
+    -------
+    profile : 1D numpy array
+        Radial sum as a function of radius.
+    """
+    # Image shape
+    nx, ny = image.shape
+
+    # Coordinates relative to center
+    cx, cy = nx // 2, ny // 2
+    y, x = np.indices((nx, ny))
+    r = np.sqrt((x - cy)**2 + (y - cx)**2)
+    r_int = np.round(r).astype(int)
+
+    # Maximum radius
+    max_r = r_int.max()
+
+    # Radial sum
+    radial_sum = np.bincount(
+        r_int.ravel(), weights=image.ravel(), minlength=max_r + 1,
+    )
+    return radial_sum
+
+
 def pair_correlation(
     locs: np.recarray,
     info: list[dict],
