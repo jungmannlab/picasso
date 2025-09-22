@@ -2856,7 +2856,7 @@ class InfoDialog(QtWidgets.QDialog):
         scroll_box = lib.ScrollableGroupBox("", self)
         self.setLayout(QtWidgets.QVBoxLayout())
         self.layout().addWidget(scroll_box)
-        self.setMinimumSize(300, 600)
+        self.setMinimumSize(500, 600)
 
         # Display
         display_groupbox = QtWidgets.QGroupBox("Display")
