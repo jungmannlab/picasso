@@ -9883,12 +9883,9 @@ class View(QtWidgets.QLabel):
         """
         modifiers = QtWidgets.QApplication.keyboardModifiers()
         if modifiers == QtCore.Qt.ControlModifier:
-            direction = event.angleDelta().y()
+            scale = 1.008 ** (-event.angleDelta().y())
             position = self.map_to_movie(event.pos())
-            if direction > 0:
-                self.zoom(1 / ZOOM, cursor_position=position)
-            else:
-                self.zoom(ZOOM, cursor_position=position)
+            self.zoom(scale, cursor_position=position)
 
 
 class Window(QtWidgets.QMainWindow):

@@ -10,6 +10,7 @@ Last change: 29-SEP-2025 CEST
 - SPINNA fix automatic area detection from picked localizations
 - Render add dependency ``imageio[ffmpeg]`` for building animations
 - Render allow for loading pick regions by dropping a .yaml file onto the window
+- Render improve zooming with mouse wheel (Ctrl/Cmd + wheel)
 - Fast rendering automatically adjusts constrast
 - Localize plotted ROI remains the same when zooming in/out and panning
 - Localize Gauss MLE saves number of iterations and fit log-likelihood
