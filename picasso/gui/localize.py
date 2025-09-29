@@ -85,7 +85,9 @@ class View(QtWidgets.QGraphicsView):
         self.setAcceptDrops(True)
         self.pan = False
         self.hscrollbar = self.horizontalScrollBar()
+        self.hscrollbar.valueChanged.connect(self.on_scroll)
         self.vscrollbar = self.verticalScrollBar()
+        self.vscrollbar.valueChanged.connect(self.on_scroll)
         self.rubberband = RubberBand(self)
         self.roi = None
         self.numeric_roi = False
@@ -123,10 +125,10 @@ class View(QtWidgets.QGraphicsView):
             )
             self.pan_start_x = event.x()
             self.pan_start_y = event.y()
+            self.window.draw_frame()
             event.accept()
         else:
             event.ignore()
-        self.window.draw_frame()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
         """Select the ROI or stop panning the view."""
@@ -162,6 +164,11 @@ class View(QtWidgets.QGraphicsView):
         scale = 1.008 ** (-event.angleDelta().y())
         self.scale(scale, scale)
         self.window.draw_frame()
+
+    def on_scroll(self) -> None:
+        """Redraw the frame if scale bar is shown."""
+        if self.window.scalebar_action.isChecked():
+            self.window.draw_frame()
 
 
 class Scene(QtWidgets.QGraphicsScene):
@@ -844,6 +851,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.pixelsize.setRange(0, 10000)
         self.pixelsize.setValue(130)
         self.pixelsize.setSingleStep(1)
+        self.pixelsize.valueChanged.connect(self.on_pixelsize_changed)
         photon_grid.addWidget(self.pixelsize, 4, 1)
 
         # Fit Settings
@@ -986,6 +994,16 @@ class ParametersDialog(QtWidgets.QDialog):
         for _ in self.quality_grid_values:
             _.setVisible(False)
             _.setText("")
+
+    def on_pixelsize_changed(self) -> None:
+        """If the movie is loaded and scale bar is shown, update it."""
+        if (
+            hasattr(self.window, "movie")
+            and self.window.movie is not None
+            and hasattr(self.window, "scalebar_action")
+            and self.window.scalebar_action.isChecked()
+        ):
+            self.window.draw_frame()
 
     def on_roi_edit_changed(self) -> None:
         """Handle changes to the ROI edit field."""
@@ -1312,23 +1330,17 @@ class Window(QtWidgets.QMainWindow):
         self.status_bar_frame_indicator = QtWidgets.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
 
-        #: Holds the curr movie as a numpy
-        # memmap in the format (frame, y, x)
+        # Holds the curr movie as a numpy memmap in the format
+        # (frame, y, x)
         self.movie = None
-
-        #: A dictionary of analysis parameters used for the last operation
+        # Dictionary of analysis parameters used for the last operation
         self.last_identification_info = None
-
-        #: A numpy.recarray of identifcations with fields frame, x and y
+        # Recarray of identifcations with fields frame, x and y
         self.identifications = None
-
         self.ready_for_fit = False
-
         self.locs = None
-
         self.movie_path = []
 
-        # Load user settings
         self.load_user_settings()
 
     def load_user_settings(self) -> None:
@@ -1449,10 +1461,15 @@ class Window(QtWidgets.QMainWindow):
         fit_in_view_action.triggered.connect(self.fit_in_view)
         view_menu.addAction(fit_in_view_action)
         view_menu.addSeparator()
-        display_settings_action = view_menu.addAction("Contrast")
-        display_settings_action.setShortcut("Ctrl+C")
-        display_settings_action.triggered.connect(self.contrast_dialog.show)
-        view_menu.addAction(display_settings_action)
+        constract_action = view_menu.addAction("Contrast")
+        constract_action.setShortcut("Ctrl+C")
+        constract_action.triggered.connect(self.contrast_dialog.show)
+        view_menu.addAction(constract_action)
+        self.scalebar_action = view_menu.addAction("Show scale bar")
+        self.scalebar_action.setCheckable(True)
+        self.scalebar_action.setChecked(False)
+        self.scalebar_action.triggered.connect(self.draw_frame)
+        view_menu.addAction(self.scalebar_action)
 
         """ Analyze """
         analyze_menu = menu_bar.addMenu("Analyze")
@@ -1885,6 +1902,7 @@ class Window(QtWidgets.QMainWindow):
                 ]
                 for loc in locs_frame:
                     self.scene.addItem(FitMarker(loc.x + 0.5, loc.y + 0.5, 1))
+            self.draw_scalebar()
 
     def draw_identifications(
         self,
@@ -1898,6 +1916,70 @@ class Window(QtWidgets.QMainWindow):
             x = identification.x
             y = identification.y
             self.scene.addRect(x - box_half, y - box_half, box, box, color)
+
+    def draw_scalebar(self) -> None:
+        """Draw a scale bar if the option is checked."""
+        if self.scalebar_action.isChecked():
+            scene_pixelsize = self.parameters_dialog.pixelsize.value()
+
+            # length (nm) - set optimal size (~1/8 of image width)
+            rect = self.view.viewport().rect()
+            visible_scene_rect = self.view.mapToScene(rect).boundingRect()
+            width = visible_scene_rect.width()
+            width_nm = width * scene_pixelsize
+            optimal_scalebar = width_nm / 8
+
+            # approximate to the nearest thousands, hundreds, tens or ones
+            if optimal_scalebar > 10_000:
+                scalebar = 10_000
+            elif optimal_scalebar > 1_000:
+                scalebar = int(1_000 * round(optimal_scalebar / 1_000))
+            elif optimal_scalebar > 100:
+                scalebar = int(100 * round(optimal_scalebar / 100))
+            elif optimal_scalebar > 10:
+                scalebar = int(10 * round(optimal_scalebar / 10))
+            else:
+                scalebar = int(round(optimal_scalebar))
+
+            length_displaypxl = int(round(
+                self.view.width() * (scalebar / scene_pixelsize) / width
+            ))
+            height_displaypxl = 10
+
+            # draw a rectangle
+            x = self.view.width() - length_displaypxl - 40
+            y = self.view.height() - height_displaypxl - 20
+            pen = QtGui.QPen(QtCore.Qt.NoPen)
+            brush = QtGui.QBrush(QtGui.QColor("white"))
+            polygon = self.view.mapToScene(
+                x, y, length_displaypxl, height_displaypxl,
+            )
+            x_scene = polygon.boundingRect().x()
+            y_scene = polygon.boundingRect().y()
+            length_scene = polygon.boundingRect().width()
+            height_scene = polygon.boundingRect().height()
+            self.scene.addRect(
+                x_scene, y_scene, length_scene, height_scene, pen, brush,
+            )
+
+            # add scale bar text
+            font = QtGui.QFont()
+            font.setPointSize(20)
+            text_item = self.scene.addText(f"{scalebar} nm", font)
+            text_item.setDefaultTextColor(QtGui.QColor("white"))
+            # position the text centered below the scale bar
+            text_rect = text_item.boundingRect()
+            text_width = text_rect.width() / (length_displaypxl / length_scene)
+            text_x = x_scene + (length_scene - text_width) / 2
+            text_y = (
+                y_scene
+                + height_scene
+                - 45 / (height_displaypxl / height_scene)
+            )
+            text_item.setPos(text_x, text_y)
+            text_item.setFlag(
+                QtWidgets.QGraphicsItem.ItemIgnoresTransformations, True
+            )
 
     @property
     def parameters(self) -> dict:
@@ -2144,14 +2226,17 @@ class Window(QtWidgets.QMainWindow):
     def fit_in_view(self) -> None:
         """Reset the zoom in the scene."""
         self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
+        self.draw_frame()
 
     def zoom_in(self) -> None:
         """Zoom in the view."""
         self.view.scale(10 / 7, 10 / 7)
+        self.draw_frame()
 
     def zoom_out(self) -> None:
         """Zoom out the view."""
         self.view.scale(7 / 10, 7 / 10)
+        self.draw_frame()
 
     def save_spots(self, path: str) -> None:
         """Save identified spots as an .hdf5 file."""
@@ -2163,9 +2248,7 @@ class Window(QtWidgets.QMainWindow):
 
     def save_spots_dialog(self) -> None:
         """Get the path for saving identified spots."""
-        if self.movie_path == []:
-            print("No spots to save.")
-        else:
+        if self.movie_path != []:
             base, ext = os.path.splitext(self.movie_path)
             path = base + "_spots.hdf5"
             path, exe = QtWidgets.QFileDialog.getSaveFileName(
@@ -2214,9 +2297,7 @@ class Window(QtWidgets.QMainWindow):
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""
-        if self.movie_path == []:
-            print("No localizations to save.")
-        else:
+        if self.movie_path != []:
             base, ext = os.path.splitext(self.movie_path)
             locs_path = base + "_locs.hdf5"
             path, exe = QtWidgets.QFileDialog.getSaveFileName(
@@ -2367,7 +2448,6 @@ class FitWorker(QtCore.QThread):
                 self.box,
             )
         elif self.method == "avg":
-            print("Average intensity")
             # just get out the average intensity
             fs = avgroi.fit_spots_parallel(spots, asynch=True)
             n_tasks = len(fs)
@@ -2382,7 +2462,7 @@ class FitWorker(QtCore.QThread):
                 self.identifications, theta, self.box, em,
             )
         else:
-            print("This should never happen...")
+            raise ValueError(f"Unknown fitting method: {self.method}")
         self.progressMade.emit(N + 1, N)
         dt = time.time() - t0
         self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
@@ -2491,8 +2571,6 @@ class QualityWorker(QtCore.QThread):
         self.progressMade.emit("Checking Quality (4/4) Kinetics ..", 0, "")
         len_mean = localize.check_kinetics(sane_locs, self.info)
         self.progressMade.emit("", 3, f"{len_mean:.3f}")
-
-        print(f"Quality {nena_px} {drift_x} {drift_y} {len_mean}")
 
         localize.add_file_to_db(
             self.path,

@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 22-SEP-2025 CEST
+Last change: 29-SEP-2025 CEST
 
 0.8.5
 -----
@@ -13,6 +13,7 @@ Last change: 22-SEP-2025 CEST
 - Fast rendering automatically adjusts constrast
 - Localize plotted ROI remains the same when zooming in/out and panning
 - Localize Gauss MLE saves number of iterations and fit log-likelihood
+- Localize show scale bar function added
 - Cluster center calculations calculate arithmetic mean, not weighted mean
 - Other bug fixes and minor improvements
 
