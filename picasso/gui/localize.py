@@ -2224,7 +2224,10 @@ class Window(QtWidgets.QMainWindow):
 
     def fit_in_view(self) -> None:
         """Reset the zoom in the scene."""
-        self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
+        rectangle = QtCore.QRectF(
+            0, 0, self.movie.shape[2], self.movie.shape[1],
+        )
+        self.view.fitInView(rectangle, QtCore.Qt.KeepAspectRatio)
         self.draw_frame()
 
     def zoom_in(self) -> None:
@@ -2243,7 +2246,8 @@ class Window(QtWidgets.QMainWindow):
         if factor < 1:
             rect = self.view.viewport().rect()
             visible_scene_rect = self.view.mapToScene(rect).boundingRect()
-            if visible_scene_rect.width() > 1.1 * self.movie.shape[1]:
+            if visible_scene_rect.width() / factor > self.movie.shape[2]:
+                self.fit_in_view()
                 return
         self.view.scale(factor, factor)
         self.draw_frame()
