@@ -12,9 +12,9 @@ Last change: 29-SEP-2025 CEST
 - Render allow for loading pick regions by dropping a .yaml file onto the window
 - Render improve zooming with mouse wheel (Ctrl/Cmd + wheel)
 - Fast rendering automatically adjusts constrast
+- Localize show scale bar function added
 - Localize plotted ROI remains the same when zooming in/out and panning
 - Localize Gauss MLE saves number of iterations and fit log-likelihood
-- Localize show scale bar function added
 - Cluster center calculations calculate arithmetic mean, not weighted mean
 - Other bug fixes and minor improvements
 

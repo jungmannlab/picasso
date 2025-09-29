@@ -2282,12 +2282,15 @@ class Window(QtWidgets.QMainWindow):
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
         if path:
-            qimage = QtGui.QImage(self.view.size(), QtGui.QImage.Format_RGB32)
+            qimage = QtGui.QImage(
+                self.scene.itemsBoundingRect().size().toSize(),
+                QtGui.QImage.Format_ARGB32,
+            )
+            qimage.fill(QtGui.QColor("transparent"))  # TODO: crop image
             painter = QtGui.QPainter(qimage)
             self.view.render(painter)
             painter.end()
             qimage.save(path)
-            # self.view.scene().save_image(path)
         self.view.setMinimumSize(1, 1)
 
     def save_locs(self, path: str) -> None:
