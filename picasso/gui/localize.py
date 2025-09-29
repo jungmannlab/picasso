@@ -162,8 +162,7 @@ class View(QtWidgets.QGraphicsView):
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         """Zoom in/out with the mouse wheel."""
         scale = 1.008 ** (-event.angleDelta().y())
-        self.scale(scale, scale)
-        self.window.draw_frame()
+        self.window.zoom(scale)
 
     def on_scroll(self) -> None:
         """Redraw the frame if scale bar is shown."""
@@ -2230,12 +2229,23 @@ class Window(QtWidgets.QMainWindow):
 
     def zoom_in(self) -> None:
         """Zoom in the view."""
-        self.view.scale(10 / 7, 10 / 7)
-        self.draw_frame()
+        self.zoom(10 / 7)
 
     def zoom_out(self) -> None:
         """Zoom out the view."""
-        self.view.scale(7 / 10, 7 / 10)
+        self.zoom(7 / 10)
+
+    def zoom(self, factor: float) -> None:
+        """Zoom in or out the view by a specific factor."""
+        if not hasattr(self, "movie") or self.movie is None:
+            return
+        # do not allow zooming out too much
+        if factor < 1:
+            rect = self.view.viewport().rect()
+            visible_scene_rect = self.view.mapToScene(rect).boundingRect()
+            if visible_scene_rect.width() > 1.1 * self.movie.shape[1]:
+                return
+        self.view.scale(factor, factor)
         self.draw_frame()
 
     def save_spots(self, path: str) -> None:
