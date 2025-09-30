@@ -13,13 +13,13 @@
 """
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 from scipy.interpolate import InterpolatedUnivariateSpline
 from tqdm import tqdm
 
-from . import __version__
+from . import lib, __version__
 
 
 def intersect1d(
@@ -384,7 +384,7 @@ def intersection_max(
     roi_r: float,
     width: int,
     aim_round: int = 1,
-    progress: Callable[[int], None] | None = None,
+    progress: Callable[[int], None] | Literal["console"] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Maximize intersection (undrift) for 2D localizations.
 
@@ -411,8 +411,9 @@ def intersection_max(
         as reference, the second round uses the entire dataset as
         reference. The impact is that in the second round, the first
         interval is also undrifted.
-    progress : picasso.lib.ProgressDialog, optional
-        Progress dialog. If None, progress is displayed with tqdm.
+    progress : lib.ProgressDialog or "console" or None, optional
+        Progress dialog. If "console", progress is displayed with tqdm.
+        If None, progress is not displayed. Default is None.
 
     Returns
     -------
@@ -426,6 +427,8 @@ def intersection_max(
         Drift in y-direction.
     """
     assert aim_round in [1, 2], "aim_round must be 1 or 2."
+    if progress is None:
+        progress = lib.MockProgress
 
     # number of segments
     n_segments = len(seg_bounds) - 1
@@ -456,7 +459,7 @@ def intersection_max(
 
     # initialize progress such that if GUI is used, tqdm is omitted
     start_idx = 1 if aim_round == 1 else 0
-    if progress is not None:
+    if progress != "console":
         iterator = range(start_idx, n_segments)
     else:
         iterator = tqdm(
@@ -501,7 +504,7 @@ def intersection_max(
         drift_y[s] = -rel_drift_y
 
         # update progress
-        if progress is not None:
+        if progress != "console":
             progress.set_value(s)
         else:
             iterator.update(s - iterator.n)

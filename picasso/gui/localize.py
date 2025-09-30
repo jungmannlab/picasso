@@ -24,6 +24,7 @@ import numpy as np
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi, \
     __version__
 from PyQt5 import QtCore, QtGui, QtWidgets
+from playsound3 import playsound
 
 try:
     from pygpufit import gpufit
@@ -84,7 +85,9 @@ class View(QtWidgets.QGraphicsView):
         self.setAcceptDrops(True)
         self.pan = False
         self.hscrollbar = self.horizontalScrollBar()
+        self.hscrollbar.valueChanged.connect(self.on_scroll)
         self.vscrollbar = self.verticalScrollBar()
+        self.vscrollbar.valueChanged.connect(self.on_scroll)
         self.rubberband = RubberBand(self)
         self.roi = None
         self.numeric_roi = False
@@ -122,6 +125,7 @@ class View(QtWidgets.QGraphicsView):
             )
             self.pan_start_x = event.x()
             self.pan_start_y = event.y()
+            self.window.draw_frame()
             event.accept()
         else:
             event.ignore()
@@ -158,7 +162,12 @@ class View(QtWidgets.QGraphicsView):
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         """Zoom in/out with the mouse wheel."""
         scale = 1.008 ** (-event.angleDelta().y())
-        self.scale(scale, scale)
+        self.window.zoom(scale)
+
+    def on_scroll(self) -> None:
+        """Redraw the frame if scale bar is shown."""
+        if self.window.scalebar_action.isChecked():
+            self.window.draw_frame()
 
 
 class Scene(QtWidgets.QGraphicsScene):
@@ -238,7 +247,47 @@ class OddSpinBox(QtWidgets.QSpinBox):
 
 
 class CamSettingComboBox(QtWidgets.QComboBox):
-    """Combo box for selecting camera settings.
+    """Combo box for selecting camera settings which are relevant for
+    sensitivity.
+
+    Datasheets for different camera models specify sensitivity at
+    different degrees of granularity: Some only specify one overall
+    sensitivity, while for others, the sensitivity depends on the
+    readout mode (faster readout leads to lower sensitivity), while
+    others again have nested dependencies (e.g. depending on both
+    readout rate and dynamic range). The sensitivity information is
+    saved in picasso.CONFIG. The aspects the sensitivity depends on are
+    termed 'Sensitivity Categories', and are listed for each camera in
+    CONFIG (if applicable). Another entry for each camera,
+    'Sensitivity', specifies the sensitivity as a scalar, a simple
+    dict, or a nested dict, depending on the applicable sensitivity
+    categories. The keys in the nested dict are the potential values of
+    the respective sensitivity categories at that index of nesting.
+
+    An example for a nested case (Andor Zyla):
+        Sensitivity Categories:
+          - PixelReadoutRate
+          - Sensitivity/DynamicRange
+        Sensitivity:
+          540 MHz - fastest readout:
+            12-bit (high well capacity): 7.98
+            12-bit (low noise): 0.26
+            16-bit (low noise & high well capacity): 0.51
+          200 MHz - lowest noise:
+            12-bit (high well capacity): 8.2
+            12-bit (low noise): 0.24
+            16-bit (low noise & high well capacity): 0.53
+
+    This ``CamSettingComboBox`` class allows for selecting the value of
+    one sensitivity category (described by its index in the list
+    "Sensitivity Categories"). If the user changes the value of the
+    ``CamSettingComboBox``, the entries of the lower levels of
+    sensitivity categories (potentially) need to be adapted. Therefore,
+    this ``CamSettingComboBox`` holds the ``CamSettingComboBoxDict``
+    ``cam_combos``, which is a ``CamSettingComboBoxDict`` with
+    references to the ``CamSettingComboBox``'s of all sensitivity
+    category indices. This way the changed ``CamSettingComboBox`` can
+    trigger the next-level ``CamSettingComboBox`` to adapt its options.
 
     ...
 
@@ -315,7 +364,7 @@ class CamSettingComboBoxDict(UserDict):
         self.sensitivity_categories[cam] = categories
 
     def set_camcombo_value(self, cam: str, category: str, value: str) -> None:
-        """Set the value of one combo box.
+        """Set the selected value of one combo box.
 
         Parameters
         ----------
@@ -355,8 +404,10 @@ class CamSettingComboBoxDict(UserDict):
 
 
 class EmissionComboBoxDict(UserDict):
-    """Dictionary holding ``QComboBox``'s for different emission
-    wavelengths.
+    """Dictionary holding ``QComboBox``'s for different cameras,
+    each having the potential emission wavelengths as options.
+    The ComboBox is only shown if the quantum efficiency is
+    given in the CONFIG, otherwise it is irrelevant for localizing.
 
     keys: str
         Camera names.
@@ -368,7 +419,7 @@ class EmissionComboBoxDict(UserDict):
         super().__init__()
 
     def set_emcombo_value(self, cam: str, wavelength: str):
-        """Sets the value of one combo box
+        """Sets the selected value of one combo box
 
         Parameters
         ----------
@@ -592,10 +643,16 @@ class ParametersDialog(QtWidgets.QDialog):
         super().__init__(parent)
         self.window = parent
         self.setWindowTitle("Parameters")
-        self.resize(300, 0)
         self.setModal(False)
 
-        vbox = QtWidgets.QVBoxLayout(self)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        scroll = QtWidgets.QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        container = QtWidgets.QWidget()
+        scroll.setWidget(container)
+        vbox = QtWidgets.QVBoxLayout(container)
+        main_layout.addWidget(scroll)
+
         identification_groupbox = QtWidgets.QGroupBox("Identification")
         vbox.addWidget(identification_groupbox)
         identification_grid = QtWidgets.QGridLayout(identification_groupbox)
@@ -655,9 +712,11 @@ class ParametersDialog(QtWidgets.QDialog):
         hbox.addWidget(self.mng_max_spinbox)
 
         # ROI
-        identification_grid.addWidget(
-            QtWidgets.QLabel("ROI (y_min,x_min,y_max,x_max):"), 5, 0,
+        label = QtWidgets.QLabel(
+            "ROI (y<sub>min</sub>,x<sub>min</sub>,"
+            "y<sub>max</sub>,x<sub>max</sub>):"
         )
+        identification_grid.addWidget(label, 5, 0,)
         self.roi_edit = QtWidgets.QLineEdit()
         regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
         validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
@@ -794,6 +853,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.pixelsize.setRange(0, 10000)
         self.pixelsize.setValue(130)
         self.pixelsize.setSingleStep(1)
+        self.pixelsize.valueChanged.connect(self.on_pixelsize_changed)
         photon_grid.addWidget(self.pixelsize, 4, 1)
 
         # Fit Settings
@@ -925,6 +985,17 @@ class ParametersDialog(QtWidgets.QDialog):
 
         self.reset_quality_check()
 
+        # adjust the size of the dialog to fit its contents
+        hint = container.sizeHint()
+        self.setMinimumWidth(hint.width() + 45)
+        # if room is available on the screen, adjust the height as well
+        screen = QtWidgets.QApplication.primaryScreen()
+        screen_height = 1000 if screen is None else screen.size().height()
+        if hint.height() + 45 < screen_height:
+            self.resize(self.width(), hint.height() + 45)
+        else:
+            self.resize(self.width(), screen_height - 100)
+
     def reset_quality_check(self) -> None:
         """Reset the quality check UI elements."""
         self.quality_check.setEnabled(False)
@@ -936,6 +1007,16 @@ class ParametersDialog(QtWidgets.QDialog):
         for _ in self.quality_grid_values:
             _.setVisible(False)
             _.setText("")
+
+    def on_pixelsize_changed(self) -> None:
+        """If the movie is loaded and scale bar is shown, update it."""
+        if (
+            hasattr(self.window, "movie")
+            and self.window.movie is not None
+            and hasattr(self.window, "scalebar_action")
+            and self.window.scalebar_action.isChecked()
+        ):
+            self.window.draw_frame()
 
     def on_roi_edit_changed(self) -> None:
         """Handle changes to the ROI edit field."""
@@ -951,15 +1032,6 @@ class ParametersDialog(QtWidgets.QDialog):
         y_min, x_min, y_max, x_max = [int(_) for _ in text]
         # update roi
         self.window.view.roi = [[y_min, x_min], [y_max, x_max]]
-        # draw the rectangle roi
-        topleft_xy = self.window.view.mapFromScene(x_min, y_min)
-        bottomright_xy = self.window.view.mapFromScene(x_max, y_max)
-        topleft = QtCore.QPoint(topleft_xy.x(), topleft_xy.y())
-        bottomright = QtCore.QPoint(bottomright_xy.x(), bottomright_xy.y())
-        self.window.view.rubberband.setGeometry(
-            QtCore.QRect(topleft, bottomright)
-        )
-        self.window.view.rubberband.show()
         self.window.draw_frame()
         self.window.view.numeric_roi = True
 
@@ -1271,23 +1343,17 @@ class Window(QtWidgets.QMainWindow):
         self.status_bar_frame_indicator = QtWidgets.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
 
-        #: Holds the curr movie as a numpy
-        # memmap in the format (frame, y, x)
+        # Holds the curr movie as a numpy memmap in the format
+        # (frame, y, x)
         self.movie = None
-
-        #: A dictionary of analysis parameters used for the last operation
+        # Dictionary of analysis parameters used for the last operation
         self.last_identification_info = None
-
-        #: A numpy.recarray of identifcations with fields frame, x and y
+        # Recarray of identifcations with fields frame, x and y
         self.identifications = None
-
         self.ready_for_fit = False
-
         self.locs = None
-
         self.movie_path = []
 
-        # Load user settings
         self.load_user_settings()
 
     def load_user_settings(self) -> None:
@@ -1355,6 +1421,22 @@ class Window(QtWidgets.QMainWindow):
         export_current_action.setShortcut("Ctrl+E")
         export_current_action.triggered.connect(self.export_current)
 
+        file_menu.addSeparator()
+        sounds_menu = file_menu.addMenu("Sound notifications")
+        sounds_actiongroup = QtWidgets.QActionGroup(file_menu)
+        default_sound_path = lib.get_sound_notification_path()  # last used
+        default_sound_name = os.path.basename(str(default_sound_path))
+        for sound in lib.get_available_sound_notifications():
+            sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
+            action = sounds_actiongroup.addAction(
+                QtWidgets.QAction(sound_name, sounds_menu, checkable=True)
+            )
+            action.setObjectName(sound)  # store full name
+            if default_sound_name == sound:
+                action.setChecked(True)
+            sounds_menu.addAction(action)
+        sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+
         """ View """
         view_menu = menu_bar.addMenu("View")
         previous_frame_action = view_menu.addAction("Previous frame")
@@ -1392,10 +1474,15 @@ class Window(QtWidgets.QMainWindow):
         fit_in_view_action.triggered.connect(self.fit_in_view)
         view_menu.addAction(fit_in_view_action)
         view_menu.addSeparator()
-        display_settings_action = view_menu.addAction("Contrast")
-        display_settings_action.setShortcut("Ctrl+C")
-        display_settings_action.triggered.connect(self.contrast_dialog.show)
-        view_menu.addAction(display_settings_action)
+        constract_action = view_menu.addAction("Contrast")
+        constract_action.setShortcut("Ctrl+C")
+        constract_action.triggered.connect(self.contrast_dialog.show)
+        view_menu.addAction(constract_action)
+        self.scalebar_action = view_menu.addAction("Show scale bar")
+        self.scalebar_action.setCheckable(True)
+        self.scalebar_action.setChecked(False)
+        self.scalebar_action.triggered.connect(self.draw_frame)
+        view_menu.addAction(self.scalebar_action)
 
         """ Analyze """
         analyze_menu = menu_bar.addMenu("Analyze")
@@ -1781,6 +1868,19 @@ class Window(QtWidgets.QMainWindow):
             self.scene = Scene(self)
             self.scene.addPixmap(pixmap)
             self.view.setScene(self.scene)
+            # draw the ROI rectangle if applicable
+            if self.view.roi is not None:
+                [[y_min, x_min], [y_max, x_max]] = self.view.roi
+                topleft_xy = self.view.mapFromScene(x_min, y_min)
+                bottomright_xy = self.view.mapFromScene(x_max, y_max)
+                topleft = QtCore.QPoint(topleft_xy.x(), topleft_xy.y())
+                bottomright = QtCore.QPoint(
+                    bottomright_xy.x(), bottomright_xy.y(),
+                )
+                self.view.rubberband.setGeometry(
+                    QtCore.QRect(topleft, bottomright)
+                )
+                self.view.rubberband.show()
             if self.ready_for_fit:
                 identifications_frame = self.identifications[
                     self.identifications.frame == self.curr_frame_number
@@ -1815,6 +1915,7 @@ class Window(QtWidgets.QMainWindow):
                 ]
                 for loc in locs_frame:
                     self.scene.addItem(FitMarker(loc.x + 0.5, loc.y + 0.5, 1))
+            self.draw_scalebar()
 
     def draw_identifications(
         self,
@@ -1828,6 +1929,70 @@ class Window(QtWidgets.QMainWindow):
             x = identification.x
             y = identification.y
             self.scene.addRect(x - box_half, y - box_half, box, box, color)
+
+    def draw_scalebar(self) -> None:
+        """Draw a scale bar if the option is checked."""
+        if self.scalebar_action.isChecked():
+            scene_pixelsize = self.parameters_dialog.pixelsize.value()
+
+            # length (nm) - set optimal size (~1/8 of image width)
+            rect = self.view.viewport().rect()
+            visible_scene_rect = self.view.mapToScene(rect).boundingRect()
+            width = visible_scene_rect.width()
+            width_nm = width * scene_pixelsize
+            optimal_scalebar = width_nm / 8
+
+            # approximate to the nearest thousands, hundreds, tens or ones
+            if optimal_scalebar > 10_000:
+                scalebar = 10_000
+            elif optimal_scalebar > 1_000:
+                scalebar = int(1_000 * round(optimal_scalebar / 1_000))
+            elif optimal_scalebar > 100:
+                scalebar = int(100 * round(optimal_scalebar / 100))
+            elif optimal_scalebar > 10:
+                scalebar = int(10 * round(optimal_scalebar / 10))
+            else:
+                scalebar = int(round(optimal_scalebar))
+
+            length_displaypxl = int(round(
+                self.view.width() * (scalebar / scene_pixelsize) / width
+            ))
+            height_displaypxl = 10
+
+            # draw a rectangle
+            x = self.view.width() - length_displaypxl - 40
+            y = self.view.height() - height_displaypxl - 20
+            pen = QtGui.QPen(QtCore.Qt.NoPen)
+            brush = QtGui.QBrush(QtGui.QColor("white"))
+            polygon = self.view.mapToScene(
+                x, y, length_displaypxl, height_displaypxl,
+            )
+            x_scene = polygon.boundingRect().x()
+            y_scene = polygon.boundingRect().y()
+            length_scene = polygon.boundingRect().width()
+            height_scene = polygon.boundingRect().height()
+            self.scene.addRect(
+                x_scene, y_scene, length_scene, height_scene, pen, brush,
+            )
+
+            # add scale bar text
+            font = QtGui.QFont()
+            font.setPointSize(20)
+            text_item = self.scene.addText(f"{scalebar} nm", font)
+            text_item.setDefaultTextColor(QtGui.QColor("white"))
+            # position the text centered below the scale bar
+            text_rect = text_item.boundingRect()
+            text_width = text_rect.width() / (length_displaypxl / length_scene)
+            text_x = x_scene + (length_scene - text_width) / 2
+            text_y = (
+                y_scene
+                + height_scene
+                - 45 / (height_displaypxl / height_scene)
+            )
+            text_item.setPos(text_x, text_y)
+            text_item.setFlag(
+                QtWidgets.QGraphicsItem.ItemIgnoresTransformations, True
+            )
 
     @property
     def parameters(self) -> dict:
@@ -1883,15 +2048,16 @@ class Window(QtWidgets.QMainWindow):
         box = parameters["Box Size"]
         mng = parameters["Min. Net Gradient"]
         message = (
-            "Identifying in frame {:,} / {:,}"
-            " (Box Size: {:,}; Min. Net Gradient: {:,}) ..."
-        ).format(frame_number, n_frames, box, mng)
+            f"Identifying in frame {frame_number} / {n_frames}"
+            f" (Box Size: {box}; Min. Net Gradient: {mng}) ..."
+        )
         self.status_bar.showMessage(message)
 
     def on_identify_finished(
         self,
         parameters: dict,
         roi: list[int],
+        elapsed_time: float,
         identifications: np.recarray,
         fit_afterwards: bool,
         calibrate_z: bool,
@@ -1906,13 +2072,18 @@ class Window(QtWidgets.QMainWindow):
             box = parameters["Box Size"]
             mng = parameters["Min. Net Gradient"]
             message = (
-                "Identified {:,} spots (Box Size: {:,}; "
-                "Min. Net Gradient: {:,}). Ready for fit."
-            ).format(n_identifications, box, mng)
+                f"Identified {n_identifications} spots (Box Size: {box}; "
+                f"Min. Net Gradient: {mng}). Ready for fit."
+            )
             self.status_bar.showMessage(message)
             self.identifications = identifications
             self.ready_for_fit = True
             self.draw_frame()
+            # sound notification
+            if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
+                sound_path = lib.get_sound_notification_path()
+                if sound_path is not None:
+                    playsound(sound_path, block=False)
             if fit_afterwards:
                 self.fit(calibrate_z=calibrate_z)
 
@@ -1972,7 +2143,7 @@ class Window(QtWidgets.QMainWindow):
         if self.parameters_dialog.gpufit_checkbox.isChecked():
             self.status_bar.showMessage("Fitting spots by GPUfit...")
         else:
-            message = "Fitting spot {:,} / {:,} ...".format(curr, total)
+            message = f"Fitting spot {curr} / {total} ..."
             self.status_bar.showMessage(message)
 
     def on_fit_finished(
@@ -1990,6 +2161,11 @@ class Window(QtWidgets.QMainWindow):
         )
         self.locs = locs
         self.draw_frame()
+        # sound notification
+        if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
+            sound_path = lib.get_sound_notification_path()
+            if sound_path is not None:
+                playsound(sound_path, block=False)
         base, ext = os.path.splitext(self.movie_path)
         if calibrate_z:
             step, ok = QtWidgets.QInputDialog.getDouble(
@@ -2006,12 +2182,21 @@ class Window(QtWidgets.QMainWindow):
                     self, "Save 3D calibration", out_path, filter="*.yaml"
                 )
                 if path:
+                    t0 = time.time()
                     zfit.calibrate_z(
                         locs,
                         self.info,
                         step,
                         self.parameters_dialog.magnification_factor.value(),
                         path=path,
+                    )
+                    dt = time.time() - t0
+                    if dt > lib.SOUND_NOTIFICATION_DURATION:
+                        sound_path = lib.get_sound_notification_path()
+                        if sound_path is not None:
+                            playsound(sound_path, block=False)
+                    self.status_bar.showMessage(
+                        f"3D calibrated in {dt:.2f} seconds."
                     )
         else:
             if fit_z:
@@ -2031,12 +2216,15 @@ class Window(QtWidgets.QMainWindow):
     ) -> None:
         """Handle the completion of the z fitting process."""
         self.status_bar.showMessage(
-            "Fitted {:,} z coordinates in {:.2f} seconds.".format(
-                len(locs), elapsed_time
-            )
+            f"Fitted {len(locs)} z coordinates in {elapsed_time:.2f} seconds."
         )
         self.locs = locs
         self.save_locs_after_fit()
+        # sound notification
+        if elapsed_time > lib.SOUND_NOTIFICATION_DURATION:
+            sound_path = lib.get_sound_notification_path()
+            if sound_path is not None:
+                playsound(sound_path, block=False)
 
     def save_locs_after_fit(self) -> None:
         """Save localizations after fitting to an .hdf5 file."""
@@ -2050,15 +2238,33 @@ class Window(QtWidgets.QMainWindow):
 
     def fit_in_view(self) -> None:
         """Reset the zoom in the scene."""
-        self.view.fitInView(self.scene.sceneRect(), QtCore.Qt.KeepAspectRatio)
+        rectangle = QtCore.QRectF(
+            0, 0, self.movie.shape[2], self.movie.shape[1],
+        )
+        self.view.fitInView(rectangle, QtCore.Qt.KeepAspectRatio)
+        self.draw_frame()
 
     def zoom_in(self) -> None:
         """Zoom in the view."""
-        self.view.scale(10 / 7, 10 / 7)
+        self.zoom(10 / 7)
 
     def zoom_out(self) -> None:
         """Zoom out the view."""
-        self.view.scale(7 / 10, 7 / 10)
+        self.zoom(7 / 10)
+
+    def zoom(self, factor: float) -> None:
+        """Zoom in or out the view by a specific factor."""
+        if not hasattr(self, "movie") or self.movie is None:
+            return
+        # do not allow zooming out too much
+        if factor < 1:
+            rect = self.view.viewport().rect()
+            visible_scene_rect = self.view.mapToScene(rect).boundingRect()
+            if visible_scene_rect.width() / factor > self.movie.shape[2]:
+                self.fit_in_view()
+                return
+        self.view.scale(factor, factor)
+        self.draw_frame()
 
     def save_spots(self, path: str) -> None:
         """Save identified spots as an .hdf5 file."""
@@ -2070,9 +2276,7 @@ class Window(QtWidgets.QMainWindow):
 
     def save_spots_dialog(self) -> None:
         """Get the path for saving identified spots."""
-        if self.movie_path == []:
-            print("No spots to save.")
-        else:
+        if self.movie_path != []:
             base, ext = os.path.splitext(self.movie_path)
             path = base + "_spots.hdf5"
             path, exe = QtWidgets.QFileDialog.getSaveFileName(
@@ -2092,12 +2296,15 @@ class Window(QtWidgets.QMainWindow):
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
         if path:
-            qimage = QtGui.QImage(self.view.size(), QtGui.QImage.Format_RGB32)
+            qimage = QtGui.QImage(
+                self.scene.itemsBoundingRect().size().toSize(),
+                QtGui.QImage.Format_ARGB32,
+            )
+            qimage.fill(QtGui.QColor("transparent"))  # TODO: crop image
             painter = QtGui.QPainter(qimage)
             self.view.render(painter)
             painter.end()
             qimage.save(path)
-            # self.view.scene().save_image(path)
         self.view.setMinimumSize(1, 1)
 
     def save_locs(self, path: str) -> None:
@@ -2121,9 +2328,7 @@ class Window(QtWidgets.QMainWindow):
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""
-        if self.movie_path == []:
-            print("No localizations to save.")
-        else:
+        if self.movie_path != []:
             base, ext = os.path.splitext(self.movie_path)
             locs_path = base + "_locs.hdf5"
             path, exe = QtWidgets.QFileDialog.getSaveFileName(
@@ -2155,7 +2360,7 @@ class IdentificationWorker(QtCore.QThread):
     progress."""
 
     progressMade = QtCore.pyqtSignal(int, dict)
-    finished = QtCore.pyqtSignal(dict, object, np.recarray, bool, bool)
+    finished = QtCore.pyqtSignal(dict, object, float, np.recarray, bool, bool)
 
     def __init__(
         self,
@@ -2173,6 +2378,7 @@ class IdentificationWorker(QtCore.QThread):
 
     def run(self) -> None:
         N = len(self.movie)
+        t0 = time.time()
         curr, futures = localize.identify_async(
             self.movie,
             self.parameters["Min. Net Gradient"],
@@ -2184,9 +2390,11 @@ class IdentificationWorker(QtCore.QThread):
             time.sleep(0.2)
         self.progressMade.emit(curr[0], self.parameters)
         identifications = localize.identifications_from_futures(futures)
+        elapsed_time = time.time() - t0
         self.finished.emit(
             self.parameters,
             self.roi,
+            elapsed_time,
             identifications,
             self.fit_afterwards,
             self.calibrate_z,
@@ -2271,7 +2479,6 @@ class FitWorker(QtCore.QThread):
                 self.box,
             )
         elif self.method == "avg":
-            print("Average intensity")
             # just get out the average intensity
             fs = avgroi.fit_spots_parallel(spots, asynch=True)
             n_tasks = len(fs)
@@ -2286,7 +2493,7 @@ class FitWorker(QtCore.QThread):
                 self.identifications, theta, self.box, em,
             )
         else:
-            print("This should never happen...")
+            raise ValueError(f"Unknown fitting method: {self.method}")
         self.progressMade.emit(N + 1, N)
         dt = time.time() - t0
         self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
@@ -2395,8 +2602,6 @@ class QualityWorker(QtCore.QThread):
         self.progressMade.emit("Checking Quality (4/4) Kinetics ..", 0, "")
         len_mean = localize.check_kinetics(sane_locs, self.info)
         self.progressMade.emit("", 3, f"{len_mean:.3f}")
-
-        print(f"Quality {nena_px} {drift_x} {drift_y} {len_mean}")
 
         localize.add_file_to_db(
             self.path,

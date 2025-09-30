@@ -28,8 +28,14 @@ wheels/
 # Plugins
 picasso/gui/plugins/
 
+# Sound notifications
+resources/notification_sounds/
+
 # Camera configuration
 picasso/config.yaml
+
+# One-click-installer output
+release/one_click_windows_gui/Output/
 
 # PyInstaller
 #  Usually these files are written by a python script from a template

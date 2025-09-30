@@ -95,6 +95,7 @@ Plotting
 - *Plot settings* opens a new dialog that allows the user to show/hide plot legend, adjust the histogram bin size and min. and max. plotted distances, among others, see below.
 
 .. image:: ../docs/spinna_nnd_plot_settings.png
+   :scale: 40 %
    :alt: nnd_plot_settings
 
 If the loaded structures include several molecular target species, several NND histograms are plotted, one for each pair of molecular target species which can be explored by clicking left and right arrows in the *Plotting* box.

@@ -1,7 +1,23 @@
 Changelog
 =========
 
-Last change: 08-SEP-2025 MTS
+Last change: 30-SEP-2025 CEST
+
+0.8.5
+-----
+- Sound notifications when long processes finish, see `here <https://picassosr.readthedocs.io/en/latest/others.html>`_
+- Several dialogs in Render, Localize and Simulate are now scrollable (*experimental*)
+- SPINNA fix automatic area detection from picked localizations
+- Render add dependency ``imageio[ffmpeg]`` for building animations
+- Render allow for loading pick regions by dropping a .yaml file onto the window
+- Render improve zooming with mouse wheel (Ctrl/Cmd + wheel)
+- Fast rendering automatically adjusts constrast
+- Localize show scale bar function added
+- Localize plotted ROI remains the same when zooming in/out and panning
+- Localize Gauss MLE saves number of iterations and fit log-likelihood
+- DBSCAN accepts min. no. of localizations per cluster
+- Cluster center calculations calculate arithmetic mean, not weighted mean
+- Other bug fixes and minor improvements
 
 0.8.4
 -----
