@@ -645,13 +645,16 @@ class ParametersDialog(QtWidgets.QDialog):
         self.setWindowTitle("Parameters")
         self.setModal(False)
 
-        scroll_box = lib.ScrollableGroupBox("", self)
-        self.setLayout(QtWidgets.QVBoxLayout())
-        self.layout().addWidget(scroll_box)
-        self.resize(600, 800)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        scroll = QtWidgets.QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        container = QtWidgets.QWidget()
+        scroll.setWidget(container)
+        vbox = QtWidgets.QVBoxLayout(container)
+        main_layout.addWidget(scroll)
 
         identification_groupbox = QtWidgets.QGroupBox("Identification")
-        scroll_box.add_widget(identification_groupbox, 0, 0)
+        vbox.addWidget(identification_groupbox)
         identification_grid = QtWidgets.QGridLayout(identification_groupbox)
 
         # Box Size
@@ -732,7 +735,7 @@ class ParametersDialog(QtWidgets.QDialog):
         if "Cameras" in CONFIG:
             # Experiment settings
             exp_groupbox = QtWidgets.QGroupBox("Experiment settings")
-            scroll_box.add_widget(exp_groupbox, 1, 0)
+            vbox.addWidget(exp_groupbox)
             exp_grid = QtWidgets.QGridLayout(exp_groupbox)
             exp_grid.addWidget(QtWidgets.QLabel("Camera:"), 0, 0)
             self.camera = QtWidgets.QComboBox()
@@ -806,7 +809,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Photon conversion
         photon_groupbox = QtWidgets.QGroupBox("Photon Conversion")
-        scroll_box.add_widget(photon_groupbox, 2, 0)
+        vbox.addWidget(photon_groupbox)
         photon_grid = QtWidgets.QGridLayout(photon_groupbox)
 
         # EM Gain
@@ -855,7 +858,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Fit Settings
         fit_groupbox = QtWidgets.QGroupBox("Fit Settings")
-        scroll_box.add_widget(fit_groupbox, 3, 0)
+        vbox.addWidget(fit_groupbox)
         fit_grid = QtWidgets.QGridLayout(fit_groupbox)
 
         fit_grid.addWidget(QtWidgets.QLabel("Method:"), 1, 0)
@@ -910,7 +913,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # 3D
         z_groupbox = QtWidgets.QGroupBox("3D via Astigmatism")
-        scroll_box.add_widget(z_groupbox, 4, 0)
+        vbox.addWidget(z_groupbox)
 
         z_grid = QtWidgets.QGridLayout(z_groupbox)
         z_grid.addWidget(
@@ -952,7 +955,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Sample quality
         quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
-        scroll_box.add_widget(quality_groupbox, 5, 0)
+        vbox.addWidget(quality_groupbox)
         quality_grid = QtWidgets.QGridLayout(quality_groupbox)
         self.quality_check = QtWidgets.QPushButton(
             "Estimate and add to database"
@@ -981,6 +984,18 @@ class ParametersDialog(QtWidgets.QDialog):
             quality_grid.addWidget(_, idx + 1, 2)
 
         self.reset_quality_check()
+
+        # adjust the size of the dialog to fit its contents
+        hint = container.sizeHint()
+        self.setMinimumWidth(hint.width() + 45)
+        # if room is available on the screen, adjust the height as well
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            screen_size = screen.size()
+            if hint.height() + 45 < screen_size.height():
+                self.resize(self.width(), hint.height() + 45)
+            else:
+                self.resize(self.width(), screen_size.height() - 100)
 
     def reset_quality_check(self) -> None:
         """Reset the quality check UI elements."""

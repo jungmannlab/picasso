@@ -427,6 +427,7 @@ class DatasetDialog(QtWidgets.QDialog):
         self.intensitysettings = []
         layout = QtWidgets.QGridLayout()
         self.setLayout(layout)
+        self.setMaximumHeight(1000)
 
         # add non-scrollable elements - left side
         self.legend = QtWidgets.QCheckBox("Show legend")
@@ -457,20 +458,26 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # add scrollable area which will display all channels, below
         # the non-scrollable elements
-        self.scroll_area = lib.ScrollableGroupBox("", self)
-        layout.addWidget(self.scroll_area, 4, 0, 1, 3)
+        scroll = QtWidgets.QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        container = QtWidgets.QWidget()
+        scroll.setWidget(container)
+        self.scroll_area = QtWidgets.QGridLayout(container)
+        self.scroll_area.setAlignment(QtCore.Qt.AlignTop)
+        layout.addWidget(scroll, 4, 0, 1, 3)
+
         self.checks = []
         self.title = []
         self.closebuttons = []
         self.colorselection = []
         self.colordisp_all = []
         self.intensitysettings = []
-        self.scroll_area.add_widget(QtWidgets.QLabel("Files"), 0, 0)
-        self.scroll_area.add_widget(QtWidgets.QLabel("Change title"), 0, 1)
-        self.scroll_area.add_widget(QtWidgets.QLabel("Color"), 0, 2)
-        self.scroll_area.add_widget(QtWidgets.QLabel(""), 0, 3)
-        self.scroll_area.add_widget(QtWidgets.QLabel("Rel. Intensity"), 0, 4)
-        self.scroll_area.add_widget(QtWidgets.QLabel("Close"), 0, 5)
+        self.scroll_area.addWidget(QtWidgets.QLabel("Files"), 0, 0)
+        self.scroll_area.addWidget(QtWidgets.QLabel("Change title"), 0, 1)
+        self.scroll_area.addWidget(QtWidgets.QLabel("Color"), 0, 2)
+        self.scroll_area.addWidget(QtWidgets.QLabel(""), 0, 3)
+        self.scroll_area.addWidget(QtWidgets.QLabel("Rel. Intensity"), 0, 4)
+        self.scroll_area.addWidget(QtWidgets.QLabel("Close"), 0, 5)
 
         self.default_colors = [
             "red",
@@ -514,7 +521,7 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # Create 3 buttons for checking, naming and closing the channel
         c = QtWidgets.QCheckBox(path)
-        currentline = self.scroll_area.content_layout.rowCount()
+        currentline = self.scroll_area.rowCount()
         t = QtWidgets.QPushButton("#")
         t.setObjectName(str(currentline))
         p = QtWidgets.QPushButton("x")
@@ -579,12 +586,23 @@ class DatasetDialog(QtWidgets.QDialog):
         self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
 
         # add all the widgets to the Dataset Dialog
-        self.scroll_area.add_widget(c, currentline, 0)
-        self.scroll_area.add_widget(t, currentline, 1)
-        self.scroll_area.add_widget(colordrop, currentline, 2)
-        self.scroll_area.add_widget(colordisp, currentline, 3)
-        self.scroll_area.add_widget(intensity, currentline, 4)
-        self.scroll_area.add_widget(p, currentline, 5)
+        self.scroll_area.addWidget(c, currentline, 0)
+        self.scroll_area.addWidget(t, currentline, 1)
+        self.scroll_area.addWidget(colordrop, currentline, 2)
+        self.scroll_area.addWidget(colordisp, currentline, 3)
+        self.scroll_area.addWidget(intensity, currentline, 4)
+        self.scroll_area.addWidget(p, currentline, 5)
+
+        # adjust the size of the dialog
+        hint = self.sizeHint()
+        self.setMinimumWidth(hint.width())
+        # if room is available on the screen, adjust the height as well
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            screen_size = screen.size()
+        max_height = min(screen_size.height()-45, 1000)
+        if hint.height() + 45 < max_height:
+            self.resize(self.width(), hint.height() + 45)
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -635,12 +653,12 @@ class DatasetDialog(QtWidgets.QDialog):
             self.window.remove_locs()
         else:
             # remove widgets from the Dataset Dialog
-            self.scroll_area.remove_widget(self.checks[i])
-            self.scroll_area.remove_widget(self.title[i])
-            self.scroll_area.remove_widget(self.colorselection[i])
-            self.scroll_area.remove_widget(self.colordisp_all[i])
-            self.scroll_area.remove_widget(self.intensitysettings[i])
-            self.scroll_area.remove_widget(self.closebuttons[i])
+            self.scroll_area.removeWidget(self.checks[i])
+            self.scroll_area.removeWidget(self.title[i])
+            self.scroll_area.removeWidget(self.colorselection[i])
+            self.scroll_area.removeWidget(self.colordisp_all[i])
+            self.scroll_area.removeWidget(self.intensitysettings[i])
+            self.scroll_area.removeWidget(self.closebuttons[i])
 
             # delete the widgets from the lists
             del self.checks[i]
@@ -694,6 +712,11 @@ class DatasetDialog(QtWidgets.QDialog):
                 f"Picasso v{__version__}: Render. File: "
                 f"{os.path.basename(self.window.view.locs_paths[-1])}"
             )
+
+            # adjust the size of the dialog
+            hint = self.sizeHint()
+            self.setMinimumWidth(hint.width())
+            self.resize(self.width(), hint.height() + 45)
 
     def update_viewport(self) -> None:
         """Update the scene in the main window."""
@@ -2853,14 +2876,18 @@ class InfoDialog(QtWidgets.QDialog):
         self.lp = None
         self.nena_calculated = False
         self.change_fov = ChangeFOV(self.window)
-        scroll_box = lib.ScrollableGroupBox("", self)
-        self.setLayout(QtWidgets.QVBoxLayout())
-        self.layout().addWidget(scroll_box)
-        self.setMinimumSize(500, 600)
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        scroll = QtWidgets.QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        container = QtWidgets.QWidget()
+        scroll.setWidget(container)
+        vbox = QtWidgets.QVBoxLayout(container)
+        main_layout.addWidget(scroll)
 
         # Display
         display_groupbox = QtWidgets.QGroupBox("Display")
-        scroll_box.add_widget(display_groupbox, 0, 0)
+        vbox.addWidget(display_groupbox)
         display_grid = QtWidgets.QGridLayout(display_groupbox)
         display_grid.addWidget(QtWidgets.QLabel("Image width:"), 0, 0)
         self.width_label = QtWidgets.QLabel()
@@ -2883,7 +2910,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # Movie
         movie_groupbox = QtWidgets.QGroupBox("Movie")
-        scroll_box.add_widget(movie_groupbox, 1, 0)
+        vbox.addWidget(movie_groupbox)
         self.movie_grid = QtWidgets.QGridLayout(movie_groupbox)
         self.movie_grid.addWidget(
             QtWidgets.QLabel("Median fit precision:"), 0, 0
@@ -2898,7 +2925,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.movie_grid.addWidget(self.nena_button, 1, 1)
         # FOV
         fov_groupbox = QtWidgets.QGroupBox("Field of view")
-        scroll_box.add_widget(fov_groupbox, 2, 0)
+        vbox.addWidget(fov_groupbox)
         fov_grid = QtWidgets.QGridLayout(fov_groupbox)
         fov_grid.addWidget(QtWidgets.QLabel("# Localizations:"), 0, 0)
         self.locs_label = QtWidgets.QLabel()
@@ -2906,7 +2933,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # Picks
         picks_groupbox = QtWidgets.QGroupBox("Picks")
-        scroll_box.add_widget(picks_groupbox, 3, 0)
+        vbox.addWidget(picks_groupbox)
         self.picks_grid = QtWidgets.QGridLayout(picks_groupbox)
         self.picks_grid.addWidget(QtWidgets.QLabel("# Picks:"), 0, 0)
         self.n_picks = QtWidgets.QLabel()
@@ -2993,6 +3020,16 @@ class InfoDialog(QtWidgets.QDialog):
         self.picks_grid.addWidget(
             pick_hists, self.picks_grid.rowCount(), 0, 1, 3
         )
+
+        # adjust the size of the dialog to fit its contents
+        hint = container.sizeHint()
+        self.setMinimumWidth(hint.width() + 70)
+        # if room is available on the screen, adjust the height as well
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            screen_size = screen.size()
+            if hint.height() + 45 < screen_size.height():
+                self.resize(self.width(), hint.height() + 45)
 
     def calculate_nena_lp(self) -> None:
         """Calculate and plot NeNA precision in a given channel."""
@@ -4044,14 +4081,18 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Display Settings")
         self.resize(200, 0)
         self.setModal(False)
-        scroll_box = lib.ScrollableGroupBox("", self)
-        self.setLayout(QtWidgets.QVBoxLayout())
-        self.layout().addWidget(scroll_box)
-        self.setMinimumSize(400, 600)
+
+        main_layout = QtWidgets.QVBoxLayout(self)
+        scroll = QtWidgets.QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        container = QtWidgets.QWidget()
+        scroll.setWidget(container)
+        vbox = QtWidgets.QVBoxLayout(container)
+        main_layout.addWidget(scroll)
 
         # General
         general_groupbox = QtWidgets.QGroupBox("General")
-        scroll_box.add_widget(general_groupbox, 0, 0)
+        vbox.addWidget(general_groupbox)
         general_grid = QtWidgets.QGridLayout(general_groupbox)
         general_grid.addWidget(QtWidgets.QLabel("Zoom:"), 0, 0)
         self.zoom = QtWidgets.QDoubleSpinBox()
@@ -4083,7 +4124,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         # Contrast
         contrast_groupbox = QtWidgets.QGroupBox("Contrast")
-        scroll_box.add_widget(contrast_groupbox, 1, 0)
+        vbox.addWidget(contrast_groupbox)
         contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
         minimum_label = QtWidgets.QLabel("Min. Density:")
         contrast_grid.addWidget(minimum_label, 0, 0)
@@ -4154,7 +4195,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.min_blur_width.valueChanged.connect(self.render_scene)
         blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
 
-        scroll_box.add_widget(blur_groupbox, 2, 0)
+        vbox.addWidget(blur_groupbox)
         self.blur_methods = {
             points_button: None,
             smooth_button: "smooth",
@@ -4173,14 +4214,14 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.pixelsize.setKeyboardTracking(False)
         self.pixelsize.valueChanged.connect(self.update_scene)
         self.camera_grid.addWidget(self.pixelsize, 0, 1)
-        scroll_box.add_widget(camera_groupbox, 3, 0)
+        vbox.addWidget(camera_groupbox)
 
         # Scalebar
         self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.update_scene)
-        scroll_box.add_widget(self.scalebar_groupbox, 4, 0)
+        vbox.addWidget(self.scalebar_groupbox)
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
         scalebar_grid.addWidget(
             QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
@@ -4199,7 +4240,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         # Render
         self.render_groupbox = QtWidgets.QGroupBox("Render properties")
 
-        scroll_box.add_widget(self.render_groupbox, 5, 0)
+        vbox.addWidget(self.render_groupbox)
         render_grid = QtWidgets.QGridLayout(self.render_groupbox)
         render_grid.addWidget(QtWidgets.QLabel("Parameter:"), 0, 0)
         self.parameter = QtWidgets.QComboBox()
@@ -4267,6 +4308,18 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
+
+        # adjust the size of the dialog to fit its contents
+        hint = container.sizeHint()
+        self.setMinimumWidth(hint.width() + 45)
+        # if room is available on the screen, adjust the height as well
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            screen_size = screen.size()
+            if hint.height() + 45 < screen_size.height():
+                self.resize(self.width(), hint.height() + 45)
+            else:
+                self.resize(self.width(), screen_size.height() - 100)
 
     def on_cmap_changed(self) -> None:
         """Load custom colormap if requested."""

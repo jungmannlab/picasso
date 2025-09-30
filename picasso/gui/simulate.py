@@ -263,8 +263,17 @@ class Window(QtWidgets.QMainWindow):
         self.currentround = CURRENTROUND
         self.structureMode = True
 
-        scroll_box = lib.ScrollableGroupBox("", self)
-        self.setMinimumSize(800, 800)
+        containerWidget = QtWidgets.QWidget()
+        scroll_box = QtWidgets.QGridLayout(containerWidget)
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setWidget(containerWidget)
+        self.setCentralWidget(scroll)
+        max_height = 1300
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is not None:
+            max_height = min(max_height, screen.size().height() - 100)
+        self.resize(800, max_height)
 
         # CAMERA PARAMETERS
         camera_groupbox = QtWidgets.QGroupBox("Camera parameters")
@@ -846,41 +855,34 @@ class Window(QtWidgets.QMainWindow):
         self.mainpbar = QtWidgets.QProgressBar(self)
         # Arrange Buttons
         if ADVANCEDMODE:
-            scroll_box.add_widget(pos_groupbox, 1, 0)
-            scroll_box.add_widget(str_groupbox, 1, 1)
-            scroll_box.add_widget(structure_groupbox, 2, 0, 2, 1)
-            scroll_box.add_widget(camera_groupbox, 1, 2)
-            scroll_box.add_widget(paint_groupbox, 3, 1)
-            scroll_box.add_widget(imager_groupbox, 2, 1)
-            scroll_box.add_widget(noise_groupbox, 2, 2)
-            scroll_box.content_layout.addLayout(btngridR, 3, 2)
-            scroll_box.add_widget(self.mainpbar, 5, 0, 1, 4)
-            scroll_box.add_widget(threed_groupbox, 4, 0)
-            scroll_box.add_widget(handles_groupbox, 4, 1)
+            scroll_box.addWidget(pos_groupbox, 1, 0)
+            scroll_box.addWidget(str_groupbox, 1, 1)
+            scroll_box.addWidget(structure_groupbox, 2, 0, 2, 1)
+            scroll_box.addWidget(camera_groupbox, 1, 2)
+            scroll_box.addWidget(paint_groupbox, 3, 1)
+            scroll_box.addWidget(imager_groupbox, 2, 1)
+            scroll_box.addWidget(noise_groupbox, 2, 2)
+            scroll_box.addLayout(btngridR, 3, 2)
+            scroll_box.addWidget(self.mainpbar, 5, 0, 1, 3)
+            scroll_box.addWidget(threed_groupbox, 4, 0)
+            scroll_box.addWidget(handles_groupbox, 4, 1)
         else:
             # Left side
-            scroll_box.add_widget(pos_groupbox, 1, 0)
-            scroll_box.add_widget(str_groupbox, 1, 1)
-            scroll_box.add_widget(structure_groupbox, 2, 0)
-            scroll_box.add_widget(paint_groupbox, 3, 0)
-            scroll_box.add_widget(handles_groupbox, 4, 0)
-            scroll_box.add_widget(threed_groupbox, 5, 0)
+            scroll_box.addWidget(pos_groupbox, 1, 0)
+            scroll_box.addWidget(str_groupbox, 1, 1)
+            scroll_box.addWidget(structure_groupbox, 2, 0)
+            scroll_box.addWidget(paint_groupbox, 3, 0)
+            scroll_box.addWidget(handles_groupbox, 4, 0)
+            scroll_box.addWidget(threed_groupbox, 5, 0)
 
             # Right side
-            scroll_box.add_widget(imager_groupbox, 2, 1)
-            scroll_box.add_widget(camera_groupbox, 3, 1)
-            scroll_box.content_layout.addLayout(btngridR, 4, 1, 2, 1)
-            scroll_box.add_widget(self.mainpbar, 8, 0, 1, 4)
+            scroll_box.addWidget(imager_groupbox, 2, 1)
+            scroll_box.addWidget(camera_groupbox, 3, 1)
+            scroll_box.addLayout(btngridR, 4, 1, 2, 1)
+            scroll_box.addWidget(self.mainpbar, 8, 0, 1, 2)
 
-        mainWidget = QtWidgets.QWidget()
-        layout = QtWidgets.QVBoxLayout()
-        mainWidget.setLayout(layout)
-        self.setCentralWidget(mainWidget)
-        layout.addWidget(scroll_box)
-        self.setGeometry(300, 300, 300, 150)
         # CALL FUNCTIONS
         self.generatePositions()
-
         self.mainpbar.setValue(0)
         self.statusBar().showMessage("Simulate ready.")
 
