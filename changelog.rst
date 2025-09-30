@@ -15,6 +15,7 @@ Last change: 30-SEP-2025 CEST
 - Localize show scale bar function added
 - Localize plotted ROI remains the same when zooming in/out and panning
 - Localize Gauss MLE saves number of iterations and fit log-likelihood
+- DBSCAN accepts min. no. of localizations per cluster
 - Cluster center calculations calculate arithmetic mean, not weighted mean
 - Other bug fixes and minor improvements
 
