@@ -550,13 +550,7 @@ class ViewRotation(QtWidgets.QLabel):
     angx, angy, angz : float
         Current rotation angle around x, y, and z axes.
     block_x, block_y, block_z : bool
-        True if rotate only around x, y, or z axis respectively
-    display_angles : bool
-        True if current rotation angles are to be displayed.
-    display_legend : bool
-        True if legend is to be displayed.
-    display_rotation : bool
-        True if reference axes is to be displayed.
+        True if rotate only around x, y, or z axis respectively.
     group_color : np.array
         Important for single channel data with group info (picked or
         clustered locs); contains an integer index for each loc
@@ -602,9 +596,6 @@ class ViewRotation(QtWidgets.QLabel):
         self._rotation = []
         self._points = []
         self._pan = False
-        self.display_legend = False
-        self.display_rotation = True
-        self.display_angles = False
         self.block_x = False
         self.block_y = False
         self.block_z = False
@@ -1080,7 +1071,7 @@ class ViewRotation(QtWidgets.QLabel):
         image : QImage
             Image with the drawn legend.
         """
-        if self.display_legend:
+        if self.window.legend_action.isChecked():
             n_channels = len(self.locs)
             painter = QtGui.QPainter(image)
             x = 12
@@ -1116,7 +1107,7 @@ class ViewRotation(QtWidgets.QLabel):
         image : QImage
             Image with the drawn legend.
         """
-        if self.display_rotation:
+        if self.window.rotation_action.isChecked():
             painter = QtGui.QPainter(image)
             length = 30
             x = 50
@@ -1172,7 +1163,7 @@ class ViewRotation(QtWidgets.QLabel):
 
     def draw_rotation_angles(self, image: np.ndarray) -> np.ndarray:
         """Draw text displaying current rotation angles in degrees."""
-        if self.display_angles:
+        if self.window.angles_action.isChecked():
             image = image.copy()
             [angx, angy, angz] = [
                 int(np.round(_ * 180 / np.pi, 0))
@@ -1253,32 +1244,6 @@ class ViewRotation(QtWidgets.QLabel):
             oldpoint = point
         painter.end()
         return image
-
-    def add_legend(self) -> None:
-        """Show/Hide legend."""
-        if self.display_legend:
-            self.display_legend = False
-        else:
-            self.display_legend = True
-        self.update_scene()
-
-    def add_rotation_view(self) -> None:
-        """Show/Hide rotation axes icon."""
-
-        if self.display_rotation:
-            self.display_rotation = False
-        else:
-            self.display_rotation = True
-        self.update_scene()
-
-    def add_angles_view(self) -> None:
-        """Show/Hide current rotation in angles."""
-
-        if self.display_angles:
-            self.display_angles = False
-        else:
-            self.display_angles = True
-        self.update_scene()
 
     def rotation_input(self) -> None:
         """Ask the user to input 3 rotation angles manually."""
@@ -1966,14 +1931,20 @@ class RotationWindow(QtWidgets.QMainWindow):
 
     Attributes
     ----------
+    angles_action : QtWidgets.QAction
+        Action to toggle the display of current rotation angles.
     animation_dialog : AnimationDialog
         Instance of animation dialog.
     display_settings_dlg : DisplaySettingsRotationDialog
         Instance of display settings rotation dialog.
+    legend_action : QtWidgets.QAction
+        Action to toggle the display of the legend.
     menu_bar : QMenuBar
         Menu bar with menus: File, View, Tools.
     menus : list
         Contains File, View and Tools menus, used for plugins.
+    rotation_action : QtWidgets.QAction
+        Action to toggle the display of reference axes.
     view_rot : ViewRotation
         Instance of the class for displaying rendered localizations.
     window : QMainWindow
@@ -2020,16 +1991,22 @@ class RotationWindow(QtWidgets.QMainWindow):
             self.display_settings_dlg.show
         )
         view_menu.addAction(display_settings_action)
-        legend_action = view_menu.addAction("Show/hide legend")
-        legend_action.setShortcut("Ctrl+L")
-        legend_action.triggered.connect(self.view_rot.add_legend)
-        rotation_view_action = view_menu.addAction("Show/hide rotation")
-        rotation_view_action.setShortcut("Ctrl+P")
-        rotation_view_action.triggered.connect(self.view_rot.add_rotation_view)
-        angles_display_action = view_menu.addAction(
+        self.legend_action = view_menu.addAction("Show/hide legend")
+        self.legend_action.setCheckable(True)
+        self.legend_action.setChecked(False)
+        self.legend_action.setShortcut("Ctrl+L")
+        self.legend_action.triggered.connect(self.update_scene)
+        self.rotation_action = view_menu.addAction("Show/hide rotation")
+        self.rotation_action.setCheckable(True)
+        self.rotation_action.setChecked(True)
+        self.rotation_action.setShortcut("Ctrl+P")
+        self.rotation_action.triggered.connect(self.update_scene)
+        self.angles_action = view_menu.addAction(
             "Show/hide rotation angles"
         )
-        angles_display_action.triggered.connect(self.view_rot.add_angles_view)
+        self.angles_action.setCheckable(True)
+        self.angles_action.setChecked(False)
+        self.angles_action.triggered.connect(self.update_scene)
 
         view_menu.addSeparator()
         rotation_action = view_menu.addAction("Rotate by angle")
@@ -2231,6 +2208,10 @@ class RotationWindow(QtWidgets.QMainWindow):
                 )
                 info = self.view_rot.infos[channel] + new_info
                 io.save_locs(path, self.window.view.all_locs[channel], info)
+
+    def update_scene(self) -> None:
+        """Update the scene in ViewRotation."""
+        self.view_rot.update_scene()
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Close all children dialogs and self."""
