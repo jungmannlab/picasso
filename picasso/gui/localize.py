@@ -990,12 +990,11 @@ class ParametersDialog(QtWidgets.QDialog):
         self.setMinimumWidth(hint.width() + 45)
         # if room is available on the screen, adjust the height as well
         screen = QtWidgets.QApplication.primaryScreen()
-        if screen is not None:
-            screen_size = screen.size()
-            if hint.height() + 45 < screen_size.height():
-                self.resize(self.width(), hint.height() + 45)
-            else:
-                self.resize(self.width(), screen_size.height() - 100)
+        screen_height = 1000 if screen is None else screen.size().height()
+        if hint.height() + 45 < screen_height:
+            self.resize(self.width(), hint.height() + 45)
+        else:
+            self.resize(self.width(), screen_height - 100)
 
     def reset_quality_check(self) -> None:
         """Reset the quality check UI elements."""

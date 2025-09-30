@@ -271,8 +271,8 @@ class Window(QtWidgets.QMainWindow):
         self.setCentralWidget(scroll)
         max_height = 1300
         screen = QtWidgets.QApplication.primaryScreen()
-        if screen is not None:
-            max_height = min(max_height, screen.size().height() - 100)
+        screen_height = 1000 if screen is None else screen.size().height()
+        max_height = min(max_height, screen_height - 100)
         self.resize(800, max_height)
 
         # CAMERA PARAMETERS

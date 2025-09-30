@@ -594,15 +594,15 @@ class DatasetDialog(QtWidgets.QDialog):
         self.scroll_area.addWidget(p, currentline, 5)
 
         # adjust the size of the dialog
-        hint = self.sizeHint()
-        self.setMinimumWidth(hint.width())
+        hint = self.scroll_area.sizeHint()
+        self.resize(hint.width() + 45, self.height())
         # if room is available on the screen, adjust the height as well
         screen = QtWidgets.QApplication.primaryScreen()
-        if screen is not None:
-            screen_size = screen.size()
-        max_height = min(screen_size.height()-45, 1000)
-        if hint.height() + 45 < max_height:
-            self.resize(self.width(), hint.height() + 45)
+        screen_height = 1000 if screen is None else screen.size().height()
+        height_offset = 150
+        max_height = screen_height - height_offset - 100
+        if hint.height() + height_offset < max_height:
+            self.resize(self.width(), hint.height() + height_offset)
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -633,7 +633,8 @@ class DatasetDialog(QtWidgets.QDialog):
                         self.checks[i].setText(new_title)
                     self.update_viewport()
                     # change size of the dialog
-                    self.adjustSize()
+                    hint = self.scroll_area.sizeHint()
+                    self.resize(hint.width() + 45, self.height())
                     # change name in the fast render dialog
                     self.window.fast_render_dialog.channel.setItemText(
                         i+1, new_title
@@ -705,7 +706,6 @@ class DatasetDialog(QtWidgets.QDialog):
             # Dataset Dialog
             if render:
                 self.update_viewport()
-                self.adjustSize()
 
             # update the window title
             self.window.setWindowTitle(
@@ -714,9 +714,9 @@ class DatasetDialog(QtWidgets.QDialog):
             )
 
             # adjust the size of the dialog
-            hint = self.sizeHint()
-            self.setMinimumWidth(hint.width())
-            self.resize(self.width(), hint.height() + 45)
+            hint = self.scroll_area.sizeHint()
+            height = min(hint.height() + 150, self.height())
+            self.resize(hint.width() + 45, height)
 
     def update_viewport(self) -> None:
         """Update the scene in the main window."""
@@ -3026,10 +3026,9 @@ class InfoDialog(QtWidgets.QDialog):
         self.setMinimumWidth(hint.width() + 70)
         # if room is available on the screen, adjust the height as well
         screen = QtWidgets.QApplication.primaryScreen()
-        if screen is not None:
-            screen_size = screen.size()
-            if hint.height() + 45 < screen_size.height():
-                self.resize(self.width(), hint.height() + 45)
+        screen_height = 1000 if screen is None else screen.size().height()
+        if hint.height() + 45 < screen_height:
+            self.resize(self.width(), hint.height() + 45)
 
     def calculate_nena_lp(self) -> None:
         """Calculate and plot NeNA precision in a given channel."""
@@ -4314,12 +4313,11 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.setMinimumWidth(hint.width() + 45)
         # if room is available on the screen, adjust the height as well
         screen = QtWidgets.QApplication.primaryScreen()
-        if screen is not None:
-            screen_size = screen.size()
-            if hint.height() + 45 < screen_size.height():
-                self.resize(self.width(), hint.height() + 45)
-            else:
-                self.resize(self.width(), screen_size.height() - 100)
+        screen_height = 1000 if screen is None else screen.size().height()
+        if hint.height() + 45 < screen_height:
+            self.resize(self.width(), hint.height() + 45)
+        else:
+            self.resize(self.width(), screen_height - 100)
 
     def on_cmap_changed(self) -> None:
         """Load custom colormap if requested."""
