@@ -5,6 +5,7 @@ Last change: 30-SEP-2025 CEST
 
 0.8.5
 -----
+- Fourier Ring Correlation (FRC) implementated in Render, see `10.1038/nmeth.2448 https://doi.org/10.1038/nmeth.2448`_
 - Sound notifications when long processes finish, see `here <https://picassosr.readthedocs.io/en/latest/others.html>`_
 - Several dialogs in Render, Localize and Simulate are now scrollable (*experimental*)
 - SPINNA fix automatic area detection from picked localizations
