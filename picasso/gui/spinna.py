@@ -498,7 +498,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
-        # self.window = window
+        self.setAutoFillBackground(True)
         layout = QtWidgets.QGridLayout(self)
         self.setLayout(layout)
         self.preview = MaskPreview(self)
@@ -1270,7 +1270,7 @@ class StructuresTab(QtWidgets.QDialog):
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
-        # self.window = window
+        self.setAutoFillBackground(True)
         layout = QtWidgets.QGridLayout(self)
         self.setLayout(layout)
 
@@ -2441,6 +2441,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
+        self.setAutoFillBackground(True)
         layout = QtWidgets.QGridLayout(self)
         left_column = QtWidgets.QGridLayout()
         right_column = QtWidgets.QGridLayout()

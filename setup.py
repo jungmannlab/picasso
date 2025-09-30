@@ -8,7 +8,7 @@ with open("readme.rst", encoding="utf-8") as readme_file:
 
 setup(
     name="picassosr",
-    version="0.8.4",
+    version="0.8.5",
     author="Joerg Schnitzbauer, Maximilian T. Strauss, Rafal Kowalewski",
     author_email=(
         "joschnitzbauer@gmail.com, "
