@@ -42,6 +42,8 @@ setup(
         "picasso": [
             "gui/icons/*.ico",
             "gui/icons/*.png",
+            "gui/notification_sounds/*.mp3",
+            "gui/notification_sounds/*.wav",
             "config_template.yaml",
         ]
     },
