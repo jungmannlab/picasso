@@ -11,7 +11,7 @@
 import os.path
 import yaml as yaml
 
-__version__ = "0.8.5"
+__version__ = "0.8.6"
 
 _this_file = os.path.abspath(__file__)
 _this_dir = os.path.dirname(_this_file)
