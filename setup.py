@@ -8,7 +8,7 @@ with open("readme.rst", encoding="utf-8") as readme_file:
 
 setup(
     name="picassosr",
-    version="0.8.6",
+    version="0.8.7",
     author="Joerg Schnitzbauer, Maximilian T. Strauss, Rafal Kowalewski",
     author_email=(
         "joschnitzbauer@gmail.com, "
@@ -22,9 +22,9 @@ setup(
         "picasso",
         "picasso.gui",
         "picasso.gui.plugins",
+        "picasso.gui.notification_sounds",
         "picasso.server",
         "picasso.ext",
-        "picasso.notification_sounds",
     ],
     entry_points={
         "console_scripts": ["picasso=picasso.__main__:main"],
@@ -42,6 +42,8 @@ setup(
         "picasso": [
             "gui/icons/*.ico",
             "gui/icons/*.png",
+            "gui/notification_sounds/*.mp3",
+            "gui/notification_sounds/*.wav",
             "config_template.yaml",
         ]
     },
