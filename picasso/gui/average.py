@@ -541,6 +541,7 @@ class Window(QtWidgets.QMainWindow):
         average_action = process_menu.addAction("Average")
         average_action.setShortcut("Ctrl+A")
         average_action.triggered.connect(self.view.average)
+        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
     def open(self) -> None:
         """Open the dialog for opening a file to load."""
