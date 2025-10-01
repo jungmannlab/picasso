@@ -10366,6 +10366,8 @@ class Window(QtWidgets.QMainWindow):
         for menu in self.menus[1:]:
             menu.setDisabled(True)
 
+        self.plugin_menu = self.menu_bar.addMenu("Plugins")  # do not delete
+
         # add plugins; if it's the first initialization
         # (plugins_loaded=False), they are not added because they're
         # loaded in __main___. Otherwise, (remove all locs) plugins

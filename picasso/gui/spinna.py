@@ -4027,6 +4027,9 @@ class Window(QtWidgets.QMainWindow):
             sounds_menu.addAction(action)
         sounds_actiongroup.triggered.connect(lib.set_sound_notification)
 
+        menu_bar = self.menuBar()
+        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)
