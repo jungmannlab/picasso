@@ -5,7 +5,7 @@ Last change: 01-OCT-2025 CEST
 
 0.8.8
 -----
-- Other bug fixes
+- Other bug fixes and minor improvements
 
 0.8.5-7
 -------
