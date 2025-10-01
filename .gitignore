@@ -28,8 +28,8 @@ wheels/
 # Plugins
 picasso/gui/plugins/
 
-# # Sound notifications
-# picasso/notification_sounds/
+# Sound notifications
+# picasso/gui/notification_sounds/
 
 # Camera configuration
 picasso/config.yaml
