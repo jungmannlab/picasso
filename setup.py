@@ -22,9 +22,9 @@ setup(
         "picasso",
         "picasso.gui",
         "picasso.gui.plugins",
+        "picasso.gui.notification_sounds",
         "picasso.server",
         "picasso.ext",
-        "picasso.notification_sounds",
     ],
     entry_points={
         "console_scripts": ["picasso=picasso.__main__:main"],

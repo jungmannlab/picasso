@@ -333,8 +333,15 @@ def set_sound_notification(action: QtWidgets.QAction) -> None:
 
 def _sound_notification_dir() -> str:
     """Return the path to the sound notification folder."""
+    print(os.path.join(
+        os.path.dirname(os.path.realpath(__file__)),
+        "gui",
+        "notification_sounds",
+    ))
     return os.path.join(
-        os.path.dirname(os.path.realpath(__file__)), "notification_sounds",
+        os.path.dirname(os.path.realpath(__file__)),
+        "gui",
+        "notification_sounds",
     )
 
 
