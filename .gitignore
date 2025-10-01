@@ -29,7 +29,7 @@ wheels/
 picasso/gui/plugins/
 
 # Sound notifications
-resources/notification_sounds/
+picasso/notification_sounds/
 
 # Camera configuration
 picasso/config.yaml

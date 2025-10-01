@@ -1,10 +1,10 @@
 Changelog
 =========
 
-Last change: 30-SEP-2025 CEST
+Last change: 01-OCT-2025 CEST
 
-0.8.5
------
+0.8.5-6
+-------
 - Sound notifications when long processes finish, see `here <https://picassosr.readthedocs.io/en/latest/others.html>`_
 - Several dialogs in Render, Localize and Simulate are now scrollable (*experimental*)
 - SPINNA fix automatic area detection from picked localizations

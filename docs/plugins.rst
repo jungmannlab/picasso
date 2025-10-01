@@ -21,6 +21,7 @@ One click installer
 PyPI
 ~~~~
 If you installed Picasso using ``pip install picassosr``, you can add plugins by following these steps:
+
 - Activate your conda environment where ``picassosr`` is installed by typing ``conda activate YOUR_ENVIRONMENT``.
 - To find the location of the package, type ``pip show picassosr`` and look for the line starting with ``Location:``.
 - Navigate to this location and go to ``picasso/gui/plugins``.
