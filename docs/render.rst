@@ -391,8 +391,7 @@ Removes the group information when loading a dataset that contains group informa
 
 Unfold / Refold groups
 ^^^^^^^^^^^^^^^^^^^^^^
-Allows to "unfold" an average to display each structure individually in a line.
-Note that the structures need to be grouped and processed with Picasso: Average beforehand.
+Allows to "unfold" an average to display each structure individually in a line.Note that the structures need to be grouped and processed with Picasso: Average beforehand.
 
 Unfold groups (square)
 ^^^^^^^^^^^^^^^^^^^^^^
