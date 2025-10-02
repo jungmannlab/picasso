@@ -9391,9 +9391,22 @@ class View(QtWidgets.QLabel):
         """Shift grouped localizations across x-axis. Useful for
         localizations that were processed with Picasso: Average."""
         if len(self.all_locs) > 1:
-            raise NotImplementedError(
-                "Please load only one channel."
+            QtWidgets.QMessageBox.information(
+                self,
+                "Unfold error",
+                "Please load only one channel.",
             )
+            return
+        if not hasattr(self.all_locs[0], "group"):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Unfold error",
+                (
+                    "Localizations need to be grouped before unfolding"
+                    " and processed with Picasso: Average."
+                )
+            )
+            return
 
         if not hasattr(self, "unfold_status"):
             self.unfold_status = "folded"
@@ -9435,16 +9448,16 @@ class View(QtWidgets.QLabel):
 
     def unfold_groups_square(self) -> None:
         """Shifts grouped localizations onto a rectangular grid of
-        chosen length. Useful for localizations that were processed with
-        Picasso: Average.
-
-        Shifts grouped localizations onto a rectangular grid of
         chosen length. Localizations can be grouped, for example, by
-        picking."""  # TODO: change the docsting
+        picking. Circular picks without saving them beforehand are
+        accepted as well."""
         if len(self.all_locs) > 1:
-            raise NotImplementedError(
-                "Please load only one channel."
+            QtWidgets.QMessageBox.information(
+                self,
+                "Unfold error",
+                "Please load only one channel.",
             )
+            return
 
         # automatically assign the group if circular picks are present
         if (
