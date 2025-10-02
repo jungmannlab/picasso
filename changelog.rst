@@ -5,6 +5,7 @@ Last change: 02-OCT-2025 CEST
 
 0.8.8
 -----
+- Render - unfolding groups works without the Picasso: Average step beforehand
 - Other bug fixes and minor improvements
 
 0.8.5-7

@@ -9436,11 +9436,39 @@ class View(QtWidgets.QLabel):
     def unfold_groups_square(self) -> None:
         """Shifts grouped localizations onto a rectangular grid of
         chosen length. Useful for localizations that were processed with
-        Picasso: Average."""
+        Picasso: Average.
+
+        Shifts grouped localizations onto a rectangular grid of
+        chosen length. Localizations can be grouped, for example, by
+        picking."""  # TODO: change the docsting
         if len(self.all_locs) > 1:
             raise NotImplementedError(
                 "Please load only one channel."
             )
+
+        # automatically assign the group if circular picks are present
+        if (
+            not hasattr(self.all_locs[0], "group")
+            and len(self._picks)
+            and self._pick_shape == "Circle"
+        ):
+            locs = self.picked_locs(0, add_group=True)
+            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+            self.all_locs[0] = locs
+            remove_group = True
+        elif hasattr(self.all_locs[0], "group"):
+            remove_group = False
+        else:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Unfold error",
+                (
+                    "Localizations need to be grouped before unfolding."
+                    " Alternatively, select circular picks to auto-assign"
+                    " groups based on picks."
+                ),
+            )
+            return
 
         n_square, ok = QtWidgets.QInputDialog.getInt(
             self,
@@ -9459,56 +9487,71 @@ class View(QtWidgets.QLabel):
         if not ok:
             return
 
-        if hasattr(self.all_locs[0], "group"):
-            self.all_locs[0].x += (
-                np.mod(self.all_locs[0].group, n_square)
-                * spacing
+        # shift localizations to the middle of the FOV and by the COM
+        # of each group
+        cx = self.infos[0][0]["Width"] / 2
+        cy = self.infos[0][0]["Height"] / 2
+        for group_id in np.unique(self.all_locs[0].group):
+            mask = self.all_locs[0].group == group_id
+            mean_x = np.mean(self.all_locs[0].x[mask])
+            mean_y = np.mean(self.all_locs[0].y[mask])
+            self.all_locs[0].x[mask] += cx - mean_x
+            self.all_locs[0].y[mask] += cy - mean_y
+        self.locs = copy.copy(self.all_locs)
+
+        # unfolding
+        self.all_locs[0].x += (
+            np.mod(self.all_locs[0].group, n_square)
+            * spacing
+        )
+        self.all_locs[0].y += (
+            np.floor(self.all_locs[0].group / n_square)
+            * spacing
+        )
+
+        mean_x = np.mean(self.locs[0].x)
+        mean_y = np.mean(self.locs[0].y)
+
+        self.all_locs[0].x -= mean_x
+        self.all_locs[0].y -= np.mean(self.all_locs[0].y)
+
+        offset_x = np.absolute(np.min(self.all_locs[0].x))
+        offset_y = np.absolute(np.min(self.all_locs[0].y))
+
+        self.all_locs[0].x += offset_x
+        self.all_locs[0].y += offset_y
+
+        if self._picks:
+            if self._pick_shape != "Circle":
+                raise NotImplementedError(
+                    "Implemented for circular picks only."
+                )
+            # Also unfold picks
+            groups = np.unique(self.all_locs[0].group)
+
+            shift_x = (
+                np.mod(groups, n_square) * spacing - mean_x + offset_x
             )
-            self.all_locs[0].y += (
-                np.floor(self.all_locs[0].group / n_square)
-                * spacing
+            shift_y = (
+                np.floor(groups / n_square) * spacing - mean_y + offset_y
             )
 
-            mean_x = np.mean(self.locs[0].x)
-            mean_y = np.mean(self.locs[0].y)
-
-            self.all_locs[0].x -= mean_x
-            self.all_locs[0].y -= np.mean(self.all_locs[0].y)
-
-            offset_x = np.absolute(np.min(self.all_locs[0].x))
-            offset_y = np.absolute(np.min(self.all_locs[0].y))
-
-            self.all_locs[0].x += offset_x
-            self.all_locs[0].y += offset_y
-
-            if self._picks:
-                if self._pick_shape != "Circle":
-                    raise NotImplementedError(
-                        "Implemented for circular picks only."
+            for j in range(len(self._picks)):
+                for k in range(len(groups)):
+                    x_pick, y_pick = self._picks[j]
+                    self._picks.append(
+                        (x_pick + shift_x[k], y_pick + shift_y[k])
                     )
-                # Also unfold picks
-                groups = np.unique(self.all_locs[0].group)
 
-                shift_x = (
-                    np.mod(groups, n_square) * spacing - mean_x + offset_x
-                )
-                shift_y = (
-                    np.floor(groups / n_square) * spacing - mean_y + offset_y
-                )
-
-                for j in range(len(self._picks)):
-                    for k in range(len(groups)):
-                        x_pick, y_pick = self._picks[j]
-                        self._picks.append(
-                            (x_pick + shift_x[k], y_pick + shift_y[k])
-                        )
-
-                self.n_picks = len(self._picks)
-                self.update_pick_info_short()
+            self.n_picks = len(self._picks)
+            self.update_pick_info_short()
 
         # Update width information
         self.infos[0][0]["Height"] = int(np.ceil(np.max(self.all_locs[0].y)))
         self.infos[0][0]["Width"] = int(np.ceil(np.max(self.all_locs[0].x)))
+        if remove_group:
+            self.all_locs[0] = lib.remove_from_rec(self.all_locs[0], "group")
+            self._picks = []
         self.locs[0] = copy.copy(self.all_locs[0])
         self.fit_in_view()
 
