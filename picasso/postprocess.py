@@ -2294,3 +2294,28 @@ def mask_locs(
     locs_out.sort(kind="mergesort", order="frame")
 
     return locs_in, locs_out
+
+# The threshold functions below are adapted from scikit-image - we do
+# not use the package to avoid extra dependencies.
+
+# TODO: each of the functions should start by checking the validity of
+# the input image (2D, non-negative, non-NaN, non-inf)
+# TODO: should the image be convert to 255 uint8?
+
+# TODO: spinna used otsu_threshold, just get the function from here
+
+# TODO: if a single threshold is provided, the user can adjust the value
+# otherwise, the methods giving pixel-wise thresholds, the threshold
+# value is disabled
+
+# TODO: the thresholds below are easy to implement
+# threshold_isodata
+# threshold_li
+# threshold_local and all its methods
+# threshold_mean
+# threshold_minimum
+# threshold_otsu
+# threshold_niblack
+# threshold_sauvola
+# threshold_triangle
+# threshold_yen
