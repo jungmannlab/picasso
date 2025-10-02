@@ -396,7 +396,12 @@ def cluster(
     return locs
 
 
-def _dbscan(X: np.ndarray, radius: float, min_density: int) -> np.ndarray:
+def _dbscan(
+    X: np.ndarray,
+    radius: float,
+    min_density: int,
+    min_locs: int = 0,
+) -> np.ndarray:
     """Find DBSCAN cluster labels, given data points and parameters.
 
     See Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
@@ -411,6 +416,9 @@ def _dbscan(X: np.ndarray, radius: float, min_density: int) -> np.ndarray:
     min_density : int
         Number of points within radius to consider a given point a core
         sample.
+    min_locs : int, optional
+        Minimum number of localizations in a cluster. Clusters with
+        fewer localizations will be removed. Default is 0.
 
     Returns
     -------
@@ -419,13 +427,18 @@ def _dbscan(X: np.ndarray, radius: float, min_density: int) -> np.ndarray:
         assigned.
     """
     db = DBSCAN(eps=radius, min_samples=min_density).fit(X)
-    return db.labels_.astype(np.int32)
+    labels = db.labels_.astype(np.int32)
+    unique_clusters, counts = np.unique(labels, return_counts=True)
+    to_discard = unique_clusters[counts < min_locs]
+    labels[np.isin(labels, to_discard)] = -1
+    return labels
 
 
 def dbscan(
     locs: np.recarray,
     radius: float,
     min_samples: int,
+    min_locs: int = 10,
     pixelsize: int | None = None,
 ) -> np.recarray:
     """Perform DBSCAN on localizations.
@@ -442,6 +455,9 @@ def dbscan(
     min_samples : int
         Number of localizations within radius to consider a given point
         a core sample.
+    min_locs : int, optional
+        Minimum number of localizations in a cluster. Clusters with
+        fewer localizations will be removed. Default is 0.
     pixelsize : int, optional
         Camera pixel size in nm. Only needed for 3D.
 
@@ -461,7 +477,7 @@ def dbscan(
         X = np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
     else:
         X = np.vstack((locs.x, locs.y)).T
-    labels = _dbscan(X, radius, min_samples)
+    labels = _dbscan(X, radius, min_samples, min_locs)
     locs = extract_valid_labels(locs, labels)
     return locs
 

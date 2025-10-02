@@ -1,12 +1,17 @@
 Changelog
 =========
 
-Last change: 30-SEP-2025 CEST
+Last change: 02-OCT-2025 CEST
 
-0.8.5
+0.8.8
 -----
 - Fourier Ring Correlation (FRC) implementated in Render, see `10.1038/nmeth.2448 https://doi.org/10.1038/nmeth.2448`_
-- Sound notifications when long processes finish, see `here <https://picassosr.readthedocs.io/en/latest/others.html>`_
+- Render - unfolding groups works without the Picasso: Average step beforehand
+- Other bug fixes and minor improvements
+
+0.8.5-7
+-------
+=- Sound notifications when long processes finish, see `here <https://picassosr.readthedocs.io/en/latest/others.html>`_
 - Several dialogs in Render, Localize and Simulate are now scrollable (*experimental*)
 - SPINNA fix automatic area detection from picked localizations
 - Render add dependency ``imageio[ffmpeg]`` for building animations
@@ -16,6 +21,7 @@ Last change: 30-SEP-2025 CEST
 - Localize show scale bar function added
 - Localize plotted ROI remains the same when zooming in/out and panning
 - Localize Gauss MLE saves number of iterations and fit log-likelihood
+- DBSCAN accepts min. no. of localizations per cluster
 - Cluster center calculations calculate arithmetic mean, not weighted mean
 - Other bug fixes and minor improvements
 

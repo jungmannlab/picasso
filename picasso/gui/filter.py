@@ -539,6 +539,8 @@ class Window(QtWidgets.QMainWindow):
             pwd = []
         self.pwd = pwd
 
+        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
     def open_file_dialog(self) -> None:
         if self.pwd == []:
             path, exe = QtWidgets.QFileDialog.getOpenFileName(

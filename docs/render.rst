@@ -391,11 +391,11 @@ Removes the group information when loading a dataset that contains group informa
 
 Unfold / Refold groups
 ^^^^^^^^^^^^^^^^^^^^^^
-Allows to "unfold" an average to display each structure individually in a line. Also works with picks.
+Allows to "unfold" an average to display each structure individually in a line.Note that the structures need to be grouped and processed with Picasso: Average beforehand.
 
 Unfold groups (square)
 ^^^^^^^^^^^^^^^^^^^^^^
-Arranges an average in a square so that each structure is displayed individually
+Arranges an average in a square so that each structure is displayed individually. This function does not require Picasso: Average beforehand. Instead, grouped or picked (circular picks) localizations are accepted.
 
 Link localizations
 ^^^^^^^^^^^^^^^^^^

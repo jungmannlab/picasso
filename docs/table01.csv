@@ -11,9 +11,9 @@ lpy ,"The localization precision in y direction, in camera pixels, as estimated 
 net_gradient ,"The net gradient of this spot which is defined by the sum of gradient vector magnitudes within the fitting box, projected to the spot center. ",float 
 z,(Optional) The z coordinate fitted in 3D in nm. Please note the units are different for x and y coordinates.,float 
 d_zcalib,"(Optional) The value of the D function used for z fitting with astigmatism, see the supplement to Huang et al. 2008.",float 
-likelihood ,The log-likelihood of the fit. Only available for MLE fitting.,float 
-iterations ,The number of iterations of the fit procedure. Only available for MLE fitting.,long 
+likelihood ,(Optional) The log-likelihood of the fit. Only available for MLE fitting.,float 
+iterations ,(Optional) The number of iterations of the fit procedure. Only available for MLE fitting.,long 
 group ,"(Optional) An identifier to assign multiple localizations to groups, for example by picking regions of interest .",long 
-len ,"(Optional) The length of the event, if localizations from consecutive frames have been linked.",long 
+len ,"(Optional) The length of the event in frames, if localizations from consecutive frames have been linked.",long 
 n ,"(Optional) The number of localizations in this event, if localizations from consecutive frames have been linked, potentially diverging from the “len” column due to a transient dark time tolerance.",long 
 photon_rate ,"(Optional) The mean number of photons per frame, if localizations from consecutive frames have been linked. The total number of photons is set in the “photons” column. ",float 

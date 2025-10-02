@@ -1510,6 +1510,8 @@ class Window(QtWidgets.QMainWindow):
         calibrate_z_action = threed_menu.addAction("Calibrate 3D")
         calibrate_z_action.triggered.connect(self.calibrate_z)
 
+        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
     @property
     def camera_info(self) -> dict[str, float]:
         """Camera information, baseline, EM gain, sensitivity and QE."""

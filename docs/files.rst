@@ -45,7 +45,16 @@ HDF5 Pick Property Files
 
 When selecting ``File > Save pick properties`` in ``Picasso: Render``, the properties of picked regions are stored in an HDF5 file. Within the HDF5 file, the data table is stored in the path ``/groups``.
 Each row in the “groups” table corresponds to one picked region. For each localization property (see Table 1), two columns are generated in the ``groups`` table: the mean and standard deviation of the respective column over the localizations in a pick region. For example, if the localization table contains a column ``len``, the “groups” table will contain a column ``len_mean`` and ``len_std``.
-Furthermore, the following columns are included: ``group`` (the group identifier), ``n_events`` (the number of localizations in the region) and ``n_units`` (the number of units from a qPAINT measurement).
+
+Furthermore, the following columns are included: 
+
+- ``group``: the group identifier;
+- ``n_events``: the number of binding events in the region;
+- ``n_units``: the number of units from a qPAINT measurement;
+- ``len_cdf`` and ``dark_cdf``: estimates of mean bright and dark times, respectively, obtained by fitting the distributions to the CDF of the exponential distribution. Units: frames;
+- ``locs``: the number of localizations in the region;
+- ``len_mean`` and ``dark_mean``: mean bright and dark times, respectively, obtained by averaging over all binding events, rather than fitting to the CDF. Units: frames;
+- ``len_std`` and ``dark_std``: standard deviation of bright and dark times,respectively;
 
 YAML Metadata Files
 -------------------

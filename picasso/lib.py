@@ -98,6 +98,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.app.processEvents()
 
     def closeEvent(self, event):
+        time.sleep(0.3)  # TODO: does it fixthe issue of dialogs not closing
         _dialogs.remove(self)
         if self.finished is False:
             self.finished = True
@@ -135,6 +136,7 @@ class StatusDialog(QtWidgets.QDialog):
         QtCore.QCoreApplication.instance().processEvents()
 
     def closeEvent(self, event):
+        time.sleep(0.3)  # TODO: does it fixthe issue of dialogs not closing
         _dialogs.remove(self)
         if self.sound_notification_path is not None:
             if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
@@ -296,7 +298,7 @@ def get_sound_notification_path() -> str | None:
 
 def get_available_sound_notifications() -> list[str | None]:
     """Get a list of file names of the available sound notifications in
-    the folder ``resources/notification_sounds``.
+    the folder ``gui/notification_sounds``.
 
     Returns
     -------
@@ -334,8 +336,8 @@ def set_sound_notification(action: QtWidgets.QAction) -> None:
 def _sound_notification_dir() -> str:
     """Return the path to the sound notification folder."""
     return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.realpath(__file__))),
-        "resources",
+        os.path.dirname(os.path.realpath(__file__)),
+        "gui",
         "notification_sounds",
     )
 
