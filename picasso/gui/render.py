@@ -39,7 +39,7 @@ from sklearn.cluster import KMeans
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .. import imageprocess, io, lib, postprocess, render, clusterer, aim, \
-    __version__
+    masking, __version__
 from .rotation import RotationWindow
 
 # PyImarisWrite works on windows only
@@ -3459,7 +3459,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
     def _mask_locs(self, locs: np.recarray):
         """Mask localizations given a mask."""
-        locs_in, locs_out = postprocess.mask_locs(
+        locs_in, locs_out = masking.mask_locs(
             locs, self.mask, self.x_max, self.y_max,
         )
         self.index_locs.append(locs_in)  # locs in the mask

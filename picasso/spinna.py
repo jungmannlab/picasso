@@ -30,7 +30,7 @@ from scipy.spatial import KDTree
 from scipy.stats import ks_2samp
 from tqdm import tqdm
 
-from . import io, lib, render, __version__
+from . import io, lib, postprocess, render, __version__
 
 
 LOCS_DTYPE_2D = [
@@ -346,44 +346,6 @@ def generate_N_structures(
         df.to_csv(save, header=True, index=False)
 
     return structure_counts
-
-
-def otsu(image: np.ndarray) -> float:
-    """Apply Otsu's thresholding algorithm to the input image to
-    segment it into a binary image.
-
-    Taken from scikit-image and reduced to the specific case used in
-    SPINNA.
-
-    Parameters
-    ----------
-    image : np.ndarray
-        The input grayscale image.
-
-    Returns
-    -------
-    thresh : float
-        Otsu's threshold value.
-    """
-    # histogram the image and converts bin edges to bin centers
-    counts, bin_edges = np.histogram(image, bins=256)
-    counts = counts.astype('float32', copy=False)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.
-
-    # class probabilities for all possible thresholds
-    weight1 = np.cumsum(counts)
-    weight2 = np.cumsum(counts[::-1])[::-1]
-    # class means for all possible thresholds
-    mean1 = np.cumsum(counts * bin_centers) / weight1
-    mean2 = (np.cumsum((counts * bin_centers)[::-1]) / weight2[::-1])[::-1]
-
-    # Clip ends to align class 1 and class 2 variables:
-    # The last value of ``weight1``/``mean1`` should pair with zero values in
-    # ``weight2``/``mean2``, which do not exist.
-    variance12 = weight1[:-1] * weight2[1:] * (mean1[:-1] - mean2[1:]) ** 2
-    idx = np.argmax(variance12)
-    thresh = bin_centers[idx]
-    return thresh
 
 
 def random_rotation_matrices(
@@ -1064,7 +1026,7 @@ class MaskGenerator():
         if verbose:
             print("Thresholding... (3/3)")
         image = np.float64(image / image.sum())
-        self.thresh = otsu(image)
+        self.thresh = postprocess.threshold_otsu(image)
 
         if mode == "loc_den":
             if apply_thresh:
