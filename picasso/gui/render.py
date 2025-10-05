@@ -3190,8 +3190,6 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         Histogram displaying binary mask; displayed in ax3.
     mask_blur : QDoubleSpinBox
         Contains the blur value in nm.
-    mask_loaded : bool
-        True, if mask was loaded from an external file.
     mask_thresh : QDoubleSpinBox
         Contains the threshold value for masking.
     paths : list
@@ -3281,7 +3279,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             'Local mean',
             'Local median',
         ])
-        self.thresh_method.activated.connect(self.update_thresh)
+        self.thresh_method.activated.connect(self.update_plots)
         threshold_layout.addWidget(self.thresh_method)
 
         display_groupbox = QtWidgets.QGroupBox("Display")
@@ -3331,13 +3329,11 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.cached_oversampling = 0
         self.cached_blur = 0
         self.cached_thresh = 0
-        self.mask_loaded = False
         self.pixelsize = 130
 
     def init_dialog(self) -> None:
         """Initialize dialog when called from the main window. Load
         localizations and metadata, updates plots."""
-        self.mask_loaded = False
         self.locs = self.window.view.locs
         self.paths = self.window.view.locs_paths
         self.infos = self.window.view.infos
@@ -3424,76 +3420,64 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             self, "Load mask", filter="*.npy"
         )
         if path:
-            self.mask_loaded = True  # will block changing of the mask
             self.mask = np.load(path)
-            # update plots without drawing a new mask
-            self.update_plots(new_mask=False)
-
-    def mask_image(self) -> None:
-        """Calculate binary mask based on threshold."""
-        if not self.mask_loaded:
-            mask = np.zeros(self.H_blur.shape, dtype=np.int8)
-            mask[self.H_blur > self.mask_thresh.value()] = 1
-            self.mask = mask
-            self.save_mask_button.setEnabled(True)
             self.plots[2].setPixmap(
                 self.render_to_pixmap(self.mask, cmap='Greys_r', title="Mask"),
             )
+            self.save_button.setEnabled(True)
 
-    def update_plots(self, new_mask: bool = True) -> None:
-        """Plot in all 4 axes: 2D histogram, blurred image, mask and
-        masked localizations."""
-        if new_mask:
-            if self.cached_oversampling:
-                self.cached_oversampling = 0
-
-            if self.cached_blur:
-                self.cached_blur = 0
-
-            if self.cached_thresh:
-                self.cached_thresh = 0
-
-            if not self.cached_oversampling:
-                self.generate_image()
-                self.blur_image()
-                self.mask_image()
-                self.cached_oversampling = 1
-                self.cached_blur = 1
-                self.cached_thresh = 1
-
-            if not self.cached_blur:
-                self.blur_image()
-                self.mask_image()
-                self.cached_blur = 1
-                self.cached_thresh = 1
-
-            if not self.cached_thresh:
-                self.mask_image()
-                self.cached_thresh = 1
-
-    def update_thresh(self) -> None:
-        """Update threshold value based on the selected method."""
-        if self.mask_loaded:
-            return
-
+    def mask_image(self) -> None:
+        """Calculate binary mask based on threshold."""
         method = self.thresh_method.currentText()
         if method == "Custom":
             self.mask_thresh.setEnabled(True)
+            mask = np.zeros(self.H_blur.shape, dtype=np.int8)
+            mask[self.H_blur > self.mask_thresh.value()] = 1
         else:
+            self.mask_thresh.setEnabled(False)
             method_mod = method.lower().replace(" ", "_")
             mask, thresh = masking.mask_image(self.H_blur, method_mod)
             mask = mask.astype(np.int8)
             if not isinstance(thresh, np.ndarray):
                 self.mask_thresh.setValue(thresh)
-                self.mask_thresh.setEnabled(True)
             else:
                 self.mask_thresh.setValue(0)
-                self.mask_thresh.setEnabled(False)
-            self.mask = mask
-            self.save_mask_button.setEnabled(True)
-            self.plots[2].setPixmap(
-                self.render_to_pixmap(self.mask, cmap='Greys_r', title="Mask"),
-            )
+        self.mask = mask
+        self.save_mask_button.setEnabled(True)
+        self.save_button.setEnabled(True)
+        self.plots[2].setPixmap(
+            self.render_to_pixmap(self.mask, cmap='Greys_r', title="Mask"),
+        )
+
+    def update_plots(self) -> None:
+        """Plot in all 4 axes: 2D histogram, blurred image, mask and
+        masked localizations."""
+        if self.cached_oversampling:
+            self.cached_oversampling = 0
+
+        if self.cached_blur:
+            self.cached_blur = 0
+
+        if self.cached_thresh:
+            self.cached_thresh = 0
+
+        if not self.cached_oversampling:
+            self.generate_image()
+            self.blur_image()
+            self.mask_image()
+            self.cached_oversampling = 1
+            self.cached_blur = 1
+            self.cached_thresh = 1
+
+        if not self.cached_blur:
+            self.blur_image()
+            self.mask_image()
+            self.cached_blur = 1
+            self.cached_thresh = 1
+
+        if not self.cached_thresh:
+            self.mask_image()
+            self.cached_thresh = 1
 
     def mask_locs(self) -> None:
         """Mask localizations from a single or all channels."""
@@ -3615,6 +3599,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             "Display pixel size (nm)": mask_pixelsize,
             "Blur (nm)": self.mask_blur.value(),
             "Threshold": self.mask_thresh.value(),
+            "Threshold method": self.thresh_method.currentText(),
             "Area (um^2)": area,
         }]
         return info
