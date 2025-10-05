@@ -109,7 +109,7 @@ def mask_image(
         'local_mean',
         'local_median',
     ] = 'otsu',
-) -> np.ndarray:
+) -> tuple[np.ndarray, float] | tuple[np.ndarray, np.ndarray]:
     """Create a binary mask from a grayscale image using a specified
     thresholding method or threshold value.
 
@@ -123,9 +123,17 @@ def mask_image(
         Thresholding method or threshold value. If a float is provided,
         it is used as a global threshold. If a string is provided, it
         specifies the thresholding method to use. Default is 'otsu'.
+
+    Returns
+    -------
+    mask : np.ndarray
+        Binary mask where True indicates pixels above the threshold.
+    threshold : float or np.ndarray
+        Threshold value used to create the mask. Can be a single float
+        for global thresholding or an array for pixel-wise thresholding.
     """
     assert image.ndim == 2, "Input image must be 2D"
-    if np.isscalar(method):
+    if not isinstance(method, str):
         threshold = float(method)
         mask = binary_mask(image, threshold)
         return mask
@@ -146,7 +154,7 @@ def mask_image(
         raise ValueError(f"Unknown thresholding method: {method}")
     threshold = function(image)
     mask = binary_mask(image, threshold)
-    return mask
+    return mask, threshold
 
 
 def threshold_isodata(image: np.ndarray) -> float:
@@ -445,7 +453,7 @@ def threshold_local_gaussian(image: np.ndarray) -> np.ndarray:
     block_size = (3, 3)
     thresh_image = np.zeros(image.shape, dtype=image.dtype)
     sigma = tuple([(b - 1) / 6.0 for b in block_size])
-    gaussian_filter(image, sigma=sigma, out=thresh_image, mode='reflect')
+    gaussian_filter(image, sigma=sigma, output=thresh_image, mode='reflect')
     mask = np.zeros(image.shape, dtype=bool)
     mask[image > thresh_image] = True
     return mask

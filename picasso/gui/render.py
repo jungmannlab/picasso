@@ -3245,18 +3245,20 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.disp_px_size.setSingleStep(10)
         self.disp_px_size.setKeyboardTracking(False)
         self.disp_px_size.valueChanged.connect(self.update_plots)
-        settings_grid.addWidget(self.disp_px_size, 0, 1, 1, 2)
+        settings_grid.addWidget(self.disp_px_size, 0, 1)
 
-        settings_grid.addWidget(QtWidgets.QLabel("Blur (nm)"), 1, 0)
+        settings_grid.addWidget(QtWidgets.QLabel("Blur (nm)"), 0, 2)
         self.mask_blur = QtWidgets.QSpinBox()
         self.mask_blur.setRange(1, 999999)
         self.mask_blur.setValue(500)
         self.mask_blur.setSingleStep(10)
         self.mask_blur.setKeyboardTracking(False)
         self.mask_blur.valueChanged.connect(self.update_plots)
-        settings_grid.addWidget(self.mask_blur, 1, 1, 1, 2)
+        settings_grid.addWidget(self.mask_blur, 0, 3)
 
-        settings_grid.addWidget(QtWidgets.QLabel("Threshold"), 2, 0)
+        threshold_layout = QtWidgets.QHBoxLayout()
+        settings_grid.addLayout(threshold_layout, 1, 0, 1, 4)
+        threshold_layout.addWidget(QtWidgets.QLabel("Threshold"))
         self.mask_thresh = QtWidgets.QDoubleSpinBox()
         self.mask_thresh.setRange(0, 1)
         self.mask_thresh.setValue(0.5)
@@ -3264,7 +3266,23 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.mask_thresh.setDecimals(5)
         self.mask_thresh.setKeyboardTracking(False)
         self.mask_thresh.valueChanged.connect(self.update_plots)
-        settings_grid.addWidget(self.mask_thresh, 2, 1, 1, 2)
+        threshold_layout.addWidget(self.mask_thresh)
+        self.thresh_method = QtWidgets.QComboBox()
+        self.thresh_method.addItems([
+            'Custom',
+            'Isodata',
+            'Li',
+            'Mean',
+            'Minimum',
+            'Otsu',
+            'Triangle',
+            'Yen',
+            'Local Gaussian',
+            'Local mean',
+            'Local median',
+        ])
+        self.thresh_method.activated.connect(self.update_thresh)
+        threshold_layout.addWidget(self.thresh_method)
 
         display_groupbox = QtWidgets.QGroupBox("Display")
         vbox.addWidget(display_groupbox)
@@ -3379,10 +3397,12 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save mask to", name_mask, filter="*.npy"
         )
-        if path:  # TODO: fix
+        if path:
             np.save(path, self.mask)
             png_path = path.replace(".npy", ".png")
-            plt.imsave(png_path, self.mask, cmap="gray")
+            pixmap = self.plots[2].pixmap()
+            if pixmap:
+                pixmap.save(png_path)
 
     def save_blur(self) -> None:
         """Save blurred image to a .png format."""
@@ -3392,8 +3412,10 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         path, ext = QtWidgets.QFileDialog.getSaveFileName(
             self, "Save blur to", name_blur, filter="*.png"
         )
-        if path:  # TODO: fix
-            plt.imsave(path, self.H_blur, cmap=self.cmap)
+        if path:
+            pixmap = self.plots[1].pixmap()
+            if pixmap:
+                pixmap.save(path)
 
     def load_mask(self) -> None:
         """Load binary mask from .npy format."""
@@ -3448,6 +3470,30 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             if not self.cached_thresh:
                 self.mask_image()
                 self.cached_thresh = 1
+
+    def update_thresh(self) -> None:
+        """Update threshold value based on the selected method."""
+        if self.mask_loaded:
+            return
+
+        method = self.thresh_method.currentText()
+        if method == "Custom":
+            self.mask_thresh.setEnabled(True)
+        else:
+            method_mod = method.lower().replace(" ", "_")
+            mask, thresh = masking.mask_image(self.H_blur, method_mod)
+            mask = mask.astype(np.int8)
+            if not isinstance(thresh, np.ndarray):
+                self.mask_thresh.setValue(thresh)
+                self.mask_thresh.setEnabled(True)
+            else:
+                self.mask_thresh.setValue(0)
+                self.mask_thresh.setEnabled(False)
+            self.mask = mask
+            self.save_mask_button.setEnabled(True)
+            self.plots[2].setPixmap(
+                self.render_to_pixmap(self.mask, cmap='Greys_r', title="Mask"),
+            )
 
     def mask_locs(self) -> None:
         """Mask localizations from a single or all channels."""
@@ -7696,7 +7742,7 @@ class View(QtWidgets.QLabel):
             # save pick properties
             base, ext = os.path.splitext(path)
             out_path = base + "_pickprops.hdf5"
-            # TODO: save pick properties
+
             r_max = 2 * max(
                 self.infos[channel][0]["Height"],
                 self.infos[channel][0]["Width"],
