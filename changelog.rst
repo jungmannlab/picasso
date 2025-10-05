@@ -1,17 +1,17 @@
 Changelog
 =========
 
-Last change: 02-OCT-2025 CEST
+Last change: 05-OCT-2025 CEST
 
 0.8.8
 -----
-- Fourier Ring Correlation (FRC) implementated in Render, see `10.1038/nmeth.2448 https://doi.org/10.1038/nmeth.2448`_
+- Render - masking dialog changed - threshold methods implemented, histogram of values shown, real-time rendering and different dialog layout
 - Render - unfolding groups works without the Picasso: Average step beforehand
 - Other bug fixes and minor improvements
 
 0.8.5-7
 -------
-=- Sound notifications when long processes finish, see `here <https://picassosr.readthedocs.io/en/latest/others.html>`_
+- Sound notifications when long processes finish, see `here <https://picassosr.readthedocs.io/en/latest/others.html>`_
 - Several dialogs in Render, Localize and Simulate are now scrollable (*experimental*)
 - SPINNA fix automatic area detection from picked localizations
 - Render add dependency ``imageio[ffmpeg]`` for building animations
