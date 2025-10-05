@@ -886,6 +886,9 @@ class Window(QtWidgets.QMainWindow):
         self.mainpbar.setValue(0)
         self.statusBar().showMessage("Simulate ready.")
 
+        menu_bar = self.menuBar()
+        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
     def load3dCalibration(self) -> None:
         """Load 3D calibration data from a YAML file."""
         dir = None

@@ -36,10 +36,4 @@ If you cloned the GitHub repository, you can add plugins by following these step
 
 For developers
 --------------
-To create a plugin, you can use the template provided in ``picasso/plugin_template.py``, see below.
-
-.. image:: ../docs/plugins.png
-   :scale: 70 %
-   :alt: Plugins
-
-As an example, please see any of the plugins in the `GitHub repo <https://github.com/rafalkowalewski1/picasso_plugins>`_.
+To create a plugin, you can use the template provided in `picasso/plugin_template.py <https://github.com/jungmannlab/picasso/blob/master/plugin_template.py>`_. For more examples of Plugins, please see the `GitHub repo <https://github.com/rafalkowalewski1/picasso_plugins>`_.

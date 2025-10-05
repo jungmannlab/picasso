@@ -1162,6 +1162,8 @@ class Window(QtWidgets.QMainWindow):
         mainWidget.setLayout(self.grid)
         self.setCentralWidget(mainWidget)
 
+        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
     def predict(self):
 
         if (self.predicting is False) and (self.model_loaded is True):
