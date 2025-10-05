@@ -3281,6 +3281,10 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ])
         self.thresh_method.activated.connect(self.update_plots)
         threshold_layout.addWidget(self.thresh_method)
+        show_hist_button = QtWidgets.QPushButton("Show histogram")
+        show_hist_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        show_hist_button.clicked.connect(self.show_hist)
+        threshold_layout.addWidget(show_hist_button)
 
         display_groupbox = QtWidgets.QGroupBox("Display")
         vbox.addWidget(display_groupbox)
@@ -3603,6 +3607,32 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             "Area (um^2)": area,
         }]
         return info
+
+    def show_hist(self) -> None:
+        """Show histogram of values of the blurred image."""
+        self.hist_window = lib.GenericPlotWindow(
+            "Blurred image values", "render",
+        )
+        self.hist_window.figure.clear()
+
+        ax = self.hist_window.figure.add_subplot(111)
+        ax.set_title("Density of blurred image values")
+        vals = self.H_blur.ravel()
+        bins = lib.calculate_optimal_bins(vals, max_n_bins=1000)
+        hist, bins, _ = ax.hist(vals, bins=bins, label="Data", density=True)
+        ax.axvline(
+            self.mask_thresh.value(),
+            0,
+            max(hist),
+            color='r',
+            label="Threshold",
+            linestyle="--",
+        )
+        ax.set_xlabel("Pixel value (a.u.)")
+        ax.set_ylabel("Density")
+        ax.legend(loc="best")
+        self.hist_window.canvas.draw()
+        self.hist_window.show()
 
     def render_to_pixmap(
         self,
