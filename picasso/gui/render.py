@@ -713,6 +713,18 @@ class DatasetDialog(QtWidgets.QDialog):
                 f"{os.path.basename(self.window.view.locs_paths[-1])}"
             )
 
+            # if only one channel left, allow render by property
+            disp_sett_dlg = self.window.display_settings_dlg
+            disp_sett_dlg.render_check.setChecked(False)
+            if len(self.checks) == 1:
+                disp_sett_dlg.render_groupbox.setEnabled(True)
+                disp_sett_dlg.parameter.clear()
+                disp_sett_dlg.parameter.addItems(
+                    self.window.view.locs[0].dtype.names
+                )
+            else:
+                disp_sett_dlg.render_groupbox.setEnabled(False)
+
             # adjust the size of the dialog
             hint = self.scroll_area.sizeHint()
             height = min(hint.height() + 150, self.height())
@@ -4368,7 +4380,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self._silent_disp_px_update = False
 
         # Render
-        self.render_groupbox = QtWidgets.QGroupBox("Render properties")
+        self.render_groupbox = QtWidgets.QGroupBox(
+            "Render properties (only single-channel data)"
+        )
 
         vbox.addWidget(self.render_groupbox)
         render_grid = QtWidgets.QGridLayout(self.render_groupbox)
@@ -4438,6 +4452,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
+        self.render_groupbox.setEnabled(False)
 
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
@@ -5136,8 +5151,7 @@ class View(QtWidgets.QLabel):
                         drift = np.rec.array(
                             drift, dtype=[("x", "f"), ("y", "f")]
                         )
-                except Exception as e:
-                    print(e)
+                except Exception:
                     # drift already initialized before
                     pass
 
@@ -5147,7 +5161,9 @@ class View(QtWidgets.QLabel):
         self.currentdrift.append(None)
 
         # if this is the first loc file, find the median localization
-        # precision and set group colors, if needed
+        # precision and set group colors and prepare render by property
+        disp_sett_dlg = self.window.display_settings_dlg
+        disp_sett_dlg.render_check.setChecked(False)
         if len(self.locs) == 1:
             self.median_lp = np.mean(
                 [np.median(locs.lpx), np.median(locs.lpy)]
@@ -5155,14 +5171,16 @@ class View(QtWidgets.QLabel):
             if hasattr(locs, "group"):
                 if len(self.group_color) == 0 and locs.group.size:
                     self.group_color = self.get_group_color(self.locs[0])
+            disp_sett_dlg.parameter.clear()
+            disp_sett_dlg.parameter.addItems(locs.dtype.names)
+            disp_sett_dlg.render_groupbox.setEnabled(True)
+        else:
+            disp_sett_dlg.render_groupbox.setEnabled(False)
 
         # render the loaded file
         if render:
             self.fit_in_view(autoscale=True)
             self.update_scene()
-
-        # add options to rendering by parameter
-        self.window.display_settings_dlg.parameter.addItems(locs.dtype.names)
 
         if hasattr(locs, "z"):
             # append z coordinates for slicing
