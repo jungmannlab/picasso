@@ -1,10 +1,11 @@
 Changelog
 =========
 
-Last change: 02-OCT-2025 CEST
+Last change: 05-OCT-2025 CEST
 
 0.8.8
 -----
+- Render - masking dialog changed - real-time rendering and different dialog layout
 - Render - unfolding groups works without the Picasso: Average step beforehand
 - Other bug fixes and minor improvements
 
