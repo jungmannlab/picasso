@@ -2404,9 +2404,9 @@ class TestClustererView(QtWidgets.QLabel):
         Specifies size of this widget (display pixels).
     view : QLabel
         Instance of View class. Used for calling functions.
-    viewport : list
+    viewport : tuple
         Contains two elements specifying min and max values of x and y
-        to be displayed.
+        to be displayed ``((y_min, x_min), (y_max, x_max))``.
     """
 
     def __init__(self, dialog: QtWidgets.QDialog) -> None:
@@ -6340,7 +6340,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Viewport defining the rendered FOV.
+            Viewport defining the rendered FOV ``((y_min, x_min),
+            (y_max, x_max))``.
         autoscale : bool, optional
             True if contrast should be optimally adjusted. Default is
             False.
@@ -6395,7 +6396,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Viewport defining the current FOV.
+            Viewport defining the current FOV ``((y_min, x_min),
+            (y_max, x_max))``.
         autoscale : bool, optional
             True if contrast should be optimally adjusted. Default is
             False.
@@ -6675,8 +6677,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Specifies the FOV to be rendered. If None, the current
-            viewport is taken.
+            Specifies the FOV to be rendered ``((y_min, x_min),
+            (y_max, x_max))``. If None, the current viewport is taken.
 
         Returns
         -------
@@ -8269,8 +8271,8 @@ class View(QtWidgets.QLabel):
         cache : bool, optional
             True if save image in cache. Default is True.
         viewport : tuple, optional
-            Viewport to be rendered. If None, takes current viewport.
-            Default is None.
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None, takes current viewport. Default is None.
 
         Returns
         -------
@@ -9860,8 +9862,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple, optional
-            Viewport to be rendered. If None ``self.viewport`` is taken.
-            Default is None.
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None, takes current viewport. Default is None.
         autoscale : bool, optional
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
@@ -9903,8 +9905,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple, optional
-            Viewport to be rendered. If None ``self.viewport`` is taken.
-            Default is None
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None
         autoscale : bool, optional
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
@@ -9938,8 +9940,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None ``self.viewport`` is
-            taken. Default is None.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None.
 
         Returns
         -------
@@ -9966,8 +9968,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None ``self.viewport`` is
-            taken. Default is None.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None.
 
         Returns
         -------
@@ -9991,8 +9993,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None ``self.viewport`` is
-            taken. Default is None.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None.
 
         Returns
         -------
@@ -10016,8 +10018,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None ``self.viewport`` is
-            taken. Default is None.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None.
 
         Returns
         -------

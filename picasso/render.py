@@ -22,7 +22,9 @@ def render(
     locs: np.recarray,
     info: dict | None = None,
     oversampling: float = 1,
-    viewport: list | None = None,
+    viewport: (
+        tuple[tuple[float, float], tuple[float, float]] | None
+    ) = None,
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
@@ -40,8 +42,10 @@ def render(
         specified.
     oversampling : float, optional
         Number of super-resolution pixels per camera pixel.
-    viewport : list or tuple, optional
-        Field of view to be rendered. If None, all locs are rendered
+    viewport : tuple, optional
+        Field of view to be rendered. The input is
+        ``((y_min, x_min), (y_max, x_max))``. If None, all locs are
+        rendered.
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
             optional
         Defines localizations' blur. The string has to be one of

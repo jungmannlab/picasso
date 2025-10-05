@@ -5,7 +5,8 @@ Last change: 05-OCT-2025 CEST
 
 0.8.8
 -----
-- Render - masking dialog changed - threshold methods implemented, histogram of values shown, real-time rendering and different dialog layout- Render - unfolding groups works without the Picasso: Average step beforehand
+- Render - masking dialog changed - threshold methods implemented, histogram of values shown, real-time rendering and different dialog layout
+- Render - unfolding groups works without the Picasso: Average step beforehand
 - Other bug fixes and minor improvements
 
 0.8.5-7

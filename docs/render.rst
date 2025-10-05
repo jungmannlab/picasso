@@ -54,6 +54,8 @@ Picking of regions of interest
 7. (Optional) Statistics about each pick region can be saved by selecting ``File > Save pick properties``. The resulting HDF5 file is not a localization file. Instead, it holds a data set called ``groups`` in which the rows show statistical values for each pick region.
 8. (Optional) The picked positions and diameter itself can be saved by selecting ``File > Save pick regions``. Such saved pick information can also be loaded into ``Picasso: Render`` by selecting ``File > Load pick regions``.
 
+**NOTE**: Rectangular picks can be used to generate the projections of localizations onto the rectangle's axes. To do so, select rectangular picks and save picked localizations (``File > Save picked localizations``). The resulting ``hdf5`` files will contain columns ``x_pick_rot`` and ``y_pick_rot``, which are the projections of localizations onto and against the "drawing" axis of the rectangle, respectively.
+
 3D rotation window
 ------------------
 
