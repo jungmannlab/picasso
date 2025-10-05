@@ -1789,6 +1789,9 @@ class MainWindow(QtWidgets.QWidget):
         palette.setColor(QtGui.QPalette.Background, QtCore.Qt.white)
         self.setPalette(palette)
 
+        menu_bar = QtWidgets.QMenuBar(self)
+        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
 
 def main():
     app = QtWidgets.QApplication(sys.argv)

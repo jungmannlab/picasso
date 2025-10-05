@@ -235,7 +235,7 @@ class MaskPreview(QtWidgets.QLabel):
     qimage : QtGui.QImage
         Currently shown image of the mask.
     viewport : tuple
-        FOV of the mask.
+        FOV of the mask ``((y_min, x_min), (y_max, x_max))``.
     """
 
     def __init__(self, mask_tab: MaskGeneratorTab) -> None:
@@ -4026,6 +4026,9 @@ class Window(QtWidgets.QMainWindow):
                 action.setChecked(True)
             sounds_menu.addAction(action)
         sounds_actiongroup.triggered.connect(lib.set_sound_notification)
+
+        menu_bar = self.menuBar()
+        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
 
 def main():

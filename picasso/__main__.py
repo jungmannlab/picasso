@@ -1539,7 +1539,10 @@ def _spinna_batch_analysis(
             locs, info = io.load_locs(str(row[f"exp_data_{target}"]))
             pixelsize = 130
             for element in info:
-                if "Picasso Localize" in element.values():
+                if (
+                    "Picasso" in element.values()
+                    and "Localize" in element.values()
+                ):  # in newer versions it's Picasso vX.Y.Z Localize
                     if "Pixelsize" in element:
                         pixelsize = element["Pixelsize"]
                         break

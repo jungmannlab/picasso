@@ -692,7 +692,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple, optional
-            Viewport to be rendered. If None, takes current viewport.
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None, takes current viewport.
         ang : tuple, optional
             Rotation angles to be rendered. If None, takes the current
             angles.
@@ -946,7 +947,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple, optional
-            Viewport to be rendered. If None self.viewport is taken.
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
         autoscale : bool, optional
             True if optimally adjust contrast.
         use_cache : bool, optional
@@ -979,7 +981,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Viewport defining the rendered FOV.
+            Viewport defining the rendered FOV ``((y_min, x_min),
+            (y_max, x_max))``.
         autoscale : bool, optional
             True if contrast should be optimally adjusted.
         use_cache : bool, optional
@@ -1650,7 +1653,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None self.viewport is taken.
+            Viewport to be evaluated. ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
 
         Returns
         -------
@@ -1677,7 +1681,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None self.viewport is taken.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
 
         Returns
         -------
@@ -1701,7 +1706,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None self.viewport is taken.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
 
         Returns
         -------
@@ -1725,7 +1731,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None self.viewport is taken.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
 
         Returns
         -------
@@ -1793,8 +1800,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : list, optional
-            Specifies the FOV to be rendered. If None, the current
-            viewport is taken.
+            Specifies the FOV to be rendered ``((y_min, x_min),
+            (y_max, x_max))``. If None, the current viewport is taken.
         animation : bool, optional
             If True, kwargs are found for building animation.
 

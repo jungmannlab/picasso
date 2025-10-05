@@ -39,7 +39,7 @@ from sklearn.cluster import KMeans
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .. import imageprocess, io, lib, postprocess, render, clusterer, aim, \
-    __version__
+    masking, __version__
 from .rotation import RotationWindow
 
 # PyImarisWrite works on windows only
@@ -712,6 +712,18 @@ class DatasetDialog(QtWidgets.QDialog):
                 f"Picasso v{__version__}: Render. File: "
                 f"{os.path.basename(self.window.view.locs_paths[-1])}"
             )
+
+            # if only one channel left, allow render by property
+            disp_sett_dlg = self.window.display_settings_dlg
+            disp_sett_dlg.render_check.setChecked(False)
+            if len(self.checks) == 1:
+                disp_sett_dlg.render_groupbox.setEnabled(True)
+                disp_sett_dlg.parameter.clear()
+                disp_sett_dlg.parameter.addItems(
+                    self.window.view.locs[0].dtype.names
+                )
+            else:
+                disp_sett_dlg.render_groupbox.setEnabled(False)
 
             # adjust the size of the dialog
             hint = self.scroll_area.sizeHint()
@@ -2404,9 +2416,9 @@ class TestClustererView(QtWidgets.QLabel):
         Specifies size of this widget (display pixels).
     view : QLabel
         Instance of View class. Used for calling functions.
-    viewport : list
+    viewport : tuple
         Contains two elements specifying min and max values of x and y
-        to be displayed.
+        to be displayed ``((y_min, x_min), (y_max, x_max))``.
     """
 
     def __init__(self, dialog: QtWidgets.QDialog) -> None:
@@ -3155,30 +3167,20 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
     Attributes
     ----------
-    ax1 : plt.axes.Axes
-        Axis where all locs are shown with a given oversampling.
-    ax2 : plt.axes.Axes
-        Axis where blurred locs are shown.
-    ax3 : plt.axes.Axes
-        Axis where binary mask is shown.
-    ax4 : plt.axes.Axes
-        Axis where masked locs are shown (initially shows only zeros).
     cached_blur : int
         0 if image is to be blurred, 1 otherwise.
     cached_oversampling : int
         0 if image is to be redrawn, 1 otherwise.
     cached_thresh : int
         0 if mask is to be calculated, 1 otherwise.
-    canvas : FigureCanvas
-        Canvas used for plotting.
     channel : int
         Channel of localizations that are plotted in the canvas.
     cmap : str
         Colormap used in displaying images, same as in the main window.
+    container : QWidget
+        Container for all widgets in the scroll area.
     disp_px_size : QSpinBox
-        Contains the display pixel size (nm).
-    figure : plt.figure.Figure
-        Figure containing subplots.
+        Contains the display pixel size in nm.
     index_locs : list
         Localizations that were masked; may contain a single or all
         channels.
@@ -3199,14 +3201,17 @@ class MaskSettingsDialog(QtWidgets.QDialog):
     mask : np.array
         Histogram displaying binary mask; displayed in ax3.
     mask_blur : QDoubleSpinBox
-        Contains the blur value.
-    mask_loaded : bool
-        True, if mask was loaded from an external file.
+        Contains the blur value in nm.
     mask_thresh : QDoubleSpinBox
         Contains the threshold value for masking.
     paths : list
         Contains paths to all localizations loaded when starting the
         dialog.
+    pixelsize : float
+        Camera pixel size (nm).
+    plots : list of QLabel
+        Used for displaying the 4 plots (original, blurred, mask,
+        masked).
     save_all : QCheckBox
         If checked, all channels loaded are masked; otherwise only
         one channel.
@@ -3214,8 +3219,6 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         Used for saving masked localizations.
     save_mask_button : QPushButton
         Used for saving the current mask as a .npy file.
-    _size_hint : tuple
-        Determines the recommended size of the dialog.
     window : QMainWindow
         Instance of the main window.
     x_max : float
@@ -3230,34 +3233,42 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Generate Mask")
         self.setModal(False)
         self.channel = 0
-        self._size_hint = (670, 840)
-        self.setMinimumSize(*self._size_hint)
 
-        vbox = QtWidgets.QVBoxLayout(self)
-        mask_groupbox = QtWidgets.QGroupBox("Mask Settings")
-        vbox.addWidget(mask_groupbox)
-        mask_grid = QtWidgets.QGridLayout(mask_groupbox)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        scroll = QtWidgets.QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        self.container = QtWidgets.QWidget()
+        scroll.setWidget(self.container)
+        vbox = QtWidgets.QVBoxLayout(self.container)
+        main_layout.addWidget(scroll)
 
-        mask_grid.addWidget(QtWidgets.QLabel("Display pixel size [nm]"), 0, 0)
+        settings_groupbox = QtWidgets.QGroupBox("Settings")
+        vbox.addWidget(settings_groupbox)
+        settings_grid = QtWidgets.QGridLayout(settings_groupbox)
+
+        settings_grid.addWidget(
+            QtWidgets.QLabel("Display pixel size (nm)"), 0, 0,
+        )
         self.disp_px_size = QtWidgets.QSpinBox()
         self.disp_px_size.setRange(10, 99999)
         self.disp_px_size.setValue(300)
         self.disp_px_size.setSingleStep(10)
         self.disp_px_size.setKeyboardTracking(False)
         self.disp_px_size.valueChanged.connect(self.update_plots)
-        mask_grid.addWidget(self.disp_px_size, 0, 1, 1, 2)
+        settings_grid.addWidget(self.disp_px_size, 0, 1)
 
-        mask_grid.addWidget(QtWidgets.QLabel("Blur"), 1, 0)
-        self.mask_blur = QtWidgets.QDoubleSpinBox()
-        self.mask_blur.setRange(0, 9999)
-        self.mask_blur.setValue(1)
-        self.mask_blur.setSingleStep(0.1)
-        self.mask_blur.setDecimals(5)
+        settings_grid.addWidget(QtWidgets.QLabel("Blur (nm)"), 0, 2)
+        self.mask_blur = QtWidgets.QSpinBox()
+        self.mask_blur.setRange(1, 999999)
+        self.mask_blur.setValue(500)
+        self.mask_blur.setSingleStep(10)
         self.mask_blur.setKeyboardTracking(False)
         self.mask_blur.valueChanged.connect(self.update_plots)
-        mask_grid.addWidget(self.mask_blur, 1, 1, 1, 2)
+        settings_grid.addWidget(self.mask_blur, 0, 3)
 
-        mask_grid.addWidget(QtWidgets.QLabel("Threshold"), 2, 0)
+        threshold_layout = QtWidgets.QHBoxLayout()
+        settings_grid.addLayout(threshold_layout, 1, 0, 1, 4)
+        threshold_layout.addWidget(QtWidgets.QLabel("Threshold"))
         self.mask_thresh = QtWidgets.QDoubleSpinBox()
         self.mask_thresh.setRange(0, 1)
         self.mask_thresh.setValue(0.5)
@@ -3265,78 +3276,108 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.mask_thresh.setDecimals(5)
         self.mask_thresh.setKeyboardTracking(False)
         self.mask_thresh.valueChanged.connect(self.update_plots)
-        mask_grid.addWidget(self.mask_thresh, 2, 1, 1, 2)
+        threshold_layout.addWidget(self.mask_thresh)
+        self.thresh_method = QtWidgets.QComboBox()
+        self.thresh_method.addItems([
+            'Custom',
+            'Isodata',
+            'Li',
+            'Mean',
+            'Minimum',
+            'Otsu',
+            'Triangle',
+            'Yen',
+            'Local Gaussian',
+            'Local mean',
+            'Local median',
+        ])
+        self.thresh_method.activated.connect(self.update_plots)
+        threshold_layout.addWidget(self.thresh_method)
+        show_hist_button = QtWidgets.QPushButton("Show histogram")
+        show_hist_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        show_hist_button.clicked.connect(self.show_hist)
+        threshold_layout.addWidget(show_hist_button)
 
-        gridspec_dict = {
-            'bottom': 0.05, 'top': 0.95, 'left': 0.05, 'right': 0.95,
-        }
-        (
-            self.figure,
-            ((self.ax1, self.ax2), (self.ax3, self.ax4)),
-        ) = plt.subplots(2, 2, figsize=(6, 6), gridspec_kw=gridspec_dict)
-        self.canvas = FigureCanvas(self.figure)
-        mask_grid.addWidget(self.canvas, 3, 0, 1, 3)
+        display_groupbox = QtWidgets.QGroupBox("Display")
+        vbox.addWidget(display_groupbox)
+        display_layout = QtWidgets.QGridLayout(display_groupbox)
+        self.plots = [QtWidgets.QLabel() for _ in range(4)]
+        display_layout.addWidget(self.plots[0], 0, 0)
+        display_layout.addWidget(self.plots[1], 0, 1)
+        display_layout.addWidget(self.plots[2], 1, 0)
+        display_layout.addWidget(self.plots[3], 1, 1)
 
+        mask_groupbox = QtWidgets.QGroupBox("Mask")
+        vbox.addWidget(mask_groupbox)
+        mask_grid = QtWidgets.QGridLayout(mask_groupbox)
         self.save_all = QtWidgets.QCheckBox("Mask all channels")
         self.save_all.setChecked(False)
-        mask_grid.addWidget(self.save_all, 4, 0)
+        mask_grid.addWidget(self.save_all, 0, 0)
 
         load_mask_button = QtWidgets.QPushButton("Load Mask")
         load_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
         load_mask_button.clicked.connect(self.load_mask)
-        mask_grid.addWidget(load_mask_button, 5, 0)
+        mask_grid.addWidget(load_mask_button, 1, 0)
 
         self.save_mask_button = QtWidgets.QPushButton("Save Mask")
         self.save_mask_button.setEnabled(False)
         self.save_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_mask_button.clicked.connect(self.save_mask)
-        mask_grid.addWidget(self.save_mask_button, 5, 1)
+        mask_grid.addWidget(self.save_mask_button, 1, 1)
 
         self.save_blur_button = QtWidgets.QPushButton("Save Blurred")
         self.save_blur_button.setEnabled(False)
         self.save_blur_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_blur_button.clicked.connect(self.save_blur)
-        mask_grid.addWidget(self.save_blur_button, 5, 2)
+        mask_grid.addWidget(self.save_blur_button, 1, 2)
 
         mask_button = QtWidgets.QPushButton("Mask")
         mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
         mask_button.clicked.connect(self.mask_locs)
-        mask_grid.addWidget(mask_button, 6, 0)
+        mask_grid.addWidget(mask_button, 2, 0)
 
         self.save_button = QtWidgets.QPushButton("Save localizations")
         self.save_button.setEnabled(False)
         self.save_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_button.clicked.connect(self.save_locs)
-        mask_grid.addWidget(self.save_button, 6, 1, 1, 2)
+        mask_grid.addWidget(self.save_button, 2, 1, 1, 2)
 
         self.cached_oversampling = 0
         self.cached_blur = 0
         self.cached_thresh = 0
-        self.mask_loaded = False
+        self.pixelsize = 130
 
     def init_dialog(self) -> None:
         """Initialize dialog when called from the main window. Load
         localizations and metadata, updates plots."""
-        self.mask_loaded = False
         self.locs = self.window.view.locs
         self.paths = self.window.view.locs_paths
         self.infos = self.window.view.infos
+        self.pixelsize = self.window.display_settings_dlg.pixelsize.value()
         # which channel to plot
         self.channel = self.window.view.get_channel("Mask image")
         self.cmap = self.window.display_settings_dlg.colormap.currentText()
-        self.show()
         info = self.infos[self.channel][0]
         self.x_max = info["Width"]
         self.y_max = info["Height"]
         self.update_plots()
 
+        # adjust the size of the dialog to fit its contents
+        hint = self.container.sizeHint()
+        self.resize(hint.width() + 45, self.height())
+        # if room is available on the screen, adjust the height as well
+        screen = QtWidgets.QApplication.primaryScreen()
+        screen_height = 1000 if screen is None else screen.size().height()
+        if hint.height() + 45 < screen_height:
+            self.resize(self.width(), hint.height() + 45)
+        else:
+            self.resize(self.width(), screen_height - 100)
+        self.show()
+
     def generate_image(self) -> None:
         """Histogram loaded localizations from a given channel."""
         locs = self.locs[self.channel]
-        oversampling = (
-            self.window.display_settings_dlg.pixelsize.value()
-            / self.disp_px_size.value()
-        )
+        oversampling = self.pixelsize / self.disp_px_size.value()
         viewport = ((0, 0), (self.y_max, self.x_max))
         _, H = render.render(
             locs,
@@ -3345,13 +3386,20 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             blur_method=None,
         )
         self.H = H / H.max()
+        self.plots[0].setPixmap(
+            self.render_to_pixmap(self.H, title="Original")
+        )
 
     def blur_image(self) -> None:
         """Blur localizations using a Gaussian filter."""
-        H_blur = gaussian_filter(self.H, sigma=self.mask_blur.value())
+        blur_px = self.mask_blur.value() / self.disp_px_size.value()
+        H_blur = gaussian_filter(self.H, sigma=blur_px)
         H_blur = H_blur / np.max(H_blur)
-        self.H_blur = H_blur  # image to be displayed in self.ax2
+        self.H_blur = H_blur
         self.save_blur_button.setEnabled(True)
+        self.plots[1].setPixmap(
+            self.render_to_pixmap(self.H_blur, title="Blur")
+        )
 
     def save_mask(self) -> None:
         """Save binary mask to .npy and .png formats."""
@@ -3364,7 +3412,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         if path:
             np.save(path, self.mask)
             png_path = path.replace(".npy", ".png")
-            plt.imsave(png_path, self.mask, cmap="gray")
+            pixmap = self.plots[2].pixmap()
+            if pixmap:
+                pixmap.save(png_path)
 
     def save_blur(self) -> None:
         """Save blurred image to a .png format."""
@@ -3375,7 +3425,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             self, "Save blur to", name_blur, filter="*.png"
         )
         if path:
-            plt.imsave(path, self.H_blur, cmap=self.cmap)
+            pixmap = self.plots[1].pixmap()
+            if pixmap:
+                pixmap.save(path)
 
     def load_mask(self) -> None:
         """Load binary mask from .npy format."""
@@ -3384,67 +3436,64 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             self, "Load mask", filter="*.npy"
         )
         if path:
-            self.mask_loaded = True  # will block changing of the mask
             self.mask = np.load(path)
-            # update plots without drawing a new mask
-            self.update_plots(new_mask=False)
+            self.plots[2].setPixmap(
+                self.render_to_pixmap(self.mask, cmap='Greys_r', title="Mask"),
+            )
+            self.save_button.setEnabled(True)
 
     def mask_image(self) -> None:
         """Calculate binary mask based on threshold."""
-        if not self.mask_loaded:
+        method = self.thresh_method.currentText()
+        if method == "Custom":
+            self.mask_thresh.setEnabled(True)
             mask = np.zeros(self.H_blur.shape, dtype=np.int8)
             mask[self.H_blur > self.mask_thresh.value()] = 1
-            self.mask = mask
-            self.save_mask_button.setEnabled(True)
+        else:
+            self.mask_thresh.setEnabled(False)
+            method_mod = method.lower().replace(" ", "_")
+            mask, thresh = masking.mask_image(self.H_blur, method_mod)
+            mask = mask.astype(np.int8)
+            if not isinstance(thresh, np.ndarray):
+                self.mask_thresh.setValue(thresh)
+            else:
+                self.mask_thresh.setValue(0)
+        self.mask = mask
+        self.save_mask_button.setEnabled(True)
+        self.save_button.setEnabled(True)
+        self.plots[2].setPixmap(
+            self.render_to_pixmap(self.mask, cmap='Greys_r', title="Mask"),
+        )
 
-    def update_plots(self, new_mask: bool = True) -> None:
+    def update_plots(self) -> None:
         """Plot in all 4 axes: 2D histogram, blurred image, mask and
         masked localizations."""
-        if self.mask_blur.value() == 0.00000:
-            self.mask_blur.setValue(0.00001)
+        if self.cached_oversampling:
+            self.cached_oversampling = 0
 
-        if new_mask:
-            if self.cached_oversampling:
-                self.cached_oversampling = 0
+        if self.cached_blur:
+            self.cached_blur = 0
 
-            if self.cached_blur:
-                self.cached_blur = 0
+        if self.cached_thresh:
+            self.cached_thresh = 0
 
-            if self.cached_thresh:
-                self.cached_thresh = 0
+        if not self.cached_oversampling:
+            self.generate_image()
+            self.blur_image()
+            self.mask_image()
+            self.cached_oversampling = 1
+            self.cached_blur = 1
+            self.cached_thresh = 1
 
-            if not self.cached_oversampling:
-                self.generate_image()
-                self.blur_image()
-                self.mask_image()
-                self.cached_oversampling = 1
-                self.cached_blur = 1
-                self.cached_thresh = 1
+        if not self.cached_blur:
+            self.blur_image()
+            self.mask_image()
+            self.cached_blur = 1
+            self.cached_thresh = 1
 
-            if not self.cached_blur:
-                self.blur_image()
-                self.mask_image()
-                self.cached_blur = 1
-                self.cached_thresh = 1
-
-            if not self.cached_thresh:
-                self.mask_image()
-                self.cached_thresh = 1
-
-        self.ax1.imshow(self.H, cmap=self.cmap)
-        self.ax1.set_title("Original")
-        self.ax2.imshow(self.H_blur, cmap=self.cmap)
-        self.ax2.set_title("Blurred")
-        self.ax3.imshow(self.mask, cmap='Greys_r')
-        self.ax3.set_title("Mask")
-        self.ax4.imshow(np.zeros_like(self.H), cmap=self.cmap)
-        self.ax4.set_title("Masked image")
-
-        for ax in (self.ax1, self.ax2, self.ax3, self.ax4):
-            ax.grid(False)
-            ax.axis('off')
-
-        self.canvas.draw()
+        if not self.cached_thresh:
+            self.mask_image()
+            self.cached_thresh = 1
 
     def mask_locs(self) -> None:
         """Mask localizations from a single or all channels."""
@@ -3459,7 +3508,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
     def _mask_locs(self, locs: np.recarray):
         """Mask localizations given a mask."""
-        locs_in, locs_out = postprocess.mask_locs(
+        locs_in, locs_out = masking.mask_locs(
             locs, self.mask, self.x_max, self.y_max,
         )
         self.index_locs.append(locs_in)  # locs in the mask
@@ -3474,19 +3523,13 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ):  # update masked locs plot if the current channel is masked
             _, self.H_new = render.render(
                 self.index_locs[-1],
-                oversampling=(
-                    self.window.display_settings_dlg.pixelsize.value()
-                    / self.disp_px_size.value()
-                ),
+                oversampling=self.pixelsize / self.disp_px_size.value(),
                 viewport=((0, 0), (self.y_max, self.x_max)),
                 blur_method=None,
             )
-
-            self.ax4.imshow(self.H_new, cmap=self.cmap)
-            self.ax4.grid(False)
-            self.ax4.axis('off')
-            self.save_button.setEnabled(True)
-            self.canvas.draw()
+            self.plots[3].setPixmap(
+                self.render_to_pixmap(self.H_new, title="Masked")
+            )
 
     def save_locs(self) -> None:
         """Save masked localizations."""
@@ -3570,11 +3613,93 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         info = self.infos[channel] + [{
             "Generated by": f"Picasso v{__version__} Render : Mask {mask_in}",
             "Display pixel size (nm)": mask_pixelsize,
-            "Blur": self.mask_blur.value(),
+            "Blur (nm)": self.mask_blur.value(),
             "Threshold": self.mask_thresh.value(),
+            "Threshold method": self.thresh_method.currentText(),
             "Area (um^2)": area,
         }]
         return info
+
+    def show_hist(self) -> None:
+        """Show histogram of values of the blurred image."""
+        self.hist_window = lib.GenericPlotWindow(
+            "Blurred image values", "render",
+        )
+        self.hist_window.figure.clear()
+
+        ax = self.hist_window.figure.add_subplot(111)
+        ax.set_title("Density of blurred image values")
+        vals = self.H_blur.ravel()
+        bins = lib.calculate_optimal_bins(vals, max_n_bins=1000)
+        hist, bins, _ = ax.hist(vals, bins=bins, label="Data", density=True)
+        ax.axvline(
+            self.mask_thresh.value(),
+            0,
+            max(hist),
+            color='r',
+            label="Threshold",
+            linestyle="--",
+        )
+        ax.set_xlabel("Pixel value (a.u.)")
+        ax.set_ylabel("Density")
+        ax.legend(loc="best")
+        self.hist_window.canvas.draw()
+        self.hist_window.show()
+
+    def render_to_pixmap(
+        self,
+        image: np.ndarray,
+        cmap: str = None,
+        title: str = "",
+    ) -> QtGui.QPixmap:
+        """Convert a 2D numpy array to QPixmap for displaying in a
+        QLabel.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            2D array to be converted.
+        cmap : str or None, optional
+            Colormap to be used. If None, self.cmap is used. Default is
+            None.
+        title : str, optional
+            Title of the image, displayed in the top left corner.
+            Default is "".
+
+        Returns
+        -------
+        pixmap : QtGui.QPixmap
+            Converted pixmap.
+        """
+        # adjust contrast and convert to 8 bits
+        if image.dtype != np.int8:
+            image -= image.min()
+            image /= image.max()
+        image = np.round(255 * image).astype("uint8")
+        # get colormap and paint the image
+        cmap = self.cmap if cmap is None else cmap
+        cmap = np.uint8(
+            np.round(255 * plt.get_cmap(cmap)(np.arange(256)))
+        )
+        # create a 4 channel (rgb, alpha) array
+        Y, X = image.shape
+        bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
+        bgra[..., 0] = cmap[:, 2][image]
+        bgra[..., 1] = cmap[:, 1][image]
+        bgra[..., 2] = cmap[:, 0][image]
+        bgra[..., 3] = 255  # set alpha channel to fully opaque
+        qimage = QtGui.QImage(bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = qimage.scaled(
+            300, 300, QtCore.Qt.KeepAspectRatioByExpanding,
+        )
+        pixmap = QtGui.QPixmap.fromImage(qimage)
+        if title:
+            painter = QtGui.QPainter(pixmap)
+            painter.setPen(QtGui.QPen(QtCore.Qt.white))
+            painter.setFont(QtGui.QFont('Arial', 15))
+            painter.drawText(10, 20, title)
+            painter.end()
+        return pixmap
 
 
 class PickToolCircleSettings(QtWidgets.QWidget):
@@ -4255,7 +4380,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self._silent_disp_px_update = False
 
         # Render
-        self.render_groupbox = QtWidgets.QGroupBox("Render properties")
+        self.render_groupbox = QtWidgets.QGroupBox(
+            "Render properties (only single-channel data)"
+        )
 
         vbox.addWidget(self.render_groupbox)
         render_grid = QtWidgets.QGridLayout(self.render_groupbox)
@@ -4325,6 +4452,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
+        self.render_groupbox.setEnabled(False)
 
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
@@ -5023,8 +5151,7 @@ class View(QtWidgets.QLabel):
                         drift = np.rec.array(
                             drift, dtype=[("x", "f"), ("y", "f")]
                         )
-                except Exception as e:
-                    print(e)
+                except Exception:
                     # drift already initialized before
                     pass
 
@@ -5034,7 +5161,9 @@ class View(QtWidgets.QLabel):
         self.currentdrift.append(None)
 
         # if this is the first loc file, find the median localization
-        # precision and set group colors, if needed
+        # precision and set group colors and prepare render by property
+        disp_sett_dlg = self.window.display_settings_dlg
+        disp_sett_dlg.render_check.setChecked(False)
         if len(self.locs) == 1:
             self.median_lp = np.mean(
                 [np.median(locs.lpx), np.median(locs.lpy)]
@@ -5042,14 +5171,16 @@ class View(QtWidgets.QLabel):
             if hasattr(locs, "group"):
                 if len(self.group_color) == 0 and locs.group.size:
                     self.group_color = self.get_group_color(self.locs[0])
+            disp_sett_dlg.parameter.clear()
+            disp_sett_dlg.parameter.addItems(locs.dtype.names)
+            disp_sett_dlg.render_groupbox.setEnabled(True)
+        else:
+            disp_sett_dlg.render_groupbox.setEnabled(False)
 
         # render the loaded file
         if render:
             self.fit_in_view(autoscale=True)
             self.update_scene()
-
-        # add options to rendering by parameter
-        self.window.display_settings_dlg.parameter.addItems(locs.dtype.names)
 
         if hasattr(locs, "z"):
             # append z coordinates for slicing
@@ -6227,7 +6358,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Viewport defining the rendered FOV.
+            Viewport defining the rendered FOV ``((y_min, x_min),
+            (y_max, x_max))``.
         autoscale : bool, optional
             True if contrast should be optimally adjusted. Default is
             False.
@@ -6282,7 +6414,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Viewport defining the current FOV.
+            Viewport defining the current FOV ``((y_min, x_min),
+            (y_max, x_max))``.
         autoscale : bool, optional
             True if contrast should be optimally adjusted. Default is
             False.
@@ -6562,8 +6695,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Specifies the FOV to be rendered. If None, the current
-            viewport is taken.
+            Specifies the FOV to be rendered ``((y_min, x_min),
+            (y_max, x_max))``. If None, the current viewport is taken.
 
         Returns
         -------
@@ -7644,7 +7777,7 @@ class View(QtWidgets.QLabel):
             # save pick properties
             base, ext = os.path.splitext(path)
             out_path = base + "_pickprops.hdf5"
-            # TODO: save pick properties
+
             r_max = 2 * max(
                 self.infos[channel][0]["Height"],
                 self.infos[channel][0]["Width"],
@@ -8156,8 +8289,8 @@ class View(QtWidgets.QLabel):
         cache : bool, optional
             True if save image in cache. Default is True.
         viewport : tuple, optional
-            Viewport to be rendered. If None, takes current viewport.
-            Default is None.
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None, takes current viewport. Default is None.
 
         Returns
         -------
@@ -8187,9 +8320,7 @@ class View(QtWidgets.QLabel):
         self._bgra[:, :, 3].fill(255)
         # build QImage
         Y, X = self._bgra.shape[:2]
-        qimage = QtGui.QImage(
-            self._bgra.data, X, Y, QtGui.QImage.Format_RGB32
-        )
+        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
         return qimage
 
     def read_colors(self, n_channels: int | None = None) -> list[list[float]]:
@@ -9391,9 +9522,22 @@ class View(QtWidgets.QLabel):
         """Shift grouped localizations across x-axis. Useful for
         localizations that were processed with Picasso: Average."""
         if len(self.all_locs) > 1:
-            raise NotImplementedError(
-                "Please load only one channel."
+            QtWidgets.QMessageBox.information(
+                self,
+                "Unfold error",
+                "Please load only one channel.",
             )
+            return
+        if not hasattr(self.all_locs[0], "group"):
+            QtWidgets.QMessageBox.information(
+                self,
+                "Unfold error",
+                (
+                    "Localizations need to be grouped before unfolding"
+                    " and processed with Picasso: Average."
+                )
+            )
+            return
 
         if not hasattr(self, "unfold_status"):
             self.unfold_status = "folded"
@@ -9435,12 +9579,40 @@ class View(QtWidgets.QLabel):
 
     def unfold_groups_square(self) -> None:
         """Shifts grouped localizations onto a rectangular grid of
-        chosen length. Useful for localizations that were processed with
-        Picasso: Average."""
+        chosen length. Localizations can be grouped, for example, by
+        picking. Circular picks without saving them beforehand are
+        accepted as well."""
         if len(self.all_locs) > 1:
-            raise NotImplementedError(
-                "Please load only one channel."
+            QtWidgets.QMessageBox.information(
+                self,
+                "Unfold error",
+                "Please load only one channel.",
             )
+            return
+
+        # automatically assign the group if circular picks are present
+        if (
+            not hasattr(self.all_locs[0], "group")
+            and len(self._picks)
+            and self._pick_shape == "Circle"
+        ):
+            locs = self.picked_locs(0, add_group=True)
+            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+            self.all_locs[0] = locs
+            remove_group = True
+        elif hasattr(self.all_locs[0], "group"):
+            remove_group = False
+        else:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Unfold error",
+                (
+                    "Localizations need to be grouped before unfolding."
+                    " Alternatively, select circular picks to auto-assign"
+                    " groups based on picks."
+                ),
+            )
+            return
 
         n_square, ok = QtWidgets.QInputDialog.getInt(
             self,
@@ -9459,56 +9631,71 @@ class View(QtWidgets.QLabel):
         if not ok:
             return
 
-        if hasattr(self.all_locs[0], "group"):
-            self.all_locs[0].x += (
-                np.mod(self.all_locs[0].group, n_square)
-                * spacing
+        # shift localizations to the middle of the FOV and by the COM
+        # of each group
+        cx = self.infos[0][0]["Width"] / 2
+        cy = self.infos[0][0]["Height"] / 2
+        for group_id in np.unique(self.all_locs[0].group):
+            mask = self.all_locs[0].group == group_id
+            mean_x = np.mean(self.all_locs[0].x[mask])
+            mean_y = np.mean(self.all_locs[0].y[mask])
+            self.all_locs[0].x[mask] += cx - mean_x
+            self.all_locs[0].y[mask] += cy - mean_y
+        self.locs = copy.copy(self.all_locs)
+
+        # unfolding
+        self.all_locs[0].x += (
+            np.mod(self.all_locs[0].group, n_square)
+            * spacing
+        )
+        self.all_locs[0].y += (
+            np.floor(self.all_locs[0].group / n_square)
+            * spacing
+        )
+
+        mean_x = np.mean(self.locs[0].x)
+        mean_y = np.mean(self.locs[0].y)
+
+        self.all_locs[0].x -= mean_x
+        self.all_locs[0].y -= np.mean(self.all_locs[0].y)
+
+        offset_x = np.absolute(np.min(self.all_locs[0].x))
+        offset_y = np.absolute(np.min(self.all_locs[0].y))
+
+        self.all_locs[0].x += offset_x
+        self.all_locs[0].y += offset_y
+
+        if self._picks:
+            if self._pick_shape != "Circle":
+                raise NotImplementedError(
+                    "Implemented for circular picks only."
+                )
+            # Also unfold picks
+            groups = np.unique(self.all_locs[0].group)
+
+            shift_x = (
+                np.mod(groups, n_square) * spacing - mean_x + offset_x
             )
-            self.all_locs[0].y += (
-                np.floor(self.all_locs[0].group / n_square)
-                * spacing
+            shift_y = (
+                np.floor(groups / n_square) * spacing - mean_y + offset_y
             )
 
-            mean_x = np.mean(self.locs[0].x)
-            mean_y = np.mean(self.locs[0].y)
-
-            self.all_locs[0].x -= mean_x
-            self.all_locs[0].y -= np.mean(self.all_locs[0].y)
-
-            offset_x = np.absolute(np.min(self.all_locs[0].x))
-            offset_y = np.absolute(np.min(self.all_locs[0].y))
-
-            self.all_locs[0].x += offset_x
-            self.all_locs[0].y += offset_y
-
-            if self._picks:
-                if self._pick_shape != "Circle":
-                    raise NotImplementedError(
-                        "Implemented for circular picks only."
+            for j in range(len(self._picks)):
+                for k in range(len(groups)):
+                    x_pick, y_pick = self._picks[j]
+                    self._picks.append(
+                        (x_pick + shift_x[k], y_pick + shift_y[k])
                     )
-                # Also unfold picks
-                groups = np.unique(self.all_locs[0].group)
 
-                shift_x = (
-                    np.mod(groups, n_square) * spacing - mean_x + offset_x
-                )
-                shift_y = (
-                    np.floor(groups / n_square) * spacing - mean_y + offset_y
-                )
-
-                for j in range(len(self._picks)):
-                    for k in range(len(groups)):
-                        x_pick, y_pick = self._picks[j]
-                        self._picks.append(
-                            (x_pick + shift_x[k], y_pick + shift_y[k])
-                        )
-
-                self.n_picks = len(self._picks)
-                self.update_pick_info_short()
+            self.n_picks = len(self._picks)
+            self.update_pick_info_short()
 
         # Update width information
         self.infos[0][0]["Height"] = int(np.ceil(np.max(self.all_locs[0].y)))
         self.infos[0][0]["Width"] = int(np.ceil(np.max(self.all_locs[0].x)))
+        if remove_group:
+            self.all_locs[0] = lib.remove_from_rec(self.all_locs[0], "group")
+            self._picks = []
         self.locs[0] = copy.copy(self.all_locs[0])
         self.fit_in_view()
 
@@ -9693,8 +9880,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple, optional
-            Viewport to be rendered. If None ``self.viewport`` is taken.
-            Default is None.
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None, takes current viewport. Default is None.
         autoscale : bool, optional
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
@@ -9736,8 +9923,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple, optional
-            Viewport to be rendered. If None ``self.viewport`` is taken.
-            Default is None
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None
         autoscale : bool, optional
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
@@ -9771,8 +9958,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None ``self.viewport`` is
-            taken. Default is None.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None.
 
         Returns
         -------
@@ -9799,8 +9986,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None ``self.viewport`` is
-            taken. Default is None.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None.
 
         Returns
         -------
@@ -9824,8 +10011,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None ``self.viewport`` is
-            taken. Default is None.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None.
 
         Returns
         -------
@@ -9849,8 +10036,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None ``self.viewport`` is
-            taken. Default is None.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None ``self.viewport`` is taken. Default is None.
 
         Returns
         -------
@@ -10365,6 +10552,8 @@ class Window(QtWidgets.QMainWindow):
         self.menus = [file_menu, view_menu, tools_menu, postprocess_menu]
         for menu in self.menus[1:]:
             menu.setDisabled(True)
+
+        self.plugin_menu = self.menu_bar.addMenu("Plugins")  # do not delete
 
         # add plugins; if it's the first initialization
         # (plugins_loaded=False), they are not added because they're
