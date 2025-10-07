@@ -15,6 +15,7 @@ from concurrent import futures
 
 import numba
 import numpy as np
+import pandas as pd
 from scipy import optimize
 from tqdm import tqdm
 
@@ -361,17 +362,17 @@ def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
 
 
 def locs_from_fits(
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     theta: np.ndarray,
     box: int,
     em: bool,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Convert the fit results into a structured array of localizations.
 
     Parameters
     ----------
-    identifications : np.recarray
-        A structured array containing the identifications of the spots,
+    identifications : pd.DataFrame
+        Data frame containing the identifications of the spots,
         including frame numbers, x and y coordinates, and net gradient.
     theta : np.ndarray
         A 2D array with the optimized parameters for each spot, where
@@ -385,12 +386,12 @@ def locs_from_fits(
 
     Returns
     -------
-    locs : np.recarray
-        A structured array containing the localized spots.
+    locs : pd.DataFrame
+        Data frame containing the localized spots.
     """
-    # box_offset = int(box/2)
-    x = theta[:, 0] + identifications.x  # - box_offset
-    y = theta[:, 1] + identifications.y  # - box_offset
+    # box_offset = int(box / 2)
+    x = theta[:, 0] + identifications["x"]  # - box_offset
+    y = theta[:, 1] + identifications["y"]  # - box_offset
     lpx = postprocess.localization_precision(
         theta[:, 2], theta[:, 4], theta[:, 3], em=em
     )
@@ -402,83 +403,56 @@ def locs_from_fits(
     ellipticity = (a - b) / a
 
     if hasattr(identifications, "n_id"):
-        locs = np.rec.array(
-            (
-                identifications.frame,
-                x,
-                y,
-                theta[:, 2],
-                theta[:, 4],
-                theta[:, 5],
-                theta[:, 3],
-                lpx,
-                lpy,
-                ellipticity,
-                identifications.net_gradient,
-                identifications.n_id,
-            ),
-            dtype=[
-                ("frame", "u4"),
-                ("x", "f4"),
-                ("y", "f4"),
-                ("photons", "f4"),
-                ("sx", "f4"),
-                ("sy", "f4"),
-                ("bg", "f4"),
-                ("lpx", "f4"),
-                ("lpy", "f4"),
-                ("ellipticity", "f4"),
-                ("net_gradient", "f4"),
-                ("n_id", "u4"),
-            ],
-        )
-        locs.sort(kind="mergesort", order="n_id")
+        locs = pd.DataFrame({
+                "frame": identifications["frame"].astype(np.uint32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "photons": theta[:, 2].astype(np.float32),
+                "sx": theta[:, 4].astype(np.float32),
+                "sy": theta[:, 5].astype(np.float32),
+                "bg": theta[:, 3].astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": (
+                    identifications["net_gradient"].astype(np.float32)
+                ),
+                "n_id": identifications["n_id"].astype(np.uint32),
+            })
+        locs.sort_values(by="n_id", kind="mergesort", inplace=True)
     else:
-        locs = np.rec.array(
-            (
-                identifications.frame,
-                x,
-                y,
-                theta[:, 2],
-                theta[:, 4],
-                theta[:, 5],
-                theta[:, 3],
-                lpx,
-                lpy,
-                ellipticity,
-                identifications.net_gradient,
-            ),
-            dtype=[
-                ("frame", "u4"),
-                ("x", "f4"),
-                ("y", "f4"),
-                ("photons", "f4"),
-                ("sx", "f4"),
-                ("sy", "f4"),
-                ("bg", "f4"),
-                ("lpx", "f4"),
-                ("lpy", "f4"),
-                ("ellipticity", "f4"),
-                ("net_gradient", "f4"),
-            ],
-        )
-        locs.sort(kind="mergesort", order="frame")
+        locs = pd.DataFrame({
+                "frame": identifications["frame"].astype(np.uint32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "photons": theta[:, 2].astype(np.float32),
+                "sx": theta[:, 4].astype(np.float32),
+                "sy": theta[:, 5].astype(np.float32),
+                "bg": theta[:, 3].astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": (
+                    identifications["net_gradient"].astype(np.float32)
+                ),
+            })
+        locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs
 
 
 def locs_from_fits_gpufit(
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     theta: np.ndarray,
     box: int,
     em: bool,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Convert the fit results from GPU-based fitting into a structured
     array of localizations.
 
     Parameters
     ----------
-    identifications : np.recarray
-        A structured array containing the identifications of the spots,
+    identifications : pd.DataFrame
+        Data frame containing the identifications of the spots,
         including frame numbers, x and y coordinates, and net gradient.
     theta : np.ndarray
         A 2D array with the optimized parameters for each spot, where
@@ -492,12 +466,12 @@ def locs_from_fits_gpufit(
 
     Returns
     -------
-    locs : np.recarray
-        A structured array containing the localized spots.
+    locs : pd.DataFrame
+        Data frame containing the localized spots.
     """
-    box_offset = int(box / 2)
-    x = theta[:, 1] + identifications.x - box_offset
-    y = theta[:, 2] + identifications.y - box_offset
+    # box_offset = int(box / 2)
+    x = theta[:, 1] + identifications["x"]  # - box_offset
+    y = theta[:, 2] + identifications["y"]  # - box_offset
     lpx = postprocess.localization_precision(
         theta[:, 0], theta[:, 3], theta[:, 5], em=em
     )
@@ -507,33 +481,18 @@ def locs_from_fits_gpufit(
     a = np.maximum(theta[:, 3], theta[:, 4])
     b = np.minimum(theta[:, 3], theta[:, 4])
     ellipticity = (a - b) / a
-    locs = np.rec.array(
-        (
-            identifications.frame,
-            x,
-            y,
-            theta[:, 0],
-            theta[:, 3],
-            theta[:, 4],
-            theta[:, 5],
-            lpx,
-            lpy,
-            ellipticity,
-            identifications.net_gradient,
-        ),
-        dtype=[
-            ("frame", "u4"),
-            ("x", "f4"),
-            ("y", "f4"),
-            ("photons", "f4"),
-            ("sx", "f4"),
-            ("sy", "f4"),
-            ("bg", "f4"),
-            ("lpx", "f4"),
-            ("lpy", "f4"),
-            ("ellipticity", "f4"),
-            ("net_gradient", "f4"),
-        ],
-    )
-    locs.sort(kind="mergesort", order="frame")
+    locs = pd.DataFrame({
+            "frame": identifications["frame"].astype(np.uint32),
+            "x": x.astype(np.float32),
+            "y": y.astype(np.float32),
+            "photons": theta[:, 0].astype(np.float32),
+            "sx": theta[:, 3].astype(np.float32),
+            "sy": theta[:, 4].astype(np.float32),
+            "bg": theta[:, 5].astype(np.float32),
+            "lpx": lpx.astype(np.float32),
+            "lpy": lpy.astype(np.float32),
+            "ellipticity": ellipticity.astype(np.float32),
+            "net_gradient": identifications["net_gradient"].astype(np.float32),
+        })
+    locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs

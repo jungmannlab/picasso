@@ -23,6 +23,7 @@ import yaml
 import h5py
 import nd2
 import numpy as np
+import pandas as pd
 from PyQt5.QtWidgets import QWidget, QMessageBox
 
 from . import lib, __version__
@@ -321,8 +322,6 @@ def load_movie(
         return load_ims(path, prompt_info=prompt_info)
     elif ext == '.nd2':
         return load_nd2(path)
-    # elif ext == ".tiff":
-    #     print("Extension .tiff not supported, please use .ome.tif instead.")
 
 
 def load_info(
@@ -1509,6 +1508,7 @@ def to_raw(path: str, verbose: bool = True) -> None:
 
 
 def save_datasets(path: str, info: dict, **kwargs) -> None:
+    # TODO: use pandas rather than h5py??
     """Save multiple datasets to an HDF5 file at the specified path."""
     with h5py.File(path, "w") as hdf:
         for key, val in kwargs.items():
@@ -1518,22 +1518,21 @@ def save_datasets(path: str, info: dict, **kwargs) -> None:
     save_info(info_path, info)
 
 
-def save_locs(path: str, locs: np.recarray, info: list[dict]) -> None:
+def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     """Save localization data to an HDF5 file.
 
     Parameters
     ----------
     path : str
         The path where the localization data will be saved.
-    locs : np.recarray
-        The localization data to be saved, typically a structured array.
+    locs : pd.DataFrame
+        The localization data to be saved.
     info : list of dict
         Metadata information to be saved alongside the localization
         data.
     """
     locs = lib.ensure_sanity(locs, info)
-    with h5py.File(path, "w") as locs_file:
-        locs_file.create_dataset("locs", data=locs)
+    locs.to_hdf(path, key="locs", mode="w")
     base, ext = os.path.splitext(path)
     info_path = base + ".yaml"
     save_info(info_path, info)
@@ -1542,7 +1541,7 @@ def save_locs(path: str, locs: np.recarray, info: list[dict]) -> None:
 def load_locs(
     path: str,
     qt_parent: QWidget | None = None
-) -> tuple[np.recarray, list[dict]]:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file.
 
     Parameters
@@ -1554,56 +1553,41 @@ def load_locs(
 
     Returns
     -------
-    locs : np.recarray
-        The localization data loaded from the file, as a structured
-        array with fields accessible as attributes.
+    locs : pd.DataFrame
+        The localization data loaded from the file.
     info : list[dict]
         Metadata information loaded from the file, typically a list of
         dictionaries containing various metadata fields.
     """
-    with h5py.File(path, "r") as locs_file:
-        locs = locs_file["locs"][...]
-    locs = np.rec.array(
-        locs, dtype=locs.dtype
-    )  # Convert to rec array with fields as attributes
+    locs = pd.read_hdf(path, key="locs")
     info = load_info(path, qt_parent=qt_parent)
     return locs, info
 
 
-def load_clusters(
-    path: str,
-    qt_parent: QWidget | None = None
-) -> np.recarray:
+def load_clusters(path: str) -> pd.DataFrame:
     """Load cluster data from an HDF5 file.
 
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing cluster data.
-    qt_parent : QWidget | None, optional
-        Parent widget for any Qt-related operations, default is None.
 
     Returns
     -------
-    clusters : np.recarray
-        The cluster data loaded from the file, as a structured
-        array with fields accessible as attributes.
+    clusters : pd.DataFrame
+        The cluster data loaded from the file.
     """
-    with h5py.File(path, "r") as cluster_file:
-        try:
-            clusters = cluster_file["clusters"][...]
-        except KeyError:
-            clusters = cluster_file["locs"][...]
-    clusters = np.rec.array(
-        clusters, dtype=clusters.dtype
-    )  # Convert to rec array with fields as attributes
+    try:
+        clusters = pd.read_hdf(path, key="clusters")
+    except KeyError:
+        clusters = pd.read_hdf(path, key="locs")
     return clusters
 
 
 def load_filter(
     path: str,
     qt_parent: QWidget | None = None,
-):
+) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file, checking for different
     possible keys for the localization data. This function is used to
     handle files that may contain localization data under different
@@ -1618,26 +1602,20 @@ def load_filter(
 
     Returns
     -------
-    locs : np.recarray
-        The localization data loaded from the file, as a structured
-        array with fields accessible as attributes.
+    locs : pd.DataFrame
+        The localization data loaded from the file.
     info : list[dict]
         Metadata information loaded from the file, typically a list of
         dictionaries containing various metadata fields.
     """
-    with h5py.File(path, "r") as locs_file:
+    try:
+        locs = pd.read_hdf(path, key="locs")
+        info = load_info(path, qt_parent=qt_parent)
+    except KeyError:
         try:
-            locs = locs_file["locs"][...]
+            locs = pd.read_hdf(path, key="groups")
             info = load_info(path, qt_parent=qt_parent)
         except KeyError:
-            try:
-                locs = locs_file["groups"][...]
-                info = load_info(path, qt_parent=qt_parent)
-            except KeyError:
-                locs = locs_file["clusters"][...]
-                info = []
-
-    locs = np.rec.array(
-        locs, dtype=locs.dtype
-    )  # Convert to rec array with fields as attributes
+            locs = pd.read_hdf(path, key="clusters")
+            info = []
     return locs, info

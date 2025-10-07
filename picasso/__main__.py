@@ -407,7 +407,6 @@ def _clusterfilter(
                     }
                     info.append(clusterfilter_info)
                     all_locs.sort(kind="mergesort", order="frame")
-                    all_locs = all_locs.view(np.recarray)
                     out_path = base + "_filter_in.hdf5"
                     io.save_locs(out_path, all_locs, info)
                     print("Complete. Saved to: {}".format(out_path))
@@ -435,7 +434,6 @@ def _clusterfilter(
                     }
                     info.append(clusterfilter_info)
                     all_locs.sort(kind="mergesort", order="frame")
-                    all_locs = all_locs.view(np.recarray)
                     out_path = base + "_filter_out.hdf5"
                     io.save_locs(out_path, all_locs, info)
                     print("Complete. Saved to: {}".format(out_path))
@@ -749,7 +747,6 @@ def _join(files: list[str], keep_index: bool = True) -> None:
     from .io import load_locs, save_locs
     from os.path import splitext
     from numpy import append
-    import numpy as np
 
     locs, info = load_locs(files[0])
     total_frames = info[0]["Frames"]
@@ -776,7 +773,6 @@ def _join(files: list[str], keep_index: bool = True) -> None:
     if not keep_index:
         info[0]["Frames"] = total_frames
     locs.sort(kind="mergesort", order="frame")
-    locs = locs.view(np.recarray)
     save_locs(base + "_join.hdf5", locs, info)
 
 

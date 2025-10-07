@@ -15,16 +15,16 @@ import collections
 import colorsys
 import os
 import time
+import warnings
 from typing import Any
 from collections.abc import Callable
 from asyncio import Future
 
 import numba
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from numpy.lib.recfunctions import append_fields
-from numpy.lib.recfunctions import drop_fields
-from numpy.lib.recfunctions import stack_arrays
+from numpy.lib.recfunctions import append_fields, drop_fields
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvas, NavigationToolbar2QT
 )
@@ -461,6 +461,12 @@ def append_to_rec(
     rec_array : np.recarray
         Recarray with the new column.
     """
+    warnings.warn(
+        "Appending to recarrays is deprecated and will be removed in Picasso"
+        " 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
+        " recarrays. Simply use locs['new_column'] = data to add a new column"
+        " to the DataFrame."
+    )
     if hasattr(rec_array, name):
         rec_array = remove_from_rec(rec_array, name)
     rec_array = append_fields(
@@ -475,15 +481,15 @@ def append_to_rec(
 
 
 def merge_locs(
-    locs_list: list[np.recarray],
+    locs_list: list[pd.DataFrame],
     increment_frames: bool = True,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Merge localization lists into one file. Can increment frames
     to avoid overlapping frames.
 
     Parameters
     ----------
-    locs_list : list of np.recarrays
+    locs_list : list of pd.DataFrame's
         List of localization lists to be merged.
     increment_frames : bool, optional
         If True, increments frames of each localization list by the
@@ -493,7 +499,7 @@ def merge_locs(
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Merged localizations.
     """
     if increment_frames:
@@ -502,43 +508,39 @@ def merge_locs(
             locs["frame"] += last_frame
             last_frame = locs["frame"][-1].max()
             locs_list[i] = locs
-    locs = stack_arrays(locs_list, usemask=False, asrecarray=True)
+    locs = pd.concat(locs_list, ignore_index=True)
     return locs
 
 
-def ensure_sanity(locs: np.recarray, info: list[dict]) -> np.recarray:
+def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     """Ensure that localizations are within the image dimensions
     and have positive localization precisions and other parameters.
 
     Parameters
     ----------
-    locs : np.recarray
-        Localizations list.
+    locs : pd.DataFrame
+        Localizations.
     info : list of dicts
         Localization metadata.
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations that pass the sanity checks.
     """
-    # no inf or nan:
-    locs = locs[
-        np.all(
-            np.array([np.isfinite(locs[_]) for _ in locs.dtype.names]),
-            axis=0,
-        )
-    ]
+    # no inf and nan:
+    locs.replace([np.inf, -np.inf], np.nan, inplace=True)
+    locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:
-    locs = locs[locs.x < info[0]["Width"]]
-    locs = locs[locs.y < info[0]["Height"]]
+    locs = locs[locs["x"] < info[0]["Width"]]
+    locs = locs[locs["y"] < info[0]["Height"]]
     for attr in ["x", "y", "lpx", "lpy", "photons", "ellipticity", "sx", "sy"]:
-        if hasattr(locs, attr):
+        if attr in locs.columns:
             locs = locs[locs[attr] >= 0]
     return locs
 
 
-def is_loc_at(x: float, y: float, locs: np.recarray, r: float) -> np.ndarray:
+def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
     """Check which localizations are within radius ``r`` from position
     ``(x, y)``.
 
@@ -546,8 +548,8 @@ def is_loc_at(x: float, y: float, locs: np.recarray, r: float) -> np.ndarray:
     ----------
     x, y : float
         x and y-coordinate of the position.
-    locs : np.recarray
-        Localizations list.
+    locs : pd.DataFrame
+        Localizations.
     r : float
         Radius.
 
@@ -557,14 +559,14 @@ def is_loc_at(x: float, y: float, locs: np.recarray, r: float) -> np.ndarray:
         Boolean array - True if a localization is within radius r
         of position (x, y).
     """
-    dx = locs.x - x
-    dy = locs.y - y
+    dx = locs["x"].values - x
+    dy = locs["y"].values - y
     r2 = r**2
     is_picked = dx**2 + dy**2 < r2
     return is_picked
 
 
-def locs_at(x: float, y: float, locs: np.recarray, r: float) -> np.recarray:
+def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:
     """Return localizations within radius ``r`` from the position
     ``(x, y)``.
 
@@ -572,14 +574,14 @@ def locs_at(x: float, y: float, locs: np.recarray, r: float) -> np.recarray:
     ----------
     x, y : float
         x and y-coordinate of the position.
-    locs : np.recarray
-        Localizations list.
+    locs : pd.DataFrame
+        Localizations.
     r : float
         Radius.
 
     Returns
     -------
-    picked_locs : np.recarray
+    picked_locs : pd.DataFrame
         Localizations in the specified area.
     """
     is_picked = is_loc_at(x, y, locs, r)
@@ -633,27 +635,27 @@ def check_if_in_polygon(
 
 
 def locs_in_polygon(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     X: np.ndarray,
     Y: np.ndarray,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Return localizations within the polygon defined by corners
     ``(X, Y)``.
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     X, Y : list
         x and y-coordinates of polygon corners.
 
     Returns
     -------
-    picked_locs : np.recarray
+    picked_locs : pd.DataFrame
         Localizations in polygon.
     """
     is_in_polygon = check_if_in_polygon(
-        locs.x, locs.y, np.array(X), np.array(Y)
+        locs["x"].values, locs["y"].values, np.array(X), np.array(Y)
     )
     return locs[is_in_polygon]
 
@@ -711,27 +713,27 @@ def check_if_in_rectangle(
 
 
 def locs_in_rectangle(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     X: np.ndarray,
     Y: np.ndarray,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Return localizations within the rectangle defined by corners
     ``(X, Y)``.
 
     Parameters
     ----------
-    locs : np.recarray
-        Localizations list.
+    locs : pd.DataFrame
+        Localizations.
     X, Y : list
         x and y coordinates of rectangle corners.
 
     Returns
     -------
-    picked_locs : np.recarray
+    picked_locs : pd.DataFrame
         Localizations in rectangle.
     """
     is_in_rectangle = check_if_in_rectangle(
-        locs.x, locs.y, np.array(X), np.array(Y)
+        locs["x"].values, locs["y"].values, np.array(X), np.array(Y)
     )
     picked_locs = locs[is_in_rectangle]
     return picked_locs
@@ -805,13 +807,19 @@ def remove_from_rec(rec_array: np.recarray, name: str) -> np.recarray:
     rec_array : np.recarray
         Recarray without the column.
     """
+    warnings.warn(
+        "Removing columns from recarrays is deprecated and will be removed in "
+        " Picasso 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
+        " recarrays. Simply use locs.drop('new_column', axis=1) to remove a"
+        " column from the DataFrame."
+    )
     rec_array = drop_fields(rec_array, name, usemask=False, asrecarray=True)
     return rec_array
 
 
 def locs_glob_map(
     func: Callable[
-        [np.recarray, dict, str, Any], tuple[np.recarray, list[dict]]
+        [pd.DataFrame, dict, str, Any], tuple[pd.DataFrame, list[dict]]
     ],
     pattern: str,
     args: list = [],

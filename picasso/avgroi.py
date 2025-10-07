@@ -14,6 +14,7 @@ from concurrent import futures
 
 import numba
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
 from . import postprocess
@@ -84,15 +85,15 @@ def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
 
 
 def locs_from_fits(
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     theta: np.ndarray,
     box: int,
     em: float,
-) -> np.recarray:
-    """Convert fit results to localization recarray."""
-    # box_offset = int(box/2)
-    x = theta[:, 0] + identifications.x  # - box_offset
-    y = theta[:, 1] + identifications.y  # - box_offset
+) -> pd.DataFrame:
+    """Convert fit results to localization DataFrame."""
+    box_offset = int(box/2)
+    x = theta[:, 0] + identifications["x"] - box_offset
+    y = theta[:, 1] + identifications["y"] - box_offset
     lpx = postprocess.localization_precision(
         theta[:, 2], theta[:, 4], theta[:, 3], em=em
     )
@@ -103,65 +104,42 @@ def locs_from_fits(
     b = np.minimum(theta[:, 4], theta[:, 5])
     ellipticity = (a - b) / a
     if hasattr(identifications, "n_id"):
-        locs = np.rec.array(
-            (
-                identifications.frame,
-                x,
-                y,
-                theta[:, 2],
-                theta[:, 4],
-                theta[:, 5],
-                theta[:, 3],
-                lpx,
-                lpy,
-                ellipticity,
-                identifications.net_gradient,
-                identifications.n_id,
-            ),
-            dtype=[
-                ("frame", "u4"),
-                ("x", "f4"),
-                ("y", "f4"),
-                ("photons", "f4"),
-                ("sx", "f4"),
-                ("sy", "f4"),
-                ("bg", "f4"),
-                ("lpx", "f4"),
-                ("lpy", "f4"),
-                ("ellipticity", "f4"),
-                ("net_gradient", "f4"),
-                ("n_id", "u4"),
-            ],
+        locs = pd.DataFrame(
+            {
+                "frame": identifications["frame"].values.astype(np.uint32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "photons": theta[:, 2].astype(np.float32),
+                "sx": theta[:, 4].astype(np.float32),
+                "sy": theta[:, 5].astype(np.float32),
+                "bg": theta[:, 3].astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": (
+                    identifications["net_gradient"].values.astype(np.float32)
+                ),
+                "n_id": identifications["n_id"].values.astype(np.uint32),
+            }
         )
-        locs.sort(kind="mergesort", order="n_id")
+        locs.sort_values(by="n_id", kind="mergesort", inplace=True)
     else:
-        locs = np.rec.array(
-            (
-                identifications.frame,
-                x,
-                y,
-                theta[:, 2],
-                theta[:, 4],
-                theta[:, 5],
-                theta[:, 3],
-                lpx,
-                lpy,
-                ellipticity,
-                identifications.net_gradient,
-            ),
-            dtype=[
-                ("frame", "u4"),
-                ("x", "f4"),
-                ("y", "f4"),
-                ("photons", "f4"),
-                ("sx", "f4"),
-                ("sy", "f4"),
-                ("bg", "f4"),
-                ("lpx", "f4"),
-                ("lpy", "f4"),
-                ("ellipticity", "f4"),
-                ("net_gradient", "f4"),
-            ],
+        locs = pd.DataFrame(
+            {
+                "frame": identifications["frame"].values.astype(np.uint32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "photons": theta[:, 2].astype(np.float32),
+                "sx": theta[:, 4].astype(np.float32),
+                "sy": theta[:, 5].astype(np.float32),
+                "bg": theta[:, 3].astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": (
+                    identifications["net_gradient"].values.astype(np.float32)
+                ),
+            }
         )
-        locs.sort(kind="mergesort", order="frame")
+        locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs

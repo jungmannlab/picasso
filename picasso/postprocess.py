@@ -20,6 +20,7 @@ from threading import Thread
 
 import numba
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from numpy.lib.recfunctions import stack_arrays
 from scipy import interpolate
@@ -32,7 +33,7 @@ from . import lib, render, imageprocess
 
 
 def get_index_blocks(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     info: list[dict],
     size: float,
 ) -> tuple:
@@ -41,7 +42,7 @@ def get_index_blocks(
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     info : list of dicts
         Metadata of the localizations list.
@@ -50,7 +51,7 @@ def get_index_blocks(
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations in the specified blocks.
     size : float
         Size of the blocks.
@@ -69,10 +70,10 @@ def get_index_blocks(
     """
     locs = lib.ensure_sanity(locs, info)
     # Sort locs by indices
-    x_index = np.uint32(locs.x / size)
-    y_index = np.uint32(locs.y / size)
+    x_index = np.uint32(locs["x"].values / size)
+    y_index = np.uint32(locs["y"].values / size)
     sort_indices = np.lexsort([x_index, y_index])
-    locs = locs[sort_indices]
+    locs = locs.iloc[sort_indices]
     x_index = x_index[sort_indices]
     y_index = y_index[sort_indices]
     # Allocate block info arrays
@@ -184,21 +185,21 @@ def _fill_index_block(
 
 
 def picked_locs(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     info: list[dict],
     picks: list[tuple],
     pick_shape: str,
     pick_size: float = None,
     add_group: bool = True,
     callback: Callable[[int], None] | Literal["console"] | None = None,
-) -> list[np.recarray]:
+) -> list[pd.DataFrame]:
     """Find picked localizations, i.e., localizations within the given
     regions of interest.
 
     Parameters
     ----------
-    locs : np.recarray
-        Localization list.
+    locs : pd.DataFrame
+        Localizations.
     info : list of dicts
         Metadata of the localizations list.
     picks : list
@@ -217,8 +218,8 @@ def picked_locs(
 
     Returns
     -------
-    picked_locs : list of np.recarrays
-        List of np.recarrays, each containing locs from one pick.
+    picked_locs : list of pd.DataFrames
+        List of pd.DataFrames, each containing locs from one pick.
     """
     if len(picks):
         picked_locs = []
