@@ -1532,7 +1532,7 @@ def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         data.
     """
     locs = lib.ensure_sanity(locs, info)
-    locs.to_hdf(path, key="locs", mode="w")
+    locs.to_hdf(path, key="locs", mode="a")
     base, ext = os.path.splitext(path)
     info_path = base + ".yaml"
     save_info(info_path, info)

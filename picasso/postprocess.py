@@ -994,24 +994,24 @@ def dark_times(
             group = locs["group"].values
         else:
             group = np.zeros(len(locs))
-    dark = _dark_times(locs, group, last_frame)
+    dark = _dark_times(locs["frame"].values, group, last_frame)
     return dark
 
 
 @numba.jit(nopython=True)
 def _dark_times(
-    locs: pd.DataFrame,
+    frame: np.ndarray,
     group: np.ndarray,
     last_frame: np.ndarray,
 ) -> np.ndarray:
     """Calculate dark times for each binding event."""
-    N = len(locs)
-    max_frame = locs["frame"].max()
-    dark = max_frame * np.ones(len(locs), dtype=np.int32)
+    N = len(frame)
+    max_frame = frame.max()
+    dark = max_frame * np.ones(len(frame), dtype=np.int32)
     for i in range(N):
         for j in range(N):
             if (group[i] == group[j]) and (i != j):
-                dark_ij = locs["frame"][i] - last_frame[j]
+                dark_ij = frame[i] - last_frame[j]
                 if (dark_ij > 0) and (dark_ij < dark[i]):
                     dark[i] = dark_ij
     for i in range(N):
@@ -1070,7 +1070,10 @@ def link(
             group = locs["group"].values
         else:
             group = np.zeros(len(locs), dtype=np.int32)
-        link_group = get_link_groups(locs, r_max, max_dark_time, group)
+        frame = locs["frame"].values
+        x = locs["x"].values
+        y = locs["y"].values
+        link_group = get_link_groups(frame, x, y, r_max, max_dark_time, group)
         if combine_mode == "average":
             linked_locs = link_loc_groups(
                 locs,
@@ -1361,7 +1364,9 @@ def cluster_combine_dist(
 
 @numba.jit(nopython=True)
 def get_link_groups(
-    locs: pd.DataFrame,
+    frame: np.ndarray,
+    x: np.ndarray,
+    y: np.ndarray,
     d_max: float,
     max_dark_time: float,
     group: np.ndarray,
@@ -1371,8 +1376,10 @@ def get_link_groups(
 
     Parameters
     ----------
-    locs : pd.DataFrame
-        Localizations that were linked, i.e., binding events.
+    frame : np.ndarray
+        Frame numbers of localizations.
+    x, y : np.ndarray
+        Coordinates of localizations.
     d_max : float
         Maximum distance for linking localizations.
     max_dark_time : float
@@ -1388,9 +1395,6 @@ def get_link_groups(
         represented by a unique integer. Localizations that are not
         linked to any other localization are assigned -1.
     """
-    frame = locs["frame"].values
-    x = locs["x"].values
-    y = locs["y"].values
     N = len(x)
     link_group = -np.ones(N, dtype=np.int32)
     current_link_group = -1

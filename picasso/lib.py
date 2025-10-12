@@ -529,6 +529,7 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
         Localizations that pass the sanity checks.
     """
     # no inf and nan:
+    locs = locs.copy()
     locs.replace([np.inf, -np.inf], np.nan, inplace=True)
     locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:

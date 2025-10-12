@@ -128,7 +128,8 @@ def render(
 
 @numba.njit
 def _render_setup(
-    locs: pd.DataFrame,
+    x: np.ndarray,
+    y: np.ndarray,
     oversampling: float,
     y_min: float, x_min: float, y_max: float, x_max: float,
 ) -> tuple[np.ndarray, int, int, np.ndarray, np.ndarray, np.ndarray]:
@@ -137,8 +138,9 @@ def _render_setup(
 
     Parameters
     ----------
-    locs : pd.DataFrame
-        Localizations.
+    x, y : np.ndarray
+        x and y coordinates of the localizations to be rendered (1D
+        arrays).
     oversampling : float
         Number of super-resolution pixels per camera pixel.
     y_min, x_min : float
@@ -159,12 +161,10 @@ def _render_setup(
     y : np.ndarray
         y coordinates to be rendered.
     in_view : np.ndarray
-        Indeces of locs to be rendered.
+        Indeces of the localizations to be rendered.
     """
     n_pixel_y = int(np.ceil(oversampling * (y_max - y_min)))
     n_pixel_x = int(np.ceil(oversampling * (x_max - x_min)))
-    x = locs["x"].values
-    y = locs["y"].values
     in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
     x = x[in_view]
     y = y[in_view]
@@ -176,7 +176,9 @@ def _render_setup(
 
 @numba.njit
 def _render_setup3d(
-    locs: pd.DataFrame,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
     oversampling: float,
     y_min: float, x_min: float,
     y_max: float, x_max: float,
@@ -197,8 +199,9 @@ def _render_setup3d(
 
     Parameters
     ----------
-    locs : pd.DataFrame
-        Localizations.
+    x, y, z : np.ndarray
+        x, y and z coordinates of the localizations to be rendered (1D
+        arrays).
     oversampling : float
         Number of super-resolution pixels per camera pixel.
     y_min, x_min : float
@@ -221,14 +224,12 @@ def _render_setup3d(
     x, y, z : np.ndarray
         x, y, z coordinates to be rendered.
     in_view : np.ndarray
-        Indeces of locs to be rendered.
+        Indeces of the localizations to be rendered.
     """
     n_pixel_y = int(np.ceil(oversampling * (y_max - y_min)))
     n_pixel_x = int(np.ceil(oversampling * (x_max - x_min)))
     n_pixel_z = int(np.ceil(oversampling * (z_max - z_min)))
-    x = locs["x"].values
-    y = locs["y"].values
-    z = locs["z"].values / pixelsize
+    z /= pixelsize
     in_view = (
         (x > x_min)
         & (y > y_min)
@@ -245,22 +246,6 @@ def _render_setup3d(
     z = oversampling * (z - z_min)
     image = np.zeros((n_pixel_y, n_pixel_x, n_pixel_z), dtype=np.float32)
     return image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view
-
-# @numba.njit
-# def _render_setupz(
-#     locs, oversampling, x_min, z_min, x_max, z_max
-# ):
-#     n_pixel_x = int(np.ceil(oversampling * (x_max - x_min)))
-#     n_pixel_z = int(np.ceil(oversampling * (z_max - z_min)))
-#     x = locs.x
-#     z = locs.z
-#     in_view = (x > x_min) & (z > z_min) & (x < x_max) & (z < z_max)
-#     x = x[in_view]
-#     z = z[in_view]
-#     x = oversampling * (x - x_min)
-#     z = oversampling * (z - z_min)
-#     image = np.zeros((n_pixel_x, n_pixel_z), dtype=np.float32)
-#     return image, n_pixel_z, n_pixel_x, x, z, in_view
 
 
 @numba.njit
@@ -565,7 +550,8 @@ def render_hist(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs,
+        locs["x"].values,
+        locs["y"].values,
         oversampling,
         y_min, x_min, y_max, x_max,
     )
@@ -579,15 +565,6 @@ def render_hist(
     _fill(image, x, y)
     n = len(x)
     return n, image
-
-
-# @numba.jit(nopython=True, nogil=True)
-# def render_histz(locs, oversampling, x_min, z_min, x_max, z_max):
-#     image, n_pixel_z, n_pixel_x, x, z, in_view = _render_setupz(
-#         locs, oversampling, x_min, z_min, x_max, z_max
-#     )
-#     _fill(image, z, x)
-#     return len(x), image
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -630,7 +607,9 @@ def render_hist3d(
     z_max = z_max / pixelsize
 
     image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(
-        locs,
+        locs["x"].values,
+        locs["y"].values,
+        locs["z"].values,
         oversampling,
         y_min, x_min, y_max, x_max, z_min, z_max,
         pixelsize,
@@ -674,7 +653,8 @@ def render_gaussian(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs,
+        locs["x"].values,
+        locs["y"].values,
         oversampling,
         y_min, x_min, y_max, x_max,
     )
@@ -733,7 +713,8 @@ def render_gaussian_iso(
     """Same as ``render_gaussian``, but uses the same localization
     precision in x and y."""
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs,
+        locs["x"].values,
+        locs["y"].values,
         oversampling,
         y_min, x_min, y_max, x_max,
     )
@@ -816,7 +797,8 @@ def render_convolve(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs,
+        locs["x"].values,
+        locs["y"].values,
         oversampling,
         y_min, x_min, y_max, x_max,
     )
@@ -873,7 +855,8 @@ def render_smooth(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs,
+        locs["x"].values,
+        locs["y"].values,
         oversampling,
         y_min, x_min, y_max, x_max,
     )

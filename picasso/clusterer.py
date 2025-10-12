@@ -11,9 +11,9 @@
     * Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
       (DOI: 10.1038/s41586-023-05925-9)
 
-    :authors: Thomas Schlichthaerle, Susanne Reinhardt,
-        Rafal Kowalewski, 2020-2022
-    :copyright: Copyright (c) 2022 Jungmann Lab, MPI of Biochemistry
+    :authors: Rafal Kowalewski, Susanne Reinhardt,
+        Thomas Schlichthaerle, 2020-2025
+    :copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -744,7 +744,7 @@ def cluster_center(
     # number of binding events
     split_idx = np.where(np.diff(grouplocs.frame) > 3)[0] + 1  # split locs by
     # consecutive frames
-    x_events = np.split(grouplocs.x, split_idx)
+    x_events = np.split(grouplocs.x.values, split_idx)
     n_events = len(x_events)  # number of binding events
     if hasattr(grouplocs, "z"):
         if pixelsize is None:
@@ -754,7 +754,7 @@ def cluster_center(
             )
         z = np.average(
             grouplocs.z,
-            weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
+            weights=1 / ((grouplocs.lpx + grouplocs.lpy) ** 2),
         )  # take lpz = 2 * mean(lpx, lpy)
         std_z = grouplocs.z.std()
         # lpz = std_z
