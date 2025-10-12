@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 07-OCT-2025 CEST
+Last change: 12-OCT-2025 CEST
+
+0.9.0
+-----
+- Localization are read using ``pandas.read_hdf`` rather than converting an ``h5py`` object to a numpy recarray. Thus, rather than ``numpy.recarray``, localizations are now ``pandas.DataFrame`` objects. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
 
 0.8.8
 -----

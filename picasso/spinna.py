@@ -33,21 +33,6 @@ from tqdm import tqdm
 from . import io, lib, postprocess, render, __version__
 
 
-LOCS_DTYPE_2D = [
-    ("frame", "u4"),
-    ("x", "f4"),
-    ("y", "f4"),
-    ("lpx", "f4"),
-    ("lpy", "f4"),
-]
-LOCS_DTYPE_3D = [
-    ("frame", "u4"),
-    ("x", "f4"),
-    ("y", "f4"),
-    ("z", "f4"),
-    ("lpx", "f4"),
-    ("lpy", "f4"),
-]
 NN_COLORS = ['#2880C4', '#97D8C4', '#F4B942', '#363636']
 N_TASKS = 100
 N_BOOTSTRAPS = 20
@@ -392,9 +377,9 @@ def coords_to_locs(
     coords: np.ndarray,
     lp: float = 1.,
     pixelsize: int = 130,
-) -> np.recarray:
-    """Convert ``coords`` array into localization list that can be read
-    in Picasso Render.
+) -> pd.DataFrame:
+    """Convert ``coords`` array into localization list in a form of a
+    data frame.
 
     Parameters
     ----------
@@ -411,27 +396,34 @@ def coords_to_locs(
 
     Returns
     -------
-    locs : np.rec.array
-        Localization list compatible with Picasso Render.
+    locs : pd.DataFrame
+        Localizations.
     """
     # x, y and localization precision in Picasso are in camera pixels
-    x = coords[:, 0] / pixelsize
-    y = coords[:, 1] / pixelsize
-    lpx = lp * np.ones(len(x)) / pixelsize
+    x = (coords[:, 0] / pixelsize).astype(np.float32)
+    y = (coords[:, 1] / pixelsize).astype(np.float32)
+    lpx = (lp * np.ones(len(x)) / pixelsize).astype(np.float32)
     lpy = lpx
     # dummy value to avoid errors in Picasso Render
-    frame = np.ones(len(x))
+    frame = np.ones(len(x), dtype=np.uint32)
     if coords.shape[1] == 3:
-        z = coords[:, 2]
-        locs = np.rec.array(
-            (frame, x, y, z, lpx, lpy),
-            dtype=LOCS_DTYPE_3D,
-        )
+        z = coords[:, 2].astype(np.float32)  # in nm
+        locs = pd.DataFrame({
+            "frame": frame,
+            "x": x,
+            "y": y,
+            "z": z,
+            "lpx": lpx,
+            "lpy": lpy,
+        })
     else:
-        locs = np.rec.array(
-            (frame, x, y, lpx, lpy),
-            dtype=LOCS_DTYPE_2D,
-        )
+        locs = pd.DataFrame({
+            "frame": frame,
+            "x": x,
+            "y": y,
+            "lpx": lpx,
+            "lpy": lpy,
+        })
     return locs
 
 
@@ -821,10 +813,10 @@ class MaskGenerator():
     ----------
     binsize : float
         Binsize used for histograming localizations (nm).
-    locs : np.recarray
-        Localizations list used for creating the mask (Picasso format).
+    locs : pd.DataFrame
+        Localizations list used for creating the mask.
     locs_path : str
-        Path to .hdf5 with locs used for masking.
+        Path to .hdf5 with ``locs`` used for masking.
     mask : np.array
         Mask giving probability mass function of finding a structure in
         each pixel/voxel.
@@ -1824,22 +1816,30 @@ class StructureSimulator():
         # centers
         if centers and self.c_pos is not None:
             path = f"{path_base}_centers.hdf5"
-            frame = np.ones(self.N)
-            lpx = np.ones(self.N) / pixelsize
+            frame = np.ones(self.N, dtype=np.uint32)
+            lpx = (np.ones(self.N) / pixelsize).astype(np.float32)
             lpy = lpx
-            x = self.c_pos[:, 0] / pixelsize
-            y = self.c_pos[:, 1] / pixelsize
+            x = (self.c_pos[:, 0] / pixelsize).astype(np.float32)
+            y = (self.c_pos[:, 1] / pixelsize).astype(np.float32)
             if self.depth is not None:
-                z = self.c_pos[:, 2]  # not scaled for picasso compatibility
-                locs = np.rec.array(
-                    (frame, x, y, z, lpx, lpy),
-                    dtype=LOCS_DTYPE_3D,
-                )
+                # not scaled for picasso compatibility
+                z = self.c_pos[:, 2].astype(np.float32)
+                locs = pd.DataFrame({
+                    "frame": frame,
+                    "x": x,
+                    "y": y,
+                    "z": z,
+                    "lpx": lpx,
+                    "lpy": lpy,
+                })
             else:
-                locs = np.rec.array(
-                    (frame, x, y, lpx, lpy),
-                    dtype=LOCS_DTYPE_2D,
-                )
+                locs = pd.DataFrame({
+                    "frame": frame,
+                    "x": x,
+                    "y": y,
+                    "lpx": lpx,
+                    "lpy": lpy,
+                })
             io.save_locs(path, locs, info)
 
         for i, name in enumerate(self.structure.targets):
@@ -1847,22 +1847,32 @@ class StructureSimulator():
             if all_mol and self.pos is not None:
                 pos = self.pos[name]
                 path = f"{path_base}_{name}_all_mols.hdf5"
-                frame = np.ones(self.N)
-                lpx = self.label_unc[i] * np.ones(self.N) / pixelsize
+                frame = np.ones(self.N, dtype=np.uint32)
+                lpx = (
+                    self.label_unc[i] * np.ones(self.N) / pixelsize
+                ).astype(np.float32)
                 lpy = lpx
-                x = pos[:, 0] / pixelsize
-                y = pos[:, 1] / pixelsize
+                x = (pos[:, 0] / pixelsize).astype(np.float32)
+                y = (pos[:, 1] / pixelsize).astype(np.float32)
                 if pos.shape[1] == 3:
-                    z = pos[:, 2]  # not scaled for picasso compatibility
-                    locs = np.rec.array(
-                        (frame, x, y, z, lpx, lpy),
-                        dtype=LOCS_DTYPE_3D,
-                    )
+                    # not scaled for picasso compatibility
+                    z = pos[:, 2].astype(np.float32)
+                    locs = pd.DataFrame({
+                        "frame": frame,
+                        "x": x,
+                        "y": y,
+                        "z": z,
+                        "lpx": lpx,
+                        "lpy": lpy,
+                    })
                 else:
-                    locs = np.rec.array(
-                        (frame, x, y, lpx, lpy),
-                        dtype=LOCS_DTYPE_2D,
-                    )
+                    locs = pd.DataFrame({
+                        "frame": frame,
+                        "x": x,
+                        "y": y,
+                        "lpx": lpx,
+                        "lpy": lpy,
+                    })
                 io.save_locs(path, locs, info)
 
             # observed molecular targets
@@ -1870,22 +1880,32 @@ class StructureSimulator():
                 pos_obs = self.pos_obs[name]
                 N = len(pos_obs)
                 path = f"{path_base}_{name}_obs_mols.hdf5"
-                frame = np.ones(N)
-                lpx = self.label_unc[i] * np.ones(N) / pixelsize
+                frame = np.ones(N, dtype=np.uint32)
+                lpx = (
+                    self.label_unc[i] * np.ones(N) / pixelsize
+                ).astype(np.float32)
                 lpy = lpx
-                x = pos_obs[:, 0] / pixelsize
-                y = pos_obs[:, 1] / pixelsize
+                x = (pos_obs[:, 0] / pixelsize).astype(np.float32)
+                y = (pos_obs[:, 1] / pixelsize).astype(np.float32)
                 if pos_obs.shape[1] == 3:
-                    z = pos_obs[:, 2]  # not scaled for picasso compatibility
-                    locs = np.rec.array(
-                        (frame, x, y, z, lpx, lpy),
-                        dtype=LOCS_DTYPE_3D,
-                    )
+                    # not scaled for picasso compatibility
+                    z = (pos_obs[:, 2]).astype(np.float32)
+                    locs = pd.DataFrame({
+                        "frame": frame,
+                        "x": x,
+                        "y": y,
+                        "z": z,
+                        "lpx": lpx,
+                        "lpy": lpy,
+                    })
                 else:
-                    locs = np.rec.array(
-                        (frame, x, y, lpx, lpy),
-                        dtype=LOCS_DTYPE_2D,
-                    )
+                    locs = pd.DataFrame({
+                        "frame": frame,
+                        "x": x,
+                        "y": y,
+                        "lpx": lpx,
+                        "lpy": lpy,
+                    })
                 io.save_locs(path, locs, info)
 
 

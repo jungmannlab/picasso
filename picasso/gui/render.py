@@ -29,11 +29,11 @@ import matplotlib
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
+import pandas as pd
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from scipy.ndimage.filters import gaussian_filter
 from scipy.optimize import curve_fit
-from numpy.lib.recfunctions import stack_arrays
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -225,7 +225,7 @@ class PickHistWindow(QtWidgets.QTabWidget):
 
     def plot(
         self,
-        pooled_locs: np.recarray,
+        pooled_locs: pd.DataFrame,
         fit_result_len: dict,
         fit_result_dark: dict,
     ) -> None:
@@ -234,7 +234,7 @@ class PickHistWindow(QtWidgets.QTabWidget):
 
         Parameters
         ----------
-        pooled_locs : np.recarray
+        pooled_locs : pd.DataFrame
             All picked localizations.
         fit_result_len : dict
             Cumulative exponential fit results for bright times, see
@@ -256,7 +256,7 @@ class PickHistWindow(QtWidgets.QTabWidget):
             "Length (cumulative) \n"
             r"$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$".format(a, t, c)
         )
-        data = pooled_locs.len
+        data = pooled_locs["len"]
         data.sort()
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label="data")
@@ -276,7 +276,7 @@ class PickHistWindow(QtWidgets.QTabWidget):
             "Dark time (cumulative) \n"
             r"$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$".format(a, t, c)
         )
-        data = pooled_locs.dark
+        data = pooled_locs["dark"]
         data.sort()
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label="data")
@@ -877,7 +877,7 @@ class PlotDialog(QtWidgets.QDialog):
 
     @staticmethod
     def getParams(
-        all_picked_locs: list[np.recarray] | list[list[np.recarray]],
+        all_picked_locs: list[pd.DataFrame] | list[list[pd.DataFrame]],
         current: int,
         length: int,
         mode: int,
@@ -899,15 +899,15 @@ class PlotDialog(QtWidgets.QDialog):
 
         if mode == 1:
             locs = all_picked_locs[current]
-            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+            locs = pd.concat(locs, ignore_index=True)
 
-            colors = locs["z"][:]
+            colors = locs["z"]
             colors[
-                colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])
-            ] = np.mean(locs["z"]) + 3 * np.std(locs["z"])
+                colors > locs["z"].mean() + 3 * locs["z"].std()
+            ] = locs["z"].mean() + 3 * locs["z"].std()
             colors[
-                colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
-            ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
+                colors < locs["z"].mean() - 3 * locs["z"].std()
+            ] = locs["z"].mean() - 3 * locs["z"].std()
             ax.scatter(
                 locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
             )
@@ -934,7 +934,7 @@ class PlotDialog(QtWidgets.QDialog):
             colors = color_sys
             for ll in range(len(all_picked_locs)):
                 locs = all_picked_locs[ll][current]
-                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                locs = pd.concat(locs, ignore_index=True)
                 ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[ll], s=2)
 
             ax.set_xlim(
@@ -1018,7 +1018,7 @@ class PlotDialogIso(QtWidgets.QDialog):
 
     @staticmethod
     def getParams(
-        all_picked_locs: list[np.recarray] | list[list[np.recarray]],
+        all_picked_locs: list[pd.DataFrame] | list[list[pd.DataFrame]],
         current: int,
         length: int,
         mode: int,
@@ -1043,15 +1043,15 @@ class PlotDialogIso(QtWidgets.QDialog):
 
         if mode == 1:
             locs = all_picked_locs[current]
-            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+            locs = pd.concat(locs, ignore_index=True)
 
-            colors = locs["z"][:]
+            colors = locs["z"]
             colors[
-                colors > np.mean(locs["z"]) + 3 * np.std(locs["z"])
-            ] = np.mean(locs["z"]) + 3 * np.std(locs["z"])
+                colors > locs["z"].mean() + 3 * locs["z"].std()
+            ] = locs["z"].mean() + 3 * locs["z"].std()
             colors[
-                colors < np.mean(locs["z"]) - 3 * np.std(locs["z"])
-            ] = np.mean(locs["z"]) - 3 * np.std(locs["z"])
+                colors < locs["z"].mean() - 3 * locs["z"].std()
+            ] = locs["z"].mean() - 3 * locs["z"].std()
 
             ax.scatter(
                 locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
@@ -1082,12 +1082,12 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax2.set_xlabel("X [Px]")
             ax2.set_ylabel("Y [Px]")
             ax2.set_xlim(
-                np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                locs["x"].mean() - 3 * locs["x"].std(),
+                locs["x"].mean() + 3 * locs["x"].std(),
             )
             ax2.set_ylim(
-                np.mean(locs["y"]) - 3 * np.std(locs["y"]),
-                np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                locs["y"].mean() - 3 * locs["y"].std(),
+                locs["y"].mean() + 3 * locs["y"].std(),
             )
             ax2.set_title("XY")
             ax2.set_facecolor("black")
@@ -1097,8 +1097,8 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax3.set_xlabel("X [Px]")
             ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
-                np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                locs["x"].mean() - 3 * locs["x"].std(),
+                locs["x"].mean() + 3 * locs["x"].std(),
             )
             ax3.set_ylim(
                 np.mean(locs["z"]) - 3 * np.std(locs["z"]),
@@ -1126,23 +1126,23 @@ class PlotDialogIso(QtWidgets.QDialog):
             colors = color_sys
             for ll in range(len(all_picked_locs)):
                 locs = all_picked_locs[ll][current]
-                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                locs = pd.concat(locs, ignore_index=True)
                 ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[ll], s=2)
                 ax2.scatter(locs["x"], locs["y"], c=colors[ll], s=2)
                 ax3.scatter(locs["x"], locs["z"], c=colors[ll], s=2)
                 ax4.scatter(locs["y"], locs["z"], c=colors[ll], s=2)
 
             ax.set_xlim(
-                np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                locs["x"].mean() - 3 * locs["x"].std(),
+                locs["x"].mean() + 3 * locs["x"].std(),
             )
             ax.set_ylim(
-                np.mean(locs["y"]) - 3 * np.std(locs["y"]),
-                np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                locs["y"].mean() - 3 * locs["y"].std(),
+                locs["y"].mean() + 3 * locs["y"].std(),
             )
             ax.set_zlim(
-                np.mean(locs["z"]) - 3 * np.std(locs["z"]),
-                np.mean(locs["z"]) + 3 * np.std(locs["z"]),
+                locs["z"].mean() - 3 * locs["z"].std(),
+                locs["z"].mean() + 3 * locs["z"].std(),
             )
 
             ax.set_xlabel("X [Px]")
@@ -1157,12 +1157,12 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax2.set_xlabel("X [Px]")
             ax2.set_ylabel("Y [Px]")
             ax2.set_xlim(
-                np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                locs["x"].mean() - 3 * locs["x"].std(),
+                locs["x"].mean() + 3 * locs["x"].std(),
             )
             ax2.set_ylim(
-                np.mean(locs["y"]) - 3 * np.std(locs["y"]),
-                np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                locs["y"].mean() - 3 * locs["y"].std(),
+                locs["y"].mean() + 3 * locs["y"].std(),
             )
             ax2.set_title("XY")
             ax2.set_facecolor("black")
@@ -1171,12 +1171,12 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax3.set_xlabel("X [Px]")
             ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
-                np.mean(locs["x"]) - 3 * np.std(locs["x"]),
-                np.mean(locs["x"]) + 3 * np.std(locs["x"]),
+                locs["x"].mean() - 3 * locs["x"].std(),
+                locs["x"].mean() + 3 * locs["x"].std(),
             )
             ax3.set_ylim(
-                np.mean(locs["z"]) - 3 * np.std(locs["z"]),
-                np.mean(locs["z"]) + 3 * np.std(locs["z"]),
+                locs["z"].mean() - 3 * locs["z"].std(),
+                locs["z"].mean() + 3 * locs["z"].std(),
             )
             ax3.set_title("XZ")
             ax3.set_facecolor("black")
@@ -1185,12 +1185,12 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax4.set_xlabel("Y [Px]")
             ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
-                np.mean(locs["y"]) - 3 * np.std(locs["y"]),
-                np.mean(locs["y"]) + 3 * np.std(locs["y"]),
+                locs["y"].mean() - 3 * locs["y"].std(),
+                locs["y"].mean() + 3 * locs["y"].std(),
             )
             ax4.set_ylim(
-                np.mean(locs["z"]) - 3 * np.std(locs["z"]),
-                np.mean(locs["z"]) + 3 * np.std(locs["z"]),
+                locs["z"].mean() - 3 * locs["z"].std(),
+                locs["z"].mean() + 3 * locs["z"].std(),
             )
             ax4.set_title("YZ")
             ax4.set_facecolor("black")
@@ -1304,12 +1304,12 @@ class ClsDlg3D(QtWidgets.QDialog):
 
     @staticmethod
     def getParams(
-        all_picked_locs: list[np.recarray],
+        all_picked_locs: list[pd.DataFrame],
         current: int,
         length: int,
         n_clusters: int,
         pixelsize: float,
-    ) -> tuple[int, int, np.recarray, list[np.recarray]]:
+    ) -> tuple[int, int, pd.DataFrame, list[pd.DataFrame]]:
         """Cluster the picked locs of the given pick with k-means in
         3D."""
         dialog = ClsDlg3D(None)
@@ -1329,27 +1329,18 @@ class ClsDlg3D(QtWidgets.QDialog):
         )
 
         locs = all_picked_locs[current]
-        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+        locs = pd.concat(locs, ignore_index=True)
 
         est = KMeans(n_clusters=n_clusters, n_init='auto')
-
-        scaled_locs = lib.append_to_rec(
-            locs, locs["x"] * pixelsize, "x_scaled"
-        )
-        scaled_locs = lib.append_to_rec(
-            scaled_locs, locs["y"] * pixelsize, "y_scaled"
-        )
-
-        X = np.asarray(scaled_locs["x_scaled"])
-        Y = np.asarray(scaled_locs["y_scaled"])
-        Z = np.asarray(scaled_locs["z"])
-
+        scaled_locs = locs.copy()
+        scaled_locs["x_scaled"] = locs["x"] * pixelsize
+        scaled_locs["y_scaled"] = locs["y"] * pixelsize
+        X = scaled_locs["x_scaled"].values
+        Y = scaled_locs["y_scaled"].values
+        Z = scaled_locs["z"].values
         est.fit(np.stack((X, Y, Z), axis=1))
-
         labels = est.labels_
-
         counts = list(Counter(labels).items())
-        # l_locs = lib.append_to_rec(l_locs,labels,'cluster')
 
         ax1.scatter(
             locs["x"], locs["y"], locs["z"], c=labels.astype(float), s=2
@@ -1393,7 +1384,8 @@ class ClsDlg3D(QtWidgets.QDialog):
         labels = [0 if x in checks else x for x in labels]
         labels = np.asarray(labels)
 
-        l_locs = lib.append_to_rec(scaled_locs, labels, "cluster")
+        l_locs = scaled_locs.copy()
+        l_locs["cluster"] = labels
         l_locs_new_group = l_locs.copy()
         power = np.round(n_clusters / 10) + 1
         l_locs_new_group["group"] = (
@@ -1515,11 +1507,11 @@ class ClsDlg2D(QtWidgets.QDialog):
 
     @staticmethod
     def getParams(
-        all_picked_locs: list[np.recarray],
+        all_picked_locs: list[pd.DataFrame],
         current: int,
         length: int,
         n_clusters: int,
-    ) -> tuple[int, int, np.recarray, list[np.recarray]]:
+    ) -> tuple[int, int, pd.DataFrame, list[pd.DataFrame]]:
         """Get parameters for clustering and run it."""
         dialog = ClsDlg2D(None)
 
@@ -1538,25 +1530,19 @@ class ClsDlg2D(QtWidgets.QDialog):
         )
 
         locs = all_picked_locs[current]
-        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+        locs = pd.concat(locs, ignore_index=True)
 
         est = KMeans(n_clusters=n_clusters, n_init='auto')
-
-        scaled_locs = lib.append_to_rec(locs, locs["x"], "x_scaled")
-        scaled_locs = lib.append_to_rec(scaled_locs, locs["y"], "y_scaled")
-
-        X = np.asarray(scaled_locs["x_scaled"])
-        Y = np.asarray(scaled_locs["y_scaled"])
-
+        scaled_locs = locs.copy()
+        scaled_locs["x_scaled"] = locs["x"]
+        scaled_locs["y_scaled"] = locs["y"]
+        X = scaled_locs["x_scaled"].values
+        Y = scaled_locs["y_scaled"].values
         est.fit(np.stack((X, Y), axis=1))
-
         labels = est.labels_
-
         counts = list(Counter(labels).items())
-        # l_locs = lib.append_to_rec(l_locs,labels,'cluster')
 
         ax1.scatter(locs["x"], locs["y"], c=labels.astype(float), s=2)
-
         ax1.set_xlabel("X")
         ax1.set_ylabel("Y")
 
@@ -1586,7 +1572,8 @@ class ClsDlg2D(QtWidgets.QDialog):
         labels = [0 if x in checks else x for x in labels]
         labels = np.asarray(labels)
 
-        l_locs = lib.append_to_rec(scaled_locs, labels, "cluster")
+        l_locs = scaled_locs.copy()
+        l_locs["cluster"] = labels
         l_locs_new_group = l_locs.copy()
         power = np.round(n_clusters / 10) + 1
         l_locs_new_group["group"] = (
@@ -2175,19 +2162,19 @@ class TestClustererDialog(QtWidgets.QDialog):
             self.view.ang = None
         self.view.update_scene()
 
-    def cluster(self, locs: np.recarray, params: dict) -> np.recarray:
+    def cluster(self, locs: pd.DataFrame, params: dict) -> pd.DataFrame:
         """ Cluster localizations using the chosen method.
 
         Parameters
         ----------
-        locs : np.recarray
+        locs : pd.DataFrame
             Contains all picked localizations from a given channel.
         params : dict
             Contains clustering parameters for a given clusterer.
 
         Returns
         -------
-        locs : np.recarray
+        locs : pd.DataFrame
             Clustered localizations. Cluster label is saved in 'group'
             field.
         """
@@ -2410,7 +2397,7 @@ class TestClustererView(QtWidgets.QLabel):
     ----------
     dialog : QDialog
         Instance of the Test Clusterer dialog.
-    locs : np.recarray
+    locs : pd.DataFrame
         Clustered localizations.
     _size : int
         Specifies size of this widget (display pixels).
@@ -2544,7 +2531,7 @@ class TestClustererView(QtWidgets.QLabel):
         )
         self.setPixmap(QtGui.QPixmap.fromImage(qimage))
 
-    def split_locs(self) -> list[np.recarray]:
+    def split_locs(self) -> list[pd.DataFrame]:
         """Split self.locs into a list that specifies either separate
         channels (all localizations, clusters and cluster centers) or
         it separates clustered localizations by color (based on the
@@ -2654,13 +2641,13 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
         vbox.addWidget(self.canvas)
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
-    def plot_3d(self, drift: np.recarray):
+    def plot_3d(self, drift: pd.DataFrame) -> None:
         """Create 3 plots: frames vs x/y, x vs y in time, frames vs z.
 
         Parameters
         ----------
-        drift : np.recarray
-            Drift for each spatial coordinates. Contains 3 dtypes: x, y
+        drift : pd.DataFrame
+            Drift for each spatial coordinates. Contains 3 columns: x, y
             and z. x and y are in camera pixels and z in nm.
         """
         self.figure.clear()
@@ -2693,13 +2680,13 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
         ax3.set_ylabel("Drift (nm)")
         self.canvas.draw()
 
-    def plot_2d(self, drift):
+    def plot_2d(self, drift: pd.DataFrame) -> None:
         """Create 2 plots: frames vs x/y, x vs y in time.
 
         Parameters
         ----------
-        drift : np.recarray
-            Drift for each spatial coordinates. Contains 2 dtypes: x, y
+        drift : pd.DataFrame
+            Drift for each spatial coordinates. Contains 2 columns: x, y
             in camera pixels.
         """
         self.figure.clear()
@@ -3506,7 +3493,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             locs = self.locs[self.channel]
             self._mask_locs(locs)
 
-    def _mask_locs(self, locs: np.recarray):
+    def _mask_locs(self, locs: pd.DataFrame) -> None:
         """Mask localizations given a mask."""
         locs_in, locs_out = masking.mask_locs(
             locs, self.mask, self.x_max, self.y_max,
@@ -3854,9 +3841,9 @@ class RESIDialog(QtWidgets.QDialog):
     apply_fa : QCheckBox
         If checked, apply basic frame analysis (just like in the case
         of SMLM clustering).
-    locs : list of np.recarrays
-        List of localization lists that are loaded in the main window
-        when opening the RESI dialog.
+    locs : list of pd.DataFrames
+        List of localizations that are loaded in the main window when
+        opening the RESI dialog.
     min_locs : list of QSpinBoxes
         List of widgets holding minimum number of localizations used in
         SMLM clusterer.
@@ -4132,30 +4119,19 @@ class RESIDialog(QtWidgets.QDialog):
                         self.window.view.infos[i] + [new_info],
                     )
                 # append resi channel id
-                centers = lib.append_to_rec(
-                    centers,
-                    i*np.ones(len(centers), dtype=np.int8),
-                    "resi_channel_id",
+                centers["resi_channel_id"] = i * np.ones(
+                    len(centers), dtype=np.int8,
                 )
                 resi_channels.append(centers)
                 progress.set_value(i)
             progress.close()
 
             # combine resi cluster centers from all channels
-            all_resi = stack_arrays(
-                resi_channels,
-                asrecarray=True,
-                usemask=False,
-                autoconvert=True,
-            )
+            all_resi = pd.concat(resi_channels, ignore_index=True)
             # change the group name in all_resi
-            all_resi = all_resi.astype([
-                ("cluster_id", d[1]) if d[0] == "group" else d
-                for d in all_resi.dtype.descr
-            ])
-            all_resi = lib.remove_from_rec(all_resi, "group")
-            # sort like all Picasso localization lists
-            all_resi.sort(kind="mergesort", order="frame")
+            all_resi["cluster_id"] = all_resi["group"]
+            all_resi.drop(columns=["group"], inplace=True)
+            all_resi.sort_values(kind="mergesort", by="frame", inplace=True)
 
             # save resi cluster centers
             io.save_locs(resi_path, all_resi, resi_info)
@@ -4962,14 +4938,14 @@ class View(QtWidgets.QLabel):
     Attributes
     ----------
     all_locs : list
-        Contains a np.recarray with localizations for each channel;
+        Contains a pd.DataFrame with localizations for each channel;
         important for fast rendering.
     currentdrift : list
         Contains the most up-to-date drift for each channel.
     custom_cmap : np.array
         Custom colormap loaded from .npy, see ``DisplaySettingsDialog``.
     _drift : list
-        Contains np.recarrays with drift info for each channel, None if
+        Contains pd.DataFrames with drift info for each channel, None if
         no drift found/calculated.
     _driftfiles : list
         Contains paths to drift .txt files for each channel.
@@ -4984,8 +4960,8 @@ class View(QtWidgets.QLabel):
         None if not calculated yet.
     infos : list of dicts
         Contains a dictionary with metadata for each channel.
-    locs : list of np.recarrays
-        Contains a np.recarray with localizations for each channel,
+    locs : list of pd.DataFrames
+        Contains a pd.DataFrame with localizations for each channel,
         reduced in case of fast rendering.
     locs_paths : list
         Contains a str defining the path for each channel.
@@ -5037,8 +5013,8 @@ class View(QtWidgets.QLabel):
     x_color : np.array
         Indexes each loc according to its parameter value;
         see ``self.activate_render_property``.
-    x_locs : list of np.recarrays
-        Contains np.recarrays with locs to be rendered by property; one
+    x_locs : list of pd.DataFrames
+        Contains pd.DataFrames with locs to be rendered by property; one
         per color.
     x_render_cache : list of dicts
         Contains dictionaries with caches for storing info about locs
@@ -5078,21 +5054,21 @@ class View(QtWidgets.QLabel):
         self.x_render_cache = []
         self.x_render_state = False
 
-    def get_group_color(self, locs: np.recarray) -> np.array:
+    def get_group_color(self, locs: pd.DataFrame) -> np.ndarray:
         """Find group color for each localization in single channel data
         with group info.
 
         Parameters
         ----------
-        locs : np.recarray
+        locs : pd.DataFrame
             Localizations.
 
         Returns
         -------
-        colors : np.array
+        colors : np.ndarray
             Array with integer group color index for each localization.
         """
-        colors = locs.group.astype(int) % N_GROUP_COLORS
+        colors = locs["group"].values.astype(int) % N_GROUP_COLORS
         return colors
 
     def add(self, path: str, render: bool = True) -> None:
@@ -5142,15 +5118,16 @@ class View(QtWidgets.QLabel):
 
                     if drifttxt.shape[1] == 3:
                         drift_z = drifttxt[:, 2]
-                        drift = (drift_x, drift_y, drift_z)
-                        drift = np.rec.array(
-                            drift, dtype=[("x", "f"), ("y", "f"), ("z", "f")]
-                        )
+                        drift = pd.DataFrame({
+                            "x": drift_x.astype(np.float32),
+                            "y": drift_y.astype(np.float32),
+                            "z": drift_z.astype(np.float32),
+                        })
                     else:
-                        drift = (drift_x, drift_y)
-                        drift = np.rec.array(
-                            drift, dtype=[("x", "f"), ("y", "f")]
-                        )
+                        drift = pd.DataFrame({
+                            "x": drift_x.astype(np.float32),
+                            "y": drift_y.astype(np.float32),
+                        })
                 except Exception:
                     # drift already initialized before
                     pass
@@ -5452,9 +5429,7 @@ class View(QtWidgets.QLabel):
             else:
                 out_locs.append(pick_locs_out)
             progress.set_value(i + 1)
-        self.all_locs[channel] = stack_arrays(
-            out_locs, asrecarray=True, usemask=False
-        )
+        self.all_locs[channel] = pd.concat(out_locs, ignore_index=True)
         self.locs[channel] = copy.copy(self.all_locs[channel])
 
         if hasattr(self.all_locs[channel], "group"):
@@ -5563,11 +5538,8 @@ class View(QtWidgets.QLabel):
         )
         # keep group info if already present
         if hasattr(self.all_locs[channel], "group"):
-            locs = lib.append_to_rec(
-                self.all_locs[channel],
-                self.all_locs[channel].group,
-                "group_input",
-            )
+            locs = self.all_locs[channel].copy()
+            locs["group_input"] = self.all_locs[channel].group
         else:
             locs = self.all_locs[channel]
 
@@ -5665,11 +5637,8 @@ class View(QtWidgets.QLabel):
         )
         # keep group info if already present
         if hasattr(self.all_locs[channel], "group"):
-            locs = lib.append_to_rec(
-                self.all_locs[channel],
-                self.all_locs[channel].group,
-                "group_input",
-            )
+            locs = self.all_locs[channel].copy()
+            locs["group_input"] = self.all_locs[channel].group
         else:
             locs = self.all_locs[channel]
 
@@ -5782,11 +5751,8 @@ class View(QtWidgets.QLabel):
 
         # keep group info if already present
         if hasattr(self.all_locs[channel], "group"):
-            locs = lib.append_to_rec(
-                self.all_locs[channel],
-                self.all_locs[channel].group,
-                "group_input",
-            )
+            locs = self.all_locs[channel].copy()
+            locs["group_input"] = self.all_locs[channel].group
         else:
             locs = self.all_locs[channel]
 
@@ -5826,14 +5792,14 @@ class View(QtWidgets.QLabel):
 
     def shifts_from_picked_coordinate(
         self,
-        locs: list[list[np.recarray]],
+        locs: list[list[pd.DataFrame]],
         coordinate: Literal["x", "y", "z"],
     ) -> np.ndarray:
         """Calculate shifts between channels along a given coordinate.
 
         Parameters
         ----------
-        locs : list of lists of np.recarrays
+        locs : list of lists of pd.DataFrames
             Each element stors picked localizations from a channel, pick
             by pick.
         coordinate : {'x', 'y', 'z'}
@@ -5851,7 +5817,7 @@ class View(QtWidgets.QLabel):
         for channel_locs in locs:
             coms.append([])
             for group_locs in channel_locs:
-                group_com = np.mean(getattr(group_locs, coordinate))
+                group_com = getattr(group_locs, coordinate).mean()
                 coms[-1].append(group_com)
         # Calculating image shifts
         d = np.zeros((n_channels, n_channels))
@@ -7117,7 +7083,7 @@ class View(QtWidgets.QLabel):
         channel = self.get_channel("Show trace")
         if channel is not None:
             locs = self.picked_locs(channel)
-            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+            locs = pd.concat(locs, ignore_index=True)
 
             n_frames = self.infos[channel][0]["Frames"]
             xvec = np.arange(n_frames)
@@ -7259,7 +7225,7 @@ class View(QtWidgets.QLabel):
                     fig.canvas.manager.set_window_title("Trace")
                     pick = self._picks[i]
                     locs = all_picked_locs[i]
-                    locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                    locs = pd.concat(locs, ignore_index=True)
 
                     xvec = np.arange(n_frames)
                     yvec = np.ones_like(xvec, dtype=float) * -1
@@ -7479,9 +7445,7 @@ class View(QtWidgets.QLabel):
                             + "."
                         )
                         locs = all_picked_locs[i]
-                        locs = stack_arrays(
-                            locs, asrecarray=True, usemask=False
-                        )
+                        locs = pd.concat(locs, ignore_index=True)
                         x_min = pick[0] - r
                         x_max = pick[0] + r
                         y_min = pick[1] - r
@@ -7761,9 +7725,7 @@ class View(QtWidgets.QLabel):
                 self, "Save picked localizations", out_path, filter="*.hdf5"
             )
             if path:
-                saved_locs = stack_arrays(
-                    saved_locs, asrecarray=True, usemask=False
-                )
+                saved_locs = pd.concat(saved_locs, ignore_index=True)
                 if saved_locs is not None:
                     d = self.window.tools_settings_dialog.pick_diameter.value()
                     pick_info = {
@@ -7804,7 +7766,7 @@ class View(QtWidgets.QLabel):
                 dark[i] = estimate_kinetic_rate(pick_locs.dark)
                 out_locs.append(pick_locs)
                 progress.set_value(i + 1)
-            out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
+            out_locs = pd.concat(out_locs, ignore_index=True)
             n_groups = len(clustered_locs)
             progress = lib.ProgressDialog(
                 "Calculating pick properties", 0, n_groups, self
@@ -7813,7 +7775,7 @@ class View(QtWidgets.QLabel):
                 out_locs, callback=progress.set_value
             )
             n_units = self.window.info_dialog.calculate_n_units(dark)
-            pick_props = lib.append_to_rec(pick_props, n_units, "n_units")
+            pick_props["n_units"] = n_units
             influx = self.window.info_dialog.influx_rate.value()
             info = self.infos[channel] + [{
                 "Generated by": f"Picasso v{__version__}: Render",
@@ -7853,10 +7815,7 @@ class View(QtWidgets.QLabel):
                         x, y, index_blocks
                     )
                     # extract the locs around the pick
-                    pick_locs = lib.locs_at(x, y, block_locs, r)
-                    locs = stack_arrays(
-                        pick_locs, asrecarray=True, usemask=False
-                    )
+                    locs = lib.locs_at(x, y, block_locs, r)
                     loccount.append(len(locs))
                     progress.set_value(i)
                 progress.close()
@@ -7925,12 +7884,14 @@ class View(QtWidgets.QLabel):
                 progress.close()
                 self.update_scene()
 
-    def rmsd_at_com(self, locs: np.recarray) -> float:
+    def rmsd_at_com(self, locs: pd.DataFrame) -> float:
         """Calculate root mean square displacement at center of
         mass."""
-        com_x = locs.x.mean()
-        com_y = locs.y.mean()
-        return np.sqrt(np.mean((locs.x - com_x) ** 2 + (locs.y - com_y) ** 2))
+        com_x = locs["x"].mean()
+        com_y = locs["y"].mean()
+        return np.sqrt(
+            ((locs["x"] - com_x) ** 2 + (locs["y"] - com_y) ** 2).mean()
+        )
 
     def index_locs(self, channel: int, fast_render: bool = False) -> None:
         """Indexes localizations from a given channel in a grid with
@@ -8096,7 +8057,7 @@ class View(QtWidgets.QLabel):
         channel: int,
         add_group: bool = True,
         fast_render: bool = False,
-    ) -> list[np.recarray]:
+    ) -> list[pd.DataFrame]:
         """Get picked localizations in the specified channel.
 
         Parameters
@@ -8113,8 +8074,8 @@ class View(QtWidgets.QLabel):
 
         Returns
         -------
-        picked_locs : list of np.recarrays
-            List of np.recarrays, each containing localizations from one
+        picked_locs : list of pd.DataFrame
+            List of DataFrames, each containing localizations from one
             pick.
         """
         if len(self._picks):
@@ -8221,9 +8182,7 @@ class View(QtWidgets.QLabel):
             Index of the channel were localizations are removed.
         """
         index = np.arange(len(self.all_locs[channel]), dtype=np.int32)
-        self.all_locs[channel] = lib.append_to_rec(
-            self.all_locs[channel], index, "index"
-        )  # used for indexing picked localizations
+        self.all_locs[channel]["index"] = index  # temporary index
 
         # if locs were indexed before, they do not have the index
         # attribute
@@ -8234,9 +8193,7 @@ class View(QtWidgets.QLabel):
         for picked_locs in all_picked_locs:
             idx = np.concatenate((idx, picked_locs.index))
         self.all_locs[channel] = np.delete(self.all_locs[channel], idx)
-        self.all_locs[channel] = lib.remove_from_rec(
-            self.all_locs[channel], "index"
-        )
+        self.all_locs[channel].drop(columns="index", inplace=True)
         self.locs[channel] = self.all_locs[channel].copy()
         # fast rendering
         self.window.fast_render_dialog.sample_locs()
@@ -8395,7 +8352,7 @@ class View(QtWidgets.QLabel):
     def render_multi_channel(
         self,
         kwargs: dict,
-        locs: np.recarray | None = None,
+        locs: pd.DataFrame | None = None,
         autoscale: bool = False,
         use_cache: bool = False,
         cache: bool = True,
@@ -8409,9 +8366,9 @@ class View(QtWidgets.QLabel):
         ----------
         kwargs : dict
             Contains blur method, etc. See ``self.get_render_kwargs``.
-        locs : np.recarray, optional
-            Locs to be rendered. If None, self.locs is used. Default is
-            None
+        locs : pd.DataFrame, optional
+            Localizations to be rendered. If None, ``self.locs`` is
+            used. Default is None.
         autoscale : bool, optional
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
@@ -8439,7 +8396,7 @@ class View(QtWidgets.QLabel):
                 if self.window.slicer_dialog.slicer_radio_button.isChecked():
                     z_min = self.window.slicer_dialog.slicermin
                     z_max = self.window.slicer_dialog.slicermax
-                    in_view = (locs[i].z > z_min) & (locs[i].z <= z_max)
+                    in_view = (locs[i]["z"] > z_min) & (locs[i]["z"] <= z_max)
                     locs[i] = locs[i][in_view]
 
         if use_cache:  # used saved image
@@ -8524,7 +8481,7 @@ class View(QtWidgets.QLabel):
         _bgra : np.ndarray
             8 bit array with 4 channels (blue, green, red and alpha).
         """
-        # get np.recarray
+        # get localizations for rendering
         locs = self.locs[0]
 
         # if render by property
@@ -8602,7 +8559,7 @@ class View(QtWidgets.QLabel):
         """
         # extract picked localizations and stack them
         locs = self.picked_locs(channel, add_group=True)
-        locs = stack_arrays(locs, asrecarray=True, usemask=False)
+        locs = pd.concat(locs, ignore_index=True)
 
         # save picked locs with .yaml
         if locs is not None:
@@ -8690,16 +8647,13 @@ class View(QtWidgets.QLabel):
         for channel in range(len(self.locs_paths)):
             if channel == 0:
                 locs = self.picked_locs(channel)
-                locs = stack_arrays(locs, asrecarray=True, usemask=False)
+                locs = pd.concat(locs, ignore_index=True)
             else:
                 templocs = self.picked_locs(channel)
-                templocs = stack_arrays(
-                    templocs, asrecarray=True, usemask=False
-                )
-                locs = np.append(locs, templocs)
+                templocs = pd.concat(templocs, ignore_index=True)
+                locs = pd.concat([locs, templocs], ignore_index=True)
 
         # save
-        locs = locs.view(np.recarray)
         if locs is not None:
             areas = self.pick_areas()
             pick_info = {
@@ -8736,7 +8690,7 @@ class View(QtWidgets.QLabel):
         locs = list(zip(*locs))
         # stack arrays from all channels in each pick
         for i in range(len(locs)):
-            locs[i] = stack_arrays(locs[i], asrecarray=True, usemask=False)
+            locs[i] = pd.concat(locs[i], ignore_index=True)
 
         if locs is not None:
             areas = self.pick_areas()
@@ -8812,7 +8766,7 @@ class View(QtWidgets.QLabel):
                 dark[i] = estimate_kinetic_rate(pick_locs.dark)
                 out_locs.append(pick_locs)
             progress.set_value(i + 1)
-        out_locs = stack_arrays(out_locs, asrecarray=True, usemask=False)
+        out_locs = pd.concat(out_locs, ignore_index=True)
         n_groups = len(picked_locs)
         progress = lib.ProgressDialog(
             "Calculating pick properties", 0, n_groups, self
@@ -8826,14 +8780,14 @@ class View(QtWidgets.QLabel):
         areas = self.pick_areas()
         if self._pick_shape == "Circle":  # duplicate values for each pick
             areas = np.repeat(areas, n_groups)
-        pick_props = lib.append_to_rec(pick_props, areas, "pick_area_um2")
+        pick_props["pick_area_um2"] = areas
         progress.close()
         # QPAINT estimate of number of binding sites
         n_units = self.window.info_dialog.calculate_n_units(dark)
-        pick_props = lib.append_to_rec(pick_props, n_units, "n_units")
-        pick_props = lib.append_to_rec(pick_props, no_locs, "locs")
-        pick_props = lib.append_to_rec(pick_props, length, "length_cdf")
-        pick_props = lib.append_to_rec(pick_props, dark, "dark_cdf")
+        pick_props["n_units"] = n_units
+        pick_props["locs"] = no_locs
+        pick_props["length_cdf"] = length
+        pick_props["dark_cdf"] = dark
         influx = self.window.info_dialog.influx_rate.value()
         info = self.infos[channel] + [{
             "Generated by": f"Picasso v{__version__}: Render",
@@ -9423,14 +9377,14 @@ class View(QtWidgets.QLabel):
         self.add_drift(channel, drift)
         self.update_scene()
 
-    def add_drift(self, channel: int, drift: np.recarray) -> None:
+    def add_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Assign attributes and save .txt drift file.
 
         Parameters
         ----------
         channel : int
             Channel where drift is to be added.
-        drift : np.recarray
+        drift : pd.DataFrame
             Contains drift in each coordinate.
         """
         timestr = time.strftime("%Y%m%d_%H%M%S")[2:]
@@ -9441,19 +9395,16 @@ class View(QtWidgets.QLabel):
         if self._drift[channel] is None:
             self._drift[channel] = drift
         else:
-            self._drift[channel].x += drift.x
-            self._drift[channel].y += drift.y
+            self._drift[channel]["x"] += drift["x"]
+            self._drift[channel]["y"] += drift["y"]
 
             if hasattr(drift, "z"):
                 if hasattr(self._drift[channel], "z"):
-                    self._drift[channel].z += drift.z
+                    self._drift[channel]["z"] += drift["z"]
                 else:
-                    self._drift[channel] = lib.append_to_rec(
-                        self._drift[channel], drift.z, "z"
-                    )
+                    self._drift[channel]["z"] = drift["z"]
 
         self.currentdrift[channel] = copy.copy(drift)
-
         np.savetxt(
             driftfile,
             self._drift[channel],
@@ -9471,46 +9422,42 @@ class View(QtWidgets.QLabel):
             if path:
                 drift = np.loadtxt(path, delimiter=' ')
                 if drift.shape[1] == 3:  # 3D drift
-                    drift = (drift[:, 0], drift[:, 1], drift[:, 2])
-                    drift = np.rec.array(
-                        drift,
-                        dtype=[("x", "f"), ("y", "f"), ("z", "f")],
-                    )
-                    self.all_locs[channel].x -= drift.x[
-                        self.all_locs[channel].frame
+                    drift = pd.DataFrame({
+                        "x": drift[:, 0],
+                        "y": drift[:, 1],
+                        "z": drift[:, 2],
+                    })
+                    self.all_locs[channel]["x"] -= drift["x"][
+                        self.all_locs[channel]["frame"]
                     ]
-                    self.all_locs[channel].y -= drift.y[
-                        self.all_locs[channel].frame
+                    self.all_locs[channel]["y"] -= drift["y"][
+                        self.all_locs[channel]["frame"]
                     ]
-                    self.all_locs[channel].z -= drift.z[
-                        self.all_locs[channel].frame
+                    self.all_locs[channel]["z"] -= drift["z"][
+                        self.all_locs[channel]["frame"]
                     ]
-                    self.locs[channel].x -= drift.x[
-                        self.locs[channel].frame
+                    self.locs[channel]["x"] -= drift["x"][
+                        self.locs[channel]["frame"]
                     ]
-                    self.locs[channel].y -= drift.y[
-                        self.locs[channel].frame
+                    self.locs[channel]["y"] -= drift["y"][
+                        self.locs[channel]["frame"]
                     ]
-                    self.locs[channel].z -= drift.z[
-                        self.locs[channel].frame
+                    self.locs[channel]["z"] -= drift["z"][
+                        self.locs[channel]["frame"]
                     ]
                 else:  # 2D drift
-                    drift = (drift[:, 0], drift[:, 1])
-                    drift = np.rec.array(
-                        drift,
-                        dtype=[("x", "f"), ("y", "f")],
-                    )
-                    self.all_locs[channel].x -= drift.x[
-                        self.all_locs[channel].frame
+                    drift = pd.DataFrame({"x": drift[:, 0], "y": drift[:, 1]})
+                    self.all_locs[channel]["x"] -= drift["x"][
+                        self.all_locs[channel]["frame"]
                     ]
-                    self.all_locs[channel].y -= drift.y[
-                        self.all_locs[channel].frame
+                    self.all_locs[channel]["y"] -= drift["y"][
+                        self.all_locs[channel]["frame"]
                     ]
-                    self.locs[channel].x -= drift.x[
-                        self.locs[channel].frame
+                    self.locs[channel]["x"] -= drift["x"][
+                        self.locs[channel]["frame"]
                     ]
-                    self.locs[channel].y -= drift.y[
-                        self.locs[channel].frame
+                    self.locs[channel]["y"] -= drift["y"][
+                        self.locs[channel]["frame"]
                     ]
                 self._drift[channel] = drift
                 self._driftfiles[channel] = path
@@ -9597,7 +9544,7 @@ class View(QtWidgets.QLabel):
             and self._pick_shape == "Circle"
         ):
             locs = self.picked_locs(0, add_group=True)
-            locs = stack_arrays(locs, asrecarray=True, usemask=False)
+            locs = pd.concat(locs, ignore_index=True)
             self.all_locs[0] = locs
             remove_group = True
         elif hasattr(self.all_locs[0], "group"):
@@ -9694,7 +9641,7 @@ class View(QtWidgets.QLabel):
         self.infos[0][0]["Height"] = int(np.ceil(np.max(self.all_locs[0].y)))
         self.infos[0][0]["Width"] = int(np.ceil(np.max(self.all_locs[0].x)))
         if remove_group:
-            self.all_locs[0] = lib.remove_from_rec(self.all_locs[0], "group")
+            self.all_locs[0].drop(columns="group", inplace=True)
             self._picks = []
         self.locs[0] = copy.copy(self.all_locs[0])
         self.fit_in_view()
@@ -9834,9 +9781,7 @@ class View(QtWidgets.QLabel):
                 self.window.info_dialog.rmsd_z_std.setText(
                     "{:.2f}".format(np.nanstd(rmsd_z))
                 )  # std rmsd in z per pick
-            pooled_locs = stack_arrays(
-                new_locs, usemask=False, asrecarray=True
-            )
+            pooled_locs = pd.concat(new_locs, ignore_index=True)
             fit_result_len = fit_cum_exp(pooled_locs.len)
             fit_result_dark = fit_cum_exp(pooled_locs.dark)
             self.window.info_dialog.length_mean.setText(
@@ -11542,12 +11487,8 @@ class Window(QtWidgets.QMainWindow):
         """Remove field 'group' from localizations."""
         channel = self.view.get_channel("Remove group")
         if channel is not None:
-            self.view.locs[channel] = lib.remove_from_rec(
-                self.view.locs[channel], "group"
-            )
-            self.view.all_locs[channel] = lib.remove_from_rec(
-                self.view.all_locs[channel], "group"
-            )
+            self.view.locs[channel].drop(columns="group", inplace=True)
+            self.view.all_locs[channel].drop(columns="group", inplace=True)
             self.view.update_scene()
 
     def save_pick_properties(self) -> None:
@@ -11594,13 +11535,10 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if path:
                     # combine locs from all channels
-                    all_locs = stack_arrays(
-                        self.view.all_locs,
-                        asrecarray=True,
-                        usemask=False,
-                        autoconvert=True,
+                    all_locs = pd.concat(self.view.all_locs, ignore_index=True)
+                    all_locs.sort_values(
+                        kind="mergesort", by="frame", inplace=True,
                     )
-                    all_locs.sort(kind="mergesort", order="frame")
                     info = self.view.infos[0] + [
                         {
                             "Generated by": f"Picasso v{__version__} Combine",

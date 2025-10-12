@@ -1907,12 +1907,12 @@ def undrift_from_picked(
     Parameters
     ----------
     picked_locs : list of pd.DataFrames
-        List of picked localizations, where each element is a
-        recarray of localizations for a single pick.
+        List of picked localizations, where each element is a data frame
+        of localizations for a single pick.
     info : list of dicts
         Metadata of the localization list, where each element
         corresponds to the metadata of the localizations in
-        `picked_locs`.
+        ``picked_locs``.
 
     Returns
     -------
@@ -1924,14 +1924,12 @@ def undrift_from_picked(
     drift_x = _undrift_from_picked_coordinate(picked_locs, info, "x")
     drift_y = _undrift_from_picked_coordinate(picked_locs, info, "y")
 
-    # A rec array to store the applied drift
-    drift = (drift_x, drift_y)
-    drift = np.rec.array(drift, dtype=[("x", "f"), ("y", "f")])
-
+    # A data frame to store the applied drift
+    drift = pd.DataFrame({"x": drift_x, "y": drift_y})
     # If z coordinate exists, also apply drift there
     if all([hasattr(_, "z") for _ in picked_locs]):
         drift_z = _undrift_from_picked_coordinate(picked_locs, info, "z")
-        drift = lib.append_to_rec(drift, drift_z, "z")
+        drift["z"] = drift_z
     return drift
 
 

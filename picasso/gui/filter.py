@@ -17,6 +17,7 @@ import importlib
 import pkgutil
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg,
@@ -44,14 +45,14 @@ class TableModel(QtCore.QAbstractTableModel):
         Number of columns.
     index : QtCore.QModelIndex
         Row/column.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     _row_count : int
         Number of rows.
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     index : QtCore.QModelIndex
         Row/column.
@@ -61,7 +62,7 @@ class TableModel(QtCore.QAbstractTableModel):
 
     def __init__(
         self,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         index: QtCore.QModelIndex,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
@@ -162,7 +163,7 @@ class PlotWindow(QtWidgets.QWidget):
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization data.
     figure : plt.Figure
         Matplotlib figure.
@@ -171,14 +172,14 @@ class PlotWindow(QtWidgets.QWidget):
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization data.
     """
 
     def __init__(
         self,
         main_window: QtWidgets.QMainWindow,
-        locs: np.recarray,
+        locs: pd.DataFrame,
     ) -> None:
         super().__init__()
         self.main_window = main_window
@@ -197,7 +198,7 @@ class PlotWindow(QtWidgets.QWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
 
-    def update_locs(self, locs: np.recarray) -> None:
+    def update_locs(self, locs: pd.DataFrame) -> None:
         self.locs = locs
         self.plot()
         self.update()
@@ -219,14 +220,14 @@ class HistWindow(PlotWindow):
         Field name for the histogram.
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization data.
     """
 
     def __init__(
         self,
         main_window: QtWidgets.QMainWindow,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         field: str,
     ) -> None:
         self.field = field
@@ -285,7 +286,7 @@ class Hist2DWindow(PlotWindow):
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization data.
     field_x : str
         Field name for the x-axis.
@@ -296,7 +297,7 @@ class Hist2DWindow(PlotWindow):
     def __init__(
         self,
         main_window: QtWidgets.QMainWindow,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         field_x: str,
         field_y: str
     ) -> None:
@@ -473,7 +474,7 @@ class Window(QtWidgets.QMainWindow):
         Dictionary of histogram windows.
     hist2d_windows : dict
         Dictionary of 2D histogram windows.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations loaded.
     pwd : str
         Current working directory.
@@ -608,7 +609,7 @@ class Window(QtWidgets.QMainWindow):
                 )
             self.hist2d_windows[field_x][field_y].show()
 
-    def update_locs(self, locs: np.recarray) -> None:
+    def update_locs(self, locs: pd.DataFrame) -> None:
         self.locs = locs
         self.vertical_scrollbar.setMaximum(len(locs) - 1)
         self.display_locs(self.vertical_scrollbar.value())

@@ -367,7 +367,7 @@ def locs_from_fits(
     box: int,
     em: bool,
 ) -> pd.DataFrame:
-    """Convert the fit results into a structured array of localizations.
+    """Convert the fit results into a data frame of localizations.
 
     Parameters
     ----------
@@ -446,7 +446,7 @@ def locs_from_fits_gpufit(
     box: int,
     em: bool,
 ) -> pd.DataFrame:
-    """Convert the fit results from GPU-based fitting into a structured
+    """Convert the fit results from GPU-based fitting into a data frame
     array of localizations.
 
     Parameters

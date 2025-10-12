@@ -1508,7 +1508,7 @@ def to_raw(path: str, verbose: bool = True) -> None:
 
 
 def save_datasets(path: str, info: dict, **kwargs) -> None:
-    # TODO: use pandas rather than h5py??
+    # TODO: use pandas rather than h5py?? also remove the import at top
     """Save multiple datasets to an HDF5 file at the specified path."""
     with h5py.File(path, "w") as hdf:
         for key, val in kwargs.items():

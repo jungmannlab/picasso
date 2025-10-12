@@ -21,6 +21,7 @@ from typing import Literal
 
 import yaml
 import numpy as np
+import pandas as pd
 from .. import io, localize, gausslq, gaussmle, zfit, lib, CONFIG, avgroi, \
     __version__
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -1299,12 +1300,12 @@ class Window(QtWidgets.QMainWindow):
     ----------
     contrast_dialog : ContrastDialog
         The dialog for adjusting display contrast.
-    identifications : np.recarray
+    identifications : pd.DataFrame
         Identified spots - frame, position, net gradient.
     last_identification_info : dict
         A dictionary of analysis parameters used for the last operation.
         Used to save user settings when closing the application.
-    locs : np.recarray
+    locs : pd.DataFrame
         Resulting localizations.
     movie : np.memmap or None
         Loaded movie (frame, y, x).
@@ -1636,19 +1637,16 @@ class Window(QtWidgets.QMainWindow):
                 n_id += 1
 
             data = [item for sublist in data for item in sublist]
-            identifications = np.array(
-                data,
-                dtype=[
-                    ("frame", int),
-                    ("x", int),
-                    ("y", int),
-                    ("net_gradient", float),
-                    ("n_id", int),
-                ],
+            self.identifications = pd.DataFrame({
+                "frame": [item[0] for item in data],
+                "x": [item[1] for item in data],
+                "y": [item[2] for item in data],
+                "net_gradient": [item[3] for item in data],
+                "n_id": [item[4] for item in data],
+            })
+            self.identifications.sort_values(
+                by="frame", inplace=True, kind="mergesort",
             )
-
-            self.identifications = identifications.view(np.recarray)
-            self.identifications.sort(kind="mergesort", order="frame")
 
             # remove all identifications that are oob
             box = self.parameters["Box Size"]
@@ -1740,18 +1738,16 @@ class Window(QtWidgets.QMainWindow):
                 n_id += 1
 
             data = [item for sublist in data for item in sublist]
-            identifications = np.array(
-                data,
-                dtype=[
-                    ("frame", int),
-                    ("x", int),
-                    ("y", int),
-                    ("net_gradient", float),
-                    ("n_id", int),
-                ],
+            self.identifications = pd.DataFrame({
+                "frame": [item[0] for item in data],
+                "x": [item[1] for item in data],
+                "y": [item[2] for item in data],
+                "net_gradient": [item[3] for item in data],
+                "n_id": [item[4] for item in data],
+            })
+            self.identifications.sort_values(
+                by="frame", inplace=True, kind="mergesort",
             )
-            self.identifications = identifications.view(np.recarray)
-            self.identifications.sort(kind="mergesort", order="frame")
 
             # remove all identifications that are oob
             box = self.parameters["Box Size"]
@@ -1921,15 +1917,15 @@ class Window(QtWidgets.QMainWindow):
 
     def draw_identifications(
         self,
-        identifications: np.recarray,
+        identifications: pd.DataFrame,
         box: int,
         color: QtGui.QColor,
     ) -> None:
         """Draw identification boxes in the scene."""
         box_half = int(box / 2)
         for identification in identifications:
-            x = identification.x
-            y = identification.y
+            x = identification["x"].values
+            y = identification["y"].values
             self.scene.addRect(x - box_half, y - box_half, box, box, color)
 
     def draw_scalebar(self) -> None:
@@ -2060,7 +2056,7 @@ class Window(QtWidgets.QMainWindow):
         parameters: dict,
         roi: list[int],
         elapsed_time: float,
-        identifications: np.recarray,
+        identifications: pd.DataFrame,
         fit_afterwards: bool,
         calibrate_z: bool,
     ) -> None:
@@ -2150,7 +2146,7 @@ class Window(QtWidgets.QMainWindow):
 
     def on_fit_finished(
         self,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         elapsed_time: float,
         fit_z: bool,
         calibrate_z: bool,
@@ -2213,7 +2209,7 @@ class Window(QtWidgets.QMainWindow):
 
     def on_fit_z_finished(
         self,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         elapsed_time: float,
     ) -> None:
         """Handle the completion of the z fitting process."""
@@ -2362,7 +2358,7 @@ class IdentificationWorker(QtCore.QThread):
     progress."""
 
     progressMade = QtCore.pyqtSignal(int, dict)
-    finished = QtCore.pyqtSignal(dict, object, float, np.recarray, bool, bool)
+    finished = QtCore.pyqtSignal(dict, object, float, pd.DataFrame, bool, bool)
 
     def __init__(
         self,
@@ -2408,13 +2404,13 @@ class FitWorker(QtCore.QThread):
     multiprocessing and update the status bar accordingly."""
 
     progressMade = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(np.recarray, float, bool, bool)
+    finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
 
     def __init__(
         self,
         movie: np.memmap,
         camera_info: dict,
-        identifications: np.recarray,
+        identifications: pd.DataFrame,
         box: int,
         method: Literal["lq", "mle", "avg"],
         eps: float,
@@ -2506,11 +2502,11 @@ class FitZWorker(QtCore.QThread):
     calibration file using multiprocessing."""
 
     progressMade = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(np.recarray, float)
+    finished = QtCore.pyqtSignal(pd.DataFrame, float)
 
     def __init__(
         self,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         info: dict,
         calibration: dict,
         magnification_factor: float,
@@ -2553,7 +2549,7 @@ class QualityWorker(QtCore.QThread):
 
     def __init__(
         self,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         info: dict,
         path: str,
         pixelsize: float

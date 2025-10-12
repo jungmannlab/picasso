@@ -806,7 +806,7 @@ def locs_from_fits(
     iterations: np.ndarray,
     box: int,
 ) -> pd.DataFrame:
-    """Convert the results of Gaussian fits into a structured array
+    """Convert the results of Gaussian fits into a data frame array
     suitable for further analysis or visualization.
 
     Parameters
