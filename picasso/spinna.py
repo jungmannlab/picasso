@@ -2830,6 +2830,8 @@ class SPINNA():
             number of simulations to be tested and M is the number of
             structures in mixer. If dict, keys are structure names and
             values are lists of numbers of structures to be simulated.
+            ``N_structures`` can be generated using
+            :meth:`~spinna.generate_N_structures`.
         save : str, optional
             Path to save numbers of structures tested and their
             corresponding scores as a .csv file. If '' is given, the

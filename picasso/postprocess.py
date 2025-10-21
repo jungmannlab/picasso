@@ -142,7 +142,7 @@ def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
                         list(range(block_starts[k, ll], block_ends[k, ll]))
                     )
     indices = list(itertools.chain(*indices))
-    return locs[indices]
+    return locs.iloc[indices]
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -238,7 +238,7 @@ def picked_locs(
                 block_locs = get_block_locs_at(
                     x, y, index_blocks
                 )
-                group_locs = lib.locs_at(x, y, block_locs, pick_size)
+                group_locs = lib.locs_at(x, y, block_locs, pick_size).copy()
                 if add_group:
                     group_locs["group"] = (
                         i * np.ones(len(group_locs), dtype=np.int32)

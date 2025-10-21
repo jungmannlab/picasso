@@ -50,10 +50,8 @@ def mask_locs(
     y_ind = (np.floor(locs["y"].values / height * mask.shape[1])).astype(int)
 
     index = mask[y_ind, x_ind].astype(bool)
-    locs_in = locs[index]
-    locs_in.sort_values(by="frame", kind="mergesort", inplace=True)
-    locs_out = locs[~index]
-    locs_out.sort_values(by="frame", kind="mergesort", inplace=True)
+    locs_in = locs.iloc[index].sort_values(by="frame", kind="mergesort")
+    locs_out = locs.iloc[~index].sort_values(by="frame", kind="mergesort")
     return locs_in, locs_out
 
 
