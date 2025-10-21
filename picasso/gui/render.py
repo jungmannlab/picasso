@@ -138,7 +138,7 @@ def estimate_kinetic_rate(data: np.ndarray) -> float:
         Mean dark/bright time from the fitted exponential function.
     """
     if len(data) > 2:
-        if data.ptp() == 0:
+        if data.max() - data.min() == 0:
             rate = np.nanmean(data)
         else:
             result = fit_cum_exp(data)
@@ -256,8 +256,8 @@ class PickHistWindow(QtWidgets.QTabWidget):
             "Length (cumulative) \n"
             r"$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$".format(a, t, c)
         )
-        data = pooled_locs["len"]
-        data.sort()
+        data = pooled_locs["len"].copy()
+        data.sort_values(inplace=True)
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label="data")
         axes.semilogx(data, fit_result_len["best_fit"], label="fit")
@@ -276,8 +276,8 @@ class PickHistWindow(QtWidgets.QTabWidget):
             "Dark time (cumulative) \n"
             r"$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$".format(a, t, c)
         )
-        data = pooled_locs["dark"]
-        data.sort()
+        data = pooled_locs["dark"].copy()
+        data.sort_values(inplace=True)
         y = np.arange(1, len(data) + 1)
         axes.semilogx(data, y, label="data")
         axes.semilogx(data, fit_result_dark["best_fit"], label="fit")
@@ -321,7 +321,6 @@ class ApplyDialog(QtWidgets.QDialog):
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
-        # vars = self.view.locs[0].dtype.names
         self.setWindowTitle("Apply expression")
         vbox = QtWidgets.QVBoxLayout(self)
         layout = QtWidgets.QGridLayout()
@@ -365,7 +364,7 @@ class ApplyDialog(QtWidgets.QDialog):
     def update_vars(self, index: int) -> None:
         """Update the variables that can be manipulated and show them in
         self.label."""
-        vars = self.window.view.locs[index].dtype.names
+        vars = self.window.view.locs[index].columns.to_list()
         self.label.setText(str(vars))
 
 
@@ -720,7 +719,7 @@ class DatasetDialog(QtWidgets.QDialog):
                 disp_sett_dlg.render_groupbox.setEnabled(True)
                 disp_sett_dlg.parameter.clear()
                 disp_sett_dlg.parameter.addItems(
-                    self.window.view.locs[0].dtype.names
+                    self.window.view.locs[0].columns.to_list()
                 )
             else:
                 disp_sett_dlg.render_groupbox.setEnabled(False)
@@ -899,9 +898,7 @@ class PlotDialog(QtWidgets.QDialog):
 
         if mode == 1:
             locs = all_picked_locs[current]
-            locs = pd.concat(locs, ignore_index=True)
-
-            colors = locs["z"]
+            colors = locs["z"].copy()
             colors[
                 colors > locs["z"].mean() + 3 * locs["z"].std()
             ] = locs["z"].mean() + 3 * locs["z"].std()
@@ -934,7 +931,6 @@ class PlotDialog(QtWidgets.QDialog):
             colors = color_sys
             for ll in range(len(all_picked_locs)):
                 locs = all_picked_locs[ll][current]
-                locs = pd.concat(locs, ignore_index=True)
                 ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[ll], s=2)
 
             ax.set_xlim(
@@ -1043,7 +1039,6 @@ class PlotDialogIso(QtWidgets.QDialog):
 
         if mode == 1:
             locs = all_picked_locs[current]
-            locs = pd.concat(locs, ignore_index=True)
 
             colors = locs["z"]
             colors[
@@ -1126,7 +1121,6 @@ class PlotDialogIso(QtWidgets.QDialog):
             colors = color_sys
             for ll in range(len(all_picked_locs)):
                 locs = all_picked_locs[ll][current]
-                locs = pd.concat(locs, ignore_index=True)
                 ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[ll], s=2)
                 ax2.scatter(locs["x"], locs["y"], c=colors[ll], s=2)
                 ax3.scatter(locs["x"], locs["z"], c=colors[ll], s=2)
@@ -1329,7 +1323,6 @@ class ClsDlg3D(QtWidgets.QDialog):
         )
 
         locs = all_picked_locs[current]
-        locs = pd.concat(locs, ignore_index=True)
 
         est = KMeans(n_clusters=n_clusters, n_init='auto')
         scaled_locs = locs.copy()
@@ -1530,7 +1523,6 @@ class ClsDlg2D(QtWidgets.QDialog):
         )
 
         locs = all_picked_locs[current]
-        locs = pd.concat(locs, ignore_index=True)
 
         est = KMeans(n_clusters=n_clusters, n_init='auto')
         scaled_locs = locs.copy()
@@ -3982,7 +3974,7 @@ class RESIDialog(QtWidgets.QDialog):
         params_grid.addWidget(self.apply_fa, params_grid.rowCount(), 0, 1, 2)
 
         # perform resi button
-        resi_button = QtWidgets.QPushButton("Perform RESI analysis")
+        resi_button = QtWidgets.QPushButton("Perform RESI")
         resi_button.clicked.connect(self.perform_resi)
         params_grid.addWidget(resi_button, params_grid.rowCount()-1, 2, 1, 2)
 
@@ -3995,8 +3987,8 @@ class RESIDialog(QtWidgets.QDialog):
             m.setValue(self.min_locs[0].value())
 
     def perform_resi(self) -> None:
-        """Perform RESI analysis on loaded localizations, using
-        user-defined clustering parameters."""
+        """Perform RESI  on loaded localizations, using user-defined
+        clustering parameters."""
         # Sanity check if more than one channel is present
         if self.n_channels < 2:
             message = (
@@ -4626,7 +4618,7 @@ class FastRenderDialog(QtWidgets.QDialog):
                     replace=False,
                 )  # random indeces to extract locs
                 self.window.view.locs[i] = (
-                    self.window.view.all_locs[i][rand_idx]
+                    self.window.view.all_locs[i].iloc[rand_idx]
                 )  # assign new localizations to be displayed
                 new_disp_nlocs = len(self.window.view.locs[i])
                 factor = new_disp_nlocs / old_disp_nlocs  # to adjust contrast
@@ -4639,9 +4631,9 @@ class FastRenderDialog(QtWidgets.QDialog):
                     n_locs,
                     size=int(n_locs * self.fractions[i+1] / 100),
                     replace=False,
-                )  # random indeces to extract locs
+                )  # random indices to extract locs
                 self.window.view.locs[i] = (
-                    self.window.view.all_locs[i][rand_idx]
+                    self.window.view.all_locs[i].iloc[rand_idx]
                 )  # assign new localizations to be displayed
                 new_disp_nlocs = len(self.window.view.locs[i])
                 factors.append(new_disp_nlocs / old_disp_nlocs)
@@ -5149,7 +5141,7 @@ class View(QtWidgets.QLabel):
                 if len(self.group_color) == 0 and locs.group.size:
                     self.group_color = self.get_group_color(self.locs[0])
             disp_sett_dlg.parameter.clear()
-            disp_sett_dlg.parameter.addItems(locs.dtype.names)
+            disp_sett_dlg.parameter.addItems(locs.columns.to_list())
             disp_sett_dlg.render_groupbox.setEnabled(True)
         else:
             disp_sett_dlg.render_groupbox.setEnabled(False)
@@ -5304,7 +5296,6 @@ class View(QtWidgets.QLabel):
         if len(self._picks) > 0:  # shift from picked
             # find shift between channels
             shift = self.shift_from_picked()
-            print("Shift {}".format(shift))
             sp = lib.ProgressDialog(
                 "Shifting channels", 0, len(self.locs), self
             )
@@ -5424,7 +5415,7 @@ class View(QtWidgets.QLabel):
                 max_dark_time=max_dark,
                 remove_ambiguous_lengths=False,
             )
-            if not pick_locs_out:
+            if len(pick_locs_out) == 0:
                 print("no locs in pick - skipped")
             else:
                 out_locs.append(pick_locs_out)
@@ -6763,18 +6754,23 @@ class View(QtWidgets.QLabel):
         self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
             shape_index
         )
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         # assign loaded picks and pick size
         if loaded_shape == "Circle":
             self._picks = regions["Centers"]
-            self.window.tools_settings_dialog.pick_diameter.setValue(
-                regions["Diameter (nm)"]
-            )
+            if "Diameter (nm)" in regions:
+                diameter = regions["Diameter (nm)"]
+            elif "Diameter" in regions:
+                diameter = regions["Diameter"] * pixelsize
+            self.window.tools_settings_dialog.pick_diameter.setValue(diameter)
         elif loaded_shape == "Rectangle":
             self._picks = regions["Center-Axis-Points"]
-            self.window.tools_settings_dialog.pick_width.setValue(
-                regions["Width (nm)"]
-            )
+            if "Width (nm)" in regions:
+                width = regions["Width (nm)"]
+            elif "Width" in regions:
+                width = regions["Width"] * pixelsize
+            self.window.tools_settings_dialog.pick_width.setValue(width)
         elif loaded_shape == "Polygon":
             self._picks = regions["Vertices"]
         else:
@@ -6804,12 +6800,16 @@ class View(QtWidgets.QLabel):
                 "Subtracting picks implemented for circular picks only."
             )
         oldpicks = self._picks.copy()
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
         # load .yaml
         with open(path, "r") as f:
             regions = yaml.full_load(f)
             self._picks = regions["Centers"]
-            diameter = regions["Diameter"]
+            if "Diameter (nm)" in regions:
+                diameter = regions["Diameter (nm)"] / pixelsize  # camera pxl
+            elif "Diameter" in regions:
+                diameter = regions["Diameter"]
 
             # calculate which picks are to stay
             distances = (
@@ -7225,7 +7225,6 @@ class View(QtWidgets.QLabel):
                     fig.canvas.manager.set_window_title("Trace")
                     pick = self._picks[i]
                     locs = all_picked_locs[i]
-                    locs = pd.concat(locs, ignore_index=True)
 
                     xvec = np.arange(n_frames)
                     yvec = np.ones_like(xvec, dtype=float) * -1
@@ -7445,7 +7444,6 @@ class View(QtWidgets.QLabel):
                             + "."
                         )
                         locs = all_picked_locs[i]
-                        locs = pd.concat(locs, ignore_index=True)
                         x_min = pick[0] - r
                         x_max = pick[0] + r
                         y_min = pick[1] - r
@@ -7763,7 +7761,7 @@ class View(QtWidgets.QLabel):
                         max_dark_time=max_dark,
                     )
                 pick_locs = postprocess.compute_dark_times(pick_locs)
-                dark[i] = estimate_kinetic_rate(pick_locs.dark)
+                dark[i] = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
                 out_locs.append(pick_locs)
                 progress.set_value(i + 1)
             out_locs = pd.concat(out_locs, ignore_index=True)
@@ -8181,21 +8179,16 @@ class View(QtWidgets.QLabel):
         channel : int
             Index of the channel were localizations are removed.
         """
-        index = np.arange(len(self.all_locs[channel]), dtype=np.int32)
-        self.all_locs[channel]["index"] = index  # temporary index
-
-        # if locs were indexed before, they do not have the index
-        # attribute
-        if self._pick_shape == "Circle":
-            self.index_locs(channel)
+        locs = self.all_locs[channel].copy()
         all_picked_locs = self.picked_locs(channel, add_group=False)
-        idx = np.array([], dtype=np.int32)
+        idx = []  # store indices of picked locs
         for picked_locs in all_picked_locs:
-            idx = np.concatenate((idx, picked_locs.index))
-        self.all_locs[channel] = np.delete(self.all_locs[channel], idx)
-        self.all_locs[channel].drop(columns="index", inplace=True)
-        self.locs[channel] = self.all_locs[channel].copy()
-        # fast rendering
+            idx.append(picked_locs.index.to_numpy())
+        idx = np.concatenate(idx)
+        locs.drop(index=idx, inplace=True)
+        self.all_locs[channel] = locs
+        self.locs[channel] = locs.copy()
+
         self.window.fast_render_dialog.sample_locs()
         self.update_scene()
 
@@ -8762,8 +8755,8 @@ class View(QtWidgets.QLabel):
                         max_dark_time=max_dark,
                     )
                 pick_locs = postprocess.compute_dark_times(pick_locs)
-                length[i] = estimate_kinetic_rate(pick_locs.len)
-                dark[i] = estimate_kinetic_rate(pick_locs.dark)
+                length[i] = estimate_kinetic_rate(pick_locs["len"].to_numpy())
+                dark[i] = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
                 out_locs.append(pick_locs)
             progress.set_value(i + 1)
         out_locs = pd.concat(out_locs, ignore_index=True)
@@ -8979,14 +8972,10 @@ class View(QtWidgets.QLabel):
                     del self.x_render_cache[-1]
 
             self.x_locs = x_locs
-
-            self.update_scene()
-
             self.window.display_settings_dlg.show_legend.setEnabled(True)
-
         else:
             self.x_render_state = False
-
+        self.update_scene()
         self.activate_property_menu()  # allows changing render parameters
 
     def activate_property_menu(self) -> None:
@@ -9254,7 +9243,7 @@ class View(QtWidgets.QLabel):
                     # sanity check and assign attributes
                     locs = lib.ensure_sanity(locs, info)
                     self.all_locs[channel] = locs
-                    self.locs[channel] = copy.copy(locs)
+                    self.locs[channel] = locs.copy()
                     self.index_blocks[channel] = None
                     self.add_drift(channel, drift)
                     self.update_scene()
@@ -9267,7 +9256,7 @@ class View(QtWidgets.QLabel):
                         (
                             "RCC failed. \nConsider changing segmentation "
                             "and make sure there are enough locs per frame.\n"
-                            "The following exception occured:\n\n {}".format(e)
+                            f"The following exception occured:\n\n {e}."
                         ),
                     )
                     rcc_progress.set_value(n_pairs)
@@ -9284,28 +9273,18 @@ class View(QtWidgets.QLabel):
             drift = postprocess.undrift_from_picked(
                 picked_locs, self.infos[channel]
             )
+            frames = self.all_locs[channel]["frame"]
+            frames_ = self.locs[channel]["frame"]
 
             # Apply drift
-            self.all_locs[channel].x -= (
-                drift["x"][self.all_locs[channel].frame]
-            )
-            self.all_locs[channel].y -= (
-                drift["y"][self.all_locs[channel].frame]
-            )
-            self.locs[channel].x -= (
-                drift["x"][self.locs[channel].frame]
-            )
-            self.locs[channel].y -= (
-                drift["y"][self.locs[channel].frame]
-            )
+            self.all_locs[channel]["x"] -= drift["x"].iloc[frames].values
+            self.all_locs[channel]["y"] -= drift["y"].iloc[frames].values
+            self.locs[channel]["x"] -= drift["x"].iloc[frames_].values
+            self.locs[channel]["y"] -= drift["y"].iloc[frames_].values
             # If z coordinate exists, also apply drift there
             if all([hasattr(_, "z") for _ in picked_locs]):
-                self.all_locs[channel].z -= (
-                    drift["z"][self.all_locs[channel].frame]
-                )
-                self.locs[channel].z -= (
-                    drift["z"][self.locs[channel].frame]
-                )
+                self.all_locs[channel]["z"] -= drift["z"].iloc[frames].values
+                self.locs[channel]["z"] -= drift["z"].iloc[frames_].values
 
             # Cleanup
             self.index_blocks[channel] = None
@@ -9361,18 +9340,21 @@ class View(QtWidgets.QLabel):
             Channel index to undo drift.
         """
         drift = self.currentdrift[channel]
-        drift.x = -drift.x
-        drift.y = -drift.y
+        drift["x"] = -drift["x"]
+        drift["y"] = -drift["y"]
 
-        self.all_locs[channel].x -= drift.x[self.all_locs[channel].frame]
-        self.all_locs[channel].y -= drift.y[self.all_locs[channel].frame]
-        self.locs[channel].x -= drift.x[self.locs[channel].frame]
-        self.locs[channel].y -= drift.y[self.locs[channel].frame]
+        frames = self.all_locs[channel]["frame"]
+        frames_ = self.locs[channel]["frame"]
+
+        self.all_locs[channel]["x"] -= drift["x"][frames].values
+        self.all_locs[channel]["y"] -= drift["y"][frames].values
+        self.locs[channel]["x"] -= drift["x"][frames_].values
+        self.locs[channel]["y"] -= drift["y"][frames_].values
 
         if hasattr(drift, "z"):
-            drift.z = -drift.z
-            self.all_locs[channel].z -= drift.z[self.all_locs[channel].frame]
-            self.locs[channel].z -= drift.z[self.locs[channel].frame]
+            drift["z"] = -drift["z"]
+            self.all_locs[channel]["z"] -= drift["z"][frames].values
+            self.locs[channel]["z"] -= drift["z"][frames_].values
 
         self.add_drift(channel, drift)
         self.update_scene()
@@ -9564,83 +9546,56 @@ class View(QtWidgets.QLabel):
         n_square, ok = QtWidgets.QInputDialog.getInt(
             self,
             "Input Dialog",
-            "Set number of elements per row and column:",
-            100,
+            "Set number of elements per column:",
+            int(np.ceil(np.sqrt(len(np.unique(self.all_locs[0]["group"]))))),
         )
         if not ok:
+            if remove_group:
+                self.all_locs[0].drop(columns="group", inplace=True)
             return
         spacing, ok = QtWidgets.QInputDialog.getInt(
             self,
             "Input Dialog",
-            "Set distance between elements:",
-            2,
+            "Set distance between elements (nm):",
+            250,
         )
         if not ok:
+            if remove_group:
+                self.all_locs[0].drop(columns="group", inplace=True)
             return
+        spacing /= self.window.display_settings_dlg.pixelsize.value()
 
         # shift localizations to the middle of the FOV and by the COM
         # of each group
         cx = self.infos[0][0]["Width"] / 2
         cy = self.infos[0][0]["Height"] / 2
-        for group_id in np.unique(self.all_locs[0].group):
-            mask = self.all_locs[0].group == group_id
-            mean_x = np.mean(self.all_locs[0].x[mask])
-            mean_y = np.mean(self.all_locs[0].y[mask])
-            self.all_locs[0].x[mask] += cx - mean_x
-            self.all_locs[0].y[mask] += cy - mean_y
-        self.locs = copy.copy(self.all_locs)
+        for group_id in np.unique(self.all_locs[0]["group"]):
+            mask = self.all_locs[0]["group"] == group_id
+            mean_x = self.all_locs[0].loc[mask, "x"].mean()
+            mean_y = self.all_locs[0].loc[mask, "y"].mean()
+            self.all_locs[0].loc[mask, "x"] += cx - mean_x
+            self.all_locs[0].loc[mask, "y"] += cy - mean_y
 
-        # unfolding
-        self.all_locs[0].x += (
-            np.mod(self.all_locs[0].group, n_square)
-            * spacing
+        # unfold onto grid
+        self.all_locs[0]["x"] += (
+            np.mod(self.all_locs[0]["group"], n_square) * spacing
         )
-        self.all_locs[0].y += (
-            np.floor(self.all_locs[0].group / n_square)
-            * spacing
+        self.all_locs[0]["y"] += (
+            np.floor(self.all_locs[0]["group"] / n_square) * spacing
         )
+        mean_x = self.locs[0]["x"].mean()
+        mean_y = self.locs[0]["y"].mean()
+        self.all_locs[0]["x"] -= mean_x
+        self.all_locs[0]["y"] -= mean_y
+        offset_x = np.absolute(np.min(self.all_locs[0]["x"]))
+        offset_y = np.absolute(np.min(self.all_locs[0]["y"]))
+        self.all_locs[0]["x"] += offset_x
+        self.all_locs[0]["y"] += offset_y
 
-        mean_x = np.mean(self.locs[0].x)
-        mean_y = np.mean(self.locs[0].y)
-
-        self.all_locs[0].x -= mean_x
-        self.all_locs[0].y -= np.mean(self.all_locs[0].y)
-
-        offset_x = np.absolute(np.min(self.all_locs[0].x))
-        offset_y = np.absolute(np.min(self.all_locs[0].y))
-
-        self.all_locs[0].x += offset_x
-        self.all_locs[0].y += offset_y
-
-        if self._picks:
-            if self._pick_shape != "Circle":
-                raise NotImplementedError(
-                    "Implemented for circular picks only."
-                )
-            # Also unfold picks
-            groups = np.unique(self.all_locs[0].group)
-
-            shift_x = (
-                np.mod(groups, n_square) * spacing - mean_x + offset_x
-            )
-            shift_y = (
-                np.floor(groups / n_square) * spacing - mean_y + offset_y
-            )
-
-            for j in range(len(self._picks)):
-                for k in range(len(groups)):
-                    x_pick, y_pick = self._picks[j]
-                    self._picks.append(
-                        (x_pick + shift_x[k], y_pick + shift_y[k])
-                    )
-
-            self.n_picks = len(self._picks)
-            self.update_pick_info_short()
-
-        # Update width information
-        self.infos[0][0]["Height"] = int(np.ceil(np.max(self.all_locs[0].y)))
-        self.infos[0][0]["Width"] = int(np.ceil(np.max(self.all_locs[0].x)))
-        if remove_group:
+        # Update FOV and clean up
+        self.infos[0][0]["Height"] = int(np.ceil(self.all_locs[0]["y"].max()))
+        self.infos[0][0]["Width"] = int(np.ceil(self.all_locs[0]["x"].max()))
+        if remove_group:  # discard groups and reset picks
             self.all_locs[0].drop(columns="group", inplace=True)
             self._picks = []
         self.locs[0] = copy.copy(self.all_locs[0])
@@ -9754,8 +9709,8 @@ class View(QtWidgets.QLabel):
                             locs, info, r_max=r_max, max_dark_time=t
                         )
                     locs = postprocess.compute_dark_times(locs)
-                    length[i] = estimate_kinetic_rate(locs.len)
-                    dark[i] = estimate_kinetic_rate(locs.dark)
+                    length[i] = estimate_kinetic_rate(locs["len"].to_numpy())
+                    dark[i] = estimate_kinetic_rate(locs["dark"].to_numpy())
                     new_locs.append(locs)
                 else:
                     self.remove_picks(self._picks[i])
@@ -9782,8 +9737,8 @@ class View(QtWidgets.QLabel):
                     "{:.2f}".format(np.nanstd(rmsd_z))
                 )  # std rmsd in z per pick
             pooled_locs = pd.concat(new_locs, ignore_index=True)
-            fit_result_len = fit_cum_exp(pooled_locs.len)
-            fit_result_dark = fit_cum_exp(pooled_locs.dark)
+            fit_result_len = fit_cum_exp(pooled_locs["len"].to_numpy())
+            fit_result_dark = fit_cum_exp(pooled_locs["dark"].to_numpy())
             self.window.info_dialog.length_mean.setText(
                 "{:.2f}".format(np.nanmean(length))
             )  # mean bright time
@@ -9797,7 +9752,9 @@ class View(QtWidgets.QLabel):
                 "{:.2f}".format(np.nanstd(dark))
             )  # std dark time
             self.window.info_dialog.pick_info = {
-                "pooled dark": estimate_kinetic_rate(pooled_locs.dark),
+                "pooled dark": estimate_kinetic_rate(
+                    pooled_locs["dark"].to_numpy()
+                ),
                 "length": length,
                 "dark": dark,
             }
@@ -10436,7 +10393,7 @@ class Window(QtWidgets.QMainWindow):
         unfold_action = postprocess_menu.addAction("Unfold / Refold groups")
         unfold_action.triggered.connect(self.view.unfold_groups)
         unfold_action_square = postprocess_menu.addAction(
-            "Unfold groups (square)"
+            "Unfold groups/picks (square grid)"
         )
         unfold_action_square.triggered.connect(self.view.unfold_groups_square)
 
@@ -10493,23 +10450,28 @@ class Window(QtWidgets.QMainWindow):
         for action in self.actions_3d:
             action.setVisible(False)
 
-        # De-select all menus until file is loaded
-        self.menus = [file_menu, view_menu, tools_menu, postprocess_menu]
-        for menu in self.menus[1:]:
-            menu.setDisabled(True)
-
-        self.plugin_menu = self.menu_bar.addMenu("Plugins")  # do not delete
-
         # add plugins; if it's the first initialization
         # (plugins_loaded=False), they are not added because they're
         # loaded in __main___. Otherwise, (remove all locs) plugins
         # need to be added to the menu bar.
+        self.plugin_menu = self.menu_bar.addMenu("Plugins")  # do not delete
         if plugins_loaded:
             try:
                 for plugin in self.plugins:
                     plugin.execute()
             except Exception:
                 pass
+
+        # De-select all menus until file is loaded
+        self.menus = [
+            file_menu,
+            view_menu,
+            tools_menu,
+            postprocess_menu,
+            self.plugin_menu,
+        ]
+        for menu in self.menus[1:]:
+            menu.setDisabled(True)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Update user settings and close all dialogs."""
@@ -10661,9 +10623,14 @@ class Window(QtWidgets.QMainWindow):
             )
         )
         pixelsize = self.display_settings_dlg.pixelsize.value()
-
-        z_header = b"X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
-        header = b"X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+        columns_z = [
+            "X", "Y", "Z", "Channel", "Width",
+            "BG", "Length", "Area", "Frame",
+        ]
+        columns = [
+            "X", "Y", "Channel", "Width",
+            "BG", "Length", "Area", "Frame",
+        ]
 
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
@@ -10679,80 +10646,34 @@ class Window(QtWidgets.QMainWindow):
             )
             if path:
                 locs = self.view.all_locs[channel]
+                columns_original = [
+                    "x", "y", "z", "sx", "bg", "photons", "frame"
+                ]
+                if not hasattr(locs, "z"):
+                    columns_original.remove("z")
+                loctxt = locs[columns_original].copy()
+                loctxt["frame"] += 1
+                loctxt[["x", "y", "sx"]] *= pixelsize
+                loctxt["Channel"] = 1
+                loctxt["Length"] = 1
+                loctxt["bg"] = loctxt["bg"].round().astype(int)
+                loctxt["photons"] = loctxt["photons"].round().astype(int)
+                column_mapper = {
+                    "x": "X",
+                    "y": "Y",
+                    "sx": "Width",
+                    "bg": "BG",
+                    "photons": "Area",
+                    "frame": "Frame",
+                }
                 if hasattr(locs, "z"):
-                    loctxt = locs[
-                        ["x", "y", "z", "sx", "bg", "photons", "frame"]
-                    ].copy()
-                    loctxt = [
-                        (
-                            row[0] * pixelsize,
-                            row[1] * pixelsize,
-                            row[2],
-                            1,
-                            row[3] * pixelsize,
-                            row[4],
-                            1,
-                            row[5],
-                            row[6] + 1,
-                        )
-                        for row in loctxt
-                    ]
-                    with open(path, "wb") as f:
-                        f.write(z_header)
-                        np.savetxt(
-                            f,
-                            loctxt,
-                            fmt=[
-                                "%.2f",
-                                "%.2f",
-                                "%.2f",
-                                "%.i",
-                                "%.2f",
-                                "%.i",
-                                "%.i",
-                                "%.i",
-                                "%.i",
-                            ],
-                            newline="\r\n",
-                            delimiter="\t",
-                        )
-                        print("File saved to {}".format(path))
+                    column_mapper["z"] = "Z"
+                loctxt.rename(columns=column_mapper, inplace=True)
+                if hasattr(locs, "z"):
+                    loctxt = loctxt[columns_z]
                 else:
-                    loctxt = locs[
-                        ["x", "y", "sx", "bg", "photons", "frame"]
-                    ].copy()
-                    loctxt = [
-                        (
-                            row[0] * pixelsize,
-                            row[1] * pixelsize,
-                            1,
-                            row[2] * pixelsize,
-                            row[3],
-                            1,
-                            row[4],
-                            row[5] + 1,
-                        )
-                        for row in loctxt
-                    ]
-                    with open(path, "wb") as f:
-                        f.write(header)
-                        np.savetxt(
-                            f,
-                            loctxt,
-                            fmt=[
-                                "%.2f",
-                                "%.2f",
-                                "%.i",
-                                "%.2f",
-                                "%.i",
-                                "%.i",
-                                "%.i",
-                                "%.i",
-                            ],
-                            newline="\r\n",
-                            delimiter="\t",
-                        )
-                        print("File saved to {}".format(path))
+                    loctxt = loctxt[columns]
+                loctxt.to_csv(path, sep="\t", index=False)
 
     def export_xyz_chimera(self) -> None:
         """Export localizations as .xyz for CHIMERA. The file contains
@@ -10773,25 +10694,10 @@ class Window(QtWidgets.QMainWindow):
                 locs = self.view.all_locs[channel]
                 if hasattr(locs, "z"):
                     loctxt = locs[["x", "y", "z"]].copy()
-                    loctxt = [
-                        (
-                            1,
-                            row[0] * pixelsize,
-                            row[1] * pixelsize,
-                            row[2],
-                        )
-                        for row in loctxt
-                    ]
-                    with open(path, "wb") as f:
-                        f.write(b"Molecule export\r\n")
-                        np.savetxt(
-                            f,
-                            loctxt,
-                            fmt=["%i", "%.5f", "%.5f", "%.5f"],
-                            newline="\r\n",
-                            delimiter="\t",
-                        )
-                        print("File saved to {}".format(path))
+                    loctxt["molecule"] = 1
+                    loctxt[["x", "y"]] *= pixelsize
+                    loctxt = loctxt[["molecule", "x", "y", "z"]]
+                    loctxt.to_csv(path, sep="\t", index=False, header=False)
                 else:
                     QtWidgets.QMessageBox.information(
                         self, "Dataset error", "Data has no z. Export skipped."
@@ -10801,7 +10707,7 @@ class Window(QtWidgets.QMainWindow):
         """Export localizations as .3d for ViSP. Show a warning if no z
         coordinate found."""
         channel = self.view.get_channel(
-            "Save localizations as xyz for chimera (molecule,x,y,z)"
+            "Save localizations for 3D ViSP (x, y, z, photons, frame)"
         )
         pixelsize = self.display_settings_dlg.pixelsize.value()
         if channel is not None:
@@ -10809,23 +10715,16 @@ class Window(QtWidgets.QMainWindow):
             out_path = base + ".visp.3d"
             path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self,
-                "Save localizations as xyz for chimera (molecule,x,y,z)",
+                "Save localizations for 3D ViSP (x, y, z, photons, frame)",
                 out_path,
             )
             if path:
                 locs = self.view.all_locs[channel].copy()
                 if hasattr(locs, "z"):
-                    locs = locs[["x", "y", "z", "photons", "frame"]].copy()
-                    locs.x *= pixelsize
-                    locs.y *= pixelsize
-                    with open(path, "wb") as f:
-                        np.savetxt(
-                            f,
-                            locs,
-                            fmt=["%.1f", "%.1f", "%.1f", "%.1f", "%d"],
-                            newline="\r\n",
-                        )
-                        print("Saving complete.")
+                    loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
+                    loctxt[["x", "y"]] *= pixelsize
+                    loctxt["frame"] = loctxt["frame"].astype(int)
+                    loctxt.to_csv(path, sep=" ", index=False, header=False)
                 else:
                     QtWidgets.QMessageBox.information(
                         self, "Dataset error", "Data has no z. Export skipped."
@@ -10868,285 +10767,74 @@ class Window(QtWidgets.QMainWindow):
                 self, "Save csv to", out_path, filter="*.csv"
             )
             if path:
-                stddummy = 0
-                locs = self.view.all_locs[channel]
-                if hasattr(locs, "len"):  # Linked locs -> add detections
-                    if hasattr(locs, "z"):
-                        loctxt = locs[
-                            [
-                                "frame",
-                                "x",
-                                "y",
-                                "sx",
-                                "sy",
-                                "photons",
-                                "bg",
-                                "lpx",
-                                "lpy",
-                                "z",
-                                "len",
-                            ]
-                        ].copy()
-                        loctxt = [
-                            (
-                                index,
-                                row[0],
-                                row[1] * pixelsize,
-                                row[2] * pixelsize,
-                                row[9],
-                                row[3] * pixelsize,
-                                row[4] * pixelsize,
-                                row[5],
-                                row[6],
-                                stddummy,
-                                (row[7] + row[8]) / 2 * pixelsize,
-                                row[10],
-                            )
-                            for index, row in enumerate(loctxt)
-                        ]
-                        header = ""
-                        for element in [
-                            "id",
-                            "frame",
-                            "x [nm]",
-                            "y [nm]",
-                            "z [nm]",
-                            "sigma1 [nm]",
-                            "sigma2 [nm]",
-                            "intensity [photon]",
-                            "offset [photon]",
-                            "bkgstd [photon]",
-                            "uncertainty_xy [nm]",
-                            "detections",
-                        ]:
-                            header += '"' + element + '",'
-                        header = header[:-1] + "\r\n"
-                        with open(path, "wb") as f:
-                            f.write(str.encode(header))
+                columns_original = [
+                    "frame",
+                    "x",
+                    "y",
+                    "sx",
+                    "sy",
+                    "photons",
+                    "bg",
+                    "lpx",
+                    "lpy",
+                ]
+                if hasattr(self.view.all_locs[channel], "z"):
+                    columns_original.append("z")
+                if hasattr(self.view.all_locs[channel], "len"):
+                    columns_original.append("len")
+                loctxt = self.view.all_locs[channel][columns_original].copy()
 
-                            np.savetxt(
-                                f,
-                                loctxt,
-                                fmt=[
-                                    "%.i",
-                                    "%.i",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.i",
-                                    "%.i",
-                                    "%.i",
-                                    "%.2f",
-                                    "%.i",
-                                ],
-                                newline="\r\n",
-                                delimiter=",",
-                            )
-                            print("File saved to {}".format(path))
-                    else:
-                        loctxt = locs[
-                            [
-                                "frame",
-                                "x",
-                                "y",
-                                "sx",
-                                "sy",
-                                "photons",
-                                "bg",
-                                "lpx",
-                                "lpy",
-                                "len",
-                            ]
-                        ].copy()
-                        loctxt = [
-                            (
-                                index,
-                                row[0],
-                                row[1] * pixelsize,
-                                row[2] * pixelsize,
-                                (row[3] + row[4]) / 2 * pixelsize,
-                                row[5],
-                                row[6],
-                                stddummy,
-                                (row[7] + row[8]) / 2 * pixelsize,
-                                row[9],
-                            )
-                            for index, row in enumerate(loctxt)
-                        ]
-                        header = ""
-                        for element in [
-                            "id",
-                            "frame",
-                            "x [nm]",
-                            "y [nm]",
-                            "sigma [nm]",
-                            "intensity [photon]",
-                            "offset [photon]",
-                            "bkgstd [photon]",
-                            "uncertainty_xy [nm]",
-                            "detections",
-                        ]:
-                            header += '"' + element + '",'
-                        header = header[:-1] + "\r\n"
-
-                        with open(path, "wb") as f:
-                            f.write(str.encode(header))
-                            np.savetxt(
-                                f,
-                                loctxt,
-                                fmt=[
-                                    "%.i",
-                                    "%.i",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.i",
-                                    "%.i",
-                                    "%.i",
-                                    "%.2f",
-                                    "%.i",
-                                ],
-                                newline="\r\n",
-                                delimiter=",",
-                            )
-                            print("File saved to {}".format(path))
-
-                else:
-                    if hasattr(locs, "z"):
-                        loctxt = locs[
-                            [
-                                "frame",
-                                "x",
-                                "y",
-                                "sx",
-                                "sy",
-                                "photons",
-                                "bg",
-                                "lpx",
-                                "lpy",
-                                "z",
-                            ]
-                        ].copy()
-                        loctxt = [
-                            (
-                                index,
-                                row[0],
-                                row[1] * pixelsize,
-                                row[2] * pixelsize,
-                                row[9] * pixelsize,
-                                row[3] * pixelsize,
-                                row[4] * pixelsize,
-                                row[5],
-                                row[6],
-                                stddummy,
-                                (row[7] + row[8]) / 2 * pixelsize,
-                            )
-                            for index, row in enumerate(loctxt)
-                        ]
-                        header = ""
-                        for element in [
-                            "id",
-                            "frame",
-                            "x [nm]",
-                            "y [nm]",
-                            "z [nm]",
-                            "sigma1 [nm]",
-                            "sigma2 [nm]",
-                            "intensity [photon]",
-                            "offset [photon]",
-                            "bkgstd [photon]",
-                            "uncertainty_xy [nm]",
-                        ]:
-                            header += '"' + element + '",'
-                        header = header[:-1] + "\r\n"
-
-                        with open(path, "wb") as f:
-                            f.write(str.encode(header))
-                            np.savetxt(
-                                f,
-                                loctxt,
-                                fmt=[
-                                    "%.i",
-                                    "%.i",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.i",
-                                    "%.i",
-                                    "%.i",
-                                    "%.2f",
-                                ],
-                                newline="\r\n",
-                                delimiter=",",
-                            )
-                            print("File saved to {}".format(path))
-                    else:
-                        loctxt = locs[
-                            [
-                                "frame",
-                                "x",
-                                "y",
-                                "sx",
-                                "sy",
-                                "photons",
-                                "bg",
-                                "lpx",
-                                "lpy",
-                            ]
-                        ].copy()
-                        loctxt = [
-                            (
-                                index,
-                                row[0],
-                                row[1] * pixelsize,
-                                row[2] * pixelsize,
-                                (row[3] + row[4]) / 2 * pixelsize,
-                                row[5],
-                                row[6],
-                                stddummy,
-                                (row[7] + row[8]) / 2 * pixelsize,
-                            )
-                            for index, row in enumerate(loctxt)
-                        ]
-                        header = ""
-                        for element in [
-                            "id",
-                            "frame",
-                            "x [nm]",
-                            "y [nm]",
-                            "sigma [nm]",
-                            "intensity [photon]",
-                            "offset [photon]",
-                            "bkgstd [photon]",
-                            "uncertainty_xy [nm]",
-                        ]:
-                            header += '"' + element + '",'
-                        header = header[:-1] + "\r\n"
-
-                        with open(path, "wb") as f:
-                            f.write(str.encode(header))
-                            np.savetxt(
-                                f,
-                                loctxt,
-                                fmt=[
-                                    "%.i",
-                                    "%.i",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.2f",
-                                    "%.i",
-                                    "%.i",
-                                    "%.i",
-                                    "%.2f",
-                                ],
-                                newline="\r\n",
-                                delimiter=",",
-                            )
-                            print("File saved to {}".format(path))
+                # add the columns
+                loctxt["photons"] = loctxt["photons"].astype(np.int32)
+                loctxt["bg"] = loctxt["bg"].astype(np.int32)
+                loctxt["id"] = np.arange(len(loctxt), dtype=np.int32)
+                loctxt[["x", "y", "sx", "sy"]] *= pixelsize
+                loctxt["bkgstd [photon]"] = 0
+                loctxt["uncertainty_xy [nm]"] = (
+                    (loctxt["lpx"] + loctxt["lpy"]) / 2 * pixelsize
+                )
+                column_mapper = {
+                    "x": "x [nm]",
+                    "y": "y [nm]",
+                    "sx": "sigma1 [nm]",
+                    "sy": "sigma2 [nm]",
+                    "photons": "intensity [photon]",
+                    "bg": "offset [photon]",
+                }
+                if hasattr(loctxt, "z"):
+                    column_mapper["z"] = "z [nm]"
+                if hasattr(loctxt, "len"):
+                    loctxt.rename(columns={"len": "detections"}, inplace=True)
+                loctxt.rename(columns=column_mapper, inplace=True)
+                loctxt.drop(columns=["lpx", "lpy"], inplace=True)
+                # change the order of columns
+                columns_final = [
+                    "id",
+                    "frame",
+                    "x [nm]",
+                    "y [nm]",
+                    "z [nm]",
+                    "sigma1 [nm]",
+                    "sigma2 [nm]",
+                    "intensity [photon]",
+                    "offset [photon]",
+                    "bkgstd [photon]",
+                    "uncertainty_xy [nm]",
+                    "detections",
+                ]
+                if not hasattr(loctxt, "z [nm]"):
+                    columns_final.remove("z [nm]")
+                    columns_final.remove("sigma2 [nm]")
+                    columns_final[4] = "sigma [nm]"
+                    loctxt.rename(
+                        columns={"sigma1 [nm]": "sigma [nm]"}, inplace=True,
+                    )
+                    loctxt.drop(columns=["sigma2 [nm]"], inplace=True)
+                if not hasattr(loctxt, "detections"):
+                    columns_final.remove("detections")
+                loctxt = loctxt[columns_final]
+                # save
+                loctxt.to_csv(path, index=False)
 
     def export_fov_ims(self) -> None:
         """Exports current FOV to .ims"""
@@ -11201,10 +10889,10 @@ class Window(QtWidgets.QMainWindow):
                     locs = self.view.locs[channel]
 
                     in_view = (
-                        (locs.x > x_min)
-                        & (locs.x <= x_max)
-                        & (locs.y > y_min)
-                        & (locs.y <= y_max)
+                        (locs["x"] > x_min)
+                        & (locs["x"] <= x_max)
+                        & (locs["y"] > y_min)
+                        & (locs["y"] <= y_max)
                     )
 
                     add_dict = {}
@@ -11224,8 +10912,8 @@ class Window(QtWidgets.QMainWindow):
                     )
 
                     if hasattr(locs, "z"):
-                        z_min = locs.z[in_view].min()
-                        z_max = locs.z[in_view].max()
+                        z_min = locs["z"][in_view].min()
+                        z_max = locs["z"][in_view].max()
                         z_mins.append(z_min)
                         z_maxs.append(z_max)
                     else:
@@ -11294,8 +10982,8 @@ class Window(QtWidgets.QMainWindow):
             self.view.load_picks(path)
 
     def subtract_picks(self) -> None:
-        """Subtract picks from a .yaml file.
-        See ``View.subtract_picks``."""
+        """Subtract picks from a .yaml file. See
+        ``View.subtract_picks``."""
         if self.view._picks:
             path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load pick regions", filter="*.yaml"
@@ -11421,7 +11109,7 @@ class Window(QtWidgets.QMainWindow):
                         "Localizations have not been spiraled yet."
                     )
             else:
-                vars = self.view.locs[channel].dtype.names
+                vars = self.view.locs[channel].columns.to_list()
                 exec(cmd, {k: self.view.locs[channel][k] for k in vars})
                 exec(cmd, {k: self.view.all_locs[channel][k] for k in vars})
             lib.ensure_sanity(
