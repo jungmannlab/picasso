@@ -1073,9 +1073,9 @@ class ParametersDialog(QtWidgets.QDialog):
     def check_quality(self) -> None:
         """Start the quality check worker thread."""
         self.quality_check.setVisible(False)
-        for idx, _ in enumerate(self.quality_grid_labels):
+        for _ in self.quality_grid_labels:
             _.setVisible(True)
-        for idx, _ in enumerate(self.quality_grid_values):
+        for _ in self.quality_grid_values:
             _.setVisible(True)
 
         self.q_worker = QualityWorker(
@@ -1911,8 +1911,10 @@ class Window(QtWidgets.QMainWindow):
                 locs_frame = self.locs[
                     self.locs.frame == self.curr_frame_number
                 ]
-                for loc in locs_frame:
-                    self.scene.addItem(FitMarker(loc.x + 0.5, loc.y + 0.5, 1))
+                for _, loc in locs_frame.iterrows():
+                    self.scene.addItem(
+                        FitMarker(loc["x"] + 0.5, loc["y"] + 0.5, 1)
+                    )
             self.draw_scalebar()
 
     def draw_identifications(
@@ -1923,9 +1925,9 @@ class Window(QtWidgets.QMainWindow):
     ) -> None:
         """Draw identification boxes in the scene."""
         box_half = int(box / 2)
-        for identification in identifications:
-            x = identification["x"].values
-            y = identification["y"].values
+        for _, identification in identifications.iterrows():
+            x = identification["x"]
+            y = identification["y"]
             self.scene.addRect(x - box_half, y - box_half, box, box, color)
 
     def draw_scalebar(self) -> None:
@@ -2561,7 +2563,7 @@ class QualityWorker(QtCore.QThread):
         self.pixelsize = pixelsize
 
     def run(self) -> None:
-        # Sanity of locs.
+        # Sanity of locs
         sane_locs = lib.ensure_sanity(self.locs, self.info)
 
         # Locs

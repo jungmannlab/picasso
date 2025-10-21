@@ -839,9 +839,9 @@ def locs_from_fits(
         (lpx, lpy), ellipticity, net gradient and identification ID
         (if available).
     """
-    # box_offset = int(box / 2)
-    x = theta[:, 1] + identifications["x"]  # - box_offset
-    y = theta[:, 0] + identifications["y"]  # - box_offset
+    box_offset = int(box / 2)
+    x = theta[:, 1] + identifications["x"] - box_offset
+    y = theta[:, 0] + identifications["y"] - box_offset
     with np.errstate(invalid="ignore"):
         lpy = np.sqrt(CRLBs[:, 0])
         lpx = np.sqrt(CRLBs[:, 1])

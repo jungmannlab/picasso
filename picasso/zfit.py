@@ -292,6 +292,7 @@ def fit_z(
         Localizations with the fitted z coordinates and their residuals
         (d_zcalib).
     """
+    locs = locs.copy()
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
     z = np.zeros_like(locs["x"])

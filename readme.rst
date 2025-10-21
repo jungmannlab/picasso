@@ -25,7 +25,7 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 
 Picasso 0.9.0
 -------------
-In this version, localizations (and other ``.hdf5`` files) are read using ``pandas.read_hdf`` rather than converting an ``h5py`` object to a numpy recarray. Thus, rather than ``numpy.recarray``, localizations are now ``pandas.DataFrame`` objects. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
+In this version, localizations (and other ``.hdf5`` files) are read using ``pandas.read_hdf`` rather than converting an ``h5py.File`` object to a numpy recarray. Thus, rather than ``numpy.recarray``, localizations are now ``pandas.DataFrame`` objects. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
 
 Changelog
 ---------

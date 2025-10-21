@@ -1134,10 +1134,8 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
         Combined localizations with calculated properties for each
         cluster.
     """
-    print("Combining localizations...")
     combined_locs = []
     if hasattr(locs, "z"):
-        print("z-mode")
         for group in tqdm(np.unique(locs["group"])):
             temp = locs[locs["group"] == group]
             cluster = np.unique(temp["cluster"].values)
@@ -1253,7 +1251,6 @@ def cluster_combine_dist(
         Combined localizations with calculated properties for each
         cluster, including distances to nearest neighbors.
     """
-    print("Calculating distances...")
     if hasattr(locs, "z"):
         pixelsize = 130 if pixelsize is None else pixelsize
         combined_locs = []
@@ -1317,7 +1314,6 @@ def cluster_combine_dist(
             combined_locs.append(clusters)
 
     else:  # 2D case
-        print("XY")
         combined_locs = []
         for group in tqdm(np.unique(locs["group"])):
             temp = locs[locs["group"] == group]
@@ -1747,7 +1743,7 @@ def n_segments(info: list[dict], segmentation: int) -> int:
 
 
 def segment(
-    locs: np.ndarray,
+    locs: pd.DataFrame,
     info: list[dict],
     segmentation: int,
     kwargs: dict = {},
@@ -1795,7 +1791,7 @@ def segment(
         it = range(n_seg)
     for i in it:
         segment_locs = locs[
-            (locs.frame >= bounds[i]) & (locs.frame < bounds[i + 1])
+            (locs["frame"] >= bounds[i]) & (locs["frame"] < bounds[i + 1])
         ]
         _, segments[i] = render.render(segment_locs, info, **kwargs)
         if callback is not None:
@@ -1854,7 +1850,7 @@ def undrift(
     drift_y_pol = interpolate.InterpolatedUnivariateSpline(t, shift_y, k=3)
     t_inter = np.arange(info[0]["Frames"])
     drift_ = (drift_x_pol(t_inter), drift_y_pol(t_inter))
-    drift = pd.DataFrame(drift_, columns=["x", "y"])
+    drift = pd.DataFrame({"x": drift_[0], "y": drift_[1]})
     if display:
         fig1 = plt.figure(figsize=(17, 6))
         plt.suptitle("Estimated drift")
@@ -1895,8 +1891,8 @@ def undrift(
         plt.xlabel("x")
         plt.ylabel("y")
         fig1.show()
-    locs["x"] -= drift["x"][locs["frame"]]
-    locs["y"] -= drift["y"][locs["frame"]]
+    locs["x"] -= drift["x"][locs["frame"]].values
+    locs["y"] -= drift["y"][locs["frame"]].values
     return drift, locs
 
 
@@ -2032,8 +2028,6 @@ def align(
         _, image = render.render(locs_, info_, blur_method="smooth")
         images.append(image)
     shift_y, shift_x = imageprocess.rcc(images)
-    print("Image x shifts: {}".format(shift_x))
-    print("Image y shifts: {}".format(shift_y))
     for i, (locs_, dx, dy) in enumerate(zip(locs, shift_x, shift_y)):
         locs_["y"] -= dy
         locs_["x"] -= dx

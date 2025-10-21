@@ -372,12 +372,12 @@ def identifications_from_futures(
     -------
     ids : pd.DataFrame
         Data frame containing the combined results from
-        all futures. Contains fields `frame`, `x`, `y`, and
-        `net_gradient`.
+        all futures. Contains fields ``frame``, ``x``, ``y``, and
+        ``net_gradient``.
     """
     ids_list_of_lists = [_.result() for _ in futures]
     ids_list = list(chain(*ids_list_of_lists))
-    ids = pd.concat(ids_list, ignore_index=True)  # TODO: check this works!
+    ids = pd.concat(ids_list, ignore_index=True)
     ids.sort_values(by="frame", kind="mergesort", inplace=True)
     return ids
 
@@ -528,7 +528,15 @@ def _cut_spots_frame(
 
 
 @numba.jit(nopython=True, cache=False)
-def _cut_spots_daskmov(movie, l_mov, ids_frame, ids_x, ids_y, box, spots):
+def _cut_spots_daskmov(
+    movie: np.ndarray,
+    l_mov: np.ndarray,
+    ids_frame: np.ndarray,
+    ids_x: np.ndarray,
+    ids_y: np.ndarray,
+    box: int,
+    spots: np.ndarray,
+):
     """Extract the spots out of a movie frame by frame.
 
     Parameters
@@ -571,7 +579,14 @@ def _cut_spots_daskmov(movie, l_mov, ids_frame, ids_x, ids_y, box, spots):
     return spots
 
 
-def _cut_spots_framebyframe(movie, ids_frame, ids_x, ids_y, box, spots):
+def _cut_spots_framebyframe(
+    movie: np.ndarray,
+    ids_frame: np.ndarray,
+    ids_x: np.ndarray,
+    ids_y: np.ndarray,
+    box: int,
+    spots: np.ndarray
+):
     """Extract the spots out of a movie frame by frame.
 
     Parameters
@@ -613,9 +628,11 @@ def _cut_spots_framebyframe(movie, ids_frame, ids_x, ids_y, box, spots):
 
 def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
     """Cut out spots from a movie based on the identified positions."""
-    N = len(ids.frame)
+    N = len(ids)
     if isinstance(movie, np.ndarray):
-        return _cut_spots_numba(movie, ids.frame, ids.x, ids.y, box)
+        return _cut_spots_numba(
+            movie, ids["frame"].values, ids["x"].values, ids["y"].values, box,
+        )
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
         """ Assumes that identifications are in order of frames! """
         spots = np.zeros((N, box, box), dtype=movie.dtype)
@@ -624,9 +641,9 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
             '(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)',
             movie.data,
             np.array([len(movie)]),
-            ids.frame,
-            ids.x,
-            ids.y,
+            ids["frame"].values,
+            ids["x"].values,
+            ids["y"].values,
             box,
             spots,
             output_dtypes=[movie.dtype],
@@ -635,10 +652,15 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
         return spots
     else:
         """Assumes that identifications are in order of frames!"""
-        N = len(ids.frame)
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         spots = _cut_spots_framebyframe(
-            movie, ids.frame, ids.x, ids.y, box, spots)
+            movie,
+            ids["frame"].values,
+            ids["x"].values,
+            ids["y"].values,
+            box,
+            spots,
+        )
         return spots
 
 
@@ -947,7 +969,7 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
         The mean length of binding events in frames.
     """
     print("Linking.. ", end='')
-    locs = locs[0:MAX_LOCS]
+    locs = locs.iloc[0:MAX_LOCS].copy()
     locs = postprocess.link(locs, info=info)
     len_mean = locs.len.mean()
     print(f"Mean length {len_mean:.2f} frames.")
@@ -994,7 +1016,6 @@ def check_drift(
         display=False,
         rcc_callback=callback,
     )
-
     drift_x = float(drift["x"].mean())
     drift_y = float(drift["y"].mean())
 
@@ -1047,7 +1068,7 @@ def get_file_summary(
         try:
             summary[col + "_mean"] = locs[col].mean()
             summary[col + "_std"] = locs[col].std()
-        except ValueError:
+        except KeyError:
             summary[col + "_mean"] = float("nan")
             summary[col + "_std"] = float("nan")
 
@@ -1090,7 +1111,6 @@ def get_file_summary(
     summary["filename_hdf"] = file_hdf
     summary["file_created"] = datetime.fromtimestamp(os.path.getmtime(file))
     summary["entry_created"] = datetime.now()
-
     return summary
 
 
