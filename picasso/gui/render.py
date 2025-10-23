@@ -9565,6 +9565,13 @@ class View(QtWidgets.QLabel):
             return
         spacing /= self.window.display_settings_dlg.pixelsize.value()
 
+        # ensure groups are consecutive integers starting from 0
+        unique_groups = np.unique(self.all_locs[0]["group"])
+        group_mapping = {old: new for new, old in enumerate(unique_groups)}
+        self.all_locs[0]["group"] = (
+            self.all_locs[0]["group"].map(group_mapping)
+        )
+
         # shift localizations to the middle of the FOV and by the COM
         # of each group
         cx = self.infos[0][0]["Width"] / 2
@@ -9583,14 +9590,11 @@ class View(QtWidgets.QLabel):
         self.all_locs[0]["y"] += (
             np.floor(self.all_locs[0]["group"] / n_square) * spacing
         )
-        mean_x = self.locs[0]["x"].mean()
-        mean_y = self.locs[0]["y"].mean()
-        self.all_locs[0]["x"] -= mean_x
-        self.all_locs[0]["y"] -= mean_y
-        offset_x = np.absolute(np.min(self.all_locs[0]["x"]))
-        offset_y = np.absolute(np.min(self.all_locs[0]["y"]))
-        self.all_locs[0]["x"] += offset_x
-        self.all_locs[0]["y"] += offset_y
+
+        self.all_locs[0]["x"] -= self.all_locs[0]["x"].mean()
+        self.all_locs[0]["y"] -= self.all_locs[0]["y"].mean()
+        self.all_locs[0]["x"] += np.absolute(np.min(self.all_locs[0]["x"]))
+        self.all_locs[0]["y"] += np.absolute(np.min(self.all_locs[0]["y"]))
 
         # Update FOV and clean up
         self.infos[0][0]["Height"] = int(np.ceil(self.all_locs[0]["y"].max()))

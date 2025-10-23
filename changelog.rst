@@ -9,6 +9,11 @@ Last change: 23-OCT-2025 CEST
 - Removed dependency ``h5py``. Picasso now uses ``pandas`` to read and write HDF5 files.
 - Updated other dependencies, most importantly, ``numpy`` is now in version 2.
 
+
+Small improvements and bug fixes:
+
+- Render: unfold groups/picks (square grid) reassigns the groups to be consecutive
+
 0.8.8
 -----
 - Render - masking dialog changed - threshold methods implemented, histogram of values shown, real-time rendering and different dialog layout
