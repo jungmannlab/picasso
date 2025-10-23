@@ -898,8 +898,8 @@ def _fftconvolve(
     """
     kernel_width = 10 * int(np.round(blur_width)) + 1
     kernel_height = 10 * int(np.round(blur_height)) + 1
-    kernel_y = signal.gaussian(kernel_height, blur_height)
-    kernel_x = signal.gaussian(kernel_width, blur_width)
+    kernel_y = signal.windows.gaussian(kernel_height, blur_height)
+    kernel_x = signal.windows.gaussian(kernel_width, blur_width)
     kernel = np.outer(kernel_y, kernel_x)
     kernel /= kernel.sum()
     image = signal.fftconvolve(image, kernel, mode="same")

@@ -1349,7 +1349,7 @@ class Window(QtWidgets.QMainWindow):
         self.movie = None
         # Dictionary of analysis parameters used for the last operation
         self.last_identification_info = None
-        # Recarray of identifcations with fields frame, x and y
+        # Dataframe of identifcations with fields frame, x and y
         self.identifications = None
         self.ready_for_fit = False
         self.locs = None
