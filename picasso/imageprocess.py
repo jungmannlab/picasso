@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from tqdm import tqdm
@@ -210,7 +211,7 @@ def rcc(
 
 
 def find_fiducials(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     info: list[dict],
 ) -> tuple[list[tuple[int, int]], int]:
     """Find the xy coordinates of regions with high density of
@@ -222,7 +223,7 @@ def find_fiducials(
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     info : list of dicts
         Localizations' metadata (from the corresponding .yaml file).

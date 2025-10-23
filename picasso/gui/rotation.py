@@ -15,11 +15,10 @@ import os
 from functools import partial
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
 from PyQt5 import QtCore, QtGui, QtWidgets
-
-from numpy.lib.recfunctions import stack_arrays
 
 from .. import io, render, lib, __version__
 
@@ -557,8 +556,8 @@ class ViewRotation(QtWidgets.QLabel):
         defining its color.
     infos : list of dicts
         Contains a dictionary with metadata for each channel.
-    locs : list
-        Contains a np.recarray with localizations for each channel.
+    locs : list of pd.DataFrame
+        Contains a data frame with localizations for each channel.
     _mode : str
         Defines current mode (zoom, pick or measure); important for
         mouseEvents.
@@ -692,7 +691,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple, optional
-            Viewport to be rendered. If None, takes current viewport.
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None, takes current viewport.
         ang : tuple, optional
             Rotation angles to be rendered. If None, takes the current
             angles.
@@ -734,7 +734,7 @@ class ViewRotation(QtWidgets.QLabel):
     def render_multi_channel(
         self,
         kwargs: dict,
-        locs: np.recarray | None = None,
+        locs: pd.DataFrame | None = None,
         ang: tuple[float, float, float] | None = None,
         autoscale: bool = False,
         use_cache: bool = False,
@@ -745,9 +745,9 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         kwargs : dict
-            Contains blur method, etc. See self.get_render_kwargs.
-        locs : np.recarray, optional
-            Locs to be rendered. If None, self.locs is used.
+            Contains blur method, etc. See ``self.get_render_kwargs``.
+        locs : pd.DataFrame, optional
+            Localizations to be rendered. If None, ``self.locs`` is used.
         ang : tuple, optional
             Rotation angles to be rendered. If None, takes the current
             angles.
@@ -865,8 +865,8 @@ class ViewRotation(QtWidgets.QLabel):
     ) -> np.ndarray:
         """Render single channel localizations.
 
-        Calls render_multi_channel in case of clustered or picked locs,
-        rendering by property).
+        Calls render_multi_channel in case of clustered or picked
+        localizations, rendering by property).
 
         Parameters
         ----------
@@ -885,7 +885,7 @@ class ViewRotation(QtWidgets.QLabel):
         _bgra : np.array
             8 bit array with 4 channels (rgb and alpha).
         """
-        # get np.recarray
+        # get pd.DataFrame
         locs = self.locs[0]
 
         # if clustered or picked locs
@@ -941,12 +941,13 @@ class ViewRotation(QtWidgets.QLabel):
         autoscale: bool = False,
         use_cache: bool = False,
     ) -> None:
-        """Update the view of rendered locs.
+        """Update the view of rendered localizations.
 
         Parameters
         ----------
         viewport : tuple, optional
-            Viewport to be rendered. If None self.viewport is taken.
+            Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
         autoscale : bool, optional
             True if optimally adjust contrast.
         use_cache : bool, optional
@@ -979,7 +980,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : tuple
-            Viewport defining the rendered FOV.
+            Viewport defining the rendered FOV ``((y_min, x_min),
+            (y_max, x_max))``.
         autoscale : bool, optional
             True if contrast should be optimally adjusted.
         use_cache : bool, optional
@@ -1650,7 +1652,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None self.viewport is taken.
+            Viewport to be evaluated. ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
 
         Returns
         -------
@@ -1677,7 +1680,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None self.viewport is taken.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
 
         Returns
         -------
@@ -1701,7 +1705,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None self.viewport is taken.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
 
         Returns
         -------
@@ -1725,7 +1730,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport: tuple, optional
-            Viewport to be evaluated. If None self.viewport is taken.
+            Viewport to be evaluated ``((y_min, x_min), (y_max, x_max))``.
+            If None self.viewport is taken.
 
         Returns
         -------
@@ -1793,8 +1799,8 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         viewport : list, optional
-            Specifies the FOV to be rendered. If None, the current
-            viewport is taken.
+            Specifies the FOV to be rendered ``((y_min, x_min),
+            (y_max, x_max))``. If None, the current viewport is taken.
         animation : bool, optional
             If True, kwargs are found for building animation.
 
@@ -2167,13 +2173,12 @@ class RotationWindow(QtWidgets.QMainWindow):
                 )
                 if path:
                     # combine locs from all channels
-                    all_locs = stack_arrays(
-                        self.window.view.all_locs,
-                        asrecarray=True,
-                        usemask=False,
-                        autoconvert=True,
+                    all_locs = pd.concat(
+                        self.window.view.all_locs, ignore_index=True,
                     )
-                    all_locs.sort(kind="mergesort", order="frame")
+                    all_locs.sort_values(
+                        kind="mergesort", by="frame", inplace=True,
+                    )
                     info = self.view_rot.infos[0] + new_info
                     io.save_locs(path, all_locs, info)
             # save all channels one by one

@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Literal
 
 import numpy as np
+import pandas as pd
 from scipy.interpolate import InterpolatedUnivariateSpline
 from tqdm import tqdm
 
@@ -642,18 +643,18 @@ def intersection_max_z(
 
 
 def aim(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     info: list[dict],
     segmentation: int = 100,
     intersect_d: float = 20/130,
     roi_r: float = 60/130,
     progress: Callable[[int], None] | None = None,
-) -> tuple[np.recarray, list[dict], np.recarray]:
+) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Apply AIM undrifting to the localizations.
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations list to be undrifted.
     info : list of dicts
         Localizations list's metadata.
@@ -670,11 +671,11 @@ def aim(
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Undrifted localizations.
     new_info : list of 1 dict
         Updated metadata.
-    drift : np.recarray
+    drift : pd.DataFrame
         Drift in x and y directions (and z if applicable).
     """
     # extract metadata
@@ -698,7 +699,7 @@ def aim(
         )
 
     # frames should start at 1
-    frame = locs["frame"] + 1 - locs["frame"].min()
+    frame = (locs["frame"] + 1 - locs["frame"].min()).values  # 1d array
 
     # find the segmentation bounds (temporal intervals)
     seg_bounds = np.concatenate((
@@ -706,13 +707,13 @@ def aim(
     ))
 
     # get the reference localizations (first interval)
-    ref_x = locs["x"][frame <= segmentation]
-    ref_y = locs["y"][frame <= segmentation]
+    ref_x = locs["x"][frame <= segmentation].values
+    ref_y = locs["y"][frame <= segmentation].values
 
     # RUN AIM TWICE #
     # the first run is with the first interval as reference
     x_pdc, y_pdc, drift_x1, drift_y1 = intersection_max(
-        locs.x, locs.y, ref_x, ref_y,
+        locs["x"].values, locs["y"].values, ref_x, ref_y,
         frame, seg_bounds, intersect_d, roi_r, width,
         aim_round=1, progress=progress,
     )
@@ -737,18 +738,15 @@ def aim(
     x_pdc += shift_x
     y_pdc += shift_y
 
-    # combine to Picasso format
-    drift = np.rec.array((drift_x, drift_y), dtype=[("x", "f"), ("y", "f")])
-
     # 3D undrifting
     if hasattr(locs, "z"):
         if progress is not None:
             progress.zero_progress(description="Undrifting z (1/2)")
         ref_x = x_pdc[frame <= segmentation]
         ref_y = y_pdc[frame <= segmentation]
-        ref_z = locs.z[frame <= segmentation]
+        ref_z = locs["z"][frame <= segmentation].values
         z_pdc, drift_z1 = intersection_max_z(
-            x_pdc, y_pdc, locs.z, ref_x, ref_y, ref_z,
+            x_pdc, y_pdc, locs["z"].values, ref_x, ref_y, ref_z,
             frame, seg_bounds, intersect_d, roi_r, width, height, pixelsize,
             aim_round=1, progress=progress,
         )
@@ -763,10 +761,13 @@ def aim(
         shift_z = np.mean(drift_z)
         drift_z -= shift_z
         z_pdc += shift_z
-        drift = np.rec.array(
-            (drift_x, drift_y, drift_z),
-            dtype=[("x", "f"), ("y", "f"), ("z", "f")]
+        # combine
+        drift = pd.DataFrame(
+            {"x": drift_x, "y": drift_y, "z": drift_z}, dtype="float32"
         )
+    else:
+        # combine
+        drift = pd.DataFrame({"x": drift_x, "y": drift_y}, dtype="float32")
 
     # apply the drift to localizations
     locs["x"] = x_pdc

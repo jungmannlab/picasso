@@ -24,6 +24,7 @@ import concurrent.futures
 from time import sleep
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
@@ -298,9 +299,9 @@ class Predictor(QtCore.QThread):
 
     Attributes
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         The input localizations for the model. Must contain the 'group'
-        field.
+        column.
     model : MLPClassifier
         The trained MLPClassifier model.
     n_groups : int
@@ -311,7 +312,7 @@ class Predictor(QtCore.QThread):
         Number of display pixels per camera pixel.
     pick_radius : float
         The radius used for picking localizations.
-    prediction : np.recarray
+    prediction : pd.DataFrame
         The predicted labels for the input localizations, one per group,
         i.e., pick.
 
@@ -319,9 +320,9 @@ class Predictor(QtCore.QThread):
     ----------
     mlp : MLPClassifier
         The trained MLPClassifier model.
-    locs : np.recarray
+    locs : pd.DataFrame
         The input localizations for the model. Must contain the 'group'
-        field.
+        column.
     pick_radius : float
         The radius used for picking localizations.
     oversampling : float
@@ -331,12 +332,12 @@ class Predictor(QtCore.QThread):
     """
 
     predictions_made = QtCore.pyqtSignal(int, int)
-    prediction_finished = QtCore.pyqtSignal(np.recarray)
+    prediction_finished = QtCore.pyqtSignal(pd.DataFrame)
 
     def __init__(
         self,
         mlp: MLPClassifier,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         pick_radius: float,
         oversampling: float,
         parent: QtWidgets.QWidget | None = None,
@@ -361,7 +362,7 @@ class Predictor(QtCore.QThread):
     def _worker(
         self,
         mlp: MLPClassifier,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         picks: np.ndarray,
         pick_radius: float,
         oversampling: float,
@@ -398,7 +399,7 @@ class Predictor(QtCore.QThread):
     def _predict_async(
         self,
         model: MLPClassifier,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         picks: np.ndarray,
         pick_radius: float,
         oversampling: float,
@@ -456,13 +457,8 @@ class Predictor(QtCore.QThread):
 
         assert self.checkConsecutive(picks)
 
-        self.locs = lib.append_to_rec(
-            self.locs, classes[self.locs["group"]], "prediction"
-        )
-        self.locs = lib.append_to_rec(
-            self.locs, probas[self.locs["group"]], "score"
-        )
-
+        self.locs["prediction"] = classes[self.locs["group"]]
+        self.locs["score"] = probas[self.locs["group"]]
         self.prediction_finished.emit(self.locs)
 
 

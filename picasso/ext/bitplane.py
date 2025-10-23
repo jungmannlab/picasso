@@ -8,7 +8,7 @@
 
 import os.path as _ospath
 import numpy as np
-import h5py
+import pandas as pd
 import datetime
 
 try:
@@ -106,7 +106,7 @@ if IMSWRITER:
             if verbose:
                 print("Reading info from {}".format(path))
             self.path = _ospath.abspath(path)
-            self.file = h5py.File(path, "r")
+            self.file = pd.read_hdf(self.path)
 
             self.frames = list(self.file["DataSet"][self.RL].keys())
             self.n_frames = len(self.frames)
