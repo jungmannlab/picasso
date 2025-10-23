@@ -22,8 +22,9 @@ from multiprocessing import sharedctypes
 
 import matplotlib.pyplot as plt
 import numba
-import numpy as np
 import scipy
+import numpy as np
+import pandas as pd
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, render, __version__
@@ -169,8 +170,8 @@ class Worker(QtCore.QThread):
         Indexes of the groups.
     iterations : int
         Number of iterations to average over.
-    locs : np.recarray
-        Localizations with group indeces.
+    locs : pd.DataFrame
+        Localizations with group indices (``group`` column).
     oversampling : float
         Number of display pixels per camera pixel.
     r : float
@@ -179,11 +180,11 @@ class Worker(QtCore.QThread):
         Minimum and maximum bounds for the histogram. Set to -r and r.
     """
 
-    progressMade = QtCore.pyqtSignal(int, int, int, int, np.recarray, bool)
+    progressMade = QtCore.pyqtSignal(int, int, int, int, pd.DataFrame, bool)
 
     def __init__(
         self,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         r: float,
         group_index: np.ndarray,
         oversampling: float,
@@ -248,10 +249,10 @@ class Worker(QtCore.QThread):
                     False,
                 )
                 time.sleep(0.5)
-            self.locs.x = np.ctypeslib.as_array(x)
-            self.locs.y = np.ctypeslib.as_array(y)
-            self.locs.x -= np.mean(self.locs.x)
-            self.locs.y -= np.mean(self.locs.y)
+            self.locs["x"] = np.ctypeslib.as_array(x)
+            self.locs["y"] = np.ctypeslib.as_array(y)
+            self.locs["x"] -= np.mean(self.locs["x"])
+            self.locs["y"] -= np.mean(self.locs["y"])
             self.progressMade.emit(
                 it + 1,
                 self.iterations,
@@ -362,7 +363,7 @@ class View(QtWidgets.QLabel):
         total_it: int,
         g: int,
         n_groups: int,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         update_image: bool,
     ) -> None:
         self.locs = locs.copy()

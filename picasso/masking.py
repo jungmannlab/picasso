@@ -16,25 +16,21 @@ from __future__ import annotations
 from typing import Literal
 
 import numpy as np
-from scipy.ndimage import (
-    gaussian_filter,
-    uniform_filter,
-    uniform_filter1d,
-    median_filter,
-)
+import pandas as pd
+from scipy import ndimage as ndi
 
 
 def mask_locs(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     mask: np.ndarray,
     width: float,
     height: float,
-) -> tuple[np.recarray, np.recarray]:
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Mask localizations given a binary mask.
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations to be masked.
     mask : np.ndarray
         Binary mask where True indicates the area to keep.
@@ -45,20 +41,17 @@ def mask_locs(
 
     Returns
     -------
-    locs_in : np.recarray
+    locs_in : pd.DataFrame
         Localizations inside the mask.
-    locs_out : np.recarray
+    locs_out : pd.DataFrame
         Localizations outside the mask.
     """
-    x_ind = (np.floor(locs["x"] / width * mask.shape[0])).astype(int)
-    y_ind = (np.floor(locs["y"] / height * mask.shape[1])).astype(int)
+    x_ind = (np.floor(locs["x"].values / width * mask.shape[0])).astype(int)
+    y_ind = (np.floor(locs["y"].values / height * mask.shape[1])).astype(int)
 
     index = mask[y_ind, x_ind].astype(bool)
-    locs_in = locs[index]
-    locs_in.sort(kind="mergesort", order="frame")
-    locs_out = locs[~index]
-    locs_out.sort(kind="mergesort", order="frame")
-
+    locs_in = locs.iloc[index].sort_values(by="frame", kind="mergesort")
+    locs_out = locs.iloc[~index].sort_values(by="frame", kind="mergesort")
     return locs_in, locs_out
 
 
@@ -340,7 +333,7 @@ def threshold_minimum(image):
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.
 
     for counter in range(10000):
-        smooth_hist = uniform_filter1d(smooth_hist, 3)
+        smooth_hist = ndi.uniform_filter1d(smooth_hist, 3)
         maximum_idxs = find_local_maxima_idx(smooth_hist)
         if len(maximum_idxs) < 3:
             break
@@ -530,7 +523,9 @@ def threshold_local_gaussian(image: np.ndarray) -> np.ndarray:
     block_size = (3, 3)
     thresh_image = np.zeros(image.shape, dtype=image.dtype)
     sigma = tuple([(b - 1) / 6.0 for b in block_size])
-    gaussian_filter(image, sigma=sigma, output=thresh_image, mode='reflect')
+    ndi.gaussian_filter(
+        image, sigma=sigma, output=thresh_image, mode='reflect',
+    )
     mask = np.zeros(image.shape, dtype=bool)
     mask[image > thresh_image] = True
     return mask
@@ -558,7 +553,7 @@ def threshold_local_mean(image: np.ndarray) -> np.ndarray:
     """
     block_size = (3, 3)
     thresh_image = np.zeros(image.shape, dtype=image.dtype)
-    uniform_filter(image, block_size, output=thresh_image, mode='reflect')
+    ndi.uniform_filter(image, block_size, output=thresh_image, mode='reflect')
     mask = np.zeros(image.shape, dtype=bool)
     mask[image > thresh_image] = True
     return mask
@@ -586,7 +581,7 @@ def threshold_local_median(image: np.ndarray) -> np.ndarray:
     """
     block_size = (3, 3)
     thresh_image = np.zeros(image.shape, dtype=image.dtype)
-    median_filter(image, block_size, output=thresh_image, mode='reflect')
+    ndi.median_filter(image, block_size, output=thresh_image, mode='reflect')
     mask = np.zeros(image.shape, dtype=bool)
     mask[image > thresh_image] = True
     return mask

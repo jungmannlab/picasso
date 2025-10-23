@@ -9,6 +9,7 @@
 """
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm import tqdm as tqdm
 from scipy import ndimage
@@ -71,7 +72,7 @@ def rotate_img(img: np.ndarray, angle: float) -> np.ndarray:
 
 
 def roi_to_img(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     pick: int,
     radius: float,
     oversampling: float,
@@ -82,7 +83,7 @@ def roi_to_img(
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations from which to create the image.
     pick : int
         The group number of the localizations to be picked.
@@ -104,16 +105,16 @@ def roi_to_img(
     # Isolate locs from pick
     pick_locs = []
     if picks is None:
-        pick_locs = locs[(locs["group"] == pick)]
+        pick_locs = locs[locs["group"] == pick]
     else:
         x, y = picks
         pick_locs = lib.locs_at(x, y, locs, radius)
-        pick_locs.sort(kind="mergesort", order="frame")
+        pick_locs.sort_values(by="frame", kind="mergesort", inplace=True)
     # dirty method to avoid floating point errors with render
     radius -= 0.001
 
-    x_mean = np.mean(pick_locs.x)
-    y_mean = np.mean(pick_locs.y)
+    x_mean = np.mean(pick_locs["x"])
+    y_mean = np.mean(pick_locs["y"])
 
     x_min = x_mean - radius
     x_max = x_mean + radius
@@ -142,7 +143,7 @@ def roi_to_img(
 
 
 def prepare_data(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     label: int,
     pick_radius: float,
     oversampling: float,
@@ -155,7 +156,7 @@ def prepare_data(
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations from which to create the images.
     label : int
         Label for the data, typically the group number.
@@ -183,7 +184,7 @@ def prepare_data(
     data = []
     labels = []
 
-    for pick in tqdm(range(locs.group.max()), desc='Prepare '+str(label)):
+    for pick in tqdm(range(locs["group"].max()), desc='Prepare '+str(label)):
 
         pick_img = roi_to_img(locs, pick,
                               radius=pick_radius,
@@ -209,7 +210,7 @@ def prepare_data(
 
 def predict_structure(
     mlp: MLPClassifier,
-    locs: np.recarray,
+    locs: pd.DataFrame,
     pick: int,
     pick_radius: float,
     oversampling: float,
@@ -222,7 +223,7 @@ def predict_structure(
     ----------
     mlp : MLPClassifier
         Trained MLP classifier.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations to predict.
     pick : int
         Index of the localizations to predict.

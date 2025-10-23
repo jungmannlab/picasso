@@ -17,6 +17,7 @@ import importlib
 import pkgutil
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg,
@@ -44,14 +45,14 @@ class TableModel(QtCore.QAbstractTableModel):
         Number of columns.
     index : QtCore.QModelIndex
         Row/column.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     _row_count : int
         Number of rows.
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     index : QtCore.QModelIndex
         Row/column.
@@ -61,7 +62,7 @@ class TableModel(QtCore.QAbstractTableModel):
 
     def __init__(
         self,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         index: QtCore.QModelIndex,
         parent: QtWidgets.QWidget | None = None,
     ) -> None:
@@ -69,7 +70,7 @@ class TableModel(QtCore.QAbstractTableModel):
         self.locs = locs
         self.index = index
         try:
-            self._column_count = len(locs[0])
+            self._column_count = len(locs.columns)
         except IndexError:
             self._column_count = 0
         self._row_count = self.locs.shape[0]
@@ -86,7 +87,7 @@ class TableModel(QtCore.QAbstractTableModel):
         role: int = QtCore.Qt.DisplayRole,
     ) -> str | None:
         if role == QtCore.Qt.DisplayRole:
-            data = self.locs[index.row()][index.column()]
+            data = self.locs.iloc[index.row(), index.column()]
             return str(data)
         return None
 
@@ -98,7 +99,7 @@ class TableModel(QtCore.QAbstractTableModel):
     ) -> str | None:
         if role == QtCore.Qt.DisplayRole:
             if orientation == QtCore.Qt.Horizontal:
-                return self.locs.dtype.names[section]
+                return self.locs.columns[section]
             elif orientation == QtCore.Qt.Vertical:
                 return self.index + section
         return None
@@ -162,7 +163,7 @@ class PlotWindow(QtWidgets.QWidget):
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization data.
     figure : plt.Figure
         Matplotlib figure.
@@ -171,14 +172,14 @@ class PlotWindow(QtWidgets.QWidget):
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization data.
     """
 
     def __init__(
         self,
         main_window: QtWidgets.QMainWindow,
-        locs: np.recarray,
+        locs: pd.DataFrame,
     ) -> None:
         super().__init__()
         self.main_window = main_window
@@ -197,7 +198,7 @@ class PlotWindow(QtWidgets.QWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
 
-    def update_locs(self, locs: np.recarray) -> None:
+    def update_locs(self, locs: pd.DataFrame) -> None:
         self.locs = locs
         self.plot()
         self.update()
@@ -219,14 +220,14 @@ class HistWindow(PlotWindow):
         Field name for the histogram.
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization data.
     """
 
     def __init__(
         self,
         main_window: QtWidgets.QMainWindow,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         field: str,
     ) -> None:
         self.field = field
@@ -242,7 +243,7 @@ class HistWindow(PlotWindow):
         self.figure.suptitle(self.field)
         axes = self.figure.add_subplot(111)
         axes.hist(data, bins, rwidth=1, linewidth=0)
-        data_range = data.ptp()
+        data_range = data.max() - data.min()
         axes.set_xlim(
             [bins[0] - 0.05 * data_range, data.max() + 0.05 * data_range]
         )
@@ -285,7 +286,7 @@ class Hist2DWindow(PlotWindow):
     ----------
     main_window : QtWidgets.QMainWindow
         Main window.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization data.
     field_x : str
         Field name for the x-axis.
@@ -296,7 +297,7 @@ class Hist2DWindow(PlotWindow):
     def __init__(
         self,
         main_window: QtWidgets.QMainWindow,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         field_x: str,
         field_y: str
     ) -> None:
@@ -321,9 +322,9 @@ class Hist2DWindow(PlotWindow):
         counts, x_edges, y_edges, image = axes.hist2d(
             x, y, bins=[bins_x, bins_y], norm=LogNorm()
         )
-        x_range = x.ptp()
+        x_range = x.max() - x.min()
         axes.set_xlim([bins_x[0] - 0.05 * x_range, x.max() + 0.05 * x_range])
-        y_range = y.ptp()
+        y_range = y.max() - y.min()
         axes.set_ylim([bins_y[0] - 0.05 * y_range, y.max() + 0.05 * y_range])
         self.figure.colorbar(image, ax=axes)
         axes.grid(False)
@@ -451,7 +452,7 @@ class FilterNum(QtWidgets.QDialog):
         """Changes attributes in the dialog according to locs.dtypes."""
         while self.attributes.count():
             self.attributes.removeItem(0)
-        names = self.window.locs.dtype.names
+        names = self.window.locs.columns
         for name in names:
             self.attributes.addItem(name)
 
@@ -473,7 +474,7 @@ class Window(QtWidgets.QMainWindow):
         Dictionary of histogram windows.
     hist2d_windows : dict
         Dictionary of 2D histogram windows.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations loaded.
     pwd : str
         Current working directory.
@@ -560,20 +561,20 @@ class Window(QtWidgets.QMainWindow):
         except io.NoMetadataFileError:
             return
         if self.locs is not None:
-            for field in self.locs.dtype.names:
-                if self.hist_windows[field]:
-                    self.hist_windows[field].close()
-                for field_y in self.locs.dtype.names:
-                    if self.hist2d_windows[field][field_y]:
-                        self.hist_windows[field][field_y].close()
+            for column in self.locs.columns:
+                if self.hist_windows[column]:
+                    self.hist_windows[column].close()
+                for column_y in self.locs.columns:
+                    if self.hist2d_windows[column][column_y]:
+                        self.hist_windows[column][column_y].close()
         self.locs_path = path
         self.update_locs(locs)
-        for field in self.locs.dtype.names:
-            self.hist_windows[field] = None
-            self.hist2d_windows[field] = {}
-            for field_y in self.locs.dtype.names:
-                self.hist2d_windows[field][field_y] = None
-            self.filter_log[field] = None
+        for column in self.locs.columns:
+            self.hist_windows[column] = None
+            self.hist2d_windows[column] = {}
+            for column_y in self.locs.columns:
+                self.hist2d_windows[column][column_y] = None
+            self.filter_log[column] = None
         self.filter_num.on_locs_loaded()
 
         self.setWindowTitle(
@@ -587,7 +588,7 @@ class Window(QtWidgets.QMainWindow):
         if len(indices) > 0:
             for index in indices:
                 index = index.column()
-                field = self.locs.dtype.names[index]
+                field = self.locs.columns[index]
                 if not self.hist_windows[field]:
                     self.hist_windows[field] = HistWindow(
                         self, self.locs, field,
@@ -600,7 +601,7 @@ class Window(QtWidgets.QMainWindow):
         if len(indices) == 2:
             indices = [index.column() for index in indices]
             field_x, field_y = [
-                self.locs.dtype.names[index] for index in indices
+                self.locs.columns[index] for index in indices
             ]
             if not self.hist2d_windows[field_x][field_y]:
                 self.hist2d_windows[field_x][field_y] = Hist2DWindow(
@@ -608,7 +609,7 @@ class Window(QtWidgets.QMainWindow):
                 )
             self.hist2d_windows[field_x][field_y].show()
 
-    def update_locs(self, locs: np.recarray) -> None:
+    def update_locs(self, locs: pd.DataFrame) -> None:
         self.locs = locs
         self.vertical_scrollbar.setMaximum(len(locs) - 1)
         self.display_locs(self.vertical_scrollbar.value())
@@ -637,7 +638,7 @@ class Window(QtWidgets.QMainWindow):
             self.filter_log[field] = [xmin, xmax]
 
     def save_file_dialog(self) -> None:
-        if "x" in self.locs.dtype.names:  # Saving only for locs
+        if "x" in self.locs.columns:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)
             out_path = base + "_filter.hdf5"
             path, exe = QtWidgets.QFileDialog.getSaveFileName(
