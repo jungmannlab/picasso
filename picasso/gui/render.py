@@ -4998,8 +4998,6 @@ class View(QtWidgets.QLabel):
         Draws a rectangle used in zooming in.
     _size_hint : tuple
         Used for size adjustment.
-    unfold_status : str
-        Specifies if unfold/refold groups.
     window : QMainWindow
         Instance of the main window.
     x_color : np.array
@@ -9447,70 +9445,11 @@ class View(QtWidgets.QLabel):
                 self.index_blocks[channel] = None
                 self.update_scene()
 
-    def unfold_groups(self) -> None:
-        """Shift grouped localizations across x-axis. Useful for
-        localizations that were processed with Picasso: Average."""
-        if len(self.all_locs) > 1:
-            QtWidgets.QMessageBox.information(
-                self,
-                "Unfold error",
-                "Please load only one channel.",
-            )
-            return
-        if not hasattr(self.all_locs[0], "group"):
-            QtWidgets.QMessageBox.information(
-                self,
-                "Unfold error",
-                (
-                    "Localizations need to be grouped before unfolding"
-                    " and processed with Picasso: Average."
-                )
-            )
-            return
-
-        if not hasattr(self, "unfold_status"):
-            self.unfold_status = "folded"
-        if self.unfold_status == "folded":
-            if hasattr(self.all_locs[0], "group"):
-                self.all_locs[0].x += self.all_locs[0].group * 2
-                groups = np.unique(self.all_locs[0].group)
-
-                if self._picks:
-                    if self._pick_shape != "Circle":
-                        raise NotImplementedError(
-                            "Unfolding implemented for circular picks only."
-                        )
-                    for j in range(len(self._picks)):
-                        for i in range(len(groups) - 1):
-                            position = self._picks[j][:]
-                            positionlist = list(position)
-                            positionlist[0] += (i + 1) * 2
-                            position = tuple(positionlist)
-                            self._picks.append(position)
-                # Update width information
-                self.oldwidth = self.infos[0][0]["Width"]
-                minwidth = np.ceil(
-                    np.mean(self.all_locs[0].x)
-                    + np.max(self.all_locs[0].x)
-                    - np.min(self.all_locs[0].x)
-                )
-                self.infos[0][0]["Width"] = int(
-                    np.max([self.oldwidth, minwidth])
-                )
-                self.locs[0] = copy.copy(self.all_locs[0])
-                self.fit_in_view()
-                self.unfold_status = "unfolded"
-                self.n_picks = len(self._picks)
-                self.update_pick_info_short()
-        else:
-            self.refold_groups()
-            self.clear_picks()
-
     def unfold_groups_square(self) -> None:
-        """Shifts grouped localizations onto a rectangular grid of
-        chosen length. Localizations can be grouped, for example, by
-        picking. Circular picks without saving them beforehand are
-        accepted as well."""
+        """Shifts grouped localizations onto a square grid with a chosen
+        number of columns and spacing. Localizations can be grouped, for
+        example, by picking (saving picked localizations is not
+        necessary) or clustering."""
         if len(self.all_locs) > 1:
             QtWidgets.QMessageBox.information(
                 self,
@@ -9548,6 +9487,7 @@ class View(QtWidgets.QLabel):
             "Input Dialog",
             "Set number of elements per column:",
             int(np.ceil(np.sqrt(len(np.unique(self.all_locs[0]["group"]))))),
+            max=len(np.unique(self.all_locs[0]["group"])),
         )
         if not ok:
             if remove_group:
@@ -9604,20 +9544,6 @@ class View(QtWidgets.QLabel):
             self._picks = []
         self.locs[0] = copy.copy(self.all_locs[0])
         self.fit_in_view()
-
-    def refold_groups(self) -> None:
-        """Refold grouped localizations across x axis."""
-        if len(self.all_locs) > 1:
-            raise NotImplementedError(
-                "Please load only one channel."
-            )
-
-        if hasattr(self.all_locs[0], "group"):
-            self.all_locs[0].x -= self.all_locs[0].group * 2
-        self.locs[0] = copy.copy(self.all_locs[0])
-        self.fit_in_view()
-        self.infos[0][0]["Width"] = self.oldwidth
-        self.unfold_status == "folded"
 
     def update_cursor(self) -> None:
         """Change cursor according to self._mode."""
@@ -10394,8 +10320,6 @@ class Window(QtWidgets.QMainWindow):
         postprocess_menu.addSeparator()
         group_action = postprocess_menu.addAction("Remove group info")
         group_action.triggered.connect(self.remove_group)
-        unfold_action = postprocess_menu.addAction("Unfold / Refold groups")
-        unfold_action.triggered.connect(self.view.unfold_groups)
         unfold_action_square = postprocess_menu.addAction(
             "Unfold groups/picks (square grid)"
         )
