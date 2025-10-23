@@ -20,7 +20,6 @@ import threading
 from typing import Callable
 
 import yaml
-import h5py
 import nd2
 import numpy as np
 import pandas as pd
@@ -1508,11 +1507,9 @@ def to_raw(path: str, verbose: bool = True) -> None:
 
 
 def save_datasets(path: str, info: dict, **kwargs) -> None:
-    # TODO: use pandas rather than h5py?? also remove the import at top
     """Save multiple datasets to an HDF5 file at the specified path."""
-    with h5py.File(path, "w") as hdf:
-        for key, val in kwargs.items():
-            hdf.create_dataset(key, data=val)
+    for key, val in kwargs.items():
+        val.to_hdf(path, key=key, mode="a")
     base, ext = os.path.splitext(path)
     info_path = base + ".yaml"
     save_info(info_path, info)
