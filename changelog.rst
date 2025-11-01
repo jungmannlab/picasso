@@ -20,6 +20,7 @@ Important updates:
 - Render: apply drift from external file fixed
 - Render 3D: remove measurement points fixed
 - Localize: user-friendly message display of large numbers (with commas)
+- Localize: fix acquisition comment extraction from uManager .tif files
 
 0.8.8
 -----
