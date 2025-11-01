@@ -19,6 +19,7 @@ Important updates:
 - Render: unfold groups/picks (rectangular grid) fixed for nonconsecutive grouping (the grid might have had missing elements before)
 - Render: apply drift from external file fixed
 - Render 3D: remove measurement points fixed
+- Render 3D: save rotated localizations fixed
 - Localize: user-friendly message display of large numbers (with commas)
 - Localize: fix acquisition comment extraction from uManager .tif files
 

@@ -2144,7 +2144,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             angx = int(self.view_rot.angx * 180 / np.pi)
             angy = int(self.view_rot.angy * 180 / np.pi)
             angz = int(self.view_rot.angz * 180 / np.pi)
-            pixelsize = self.window.view.display_settings_dlg.pixelsize.value()
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
             if self.view_rot.pick_shape == "Circle":
                 x, y = self.view_rot.pick
                 pick = [float(x), float(y)]
