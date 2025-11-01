@@ -1123,32 +1123,71 @@ class TiffMap:
                     info["Camera"] = mm_info["Camera"]
                 else:
                     info["Camera"] = "None"
+            # elif tag == 84720485:  # Acquisition comments
+            #     print("Found the acquisition commments!")
+            #     count = self.read("L")
+            #     print(f"{count} bytes of acq comments")
+            #     readout = self.file.read(4 * count).strip(b"\0")
+            #     print(f"read: {readout}")
+            #     # for generality in indexing in line below
+            #     readout_s = readout.decode() + ' '
+            #     print(f"decoded: {readout_s}")
+            #     readout_s = readout_s[
+            #         readout_s.index('{'):-readout_s[::-1].index('}')
+            #     ]
+            #     print(f"within brackets: {readout_s}")
+            #     comments = json.loads(readout_s)["Summary"].split("\n")
+            #     print(f"comments: {comments}")
+            #     break
+
         # Acquistion comments
         self.file.seek(self.last_ifd_offset)
         comments = ""
         offset = 0
         while True:  # Fin the block with the summary
             line = self.file.readline()
+            lineshort = str(line)
+            # if len(lineshort) > 200:
+            #     lineshort = lineshort[:200]
+            # print(f"line is: {lineshort}")
             if "Summary" in str(line):
+                # readout_s = line.decode()
+                readout_s = str(line)
+                # print(f"decoded: {readout_s}")
+                try:
+                    readout_s = readout_s[
+                        readout_s.index('{'):-readout_s[::-1].index('}')
+                    ]
+                    comments = json.loads(readout_s)["Summary"].split("\n")
+                except:
+                    pass
+                # print(f"comments: {comments}")
                 break
             if not line:
                 break
             offset += len(line)
 
-        if line:
-            for i in range(len(line)):
-                self.file.seek(self.last_ifd_offset + offset + i)
-                readout = self.read("L")
-                if readout == 84720485:  # Acquisition comments
-                    count = self.read("L")
-                    readout = self.file.read(4 * count).strip(b"\0")
-                    # for generality in indexing in line below
-                    readout_s = readout.decode() + ' '
-                    readout_s = readout_s[
-                        readout_s.index('{'):-readout_s[::-1].index('}')
-                    ]
-                    comments = json.loads(readout_s)["Summary"].split("\n")
-                    break
+        # print('Found an entry with "Summary". Now reading acquisition comments')
+        # if line:
+        #     for i in range(len(line)):
+        #         self.file.seek(self.last_ifd_offset + offset + i)
+        #         # tag = self.read("H")
+        #         readout = self.read("L")
+        #         print(f"ID: {readout} (84720485 is acq comment)")
+        #         if readout == 84720485:  # Acquisition comments
+        #             count = self.read("L")
+        #             print(f"{count} bytes of acq comments")
+        #             readout = self.file.read(4 * count).strip(b"\0")
+        #             print(f"read: {readout}")
+        #             # for generality in indexing in line below
+        #             readout_s = readout.decode() + ' '
+        #             print(f"decoded: {readout_s}")
+        #             readout_s = readout_s[
+        #                 readout_s.index('{'):-readout_s[::-1].index('}')
+        #             ]
+        #             print(f"within brackets: {readout_s}")
+        #             comments = json.loads(readout_s)["Summary"].split("\n")
+        #             break
 
         info["Micro-Manager Acquisition Comments"] = comments
         return info
