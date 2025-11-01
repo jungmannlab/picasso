@@ -1728,7 +1728,7 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         self.buttons.rejected.connect(self.reject)
 
     @staticmethod
-    def getParams(parent: QtWidgets.QWidget) -> list[int | bool]:
+    def getParams(parent: QtWidgets.QWidget) -> list:
         """Create the dialog and returns the numbers of molecular
         targets per simulation, number of simulations, resolution
         factor, check if the results are to be saved."""
@@ -3066,13 +3066,30 @@ class SimulationsTab(QtWidgets.QDialog):
             loaded = df.columns
             titles = [_.title for _ in self.structures]
             if (
-                len(loaded) == len(titles)
-                and all([t in loaded for t in titles])
-            ):
+                len(loaded) == len(titles) * 2
+                and all([f"N_{t}" in loaded for t in titles])
+            ):  # check that all titles are present
                 self.N_structures_fit = {
-                    column: df[column].values.astype(np.int32)
-                    for column in df.columns
+                    structure_name: (
+                        df[f"N_{structure_name}"].values.astype(np.int32)
+                    )
+                    for structure_name in titles
                 }
+                # get granularity and n_sim_fit from the user
+                n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
+                    self, "", "Number of simulations per tested combination",
+                    value=10, min=1, max=1000, step=1
+                )
+                if not ok:
+                    return
+                granularity, ok = QtWidgets.QInputDialog.getInt(
+                    self, "", "Granularity",
+                    value=21, min=1, max=1000, step=1
+                )
+                if not ok:
+                    return
+                self.n_sim_fit = n_sim_fit
+                self.granularity = granularity
                 # update the generate n structures button
                 n = len(self.N_structures_fit[self.structures[0].title])
                 estimated_time = self.estimate_fit_time(n)
