@@ -3038,7 +3038,7 @@ class SimulationsTab(QtWidgets.QDialog):
             gt_coords=self.exp_data,
             N_sim=self.n_sim_fit,
         )
-        _ = spinner.NN_scorer(N_structures, callback=None)
+        _ = spinner.NN_scorer(N_structures)
         dt = time.time() - t0
 
         # estimate the time for n combinations with a certain number of CPUs;

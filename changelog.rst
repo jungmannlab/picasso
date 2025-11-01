@@ -20,8 +20,9 @@ Important updates:
 - Render: apply drift from external file fixed
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
-- Localize: user-friendly message display of large numbers (with commas)
-- Localize: fix acquisition comment extraction from uManager .tif files
+- Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
+- Localize: fixed acquisition comment extraction from uManager .tif files
+- SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
 
 0.8.8
 -----
