@@ -2339,7 +2339,7 @@ class SimulationsTab(QtWidgets.QDialog):
         only).
     depth_stack : QtWidgets.QStackedWidget
         Stack of widgets for setting the depth of the simulation.
-        Index == 0 ->
+        Index == 0 -> disabled (2D), index == 1 -> enabled (3D).
     dim_widget : QtWidgets.QComboBox
         Combo box for setting the dimension of the simulation (2D/3D).
     exp_data : dict
@@ -3237,32 +3237,38 @@ class SimulationsTab(QtWidgets.QDialog):
         metadata["Date"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         metadata["File location of structures"] = self.structures_path
         metadata["Molecular targets"] = ", ".join(self.targets)
-        metadata["File location of experimental data"] = (
-            ", ".join([self.exp_data_paths[target] for target in self.targets])
-        )
-        if self.mask_den_stack.currentIndex() == 0:
-            metadata["File location of masks"] = (
-                ", ".join([self.mask_paths[target] for target in self.targets])
-            )
-            metadata["Number of simulations"] = self.n_sim_fit
-        else:
-            metadata["Simulated FOV (um)"] = (
-                ", ".join(
-                    [str(_/1e3) for _ in self.mixer.roi if _ is not None]
-                )
-            )
-        metadata["Label uncertainties (nm)"] = (
-            ", ".join([str(_.value()) for _ in self.label_unc_spins])
-        )
-        metadata["labeling efficiencies (%)"] = (
-            ", ".join([str(_.value()) for _ in self.le_spins])
-        )
+        metadata["Number of simulations"] = self.n_sim_fit
+        metadata["Parameter search space granularity"] = self.granularity
+        metadata["Dimensionality"] = self.dim_widget.currentText()
         metadata["Rotations mode"] = (
             self.settings_dialog.rot_dim_widget.currentText()
         )
-        metadata["Dimensionality"] = self.dim_widget.currentText()
-        metadata["Number of simulation repeats"] = str(self.n_sim_fit)
-        metadata["Parameter search space granularity"] = self.granularity
+        for t_idx, target in enumerate(self.targets):
+            metadata[f"File location of experimental data ({target})"] = (
+                self.exp_data_paths[target]
+            )
+            metadata[f"Label uncertainties (nm) ({target})"] = (
+                self.label_unc_spins[t_idx].value()
+            )
+            metadata[f"Labeling efficiencies (%) ({target})"] = (
+                self.le_spins[t_idx].value()
+            )
+        # masked used / observed density
+        if self.mask_den_stack.currentIndex() == 0:  # mask
+            for target in self.targets:
+                metadata[f"Mask ({target})"] = self.mask_paths[target]
+        else:
+            for target, den_spin in zip(self.targets, self.densities_spins):
+                if self.dim_widget.currentIndex() == 0:  # 2D
+                    label = f"Observed density (um^-2) ({target})"
+                if self.dim_widget.currentIndex() == 1:  # 3D
+                    label = f"Observed density (um^-3) ({target})"
+                metadata[label] = den_spin.value()
+            metadata["Simulated FOV (um)"] = " x ".join([
+                        str(_ / 1e3)
+                        for _ in self.mixer.roi if _ is not None
+                    ])
+        # fit results
         metadata["Best fitting proportions (%)"] = (
             self.fit_results_display.text().replace("\n", "")
         )
@@ -3302,13 +3308,15 @@ class SimulationsTab(QtWidgets.QDialog):
         for i, t1 in enumerate(self.mixer.targets):
             for t2 in self.mixer.targets[i:]:
                 key = f"{t1}-{t2}"
-                metadata[f"Number of neighbors at fitting ({key})"] = (
+                metadata[f"Number of neighbors considered ({key})"] = (
                     self.mixer.get_neighbor_counts(t1, t2)
                 )
 
         # labeling efficiency fitting
         if self.le_fitting_check.isChecked():
-            metadata["Labeling efficiency fitting"] = (
+            for target in self.targets:
+                metadata.pop(f"Labeling efficiency (%) ({target})", None)
+            metadata["Best fitting labeling efficiencies (%)"] = (
                 self.fit_results_display.text()
             )
 
