@@ -634,6 +634,9 @@ class ViewRotation(QtWidgets.QLabel):
             ).setChecked(True)
             self.window.display_settings_dlg.colormap.setCurrentText(color)
 
+            # remove measurement points
+            self._points = []
+
             # save the pick information
             self.pick = w.view._picks[0]
             self.pick_shape = w.view._pick_shape
@@ -1493,8 +1496,7 @@ class ViewRotation(QtWidgets.QLabel):
                 event.accept()
             # remove point
             elif event.button() == QtCore.Qt.RightButton:
-                x, y = self.map_to_movie(event.pos())
-                self.remove_points((x, y))
+                self.remove_points()
                 event.accept()
             else:
                 event.ignore()

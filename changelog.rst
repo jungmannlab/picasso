@@ -16,7 +16,9 @@ Important updates:
 *Small improvements and bug fixes:*
 +++++++++++++++++++++++++++++++++++
 
-- Render: unfold groups/picks (square grid) reassigns the groups to be consecutive
+- Render: unfold groups/picks (rectangular grid) fixed for nonconsecutive grouping (the grid might have had missing elements before)
+- Render: apply drift from external file fixed
+- Render 3D: remove measurement points fixed
 - Localize: user-friendly message display of large numbers (with commas)
 
 0.8.8
