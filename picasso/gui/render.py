@@ -9401,44 +9401,46 @@ class View(QtWidgets.QLabel):
             )
             if path:
                 drift = np.loadtxt(path, delimiter=' ')
+                all_frame = self.all_locs[channel]["frame"]
+                frame = self.locs[channel]["frame"]
                 if drift.shape[1] == 3:  # 3D drift
                     drift = pd.DataFrame({
                         "x": drift[:, 0],
                         "y": drift[:, 1],
                         "z": drift[:, 2],
                     })
-                    self.all_locs[channel]["x"] -= drift["x"][
-                        self.all_locs[channel]["frame"]
-                    ]
-                    self.all_locs[channel]["y"] -= drift["y"][
-                        self.all_locs[channel]["frame"]
-                    ]
-                    self.all_locs[channel]["z"] -= drift["z"][
-                        self.all_locs[channel]["frame"]
-                    ]
-                    self.locs[channel]["x"] -= drift["x"][
-                        self.locs[channel]["frame"]
-                    ]
-                    self.locs[channel]["y"] -= drift["y"][
-                        self.locs[channel]["frame"]
-                    ]
-                    self.locs[channel]["z"] -= drift["z"][
-                        self.locs[channel]["frame"]
-                    ]
+                    self.all_locs[channel]["x"] -= (
+                        drift["x"].iloc[all_frame].values
+                    )
+                    self.all_locs[channel]["y"] -= (
+                        drift["y"].iloc[all_frame].values
+                    )
+                    self.all_locs[channel]["z"] -= (
+                        drift["z"].iloc[all_frame].values
+                    )
+                    self.locs[channel]["x"] -= (
+                        drift["x"].iloc[frame].values
+                    )
+                    self.locs[channel]["y"] -= (
+                        drift["y"].iloc[frame].values
+                    )
+                    self.locs[channel]["z"] -= (
+                        drift["z"].iloc[frame].values
+                    )
                 else:  # 2D drift
                     drift = pd.DataFrame({"x": drift[:, 0], "y": drift[:, 1]})
-                    self.all_locs[channel]["x"] -= drift["x"][
-                        self.all_locs[channel]["frame"]
-                    ]
-                    self.all_locs[channel]["y"] -= drift["y"][
-                        self.all_locs[channel]["frame"]
-                    ]
-                    self.locs[channel]["x"] -= drift["x"][
-                        self.locs[channel]["frame"]
-                    ]
-                    self.locs[channel]["y"] -= drift["y"][
-                        self.locs[channel]["frame"]
-                    ]
+                    self.all_locs[channel]["x"] -= (
+                        drift["x"].iloc[all_frame].values
+                    )
+                    self.all_locs[channel]["y"] -= (
+                        drift["y"].iloc[all_frame].values
+                    )
+                    self.locs[channel]["x"] -= (
+                        drift["x"].iloc[frame].values
+                    )
+                    self.locs[channel]["y"] -= (
+                        drift["y"].iloc[frame].values
+                    )
                 self._drift[channel] = drift
                 self._driftfiles[channel] = path
                 self.currentdrift[channel] = copy.copy(drift)
