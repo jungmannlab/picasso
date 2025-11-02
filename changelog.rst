@@ -19,6 +19,7 @@ Important updates:
 
 - Render: unfold groups/picks (rectangular grid) fixed for nonconsecutive grouping (the grid might have had missing elements before)
 - Render: apply drift from external file fixed
+- Render: fix loading camera pixel size from metadata (see issue #560)
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
 - Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
