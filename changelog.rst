@@ -24,6 +24,7 @@ Important updates:
 - Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
 - Localize: fixed acquisition comment extraction from uManager .tif files
 - SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
+- SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
 
 0.8.8
 -----

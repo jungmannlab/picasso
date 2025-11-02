@@ -2929,6 +2929,9 @@ class SimulationsTab(QtWidgets.QDialog):
             title_spin.setDecimals(2)
             title_spin.setSingleStep(1)
             title_spin.setValue(0)
+            title_spin.valueChanged.connect(
+                partial(self.check_prop_str_sum, name=title)
+            )
 
             label = QtWidgets.QLabel(f"{title}:")
             column = 2 if len(self.prop_str_input_spins) % 2 else 0
@@ -3233,6 +3236,24 @@ class SimulationsTab(QtWidgets.QDialog):
 
     def save_fit_results(self) -> None:
         """Save fit results in .txt with all parameters used."""
+        metadata = self.summarize_fit_results()
+        out_path = self.structures_path.replace(".yaml", "_fit_summary.txt")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save fitting summary", out_path, filter="*.txt"
+        )
+        if path:
+            with open(path, "w") as f:
+                for key, value in metadata.items():
+                    f.write(f"{key}: {value}\n")
+
+    def summarize_fit_results(self) -> None:
+        """Summarize fit results and parameters in a dictionary.
+
+        Returns
+        -------
+        metadata : dict
+            Dictionary with all parameters used and fit results.
+        """
         metadata = {}
         metadata["Date"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         metadata["File location of structures"] = self.structures_path
@@ -3319,16 +3340,7 @@ class SimulationsTab(QtWidgets.QDialog):
             metadata["Best fitting labeling efficiencies (%)"] = (
                 self.fit_results_display.text()
             )
-
-        # save metadata
-        out_path = self.structures_path.replace(".yaml", "_fit_summary.txt")
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save fitting summary", out_path, filter="*.txt"
-        )
-        if path:
-            with open(path, "w") as f:
-                for key, value in metadata.items():
-                    f.write(f"{key}: {value}\n")
+        return metadata
 
     @check_structures_loaded
     @check_exp_data_loaded
@@ -3781,6 +3793,18 @@ class SimulationsTab(QtWidgets.QDialog):
         sum_ = sum([_.value() for _ in self.prop_str_input_spins])
         ok = True if isclose(sum_, 100, abs_tol=1e-3) else False
         return ok, sum_
+
+    def check_prop_str_sum(self, value: float, name: str) -> None:
+        """Stop the user from increasing the proportions to exceed
+        100%."""
+        sum_ = sum([_.value() for _ in self.prop_str_input_spins])
+        if sum_ <= 100:
+            return
+        all_names = [_.title for _ in self.structures]
+        idx = all_names.index(name)
+        self.prop_str_input_spins[idx].setValue(
+            self.prop_str_input_spins[idx].value() - (sum_ - 100)
+        )
 
     def find_roi(
         self,
