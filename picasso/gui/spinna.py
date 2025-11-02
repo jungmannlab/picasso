@@ -1728,7 +1728,7 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         self.buttons.rejected.connect(self.reject)
 
     @staticmethod
-    def getParams(parent: QtWidgets.QWidget) -> list[int | bool]:
+    def getParams(parent: QtWidgets.QWidget) -> list:
         """Create the dialog and returns the numbers of molecular
         targets per simulation, number of simulations, resolution
         factor, check if the results are to be saved."""
@@ -2339,7 +2339,7 @@ class SimulationsTab(QtWidgets.QDialog):
         only).
     depth_stack : QtWidgets.QStackedWidget
         Stack of widgets for setting the depth of the simulation.
-        Index == 0 ->
+        Index == 0 -> disabled (2D), index == 1 -> enabled (3D).
     dim_widget : QtWidgets.QComboBox
         Combo box for setting the dimension of the simulation (2D/3D).
     exp_data : dict
@@ -2929,6 +2929,9 @@ class SimulationsTab(QtWidgets.QDialog):
             title_spin.setDecimals(2)
             title_spin.setSingleStep(1)
             title_spin.setValue(0)
+            title_spin.valueChanged.connect(
+                partial(self.check_prop_str_sum, name=title)
+            )
 
             label = QtWidgets.QLabel(f"{title}:")
             column = 2 if len(self.prop_str_input_spins) % 2 else 0
@@ -3038,7 +3041,7 @@ class SimulationsTab(QtWidgets.QDialog):
             gt_coords=self.exp_data,
             N_sim=self.n_sim_fit,
         )
-        _ = spinner.NN_scorer(N_structures, callback=None)
+        _ = spinner.NN_scorer(N_structures)
         dt = time.time() - t0
 
         # estimate the time for n combinations with a certain number of CPUs;
@@ -3066,13 +3069,30 @@ class SimulationsTab(QtWidgets.QDialog):
             loaded = df.columns
             titles = [_.title for _ in self.structures]
             if (
-                len(loaded) == len(titles)
-                and all([t in loaded for t in titles])
-            ):
+                len(loaded) == len(titles) * 2
+                and all([f"N_{t}" in loaded for t in titles])
+            ):  # check that all titles are present
                 self.N_structures_fit = {
-                    column: df[column].values.astype(np.int32)
-                    for column in df.columns
+                    structure_name: (
+                        df[f"N_{structure_name}"].values.astype(np.int32)
+                    )
+                    for structure_name in titles
                 }
+                # get granularity and n_sim_fit from the user
+                n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
+                    self, "", "Number of simulations per tested combination",
+                    value=10, min=1, max=1000, step=1
+                )
+                if not ok:
+                    return
+                granularity, ok = QtWidgets.QInputDialog.getInt(
+                    self, "", "Granularity",
+                    value=21, min=1, max=1000, step=1
+                )
+                if not ok:
+                    return
+                self.n_sim_fit = n_sim_fit
+                self.granularity = granularity
                 # update the generate n structures button
                 n = len(self.N_structures_fit[self.structures[0].title])
                 estimated_time = self.estimate_fit_time(n)
@@ -3216,36 +3236,60 @@ class SimulationsTab(QtWidgets.QDialog):
 
     def save_fit_results(self) -> None:
         """Save fit results in .txt with all parameters used."""
+        metadata = self.summarize_fit_results()
+        out_path = self.structures_path.replace(".yaml", "_fit_summary.txt")
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save fitting summary", out_path, filter="*.txt"
+        )
+        if path:
+            with open(path, "w") as f:
+                for key, value in metadata.items():
+                    f.write(f"{key}: {value}\n")
+
+    def summarize_fit_results(self) -> None:
+        """Summarize fit results and parameters in a dictionary.
+
+        Returns
+        -------
+        metadata : dict
+            Dictionary with all parameters used and fit results.
+        """
         metadata = {}
         metadata["Date"] = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
         metadata["File location of structures"] = self.structures_path
         metadata["Molecular targets"] = ", ".join(self.targets)
-        metadata["File location of experimental data"] = (
-            ", ".join([self.exp_data_paths[target] for target in self.targets])
-        )
-        if self.mask_den_stack.currentIndex() == 0:
-            metadata["File location of masks"] = (
-                ", ".join([self.mask_paths[target] for target in self.targets])
-            )
-            metadata["Number of simulations"] = self.n_sim_fit
-        else:
-            metadata["Simulated FOV (um)"] = (
-                ", ".join(
-                    [str(_/1e3) for _ in self.mixer.roi if _ is not None]
-                )
-            )
-        metadata["Label uncertainties (nm)"] = (
-            ", ".join([str(_.value()) for _ in self.label_unc_spins])
-        )
-        metadata["labeling efficiencies (%)"] = (
-            ", ".join([str(_.value()) for _ in self.le_spins])
-        )
+        metadata["Number of simulations"] = self.n_sim_fit
+        metadata["Parameter search space granularity"] = self.granularity
+        metadata["Dimensionality"] = self.dim_widget.currentText()
         metadata["Rotations mode"] = (
             self.settings_dialog.rot_dim_widget.currentText()
         )
-        metadata["Dimensionality"] = self.dim_widget.currentText()
-        metadata["Number of simulation repeats"] = str(self.n_sim_fit)
-        metadata["Parameter search space granularity"] = self.granularity
+        for t_idx, target in enumerate(self.targets):
+            metadata[f"File location of experimental data ({target})"] = (
+                self.exp_data_paths[target]
+            )
+            metadata[f"Label uncertainties (nm) ({target})"] = (
+                self.label_unc_spins[t_idx].value()
+            )
+            metadata[f"Labeling efficiencies (%) ({target})"] = (
+                self.le_spins[t_idx].value()
+            )
+        # masked used / observed density
+        if self.mask_den_stack.currentIndex() == 0:  # mask
+            for target in self.targets:
+                metadata[f"Mask ({target})"] = self.mask_paths[target]
+        else:
+            for target, den_spin in zip(self.targets, self.densities_spins):
+                if self.dim_widget.currentIndex() == 0:  # 2D
+                    label = f"Observed density (um^-2) ({target})"
+                if self.dim_widget.currentIndex() == 1:  # 3D
+                    label = f"Observed density (um^-3) ({target})"
+                metadata[label] = den_spin.value()
+            metadata["Simulated FOV (um)"] = " x ".join([
+                        str(_ / 1e3)
+                        for _ in self.mixer.roi if _ is not None
+                    ])
+        # fit results
         metadata["Best fitting proportions (%)"] = (
             self.fit_results_display.text().replace("\n", "")
         )
@@ -3285,25 +3329,18 @@ class SimulationsTab(QtWidgets.QDialog):
         for i, t1 in enumerate(self.mixer.targets):
             for t2 in self.mixer.targets[i:]:
                 key = f"{t1}-{t2}"
-                metadata[f"Number of neighbors at fitting ({key})"] = (
+                metadata[f"Number of neighbors considered ({key})"] = (
                     self.mixer.get_neighbor_counts(t1, t2)
                 )
 
         # labeling efficiency fitting
         if self.le_fitting_check.isChecked():
-            metadata["Labeling efficiency fitting"] = (
+            for target in self.targets:
+                metadata.pop(f"Labeling efficiency (%) ({target})", None)
+            metadata["Best fitting labeling efficiencies (%)"] = (
                 self.fit_results_display.text()
             )
-
-        # save metadata
-        out_path = self.structures_path.replace(".yaml", "_fit_summary.txt")
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save fitting summary", out_path, filter="*.txt"
-        )
-        if path:
-            with open(path, "w") as f:
-                for key, value in metadata.items():
-                    f.write(f"{key}: {value}\n")
+        return metadata
 
     @check_structures_loaded
     @check_exp_data_loaded
@@ -3756,6 +3793,18 @@ class SimulationsTab(QtWidgets.QDialog):
         sum_ = sum([_.value() for _ in self.prop_str_input_spins])
         ok = True if isclose(sum_, 100, abs_tol=1e-3) else False
         return ok, sum_
+
+    def check_prop_str_sum(self, value: float, name: str) -> None:
+        """Stop the user from increasing the proportions to exceed
+        100%."""
+        sum_ = sum([_.value() for _ in self.prop_str_input_spins])
+        if sum_ <= 100:
+            return
+        all_names = [_.title for _ in self.structures]
+        idx = all_names.index(name)
+        self.prop_str_input_spins[idx].setValue(
+            self.prop_str_input_spins[idx].value() - (sum_ - 100)
+        )
 
     def find_roi(
         self,
