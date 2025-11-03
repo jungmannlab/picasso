@@ -1573,9 +1573,7 @@ class Window(QtWidgets.QMainWindow):
             self.set_frame(0)
             self.fit_in_view()
             self.parameters_dialog.set_camera_parameters(self.info[0])
-            self.status_bar.showMessage(
-                "Opened movie in {:.2f} seconds.".format(dt)
-            )
+            self.status_bar.showMessage(f"Opened movie in {dt:.2f} seconds.")
 
             if "Pixelsize" in self.info[0]:
                 self.parameters_dialog.pixelsize.setValue(
@@ -1671,9 +1669,8 @@ class Window(QtWidgets.QMainWindow):
             self.ready_for_fit = True
             self.draw_frame()
             self.status_bar.showMessage(
-                "Created a total of {} identifications.".format(
-                    len(self.identifications)
-                )
+                f"Created a total of {len(self.identifications):,} "
+                "identifications."
             )
 
         except io.NoMetadataFileError:
@@ -1772,9 +1769,8 @@ class Window(QtWidgets.QMainWindow):
             self.ready_for_fit = True
             self.draw_frame()
             self.status_bar.showMessage(
-                "Created a total of {} identifications.".format(
-                    len(self.identifications)
-                )
+                f"Created a total of {len(self.identifications):,} "
+                "identifications."
             )
 
         except io.NoMetadataFileError:
@@ -1898,9 +1894,8 @@ class Window(QtWidgets.QMainWindow):
                     )
                     box = self.parameters["Box Size"]
                     self.status_bar.showMessage(
-                        "Found {:,} spots in curr frame.".format(
-                            len(identifications_frame)
-                        )
+                        f"Found {len(identifications_frame):,} spots in "
+                        "current frame."
                     )
                     self.draw_identifications(
                         identifications_frame, box, QtGui.QColor("red")
@@ -2048,8 +2043,8 @@ class Window(QtWidgets.QMainWindow):
         box = parameters["Box Size"]
         mng = parameters["Min. Net Gradient"]
         message = (
-            f"Identifying in frame {frame_number} / {n_frames}"
-            f" (Box Size: {box}; Min. Net Gradient: {mng}) ..."
+            f"Identifying in frame {frame_number:,} / {n_frames:,}"
+            f" (Box Size: {box}; Min. Net Gradient: {mng:,}) ..."
         )
         self.status_bar.showMessage(message)
 
@@ -2072,7 +2067,7 @@ class Window(QtWidgets.QMainWindow):
             box = parameters["Box Size"]
             mng = parameters["Min. Net Gradient"]
             message = (
-                f"Identified {n_identifications} spots (Box Size: {box}; "
+                f"Identified {n_identifications:,} spots (Box Size: {box}; "
                 f"Min. Net Gradient: {mng}). Ready for fit."
             )
             self.status_bar.showMessage(message)
@@ -2143,7 +2138,7 @@ class Window(QtWidgets.QMainWindow):
         if self.parameters_dialog.gpufit_checkbox.isChecked():
             self.status_bar.showMessage("Fitting spots by GPUfit...")
         else:
-            message = f"Fitting spot {curr} / {total} ..."
+            message = f"Fitting spot {curr:,} / {total:,} ..."
             self.status_bar.showMessage(message)
 
     def on_fit_finished(
@@ -2157,7 +2152,7 @@ class Window(QtWidgets.QMainWindow):
         markers, fit/calibration z coordinates, if requested, save
         localizations."""
         self.status_bar.showMessage(
-            f"Fitted {len(locs)} spots in {elapsed_time:.2f} seconds."
+            f"Fitted {len(locs):,} spots in {elapsed_time:.2f} seconds."
         )
         self.locs = locs
         self.draw_frame()
@@ -2206,7 +2201,7 @@ class Window(QtWidgets.QMainWindow):
 
     def on_fit_z_progress(self, curr: int, total: int) -> None:
         """Update the status bar with the fitting progress."""
-        message = "Fitting z coordinate {:,} / {:,} ...".format(curr, total)
+        message = f"Fitting z coordinate {curr:,} / {total:,} ..."
         self.status_bar.showMessage(message)
 
     def on_fit_z_finished(
@@ -2216,7 +2211,8 @@ class Window(QtWidgets.QMainWindow):
     ) -> None:
         """Handle the completion of the z fitting process."""
         self.status_bar.showMessage(
-            f"Fitted {len(locs)} z coordinates in {elapsed_time:.2f} seconds."
+            f"Fitted {len(locs):,} z coordinates in {elapsed_time:.2f} "
+            "seconds."
         )
         self.locs = locs
         self.save_locs_after_fit()

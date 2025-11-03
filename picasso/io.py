@@ -1123,32 +1123,27 @@ class TiffMap:
                     info["Camera"] = mm_info["Camera"]
                 else:
                     info["Camera"] = "None"
-        # Acquistion comments
+
+        # Acquisition comments
         self.file.seek(self.last_ifd_offset)
         comments = ""
         offset = 0
         while True:  # Fin the block with the summary
             line = self.file.readline()
             if "Summary" in str(line):
-                break
-            if not line:
-                break
-            offset += len(line)
-
-        if line:
-            for i in range(len(line)):
-                self.file.seek(self.last_ifd_offset + offset + i)
-                readout = self.read("L")
-                if readout == 84720485:  # Acquisition comments
-                    count = self.read("L")
-                    readout = self.file.read(4 * count).strip(b"\0")
-                    # for generality in indexing in line below
-                    readout_s = readout.decode() + ' '
+                readout_s = str(line)
+                try:
                     readout_s = readout_s[
                         readout_s.index('{'):-readout_s[::-1].index('}')
                     ]
                     comments = json.loads(readout_s)["Summary"].split("\n")
-                    break
+                except Exception:
+                    pass
+                # print(f"comments: {comments}")
+                break
+            if not line:
+                break
+            offset += len(line)
 
         info["Micro-Manager Acquisition Comments"] = comments
         return info

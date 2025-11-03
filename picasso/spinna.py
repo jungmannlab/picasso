@@ -30,7 +30,7 @@ from scipy.spatial import KDTree
 from scipy.stats import ks_2samp
 from tqdm import tqdm
 
-from . import io, lib, postprocess, render, __version__
+from . import io, lib, masking, render, __version__
 
 
 NN_COLORS = ['#2880C4', '#97D8C4', '#F4B942', '#363636']
@@ -1018,7 +1018,7 @@ class MaskGenerator():
         if verbose:
             print("Thresholding... (3/3)")
         image = np.float64(image / image.sum())
-        self.thresh = postprocess.threshold_otsu(image)
+        self.thresh = masking.threshold_otsu(image)
 
         if mode == "loc_den":
             if apply_thresh:

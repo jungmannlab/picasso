@@ -325,8 +325,102 @@ def picked_locs(
         return picked_locs
 
 
-@numba.jit(nopython=True, nogil=True, cache=True)
 def pick_similar(
+    locs: pd.DataFrame,
+    info: list[dict],
+    picks: list[tuple],
+    d: float,
+    std_range: float = 2.0,
+) -> list[tuple]:
+    """Find similar picks based on the number of localizations and
+    RMSD. Only implemented for circular picks.
+
+    Mean number of localizations and RMSD in picks are calculated and
+    the allowed range is defined by the given standard deviation range
+    (``std_range``). Only picks with number of localizations and RMSD
+    within these ranges are returned.
+
+    Takes the grid of overlapping picks of the given size (defined by
+    ``x``, ``y_shift`` and ``y_base``) and shifts each pick towards the
+    center of mass of the localizations within the pick. If the picked
+    localizations have the required number of localizations and the
+    RMSD, it is added to the output list (``x_similar`` and
+    ``y_similar``).
+
+    This function calls ``_pick_similar`` which is implemented in numba
+    for speed.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Metadata of the localizations.
+    picks : list
+        List of picks (x, y) coordinates.
+    d : float
+        Pick diameter (in camera pixels).
+    std_range : float
+        Standard deviation range for picking similar localizations.
+
+    Returns
+    -------
+    new_picks : list of tuples
+        List of (x, y) coordinates of similar picks.
+    """
+    r = d / 2
+    d2 = d ** 2
+    # extract n_locs and rmsd from current picks
+    index_blocks = get_index_blocks(locs, info, r)
+    n_locs = []
+    rmsd = []
+    for i, pick in enumerate(picks):
+        x, y = pick
+        block_locs = get_block_locs_at(x, y, index_blocks)
+        pick_locs = lib.locs_at(x, y, block_locs, r)
+        n_locs.append(len(pick_locs))
+        pick_locs_xy = pick_locs[["x", "y"]].values.T
+        rmsd.append(rmsd_at_com(pick_locs_xy))
+
+    # calculate min and max n_locs and rmsd for picking similar
+    mean_n_locs = np.mean(n_locs)
+    mean_rmsd = np.mean(rmsd)
+    std_n_locs = np.std(n_locs)
+    std_rmsd = np.std(rmsd)
+    min_n_locs = max(2, mean_n_locs - std_range * std_n_locs)
+    max_n_locs = mean_n_locs + std_range * std_n_locs
+    min_rmsd = mean_rmsd - std_range * std_rmsd
+    max_rmsd = mean_rmsd + std_range * std_rmsd
+
+    # x, y coordinates of found regions:
+    x_similar = np.array([_[0] for _ in picks])
+    y_similar = np.array([_[1] for _ in picks])
+
+    # preparations for grid search
+    x_range = np.arange(d / 2, info[0]["Width"], np.sqrt(3) * d / 2)
+    y_range_base = np.arange(d / 2, info[0]["Height"] - d / 2, d)
+    y_range_shift = y_range_base + d / 2
+    locs_temp, size, _, _, block_starts, block_ends, K, L = (
+        index_blocks
+    )
+    locs_xy = np.stack((locs_temp.x, locs_temp.y))
+    x_r = np.uint64(x_range / size)
+    y_r1 = np.uint64(y_range_shift / size)
+    y_r2 = np.uint64(y_range_base / size)
+    # pick similar
+    x_similar, y_similar = _pick_similar(
+        x_range, y_range_shift, y_range_base,
+        min_n_locs, max_n_locs, min_rmsd, max_rmsd,
+        x_r, y_r1, y_r2,
+        locs_xy, block_starts, block_ends, K, L,
+        x_similar, y_similar, r, d2,
+    )
+    new_picks = list(zip(x_similar, y_similar))
+    return new_picks
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _pick_similar(
     x: np.ndarray,
     y_shift: np.ndarray,
     y_base: np.ndarray,
@@ -356,6 +450,10 @@ def pick_similar(
     localizations have the required number of localizations and the
     RMSD, it is added to the output list (``x_similar`` and
     ``y_similar``).
+
+    This function is implemented in numba for speed, called from
+    ``pick_similar``. See that function for more user-friendly
+    interface.
 
     Parameters
     ----------

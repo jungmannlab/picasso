@@ -1,13 +1,35 @@
 Changelog
 =========
 
-Last change: 23-OCT-2025 CEST
+Last change: 02-NOV-2025 CEST
 
 0.9.0
 -----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+
 - Picasso does not use ``numpy.recarray`` objects anymore. ``pandas.DataFrame`` are used instead. This applies to localizations, drift data, cluster centers, etc. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
-- Removed dependency ``h5py``. Picasso now uses ``pandas`` to read and write HDF5 files.
-- Updated other dependencies, most importantly, ``numpy`` is now in version 2.
+- Removed dependency ``h5py``. Picasso now uses ``pandas`` to read and write HDF5 files
+- Updated other dependencies, most importantly, ``numpy`` is now in version 2
+- Render: unfold groups was removed as it is contained within the square grid unfolding
+- SPINNA: improved saved fit results summary (see issue #560)
+
+*Small improvements and bug fixes:*
++++++++++++++++++++++++++++++++++++
+
+- Render: unfold groups/picks (rectangular grid) fixed for nonconsecutive grouping (the grid might have had missing elements before)
+- Render: apply drift from external file fixed
+- Render: fix masking (issue #560)
+- Render: fix loading camera pixel size from metadata (see issue #560)
+- Render 3D: remove measurement points fixed
+- Render 3D: save rotated localizations fixed
+- Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
+- Localize: fixed acquisition comment extraction from uManager .tif files
+- SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
+- SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
+- SPINNA: save last opened folder added
+- SPINNA: save NND plot fixed (when no simulations were run)
+- Simplify the API for picking similar in ``picasso.postprocess``
 
 0.8.8
 -----

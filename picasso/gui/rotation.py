@@ -634,6 +634,9 @@ class ViewRotation(QtWidgets.QLabel):
             ).setChecked(True)
             self.window.display_settings_dlg.colormap.setCurrentText(color)
 
+            # remove measurement points
+            self._points = []
+
             # save the pick information
             self.pick = w.view._picks[0]
             self.pick_shape = w.view._pick_shape
@@ -1493,8 +1496,7 @@ class ViewRotation(QtWidgets.QLabel):
                 event.accept()
             # remove point
             elif event.button() == QtCore.Qt.RightButton:
-                x, y = self.map_to_movie(event.pos())
-                self.remove_points((x, y))
+                self.remove_points()
                 event.accept()
             else:
                 event.ignore()
@@ -2142,7 +2144,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             angx = int(self.view_rot.angx * 180 / np.pi)
             angy = int(self.view_rot.angy * 180 / np.pi)
             angz = int(self.view_rot.angz * 180 / np.pi)
-            pixelsize = self.window.view.display_settings_dlg.pixelsize.value()
+            pixelsize = self.window.display_settings_dlg.pixelsize.value()
             if self.view_rot.pick_shape == "Circle":
                 x, y = self.view_rot.pick
                 pick = [float(x), float(y)]

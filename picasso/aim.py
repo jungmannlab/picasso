@@ -692,10 +692,11 @@ def aim(
             n_frames = val - locs["frame"].min()
         if val := inf.get("Pixelsize"):
             pixelsize = val
-    if np.isnan(width * height * pixelsize * n_frames):
+    if np.any(np.isnan([width, height, pixelsize, n_frames])):
         raise KeyError(
             "Insufficient metadata available. Please specify 'Width', 'Height'"
-            ", 'Frames' and 'Pixelsize' in the metadata .yaml."
+            ", 'Frames' and 'Pixelsize' in the metadata .yaml of the"
+            " localizations."
         )
 
     # frames should start at 1
