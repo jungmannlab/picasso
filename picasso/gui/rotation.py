@@ -888,7 +888,6 @@ class ViewRotation(QtWidgets.QLabel):
         _bgra : np.array
             8 bit array with 4 channels (rgb and alpha).
         """
-        # get pd.DataFrame
         locs = self.locs[0]
 
         # if clustered or picked locs

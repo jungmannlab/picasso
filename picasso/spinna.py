@@ -2909,7 +2909,7 @@ class SPINNA():
                 fd = self.n_futures_done(fs)
                 fd_ = int(fd * N_ / N)
                 if fd > 0 and callback != "console":
-                    callback.setLabelText(f"{self.progress_title} {fd_}/{N_}")
+                    callback.description_base = self.progress_title
                     callback.set_value(fd_)
                 elif fd > 0 and callback == "console":
                     progress_bar.update(fd_ - progress_bar.n)
@@ -2958,6 +2958,8 @@ class SPINNA():
                 self.progress_title = (
                     f"Bootstrapping {i+1}/{N_BOOTSTRAPS}; spinning structures"
                 )
+                if callback != "console":
+                    callback.t0_est = time.time()
                 # gt_coords_boot = self.mixer.run_simulation(opt_N_structures_)
                 gt_coords_boot = self.mixer.run_simulation(opt_N_structures)
                 self.dists_gt = get_NN_dist_experimental(
@@ -3073,9 +3075,7 @@ class SPINNA():
             # score the simulation results
             scores[ii] = NND_score(dists_sim, self.dists_gt)
             if callback != "console":
-                callback.setLabelText(
-                    f"{self.progress_title} {ii+1}/{N_structures.shape[0]}"
-                )
+                callback.description_base = self.progress_title
                 callback.set_value(ii)
         return N_structures, scores
 

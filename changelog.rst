@@ -33,6 +33,7 @@ Important updates:
 - SPINNA: save NND plot fixed (when no simulations were run)
 - SPINNA: smaller font size in NND plot for better readability
 - SPINNA: read camera pixel size from metadata fixed (if available)
+- SPINNA: clean up progress dialog
 - Simplify the API for picking similar in ``picasso.postprocess``
 - Progress dialog shows remaining time estimate more accurately (ignores the offset due to, for example, multiprocessing startup time)
 
