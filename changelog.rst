@@ -21,6 +21,7 @@ Important updates:
 - Render: apply drift from external file fixed
 - Render: fix masking (issue #560)
 - Render: fix loading camera pixel size from metadata (see issue #560)
+- Render: saving picks separately fixed areas in the .yaml files
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
 - Render 3D: display adjusted after changing blur method

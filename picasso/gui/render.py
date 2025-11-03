@@ -8561,10 +8561,6 @@ class View(QtWidgets.QLabel):
                 if self._pick_shape == "Circle":
                     d = self.window.tools_settings_dialog.pick_diameter.value()
                     pick_info["Pick Diameter (nm)"] = d
-                    # correct for the total area
-                    pick_info["Area (um^2)"] = (
-                        pick_info["Area (um^2)"] * len(self._picks)
-                    )
                 elif self._pick_shape == "Rectangle":
                     w = self.window.tools_settings_dialog.pick_width.value()
                     pick_info["Pick Width (nm)"] = w
@@ -8651,10 +8647,6 @@ class View(QtWidgets.QLabel):
                 if self._pick_shape == "Circle":
                     d = self.window.tools_settings_dialog.pick_diameter.value()
                     pick_info["Pick Diameter (nm)"] = d
-                    # correct for the total area
-                    pick_info["Area (um^2)"] = (
-                        pick_info["Area (um^2)"] * len(self._picks)
-                    )
                 elif self._pick_shape == "Rectangle":
                     w = self.window.tools_settings_dialog.pick_width.value()
                     pick_info["Pick Width (nm)"] = w
