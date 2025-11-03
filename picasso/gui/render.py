@@ -7884,15 +7884,6 @@ class View(QtWidgets.QLabel):
                 progress.close()
                 self.update_scene()
 
-    def rmsd_at_com(self, locs: pd.DataFrame) -> float:
-        """Calculate root mean square displacement at center of
-        mass."""
-        com_x = locs["x"].mean()
-        com_y = locs["y"].mean()
-        return np.sqrt(
-            ((locs["x"] - com_x) ** 2 + (locs["y"] - com_y) ** 2).mean()
-        )
-
     def index_locs(self, channel: int, fast_render: bool = False) -> None:
         """Indexes localizations from a given channel in a grid with
         grid size equal to the pick radius."""
@@ -7992,64 +7983,23 @@ class View(QtWidgets.QLabel):
             )
         channel = self.get_channel("Pick similar")
         if channel is not None:
-            info = self.infos[channel]
             d = (
                 self.window.tools_settings_dialog.pick_diameter.value()
             ) / self.window.display_settings_dlg.pixelsize.value()
-            r = d / 2
-            d2 = d ** 2
             std_range = (
                 self.window.tools_settings_dialog.pick_similar_range.value()
             )
-            # extract n_locs and rmsd from current picks
-            index_blocks = self.get_index_blocks(channel)
-            n_locs = []
-            rmsd = []
-            for i, pick in enumerate(self._picks):
-                x, y = pick
-                block_locs = postprocess.get_block_locs_at(x, y, index_blocks)
-                pick_locs = lib.locs_at(x, y, block_locs, r)
-                n_locs.append(len(pick_locs))
-                rmsd.append(self.rmsd_at_com(pick_locs))
-
-            # calculate min and max n_locs and rmsd for picking similar
-            mean_n_locs = np.mean(n_locs)
-            mean_rmsd = np.mean(rmsd)
-            std_n_locs = np.std(n_locs)
-            std_rmsd = np.std(rmsd)
-            min_n_locs = max(2, mean_n_locs - std_range * std_n_locs)
-            max_n_locs = mean_n_locs + std_range * std_n_locs
-            min_rmsd = mean_rmsd - std_range * std_rmsd
-            max_rmsd = mean_rmsd + std_range * std_rmsd
-
-            # x, y coordinates of found regions:
-            x_similar = np.array([_[0] for _ in self._picks])
-            y_similar = np.array([_[1] for _ in self._picks])
-
-            # preparations for grid search
-            x_range = np.arange(d / 2, info[0]["Width"], np.sqrt(3) * d / 2)
-            y_range_base = np.arange(d / 2, info[0]["Height"] - d / 2, d)
-            y_range_shift = y_range_base + d / 2
-            locs_temp, size, _, _, block_starts, block_ends, K, L = (
-                index_blocks
-            )
-            locs_xy = np.stack((locs_temp.x, locs_temp.y))
-            x_r = np.uint64(x_range / size)
-            y_r1 = np.uint64(y_range_shift / size)
-            y_r2 = np.uint64(y_range_base / size)
             status = lib.StatusDialog("Picking similar...", self.window)
-            # pick similar
-            x_similar, y_similar = postprocess.pick_similar(
-                x_range, y_range_shift, y_range_base,
-                min_n_locs, max_n_locs, min_rmsd, max_rmsd,
-                x_r, y_r1, y_r2,
-                locs_xy, block_starts, block_ends, K, L,
-                x_similar, y_similar, r, d2,
+            new_picks = postprocess.pick_similar(
+                locs=self.all_locs[channel],
+                info=self.infos[channel],
+                picks=self._picks,
+                d=d,
+                std_range=std_range,
             )
             # add picks
-            similar = list(zip(x_similar, y_similar))
             self._picks = []
-            self.add_picks(similar)
+            self.add_picks(new_picks)
             status.close()
 
     def picked_locs(
