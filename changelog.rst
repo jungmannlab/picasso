@@ -21,15 +21,22 @@ Important updates:
 - Render: apply drift from external file fixed
 - Render: fix masking (issue #560)
 - Render: fix loading camera pixel size from metadata (see issue #560)
+- Render: saving picks separately fixed areas in the .yaml files
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
+- Render 3D: display adjusted after changing blur method
+- Render 3D: fixed ind. loc. prec.
 - Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
 - Localize: fixed acquisition comment extraction from uManager .tif files
 - SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
 - SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
 - SPINNA: save last opened folder added
 - SPINNA: save NND plot fixed (when no simulations were run)
+- SPINNA: smaller font size in NND plot for better readability
+- SPINNA: read camera pixel size from metadata fixed (if available)
+- SPINNA: clean up progress dialog
 - Simplify the API for picking similar in ``picasso.postprocess``
+- Progress dialog shows remaining time estimate more accurately (ignores the offset due to, for example, multiprocessing startup time)
 
 0.8.8
 -----

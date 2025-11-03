@@ -688,7 +688,9 @@ def render_gaussian(
         if "lpz" in locs:
             lpz = locs["lpz"].values  # NOTE: lpz must have same units as lpx
         else:
-            lpz = 2 * np.mean(locs[["lpx", "lpy"]].to_numpy().mean(axis=0))
+            lpz = 2 * locs[["lpx", "lpy"]].to_numpy().mean(axis=1)
+        print(x.shape, lpz.shape, locs['lpx'].values.shape)
+        print(len(in_view), in_view)
         blur_depth = oversampling * np.maximum(lpz, min_blur_width)
 
         sy = blur_height[in_view]
@@ -748,7 +750,7 @@ def render_gaussian_iso(
         if "lpz" in locs:
             lpz = locs["lpz"].values  # NOTE: lpz must have same units as lpx
         else:
-            lpz = 2 * np.mean(locs[["lpx", "lpy"]].to_numpy().mean(axis=0))
+            lpz = 2 * locs[["lpx", "lpy"]].to_numpy().mean(axis=1)
         blur_depth = oversampling * np.maximum(lpz, min_blur_width)
 
         sy = (blur_height[in_view] + blur_width[in_view]) / 2
