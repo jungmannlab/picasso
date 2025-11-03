@@ -3651,10 +3651,10 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         pixmap : QtGui.QPixmap
             Converted pixmap.
         """
+        image = np.float32(image)
         # adjust contrast and convert to 8 bits
-        if image.dtype != np.int8:
-            image -= image.min()
-            image /= image.max()
+        image -= image.min()
+        image /= image.max()
         image = np.round(255 * image).astype("uint8")
         # get colormap and paint the image
         cmap = self.cmap if cmap is None else cmap
