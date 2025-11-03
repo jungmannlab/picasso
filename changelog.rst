@@ -28,6 +28,7 @@ Important updates:
 - SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
 - SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
 - SPINNA: save last opened folder added
+- SPINNA: save NND plot fixed (when no simulations were run)
 
 0.8.8
 -----

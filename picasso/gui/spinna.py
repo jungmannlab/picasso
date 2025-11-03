@@ -4007,6 +4007,14 @@ class SimulationsTab(QtWidgets.QDialog):
         else:
             return
 
+        if self.mixer is None:
+            # set up a dummy mixer to get neighbor idx
+            self.mixer = spinna.StructureMixer(
+                structures=self.structures,
+                label_unc={"ALL": 0},
+                le={"ALL": 1.0},
+                width=10, height=10, depth=10,
+            )
         i = 0
         for (t1, t2, _) in self.mixer.get_neighbor_idx(duplicate=True):
             fig = self.nnd_plots[i]
@@ -4027,6 +4035,15 @@ class SimulationsTab(QtWidgets.QDialog):
             self.window.pwd = os.path.dirname(path)
         else:
             return
+
+        # set up a dummy mixer to get neighbor idx
+        if self.mixer is None:
+            self.mixer = spinna.StructureMixer(
+                structures=self.structures,
+                label_unc={"ALL": 0},
+                le={"ALL": 1.0},
+                width=10, height=10, depth=10,
+            )
 
         i = 0
         for (t1, t2, n) in self.mixer.get_neighbor_idx(duplicate=True):
