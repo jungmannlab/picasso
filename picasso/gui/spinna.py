@@ -328,9 +328,13 @@ class MaskPreview(QtWidgets.QLabel):
     def save_current_view(self) -> None:
         """Save self.image (QImage, the current view) as png or tif."""
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save current view", filter="*.png;;*.tif"
+            self,
+            "Save current view",
+            directory=self.mask_tab.window.pwd,
+            filter="*.png;;*.tif",
         )
         if path:
+            self.mask_tab.window.pwd = os.path.dirname(path)
             self.qimage.save(path)
 
     def viewport_size(self) -> tuple[int, int] | None:
@@ -502,6 +506,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         layout = QtWidgets.QGridLayout(self)
         self.setLayout(layout)
         self.preview = MaskPreview(self)
+        self.window = window
 
         self.locs_path = ""
         self.locs = None
@@ -687,9 +692,13 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         """Load localizations / molecules for mask generation."""
         # get localizations file
         self.locs_path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load molecules for mask generation", filter="*.hdf5"
+            self,
+            "Load molecules for mask generation",
+            directory=self.window.pwd,
+            filter="*.hdf5",
         )
         if self.locs_path:
+            self.window.pwd = os.path.dirname(self.locs_path)
             self.mask_generator = spinna.MaskGenerator(self.locs_path)
             self.mask_ndim.clear()
             if hasattr(self.mask_generator.locs, "z"):
@@ -1273,6 +1282,7 @@ class StructuresTab(QtWidgets.QDialog):
         self.setAutoFillBackground(True)
         layout = QtWidgets.QGridLayout(self)
         self.setLayout(layout)
+        self.window = window
 
         self.structures = []
         self.current_structure = None
@@ -1467,9 +1477,13 @@ class StructuresTab(QtWidgets.QDialog):
         """Save current structures as a .yaml file."""
         self.update_current_structure()  # in case it was not saved yet
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save structures", filter="*.yaml"
+            self,
+            "Save structures",
+            directory=self.window.pwd,
+            filter="*.yaml",
         )
         if path:
+            self.window.pwd = os.path.dirname(path)
             info = []
             for structure in self.structures:
                 m_info = {
@@ -1486,9 +1500,13 @@ class StructuresTab(QtWidgets.QDialog):
     def load_structures(self) -> None:
         """Load structures from in a .yaml file."""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load structures", filter="*.yaml"
+            self,
+            "Load structures",
+            directory=self.window.pwd,
+            filter="*.yaml",
         )
         if path:
+            self.window.pwd = os.path.dirname(path)
             with open(path, 'r') as file:
                 try:
                     info = list(yaml.load_all(file, Loader=yaml.FullLoader))
@@ -1666,9 +1684,13 @@ class StructuresTab(QtWidgets.QDialog):
     def save_preview(self) -> None:
         """Save current preview."""
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save current view", filter="*.png;;.tif"
+            self,
+            "Save current view",
+            directory=self.window.pwd,
+            filter="*.png;;*.tif",
         )
         if path:
+            self.window.pwd = os.path.dirname(path)
             self.preview.qimage.save(path)
 
 
@@ -1899,11 +1921,14 @@ class CompareModelsDialog(QtWidgets.QDialog):
     def on_add_model(self) -> None:
         """Add a new model (list of structures) to the dialog."""
         paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
-            self, "Choose model(s)", filter="*.yaml"
+            self,
+            "Choose model(s)",
+            directory=self.sim_tab.window.pwd,
+            filter="*.yaml"
         )
         if not paths:
             return
-
+        self.sim_tab.window.pwd = os.path.dirname(paths[0])
         for path in paths:
             structures, targets = spinna.load_structures(path)
             # check that the loaded targets match the exp. data's targets
@@ -2441,6 +2466,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
+        self.window = window
         self.setAutoFillBackground(True)
         layout = QtWidgets.QGridLayout(self)
         left_column = QtWidgets.QGridLayout()
@@ -2674,9 +2700,13 @@ class SimulationsTab(QtWidgets.QDialog):
     def load_structures(self) -> None:
         """Load structures from .yaml file."""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load structures", filter="*.yaml"
+            self,
+            "Load structures",
+            directory=self.window.pwd,
+            filter="*.yaml",
         )
         if path:
+            self.window.pwd = os.path.dirname(path)
             self.structures, self.targets = spinna.load_structures(path)
 
             self.structures_path = path
@@ -2723,9 +2753,13 @@ class SimulationsTab(QtWidgets.QDialog):
         target species."""
         target = name[3:]
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, f"Load molecules for {target}", filter="*.hdf5"
+            self,
+            f"Load molecules for {target}",
+            directory=self.window.pwd,
+            filter="*.hdf5",
         )
         if path:
+            self.window.pwd = os.path.dirname(path)
             # load the data
             locs, info = io.load_locs(path)
             pixelsize = None
@@ -2768,9 +2802,13 @@ class SimulationsTab(QtWidgets.QDialog):
         """Load mask for the given molecular target species."""
         target = name[4:]
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, f"Load mask for {target}", filter="*.npy"
+            self,
+            f"Load mask for {target}",
+            directory=self.window.pwd,
+            filter="*.npy",
         )
         if path:
+            self.window.pwd = os.path.dirname(path)
             # load the data
             mask, info = io.load_mask(path)
             self.masks[target] = mask
@@ -2982,6 +3020,7 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             if not save:
                 return
+            self.window.pwd = os.path.dirname(save)
         self.n_sim_fit = n_sim_fit
         self.granularity = granularity
         self.n_sim_plot_spin.setValue(n_sim_fit)  # save in  NND plot settings
@@ -3061,9 +3100,13 @@ class SimulationsTab(QtWidgets.QDialog):
     def load_search_space(self) -> None:
         """Load combinations of numbers of structures for fitting."""
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load numbers of structures", filter="*.csv"
+            self,
+            "Load numbers of structures",
+            directory=self.window.pwd,
+            filter="*.csv",
         )
         if path:
+            self.window.pwd = os.path.dirname(path)
             df = pd.read_csv(path)
             # check if the structure titles are the same as the ones loaded
             loaded = df.columns
@@ -3142,6 +3185,7 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             if not save:
                 return
+            self.window.pwd = os.path.dirname(save)
 
         spinner = spinna.SPINNA(
             mixer=self.mixer,
@@ -3242,6 +3286,7 @@ class SimulationsTab(QtWidgets.QDialog):
             self, "Save fitting summary", out_path, filter="*.txt"
         )
         if path:
+            self.window.pwd = os.path.dirname(path)
             with open(path, "w") as f:
                 for key, value in metadata.items():
                     f.write(f"{key}: {value}\n")
@@ -3500,6 +3545,7 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             if not path:
                 return
+            self.window.pwd = os.path.dirname(path)
         else:
             path = ""
 
@@ -3957,6 +4003,7 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             if not path:
                 return
+            self.window.pwd = os.path.dirname(path)
         else:
             return
 
@@ -3977,6 +4024,7 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             if not path:
                 return
+            self.window.pwd = os.path.dirname(path)
         else:
             return
 
@@ -4039,6 +4087,9 @@ class Window(QtWidgets.QMainWindow):
         self.resize(1024, 768)
         self.setMinimumSize(1024, 768)
         self.setMaximumSize(1024, 768)
+        settings = io.load_user_settings()
+        spinna_settings = settings.get("SPINNA", {})
+        self.pwd = spinna_settings.get("PWD", os.getcwd())
 
         # TABS
         self.tabs = QtWidgets.QTabWidget()
@@ -4078,6 +4129,14 @@ class Window(QtWidgets.QMainWindow):
 
         menu_bar = self.menuBar()
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+
+    def closeEvent(self, event: QtGui.QCloseEvent) -> None:
+        """Save the most recent directory in the user settings on
+        close."""
+        settings = io.load_user_settings()
+        settings["SPINNA"]["PWD"] = self.pwd
+        io.save_user_settings(settings)
+        QtWidgets.qApp.closeAllWindows()
 
 
 def main():

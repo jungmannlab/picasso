@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 23-OCT-2025 CEST
+Last change: 02-NOV-2025 CEST
 
 0.9.0
 -----
@@ -26,6 +26,7 @@ Important updates:
 - Localize: fixed acquisition comment extraction from uManager .tif files
 - SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
 - SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
+- SPINNA: save last opened folder added
 
 0.8.8
 -----
