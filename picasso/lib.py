@@ -66,6 +66,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.t0 = time.time()
         self.app = QtCore.QCoreApplication.instance()
         self.initalized = True
+        self.count_started = False
         self.finished = False
         # sound notification
         self.sound_notification_path = get_sound_notification_path()
@@ -74,27 +75,36 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         if not self.initalized:
             self.init()
         self.setValue(value)
-        # estimate time left
-        elapsed = time.time() - self.t0
-        remaining = int((self.maximum() - value) * elapsed / (value + 1e-6))
-        # convert to hh-mm-ss
-        hours, remainder = divmod(remaining, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        # format time estimate
-        if hours > 0:
-            hours = min(10, hours)  # limit hours to 10 for display
-            time_estimate = f"{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
-        else:
-            time_estimate = f"{minutes:02d}m:{seconds:02d}s"
-        # set label text with time estimate
-        description = (
-            f"{self.description_base}"
-            f"\nEstimated time remaining: {time_estimate}"
-        )
-        self.setLabelText(description)
+        if self.count_started:
+            # estimate time left
+            elapsed = time.time() - self.t0_est
+            remaining = int(
+                (self.maximum() - value) * elapsed / (value + 1e-6)
+            )
+            # convert to hh-mm-ss
+            hours, remainder = divmod(remaining, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            # format time estimate
+            if hours > 0:
+                hours = min(10, hours)  # limit hours to 10 for display
+                time_estimate = f"{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
+            else:
+                time_estimate = f"{minutes:02d}m:{seconds:02d}s"
+            # set label text with time estimate
+            description = (
+                f"{self.description_base}"
+                f"\nEstimated time remaining: {time_estimate}"
+            )
+            self.setLabelText(description)
+        # sound notification
         if value >= self.maximum() and self.finished is False:
             self.finished = True
             self.play_sound_notification()
+        # if value is above zero, count has started, enabling time estimate
+        if not self.count_started:
+            if value > 0:
+                self.count_started = True
+                self.t0_est = time.time()
         self.app.processEvents()
 
     def closeEvent(self, event):

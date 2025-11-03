@@ -30,6 +30,7 @@ Important updates:
 - SPINNA: save last opened folder added
 - SPINNA: save NND plot fixed (when no simulations were run)
 - Simplify the API for picking similar in ``picasso.postprocess``
+- Progress dialog shows remaining time estimate more accurately (ignores the offset due to, for example, multiprocessing startup time)
 
 0.8.8
 -----
