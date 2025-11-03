@@ -29,6 +29,8 @@ Important updates:
 - SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
 - SPINNA: save last opened folder added
 - SPINNA: save NND plot fixed (when no simulations were run)
+- SPINNA: smaller font size in NND plot for better readability
+- SPINNA: read camera pixel size from metadata fixed (if available)
 - Simplify the API for picking similar in ``picasso.postprocess``
 - Progress dialog shows remaining time estimate more accurately (ignores the offset due to, for example, multiprocessing startup time)
 
