@@ -23,6 +23,7 @@ Important updates:
 - Render: fix loading camera pixel size from metadata (see issue #560)
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
+- Render 3D: display adjusted after changing blur method
 - Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
 - Localize: fixed acquisition comment extraction from uManager .tif files
 - SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)

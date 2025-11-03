@@ -231,7 +231,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
 
     def render_scene(self, *args, **kwargs):
         """Update scene in the rotation window."""
-        self.window.view_rot.update_scene(use_cache=True)
+        self.window.view_rot.update_scene()
 
     def set_dynamic_disp_px(self, state: bool) -> None:
         """Update scene if dynamic display pixel size is checked."""
