@@ -16,7 +16,7 @@ One click installer
 - Then go to the folder ``picasso/gui/plugins``.
 - Copy the plugin(s) to this folder.
 
-**NOTE**: Plugins added in this distribution will not be able to use packages that are not installed automatically (from the file ``requirements.txt``).
+**NOTE**: Plugins added in this distribution will not be able to use packages that are not installed automatically (dependencies in the file ``pyproject.toml``).
 
 PyPI
 ~~~~

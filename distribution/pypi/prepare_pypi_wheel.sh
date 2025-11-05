@@ -4,6 +4,6 @@ conda activate picasso_pypi_wheel
 pip install twine
 rm -rf dist
 rm -rf build
-python setup.py sdist bdist_wheel
+python -m build
 twine check dist/*
 conda deactivate
