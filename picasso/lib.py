@@ -108,7 +108,6 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.app.processEvents()
 
     def closeEvent(self, event):
-        time.sleep(0.3)  # TODO: does it fixthe issue of dialogs not closing
         _dialogs.remove(self)
         if self.finished is False:
             self.finished = True
@@ -146,7 +145,6 @@ class StatusDialog(QtWidgets.QDialog):
         QtCore.QCoreApplication.instance().processEvents()
 
     def closeEvent(self, event):
-        time.sleep(0.3)  # TODO: does it fixthe issue of dialogs not closing
         _dialogs.remove(self)
         if self.sound_notification_path is not None:
             if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
