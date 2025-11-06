@@ -1,15 +1,15 @@
 """
-    picasso.aim
-    ~~~~~~~~~~~
+picasso.aim
+~~~~~~~~~~~
 
-    Picasso implementation of Adaptive Intersection Maximization (AIM)
-    for fast undrifting in 2D and 3D.
+Picasso implementation of Adaptive Intersection Maximization (AIM)
+for fast undrifting in 2D and 3D.
 
-    Adapted from: Ma, H., et al. Science Advances. 2024.
+Adapted from: Ma, H., et al. Science Advances. 2024.
 
-    :author: Hongqiang Ma, Maomao Chen, Phuong Nguyen, Yang Liu,
-        Rafal Kowalewski, 2024
-    :copyright: Copyright (c) 2016-2024 Jungmann Lab, MPI of Biochemistry
+:author: Hongqiang Ma, Maomao Chen, Phuong Nguyen, Yang Liu,
+    Rafal Kowalewski, 2024
+:copyright: Copyright (c) 2016-2024 Jungmann Lab, MPI of Biochemistry
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -49,7 +49,7 @@ def intersect1d(
         Indices of common elements in b.
     """
     aux = np.concatenate((a, b))
-    aux_sort_indices = np.argsort(aux, kind='mergesort')
+    aux_sort_indices = np.argsort(aux, kind="mergesort")
     aux = aux[aux_sort_indices]
 
     mask = aux[1:] == aux[:-1]
@@ -95,9 +95,7 @@ def count_intersections(
     l1_counts_subset = l1_counts[idx1]
     # for each overlapping coordinate, take the minimum count from l0
     # and l1, sum up across all overlapping coordinates
-    n_intersections = np.sum(
-        np.minimum(l0_counts_subset, l1_counts_subset)
-    )
+    n_intersections = np.sum(np.minimum(l0_counts_subset, l1_counts_subset))
     return n_intersections
 
 
@@ -367,8 +365,7 @@ def get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
     ang_z = np.angle(fft_values[1])
     ang_z = ang_z - 2 * np.pi * (ang_z > 0)  # normalize
     pz = (
-        np.abs(ang_z) / (2 * np.pi / roi_cc.size)
-        - (roi_cc.size - 1) / 2
+        np.abs(ang_z) / (2 * np.pi / roi_cc.size) - (roi_cc.size - 1) / 2
     )  # peak in z
     pz *= roi_size / roi_cc.size  # convert to intersect_d units
     return pz
@@ -449,7 +446,7 @@ def intersection_max(
     for i, shift_x in enumerate(steps):
         for j, shift_y in enumerate(steps):
             shifts_xy[i, j] = shift_x + shift_y * width_units
-    shifts_xy = shifts_xy.reshape(box ** 2)
+    shifts_xy = shifts_xy.reshape(box**2)
 
     # convert reference to a 1D array in units of intersect_d and find
     # unique values and counts
@@ -473,14 +470,14 @@ def intersection_max(
     for s in iterator:
         # get the target localizations within the current segment
         min_frame_idx = frame > seg_bounds[s]
-        max_frame_idx = frame <= seg_bounds[s+1]
+        max_frame_idx = frame <= seg_bounds[s + 1]
         x1 = x[min_frame_idx & max_frame_idx]
         y1 = y[min_frame_idx & max_frame_idx]
 
         # skip if no reference localizations
         if len(x1) == 0:
-            drift_x[s] = drift_x[s-1]
-            drift_y[s] = drift_y[s-1]
+            drift_x[s] = drift_x[s - 1]
+            drift_y[s] = drift_y[s - 1]
             continue
 
         # undrifting from the previous round
@@ -489,8 +486,14 @@ def intersection_max(
 
         # count the number of intersected localizations
         roi_cc = point_intersect_2d(
-            l0_coords, l0_counts, x1, y1,
-            intersect_d, width_units, shifts_xy, box,
+            l0_coords,
+            l0_counts,
+            x1,
+            y1,
+            intersect_d,
+            width_units,
+            shifts_xy,
+            box,
         )
 
         # estimate the precise sub-pixel position of the peak of roi_cc
@@ -519,8 +522,8 @@ def intersection_max(
     drift_y = drift_y_pol(t_inter)
 
     # undrift the localizations
-    x_pdc = x - drift_x[frame-1]
-    y_pdc = y - drift_y[frame-1]
+    x_pdc = x - drift_x[frame - 1]
+    y_pdc = y - drift_y[frame - 1]
 
     return x_pdc, y_pdc, drift_x, drift_y
 
@@ -592,14 +595,14 @@ def intersection_max_z(
     for s in iterator:
         # get the target localizations within the current segment
         min_frame_idx = frame > seg_bounds[s]
-        max_frame_idx = frame <= seg_bounds[s+1]
+        max_frame_idx = frame <= seg_bounds[s + 1]
         x1 = x[min_frame_idx & max_frame_idx]
         y1 = y[min_frame_idx & max_frame_idx]
         z1 = z[min_frame_idx & max_frame_idx]
 
         # skip if no reference localizations
         if len(x1) == 0:
-            drift_z[s] = drift_z[s-1]
+            drift_z[s] = drift_z[s - 1]
             continue
 
         # undrifting from the previous round
@@ -607,8 +610,15 @@ def intersection_max_z(
 
         # count the number of intersected localizations
         roi_cc = point_intersect_3d(
-            l0_coords, l0_counts, x1, y1, z1,
-            intersect_d, width_units, height_units, shifts_z,
+            l0_coords,
+            l0_counts,
+            x1,
+            y1,
+            z1,
+            intersect_d,
+            width_units,
+            height_units,
+            shifts_z,
         )
 
         # estimate the precise sub-pixel position of the peak of roi_cc
@@ -633,7 +643,7 @@ def intersection_max_z(
     drift_z = drift_z_pol(t_inter)
 
     # undrift the localizations
-    z_pdc = z - drift_z[frame-1]
+    z_pdc = z - drift_z[frame - 1]
 
     # convert back to nm
     z_pdc *= pixelsize
@@ -646,8 +656,8 @@ def aim(
     locs: pd.DataFrame,
     info: list[dict],
     segmentation: int = 100,
-    intersect_d: float = 20/130,
-    roi_r: float = 60/130,
+    intersect_d: float = 20 / 130,
+    roi_r: float = 60 / 130,
     progress: Callable[[int], None] | None = None,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Apply AIM undrifting to the localizations.
@@ -688,7 +698,7 @@ def aim(
             width = val
         if val := inf.get("Height"):
             height = val
-        if val := inf.get('Frames'):
+        if val := inf.get("Frames"):
             n_frames = val - locs["frame"].min()
         if val := inf.get("Pixelsize"):
             pixelsize = val
@@ -703,9 +713,9 @@ def aim(
     frame = (locs["frame"] + 1 - locs["frame"].min()).values  # 1d array
 
     # find the segmentation bounds (temporal intervals)
-    seg_bounds = np.concatenate((
-        np.arange(0, n_frames, segmentation), [n_frames]
-    ))
+    seg_bounds = np.concatenate(
+        (np.arange(0, n_frames, segmentation), [n_frames])
+    )
 
     # get the reference localizations (first interval)
     ref_x = locs["x"][frame <= segmentation].values
@@ -714,17 +724,33 @@ def aim(
     # RUN AIM TWICE #
     # the first run is with the first interval as reference
     x_pdc, y_pdc, drift_x1, drift_y1 = intersection_max(
-        locs["x"].values, locs["y"].values, ref_x, ref_y,
-        frame, seg_bounds, intersect_d, roi_r, width,
-        aim_round=1, progress=progress,
+        locs["x"].values,
+        locs["y"].values,
+        ref_x,
+        ref_y,
+        frame,
+        seg_bounds,
+        intersect_d,
+        roi_r,
+        width,
+        aim_round=1,
+        progress=progress,
     )
     # the second run is with the entire dataset as reference
     if progress is not None:
         progress.zero_progress(description="Undrifting by AIM (2/2)")
     x_pdc, y_pdc, drift_x2, drift_y2 = intersection_max(
-        x_pdc, y_pdc, x_pdc, y_pdc,
-        frame, seg_bounds, intersect_d, roi_r, width,
-        aim_round=2, progress=progress,
+        x_pdc,
+        y_pdc,
+        x_pdc,
+        y_pdc,
+        frame,
+        seg_bounds,
+        intersect_d,
+        roi_r,
+        width,
+        aim_round=2,
+        progress=progress,
     )
 
     # add the drifts together from the two rounds
@@ -747,16 +773,40 @@ def aim(
         ref_y = y_pdc[frame <= segmentation]
         ref_z = locs["z"][frame <= segmentation].values
         z_pdc, drift_z1 = intersection_max_z(
-            x_pdc, y_pdc, locs["z"].values, ref_x, ref_y, ref_z,
-            frame, seg_bounds, intersect_d, roi_r, width, height, pixelsize,
-            aim_round=1, progress=progress,
+            x_pdc,
+            y_pdc,
+            locs["z"].values,
+            ref_x,
+            ref_y,
+            ref_z,
+            frame,
+            seg_bounds,
+            intersect_d,
+            roi_r,
+            width,
+            height,
+            pixelsize,
+            aim_round=1,
+            progress=progress,
         )
         if progress is not None:
             progress.zero_progress(description="Undrifting z (2/2)")
         z_pdc, drift_z2 = intersection_max_z(
-            x_pdc, y_pdc, z_pdc, x_pdc, y_pdc, z_pdc,
-            frame, seg_bounds, intersect_d, roi_r, width, height, pixelsize,
-            aim_round=2, progress=progress,
+            x_pdc,
+            y_pdc,
+            z_pdc,
+            x_pdc,
+            y_pdc,
+            z_pdc,
+            frame,
+            seg_bounds,
+            intersect_d,
+            roi_r,
+            width,
+            height,
+            pixelsize,
+            aim_round=2,
+            progress=progress,
         )
         drift_z = drift_z1 + drift_z2
         shift_z = np.mean(drift_z)

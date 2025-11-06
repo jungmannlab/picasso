@@ -38,10 +38,11 @@ def check_new(path: str, processed: dict, logfile: str):
     all_ = [os.path.join(path, _) for _ in all_]
 
     new = [
-        _ for _ in all_
+        _
+        for _ in all_
         if (
-            os.path.normpath(_) not in processed.keys() and
-            _.endswith(FILETYPES)
+            os.path.normpath(_) not in processed.keys()
+            and _.endswith(FILETYPES)
         )
     ]
     locs = [_ for _ in all_ if _.endswith("_locs.hdf5")]
@@ -102,10 +103,10 @@ def get_children_files(file: str, checked: list):
         _
         for _ in files_in_folder
         if (
-            _.startswith(file[:-8]) and
-            _ not in checked and
-            _.endswith(".ome.tif") and
-            'MMStack_Pos0' in _
+            _.startswith(file[:-8])
+            and _ not in checked
+            and _.endswith(".ome.tif")
+            and "MMStack_Pos0" in _
         )
     ]
 
@@ -205,11 +206,13 @@ def check_new_and_process(
                     if "$FILENAME" in command:
                         to_execute = command[:]
                         to_execute = to_execute.replace(
-                            "$FILENAME", f'"{file}"',
+                            "$FILENAME",
+                            f'"{file}"',
                         )
 
                     print_to_file(
-                        logfile, f"{datetime.now()} Executing {to_execute}.",
+                        logfile,
+                        f"{datetime.now()} Executing {to_execute}.",
                     )
 
                     subprocess.run(to_execute)
@@ -218,7 +221,8 @@ def check_new_and_process(
                 raise
             except Exception as e:
                 print_to_file(
-                    logfile, f"{datetime.now()} Exception {e} occured.",
+                    logfile,
+                    f"{datetime.now()} Exception {e} occured.",
                 )
 
             processed[file] = True
@@ -267,7 +271,10 @@ def watcher():
                     "sqlite:///" + localize._db_filename(), echo=False
                 )
                 df.to_sql(
-                    "watcher", con=engine, if_exists="replace", index=False,
+                    "watcher",
+                    con=engine,
+                    if_exists="replace",
+                    index=False,
                 )
 
                 st.success("Removed. Please refresh this page.")
@@ -411,14 +418,14 @@ def watcher():
                 for i in range(n_columns):
                     settings_selected = {}
                     settings_selected["box_side_length"] = settings[i]["box"]
-                    settings_selected["gradient"] = (
-                        settings[i]["min_net_gradient"]
-                    )
+                    settings_selected["gradient"] = settings[i][
+                        "min_net_gradient"
+                    ]
                     settings_selected["gain"] = settings[i]["em_gain"]
                     settings_selected["baseline"] = settings[i]["baseline"]
-                    settings_selected["sensitivity"] = (
-                        settings[i]["sensitivity"]
-                    )
+                    settings_selected["sensitivity"] = settings[i][
+                        "sensitivity"
+                    ]
                     settings_selected["qe"] = settings[i]["qe"]
                     settings_selected["pixelsize"] = settings[i]["pixelsize"]
                     settings_selected["fit_method"] = settings[i]["methods"]
@@ -426,9 +433,9 @@ def watcher():
                     if settings[i]["calib_file"]:
                         settings_selected["zc"] = settings[i]["calib_file"]
                     if settings[i]["magnification_factor"]:
-                        settings_selected["mf"] = (
-                            settings[i]["magnification_factor"]
-                        )
+                        settings_selected["mf"] = settings[i][
+                            "magnification_factor"
+                        ]
 
                     settings_selected["database"] = True
                     if n_columns == 1:
@@ -443,7 +450,7 @@ def watcher():
                 existing = fetch_db()
 
                 if len(existing) > 0:
-                    existing = existing['filename'].tolist()
+                    existing = existing["filename"].tolist()
                 else:
                     existing = []
 
@@ -476,7 +483,10 @@ def watcher():
                     "sqlite:///" + localize._db_filename(), echo=False
                 )
                 df.to_sql(
-                    "watcher", con=engine, if_exists="append", index=False,
+                    "watcher",
+                    con=engine,
+                    if_exists="append",
+                    index=False,
                 )
 
                 for reset in range(3):

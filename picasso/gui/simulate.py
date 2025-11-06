@@ -1,11 +1,11 @@
 """
-    picasso.gui.simulate
-    ~~~~~~~~~~~~~~~~~~~~
+picasso.gui.simulate
+~~~~~~~~~~~~~~~~~~~~
 
-    GUI for simulating single molecule fluorescence data.
+GUI for simulating single molecule fluorescence data.
 
-    :author: Maximilian Thomas Strauss, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:author: Maximilian Thomas Strauss, 2016
+:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -331,7 +331,8 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QSpacerItem(
                 1,
                 1,
-                QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Minimum,
+                QtWidgets.QSizePolicy.Expanding,
             )
         )
 
@@ -379,7 +380,8 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QSpacerItem(
                 1,
                 1,
-                QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Minimum,
+                QtWidgets.QSizePolicy.Expanding,
             )
         )
 
@@ -494,7 +496,9 @@ class Window(QtWidgets.QMainWindow):
 
         igrid.addWidget(self.photonslopemodeEdit, 9 - igridindex, 1)
         igrid.addWidget(
-            QtWidgets.QLabel("Constant detection rate"), 9 - igridindex, 0,
+            QtWidgets.QLabel("Constant detection rate"),
+            9 - igridindex,
+            0,
         )
 
         if ADVANCEDMODE:
@@ -786,7 +790,8 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QSpacerItem(
                 1,
                 1,
-                QtWidgets.QSizePolicy.Minimum, QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Minimum,
+                QtWidgets.QSizePolicy.Expanding,
             )
         )
 
@@ -811,11 +816,15 @@ class Window(QtWidgets.QMainWindow):
 
         btngridR.addWidget(loadButton, 0, 0, 1, 2)
         btngridR.addWidget(
-            QtWidgets.QLabel("Exchange rounds to be simulated:"), 1, 0,
+            QtWidgets.QLabel("Exchange rounds to be simulated:"),
+            1,
+            0,
         )
         btngridR.addWidget(self.exchangeroundsEdit, 1, 1)
         btngridR.addWidget(
-            QtWidgets.QLabel("Concatenate several rounds:"), 2, 0,
+            QtWidgets.QLabel("Concatenate several rounds:"),
+            2,
+            0,
         )
         btngridR.addWidget(self.conroundsEdit, 2, 1)
         btngridR.addWidget(QtWidgets.QLabel("Concatenate Exchange"))
@@ -1680,10 +1689,12 @@ class Window(QtWidgets.QMainWindow):
                 info = io.load_info(path)
 
                 x = self.readLine(
-                    info[0]["Structure.StructureX"], textmode=False,
+                    info[0]["Structure.StructureX"],
+                    textmode=False,
                 )
                 y = self.readLine(
-                    info[0]["Structure.StructureY"], textmode=False,
+                    info[0]["Structure.StructureY"],
+                    textmode=False,
                 )
                 try:
                     ex = self.readLine(
@@ -1812,9 +1823,9 @@ class Window(QtWidgets.QMainWindow):
         self.plotStructure()
         pixelsize = self.pixelsizeEdit.value()
         if self.structureMode:
-            (
-                structurexx, structureyy, structureex, structure3d
-            ) = self.readStructure()
+            (structurexx, structureyy, structureex, structure3d) = (
+                self.readStructure()
+            )
             structure = simulate.defineStructure(
                 structurexx, structureyy, structureex, structure3d, pixelsize
             )
@@ -2410,7 +2421,8 @@ class CalibrationDialog(QtWidgets.QDialog):
     def loadTif(self) -> None:
         """Load .tif files from a directory."""
         self.path = QtWidgets.QFileDialog.getExistingDirectory(
-            self, "Select Directory",
+            self,
+            "Select Directory",
         )
         if self.path:
             self.tifCounter = len(_glob.glob1(self.path, "*.tif"))
@@ -2431,7 +2443,9 @@ class CalibrationDialog(QtWidgets.QDialog):
 
             for i in range(0, self.tifCounter):
                 self.table.setItem(
-                    i, 0, QtWidgets.QTableWidgetItem(self.tifFiles[i]),
+                    i,
+                    0,
+                    QtWidgets.QTableWidgetItem(self.tifFiles[i]),
                 )
 
     def changeComb(self, indexval: int) -> None:
@@ -2514,8 +2528,7 @@ def main():
 
     plugins = [
         importlib.import_module(name)
-        for finder, name, ispkg
-        in iter_namespace(plugins)
+        for finder, name, ispkg in iter_namespace(plugins)
     ]
 
     for plugin in plugins:
@@ -2530,7 +2543,9 @@ def main():
         lib.cancel_dialogs()
         message = "".join(tback.format_exception(type, value, tback))
         errorbox = QtWidgets.QMessageBox.critical(
-            window, "An error occured", message,
+            window,
+            "An error occured",
+            message,
         )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)

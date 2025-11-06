@@ -1,11 +1,11 @@
 """
-    picasso.io
-    ~~~~~~~~~~
+picasso.io
+~~~~~~~~~~
 
-    General purpose library for handling input and output of files.
+General purpose library for handling input and output of files.
 
-    :author: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:author: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -319,7 +319,7 @@ def load_movie(
         return load_tif(path)
     elif ext == ".ims":
         return load_ims(path, prompt_info=prompt_info)
-    elif ext == '.nd2':
+    elif ext == ".nd2":
         return load_nd2(path)
 
 
@@ -505,8 +505,13 @@ class AbstractPicassoMovie(abc.ABC):
             Keys: gain, qe, wavelength, cam_index, camera. Values are
             lists.
         """
-        return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0,
-                'camera': 'None'}
+        return {
+            "gain": [1],
+            "qe": [1],
+            "wavelength": [0],
+            "cam_index": 0,
+            "camera": "None",
+        }
 
     @abc.abstractmethod
     def __getitem__(self, it):
@@ -534,7 +539,7 @@ class AbstractPicassoMovie(abc.ABC):
     @property
     @abc.abstractmethod
     def dtype(self):
-        return 'u16'
+        return "u16"
 
 
 class ND2Movie(AbstractPicassoMovie):
@@ -552,23 +557,27 @@ class ND2Movie(AbstractPicassoMovie):
         self.dask = self.nd2file.to_dask()
         self.sizes = self.nd2file.sizes
 
-        required_dims = ['T', 'Y', 'X']  # exactly these, not more
+        required_dims = ["T", "Y", "X"]  # exactly these, not more
         for dim in required_dims:
             if dim not in self.nd2file.sizes.keys():
                 raise KeyError(
-                    'Required dimension {:s} not in file {:s}'.format(
-                        dim, self.path))
+                    "Required dimension {:s} not in file {:s}".format(
+                        dim, self.path
+                    )
+                )
         if self.nd2file.ndim != len(required_dims):
             raise KeyError(
-                'File {:s} has dimensions {:s} '.format(
-                    self.path, str(self.nd2file.sizes.keys())) +
-                'but should have exactly {:s}.'.format(str(required_dims)))
+                "File {:s} has dimensions {:s} ".format(
+                    self.path, str(self.nd2file.sizes.keys())
+                )
+                + "but should have exactly {:s}.".format(str(required_dims))
+            )
 
         self.meta = self.get_metadata(self.nd2file)
         self._shape = [
-            self.nd2file.sizes['T'],
-            self.nd2file.sizes['X'],
-            self.nd2file.sizes['Y'],
+            self.nd2file.sizes["T"],
+            self.nd2file.sizes["X"],
+            self.nd2file.sizes["Y"],
         ]
 
     def info(self) -> dict:
@@ -591,18 +600,20 @@ class ND2Movie(AbstractPicassoMovie):
         info = {
             # "Byte Order": self._tif_byte_order,
             "File": self.path,
-            "Height": nd2file.sizes['Y'],
-            "Width": nd2file.sizes['X'],
+            "Height": nd2file.sizes["Y"],
+            "Width": nd2file.sizes["X"],
             "Data Type": nd2file.dtype.name,
-            "Frames": nd2file.sizes['T'],
+            "Frames": nd2file.sizes["T"],
         }
-        info['Acquisition Comments'] = ''
+        info["Acquisition Comments"] = ""
 
         mm_info = self.metadata_to_dict(nd2file)
         camera_name = str(
-            mm_info.get('description', {}).get(
-                'Metadata', {}).get('Camera Name', 'None'))
-        info['Camera'] = camera_name
+            mm_info.get("description", {})
+            .get("Metadata", {})
+            .get("Camera Name", "None")
+        )
+        info["Camera"] = camera_name
 
         # simulate micro manager camera data for loading config values
         # see picasso/gui/localize:680ff
@@ -616,38 +627,46 @@ class ND2Movie(AbstractPicassoMovie):
         #     'Emission Wavelengths':
         #         '2 (560)': 560
         readout_rate = str(
-            mm_info.get(
-                'description', {}).get('Metadata', {}).get(
-                'Camera Settings', {}).get('Readout Rate', 'None'))
+            mm_info.get("description", {})
+            .get("Metadata", {})
+            .get("Camera Settings", {})
+            .get("Readout Rate", "None")
+        )
         readout_mode = str(
-            mm_info.get(
-                'description', {}).get('Metadata', {}).get(
-                'Camera Settings', {}).get('Readout Mode', 'None'))
+            mm_info.get("description", {})
+            .get("Metadata", {})
+            .get("Camera Settings", {})
+            .get("Readout Mode", "None")
+        )
         conversion_gain = str(
-            mm_info.get(
-                'description', {}).get('Metadata', {}).get(
-                'Camera Settings', {}).get('Conversion Gain', 'None'))
+            mm_info.get("description", {})
+            .get("Metadata", {})
+            .get("Camera Settings", {})
+            .get("Conversion Gain", "None")
+        )
         filter = str(
-            mm_info.get(
-                'description', {}).get('Metadata', {}).get(
-                'Camera Settings', {}).get('Microscope Settings', {}).get(
-                'Nikon Ti2, FilterChanger(Turret-Lo)', 'None'))
+            mm_info.get("description", {})
+            .get("Metadata", {})
+            .get("Camera Settings", {})
+            .get("Microscope Settings", {})
+            .get("Nikon Ti2, FilterChanger(Turret-Lo)", "None")
+        )
 
-        sensitivity_category = 'PixelReadoutRate'
-        sensitivity_category2 = 'Sensitivity/DynamicRange'
+        sensitivity_category = "PixelReadoutRate"
+        sensitivity_category2 = "Sensitivity/DynamicRange"
         info["Micro-Manager Metadata"] = {
-            camera_name + '-' + sensitivity_category: readout_rate,
-            camera_name + '-' + sensitivity_category2: (
-                readout_mode + ' ' + conversion_gain
-            ),
-            'Filter': filter,
-            }
+            camera_name + "-" + sensitivity_category: readout_rate,
+            camera_name
+            + "-"
+            + sensitivity_category2: (readout_mode + " " + conversion_gain),
+            "Filter": filter,
+        }
         info["Picasso Metadata"] = {
-            'Camera': camera_name,
-            'PixelReadoutRate': readout_rate,
-            'ReadoutMode': readout_mode,
-            'ConversionGain': conversion_gain,
-            'Filter': filter,
+            "Camera": camera_name,
+            "PixelReadoutRate": readout_rate,
+            "ReadoutMode": readout_mode,
+            "ConversionGain": conversion_gain,
+            "Filter": filter,
         }
         info["nd2 Metadata"] = mm_info
 
@@ -671,29 +690,29 @@ class ND2Movie(AbstractPicassoMovie):
 
         text_info = nd2file.text_info
         try:
-            mmmeta['capturing'] = (
-                self.nikontext_to_dict(text_info['capturing'])
+            mmmeta["capturing"] = self.nikontext_to_dict(
+                text_info["capturing"]
             )
         except Exception:
             pass
         try:
-            mmmeta['AcquisitionDate'] = text_info['date']
+            mmmeta["AcquisitionDate"] = text_info["date"]
         except Exception:
             pass
         try:
-            mmmeta['description'] = (
-                self.nikontext_to_dict(text_info['description'])
+            mmmeta["description"] = self.nikontext_to_dict(
+                text_info["description"]
             )
         except Exception:
             pass
         try:
-            mmmeta['optics'] = self.nikontext_to_dict(text_info['optics'])
+            mmmeta["optics"] = self.nikontext_to_dict(text_info["optics"])
         except Exception:
             pass
 
-        mmmeta['custom_data'] = nd2file.custom_data
-        mmmeta['attributes'] = nd2file.attributes._asdict()
-        mmmeta['metadata'] = self.nd2metadata_to_dict(nd2file.metadata)
+        mmmeta["custom_data"] = nd2file.custom_data
+        mmmeta["attributes"] = nd2file.attributes._asdict()
+        mmmeta["metadata"] = self.nd2metadata_to_dict(nd2file.metadata)
 
         return mmmeta
 
@@ -715,25 +734,26 @@ class ND2Movie(AbstractPicassoMovie):
         """
         out = {}
         curr_keys = []
-        for i, item in enumerate(text.split('\r\n')):
-            itparts = item.split(':')
-            itparts = [it.strip() for it in itparts if it.strip() != '']
+        for i, item in enumerate(text.split("\r\n")):
+            itparts = item.split(":")
+            itparts = [it.strip() for it in itparts if it.strip() != ""]
             if len(itparts) == 1:
                 curr_keys.append(itparts[0])
                 cls.set_nested_dict_entry(out, curr_keys, {})
             elif len(itparts) == 2:
                 cls.set_nested_dict_entry(
-                    out, curr_keys+[itparts[0]], itparts[1])
+                    out, curr_keys + [itparts[0]], itparts[1]
+                )
             elif len(itparts) == 3:
                 curr_keys.append(itparts[0])
                 cls.set_nested_dict_entry(out, curr_keys, {})
                 cls.set_nested_dict_entry(
-                    out, curr_keys+[itparts[1]], itparts[2])
+                    out, curr_keys + [itparts[1]], itparts[2]
+                )
             elif len(itparts) > 3:
                 curr_keys.append(itparts[0])
                 cls.set_nested_dict_entry(out, curr_keys, {})
-                cls.set_nested_dict_entry(
-                    out, curr_keys+[itparts[1]], item)
+                cls.set_nested_dict_entry(out, curr_keys + [itparts[1]], item)
                 # raise KeyError(
                 #     'Cannot parse three or more colons between newlines: ' +
                 #     item)
@@ -756,22 +776,22 @@ class ND2Movie(AbstractPicassoMovie):
             The content as a dict.
         """
         out = {}
-        out['contents'] = meta.contents.__dict__
+        out["contents"] = meta.contents.__dict__
         chans = [{}] * len(meta.channels)
         for i, chan in enumerate(meta.channels):
             chans[i] = chan.__dict__
-            metachan = chan.__dict__['channel'].__dict__
-            chans[i]['channel'] = {}
+            metachan = chan.__dict__["channel"].__dict__
+            chans[i]["channel"] = {}
             for k, v in metachan.items():
-                chans[i]['channel'][str(k)] = str(v)
-            chans[i]['loops'] = chan.__dict__['loops'].__dict__
-            chans[i]['microscope'] = chan.__dict__['microscope'].__dict__
-            chans[i]['volume'] = chan.__dict__['volume'].__dict__
-            axints = chans[i]['volume']['axesInterpretation']
-            chans[i]['volume']['axesInterpretation'] = [None]*len(axints)
+                chans[i]["channel"][str(k)] = str(v)
+            chans[i]["loops"] = chan.__dict__["loops"].__dict__
+            chans[i]["microscope"] = chan.__dict__["microscope"].__dict__
+            chans[i]["volume"] = chan.__dict__["volume"].__dict__
+            axints = chans[i]["volume"]["axesInterpretation"]
+            chans[i]["volume"]["axesInterpretation"] = [None] * len(axints)
             for j, axes_inter in enumerate(axints):
-                chans[i]['volume']['axesInterpretation'][j] = axes_inter
-        out['channels'] = chans
+                chans[i]["volume"]["axesInterpretation"][j] = axes_inter
+        out["channels"] = chans
         return out
 
     @classmethod
@@ -806,11 +826,11 @@ class ND2Movie(AbstractPicassoMovie):
         return self.get_frame(it)
 
     def __iter__(self):
-        for i in range(self.sizes['T']):
+        for i in range(self.sizes["T"]):
             yield self[i]
 
     def __len__(self):
-        return self.sizes['T']
+        return self.sizes["T"]
 
     @property
     def shape(self) -> tuple[int, int, int]:
@@ -835,7 +855,7 @@ class ND2Movie(AbstractPicassoMovie):
         return self.dask[index].compute()
 
     def tofile(self, file_handle, byte_order=None):
-        raise NotImplementedError('Cannot write .nd2 file.')
+        raise NotImplementedError("Cannot write .nd2 file.")
 
     def camera_parameters(self, config):
         """Get the camera specific parameters:
@@ -889,29 +909,29 @@ class ND2Movie(AbstractPicassoMovie):
         except Exception:
             raise KeyError("'camera' key not found in metadata or config.")
 
-        cameras = config['Cameras']
+        cameras = config["Cameras"]
         camera = info["Camera"]
 
         try:
             assert camera in cameras.keys()
         except Exception:
-            raise KeyError('camera from metadata not found in config.')
+            raise KeyError("camera from metadata not found in config.")
 
         index = sorted(list(cameras.keys())).index(camera)
-        parameters['cam_index'] = index
-        parameters['camera'] = camera
+        parameters["cam_index"] = index
+        parameters["camera"] = camera
 
         try:
             assert "Picasso Metadata" in info
         except Exception:
-            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
 
         pm_info = info["Picasso Metadata"]
         # mm_info = info["nd2 Metadata"]
         cam_config = config["Cameras"][camera]
         if "Gain Property Name" in cam_config:
             raise NotImplementedError(
-                'Extracting Gain from nd2 files is not implemented yet.'
+                "Extracting Gain from nd2 files is not implemented yet."
             )
             # gain_property_name = cam_config["Gain Property Name"]
             # gain = pm_info['gain']
@@ -927,32 +947,33 @@ class ND2Movie(AbstractPicassoMovie):
             #         == cam_config["EM Switch Property"][True]
             #     ):
             #         parameters['gain'] = int(gain)
-        if 'gain' not in parameters.keys():
-            parameters['gain'] = [1]
+        if "gain" not in parameters.keys():
+            parameters["gain"] = [1]
 
-        parameters['Sensitivity'] = {}
+        parameters["Sensitivity"] = {}
         if "Sensitivity Categories" in cam_config:
             categories = cam_config["Sensitivity Categories"]
             for i, category in enumerate(categories):
-                parameters['Sensitivity'][category] = pm_info[category]
+                parameters["Sensitivity"][category] = pm_info[category]
         if "Quantum Efficiency" in cam_config:
             if "Filter Wavelengths" in cam_config:
-                channel = pm_info['Filter']
+                channel = pm_info["Filter"]
                 channels = cam_config["Filter Wavelengths"]
                 if channel in channels:
                     wavelength = channels[channel]
-                    parameters['wavelength'] = str(wavelength)
-                    parameters['qe'] = cam_config["Quantum Efficiency"][
-                        wavelength]
-        if 'qe' not in parameters.keys():
-            parameters['qe'] = [1]
-        if 'wavelength' not in parameters.keys():
-            parameters['wavelength'] = [0]
+                    parameters["wavelength"] = str(wavelength)
+                    parameters["qe"] = cam_config["Quantum Efficiency"][
+                        wavelength
+                    ]
+        if "qe" not in parameters.keys():
+            parameters["qe"] = [1]
+        if "wavelength" not in parameters.keys():
+            parameters["wavelength"] = [0]
         return parameters
 
     @property
     def dtype(self):
-        return np.dtype(self.meta['Data Type'])
+        return np.dtype(self.meta["Data Type"])
 
 
 class TiffMap:
@@ -1134,7 +1155,7 @@ class TiffMap:
                 readout_s = str(line)
                 try:
                     readout_s = readout_s[
-                        readout_s.index('{'):-readout_s[::-1].index('}')
+                        readout_s.index("{") : -readout_s[::-1].index("}")
                     ]
                     comments = json.loads(readout_s)["Summary"].split("\n")
                 except Exception:
@@ -1153,7 +1174,9 @@ class TiffMap:
         self.file.seek(self.image_offsets[index])
         frame = np.reshape(
             np.fromfile(
-                self.file, dtype=self._tif_dtype, count=self.frame_size,
+                self.file,
+                dtype=self._tif_dtype,
+                count=self.frame_size,
             ),
             self.frame_shape,
         )
@@ -1334,26 +1357,26 @@ class TiffMultiMap(AbstractPicassoMovie):
         try:
             assert "Cameras" in config and "Camera" in info
         except Exception:
-            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
             # raise KeyError("'camera' key not found in metadata or config.")
 
-        cameras = config['Cameras']
+        cameras = config["Cameras"]
         camera = info["Camera"]
 
         try:
             assert camera in list(cameras.keys())
         except Exception:
-            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
             # raise KeyError('camera from metadata not found in config.')
 
         index = sorted(list(cameras.keys())).index(camera)
-        parameters['cam_index'] = index
-        parameters['camera'] = camera
+        parameters["cam_index"] = index
+        parameters["camera"] = camera
 
         try:
             assert "Micro-Manager Metadata" in info
         except Exception:
-            return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
+            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
 
         mm_info = info["Micro-Manager Metadata"]
         cam_config = config["Cameras"][camera]
@@ -1361,9 +1384,7 @@ class TiffMultiMap(AbstractPicassoMovie):
             gain_property_name = cam_config["Gain Property Name"]
             gain = mm_info[camera + "-" + gain_property_name]
             if "EM Switch Property" in cam_config:
-                switch_property_name = cam_config[
-                    "EM Switch Property"
-                ]["Name"]
+                switch_property_name = cam_config["EM Switch Property"]["Name"]
                 switch_property_value = mm_info[
                     camera + "-" + switch_property_name
                 ]
@@ -1371,35 +1392,32 @@ class TiffMultiMap(AbstractPicassoMovie):
                     switch_property_value
                     == cam_config["EM Switch Property"][True]
                 ):
-                    parameters['gain'] = int(gain)
-        if 'gain' not in parameters.keys():
-            parameters['gain'] = [1]
-        parameters['Sensitivity'] = {}
+                    parameters["gain"] = int(gain)
+        if "gain" not in parameters.keys():
+            parameters["gain"] = [1]
+        parameters["Sensitivity"] = {}
         if "Sensitivity Categories" in cam_config:
             categories = cam_config["Sensitivity Categories"]
             for i, category in enumerate(categories):
                 property_name = camera + "-" + category
                 if property_name in mm_info:
                     exp_setting = mm_info[camera + "-" + category]
-                    parameters['Sensitivity'][category] = exp_setting
+                    parameters["Sensitivity"][category] = exp_setting
         if "Quantum Efficiency" in cam_config:
             if "Channel Device" in cam_config:
-                channel_device_name = cam_config["Channel Device"][
-                    "Name"
-                ]
+                channel_device_name = cam_config["Channel Device"]["Name"]
                 channel = mm_info[channel_device_name]
-                channels = cam_config["Channel Device"][
-                    "Emission Wavelengths"
-                ]
+                channels = cam_config["Channel Device"]["Emission Wavelengths"]
                 if channel in channels:
                     wavelength = channels[channel]
-                    parameters['wavelength'] = [str(wavelength)]
-                    parameters['qe'] = [cam_config["Quantum Efficiency"][
-                        wavelength]]
-        if 'qe' not in parameters.keys():
-            parameters['qe'] = [1]
-        if 'wavelength' not in parameters.keys():
-            parameters['wavelength'] = [0]
+                    parameters["wavelength"] = [str(wavelength)]
+                    parameters["qe"] = [
+                        cam_config["Quantum Efficiency"][wavelength]
+                    ]
+        if "qe" not in parameters.keys():
+            parameters["qe"] = [1]
+        if "wavelength" not in parameters.keys():
+            parameters["wavelength"] = [0]
         return parameters
 
     def tofile(self, file_handle, byte_order=None):
@@ -1531,8 +1549,7 @@ def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
 
 
 def load_locs(
-    path: str,
-    qt_parent: QWidget | None = None
+    path: str, qt_parent: QWidget | None = None
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file.
 

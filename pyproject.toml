@@ -73,3 +73,20 @@ picasso = [
     "gui/notification_sounds/*.wav",
     "config_template.yaml",
 ]
+
+[tool.black]
+line-length = 79
+include = "\\.pyi?$"
+exclude = '''
+(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)
+'''

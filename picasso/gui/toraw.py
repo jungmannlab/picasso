@@ -1,12 +1,12 @@
 #!/usr/bin/env python
 """
-    picasso.gui.toraw
-    ~~~~~~~~~~~~~~~~~
+picasso.gui.toraw
+~~~~~~~~~~~~~~~~~
 
-    Graphical user interface for converting movies to raw files.
+Graphical user interface for converting movies to raw files.
 
-    :author: Joerg Schnitzbauer, 2015
-    :copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
+:author: Joerg Schnitzbauer, 2015
+:copyright: Copyright (c) 2015 Jungmann Lab, MPI of Biochemistry
 """
 
 import sys
@@ -155,7 +155,9 @@ def main():
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
         errorbox = QtWidgets.QMessageBox.critical(
-            window, "An error occured", message,
+            window,
+            "An error occured",
+            message,
         )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)

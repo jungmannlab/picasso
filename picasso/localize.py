@@ -1,12 +1,12 @@
 """
-    picasso.localize
-    ~~~~~~~~~~~~~~~~
+picasso.localize
+~~~~~~~~~~~~~~~~
 
-    Identify and localize fluorescent single molecules in a frame
-    sequence.
+Identify and localize fluorescent single molecules in a frame
+sequence.
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -63,15 +63,17 @@ MEAN_COLS = [
     "d_zcalib",
 ]
 SET_COLS = [
-    "Frames", "Height", "Width", "Box Size", "Min. Net Gradient", "Pixelsize",
+    "Frames",
+    "Height",
+    "Width",
+    "Box Size",
+    "Min. Net Gradient",
+    "Pixelsize",
 ]
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
-def local_maxima(
-    frame: np.ndarray,
-    box: int
-) -> tuple[np.ndarray, np.ndarray]:
+def local_maxima(frame: np.ndarray, box: int) -> tuple[np.ndarray, np.ndarray]:
     """Find pixels with maximum value within a region of interest.
 
     Parameters
@@ -96,8 +98,8 @@ def local_maxima(
     for i in range(box_half, Y - box_half_1):
         for j in range(box_half, X - box_half_1):
             local_frame = frame[
-                i - box_half:i + box_half + 1,
-                j - box_half:j + box_half + 1,
+                i - box_half : i + box_half + 1,
+                j - box_half : j + box_half + 1,
             ]
             flat_max = np.argmax(local_frame)
             i_local_max = int(flat_max / box)
@@ -268,7 +270,7 @@ def identify_in_frame(
         (len(y),).
     """
     if roi is not None:
-        frame = frame[roi[0][0]:roi[1][0], roi[0][1]:roi[1][1]]
+        frame = frame[roi[0][0] : roi[1][0], roi[0][1] : roi[1][1]]
     image = np.float32(frame)  # otherwise numba goes crazy
     y, x, net_gradient = identify_in_image(image, minimum_ng, box)
     if roi is not None:
@@ -324,12 +326,14 @@ def identify_by_frame_number(
         frame = movie[frame_number]
     y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
     frame = frame_number * np.ones(len(x))
-    identifications = pd.DataFrame({
-        "frame": frame.astype(int),
-        "x": x.astype(int),
-        "y": y.astype(int),
-        "net_gradient": net_gradient.astype(np.float32),
-    })
+    identifications = pd.DataFrame(
+        {
+            "frame": frame.astype(int),
+            "x": x.astype(int),
+            "y": y.astype(int),
+            "net_gradient": net_gradient.astype(np.float32),
+        }
+    )
     return identifications
 
 
@@ -438,7 +442,13 @@ def identify_async(
     executor = ThreadPoolExecutor(n_workers)
     f = [
         executor.submit(
-            _identify_worker, movie, current, minimum_ng, box, roi, lock,
+            _identify_worker,
+            movie,
+            current,
+            minimum_ng,
+            box,
+            roi,
+            lock,
         )
         for _ in range(n_workers)
     ]
@@ -499,7 +509,7 @@ def _cut_spots_numba(
     r = int(box / 2)
     spots = np.zeros((n_spots, box, box), dtype=movie.dtype)
     for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
-        spots[id] = movie[frame, yc - r:yc + r + 1, xc - r:xc + r + 1]
+        spots[id] = movie[frame, yc - r : yc + r + 1, xc - r : xc + r + 1]
     return spots
 
 
@@ -523,7 +533,7 @@ def _cut_spots_frame(
             break
         yc = ids_y[j]
         xc = ids_x[j]
-        spots[j] = frame[yc - r:yc + r + 1, xc - r:xc + r + 1]
+        spots[j] = frame[yc - r : yc + r + 1, xc - r : xc + r + 1]
     return j
 
 
@@ -585,7 +595,7 @@ def _cut_spots_framebyframe(
     ids_x: np.ndarray,
     ids_y: np.ndarray,
     box: int,
-    spots: np.ndarray
+    spots: np.ndarray,
 ):
     """Extract the spots out of a movie frame by frame.
 
@@ -631,14 +641,18 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
     N = len(ids)
     if isinstance(movie, np.ndarray):
         return _cut_spots_numba(
-            movie, ids["frame"].values, ids["x"].values, ids["y"].values, box,
+            movie,
+            ids["frame"].values,
+            ids["x"].values,
+            ids["y"].values,
+            box,
         )
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
-        """ Assumes that identifications are in order of frames! """
+        """Assumes that identifications are in order of frames!"""
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         spots = da.apply_gufunc(
             _cut_spots_daskmov,
-            '(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)',
+            "(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)",
             movie.data,
             np.array([len(movie)]),
             ids["frame"].values,
@@ -757,7 +771,12 @@ def fit(
         spots, eps, max_it, method=method
     )
     locs = locs_from_fits(
-        identifications, theta, CRLBs, likelihoods, iterations, box,
+        identifications,
+        theta,
+        CRLBs,
+        likelihoods,
+        iterations,
+        box,
     )
     return locs
 
@@ -860,22 +879,24 @@ def locs_from_fits(
     x = theta[:, 1] + identifications["x"]  # - box_offset
     lpy = np.sqrt(CRLBs[:, 0])
     lpx = np.sqrt(CRLBs[:, 1])
-    locs = pd.DataFrame({
-        "frame": identifications["frame"].values.astype(np.uint32),
-        "x": x.astype(np.float32),
-        "y": y.astype(np.float32),
-        "photons": theta[:, 2].astype(np.float32),
-        "sx": theta[:, 5].astype(np.float32),
-        "sy": theta[:, 4].astype(np.float32),
-        "bg": theta[:, 3].astype(np.float32),
-        "lpx": lpx.astype(np.float32),
-        "lpy": lpy.astype(np.float32),
-        "net_gradient": (
-            identifications["net_gradient"].values.astype(np.float32)
-        ),
-        "likelihood": likelihoods.astype(np.float32),
-        "iterations": iterations.astype(np.int32),
-    })
+    locs = pd.DataFrame(
+        {
+            "frame": identifications["frame"].values.astype(np.uint32),
+            "x": x.astype(np.float32),
+            "y": y.astype(np.float32),
+            "photons": theta[:, 2].astype(np.float32),
+            "sx": theta[:, 5].astype(np.float32),
+            "sy": theta[:, 4].astype(np.float32),
+            "bg": theta[:, 3].astype(np.float32),
+            "lpx": lpx.astype(np.float32),
+            "lpy": lpy.astype(np.float32),
+            "net_gradient": (
+                identifications["net_gradient"].values.astype(np.float32)
+            ),
+            "likelihood": likelihoods.astype(np.float32),
+            "iterations": iterations.astype(np.int32),
+        }
+    )
     locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs
 
@@ -942,7 +963,7 @@ def check_nena(
         The NeNA value in pixels, representing the experimental
         localization precision.
     """
-    print('Calculating NeNA.. ', end='')
+    print("Calculating NeNA.. ", end="")
     locs = locs[0:MAX_LOCS]
     try:
         result, nena_px = postprocess.nena(locs, None, callback=callback)
@@ -968,7 +989,7 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
     len_mean : float
         The mean length of binding events in frames.
     """
-    print("Linking.. ", end='')
+    print("Linking.. ", end="")
     locs = locs.iloc[0:MAX_LOCS].copy()
     locs = postprocess.link(locs, info=info)
     len_mean = locs.len.mean()
@@ -1136,7 +1157,7 @@ def add_file_to_db(
     file_hdf: str,
     drift: tuple[float, float] | None = None,
     len_mean: float | None = None,
-    nena: float | None = None
+    nena: float | None = None,
 ) -> None:
     """Add a localization file summary to the SQLite database."""
     summary = get_file_summary(file, file_hdf, drift, len_mean, nena)

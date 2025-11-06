@@ -60,13 +60,18 @@ def status():
             df = df.sort_values("entry_created")
             st.write(f"The database currently contains {len(df):,} entries.")
             st.write("Preview of the last 10 entries:")
-            st.write(df.iloc[-10:][
-                ["entry_created", "filename", "nena_px", "file_created"]
-            ])
+            st.write(
+                df.iloc[-10:][
+                    ["entry_created", "filename", "nena_px", "file_created"]
+                ]
+            )
         else:
             df = pd.DataFrame(
                 columns=[
-                    "entry_created", "filename", "nena_px", "file_created",
+                    "entry_created",
+                    "filename",
+                    "nena_px",
+                    "file_created",
                 ]
             )
             st.write("Database is empty.")
@@ -90,7 +95,7 @@ def status():
 
             if path not in df["filename"].tolist():
                 base, ext = os.path.splitext(path)
-                target = base + '_locs.hdf5'
+                target = base + "_locs.hdf5"
 
                 if not os.path.isfile(target):
                     st.error(f"File {target} does not exist.")
@@ -99,7 +104,8 @@ def status():
 
                 with st.spinner(f"Fetching summary from {file_hdf}."):
                     summary = localize.get_file_summary(
-                        path, file_hdf=file_hdf,
+                        path,
+                        file_hdf=file_hdf,
                     )
                     st.write(summary)
                     if st.button("Add to database"):
@@ -120,7 +126,8 @@ def status():
 
         elif os.path.isdir(path):
             files = [
-                _ for _ in os.listdir(path)
+                _
+                for _ in os.listdir(path)
                 if _.endswith((".raw", ".ome.tif", ".ims"))
             ]  # Children files are in there
 
@@ -140,7 +147,8 @@ def status():
                         file_hdf = base + "_locs.hdf5"
                         if os.path.isfile(file_hdf):
                             summary = localize.get_file_summary(
-                                path_, file_hdf=file_hdf,
+                                path_,
+                                file_hdf=file_hdf,
                             )
                             df_ = pd.DataFrame(
                                 summary.values(), summary.keys()
@@ -159,12 +167,15 @@ def status():
                         "sqlite:///" + localize._db_filename(), echo=False
                     )
                     stack.to_sql(
-                        "files", con=engine, if_exists="append", index=False,
+                        "files",
+                        con=engine,
+                        if_exists="append",
+                        index=False,
                     )
 
                     st.success(f"Submitted {len(stack)} entries to the DB.")
                     st.success("Submitted to DB. Please refresh page.")
                 else:
-                    st.warning('No files found in folder.')
+                    st.warning("No files found in folder.")
         else:
             st.warning("Path is not valid or no locs found.")

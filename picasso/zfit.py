@@ -1,11 +1,11 @@
 """
-    picasso.zfit
-    ~~~~~~~~~~~~
+picasso.zfit
+~~~~~~~~~~~~
 
-    Fitting z coordinates using astigmatism.
+Fitting z coordinates using astigmatism.
 
-    :author: Joerg Schnitzbauer, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:author: Joerg Schnitzbauer, 2016
+:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 import multiprocessing
@@ -162,7 +162,11 @@ def calibrate_z(
     plt.plot(locs["z"], locs["sx"], ".", label="x", alpha=0.2)
     plt.plot(locs["z"], locs["sy"], ".", label="y", alpha=0.2)
     plt.plot(
-        z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="calibration",
+        z_range,
+        np.polyval(cx, z_range),
+        "0.3",
+        lw=1.5,
+        label="calibration",
     )
     plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5)
     plt.xlim(z_range.min(), z_range.max())
@@ -261,7 +265,7 @@ def fit_z(
     info: list[dict],
     calibration: dict,
     magnification_factor: float,
-    filter: int = 2
+    filter: int = 2,
 ) -> pd.DataFrame:
     """Fit z coordinates to the localizations based on the calibration
     curve coefficients and the single-emitter image width and height.
@@ -303,9 +307,7 @@ def fit_z(
         # set bounds to avoid potential gaps in the calibration curve,
         # credits to Loek Andriessen
         result = minimize_scalar(
-            _fit_z_target,
-            bounds=[-1000, 1000],
-            args=(sx[i], sy[i], cx, cy)
+            _fit_z_target, bounds=[-1000, 1000], args=(sx[i], sy[i], cx, cy)
         )
         z[i] = result.x
         square_d_zcalib[i] = result.fun
@@ -367,9 +369,11 @@ def fit_z_parallel(
     n_locs = len(locs)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_locs / n_tasks + 1)
-        if _ < n_locs % n_tasks
-        else int(n_locs / n_tasks)
+        (
+            int(n_locs / n_tasks + 1)
+            if _ < n_locs % n_tasks
+            else int(n_locs / n_tasks)
+        )
         for _ in range(n_tasks)
     ]
     start_indices = np.cumsum([0] + spots_per_task[:-1])
@@ -379,7 +383,7 @@ def fit_z_parallel(
         fs.append(
             executor.submit(
                 fit_z,
-                locs[i:i + n_locs_task],
+                locs[i : i + n_locs_task],
                 info,
                 calibration,
                 magnification_factor,
@@ -395,8 +399,7 @@ def fit_z_parallel(
 
 
 def locs_from_futures(
-    futures: list[futures.Future],
-    filter: int = 2
+    futures: list[futures.Future], filter: int = 2
 ) -> pd.DataFrame:
     """Combine the results from a list of futures (i.e.,
     multiprocessing results) into a single DataFrame of localizations
@@ -446,6 +449,6 @@ def filter_z_fits(locs: pd.DataFrame, range: int) -> pd.DataFrame:
         their residuals (d_zcalib) after filtering.
     """
     if range > 0:
-        rmsd = np.sqrt(np.nanmean(locs["d_zcalib"]**2))
+        rmsd = np.sqrt(np.nanmean(locs["d_zcalib"] ** 2))
         locs = locs[locs["d_zcalib"] <= range * rmsd]
     return locs
