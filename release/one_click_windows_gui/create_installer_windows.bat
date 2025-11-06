@@ -12,7 +12,7 @@ call pip install build
 call python -m build
 
 call cd release/one_click_windows_gui
-call pip install "../../dist/picassosr-0.8.8-py3-none-any.whl"
+call pip install "../../dist/picassosr-0.8.9-py3-none-any.whl"
 
 call pip install pyinstaller==5.12
 call pyinstaller ../pyinstaller/picasso.spec -y --clean
