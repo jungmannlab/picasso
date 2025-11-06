@@ -103,12 +103,12 @@ Besides using the GUI, you can use picasso like any other Python module. Conside
   print('Average bright time {:.2f} frames'.format(np.mean(linked_locs_dark.n)))
   print('Average dark time {:.2f} frames'.format(np.mean(linked_locs_dark.dark)))
 
-This codeblock loads data from testdata_locs and uses the postprocess functions programmatically.
+This codeblock loads data from testdata_locs and uses the postprocess functions programmatically. For more examples, visit the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
 
 Jupyter Notebooks
 -----------------
 
-Check picasso/samples/ for Jupyter Notebooks that show how to interact with the Picasso codebase.
+Check the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__ that show how to interact with the Picasso codebase.
 
 Contributing
 ------------

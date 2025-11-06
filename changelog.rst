@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 05-NOV-2025 CEST
+Last change: 06-NOV-2025 CEST
 
 0.9.0
 -----
