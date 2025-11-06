@@ -2911,9 +2911,9 @@ class InfoDialog(QtWidgets.QDialog):
         main_layout = QtWidgets.QVBoxLayout(self)
         scroll = QtWidgets.QScrollArea(self)
         scroll.setWidgetResizable(True)
-        container = QtWidgets.QWidget()
-        scroll.setWidget(container)
-        vbox = QtWidgets.QVBoxLayout(container)
+        self.container = QtWidgets.QWidget()
+        scroll.setWidget(self.container)
+        vbox = QtWidgets.QVBoxLayout(self.container)
         main_layout.addWidget(scroll)
 
         # Display
@@ -3055,7 +3055,8 @@ class InfoDialog(QtWidgets.QDialog):
         )
 
         # adjust the size of the dialog to fit its contents
-        hint = container.sizeHint()
+        hint = self.container.sizeHint()
+        print(f"hint at init: {hint.width()} x {hint.height()}")
         self.setMinimumWidth(hint.width() + 70)
         # if room is available on the screen, adjust the height as well
         screen = QtWidgets.QApplication.primaryScreen()
