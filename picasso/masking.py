@@ -1,15 +1,15 @@
 """
-    picasso.masking
-    ~~~~~~~~~~~~~~~
+picasso.masking
+~~~~~~~~~~~~~~~
 
-    Functions for masking localizations based on binary masks or
-    thresholding of images.
+Functions for masking localizations based on binary masks or
+thresholding of images.
 
-    Thresholding functions are adapted from scikit-image. The package is
-    not used directly to avoid extra dependencies.
+Thresholding functions are adapted from scikit-image. The package is
+not used directly to avoid extra dependencies.
 
-    :author: Rafal Kowalewski 2025
-    :copyright: Copyright (c) 2015-2025 Jungmann Lab, MPI Biochemistry
+:author: Rafal Kowalewski 2025
+:copyright: Copyright (c) 2015-2025 Jungmann Lab, MPI Biochemistry
 """
 
 from __future__ import annotations
@@ -90,18 +90,21 @@ def binary_mask(
 
 def mask_image(
     image: np.ndarray,
-    method: float | Literal[
-        'isodata',
-        'li',
-        'mean',
-        'minimum',
-        'otsu',
-        'triangle',
-        'yen',
-        'local_gaussian',
-        'local_mean',
-        'local_median',
-    ] = 'otsu',
+    method: (
+        float
+        | Literal[
+            "isodata",
+            "li",
+            "mean",
+            "minimum",
+            "otsu",
+            "triangle",
+            "yen",
+            "local_gaussian",
+            "local_mean",
+            "local_median",
+        ]
+    ) = "otsu",
 ) -> tuple[np.ndarray, float] | tuple[np.ndarray, np.ndarray]:
     """Create a binary mask from a grayscale image using a specified
     thresholding method or threshold value.
@@ -131,16 +134,16 @@ def mask_image(
         mask = binary_mask(image, threshold)
         return mask
     threshold_functions = {
-        'isodata': threshold_isodata,
-        'li': threshold_li,
-        'mean': threshold_mean,
-        'minimum': threshold_minimum,
-        'otsu': threshold_otsu,
-        'triangle': threshold_triangle,
-        'yen': threshold_yen,
-        'local_gaussian': threshold_local_gaussian,
-        'local_mean': threshold_local_mean,
-        'local_median': threshold_local_median,
+        "isodata": threshold_isodata,
+        "li": threshold_li,
+        "mean": threshold_mean,
+        "minimum": threshold_minimum,
+        "otsu": threshold_otsu,
+        "triangle": threshold_triangle,
+        "yen": threshold_yen,
+        "local_gaussian": threshold_local_gaussian,
+        "local_mean": threshold_local_mean,
+        "local_median": threshold_local_median,
     }
     function = threshold_functions.get(method)
     if function is None:
@@ -179,8 +182,8 @@ def threshold_isodata(image: np.ndarray) -> float:
            http://fiji.sc/wiki/index.php/Auto_Threshold
     """
     counts, bin_edges = np.histogram(image, bins=256)
-    counts = counts.astype('float32', copy=False)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.
+    counts = counts.astype("float32", copy=False)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
     # image only contains one unique value
     if len(bin_centers) == 1:
@@ -253,9 +256,8 @@ def threshold_li(image: np.ndarray) -> float:
         if mean_back == 0.0:
             break
 
-        t_next = (
-            (mean_back - mean_fore)
-            / (np.log(mean_back) - np.log(mean_fore))
+        t_next = (mean_back - mean_fore) / (
+            np.log(mean_back) - np.log(mean_fore)
         )
     threshold = t_next
     return threshold
@@ -329,8 +331,8 @@ def threshold_minimum(image):
         return maximum_idxs
 
     counts, bin_edges = np.histogram(image, bins=256)
-    smooth_hist = counts.astype('float32', copy=False)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.
+    smooth_hist = counts.astype("float32", copy=False)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
     for counter in range(10000):
         smooth_hist = ndi.uniform_filter1d(smooth_hist, 3)
@@ -339,12 +341,14 @@ def threshold_minimum(image):
             break
 
     if len(maximum_idxs) != 2:
-        raise RuntimeError('Unable to find two maxima in histogram')
+        raise RuntimeError("Unable to find two maxima in histogram")
     elif counter == 10000 - 1:
-        raise RuntimeError('Maximum iteration reached for histogram smoothing')
+        raise RuntimeError("Maximum iteration reached for histogram smoothing")
 
     # Find the lowest point between the maxima
-    threshold_idx = np.argmin(smooth_hist[maximum_idxs[0]:maximum_idxs[1] + 1])
+    threshold_idx = np.argmin(
+        smooth_hist[maximum_idxs[0] : maximum_idxs[1] + 1]
+    )
     threshold = bin_centers[maximum_idxs[0] + threshold_idx]
     return threshold
 
@@ -371,8 +375,8 @@ def threshold_otsu(image: np.ndarray) -> float:
     """
     # histogram the image and converts bin edges to bin centers
     counts, bin_edges = np.histogram(image, bins=256)
-    counts = counts.astype('float32', copy=False)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.
+    counts = counts.astype("float32", copy=False)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
     # class probabilities for all possible thresholds
     weight1 = np.cumsum(counts)
@@ -414,7 +418,7 @@ def threshold_triangle(image: np.ndarray) -> float:
        http://fiji.sc/wiki/index.php/Auto_Threshold
     """
     hist, bin_edges = np.histogram(image.reshape(-1), bins=256)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
     nbins = len(hist)
 
     arg_peak_height = np.argmax(hist)
@@ -478,14 +482,14 @@ def threshold_yen(image: np.ndarray) -> float:
 
     """
     counts, bin_edges = np.histogram(image, bins=256)
-    counts = counts.astype('float32', copy=False)
-    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.
+    counts = counts.astype("float32", copy=False)
+    bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.0
 
     if bin_centers.size == 1:
         return bin_centers[0]
 
     # Calculate probability mass function
-    pmf = counts.astype('float32', copy=False) / counts.sum()
+    pmf = counts.astype("float32", copy=False) / counts.sum()
     P1 = np.cumsum(pmf)  # Cumulative normalized histogram
     P1_sq = np.cumsum(pmf**2)
     # Get cumsum calculated from end of squared array:
@@ -524,7 +528,10 @@ def threshold_local_gaussian(image: np.ndarray) -> np.ndarray:
     thresh_image = np.zeros(image.shape, dtype=image.dtype)
     sigma = tuple([(b - 1) / 6.0 for b in block_size])
     ndi.gaussian_filter(
-        image, sigma=sigma, output=thresh_image, mode='reflect',
+        image,
+        sigma=sigma,
+        output=thresh_image,
+        mode="reflect",
     )
     mask = np.zeros(image.shape, dtype=bool)
     mask[image > thresh_image] = True
@@ -553,7 +560,7 @@ def threshold_local_mean(image: np.ndarray) -> np.ndarray:
     """
     block_size = (3, 3)
     thresh_image = np.zeros(image.shape, dtype=image.dtype)
-    ndi.uniform_filter(image, block_size, output=thresh_image, mode='reflect')
+    ndi.uniform_filter(image, block_size, output=thresh_image, mode="reflect")
     mask = np.zeros(image.shape, dtype=bool)
     mask[image > thresh_image] = True
     return mask
@@ -581,7 +588,7 @@ def threshold_local_median(image: np.ndarray) -> np.ndarray:
     """
     block_size = (3, 3)
     thresh_image = np.zeros(image.shape, dtype=image.dtype)
-    ndi.median_filter(image, block_size, output=thresh_image, mode='reflect')
+    ndi.median_filter(image, block_size, output=thresh_image, mode="reflect")
     mask = np.zeros(image.shape, dtype=bool)
     mask[image > thresh_image] = True
     return mask

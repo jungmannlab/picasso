@@ -12,6 +12,7 @@ Important updates:
 - Removed dependency ``h5py``. Picasso now uses ``pandas`` to read and write HDF5 files
 - Updated other dependencies, most importantly, ``numpy`` is now in version 2
 - Old setup files were replaced by ``pyproject.toml`` for building and packaging Picasso
+- Black-based code formatting applied to all scripts
 - Render: unfold groups was removed as it is contained within the square grid unfolding
 - SPINNA: improved saved fit results summary (see issue #560)
 

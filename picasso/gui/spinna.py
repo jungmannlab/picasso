@@ -1,12 +1,12 @@
 """
-    picasso.gui.spinna
-    ~~~~~~~~~~~~~~~~~~
+picasso.gui.spinna
+~~~~~~~~~~~~~~~~~~
 
-    Graphical user interface for simulating single proteins in
-    DNA-PAINT using SPINNA. DOI: 10.1038/s41467-025-59500-z
+Graphical user interface for simulating single proteins in
+DNA-PAINT using SPINNA. DOI: 10.1038/s41467-025-59500-z
 
-    :authors: Rafal Kowalewski, Luciano A Masullo, 2022-2025
-    :copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
+:authors: Rafal Kowalewski, Luciano A Masullo, 2022-2025
+:copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ from PyQt5.QtSvg import QSvgRenderer
 
 from .. import io, lib, spinna, __version__
 
-matplotlib.use('agg')
+matplotlib.use("agg")
 
 MASK_PREVIEW_SIZE = 600
 MASK_PREVIEW_ZOOM = 9 / 7
@@ -49,9 +49,16 @@ STRUCTURE_PREVIEW_SIZE = 512
 STRUCTURE_PREVIEW_SCALING = 0.8 * 1.44
 STRUCTURE_PREVIEW_MOL_SIZE = 12
 STRUCTURE_PREVIEW_COLORS = [
-    [31, 119, 180], [255, 127, 14], [44, 160, 44],
-    [214, 39, 40], [148, 103, 189], [140, 86, 75],
-    [227, 119, 194], [127, 127, 127], [188, 189, 34], [23, 190, 207],
+    [31, 119, 180],
+    [255, 127, 14],
+    [44, 160, 44],
+    [214, 39, 40],
+    [148, 103, 189],
+    [140, 86, 75],
+    [227, 119, 194],
+    [127, 127, 127],
+    [188, 189, 34],
+    [23, 190, 207],
 ]
 
 NND_PLOT_SIZE = 470
@@ -91,6 +98,7 @@ def split_name(name: str) -> tuple[str, int]:
 def check_structures_loaded(f: Callable) -> Callable:
     """Decorator that checks if structures are loaded. Displays a
     warning if not."""
+
     def wrapper(*args, **kwargs):
         if not args[0].structures:
             message = "Please load structures first."
@@ -98,12 +106,14 @@ def check_structures_loaded(f: Callable) -> Callable:
             return
         else:
             return f(*args, **kwargs)
+
     return wrapper
 
 
 def check_exp_data_loaded(f: Callable) -> Callable:
     """Decorator that checks if experimental data is loaded. Displays
     a warning if not."""
+
     def wrapper(*args, **kwargs):
         message = "Please load experimental data first."
         if not args[0].targets:
@@ -114,12 +124,14 @@ def check_exp_data_loaded(f: Callable) -> Callable:
                 QtWidgets.QMessageBox.warning(args[0], "", message)
                 return
         return f(*args, **kwargs)
+
     return wrapper
 
 
 def check_search_space_loaded(f: Callable) -> Callable:
     """Decorator that checks if the stoichiometry search space is
     loaded. Displays a warning if not."""
+
     def wrapper(*args, **kwargs):
         if not args[0].N_structures_fit or not args[0].granularity:
             message = "Please generate/load search space."
@@ -127,6 +139,7 @@ def check_search_space_loaded(f: Callable) -> Callable:
             return
         else:
             return f(*args, **kwargs)
+
     return wrapper
 
 
@@ -182,7 +195,7 @@ class MaskGeneratorLegend(QtWidgets.QLabel):
 
         self.plot_legend(image.max())
         buffer = python_io.BytesIO()
-        self.fig.savefig(buffer, format='svg')
+        self.fig.savefig(buffer, format="svg")
         buffer.seek(0)
         svg_data = buffer.getvalue().decode()
 
@@ -215,10 +228,13 @@ class MaskGeneratorLegend(QtWidgets.QLabel):
         ax.imshow(gradient, cmap="magma")
         ax.set_yticks([])
         ax.set_xticks(np.linspace(0, 15, 5))
-        ax.set_xticklabels(["0.00E+0"] + [
-            f"{Decimal(str(_)):.2E}"
-            for _ in np.linspace(0, max_value, 5)[1:]
-        ])
+        ax.set_xticklabels(
+            ["0.00E+0"]
+            + [
+                f"{Decimal(str(_)):.2E}"
+                for _ in np.linspace(0, max_value, 5)[1:]
+            ]
+        )
 
 
 class MaskPreview(QtWidgets.QLabel):
@@ -265,7 +281,8 @@ class MaskPreview(QtWidgets.QLabel):
         if full_fov:
             self.image = self.mask_tab.mask.copy()
             self.viewport = (
-                (0, 0), (self.image.shape[1], self.image.shape[0])
+                (0, 0),
+                (self.image.shape[1], self.image.shape[0]),
             )
         else:
             (y_min, x_min), (y_max, x_max) = self.viewport
@@ -289,9 +306,7 @@ class MaskPreview(QtWidgets.QLabel):
         """Apply magma cmap to the image and converts it to QImage."""
         Y, X = image.shape
         bgra = np.zeros((Y, X, 4), dtype=np.uint8, order="C")
-        cmap = np.uint8(
-            np.round(255 * plt.get_cmap("magma")(np.arange(256)))
-        )
+        cmap = np.uint8(np.round(255 * plt.get_cmap("magma")(np.arange(256))))
         bgra[..., 0] = cmap[:, 2][image]
         bgra[..., 1] = cmap[:, 1][image]
         bgra[..., 2] = cmap[:, 0][image]
@@ -548,9 +563,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         mask_layout.addWidget(self.load_locs_button, 0, 0, 1, 2)
 
         # mask pixel / voxel size
-        mask_layout.addWidget(
-            QtWidgets.QLabel("Mask pixel/voxel (nm):"), 1, 0
-        )
+        mask_layout.addWidget(QtWidgets.QLabel("Mask pixel/voxel (nm):"), 1, 0)
         self.mask_binsize = ignoreArrowsSpinBox()
         self.mask_binsize.setRange(1, 10_000)
         self.mask_binsize.setSingleStep(1)
@@ -672,9 +685,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         layout.addWidget(mask_info_box, 2, 1)
         mask_info_layout = QtWidgets.QHBoxLayout(mask_info_box)
         self.mask_info_display1 = QtWidgets.QLabel(
-            "Area (\u03bcm\u00b2):\n"
-            "Dimensions:\n"
-            "Size memory:"
+            "Area (\u03bcm\u00b2):\n" "Dimensions:\n" "Size memory:"
         )
         self.mask_info_display1.setAlignment(QtCore.Qt.AlignRight)
         # make sure that the dash symbols are aligned
@@ -722,9 +733,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             self.mask_generator.ndim = ndim
             mode = ["loc_den", "binary"][self.mask_type.currentIndex()]
             status = lib.StatusDialog("Generating mask...", self.preview)
-            self.mask_generator.generate_mask(
-                apply_thresh=False, mode=mode
-            )
+            self.mask_generator.generate_mask(apply_thresh=False, mode=mode)
             status.close()
             self.mask = deepcopy(self.mask_generator.mask)
             self.preview.on_mask_generated()
@@ -794,10 +803,10 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                 count = (self.mask > self.mask_generator.thresh).sum()
             if self.mask.ndim == 2:
                 area_str = "Area (\u03bcm\u00b2):"
-                area = 1e-6 * self.mask_generator.binsize ** 2 * count
+                area = 1e-6 * self.mask_generator.binsize**2 * count
             else:
                 area_str = "Volume (\u03bcm\u00b3):"
-                area = 1e-9 * self.mask_generator.binsize ** 3 * count
+                area = 1e-9 * self.mask_generator.binsize**3 * count
         return area_str, np.round(area, 2)
 
     def get_mask_dimensions(self) -> str:
@@ -874,11 +883,13 @@ class StructurePreview(QtWidgets.QLabel):
         self.angx = 0  # rotation angles in radians
         self.angy = 0
         self.angz = 0
-        self.ORIGIN = np.int32((
-            int(STRUCTURE_PREVIEW_SIZE/2),
-            int(STRUCTURE_PREVIEW_SIZE/2),
-            0,
-        ))
+        self.ORIGIN = np.int32(
+            (
+                int(STRUCTURE_PREVIEW_SIZE / 2),
+                int(STRUCTURE_PREVIEW_SIZE / 2),
+                0,
+            )
+        )
         self.factor = 1  # scaling factor used at drawing the scalebar and
         # spreading the molecular targets
         self.rotating = False  # is the displayed structure is being rotated
@@ -941,7 +952,7 @@ class StructurePreview(QtWidgets.QLabel):
         coords_rot : lists of np.2darrays
             Rotated coordinates.
         """
-        rot = Rotation.from_euler('zyx', (self.angz, self.angy, self.angx))
+        rot = Rotation.from_euler("zyx", (self.angz, self.angy, self.angx))
         coords_rot = [rot.apply(_) for _ in coords]
         return coords_rot
 
@@ -1118,7 +1129,7 @@ class StructurePreview(QtWidgets.QLabel):
 
         # rotate these points
         coordinates = [[xx, xy, xz], [yx, yy, yz], [zx, zy, zz]]
-        rot = Rotation.from_euler('zyx', (self.angz, self.angy, self.angx))
+        rot = Rotation.from_euler("zyx", (self.angz, self.angy, self.angx))
         coordinates = rot.apply(coordinates).astype(int)
         (xx, xy, xz) = coordinates[0]
         (yx, yy, yz) = coordinates[1]
@@ -1205,7 +1216,7 @@ class StructurePreview(QtWidgets.QLabel):
         x /= self.factor
         y /= -self.factor
 
-        rot = Rotation.from_euler('zyx', (self.angz, self.angy, self.angx))
+        rot = Rotation.from_euler("zyx", (self.angz, self.angy, self.angx))
         x, y, z = np.around(rot.apply([x, y, 0], inverse=True), 4)
 
         # add the widgets
@@ -1246,9 +1257,7 @@ class StructurePreview(QtWidgets.QLabel):
         else:
             colors_rgb = STRUCTURE_PREVIEW_COLORS
 
-        colors = {
-            target: rgb for target, rgb in zip(all_targets, colors_rgb)
-        }
+        colors = {target: rgb for target, rgb in zip(all_targets, colors_rgb)}
         return colors
 
 
@@ -1333,7 +1342,11 @@ class StructuresTab(QtWidgets.QDialog):
         add_structure_button = QtWidgets.QPushButton("Add a new structure")
         add_structure_button.released.connect(self.add_structure)
         self.structures_box.layout().addWidget(
-            add_structure_button, 1, 0, 1, 2,
+            add_structure_button,
+            1,
+            0,
+            1,
+            2,
         )
 
         save_structures_button = QtWidgets.QPushButton("Save all structures")
@@ -1362,8 +1375,8 @@ class StructuresTab(QtWidgets.QDialog):
     def update_preview(self, reset_angles: bool = False) -> None:
         """Update information for rendering in self.preview."""
         self.update_current_structure()
-        self.preview.structure = (
-            self.find_structure_by_title(self.current_structure)
+        self.preview.structure = self.find_structure_by_title(
+            self.current_structure
         )
         if isinstance(reset_angles, bool) and reset_angles:
             self.preview.angx = 0
@@ -1507,7 +1520,7 @@ class StructuresTab(QtWidgets.QDialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            with open(path, 'r') as file:
+            with open(path, "r") as file:
                 try:
                     info = list(yaml.load_all(file, Loader=yaml.FullLoader))
                 except TypeError:
@@ -1558,9 +1571,11 @@ class StructuresTab(QtWidgets.QDialog):
         if count == 5:
             name = "target"
         else:
-            name = self.mol_tar_box.content_layout.itemAt(
-                count-5
-            ).widget().text()
+            name = (
+                self.mol_tar_box.content_layout.itemAt(count - 5)
+                .widget()
+                .text()
+            )
 
         name_widget = QtWidgets.QLineEdit(objectName=f"target{self.n_mol_tar}")
         name_widget.setText(name)
@@ -1608,14 +1623,15 @@ class StructuresTab(QtWidgets.QDialog):
                 if num == row:  # delete the widget if the same row
                     self.mol_tar_box.content_layout.removeWidget(widget)
                     del widget
-                elif num > row:   # if the widget below, lower the object name
+                elif num > row:  # if the widget below, lower the object name
                     widget.setObjectName(f"{base}{num-1}")
                     # if this is delete button, connect it to a new function
-                    if base == 'del':
+                    if base == "del":
                         widget.disconnect()
                         widget.released.connect(
                             partial(
-                                self.delete_molecular_target, f"del{num-1}",
+                                self.delete_molecular_target,
+                                f"del{num-1}",
                             )
                         )
         self.n_mol_tar -= 1
@@ -1669,9 +1685,12 @@ class StructuresTab(QtWidgets.QDialog):
                 delete_button = QtWidgets.QPushButton(
                     "x", objectName=f"del{self.n_mol_tar}"
                 )
-                delete_button.released.connect(partial(
-                    self.delete_molecular_target, delete_button.objectName()
-                ))
+                delete_button.released.connect(
+                    partial(
+                        self.delete_molecular_target,
+                        delete_button.objectName(),
+                    )
+                )
 
                 self.mol_tar_box.add_widget(name_widget, row, 0)
                 self.mol_tar_box.add_widget(x_widget, row, 1)
@@ -1849,16 +1868,16 @@ class CompareModelsDialog(QtWidgets.QDialog):
             self.label_unc_to_spins[target] = label_unc_to_spin
             self.label_unc_step_spins[target] = label_unc_step_spin
             label_unc_layout.addWidget(
-                QtWidgets.QLabel(target), 2+targets.index(target), 0
+                QtWidgets.QLabel(target), 2 + targets.index(target), 0
             )
             label_unc_layout.addWidget(
-                label_unc_from_spin, 2+targets.index(target), 1
+                label_unc_from_spin, 2 + targets.index(target), 1
             )
             label_unc_layout.addWidget(
-                label_unc_to_spin, 2+targets.index(target), 2
+                label_unc_to_spin, 2 + targets.index(target), 2
             )
             label_unc_layout.addWidget(
-                label_unc_step_spin, 2+targets.index(target), 3
+                label_unc_step_spin, 2 + targets.index(target), 3
             )
 
         # models
@@ -1924,7 +1943,7 @@ class CompareModelsDialog(QtWidgets.QDialog):
             self,
             "Choose model(s)",
             directory=self.sim_tab.window.pwd,
-            filter="*.yaml"
+            filter="*.yaml",
         )
         if not paths:
             return
@@ -2143,16 +2162,12 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.min_dist = QtWidgets.QSpinBox()
         self.min_dist.setRange(0, 99999)
         self.min_dist.setValue(0)
-        const_layout.addRow(
-            QtWidgets.QLabel("Min dist (nm):"), self.min_dist
-        )
+        const_layout.addRow(QtWidgets.QLabel("Min dist (nm):"), self.min_dist)
 
         self.max_dist = QtWidgets.QSpinBox()
         self.max_dist.setRange(0, 99999)
         self.max_dist.setValue(200)
-        const_layout.addRow(
-            QtWidgets.QLabel("Max dist (nm):"), self.max_dist
-        )
+        const_layout.addRow(QtWidgets.QLabel("Max dist (nm):"), self.max_dist)
 
         # title
         self.title = QtWidgets.QLineEdit()
@@ -2270,7 +2285,7 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
 
         binsize_sim = self.binsize_sim.value()
         binsize_exp = self.binsize_exp.value()
-        if max(binsize_sim, binsize_exp) > maxdist-mindist:
+        if max(binsize_sim, binsize_exp) > maxdist - mindist:
             QtWidgets.QMessageBox.warning(
                 self, "Warning", "Bin size is larger than the distance range."
             )
@@ -2315,7 +2330,7 @@ class SimulationsPlotWindow(QtWidgets.QLabel):
         the image is avoided after drawing on the canvas."""
         # render the figure as .svg
         buffer = python_io.BytesIO()
-        fig.savefig(buffer, format='svg')
+        fig.savefig(buffer, format="svg")
         buffer.seek(0)
         svg_data = buffer.getvalue().decode()
 
@@ -2782,10 +2797,10 @@ class SimulationsTab(QtWidgets.QDialog):
 
             if hasattr(locs, "z"):
                 coords = np.stack(
-                    (locs.x*pixelsize, locs.y*pixelsize, locs.z)
+                    (locs.x * pixelsize, locs.y * pixelsize, locs.z)
                 ).T
             else:
-                coords = np.stack((locs.x*pixelsize, locs.y*pixelsize)).T
+                coords = np.stack((locs.x * pixelsize, locs.y * pixelsize)).T
 
             self.exp_data[target] = coords
             self.exp_data_paths[target] = path
@@ -2849,8 +2864,13 @@ class SimulationsTab(QtWidgets.QDialog):
             return
 
         depth, ok = QtWidgets.QInputDialog.getInt(
-            self, "", "Input z range for simulation (nm)",
-            value=100, min=1, max=100_000, step=10
+            self,
+            "",
+            "Input z range for simulation (nm)",
+            value=100,
+            min=1,
+            max=100_000,
+            step=10,
         )
         if ok:
             self.depth = depth
@@ -2900,7 +2920,8 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.load_exp_data_box.add_widget(
                 target_button,
-                self.load_exp_data_box.content_layout.rowCount(), 0,
+                self.load_exp_data_box.content_layout.rowCount(),
+                0,
             )
             self.load_exp_data_buttons.append(target_button)
 
@@ -2914,7 +2935,8 @@ class SimulationsTab(QtWidgets.QDialog):
         for target in self.targets:
             row = self.load_mask_box.content_layout.rowCount()
             target_button = QtWidgets.QPushButton(
-                f"Load {target}", objectName=f"mask{target}")
+                f"Load {target}", objectName=f"mask{target}"
+            )
             target_button.released.connect(
                 partial(self.load_mask, target_button.objectName())
             )
@@ -3009,8 +3031,8 @@ class SimulationsTab(QtWidgets.QDialog):
     @check_exp_data_loaded
     def generate_search_space(self) -> None:
         """Generate combinations numbers of structures for fitting."""
-        n_sim_fit, granularity, save, ok = (
-            GenerateSearchSpaceDialog.getParams(self)
+        n_sim_fit, granularity, save, ok = GenerateSearchSpaceDialog.getParams(
+            self
         )
         if not ok:
             return
@@ -3071,7 +3093,7 @@ class SimulationsTab(QtWidgets.QDialog):
             N_structures[0, i] = self.N_structures_fit[structure.title][0]
 
         # set up the mixer
-        mixer = self.setup_mixer(mode='fit')
+        mixer = self.setup_mixer(mode="fit")
         if mixer is None:
             return "--:--:--"
 
@@ -3114,9 +3136,8 @@ class SimulationsTab(QtWidgets.QDialog):
             # check if the structure titles are the same as the ones loaded
             loaded = df.columns
             titles = [_.title for _ in self.structures]
-            if (
-                len(loaded) == len(titles) * 2
-                and all([f"N_{t}" in loaded for t in titles])
+            if len(loaded) == len(titles) * 2 and all(
+                [f"N_{t}" in loaded for t in titles]
             ):  # check that all titles are present
                 self.N_structures_fit = {
                     structure_name: (
@@ -3126,14 +3147,18 @@ class SimulationsTab(QtWidgets.QDialog):
                 }
                 # get granularity and n_sim_fit from the user
                 n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
-                    self, "", "Number of simulations per tested combination",
-                    value=10, min=1, max=1000, step=1
+                    self,
+                    "",
+                    "Number of simulations per tested combination",
+                    value=10,
+                    min=1,
+                    max=1000,
+                    step=1,
                 )
                 if not ok:
                     return
                 granularity, ok = QtWidgets.QInputDialog.getInt(
-                    self, "", "Granularity",
-                    value=21, min=1, max=1000, step=1
+                    self, "", "Granularity", value=21, min=1, max=1000, step=1
                 )
                 if not ok:
                     return
@@ -3160,7 +3185,7 @@ class SimulationsTab(QtWidgets.QDialog):
     def fit_n_str(self) -> None:
         """Find the best fitting combination of numbers of structures to
         the experimental data."""
-        self.mixer = self.setup_mixer(mode='fit')
+        self.mixer = self.setup_mixer(mode="fit")
         if self.mixer is None:
             return
 
@@ -3216,7 +3241,7 @@ class SimulationsTab(QtWidgets.QDialog):
         self.update_prop_str_input_spins(self.opt_props)
         self.display_proportions(self.opt_props)
         self.save_fit_results()
-        self.mixer = self.setup_mixer(mode='single_sim')
+        self.mixer = self.setup_mixer(mode="single_sim")
         self.sim_and_plot_NND()
 
     def update_prop_str_input_spins(self, prop_str: np.ndarray) -> None:
@@ -3239,7 +3264,7 @@ class SimulationsTab(QtWidgets.QDialog):
             for i in range(self.prop_str_input.content_layout.count())
             if isinstance(
                 self.prop_str_input.content_layout.itemAt(i).widget(),
-                QtWidgets.QPushButton
+                QtWidgets.QPushButton,
             )
         ]
         if button:
@@ -3252,6 +3277,7 @@ class SimulationsTab(QtWidgets.QDialog):
             for i, ps in enumerate(prop_str):
                 spin = self.prop_str_input_spins[i]
                 spin.setValue(ps)
+
         button.released.connect(retrieve_results)
         self.prop_str_input.add_widget(
             button, self.prop_str_input.content_layout.rowCount(), 0, 1, 2
@@ -3273,7 +3299,8 @@ class SimulationsTab(QtWidgets.QDialog):
         if self.le_fitting_check.isChecked():
             # extract the le values based on the recovered proportions
             le_values = spinna.get_le_from_props(
-                self.structures, self.opt_props,
+                self.structures,
+                self.opt_props,
             )
             text = (
                 f"LE {self.targets[0]}: {le_values[self.targets[0]]:.1f}%,"
@@ -3319,9 +3346,9 @@ class SimulationsTab(QtWidgets.QDialog):
             metadata[f"Label uncertainties (nm) ({target})"] = (
                 self.label_unc_spins[t_idx].value()
             )
-            metadata[f"Labeling efficiencies (%) ({target})"] = (
-                self.le_spins[t_idx].value()
-            )
+            metadata[f"Labeling efficiencies (%) ({target})"] = self.le_spins[
+                t_idx
+            ].value()
         # masked used / observed density
         if self.mask_den_stack.currentIndex() == 0:  # mask
             for target in self.targets:
@@ -3333,10 +3360,9 @@ class SimulationsTab(QtWidgets.QDialog):
                 if self.dim_widget.currentIndex() == 1:  # 3D
                     label = f"Observed density (um^-3) ({target})"
                 metadata[label] = den_spin.value()
-            metadata["Simulated FOV (um)"] = " x ".join([
-                        str(_ / 1e3)
-                        for _ in self.mixer.roi if _ is not None
-                    ])
+            metadata["Simulated FOV (um)"] = " x ".join(
+                [str(_ / 1e3) for _ in self.mixer.roi if _ is not None]
+            )
         # fit results
         metadata["Best fitting proportions (%)"] = (
             self.fit_results_display.text().replace("\n", "")
@@ -3350,27 +3376,37 @@ class SimulationsTab(QtWidgets.QDialog):
             for target in self.targets:
                 if isinstance(self.opt_props, tuple):
                     rel_props = self.mixer.convert_props_for_target(
-                        self.opt_props[0], target, self.n_total,
+                        self.opt_props[0],
+                        target,
+                        self.n_total,
                     )
                     rel_props_sd = self.mixer.convert_props_for_target(
-                        self.opt_props[1], target, self.n_total,
+                        self.opt_props[1],
+                        target,
+                        self.n_total,
                     )
                 else:
                     rel_props = self.mixer.convert_props_for_target(
-                        self.opt_props, target, self.n_total,
+                        self.opt_props,
+                        target,
+                        self.n_total,
                     )
                 idx_valid = np.where(rel_props != np.inf)[0]
                 if isinstance(self.opt_props, tuple):
-                    value = ", ".join([
-                        f"{self.structures[i].title}: {rel_props[i]:.2f}% +/-"
-                        f" {rel_props_sd[i]:.2f}%"
-                        for i in idx_valid
-                    ])
+                    value = ", ".join(
+                        [
+                            f"{self.structures[i].title}: {rel_props[i]:.2f}% +/-"
+                            f" {rel_props_sd[i]:.2f}%"
+                            for i in idx_valid
+                        ]
+                    )
                 else:
-                    value = ", ".join([
-                        f"{self.structures[i].title}: {rel_props[i]:.2f}%"
-                        for i in idx_valid
-                    ])
+                    value = ", ".join(
+                        [
+                            f"{self.structures[i].title}: {rel_props[i]:.2f}%"
+                            for i in idx_valid
+                        ]
+                    )
                 metadata[f"Relative proportions of {target} in"] = value
 
         # number of neighbors considered at fitting
@@ -3396,9 +3432,9 @@ class SimulationsTab(QtWidgets.QDialog):
     def compare_models(self) -> None:
         """Open the dialog to compare the goodness of fit for
         different models of structures and runs the test."""
-        (
-            models, model_names, label_unc, save_scores, ok
-        ) = CompareModelsDialog.getParams(self, self.targets)
+        (models, model_names, label_unc, save_scores, ok) = (
+            CompareModelsDialog.getParams(self, self.targets)
+        )
         if not ok or not models:
             return
 
@@ -3415,7 +3451,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
         # set up the mixer so that it's easier to extract parameters
         # for model comparison
-        base_mixer = self.setup_mixer(mode='fit')
+        base_mixer = self.setup_mixer(mode="fit")
         if base_mixer is None:  # if there's an error, return
             return
 
@@ -3468,9 +3504,7 @@ class SimulationsTab(QtWidgets.QDialog):
         # display the results
         self.update_prop_str_input_spins(opt_props)
         self.sim_and_plot_NND()
-        text = (
-            f"Best fitting model: {model_names[idx]}, already loaded."
-        )
+        text = f"Best fitting model: {model_names[idx]}, already loaded."
         self.fit_results_display.setText(text)
 
     def on_roi_button_clicked(self) -> None:
@@ -3480,14 +3514,24 @@ class SimulationsTab(QtWidgets.QDialog):
             # here mass refers to area/volume
             if self.dim_widget.currentIndex() == 0:  # 2D
                 mass, ok = QtWidgets.QInputDialog.getInt(
-                    self, "", "Area (\u03bcm\u00b2):", 100, 0, 1_000_000,
+                    self,
+                    "",
+                    "Area (\u03bcm\u00b2):",
+                    100,
+                    0,
+                    1_000_000,
                 )
                 if ok:
                     self.single_sim_mass = mass
                     self.roi_button.setText(f"Area: {mass:.0f} \u03bcm\u00b2")
             else:  # 3D
                 mass, ok = QtWidgets.QInputDialog.getInt(
-                    self, "", "Volume (\u03bcm\u00b3):", 100, 0, 1_000_000,
+                    self,
+                    "",
+                    "Volume (\u03bcm\u00b3):",
+                    100,
+                    0,
+                    1_000_000,
                 )
                 if ok:
                     self.single_sim_mass = mass
@@ -3510,15 +3554,19 @@ class SimulationsTab(QtWidgets.QDialog):
             Total number of molecules to simulate.
         """
         if self.mask_den_stack.currentIndex() == 0:  # mask
-            n_total = int(sum([
-                len(self.exp_data[t])
-                / self.le_spins[i].value() * 100
-                for i, t in enumerate(self.targets)
-            ]))
+            n_total = int(
+                sum(
+                    [
+                        len(self.exp_data[t]) / self.le_spins[i].value() * 100
+                        for i, t in enumerate(self.targets)
+                    ]
+                )
+            )
         else:
             tot_densities = [
                 self.densities_spins[i].value()
-                / self.le_spins[i].value() * 100
+                / self.le_spins[i].value()
+                * 100
                 for i in range(len(self.densities_spins))
             ]
             n_total = int(self.single_sim_mass * sum(tot_densities))
@@ -3553,7 +3601,7 @@ class SimulationsTab(QtWidgets.QDialog):
             path = ""
 
         # create the mixer instance
-        self.mixer = self.setup_mixer(mode='single_sim')
+        self.mixer = self.setup_mixer(mode="single_sim")
         if self.mixer is None:
             return
 
@@ -3609,12 +3657,17 @@ class SimulationsTab(QtWidgets.QDialog):
         ):
             # plot simulated distances
             fig, ax = spinna.plot_NN(
-                dist=dist_sim[i], mode='plot', show_legend=False,
+                dist=dist_sim[i],
+                mode="plot",
+                show_legend=False,
                 binsize=plot_params["binsize_sim"],
                 xlim=(plot_params["min_dist"], plot_params["max_dist"]),
-                return_fig=True, figsize=(4.947, 3.71), alpha=1.0,
+                return_fig=True,
+                figsize=(4.947, 3.71),
+                alpha=1.0,
                 title=f"{plot_params['title']}{t1} \u2192 {t2}",
-                xlabel=plot_params["xlabel"], ylabel=plot_params["ylabel"],
+                xlabel=plot_params["xlabel"],
+                ylabel=plot_params["ylabel"],
                 colors=plot_params["colors"],
             )
             if show_exp:  # plot exp. data if loaded
@@ -3627,9 +3680,13 @@ class SimulationsTab(QtWidgets.QDialog):
                 if self.dim_widget.currentIndex() == 0 and exp2.shape[1] == 3:
                     exp2 = exp2[:, :2]
                 fig, ax = spinna.plot_NN(
-                    data1=exp1, data2=exp2,
+                    data1=exp1,
+                    data2=exp2,
                     n_neighbors=plot_params["nn_counts"][f"{t1}-{t2}"].value(),
-                    show_legend=False, fig=fig, ax=ax, mode='hist',
+                    show_legend=False,
+                    fig=fig,
+                    ax=ax,
+                    mode="hist",
                     binsize=plot_params["binsize_exp"],
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
                     return_fig=True,
@@ -3637,8 +3694,10 @@ class SimulationsTab(QtWidgets.QDialog):
                         f"{plot_params['title']}{t1} \u2192 {t2}\n"
                         f"KS2: {self.current_score:.6f}"
                     ),
-                    xlabel=plot_params["xlabel"], ylabel=plot_params["ylabel"],
-                    alpha=plot_params["alpha"], colors=plot_params["colors"],
+                    xlabel=plot_params["xlabel"],
+                    ylabel=plot_params["ylabel"],
+                    alpha=plot_params["alpha"],
+                    colors=plot_params["colors"],
                 )
 
             self.nnd_plots.append(fig)
@@ -3663,17 +3722,20 @@ class SimulationsTab(QtWidgets.QDialog):
                 exp1 = self.exp_data[t1]
                 exp2 = self.exp_data[t2]
                 fig, ax = spinna.plot_NN(
-                    data1=exp1, data2=exp2,
+                    data1=exp1,
+                    data2=exp2,
                     n_neighbors=plot_params["nn_counts"][f"{t1}-{t2}"].value(),
                     show_legend=False,
-                    mode='hist',
+                    mode="hist",
                     figsize=(4.947, 3.71),
                     binsize=plot_params["binsize_exp"],
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
                     return_fig=True,
                     title=f"{plot_params['title']}{t1} \u2192 {t2}",
-                    xlabel=plot_params["xlabel"], ylabel=plot_params["ylabel"],
-                    alpha=plot_params["alpha"], colors=plot_params["colors"],
+                    xlabel=plot_params["xlabel"],
+                    ylabel=plot_params["ylabel"],
+                    alpha=plot_params["alpha"],
+                    colors=plot_params["colors"],
                 )
 
                 self.nnd_plots.append(fig)
@@ -3682,7 +3744,7 @@ class SimulationsTab(QtWidgets.QDialog):
         self.display_current_nnd_plot()
 
     @check_structures_loaded
-    def setup_mixer(self, mode: Literal['fit', 'single_sim'] = 'fit') -> None:
+    def setup_mixer(self, mode: Literal["fit", "single_sim"] = "fit") -> None:
         """Initialize the class used for simulations.
 
         Parameters
@@ -3736,9 +3798,9 @@ class SimulationsTab(QtWidgets.QDialog):
         rot_mode = ["2D", "3D", None][
             self.settings_dialog.rot_dim_widget.currentIndex()
         ]
-        if mode == 'fit':
+        if mode == "fit":
             if self.settings_dialog.auto_nn_check.isChecked():
-                nn_counts = 'auto'
+                nn_counts = "auto"
             else:
                 nn_counts = {
                     name: self.settings_dialog.nn_counts[name].value()
@@ -3755,7 +3817,9 @@ class SimulationsTab(QtWidgets.QDialog):
             label_unc=label_unc,
             le=le,
             mask_dict=mask_dict,
-            width=width, height=height, depth=depth,
+            width=width,
+            height=height,
+            depth=depth,
             random_rot_mode=rot_mode,
             nn_counts=nn_counts,
         )
@@ -3857,7 +3921,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
     def find_roi(
         self,
-        mode: Literal['fit', 'single_sim'] = 'fit',
+        mode: Literal["fit", "single_sim"] = "fit",
     ) -> tuple[float, float, float]:
         """Find width, height, depth to conduct simulation(s) with
         homogeneous distribution.
@@ -3873,9 +3937,9 @@ class SimulationsTab(QtWidgets.QDialog):
         result : tuple
             Width, height, depth (all nm).
         """
-        assert mode in ['fit', 'single_sim']
+        assert mode in ["fit", "single_sim"]
 
-        if mode == 'fit':
+        if mode == "fit":
             return self.find_roi_fit()
         elif mode == "single_sim":
             return self.find_roi_single_sim()
@@ -4016,10 +4080,12 @@ class SimulationsTab(QtWidgets.QDialog):
                 structures=self.structures,
                 label_unc={"ALL": 0},
                 le={"ALL": 1.0},
-                width=10, height=10, depth=10,
+                width=10,
+                height=10,
+                depth=10,
             )
         i = 0
-        for (t1, t2, _) in self.mixer.get_neighbor_idx(duplicate=True):
+        for t1, t2, _ in self.mixer.get_neighbor_idx(duplicate=True):
             fig = self.nnd_plots[i]
             outpath = path.replace(ext[1:], f"_{t1}_{t2}{ext[1:]}")
             fig.savefig(outpath)
@@ -4045,11 +4111,13 @@ class SimulationsTab(QtWidgets.QDialog):
                 structures=self.structures,
                 label_unc={"ALL": 0},
                 le={"ALL": 1.0},
-                width=10, height=10, depth=10,
+                width=10,
+                height=10,
+                depth=10,
             )
 
         i = 0
-        for (t1, t2, n) in self.mixer.get_neighbor_idx(duplicate=True):
+        for t1, t2, n in self.mixer.get_neighbor_idx(duplicate=True):
             if not n:
                 continue
             # extract plotted line (simulation) and histogram (exp, if
@@ -4074,11 +4142,11 @@ class SimulationsTab(QtWidgets.QDialog):
                 n_bins = int(len(ax.patches) / n)
                 mindist = self.nn_plot_settings_dialog.min_dist.value()
                 maxdist = self.nn_plot_settings_dialog.max_dist.value()
-                bin_edges = np.linspace(mindist, maxdist, n_bins+1)
-                bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2.
+                bin_edges = np.linspace(mindist, maxdist, n_bins + 1)
+                bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2.0
                 data_exp["bins_exp"] = bin_centers
                 patches = [
-                    ax.patches[ii:ii+n_bins]
+                    ax.patches[ii : ii + n_bins]
                     for ii in range(0, len(ax.patches), n_bins)
                 ]
                 for p, patch in enumerate(patches):
@@ -4170,8 +4238,7 @@ def main():
 
     plugins = [
         importlib.import_module(name)
-        for finder, name, ispkg
-        in iter_namespace(plugins)
+        for finder, name, ispkg in iter_namespace(plugins)
     ]
 
     for plugin in plugins:

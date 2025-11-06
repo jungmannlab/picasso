@@ -1,12 +1,12 @@
 """
-    picasso.spinna
-    ~~~~~~~~~~~~~~
+picasso.spinna
+~~~~~~~~~~~~~~
 
-    Single protein simulations in DNA-PAINT for recovery of
-    stoichiometries of oligomerization states.
+Single protein simulations in DNA-PAINT for recovery of
+stoichiometries of oligomerization states.
 
-    :authors: Luciano A Masullo, Rafal Kowalewski, 2022-2025
-    :copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
+:authors: Luciano A Masullo, Rafal Kowalewski, 2022-2025
+:copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from tqdm import tqdm
 from . import io, lib, masking, render, __version__
 
 
-NN_COLORS = ['#2880C4', '#97D8C4', '#F4B942', '#363636']
+NN_COLORS = ["#2880C4", "#97D8C4", "#F4B942", "#363636"]
 N_TASKS = 100
 N_BOOTSTRAPS = 20
 BOOTSTRAP_DISTANCE = 30.0
@@ -160,7 +160,7 @@ def generate_N_structures(
     structures: list[Structure],
     N_total: dict,
     granularity: int,
-    save: str = '',
+    save: str = "",
 ) -> dict:
     """Generate combinations of numbers of structures to be simulated
     in NN_scorer. In other words, generate the parameter search space
@@ -261,10 +261,12 @@ def generate_N_structures(
 
     # combined numbers of free structures
     free_structures = np.array(list(it_prod(*bases)))
-    N_structures = np.hstack((
-        np.zeros((free_structures.shape[0], n_t)),
-        free_structures,
-    ))
+    N_structures = np.hstack(
+        (
+            np.zeros((free_structures.shape[0], n_t)),
+            free_structures,
+        )
+    )
 
     # based on the numbers of free structures, we can calculate the
     # numbers of dependent structures using the set of linear equations
@@ -278,14 +280,14 @@ def generate_N_structures(
         # take the coefficients from eqs; we start from the last row
         # and take only the coefficients that are to the right side of
         # the leading one
-        formula = eqs[n_t-i-1][(n_t-i):]
+        formula = eqs[n_t - i - 1][(n_t - i) :]
         # the last element in the formula is the constant coefficient;
         # to get the value of the dependent structure count, subtract
         # the term taken from the dot product of the coefficients from the
         # the constant coefficient (all taken from formula and the
         # structure counts)
-        N_structures[:, n_t-i-1] = (
-            formula[-1] - (N_structures[:, (n_t-i):] @ formula[:-1])
+        N_structures[:, n_t - i - 1] = formula[-1] - (
+            N_structures[:, (n_t - i) :] @ formula[:-1]
         )
 
     # the last step is to delete the unphysical values, i.e., the
@@ -323,11 +325,8 @@ def generate_N_structures(
         # save as a .csv file
         df = pd.DataFrame(
             np.hstack((N_structures, props)),
-            columns=[
-                f"N_{_.title}" for _ in structures
-            ]+[
-                f"Prop_{_.title}" for _ in structures
-            ],
+            columns=[f"N_{_.title}" for _ in structures]
+            + [f"Prop_{_.title}" for _ in structures],
         )
         df.to_csv(save, header=True, index=False)
 
@@ -361,12 +360,12 @@ def random_rotation_matrices(
     if not isinstance(num, int) or num <= 0:
         raise TypeError("Number of rotations must be a positive integer.")
 
-    if mode == '3D':
+    if mode == "3D":
         rots = Rotation.random(num=num).as_matrix().astype(np.float32)
-    elif mode == '2D':
+    elif mode == "2D":
         # rotate only around z
-        angles = np.random.uniform(0, 2*np.pi, size=(num,))
-        rots = Rotation.from_euler('z', angles).as_matrix().astype(np.float32)
+        angles = np.random.uniform(0, 2 * np.pi, size=(num,))
+        rots = Rotation.from_euler("z", angles).as_matrix().astype(np.float32)
     elif mode is None:
         rots = Rotation.identity(num=num).as_matrix().astype(np.float32)
     else:
@@ -376,7 +375,7 @@ def random_rotation_matrices(
 
 def coords_to_locs(
     coords: np.ndarray,
-    lp: float = 1.,
+    lp: float = 1.0,
     pixelsize: int = 130,
 ) -> pd.DataFrame:
     """Convert ``coords`` array into localization list in a form of a
@@ -409,22 +408,26 @@ def coords_to_locs(
     frame = np.ones(len(x), dtype=np.uint32)
     if coords.shape[1] == 3:
         z = coords[:, 2].astype(np.float32)  # in nm
-        locs = pd.DataFrame({
-            "frame": frame,
-            "x": x,
-            "y": y,
-            "z": z,
-            "lpx": lpx,
-            "lpy": lpy,
-        })
+        locs = pd.DataFrame(
+            {
+                "frame": frame,
+                "x": x,
+                "y": y,
+                "z": z,
+                "lpx": lpx,
+                "lpy": lpy,
+            }
+        )
     else:
-        locs = pd.DataFrame({
-            "frame": frame,
-            "x": x,
-            "y": y,
-            "lpx": lpx,
-            "lpy": lpy,
-        })
+        locs = pd.DataFrame(
+            {
+                "frame": frame,
+                "x": x,
+                "y": y,
+                "lpx": lpx,
+                "lpy": lpy,
+            }
+        )
     return locs
 
 
@@ -433,7 +436,7 @@ def plot_NN(
     data2: np.ndarray | None = None,
     n_neighbors: int = 1,
     dist: np.ndarray | None = None,
-    mode: Literal['hist', 'plot'] = 'hist',
+    mode: Literal["hist", "plot"] = "hist",
     fig: plt.Figure | None = None,
     ax: plt.axes | None = None,
     figsize: tuple[float, float] = (6, 6),
@@ -447,10 +450,10 @@ def plot_NN(
     ylabel: str = "Norm. frequency",
     show_legend: bool = True,
     alpha: float = 0.6,
-    edgecolor: str = 'black',
+    edgecolor: str = "black",
     show: bool = False,
     return_fig: bool = False,
-    savefig: str = '',
+    savefig: str = "",
 ) -> tuple[plt.Figure, plt.axes] | None:
     """Plot a nearest neighbor distances histogram.
 
@@ -524,10 +527,10 @@ def plot_NN(
     # plot histogram / line
     for i in range(n_neighbors):
         data = dist[:, i]
-        if mode == 'hist':
+        if mode == "hist":
             ax.hist(
                 data,
-                bins=np.arange(xlim[0], xlim[1]+binsize, binsize),
+                bins=np.arange(xlim[0], xlim[1] + binsize, binsize),
                 edgecolor=edgecolor,
                 color=colors[i],
                 label=f"exp {i+1}th NN",
@@ -535,10 +538,10 @@ def plot_NN(
                 linewidth=0.4,  # 0.1
                 density=True,
             )
-        elif mode == 'plot':
+        elif mode == "plot":
             counts, bin_edges = np.histogram(
                 data,
-                bins=np.arange(xlim[0], xlim[1]+binsize, binsize),
+                bins=np.arange(xlim[0], xlim[1] + binsize, binsize),
                 density=True,
             )
             bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
@@ -620,7 +623,7 @@ def get_NN_dist(
 
     # find distances
     tree = KDTree(data2)
-    dist, _ = tree.query(data1, k=n_neighbors+reduce)
+    dist, _ = tree.query(data1, k=n_neighbors + reduce)
 
     # adjust the shape of the output if needed
     if n_neighbors + reduce == 1:
@@ -771,7 +774,7 @@ def load_structures(path: str) -> tuple[list[Structure], list[str]]:
     targets : list of strs
         List of all unique molecular targets in the structures.
     """
-    with open(path, 'r') as file:
+    with open(path, "r") as file:
         try:
             info = list(yaml.load_all(file, Loader=yaml.FullLoader))
         except TypeError:
@@ -800,7 +803,7 @@ def load_structures(path: str) -> tuple[list[Structure], list[str]]:
     return structures, targets
 
 
-class MaskGenerator():
+class MaskGenerator:
     """Interface for mask generation based on a Picasso .hdf5 file.
 
     To generate a mask, run the following command with arguments of
@@ -894,9 +897,9 @@ class MaskGenerator():
         # open localizations
         locs, info = io.load_locs(self.locs_path)
         if hasattr(locs, "z"):
-            self.locs = locs[['x', 'y', 'z']]
+            self.locs = locs[["x", "y", "z"]]
         else:
-            self.locs = locs[['x', 'y']]
+            self.locs = locs[["x", "y"]]
 
         if run_checks:
             self.ensure_correct_inputs()
@@ -936,9 +939,7 @@ class MaskGenerator():
         ):
             raise TypeError("Binsize must be a number.")
         # sigma
-        if not (
-            isinstance(self.sigma, float) or isinstance(self.sigma, int)
-        ):
+        if not (isinstance(self.sigma, float) or isinstance(self.sigma, int)):
             raise TypeError("Sigma must be a number.")
         # ndim
         if self.ndim is not None:
@@ -967,17 +968,26 @@ class MaskGenerator():
         # 2D image
         if self.ndim == 2 or not hasattr(self.locs, "z"):
             _, image = render.render_hist(
-                self.locs, oversampling,
-                self.y_min, self.x_min, self.y_max, self.x_max,
+                self.locs,
+                oversampling,
+                self.y_min,
+                self.x_min,
+                self.y_max,
+                self.x_max,
             )
         # 3D image
         else:
             self.z_min = self.locs.z.min()
             self.z_max = self.locs.z.max()
             _, image = render.render_hist3d(
-                self.locs, oversampling,
-                self.y_min, self.x_min, self.y_max, self.x_max,
-                self.z_min, self.z_max,
+                self.locs,
+                oversampling,
+                self.y_min,
+                self.x_min,
+                self.y_max,
+                self.x_max,
+                self.z_min,
+                self.z_max,
                 self.pixelsize,
             )
         return image
@@ -1015,7 +1025,7 @@ class MaskGenerator():
             print("Applying gaussian filter... (2/3)")
         if self.sigma > 0:
             sigma = self.sigma / self.binsize
-            image = gaussian_filter(image, sigma=sigma, mode='constant')
+            image = gaussian_filter(image, sigma=sigma, mode="constant")
         if verbose:
             print("Thresholding... (3/3)")
         image = np.float64(image / image.sum())
@@ -1054,6 +1064,7 @@ class MaskGenerator():
 
         if save_png:
             from PIL import Image
+
             outpath = path.replace(".npy", ".png")
             if self.mask.ndim == 3:
                 mask_ = np.sum(self.mask, axis=2)
@@ -1061,7 +1072,7 @@ class MaskGenerator():
             else:
                 mask_ = self.mask.copy()
                 mask_ /= mask_.max()  # normalize to save image
-            im = Image.fromarray(np.uint8(mask_*255))
+            im = Image.fromarray(np.uint8(mask_ * 255))
             im.save(outpath)
 
     def save_mask_info(self, path: str) -> None:
@@ -1081,7 +1092,7 @@ class MaskGenerator():
             "Generated from": self.locs_path,
             "Gaussian blur (nm)": self.sigma,
             "Camera pixelsize (nm)": self.pixelsize,
-            "x_min":  self.x_min,
+            "x_min": self.x_min,
             "x_max": self.x_max,
             "y_min": self.y_min,
             "y_max": self.y_max,
@@ -1093,20 +1104,20 @@ class MaskGenerator():
             info["z_min"] = float(self.z_min)
             info["z_max"] = float(self.z_max)
             info["Volume (um^3)"] = float(
-                1e-9 * self.binsize ** 3 * (self.mask > self.thresh).sum()
+                1e-9 * self.binsize**3 * (self.mask > self.thresh).sum()
             )
         else:  # 2D mask
             info["Area (um^2)"] = float(
-                1e-6 * self.binsize ** 2 * (self.mask > self.thresh).sum()
+                1e-6 * self.binsize**2 * (self.mask > self.thresh).sum()
             )
 
         # save
         outpath = path.replace(".npy", ".yaml")
-        with open(outpath, 'w') as file:
+        with open(outpath, "w") as file:
             yaml.dump(info, file)
 
 
-class Structure():
+class Structure:
     """Specify a structure (hetero/homomultimer).
 
     ...
@@ -1137,15 +1148,15 @@ class Structure():
         self.z = {}
 
     def __repr__(self) -> str:
-        display = [(
-            f"Type: Structure, Title: {self.title}\n"
-            f"Coordinates below: x, y, z (nm)\n"
-        )]
+        display = [
+            (
+                f"Type: Structure, Title: {self.title}\n"
+                f"Coordinates below: x, y, z (nm)\n"
+            )
+        ]
         for target in self.x.keys():
             display.append(f"{target}:")
-            for x, y, z in zip(
-                self.x[target], self.y[target], self.z[target]
-            ):
+            for x, y, z in zip(self.x[target], self.y[target], self.z[target]):
                 display.append(f"{x}, {y}, {z}")
 
         return "\n".join(display) + "\n"
@@ -1183,9 +1194,7 @@ class Structure():
                 )
         else:  # 2D
             if not (len(x) == len(y)):  # assert equal lengths
-                raise ValueError(
-                    "x and y coordinates must have equal length."
-                )
+                raise ValueError("x and y coordinates must have equal length.")
             z = [0] * len(x)
 
         # add name to self.targets if not present already
@@ -1281,7 +1290,7 @@ class Structure():
         return self
 
 
-class StructureSimulator():
+class StructureSimulator:
     """Simulate positions of one structure using CSR, taking into
     account labeling efficiency and label uncertainty for each
     molecular target as well as the number of structures to be
@@ -1436,7 +1445,7 @@ class StructureSimulator():
             self.y_max = height
 
             if depth is not None:
-                self.z_min = - depth / 2
+                self.z_min = -depth / 2
                 self.z_max = depth / 2
             else:
                 self.z_min = None
@@ -1460,7 +1469,7 @@ class StructureSimulator():
                 # z coordiantes are given in nm already (picasso)
                 self.z_min = mask_info["z_min"]
                 self.z_max = mask_info["z_max"]
-                self.depth = (self.z_max - self.z_min)  # depth in nm
+                self.depth = self.z_max - self.z_min  # depth in nm
             else:
                 self.z_min = None
                 self.z_max = None
@@ -1477,9 +1486,7 @@ class StructureSimulator():
             )
 
         else:
-            raise ValueError(
-                "Please provide information for mask or ROI."
-            )
+            raise ValueError("Please provide information for mask or ROI.")
 
     def simulate_centers(self) -> None:
         """Simulate positions of centers of structures in 2D or 3D with
@@ -1675,7 +1682,7 @@ class StructureSimulator():
         """
         N, M, _ = coords.shape
         # reshape matrices to allow matrix multiplication
-        coords_ = coords.reshape(N*M, 3)
+        coords_ = coords.reshape(N * M, 3)
         # rotation matrix for each molecule (not structure)
         rotations_ = np.repeat(rotations, M, axis=0)
 
@@ -1763,9 +1770,7 @@ class StructureSimulator():
                     obs_mol=save_obs_mol,
                 )
             else:
-                raise ValueError(
-                    "Please specify path_base for saving."
-                )
+                raise ValueError("Please specify path_base for saving.")
 
         return self
 
@@ -1825,22 +1830,26 @@ class StructureSimulator():
             if self.depth is not None:
                 # not scaled for picasso compatibility
                 z = self.c_pos[:, 2].astype(np.float32)
-                locs = pd.DataFrame({
-                    "frame": frame,
-                    "x": x,
-                    "y": y,
-                    "z": z,
-                    "lpx": lpx,
-                    "lpy": lpy,
-                })
+                locs = pd.DataFrame(
+                    {
+                        "frame": frame,
+                        "x": x,
+                        "y": y,
+                        "z": z,
+                        "lpx": lpx,
+                        "lpy": lpy,
+                    }
+                )
             else:
-                locs = pd.DataFrame({
-                    "frame": frame,
-                    "x": x,
-                    "y": y,
-                    "lpx": lpx,
-                    "lpy": lpy,
-                })
+                locs = pd.DataFrame(
+                    {
+                        "frame": frame,
+                        "x": x,
+                        "y": y,
+                        "lpx": lpx,
+                        "lpy": lpy,
+                    }
+                )
             io.save_locs(path, locs, info)
 
         for i, name in enumerate(self.structure.targets):
@@ -1849,31 +1858,35 @@ class StructureSimulator():
                 pos = self.pos[name]
                 path = f"{path_base}_{name}_all_mols.hdf5"
                 frame = np.ones(self.N, dtype=np.uint32)
-                lpx = (
-                    self.label_unc[i] * np.ones(self.N) / pixelsize
-                ).astype(np.float32)
+                lpx = (self.label_unc[i] * np.ones(self.N) / pixelsize).astype(
+                    np.float32
+                )
                 lpy = lpx
                 x = (pos[:, 0] / pixelsize).astype(np.float32)
                 y = (pos[:, 1] / pixelsize).astype(np.float32)
                 if pos.shape[1] == 3:
                     # not scaled for picasso compatibility
                     z = pos[:, 2].astype(np.float32)
-                    locs = pd.DataFrame({
-                        "frame": frame,
-                        "x": x,
-                        "y": y,
-                        "z": z,
-                        "lpx": lpx,
-                        "lpy": lpy,
-                    })
+                    locs = pd.DataFrame(
+                        {
+                            "frame": frame,
+                            "x": x,
+                            "y": y,
+                            "z": z,
+                            "lpx": lpx,
+                            "lpy": lpy,
+                        }
+                    )
                 else:
-                    locs = pd.DataFrame({
-                        "frame": frame,
-                        "x": x,
-                        "y": y,
-                        "lpx": lpx,
-                        "lpy": lpy,
-                    })
+                    locs = pd.DataFrame(
+                        {
+                            "frame": frame,
+                            "x": x,
+                            "y": y,
+                            "lpx": lpx,
+                            "lpy": lpy,
+                        }
+                    )
                 io.save_locs(path, locs, info)
 
             # observed molecular targets
@@ -1882,35 +1895,39 @@ class StructureSimulator():
                 N = len(pos_obs)
                 path = f"{path_base}_{name}_obs_mols.hdf5"
                 frame = np.ones(N, dtype=np.uint32)
-                lpx = (
-                    self.label_unc[i] * np.ones(N) / pixelsize
-                ).astype(np.float32)
+                lpx = (self.label_unc[i] * np.ones(N) / pixelsize).astype(
+                    np.float32
+                )
                 lpy = lpx
                 x = (pos_obs[:, 0] / pixelsize).astype(np.float32)
                 y = (pos_obs[:, 1] / pixelsize).astype(np.float32)
                 if pos_obs.shape[1] == 3:
                     # not scaled for picasso compatibility
                     z = (pos_obs[:, 2]).astype(np.float32)
-                    locs = pd.DataFrame({
-                        "frame": frame,
-                        "x": x,
-                        "y": y,
-                        "z": z,
-                        "lpx": lpx,
-                        "lpy": lpy,
-                    })
+                    locs = pd.DataFrame(
+                        {
+                            "frame": frame,
+                            "x": x,
+                            "y": y,
+                            "z": z,
+                            "lpx": lpx,
+                            "lpy": lpy,
+                        }
+                    )
                 else:
-                    locs = pd.DataFrame({
-                        "frame": frame,
-                        "x": x,
-                        "y": y,
-                        "lpx": lpx,
-                        "lpy": lpy,
-                    })
+                    locs = pd.DataFrame(
+                        {
+                            "frame": frame,
+                            "x": x,
+                            "y": y,
+                            "lpx": lpx,
+                            "lpy": lpy,
+                        }
+                    )
                 io.save_locs(path, locs, info)
 
 
-class StructureMixer():
+class StructureMixer:
     """Interface for mixing different structures for simulations.
 
     ...
@@ -2096,13 +2113,13 @@ class StructureMixer():
                 " e.g.:\n"
                 '{"CD80", 2.3, "PDL1", 1.89}.'
             )
-        if not all([
-            isinstance(label_unc, Number)
-            for label_unc in self.label_unc.values()
-        ]):
-            raise TypeError(
-                "labeling uncertainties must be positive numbers."
-            )
+        if not all(
+            [
+                isinstance(label_unc, Number)
+                for label_unc in self.label_unc.values()
+            ]
+        ):
+            raise TypeError("labeling uncertainties must be positive numbers.")
         if not all([label_unc >= 0 for label_unc in self.label_unc.values()]):
             raise ValueError(
                 "labeling uncertainties must be positive numbers."
@@ -2170,17 +2187,14 @@ class StructureMixer():
         ``self.__init__()``."""
         for target in self.targets:
             if (
-              "ALL" not in self.label_unc.keys()
-              and target not in self.label_unc.keys()
+                "ALL" not in self.label_unc.keys()
+                and target not in self.label_unc.keys()
             ):
                 raise KeyError(
                     f"{target} defined in the model was not specified in"
                     " self.label_unc."
                 )
-            if (
-              "ALL" not in self.le.keys()
-              and target not in self.le.keys()
-            ):
+            if "ALL" not in self.le.keys() and target not in self.le.keys():
                 raise KeyError(
                     f"{target} defined in the model was not specified in"
                     " self.le."
@@ -2204,7 +2218,7 @@ class StructureMixer():
     def run_simulation(
         self,
         N_structures: list | np.ndarray,
-        path: str = '',
+        path: str = "",
     ) -> dict:
         """Run a simulation with the given numbers of structures.
 
@@ -2226,12 +2240,8 @@ class StructureMixer():
             and spatial coordinates of localizations (from combined
             simulations for each structure) as values.
         """
-        if (
-            not isinstance(N_structures, list)
-            and (
-                not isinstance(N_structures, np.ndarray)
-                and N_structures.ndim != 1
-            )
+        if not isinstance(N_structures, list) and (
+            not isinstance(N_structures, np.ndarray) and N_structures.ndim != 1
         ):
             raise TypeError(
                 "Please input numbers of structures as a list or 1D array."
@@ -2266,8 +2276,11 @@ class StructureMixer():
                 N_structures=N_structures[i],
                 le=le,
                 label_unc=label_unc,
-                mask=mask, mask_info=mask_info,
-                width=width, height=height, depth=depth,
+                mask=mask,
+                mask_info=mask_info,
+                width=width,
+                height=height,
+                depth=depth,
                 random_rot_mode=self.random_rot_mode,
             ).run()
             self.simulators.append(simulator)
@@ -2398,9 +2411,9 @@ class StructureMixer():
         # prepare metadata
         if pixelsize is None:
             if self.mask_info is not None:
-                pixelsize = list(
-                    self.mask_info.values()
-                )[0]["Camera pixelsize (nm)"]
+                pixelsize = list(self.mask_info.values())[0][
+                    "Camera pixelsize (nm)"
+                ]
             else:
                 pixelsize = 130
 
@@ -2720,7 +2733,8 @@ class StructureMixer():
         for i, structure in enumerate(self.structures):
             N_structures[:, i] = np.int32(
                 N_total
-                * proportions[:, i] / 100
+                * proportions[:, i]
+                / 100
                 / structure.get_all_targets_count()
             )
         if N_structures.shape[0] == 1:
@@ -2745,7 +2759,7 @@ class StructureMixer():
                 return self.roi[0] * self.roi[1] * self.roi[2] * 1e-9
 
 
-class SPINNA():
+class SPINNA:
     """Fit simulations produced from ``StructureMixer`` to the
     experimental data by comparing their nearest neighbors distances
     (NND) across different combinations of the numbers of the
@@ -2809,13 +2823,13 @@ class SPINNA():
     def fit(
         self,
         N_structures: np.ndarray | dict,
-        save: str = '',
+        save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
-        tuple[np.ndarray, float] |
-        tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+        tuple[np.ndarray, float]
+        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
     ):
         """Find fitting error for every combination of ``N_structures``
         using NND comparison to ground truth. Applies multiprocessing
@@ -2868,18 +2882,20 @@ class SPINNA():
     def fit_stoichiometry(
         self,
         N_structures: np.ndarray | dict,
-        save: str = '',
+        save: str = "",
         asynch: bool = True,
         bootstrap: bool = False,
         callback: lib.ProgressDialog | Literal["console"] | None = None,
     ) -> (
-        tuple[np.ndarray, float] |
-        tuple[tuple[np.ndarray, ...], tuple[float, ...]]
+        tuple[np.ndarray, float]
+        | tuple[tuple[np.ndarray, ...], tuple[float, ...]]
     ):
         """Alias for ``self.fit()``."""
-        assert callback is None or isinstance(callback, lib.ProgressDialog) \
-            or callback == "console", "callback must be a ProgressDialog," \
-            " 'console', or None."
+        assert (
+            callback is None
+            or isinstance(callback, lib.ProgressDialog)
+            or callback == "console"
+        ), ("callback must be a ProgressDialog," " 'console', or None.")
         if callback is None:
             callback = lib.MockProgress()
 
@@ -2931,9 +2947,9 @@ class SPINNA():
                 np.hstack((N_structures, props, scores.reshape(-1, 1))),
                 columns=[
                     f"N_{name}" for name in self.mixer.get_structure_names()
-                ]+[
-                    f"Prop_{name}" for name in self.mixer.get_structure_names()
-                ]+['Kolmogorov-Smirnov statistic'],
+                ]
+                + [f"Prop_{name}" for name in self.mixer.get_structure_names()]
+                + ["Kolmogorov-Smirnov statistic"],
             )
             df.to_csv(save, header=True, index=False)
 
@@ -2946,7 +2962,8 @@ class SPINNA():
             exp_dists_gt = deepcopy(self.dists_gt)
 
             N_structures_subset = self.get_subset_N_structures(
-                N_structures, opt_N_structures,
+                N_structures,
+                opt_N_structures,
             )
 
             # initialize bootstrapping
@@ -2971,9 +2988,11 @@ class SPINNA():
                 index_boot = np.argmin(scores_boot)
                 score_boot = scores_boot[index_boot]
                 scores.append(score_boot)
-                boot_props.append(self.mixer.convert_counts_to_props(
-                    N_structures_boot[index_boot]
-                ))
+                boot_props.append(
+                    self.mixer.convert_counts_to_props(
+                        N_structures_boot[index_boot]
+                    )
+                )
 
             self.dists_gt = exp_dists_gt
             score_std = np.std(scores)
@@ -3016,19 +3035,19 @@ class SPINNA():
         executor = futures.ProcessPoolExecutor(n_workers)
         # call NN_scorer for each group of N_structures
         for i, n_neighbors_task in zip(start_indices, structures_per_task):
-            fs.append(executor.submit(
-                self.NN_scorer,
-                N_structures[i:i + n_neighbors_task],
-            ))
+            fs.append(
+                executor.submit(
+                    self.NN_scorer,
+                    N_structures[i : i + n_neighbors_task],
+                )
+            )
         return fs
 
     def NN_scorer(
         self,
         N_structures: np.ndarray,
         callback: (
-            lib.ProgressDialog
-            | Literal["console"]
-            | lib.MockProgress
+            lib.ProgressDialog | Literal["console"] | lib.MockProgress
         ) = lib.MockProgress(),
     ) -> tuple[np.ndarray, np.ndarray]:
         """Score the simulations similarity to the ground truth dataset
@@ -3118,8 +3137,8 @@ class SPINNA():
             N_structures = N_structures_
 
         proportions = self.mixer.convert_counts_to_props(N_structures)
-        center_proportions = (
-            self.mixer.convert_counts_to_props(center_N_structures)
+        center_proportions = self.mixer.convert_counts_to_props(
+            center_N_structures
         )
 
         proportions_tree = KDTree(proportions)
@@ -3336,25 +3355,25 @@ def compare_models(
 
     # compare the models
     progress_title = f"Spinning with label uncertainties: {label_unc}"
-    (
-        best_score, best_idx, best_mixer, best_props
-    ) = compare_models_given_label_unc(
-        models=models,
-        exp_data=exp_data,
-        granularity=granularity,
-        label_unc=label_unc,
-        le=le,
-        mask_dict=mask_dict,
-        width=width,
-        height=height,
-        depth=depth,
-        random_rot_mode=random_rot_mode,
-        nn_counts=nn_counts,
-        N_sim=N_sim,
-        asynch=asynch,
-        savedir=savedir,
-        callback=callback,
-        progress_title=progress_title,
+    (best_score, best_idx, best_mixer, best_props) = (
+        compare_models_given_label_unc(
+            models=models,
+            exp_data=exp_data,
+            granularity=granularity,
+            label_unc=label_unc,
+            le=le,
+            mask_dict=mask_dict,
+            width=width,
+            height=height,
+            depth=depth,
+            random_rot_mode=random_rot_mode,
+            nn_counts=nn_counts,
+            N_sim=N_sim,
+            asynch=asynch,
+            savedir=savedir,
+            callback=callback,
+            progress_title=progress_title,
+        )
     )
     return best_score, best_idx, label_unc, best_mixer, best_props
 
@@ -3484,9 +3503,12 @@ def compare_models_given_label_unc(
         )
         savepath = ""
         if savedir:
-            suffix = ("_").join([
-                f"{target}_{lunc:2f}_nm" for target, lunc in label_unc.items()
-            ])
+            suffix = ("_").join(
+                [
+                    f"{target}_{lunc:2f}_nm"
+                    for target, lunc in label_unc.items()
+                ]
+            )
             savepath = os.path.join(
                 savedir, f"fit_scores_model_{i+1}_label_unc_{suffix}.csv"
             )

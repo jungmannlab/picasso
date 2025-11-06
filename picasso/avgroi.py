@@ -1,12 +1,12 @@
 """
-    picasso.avgroi
-    ~~~~~~~~~~~~~~
+picasso.avgroi
+~~~~~~~~~~~~~~
 
-    Fits spots, i.e., finds the average of the pixels in a region of
-    interest (ROI).
+Fits spots, i.e., finds the average of the pixels in a region of
+interest (ROI).
 
-    :author: Maximilian Thomas Strauss, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:author: Maximilian Thomas Strauss, 2016
+:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 import multiprocessing
@@ -60,8 +60,10 @@ def fit_spots_parallel(
     n_spots = len(spots)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_spots / n_tasks + 1) if _ < n_spots % n_tasks else int(
-            n_spots / n_tasks
+        (
+            int(n_spots / n_tasks + 1)
+            if _ < n_spots % n_tasks
+            else int(n_spots / n_tasks)
         )
         for _ in range(n_tasks)
     ]
@@ -69,7 +71,7 @@ def fit_spots_parallel(
     fs = []
     executor = futures.ProcessPoolExecutor(n_workers)
     for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i:i + n_spots_task]))
+        fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
     if asynch:
         return fs
     with tqdm(total=n_tasks, unit="task") as progress_bar:
@@ -91,7 +93,7 @@ def locs_from_fits(
     em: float,
 ) -> pd.DataFrame:
     """Convert fit results to localization DataFrame."""
-    box_offset = int(box/2)
+    box_offset = int(box / 2)
     x = theta[:, 0] + identifications["x"] - box_offset
     y = theta[:, 1] + identifications["y"] - box_offset
     lpx = postprocess.localization_precision(
