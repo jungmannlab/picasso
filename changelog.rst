@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 02-NOV-2025 CEST
+Last change: 06-NOV-2025 CEST
 
 0.9.0
 -----
@@ -11,6 +11,7 @@ Important updates:
 - Picasso does not use ``numpy.recarray`` objects anymore. ``pandas.DataFrame`` are used instead. This applies to localizations, drift data, cluster centers, etc. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
 - Removed dependency ``h5py``. Picasso now uses ``pandas`` to read and write HDF5 files
 - Updated other dependencies, most importantly, ``numpy`` is now in version 2
+- Old setup files were replaced by ``pyproject.toml`` for building and packaging Picasso
 - Render: unfold groups was removed as it is contained within the square grid unfolding
 - SPINNA: improved saved fit results summary (see issue #560)
 
