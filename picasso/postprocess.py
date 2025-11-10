@@ -1,11 +1,11 @@
 """
-    picasso.postprocess
-    ~~~~~~~~~~~~~~~~~~~
+picasso.postprocess
+~~~~~~~~~~~~~~~~~~~
 
-    Data analysis of localization lists.
+Data analysis of localization lists.
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2015-2018
-    :copyright: Copyright (c) 2015-2018 Jungmann Lab, MPI Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2015-2018
+:copyright: Copyright (c) 2015-2018 Jungmann Lab, MPI Biochemistry
 """
 
 from __future__ import annotations
@@ -221,30 +221,32 @@ def picked_locs(
         List of pd.DataFrames, each containing locs from one pick.
     """
     _valid_shapes = ("Circle", "Rectangle", "Polygon")
-    assert pick_shape in _valid_shapes, (
-        f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
-    )
+    assert (
+        pick_shape in _valid_shapes
+    ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
     if len(picks):
         picked_locs = []
         if callback == "console":
             progress = tqdm(
-                range(len(picks)), desc="Picking locs", unit="pick",
+                range(len(picks)),
+                desc="Picking locs",
+                unit="pick",
             )
 
         if pick_shape == "Circle":
             index_blocks = get_index_blocks(locs, info, pick_size)
             for i, pick in enumerate(picks):
                 x, y = pick
-                block_locs = get_block_locs_at(
-                    x, y, index_blocks
-                )
+                block_locs = get_block_locs_at(x, y, index_blocks)
                 group_locs = lib.locs_at(x, y, block_locs, pick_size).copy()
                 if add_group:
-                    group_locs["group"] = (
-                        i * np.ones(len(group_locs), dtype=np.int32)
+                    group_locs["group"] = i * np.ones(
+                        len(group_locs), dtype=np.int32
                     )
                 group_locs.sort_values(
-                    by="frame", kind="mergesort", inplace=True,
+                    by="frame",
+                    kind="mergesort",
+                    inplace=True,
                 )
                 picked_locs.append(group_locs)
 
@@ -272,17 +274,17 @@ def picked_locs(
                 angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
                 x_shifted = group_locs["x"].values - xs
                 y_shifted = group_locs["y"].values - ys
-                x_pick_rot = x_shifted * np.cos(
+                x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(
                     angle
-                ) - y_shifted * np.sin(angle)
-                y_pick_rot = x_shifted * np.sin(
+                )
+                y_pick_rot = x_shifted * np.sin(angle) + y_shifted * np.cos(
                     angle
-                ) + y_shifted * np.cos(angle)
+                )
                 group_locs["x_pick_rot"] = x_pick_rot
                 group_locs["y_pick_rot"] = y_pick_rot
                 if add_group:
-                    group_locs["group"] = (
-                        i * np.ones(len(group_locs), dtype=np.int32)
+                    group_locs["group"] = i * np.ones(
+                        len(group_locs), dtype=np.int32
                     )
                 group_locs.sort_values(
                     by="frame", kind="mergesort", inplace=True
@@ -309,8 +311,8 @@ def picked_locs(
                 group_locs = group_locs[group_locs["y"] < max(Y)]
                 group_locs = lib.locs_in_polygon(group_locs, X, Y)
                 if add_group:
-                    group_locs["group"] = (
-                        i * np.ones(len(group_locs), dtype=np.int32)
+                    group_locs["group"] = i * np.ones(
+                        len(group_locs), dtype=np.int32
                     )
                 group_locs.sort_values(
                     by="frame", kind="mergesort", inplace=True
@@ -369,7 +371,7 @@ def pick_similar(
         List of (x, y) coordinates of similar picks.
     """
     r = d / 2
-    d2 = d ** 2
+    d2 = d**2
     # extract n_locs and rmsd from current picks
     index_blocks = get_index_blocks(locs, info, r)
     n_locs = []
@@ -400,20 +402,32 @@ def pick_similar(
     x_range = np.arange(d / 2, info[0]["Width"], np.sqrt(3) * d / 2)
     y_range_base = np.arange(d / 2, info[0]["Height"] - d / 2, d)
     y_range_shift = y_range_base + d / 2
-    locs_temp, size, _, _, block_starts, block_ends, K, L = (
-        index_blocks
-    )
+    locs_temp, size, _, _, block_starts, block_ends, K, L = index_blocks
     locs_xy = np.stack((locs_temp.x, locs_temp.y))
     x_r = np.uint64(x_range / size)
     y_r1 = np.uint64(y_range_shift / size)
     y_r2 = np.uint64(y_range_base / size)
     # pick similar
     x_similar, y_similar = _pick_similar(
-        x_range, y_range_shift, y_range_base,
-        min_n_locs, max_n_locs, min_rmsd, max_rmsd,
-        x_r, y_r1, y_r2,
-        locs_xy, block_starts, block_ends, K, L,
-        x_similar, y_similar, r, d2,
+        x_range,
+        y_range_shift,
+        y_range_base,
+        min_n_locs,
+        max_n_locs,
+        min_rmsd,
+        max_rmsd,
+        x_r,
+        y_r1,
+        y_r2,
+        locs_xy,
+        block_starts,
+        block_ends,
+        K,
+        L,
+        x_similar,
+        y_similar,
+        r,
+        d2,
     )
     new_picks = list(zip(x_similar, y_similar))
     return new_picks
@@ -501,12 +515,22 @@ def _pick_similar(
         for j, y_grid in enumerate(y):
             y_range = y_r[j]
             n_block_locs = n_block_locs_at(
-                x_range, y_range, K, L, block_starts, block_ends,
+                x_range,
+                y_range,
+                K,
+                L,
+                block_starts,
+                block_ends,
             )
             if n_block_locs >= min_n_locs:
                 block_locs_xy = get_block_locs_at_numba(
-                    x_range, y_range,
-                    locs_xy, block_starts, block_ends, K, L,
+                    x_range,
+                    y_range,
+                    locs_xy,
+                    block_starts,
+                    block_ends,
+                    K,
+                    L,
                 )
                 picked_locs_xy = locs_at_numba(
                     x_grid, y_grid, block_locs_xy, r
@@ -537,8 +561,7 @@ def _pick_similar(
                         else:
                             break
                     if np.all(
-                        (x_similar - x_test) ** 2
-                        + (y_similar - y_test) ** 2
+                        (x_similar - x_test) ** 2 + (y_similar - y_test) ** 2
                         > d2
                     ):
                         if min_n_locs <= picked_locs_xy.shape[1] <= max_n_locs:
@@ -547,12 +570,8 @@ def _pick_similar(
                                 <= rmsd_at_com(picked_locs_xy)
                                 <= max_rmsd
                             ):
-                                x_similar = np.append(
-                                    x_similar, x_test
-                                )
-                                y_similar = np.append(
-                                    y_similar, y_test
-                                )
+                                x_similar = np.append(x_similar, x_test)
+                                y_similar = np.append(y_similar, y_test)
     return x_similar, y_similar
 
 
@@ -613,14 +632,16 @@ def get_block_locs_at_numba(
                             )
                             step = 1
                         else:
-                            indices = np.concatenate((
-                                indices,
-                                np.arange(
-                                    float(block_starts[k, ll]),
-                                    float(block_ends[k, ll]),
-                                    dtype=np.uint32,
+                            indices = np.concatenate(
+                                (
+                                    indices,
+                                    np.arange(
+                                        float(block_starts[k, ll]),
+                                        float(block_ends[k, ll]),
+                                        dtype=np.uint32,
+                                    ),
                                 )
-                            ))
+                            )
     return locs_xy[:, indices]
 
 
@@ -636,8 +657,8 @@ def locs_at_numba(
     ``r``."""
     dx = locs_xy[0] - x
     dy = locs_xy[1] - y
-    r2 = r ** 2
-    is_picked = dx ** 2 + dy ** 2 < r2
+    r2 = r**2
+    is_picked = dx**2 + dy**2 < r2
     return locs_xy[:, is_picked]
 
 
@@ -781,16 +802,17 @@ def nena(
 
     def func(d, delta_a, s, ac, dc, sc):
         a = ac + delta_a  # make sure a >= ac
-        p_single = a * (d / (2 * s**2)) * np.exp(-d**2 / (4 * s**2))
+        p_single = a * (d / (2 * s**2)) * np.exp(-(d**2) / (4 * s**2))
         p_short = (
-            ac / (sc * np.sqrt(2 * np.pi)) *
-            np.exp(-0.5 * ((d - dc) / sc)**2)
+            ac
+            / (sc * np.sqrt(2 * np.pi))
+            * np.exp(-0.5 * ((d - dc) / sc) ** 2)
         )
         return p_single + p_short
 
     area = np.trapz(dnfl, bin_centers)
     median_lp = np.mean([np.median(locs["lpx"]), np.median(locs["lpy"])])
-    p0 = [0.8*area, median_lp, 0.1*area, 2*median_lp, median_lp]
+    p0 = [0.8 * area, median_lp, 0.1 * area, 2 * median_lp, median_lp]
     bounds = ([0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf])
     popt, _ = curve_fit(func, bin_centers, dnfl, p0=p0, bounds=bounds)
     s = popt[1]  # NeNA
@@ -1269,19 +1291,21 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
                 std_z[i] = cluster_locs["z"].std() / np.sqrt(len(cluster_locs))
                 n[i] = len(cluster_locs)
                 group_id[i] = group
-            clusters = pd.DataFrame({
-                "group": group_id,
-                "cluster": cluster,
-                "mean_frame": mean_frame.astype(np.float32),
-                "x": com_x.astype(np.float32),
-                "y": com_y.astype(np.float32),
-                "z": com_z.astype(np.float32),
-                "std_frame": std_frame.astype(np.float32),
-                "lpx": std_x.astype(np.float32),
-                "lpy": std_y.astype(np.float32),
-                "lpz": std_z.astype(np.float32),
-                "n": n.astype(np.int32),
-            })
+            clusters = pd.DataFrame(
+                {
+                    "group": group_id,
+                    "cluster": cluster,
+                    "mean_frame": mean_frame.astype(np.float32),
+                    "x": com_x.astype(np.float32),
+                    "y": com_y.astype(np.float32),
+                    "z": com_z.astype(np.float32),
+                    "std_frame": std_frame.astype(np.float32),
+                    "lpx": std_x.astype(np.float32),
+                    "lpy": std_y.astype(np.float32),
+                    "lpz": std_z.astype(np.float32),
+                    "n": n.astype(np.int32),
+                }
+            )
             combined_locs.append(clusters)
     else:
         for group in tqdm(np.unique(locs["group"])):
@@ -1312,17 +1336,19 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
                 std_y[i] = cluster_locs["y"].std() / np.sqrt(len(cluster_locs))
                 n[i] = len(cluster_locs)
                 group_id[i] = group
-            clusters = pd.DataFrame({
-                "group": group_id,
-                "cluster": cluster,
-                "mean_frame": mean_frame.astype(np.float32),
-                "x": com_x.astype(np.float32),
-                "y": com_y.astype(np.float32),
-                "std_frame": std_frame.astype(np.float32),
-                "lpx": std_x.astype(np.float32),
-                "lpy": std_y.astype(np.float32),
-                "n": n.astype(np.int32),
-            })
+            clusters = pd.DataFrame(
+                {
+                    "group": group_id,
+                    "cluster": cluster,
+                    "mean_frame": mean_frame.astype(np.float32),
+                    "x": com_x.astype(np.float32),
+                    "y": com_y.astype(np.float32),
+                    "std_frame": std_frame.astype(np.float32),
+                    "lpx": std_x.astype(np.float32),
+                    "lpy": std_y.astype(np.float32),
+                    "n": n.astype(np.int32),
+                }
+            )
             combined_locs.append(clusters)
 
     combined_locs = pd.concat(combined_locs, ignore_index=True)
@@ -1372,16 +1398,20 @@ def cluster_combine_dist(
                 # find nearest neighbor in xyz
                 group_locs = temp[temp["cluster"] != clusterval]
                 cluster_locs = temp[temp["cluster"] == clusterval]
-                ref_point = np.stack((
-                    cluster_locs["x"].values,
-                    cluster_locs["y"].values,
-                    cluster_locs["z"].values / pixelsize,
-                ))
-                all_points = np.stack((
-                    group_locs["x"].values,
-                    group_locs["y"].values,
-                    group_locs["z"].values / pixelsize,
-                ))
+                ref_point = np.stack(
+                    (
+                        cluster_locs["x"].values,
+                        cluster_locs["y"].values,
+                        cluster_locs["z"].values / pixelsize,
+                    )
+                )
+                all_points = np.stack(
+                    (
+                        group_locs["x"].values,
+                        group_locs["y"].values,
+                        group_locs["z"].values / pixelsize,
+                    )
+                )
                 distances = distance.cdist(
                     ref_point.transpose(), all_points.transpose()
                 )
@@ -1394,21 +1424,23 @@ def cluster_combine_dist(
                 )
                 min_dist_xy[i] = np.amin(distances_xy)
 
-            clusters = pd.DataFrame({
-                "group": group_id,
-                "cluster": cluster,
-                "mean_frame": mean_frame.astype(np.float32),
-                "x": com_x.astype(np.float32),
-                "y": com_y.astype(np.float32),
-                "z": com_z.astype(np.float32),
-                "std_frame": std_frame.astype(np.float32),
-                "lpx": std_x.astype(np.float32),
-                "lpy": std_y.astype(np.float32),
-                "lpz": std_z.astype(np.float32),
-                "n": n.astype(np.int32),
-                "min_dist": min_dist.astype(np.float32),
-                "mind_dist_xy": min_dist_xy.astype(np.float32),
-            })
+            clusters = pd.DataFrame(
+                {
+                    "group": group_id,
+                    "cluster": cluster,
+                    "mean_frame": mean_frame.astype(np.float32),
+                    "x": com_x.astype(np.float32),
+                    "y": com_y.astype(np.float32),
+                    "z": com_z.astype(np.float32),
+                    "std_frame": std_frame.astype(np.float32),
+                    "lpx": std_x.astype(np.float32),
+                    "lpy": std_y.astype(np.float32),
+                    "lpz": std_z.astype(np.float32),
+                    "n": n.astype(np.int32),
+                    "min_dist": min_dist.astype(np.float32),
+                    "mind_dist_xy": min_dist_xy.astype(np.float32),
+                }
+            )
             combined_locs.append(clusters)
 
     else:  # 2D case
@@ -1438,18 +1470,20 @@ def cluster_combine_dist(
                 )
                 min_dist[i] = np.amin(distances_xy)
 
-            clusters = pd.DataFrame({
-                "group": group_id,
-                "cluster": cluster,
-                "mean_frame": mean_frame.astype(np.float32),
-                "x": com_x.astype(np.float32),
-                "y": com_y.astype(np.float32),
-                "std_frame": std_frame.astype(np.float32),
-                "lpx": std_x.astype(np.float32),
-                "lpy": std_y.astype(np.float32),
-                "n": n.astype(np.int32),
-                "min_dist": min_dist.astype(np.float32),
-            })
+            clusters = pd.DataFrame(
+                {
+                    "group": group_id,
+                    "cluster": cluster,
+                    "mean_frame": mean_frame.astype(np.float32),
+                    "x": com_x.astype(np.float32),
+                    "y": com_y.astype(np.float32),
+                    "std_frame": std_frame.astype(np.float32),
+                    "lpx": std_x.astype(np.float32),
+                    "lpy": std_y.astype(np.float32),
+                    "n": n.astype(np.int32),
+                    "min_dist": min_dist.astype(np.float32),
+                }
+            )
             combined_locs.append(clusters)
 
     combined_locs = pd.concat(combined_locs, ignore_index=True)
@@ -1604,7 +1638,7 @@ def _link_group_mean(
     link_group: np.ndarray,
     n_locs: int,
     n_groups: int,
-    n_locs_per_group: np.ndarray
+    n_locs_per_group: np.ndarray,
 ) -> np.ndarray:
     """Calculate the mean of a column for each link group."""
     group_sum = _link_group_sum(column, link_group, n_locs, n_groups)
@@ -1622,14 +1656,18 @@ def _link_group_weighted_mean(
     link_group: np.ndarray,
     n_locs: int,
     n_groups: int,
-    n_locs_per_group: np.ndarray
+    n_locs_per_group: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Calculate the mean of a column for each link group and the sum
     of the weights."""
     sum_weights = _link_group_sum(weights, link_group, n_locs, n_groups)
     return (
         _link_group_mean(
-            column * weights, link_group, n_locs, n_groups, sum_weights,
+            column * weights,
+            link_group,
+            n_locs,
+            n_groups,
+            sum_weights,
         ),
         sum_weights,
     )
@@ -1723,19 +1761,33 @@ def link_loc_groups(
         )
     if hasattr(locs, "photons"):
         columns["photons"] = _link_group_sum(
-            locs["photons"].values, link_group, n_locs, n_groups,
+            locs["photons"].values,
+            link_group,
+            n_locs,
+            n_groups,
         )
     if hasattr(locs, "sx"):
         columns["sx"] = _link_group_mean(
-            locs["sx"].values, link_group, n_locs, n_groups, n_,
+            locs["sx"].values,
+            link_group,
+            n_locs,
+            n_groups,
+            n_,
         )
     if hasattr(locs, "sy"):
         columns["sy"] = _link_group_mean(
-            locs["sy"].values, link_group, n_locs, n_groups, n_,
+            locs["sy"].values,
+            link_group,
+            n_locs,
+            n_groups,
+            n_,
         )
     if hasattr(locs, "bg"):
         columns["bg"] = _link_group_sum(
-            locs["bg"].values, link_group, n_locs, n_groups,
+            locs["bg"].values,
+            link_group,
+            n_locs,
+            n_groups,
         )
     if hasattr(locs, "x"):
         columns["lpx"] = np.sqrt(1 / sum_weights_x_)
@@ -1759,7 +1811,11 @@ def link_loc_groups(
         )
     if hasattr(locs, "z"):
         columns["z"] = _link_group_mean(
-            locs["z"].values, link_group, n_locs, n_groups, n_,
+            locs["z"].values,
+            link_group,
+            n_locs,
+            n_groups,
+            n_,
         )
     if hasattr(locs, "d_zcalib"):
         columns["d_zcalib"] = _link_group_mean(
@@ -1767,7 +1823,10 @@ def link_loc_groups(
         )
     if hasattr(locs, "group"):
         columns["group"] = _link_group_last(
-            locs["group"].values, link_group, n_locs, n_groups,
+            locs["group"].values,
+            link_group,
+            n_locs,
+            n_groups,
         )
     if hasattr(locs, "frame"):
         columns["len"] = last_frame_ - first_frame_ + 1
@@ -1777,17 +1836,15 @@ def link_loc_groups(
     linked_locs = pd.DataFrame(columns)
     if remove_ambiguous_lengths:
         valid = np.logical_and(
-            first_frame_ > 0, last_frame_ < info[0]["Frames"],
+            first_frame_ > 0,
+            last_frame_ < info[0]["Frames"],
         )
         linked_locs = linked_locs[valid]
     return linked_locs
 
 
 def localization_precision(
-    photons: np.ndarray,
-    s: np.ndarray,
-    bg: np.ndarray,
-    em: bool
+    photons: np.ndarray, s: np.ndarray, bg: np.ndarray, em: bool
 ) -> np.ndarray:
     """Calculate the theoretical localization precision according to
     Mortensen et al., Nat Meth, 2010 for a 2D unweighted Gaussian fit.
@@ -1995,8 +2052,7 @@ def undrift(
 
 
 def undrift_from_picked(
-    picked_locs: list[pd.DataFrame],
-    info: list[dict]
+    picked_locs: list[pd.DataFrame], info: list[dict]
 ) -> pd.DataFrame:
     """Find drift from picked localizations. Note that unlike other
     undrifting functions, this function does not return undrifted
@@ -2035,7 +2091,7 @@ def _undrift_from_picked_coordinate(
     picked_locs: list[pd.DataFrame],
     info: list[dict],
     coordinate: Literal["x", "y", "z"],
- ) -> np.ndarray:
+) -> np.ndarray:
     """Calculate drift in a given coordinate from picked localizations.
     Uses the center of mass of each pick to find the drift
     in the specified coordinate across all frames. The drift is
@@ -2079,7 +2135,7 @@ def _undrift_from_picked_coordinate(
     # where each pick is weighted according to its msd
     nan_mask = np.isnan(drift)
     drift = np.ma.MaskedArray(drift, mask=nan_mask)
-    drift_mean = np.ma.average(drift, axis=0, weights=1/msd)
+    drift_mean = np.ma.average(drift, axis=0, weights=1 / msd)
     drift_mean = drift_mean.filled(np.nan)
 
     # Linear interpolation for frames without localizations
@@ -2169,9 +2225,9 @@ def groupprops(
         callback(0)
         it = enumerate(group_ids)
     else:
-        it = enumerate(tqdm(
-            group_ids, desc="Calculating group statistics", unit="Groups"
-        ))
+        it = enumerate(
+            tqdm(group_ids, desc="Calculating group statistics", unit="Groups")
+        )
     for i, group_id in it:
         group_locs = locs[locs["group"] == group_id]
         groups["group"][i] = group_id
@@ -2182,12 +2238,14 @@ def groupprops(
         if callback is not None:
             callback(i + 1)
     # set dtypes
-    groups = groups.astype({
-        "group": np.int32,
-        "n_events": np.int32,
-        **{name + "_mean": np.float32 for name in locs.columns},
-        **{name + "_std": np.float32 for name in locs.columns},
-    })
+    groups = groups.astype(
+        {
+            "group": np.int32,
+            "n_events": np.int32,
+            **{name + "_mean": np.float32 for name in locs.columns},
+            **{name + "_std": np.float32 for name in locs.columns},
+        }
+    )
     return groups
 
 
@@ -2244,9 +2302,12 @@ def calculate_fret(
 
 
 def nn_analysis(
-    x1: np.ndarray, x2: np.ndarray,
-    y1: np.ndarray, y2: np.ndarray,
-    z1: np.ndarray, z2: np.ndarray,
+    x1: np.ndarray,
+    x2: np.ndarray,
+    y1: np.ndarray,
+    y2: np.ndarray,
+    z1: np.ndarray,
+    z2: np.ndarray,
     nn_count: int,
     same_channel: bool = True,
 ) -> np.ndarray:
@@ -2286,7 +2347,7 @@ def nn_analysis(
         input1 = np.stack((x1, y1)).T
         input2 = np.stack((x2, y2)).T
     if same_channel:
-        model = NN(n_neighbors=nn_count+1)
+        model = NN(n_neighbors=nn_count + 1)
     else:
         model = NN(n_neighbors=nn_count)
     model.fit(input1)

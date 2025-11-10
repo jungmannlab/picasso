@@ -1,19 +1,19 @@
 """
-    picasso.clusterer
-    ~~~~~~~~~~~~~~~~~
+picasso.clusterer
+~~~~~~~~~~~~~~~~~
 
-    Clusterer for single molecules optimized for DNA-PAINT.
-    Implementation of DBSCAN and HDBSCAN.
+Clusterer for single molecules optimized for DNA-PAINT.
+Implementation of DBSCAN and HDBSCAN.
 
-    SMLM clusterer is based on:
-    * Schlichthaerle, et al. Nature Comm, 2021
-      (DOI: 10.1038/s41467-021-22606-1)
-    * Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
-      (DOI: 10.1038/s41586-023-05925-9)
+SMLM clusterer is based on:
+* Schlichthaerle, et al. Nature Comm, 2021
+  (DOI: 10.1038/s41467-021-22606-1)
+* Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
+  (DOI: 10.1038/s41586-023-05925-9)
 
-    :authors: Rafal Kowalewski, Susanne Reinhardt,
-        Thomas Schlichthaerle, 2020-2025
-    :copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
+:authors: Rafal Kowalewski, Susanne Reinhardt,
+    Thomas Schlichthaerle, 2020-2025
+:copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
     frame_grouped = frame_pd.groupby(frame_pd.index)
 
     # perform frame analysis
-    true_cluster = frame_grouped.apply(_frame_analysis, frame.max()+1)
+    true_cluster = frame_grouped.apply(_frame_analysis, frame.max() + 1)
 
     # cluster ids that did not pass frame analysis
     discard = true_cluster.index[true_cluster == 0].values
@@ -625,53 +625,57 @@ def find_cluster_centers(
         std_z = np.array([_[17] for _ in centers_])
         volume = np.array([_[18] for _ in centers_])
         convexhull = np.array([_[19] for _ in centers_])
-        centers = pd.DataFrame({
-            "frame": frame.astype(np.float32),
-            "std_frame": std_frame.astype(np.float32),
-            "x": x.astype(np.float32),
-            "y": y.astype(np.float32),
-            "std_x": std_x.astype(np.float32),
-            "std_y": std_y.astype(np.float32),
-            "z": z.astype(np.float32),
-            "photons": photons.astype(np.float32),
-            "sx": sx.astype(np.float32),
-            "sy": sy.astype(np.float32),
-            "bg": bg.astype(np.float32),
-            "lpx": lpx.astype(np.float32),
-            "lpy": lpy.astype(np.float32),
-            "std_z": std_z.astype(np.float32),
-            "ellipticity": ellipticity.astype(np.float32),
-            "net_gradient": net_gradient.astype(np.float32),
-            "n": n.astype(np.uint32),
-            "n_events": n_events.astype(np.int32),
-            "volume": volume.astype(np.float32),
-            "convexhull": convexhull.astype(np.float32),
-            "group": res.index.values.astype(np.int32),  # group id
-        })
+        centers = pd.DataFrame(
+            {
+                "frame": frame.astype(np.float32),
+                "std_frame": std_frame.astype(np.float32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "std_x": std_x.astype(np.float32),
+                "std_y": std_y.astype(np.float32),
+                "z": z.astype(np.float32),
+                "photons": photons.astype(np.float32),
+                "sx": sx.astype(np.float32),
+                "sy": sy.astype(np.float32),
+                "bg": bg.astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "std_z": std_z.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": net_gradient.astype(np.float32),
+                "n": n.astype(np.uint32),
+                "n_events": n_events.astype(np.int32),
+                "volume": volume.astype(np.float32),
+                "convexhull": convexhull.astype(np.float32),
+                "group": res.index.values.astype(np.int32),  # group id
+            }
+        )
     else:
         area = np.array([_[16] for _ in centers_])
         convexhull = np.array([_[17] for _ in centers_])
-        centers = pd.DataFrame({
-            "frame": frame.astype(np.float32),
-            "std_frame": std_frame.astype(np.float32),
-            "x": x.astype(np.float32),
-            "y": y.astype(np.float32),
-            "std_x": std_x.astype(np.float32),
-            "std_y": std_y.astype(np.float32),
-            "photons": photons.astype(np.float32),
-            "sx": sx.astype(np.float32),
-            "sy": sy.astype(np.float32),
-            "bg": bg.astype(np.float32),
-            "lpx": lpx.astype(np.float32),
-            "lpy": lpy.astype(np.float32),
-            "ellipticity": ellipticity.astype(np.float32),
-            "net_gradient": net_gradient.astype(np.float32),
-            "n": n.astype(np.uint32),
-            "n_events": n_events.astype(np.int32),
-            "area": area.astype(np.float32),
-            "convexhull": convexhull.astype(np.float32),
-            "group": res.index.values.astype(np.int32),  # group id
-        })
+        centers = pd.DataFrame(
+            {
+                "frame": frame.astype(np.float32),
+                "std_frame": std_frame.astype(np.float32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "std_x": std_x.astype(np.float32),
+                "std_y": std_y.astype(np.float32),
+                "photons": photons.astype(np.float32),
+                "sx": sx.astype(np.float32),
+                "sy": sy.astype(np.float32),
+                "bg": bg.astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": net_gradient.astype(np.float32),
+                "n": n.astype(np.uint32),
+                "n_events": n_events.astype(np.int32),
+                "area": area.astype(np.float32),
+                "convexhull": convexhull.astype(np.float32),
+                "group": res.index.values.astype(np.int32),  # group id
+            }
+        )
     if hasattr(locs, "group_input"):
         group_input = np.array([_[-1] for _ in centers_])
         centers["group_input"] = group_input.astype(np.int32)
@@ -731,8 +735,8 @@ def cluster_center(
     #     error_sums_wtd(grouplocs.y, grouplocs.lpy)
     #     / (len(grouplocs) - 1)
     # )
-    lpx = np.std(grouplocs.x) / len(grouplocs)**0.5
-    lpy = np.std(grouplocs.y) / len(grouplocs)**0.5
+    lpx = np.std(grouplocs.x) / len(grouplocs) ** 0.5
+    lpy = np.std(grouplocs.y) / len(grouplocs) ** 0.5
     if not separate_lp:
         lpx = (lpx + lpy) / 2
         lpy = lpx
@@ -758,9 +762,9 @@ def cluster_center(
         )  # take lpz = 2 * mean(lpx, lpy)
         std_z = grouplocs.z.std()
         # lpz = std_z
-        volume = np.power(
-            (std_x + std_y + std_z / pixelsize) / 3 * 2, 3
-        ) * 4.18879
+        volume = (
+            np.power((std_x + std_y + std_z / pixelsize) / 3 * 2, 3) * 4.18879
+        )
         try:
             X = np.stack(
                 (grouplocs.x, grouplocs.y, grouplocs.z / pixelsize),

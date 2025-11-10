@@ -9,7 +9,7 @@ import numpy as np
 
 
 # class that defines modifications to the GUI and actions
-class Plugin():
+class Plugin:
     def __init__(self, window):
         self.name = "render"  # input the name of the app
         self.window = window

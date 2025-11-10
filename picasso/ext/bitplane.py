@@ -1,9 +1,9 @@
 """
-    ext/bitplane
-    ~~~~~~~~~~~~
-    Utility functions to handle bitplane data.
-    :author: Maximilian T Strauss, 2021-2022
-    :copyright: Copyright (c) 2021-2022 Maximilian T Strauss
+ext/bitplane
+~~~~~~~~~~~~
+Utility functions to handle bitplane data.
+:author: Maximilian T Strauss, 2021-2022
+:copyright: Copyright (c) 2021-2022 Maximilian T Strauss
 """
 
 import os.path as _ospath
@@ -334,7 +334,7 @@ if IMSWRITER:
         info,
         z_min,
         z_max,
-        pixelsize
+        pixelsize,
     ):
 
         if len(array.shape) == 3:

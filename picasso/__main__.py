@@ -1,11 +1,11 @@
 """
-    __main__.py
-    ~~~~~~~~~~~
+__main__.py
+~~~~~~~~~~~
 
-    Picasso command line interface.
+Picasso command line interface.
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss
-    :copyright: Copyright (c) 2016-2019 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss
+:copyright: Copyright (c) 2016-2019 Jungmann Lab, MPI of Biochemistry
 """
 
 import os.path
@@ -123,36 +123,39 @@ def _csv2hdf(path: str, pixelsize: float) -> None:
                 lpy = data["uncertainty_xy [nm]"] / pixelsize
 
                 if "z_nm" in list(data):
-                    # TODO update other column labels
                     z = data["z_nm"] / pixelsize
                     sx = data["sigma1_nm"] / pixelsize
                     sy = data["sigma2_nm"] / pixelsize
-                    locs = pd.DataFrame({
-                        "frame": frames.astype(_np.uint32),
-                        "x": x.astype(_np.float32),
-                        "y": y.astype(_np.float32),
-                        "z": z.astype(_np.float32),
-                        "photons": photons.astype(_np.float32),
-                        "sx": sx.astype(_np.float32),
-                        "sy": sy.astype(_np.float32),
-                        "bg": bg.astype(_np.float32),
-                        "lpx": lpx.astype(_np.float32),
-                        "lpy": lpy.astype(_np.float32),
-                    })
+                    locs = pd.DataFrame(
+                        {
+                            "frame": frames.astype(_np.uint32),
+                            "x": x.astype(_np.float32),
+                            "y": y.astype(_np.float32),
+                            "z": z.astype(_np.float32),
+                            "photons": photons.astype(_np.float32),
+                            "sx": sx.astype(_np.float32),
+                            "sy": sy.astype(_np.float32),
+                            "bg": bg.astype(_np.float32),
+                            "lpx": lpx.astype(_np.float32),
+                            "lpy": lpy.astype(_np.float32),
+                        }
+                    )
                 else:
                     sx = data["sigma [nm]"] / pixelsize
                     sy = data["sigma [nm]"] / pixelsize
-                    locs = pd.DataFrame({
-                        "frame": frames.astype(_np.uint32),
-                        "x": x.astype(_np.float32),
-                        "y": y.astype(_np.float32),
-                        "photons": photons.astype(_np.float32),
-                        "sx": sx.astype(_np.float32),
-                        "sy": sy.astype(_np.float32),
-                        "bg": bg.astype(_np.float32),
-                        "lpx": lpx.astype(_np.float32),
-                        "lpy": lpy.astype(_np.float32),
-                    })
+                    locs = pd.DataFrame(
+                        {
+                            "frame": frames.astype(_np.uint32),
+                            "x": x.astype(_np.float32),
+                            "y": y.astype(_np.float32),
+                            "photons": photons.astype(_np.float32),
+                            "sx": sx.astype(_np.float32),
+                            "sy": sy.astype(_np.float32),
+                            "bg": bg.astype(_np.float32),
+                            "lpx": lpx.astype(_np.float32),
+                            "lpy": lpy.astype(_np.float32),
+                        }
+                    )
 
                 locs.sort_values(kind="mergesort", by="frame", inplace=True)
 
@@ -161,6 +164,7 @@ def _csv2hdf(path: str, pixelsize: float) -> None:
                 img_info["Frames"] = int(_np.max(frames)) + 1
                 img_info["Height"] = int(_np.ceil(_np.max(y)))
                 img_info["Width"] = int(_np.ceil(_np.max(x)))
+                img_info["Pixelsize"] = float(pixelsize)
 
                 info = []
                 info.append(img_info)
@@ -250,12 +254,14 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
                         linked_photonrate.append(_np.mean(temp["photon_rate"]))
 
                 clusters["n_after_link"] = _np.array(
-                    n_after_link, dtype=_np.int32,
+                    n_after_link,
+                    dtype=_np.int32,
                 )
                 clusters["linked_len"] = _np.array(linked_len, dtype=_np.int32)
                 clusters["linked_n"] = _np.array(linked_n, dtype=_np.int32)
                 clusters["linked_photonrate"] = _np.array(
-                    linked_photonrate, dtype=_np.float32,
+                    linked_photonrate,
+                    dtype=_np.float32,
                 )
                 clusters.to_hdf5(cluster_path, "clusters", mode="a")
             except Exception:
@@ -367,7 +373,8 @@ def _clusterfilter(
                             first = False
                         else:
                             all_locs = np.append(
-                                all_locs, locs[locs["group"] == group],
+                                all_locs,
+                                locs[locs["group"] == group],
                             )
 
                     base, ext = os.path.splitext(path)
@@ -381,7 +388,9 @@ def _clusterfilter(
                     }
                     info.append(clusterfilter_info)
                     all_locs.sort_values(
-                        kind="mergesort", by="frame", inplace=True,
+                        kind="mergesort",
+                        by="frame",
+                        inplace=True,
                     )
                     out_path = base + "_filter_in.hdf5"
                     io.save_locs(out_path, all_locs, info)
@@ -396,7 +405,8 @@ def _clusterfilter(
                             first = False
                         else:
                             all_locs = np.append(
-                                all_locs, locs[locs["group"] == group],
+                                all_locs,
+                                locs[locs["group"] == group],
                             )
 
                     base, ext = os.path.splitext(path)
@@ -410,7 +420,9 @@ def _clusterfilter(
                     }
                     info.append(clusterfilter_info)
                     all_locs.sort_values(
-                        kind="mergesort", by="frame", inplace=True,
+                        kind="mergesort",
+                        by="frame",
+                        inplace=True,
                     )
                     out_path = base + "_filter_out.hdf5"
                     io.save_locs(out_path, all_locs, info)
@@ -474,7 +486,10 @@ def _undrift(
         else:
             print("Undrifting file {}".format(path))
             drift, locs = postprocess.undrift(
-                locs, info, segmentation, display=display,
+                locs,
+                info,
+                segmentation,
+                display=display,
             )
 
             undrift_info["Drift X"] = float(drift["x"].mean())
@@ -489,8 +504,8 @@ def _undrift(
 def _undrift_aim(
     files: str,
     segmentation: int,
-    intersectdist: float = 20/130,
-    roiradius: float = 60/130
+    intersectdist: float = 20 / 130,
+    roiradius: float = 60 / 130,
 ) -> None:
     """Run AIM undrifting on the given files. See ``aim.aim`` for
     details."""
@@ -506,7 +521,11 @@ def _undrift_aim(
             continue
         print("Undrifting file {}".format(path))
         locs, new_info, drift = aim.aim(
-            locs, info, segmentation, intersectdist, roiradius,
+            locs,
+            info,
+            segmentation,
+            intersectdist,
+            roiradius,
         )
         base, ext = os.path.splitext(path)
         io.save_locs(base + "_aim.hdf5", locs, new_info)
@@ -619,6 +638,7 @@ def _smlm_clusterer(
     paths = glob.glob(files)
     if paths:
         from . import io, clusterer
+
         params = {
             "radius_xy": radius,
             "radius_z": radius_z,
@@ -710,7 +730,8 @@ def _align(files: str, display: bool) -> None:
     infos = [_[1] for _ in locs_infos]
     aligned_locs = align(locs, infos, display=display)
     align_info = {
-        "Generated by": f"Picasso v{__version__} Align", "Files": files,
+        "Generated by": f"Picasso v{__version__} Align",
+        "Files": files,
     }
     for file, locs_, info in zip(files, aligned_locs, infos):
         info.append(align_info)
@@ -727,7 +748,8 @@ def _join(files: list[str], keep_index: bool = True) -> None:
     locs, info = load_locs(files[0])
     total_frames = info[0]["Frames"]
     join_info = {
-        "Generated by": f"Picasso v{__version__} Join", "Files": [files[0]],
+        "Generated by": f"Picasso v{__version__} Join",
+        "Files": [files[0]],
     }
     for path in files[1:]:
         locs_, info_ = load_locs(path)
@@ -768,7 +790,10 @@ def _groupprops(files: str) -> None:
             groups = groupprops(locs)
             base, ext = splitext(path)
             save_datasets(
-                base + "_groupprops.hdf5", info, locs=locs, groups=groups,
+                base + "_groupprops.hdf5",
+                info,
+                locs=locs,
+                groups=groups,
             )
 
 
@@ -851,44 +876,6 @@ def _start_server() -> None:
     sys.exit(stcli.main())
 
 
-def _nanotron(args: argparse.Namespace) -> None:
-    """Run nanoTRON prediction on localization files.
-
-    Parameters
-    ----------
-    files : str
-        Path to the localization files or a directory containing
-        HDF5 files.
-    model_path : str
-        Path to the nanoTRON model file.
-    model_pth : str
-        Path to the nanoTRON model weights file.
-    """
-    from glob import glob
-    from os.path import isdir
-    from .io import load_locs, NoMetadataFileError
-
-    files = args.files
-
-    if isdir(files):
-        print("Analyzing folder")
-        paths = glob(files + "/*.hdf5")
-        print("A total of {} files detected".format(len(paths)))
-    else:
-        paths = glob(files)
-
-    if paths:
-        for path in paths:
-            print("nanoTRON predicting {}".format(path))
-            try:
-                locs, info = load_locs(path)
-            except NoMetadataFileError:
-                continue
-            # TODO: Include call to proper prediction routine
-            raise NotImplementedError
-            # predict(locs, info, **kwargs)
-
-
 def _localize(args: argparse.Namespace) -> None:
     """Localize molecules in microscopy images.
 
@@ -948,9 +935,11 @@ def _localize(args: argparse.Namespace) -> None:
 
     for index, element in enumerate(vars(args)):
         try:
-            print("{:<8} {:<15} {:<10}".format(
-                index + 1, element, getattr(args, element)
-            ))
+            print(
+                "{:<8} {:<15} {:<10}".format(
+                    index + 1, element, getattr(args, element)
+                )
+            )
         except TypeError:  # if None is default value
             print("{:<8} {:<15} {}".format(index + 1, element, "None"))
     print("------------------------------------------")
@@ -1079,7 +1068,10 @@ def _localize(args: argparse.Namespace) -> None:
             print("------------------------------------------")
             movie, info = load_movie(path)
             current, futures = identify_async(
-                movie, min_net_gradient, box, roi=roi,
+                movie,
+                min_net_gradient,
+                box,
+                roi=roi,
             )
             n_frames = len(movie)
             while current[0] < n_frames:
@@ -1113,7 +1105,12 @@ def _localize(args: argparse.Namespace) -> None:
                     sleep(0.2)
                 print(f"Fitting spot {n_spots} of {n_spots}")
                 locs = locs_from_fits(
-                    ids, thetas, CRLBs, likelihoods, iterations, box,
+                    ids,
+                    thetas,
+                    CRLBs,
+                    likelihoods,
+                    iterations,
+                    box,
                 )
 
             elif args.fit_method == "avg":
@@ -1131,11 +1128,11 @@ def _localize(args: argparse.Namespace) -> None:
 
             localize_info = {
                 "Generated by": f"Picasso v{__version__} Localize",
-                "ROI": None,  # TODO: change if ROI is given
+                "ROI": roi,
                 "Box Size": box,
                 "Min. Net Gradient": min_net_gradient,
                 "Pixelsize": px,
-                "Fit method": args.fit_method
+                "Fit method": args.fit_method,
             }
             localize_info.update(camera_info)
             if args.fit_method == "mle":
@@ -1190,7 +1187,10 @@ def _localize(args: argparse.Namespace) -> None:
                 print("------------------------------------------")
                 try:
                     _undrift(
-                        out_path, args.drift, display=False, fromfile=None,
+                        out_path,
+                        args.drift,
+                        display=False,
+                        fromfile=None,
                     )
                 except Exception as e:
                     print(e)
@@ -1488,16 +1488,14 @@ def _spinna_batch_analysis(
         # load data and parameters for each molecular target
         for target in targets:
             for col_name in [
-                f"{_}_{target}"
-                for _ in ["label_unc", "exp_data"]
+                f"{_}_{target}" for _ in ["label_unc", "exp_data"]
             ]:
                 if col_name not in row.index:
                     raise ValueError(
                         f"Column {col_name} not found in the parameters file."
                     )
-            if (
-                f"le_{target}" not in row.index
-                and ("le_fitting" in row.index and row["le_fitting"] == 0)
+            if f"le_{target}" not in row.index and (
+                "le_fitting" in row.index and row["le_fitting"] == 0
             ):
                 raise ValueError(
                     f"Column le_{target} not found in the parameters file."
@@ -1604,7 +1602,9 @@ def _spinna_batch_analysis(
             label_unc=label_unc,
             le=le,
             mask_dict=mask_dict,
-            width=width, height=height, depth=depth,
+            width=width,
+            height=height,
+            depth=depth,
             random_rot_mode=random_rot_mode,
         )
 
@@ -1644,10 +1644,12 @@ def _spinna_batch_analysis(
         if isinstance(opt_props, tuple):
             props_mean, props_std = opt_props
             results["Modified Kolmogorov-Smirnov score +/- s.d."] = score
-            results["Fitted proportions of structures"] = ", ".join([
-                f"{props_mean[i]:.2f} +/- {props_std[i]:.2f}%"
-                for i in range(len(props_mean))
-            ])
+            results["Fitted proportions of structures"] = ", ".join(
+                [
+                    f"{props_mean[i]:.2f} +/- {props_std[i]:.2f}%"
+                    for i in range(len(props_mean))
+                ]
+            )
         else:
             results["Modified Kolmogorov-Smirnov score"] = score
             results["Fitted proportions of structures"] = opt_props
@@ -1660,13 +1662,17 @@ def _spinna_batch_analysis(
                 else:
                     opt_props_ = opt_props
                 rel_props = mixer.convert_props_for_target(
-                    opt_props_, target, n_simulated,
+                    opt_props_,
+                    target,
+                    n_simulated,
                 )
                 idx_valid = np.where(rel_props != np.inf)[0]
-                value = ", ".join([
-                    f"{structures[i].title}: {rel_props[i]:.2f}%"
-                    for i in idx_valid
-                ])
+                value = ", ".join(
+                    [
+                        f"{structures[i].title}: {rel_props[i]:.2f}%"
+                        for i in idx_valid
+                    ]
+                )
                 results[f"Relative proportions of {target} in"] = value
 
         if apply_mask:
@@ -1720,18 +1726,29 @@ def _spinna_batch_analysis(
             mixer.get_neighbor_idx(duplicate=True)
         ):
             fig, ax = spinna.plot_NN(
-                dist=dist_sim[i], mode='plot', show_legend=False,
-                return_fig=True, figsize=(4.947, 3.71), alpha=1.0,
-                binsize=NND_bin, xlim=[0, NND_maxdist],
+                dist=dist_sim[i],
+                mode="plot",
+                show_legend=False,
+                return_fig=True,
+                figsize=(4.947, 3.71),
+                alpha=1.0,
+                binsize=NND_bin,
+                xlim=[0, NND_maxdist],
                 title=f"Nearest Neighbors Distances: {t1} -> {t2}",
             )
             exp1 = exp_data[t1]
             exp2 = exp_data[t2]
             fig, ax = spinna.plot_NN(
-                data1=exp1, data2=exp2,
+                data1=exp1,
+                data2=exp2,
                 n_neighbors=nn_plotted,
-                show_legend=False, fig=fig, ax=ax, mode='hist',
-                return_fig=True, binsize=NND_bin, xlim=[0, NND_maxdist],
+                show_legend=False,
+                fig=fig,
+                ax=ax,
+                mode="hist",
+                return_fig=True,
+                binsize=NND_bin,
+                xlim=[0, NND_maxdist],
                 title=f"Nearest Neighbors Distances: {t1} -> {t2}",
                 savefig=[
                     f"{save_filename}_NND_{t1}_{t2}.{_}"
@@ -1742,7 +1759,8 @@ def _spinna_batch_analysis(
     # save the summary as .csv file
     summary = pd.DataFrame(summary)
     summary.to_csv(
-        os.path.join(result_dir, "summary_results.csv"), index=False,
+        os.path.join(result_dir, "summary_results.csv"),
+        index=False,
     )
 
 
@@ -1826,10 +1844,14 @@ def main():
         "parameter", type=str, help="parameter to be filtered"
     )
     clusterfilter_parser.add_argument(
-        "minval", type=float, help="lower boundary",
+        "minval",
+        type=float,
+        help="lower boundary",
     )
     clusterfilter_parser.add_argument(
-        "maxval", type=float, help="upper boundary",
+        "maxval",
+        type=float,
+        help="upper boundary",
     )
 
     # undrift parser
@@ -1897,7 +1919,7 @@ def main():
         "-i",
         "--intersectdist",
         type=float,
-        default=20/130,
+        default=20 / 130,
         help=(
             "max. distance (cam. pixels) between localizations in"
             " consecutive segments to be considered as intersecting"
@@ -1907,11 +1929,8 @@ def main():
         "-r",
         "--roiradius",
         type=float,
-        default=60/130,
-        help=(
-            "max. drift (cam. pixels) between two consecutive"
-            " segments"
-        ),
+        default=60 / 130,
+        help=("max. drift (cam. pixels) between two consecutive" " segments"),
     )
 
     # local densitydd
@@ -1931,7 +1950,7 @@ def main():
         help=(
             "maximal distance between to localizations"
             " to be considered local"
-            ),
+        ),
     )
 
     # DBSCAN
@@ -2038,9 +2057,7 @@ def main():
     smlm_cluster_parser.add_argument(
         "radius_z",
         type=float,
-        help=(
-            "clustering radius in axial direction (MUST BE SET FOR 3D!!!)"
-        ),
+        help=("clustering radius in axial direction (MUST BE SET FOR 3D!!!)"),
         default=None,
     )
 
@@ -2293,30 +2310,17 @@ def main():
     subparsers.add_parser("design", help="design RRO DNA origami structures")
     # simulate
     subparsers.add_parser(
-        "simulate", help="simulate single molecule fluorescence data",
+        "simulate",
+        help="simulate single molecule fluorescence data",
     )
 
     # nanotron
-    nanotron_parser = subparsers.add_parser(
-        "nanotron", help="segmentation with deep learning"
-    )
-    nanotron_parser.add_argument(
-        "-m",
-        "--model",
-        nargs="?",
-        help="a model file for prediction",
-    )
-
-    nanotron_parser.add_argument(
-        "files",
-        nargs="?",
-        help="one localization file or a folder containing localization files"
-        " specified by a unix style path pattern",
-    )
+    subparsers.add_parser("nanotron", help="segmentation with deep learning")
 
     # average
     average_parser = subparsers.add_parser(
-        "average", help="particle averaging",
+        "average",
+        help="particle averaging",
     )
     average_parser.add_argument(
         "-o",
@@ -2423,12 +2427,9 @@ def main():
 
                 average.main()
         elif args.command == "nanotron":
-            if args.files:
-                _nanotron(args)
-            else:
-                from .gui import nanotron
+            from .gui import nanotron
 
-                nanotron.main()
+            nanotron.main()
         elif args.command == "average3":
             from .gui import average3
 
@@ -2449,7 +2450,10 @@ def main():
             )
         elif args.command == "undrift":
             _undrift(
-                args.files, args.segmentation, args.nodisplay, args.fromfile,
+                args.files,
+                args.segmentation,
+                args.nodisplay,
+                args.fromfile,
             )
         elif args.command == "aim":
             _undrift_aim(
@@ -2464,7 +2468,10 @@ def main():
             _dbscan(args.files, args.radius, args.density, args.pixelsize)
         elif args.command == "hdbscan":
             _hdbscan(
-                args.files, args.min_cluster, args.min_samples, args.pixelsize,
+                args.files,
+                args.min_cluster,
+                args.min_samples,
+                args.pixelsize,
             )
         elif args.command == "smlm_cluster":
             _smlm_clusterer(
@@ -2506,7 +2513,9 @@ def main():
         elif args.command == "spinna":
             if args.parameters:
                 _spinna_batch_analysis(
-                    args.parameters, args.asynch, args.bootstrap,
+                    args.parameters,
+                    args.asynch,
+                    args.bootstrap,
                 )
             else:
                 from .gui import spinna

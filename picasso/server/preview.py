@@ -93,8 +93,8 @@ def preview():
                         oversampling = c1.number_input(
                             "Oversampling",
                             value=5.0,
-                            min_value=1.,
-                            max_value=40.,
+                            min_value=1.0,
+                            max_value=40.0,
                         )
 
                         image = picasso_render(locs, viewport, oversampling)

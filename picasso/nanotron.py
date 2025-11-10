@@ -1,11 +1,11 @@
 """
-    picasso.nanotron
-    ~~~~~~~~~~~~~~~~
+picasso.nanotron
+~~~~~~~~~~~~~~~~
 
-    Deep learning library for classification of picked localizations.
+Deep learning library for classification of picked localizations.
 
-    :author: Alexander Auer, Maximilian Strauss 2020
-    :copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
+:author: Alexander Auer, Maximilian Strauss 2020
+:copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
 """
 
 import numpy as np
@@ -43,7 +43,7 @@ def prepare_img(
         Prepared image.
     """
     img = alpha * img - bg
-    img = img.astype('float')
+    img = img.astype("float")
     img = img / img.max()
     img = img.clip(min=0)
     img = img.reshape(img_shape**2)
@@ -126,17 +126,20 @@ def roi_to_img(
     # for debugging
     if False:
         print("mean x: {}".format(np.mean(pick_locs.x)))
-        print('length x: {}'.format(x_max - x_min))
+        print("length x: {}".format(x_max - x_min))
         print("mean y: {}".format(np.mean(pick_locs.y)))
-        print('length y: {}'.format(y_max - y_min))
-        print('radius: {}'.format(radius))
-        print('viewport: {}'.format(viewport))
+        print("length y: {}".format(y_max - y_min))
+        print("radius: {}".format(radius))
+        print("viewport: {}".format(viewport))
 
     # Render locs with Picasso render function
     try:
-        len_x, pick_img = render.render(pick_locs, viewport=viewport,
-                                        oversampling=oversampling,
-                                        blur_method='smooth')
+        len_x, pick_img = render.render(
+            pick_locs,
+            viewport=viewport,
+            oversampling=oversampling,
+            blur_method="smooth",
+        )
     except Exception:
         pass
     return pick_img
@@ -184,22 +187,26 @@ def prepare_data(
     data = []
     labels = []
 
-    for pick in tqdm(range(locs["group"].max()), desc='Prepare '+str(label)):
+    for pick in tqdm(range(locs["group"].max()), desc="Prepare " + str(label)):
 
-        pick_img = roi_to_img(locs, pick,
-                              radius=pick_radius,
-                              oversampling=oversampling)
+        pick_img = roi_to_img(
+            locs, pick, radius=pick_radius, oversampling=oversampling
+        )
 
         if export is True and pick < 10:
-            filename = 'label' + str(label) + '-' + str(pick)
+            filename = "label" + str(label) + "-" + str(pick)
             plt.imsave(
-                './img/' + filename + '.png', (alpha*pick_img-bg),
-                cmap='Greys',
+                "./img/" + filename + ".png",
+                (alpha * pick_img - bg),
+                cmap="Greys",
                 vmax=10,
             )
 
         pick_img = prepare_img(
-            pick_img, img_shape=img_shape, alpha=alpha, bg=bg,
+            pick_img,
+            img_shape=img_shape,
+            alpha=alpha,
+            bg=bg,
         )
 
         data.append(pick_img)

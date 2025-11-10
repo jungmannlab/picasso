@@ -1,11 +1,11 @@
 """
-    picasso.lib
-    ~~~~~~~~~~~
+picasso.lib
+~~~~~~~~~~~
 
-    Handy functions and classes.
+Handy functions and classes.
 
-    :author: Joerg Schnitzbauer, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:author: Joerg Schnitzbauer, 2016
+:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from numpy.lib.recfunctions import append_fields, drop_fields
 from matplotlib.backends.backend_qt5agg import (
-    FigureCanvas, NavigationToolbar2QT
+    FigureCanvas,
+    NavigationToolbar2QT,
 )
 from PyQt5 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
@@ -108,7 +109,6 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.app.processEvents()
 
     def closeEvent(self, event):
-        time.sleep(0.3)  # TODO: does it fixthe issue of dialogs not closing
         _dialogs.remove(self)
         if self.finished is False:
             self.finished = True
@@ -134,7 +134,8 @@ class StatusDialog(QtWidgets.QDialog):
 
     def __init__(self, description, parent):
         super(StatusDialog, self).__init__(
-            parent, QtCore.Qt.CustomizeWindowHint,
+            parent,
+            QtCore.Qt.CustomizeWindowHint,
         )
         _dialogs.append(self)
         vbox = QtWidgets.QVBoxLayout(self)
@@ -146,14 +147,13 @@ class StatusDialog(QtWidgets.QDialog):
         QtCore.QCoreApplication.instance().processEvents()
 
     def closeEvent(self, event):
-        time.sleep(0.3)  # TODO: does it fixthe issue of dialogs not closing
         _dialogs.remove(self)
         if self.sound_notification_path is not None:
             if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
                 playsound(self.sound_notification_path, block=False)
 
 
-class MockProgress():
+class MockProgress:
     """Class to mock a progress bar or dialog, allowing for calling
     the same methods but not displaying anything."""
 
@@ -292,9 +292,8 @@ def get_sound_notification_path() -> str | None:
         io.save_user_settings(settings)
     filename = settings["Sound_notification"]["filename"]
     sounds_dir = _sound_notification_dir()
-    if (
-        filename is not None and
-        os.path.isfile(os.path.join(sounds_dir, filename))
+    if filename is not None and os.path.isfile(
+        os.path.join(sounds_dir, filename)
     ):
         ext = os.path.splitext(filename)[1].lower()
         if ext not in [".mp3", ".wav"]:
@@ -317,9 +316,10 @@ def get_available_sound_notifications() -> list[str | None]:
     """
     sounds_dir = _sound_notification_dir()
     filenames = [
-        _ for _ in os.listdir(sounds_dir)
-        if os.path.isfile(os.path.join(sounds_dir, _)) and
-        os.path.splitext(_)[1].lower() in [".mp3", ".wav"]
+        _
+        for _ in os.listdir(sounds_dir)
+        if os.path.isfile(os.path.join(sounds_dir, _))
+        and os.path.splitext(_)[1].lower() in [".mp3", ".wav"]
     ]
     filenames = ["None"] + filenames
     return filenames
@@ -387,13 +387,32 @@ def is_hexadecimal(text):
         True if text represents rgb, False otherwise.
     """
     allowed_characters = [
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-        'a', 'b', 'c', 'd', 'e', 'f',
-        'A', 'B', 'C', 'D', 'E', 'F',
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
     ]
     sum_char = 0
     if isinstance(text, str):
-        if text[0] == '#':
+        if text[0] == "#":
             if len(text) == 7:
                 for char in text[1:]:
                     if char in allowed_characters:
@@ -631,11 +650,11 @@ def check_if_in_polygon(
         count = 0
         for j in range(n_polygon):
             j_next = (j + 1) % n_polygon
-            if (
-                ((Y[j] > y[i]) != (Y[j_next] > y[i])) and
+            if ((Y[j] > y[i]) != (Y[j_next] > y[i])) and (
                 (
-                    (x[i] < X[j] + (X[j_next] - X[j])
-                     * (y[i] - Y[j]) / (Y[j_next] - Y[j]))
+                    x[i]
+                    < X[j]
+                    + (X[j_next] - X[j]) * (y[i] - Y[j]) / (Y[j_next] - Y[j])
                 )
             ):
                 count += 1

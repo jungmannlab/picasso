@@ -169,7 +169,8 @@ def compare():
         files = df["filename"].unique()
 
         selected = st.multiselect(
-            "Select files (Hover to see full path)", files,
+            "Select files (Hover to see full path)",
+            files,
         )
 
         if len(selected) > 0:

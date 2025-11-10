@@ -1,11 +1,11 @@
 """
-    picasso.gausslq
-    ~~~~~~~~~~~~~~~
+picasso.gausslq
+~~~~~~~~~~~~~~~
 
-    Fit spots (single-molecule images) with 2D Gaussian least squares.
+Fit spots (single-molecule images) with 2D Gaussian least squares.
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ def _outer(
     size: int,
     model: np.ndarray,
     n: float,
-    bg: float
+    bg: float,
 ) -> None:
     """Compute the outer product of two vectors a and b, scaled by n and
     added a background value bg, and store the result in model."""
@@ -155,9 +155,7 @@ def _compute_model(
     model_x[:] = _gaussian(
         theta[0], theta[4], grid
     )  # sx and sy are wrong with integrated gaussian
-    model_y[:] = _gaussian(
-        theta[1], theta[5], grid
-    )
+    model_y[:] = _gaussian(theta[1], theta[5], grid)
     _outer(model_y, model_x, size, model, theta[2], theta[3])
     return model
 
@@ -294,16 +292,18 @@ def fit_spots_parallel(
     n_spots = len(spots)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_spots / n_tasks + 1)
-        if _ < n_spots % n_tasks
-        else int(n_spots / n_tasks)
+        (
+            int(n_spots / n_tasks + 1)
+            if _ < n_spots % n_tasks
+            else int(n_spots / n_tasks)
+        )
         for _ in range(n_tasks)
     ]
     start_indices = np.cumsum([0] + spots_per_task[:-1])
     fs = []
     executor = futures.ProcessPoolExecutor(n_workers)
     for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i:i + n_spots_task]))
+        fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
     if asynch:
         return fs
     with tqdm(desc="LQ fitting", total=n_tasks, unit="task") as progress_bar:
@@ -403,7 +403,8 @@ def locs_from_fits(
     ellipticity = (a - b) / a
 
     if hasattr(identifications, "n_id"):
-        locs = pd.DataFrame({
+        locs = pd.DataFrame(
+            {
                 "frame": identifications["frame"].astype(np.uint32),
                 "x": x.astype(np.float32),
                 "y": y.astype(np.float32),
@@ -418,10 +419,12 @@ def locs_from_fits(
                     identifications["net_gradient"].astype(np.float32)
                 ),
                 "n_id": identifications["n_id"].astype(np.uint32),
-            })
+            }
+        )
         locs.sort_values(by="n_id", kind="mergesort", inplace=True)
     else:
-        locs = pd.DataFrame({
+        locs = pd.DataFrame(
+            {
                 "frame": identifications["frame"].astype(np.uint32),
                 "x": x.astype(np.float32),
                 "y": y.astype(np.float32),
@@ -435,7 +438,8 @@ def locs_from_fits(
                 "net_gradient": (
                     identifications["net_gradient"].astype(np.float32)
                 ),
-            })
+            }
+        )
         locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs
 
@@ -481,7 +485,8 @@ def locs_from_fits_gpufit(
     a = np.maximum(theta[:, 3], theta[:, 4])
     b = np.minimum(theta[:, 3], theta[:, 4])
     ellipticity = (a - b) / a
-    locs = pd.DataFrame({
+    locs = pd.DataFrame(
+        {
             "frame": identifications["frame"].astype(np.uint32),
             "x": x.astype(np.float32),
             "y": y.astype(np.float32),
@@ -493,6 +498,7 @@ def locs_from_fits_gpufit(
             "lpy": lpy.astype(np.float32),
             "ellipticity": ellipticity.astype(np.float32),
             "net_gradient": identifications["net_gradient"].astype(np.float32),
-        })
+        }
+    )
     locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs

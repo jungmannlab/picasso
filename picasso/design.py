@@ -1,11 +1,11 @@
 """
-    picasso.design
-    ~~~~~~~~~~~~~~
+picasso.design
+~~~~~~~~~~~~~~
 
-    Design rectangular rothemund origami (RRO).
+Design rectangular rothemund origami (RRO).
 
-    :author: Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:author: Maximilian Thomas Strauss, 2016-2018
+:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 import csv

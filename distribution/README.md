@@ -17,7 +17,7 @@ You will now find the installer executable in the folder `Output`, ready for dis
 # Creating shortcuts for Linux
 The script `create_linux_shortcuts.py` creates application menu entries (`*.desktop` files following the desktop entry specification by freedesktop.org) and an executable that can be called from the terminal without explicitly activating the picasso environment.
 
-1. Clone/download picasso, set up the picasso environment using `python -m venv path/to/environment`, activate the environment, install the requirements and run `python setup.py install`.
+1. Clone/download picasso, set up the picasso environment using `python -m venv path/to/environment`, activate the environment, install the requirements and run `pip install .`.
 2. With the picasso environment activated, run the script `create_linux_shortcuts.py`.
 
 When `create_linux_shortcuts.py` is run as root, the picasso script is created as `/usr/bin/picasso` and the desktop files are created in `/usr/share/applications`.
