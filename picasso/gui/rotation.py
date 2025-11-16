@@ -664,6 +664,9 @@ class ViewRotation(QtWidgets.QLabel):
                 0
             ]  # only one pick, take the first element
             temp.z /= self.pixelsize
+            # same for lpz if present
+            if "lpz" in temp.columns:
+                temp.lpz /= self.pixelsize
             self.locs.append(temp)
             self.infos.append(self.window.window.view.infos[i])
 
