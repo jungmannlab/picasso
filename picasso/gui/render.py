@@ -1690,6 +1690,10 @@ class DbscanDialog(QtWidgets.QDialog):
         Contains the minimum number of locs in a cluster.
     radius : QDoubleSpinBox
         Contains epsilon (camera pixels) for DBSCAN (see scikit-learn).
+    save_areas : QCheckBox
+        Whether to save cluster areas as .csv file.
+    save_centers : QCheckBox
+        Whether to save cluster centers.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -1722,6 +1726,10 @@ class DbscanDialog(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
+        # save cluster areas
+        self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setChecked(False)
+        grid.addWidget(self.save_areas, 4, 0, 1, 2)
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1746,6 +1754,7 @@ class DbscanDialog(QtWidgets.QDialog):
             "min_density": dialog.density.value(),
             "min_locs": dialog.min_locs.value(),
             "save_centers": dialog.save_centers.isChecked(),
+            "save_areas": dialog.save_areas.isChecked(),
         }, result == QtWidgets.QDialog.Accepted
 
 
@@ -1763,6 +1772,10 @@ class HdbscanDialog(QtWidgets.QDialog):
     min_samples : QSpinBox
         Contains the number of locs in a neighbourhood for a loc to be
         considered a core point.
+    save_areas : QCheckBox
+        Whether to save cluster areas as .csv file.
+    save_centers : QCheckBox
+        Whether to save cluster centers.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -1799,6 +1812,10 @@ class HdbscanDialog(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
+        # save cluster areas
+        self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setChecked(False)
+        grid.addWidget(self.save_areas, 4, 0, 1, 2)
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1824,6 +1841,7 @@ class HdbscanDialog(QtWidgets.QDialog):
                 "min_samples": dialog.min_samples.value(),
                 "cluster_eps": dialog.cluster_eps.value(),
                 "save_centers": dialog.save_centers.isChecked(),
+                "save_areas": dialog.save_areas.isChecked(),
             },
             result == QtWidgets.QDialog.Accepted,
         )
@@ -1907,6 +1925,8 @@ class SMLMDialog(QtWidgets.QDialog):
         is present.
     min_locs : QSpinBox
         Contains minimum number of locs in cluster.
+    save_areas : QCheckBox
+        Controls whether cluster areas are saved.
     save_centers : QCheckBox
         Controls whether cluster centers are saved.
     frame_analysis : QCheckBox
@@ -1952,16 +1972,20 @@ class SMLMDialog(QtWidgets.QDialog):
         self.min_locs.setRange(1, int(1e6))
         self.min_locs.setValue(10)
         grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
-        # save cluster centers
-        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
-        self.save_centers.setChecked(False)
-        grid.addWidget(self.save_centers, grid.rowCount(), 0, 1, 2)
         # perform basic frame analysis
         self.frame_analysis = QtWidgets.QCheckBox(
             "Perform basic frame analysis"
         )
         self.frame_analysis.setChecked(True)
         grid.addWidget(self.frame_analysis, grid.rowCount(), 0, 1, 2)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(False)
+        grid.addWidget(self.save_centers, grid.rowCount(), 0, 1, 2)
+        # save cluster areas
+        self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setChecked(False)
+        grid.addWidget(self.save_areas, grid.rowCount(), 0, 1, 2)
 
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -1990,8 +2014,9 @@ class SMLMDialog(QtWidgets.QDialog):
                 "radius_xy": dialog.radius_xy.value(),
                 "radius_z": dialog.radius_z.value(),
                 "min_locs": dialog.min_locs.value(),
-                "save_centers": dialog.save_centers.isChecked(),
                 "frame_analysis": dialog.frame_analysis.isChecked(),
+                "save_centers": dialog.save_centers.isChecked(),
+                "save_areas": dialog.save_areas.isChecked(),
             },
             result == QtWidgets.QDialog.Accepted,
         )
@@ -5526,7 +5551,8 @@ class View(QtWidgets.QLabel):
         radius: float,
         min_density: int,
         min_locs: int,
-        save_centers: bool,
+        save_centers: bool = False,
+        save_areas: bool = False,
     ) -> None:
         """Perform DBSCAN in a given channel with user-defined
         parameters and save the result.
@@ -5543,8 +5569,12 @@ class View(QtWidgets.QLabel):
             Minimum local density for DBSCAN clustering.
         min_locs : int
             Minimum number of localizations in a cluster.
-        save_centers : bool
-            Specifies if cluster centers should be saved.
+        save_centers : bool, optional
+            Specifies if cluster centers should be saved. Default is
+            False.
+        save_areas : bool, optional
+            Specifies if cluster areas should be saved. Default is
+            False.
         """
         status = lib.StatusDialog(
             "Applying DBSCAN. This may take a while.", self
@@ -5580,6 +5610,15 @@ class View(QtWidgets.QLabel):
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
+        if save_areas:
+            progress = lib.ProgressDialog(
+                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+            )
+            progress.set_value(0)
+            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            path = path.replace(".hdf5", "_areas.csv")
+            areas.to_csv(path, index=False)
+            progress.close()
 
     def hdbscan(self) -> None:
         """Get a channel, parameters and path for HDBSCAN."""
@@ -5624,7 +5663,8 @@ class View(QtWidgets.QLabel):
         min_cluster: int,
         min_samples: int,
         cluster_eps: float,
-        save_centers: bool,
+        save_centers: bool = False,
+        save_areas: bool = False,
     ) -> None:
         """Perform HDBSCAN in a given channel with user-defined
         parameters and save the result.
@@ -5643,8 +5683,12 @@ class View(QtWidgets.QLabel):
         cluster_eps : float
             Distance threshold. Clusters below this value will be
             merged.
-        save_centers : bool
-            Specifies if cluster centers should be saved.
+        save_centers : bool, optional
+            Specifies if cluster centers should be saved. Default is
+            False.
+        save_areas : bool, optional
+            Specifies if cluster areas should be saved. Default is
+            False.
         """
         status = lib.StatusDialog(
             "Applying HDBSCAN. This may take a while.", self
@@ -5682,6 +5726,15 @@ class View(QtWidgets.QLabel):
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
             status.close()
+        if save_areas:
+            progress = lib.ProgressDialog(
+                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+            )
+            progress.set_value(0)
+            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            path = path.replace(".hdf5", "_areas.csv")
+            areas.to_csv(path, index=False)
+            progress.close()
 
     def smlm_clusterer(self) -> None:
         """Get a channel, parameters and path for SMLM clustering."""
@@ -5736,7 +5789,8 @@ class View(QtWidgets.QLabel):
         radius_z: float,
         min_locs: int,
         frame_analysis: bool,
-        save_centers: bool,
+        save_centers: bool = False,
+        save_areas: bool = False,
     ) -> None:
         """Perform SMLM clustering in a given channel with user-defined
         parameters and save the result.
@@ -5756,8 +5810,10 @@ class View(QtWidgets.QLabel):
             Minimum number of localizations in a cluster.
         frame_analysis : bool
             If True, performs basic frame analysis.
-        save_centers : bool
-            If True, saves cluster centers.
+        save_centers : bool, optional
+            If True, saves cluster centers. Default is False.
+        save_areas : bool, optional
+            If True, saves cluster areas. Default is False.
         """
         # for converting z coordinates
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
@@ -5803,6 +5859,15 @@ class View(QtWidgets.QLabel):
             centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
             io.save_locs(path, centers, info)
             status.close()
+        if save_areas:
+            progress = lib.ProgressDialog(
+                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+            )
+            progress.set_value(0)
+            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            path = path.replace(".hdf5", "_areas.csv")
+            areas.to_csv(path, index=False)
+            progress.close()
 
     def shifts_from_picked_coordinate(
         self,

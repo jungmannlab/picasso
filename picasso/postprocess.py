@@ -2230,11 +2230,11 @@ def groupprops(
         )
     for i, group_id in it:
         group_locs = locs[locs["group"] == group_id]
-        groups["group"][i] = group_id
-        groups["n_events"][i] = len(group_locs)
+        groups.loc[i, "group"] = group_id
+        groups.loc[i, "n_events"] = len(group_locs)
         for name in locs.columns:
-            groups[name + "_mean"][i] = group_locs[name].mean()
-            groups[name + "_std"][i] = group_locs[name].std()
+            groups.loc[i, name + "_mean"] = group_locs[name].mean()
+            groups.loc[i, name + "_std"] = group_locs[name].std()
         if callback is not None:
             callback(i + 1)
     # set dtypes

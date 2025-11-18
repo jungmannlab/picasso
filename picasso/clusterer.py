@@ -3,7 +3,8 @@ picasso.clusterer
 ~~~~~~~~~~~~~~~~~
 
 Clusterer for single molecules optimized for DNA-PAINT.
-Implementation of DBSCAN and HDBSCAN.
+Additionally, contains implementations of DBSCAN and HDBSCAN and other
+clustering-related functions.
 
 SMLM clusterer is based on:
 * Schlichthaerle, et al. Nature Comm, 2021
@@ -18,9 +19,12 @@ SMLM clusterer is based on:
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 import pandas as pd
-from scipy.spatial import ConvexHull, KDTree, QhullError
+from tqdm import tqdm
+from scipy.spatial import ConvexHull, KDTree, QhullError, Delaunay
 from sklearn.cluster import DBSCAN, HDBSCAN
 
 
@@ -830,3 +834,133 @@ def cluster_center(
         # assumes only one group input!
         result.append(np.unique(grouplocs.group_input)[0])
     return result
+
+
+def _delaunay_area(triangles: np.ndarray) -> float:
+    """Calculate area of 2D Delaunay triangulation.
+
+    Parameters
+    ----------
+    triangles : np.ndarray
+        Array of shape (n_triangles, 3, 2) containing triangle vertex
+        coordinates. Obtained with ``Delaunay.simplices``.
+
+    Returns
+    -------
+    area : float
+        Total area of the triangulation.
+    """
+    v1 = triangles[:, 1] - triangles[:, 0]
+    v2 = triangles[:, 2] - triangles[:, 0]
+    areas = 0.5 * np.abs(np.cross(v1, v2))
+    return areas.sum()
+
+
+def _delaunay_volume(triangles: np.ndarray) -> float:
+    """Calculate volume of 3D Delaunay triangulation. TODO: make sure this works
+
+    Parameters
+    ----------
+    triangles : np.ndarray
+        Array of shape (n_tetrahedra, 4, 3) containing tetrahedron vertex
+        coordinates. Obtained with ``Delaunay.simplices``.
+
+    Returns
+    -------
+    volume : float
+        Total volume of the triangulation.
+    """
+    v1 = triangles[:, 1] - triangles[:, 0]
+    v2 = triangles[:, 2] - triangles[:, 0]
+    v3 = triangles[:, 3] - triangles[:, 0]
+    volumes = np.abs(np.linalg.det(np.stack([v1, v2, v3], axis=2))) / 6
+    return volumes.sum()
+
+
+def _cluster_area(X: np.ndarray) -> float:
+    """Calculate cluster area (2D) or volume (3D) using Delaunay
+    triangulation.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Array of points of shape (n_points, n_dim).
+
+    Returns
+    -------
+    area : float
+        Cluster area (2D) or volume (3D).
+    """
+    delaunay = Delaunay(X)
+    triangles = X[delaunay.simplices]
+    if X.shape[1] == 2:  # 2D
+        return _delaunay_area(triangles)
+    elif X.shape[1] == 3:  # 3D
+        return _delaunay_volume(triangles)
+
+
+def cluster_areas(
+    locs: pd.DataFrame,
+    info: list[dict],
+    progress: Callable[[int], None] | None = None,
+) -> pd.DataFrame:
+    """Calculate cluster areas (2D) or volumes (3D).
+
+    Uses Delaunay triangulation to find the area/volume.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Clustered localizations (contain group info).
+    info : list of dict
+        Localization metadata, see `picasso.io.load_locs`.
+    progress : picasso.lib.ProgressDialog, optional
+        Progress dialog. If None, progress is displayed with into the
+        console. Default is None.
+
+    Returns
+    -------
+    areas : pd.DataFrame
+        Cluster areas/volumes for each cluster.
+    """
+    assert hasattr(
+        locs, "group"
+    ), "Localizations must contain 'group' column."
+
+    # get pixel size from info
+    pixelsize = None
+    for inf in info:
+        if val := inf.get("Pixelsize"):
+            pixelsize = val
+            break
+    assert (
+        isinstance(pixelsize, (int, float))
+    ), "Pixelsize not found in info."
+
+    groups = np.unique(locs["group"])
+    area_key = "area (nm^2)" if not hasattr(locs, "z") else "volume (nm^3)"
+    areas = {
+        "group": groups.astype(np.int32), 
+        area_key: np.zeros(len(groups), dtype=np.float32)
+    }
+    if progress is None:
+        iterator = tqdm(range(len(groups)), desc="Calculating cluster areas")
+    else:
+        iterator = range(len(groups))
+
+    for idx in iterator:
+        group_id = groups[idx]
+        grouplocs = locs[locs["group"] == group_id]
+        if hasattr(grouplocs, "z"):
+            if len(grouplocs) < 4:
+                continue
+            X = grouplocs[["x", "y", "z"]].values
+            X[:, :2] *= pixelsize  # convert z to camera pixels
+        else:
+            if len(grouplocs) < 3:
+                continue
+            X = grouplocs[["x", "y"]].values * pixelsize
+        areas[area_key][idx] = _cluster_area(X)
+        if progress is not None:
+            progress(idx + 1)
+    return pd.DataFrame(areas)
