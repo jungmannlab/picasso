@@ -26,6 +26,7 @@ Important updates:
 - Render: fix loading camera pixel size from metadata (see issue #560)
 - Render: saving picks separately fixed areas in the .yaml files
 - Render: save pick/group properties saves qpaint index (1 / mean dark time)
+- Render: clustering metadata saves fraction of rejected localizations
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
 - Render 3D: display adjusted after changing blur method
