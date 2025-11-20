@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import traceback
+import warnings
 import copy
 import time
 import os.path
@@ -34,7 +35,7 @@ import pandas as pd
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from scipy.ndimage.filters import gaussian_filter
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, OptimizeWarning
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -1690,6 +1691,10 @@ class DbscanDialog(QtWidgets.QDialog):
         Contains the minimum number of locs in a cluster.
     radius : QDoubleSpinBox
         Contains epsilon (camera pixels) for DBSCAN (see scikit-learn).
+    save_areas : QCheckBox
+        Whether to save cluster areas as .csv file.
+    save_centers : QCheckBox
+        Whether to save cluster centers.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -1722,6 +1727,10 @@ class DbscanDialog(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
+        # save cluster areas
+        self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setChecked(False)
+        grid.addWidget(self.save_areas, 4, 0, 1, 2)
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1746,6 +1755,7 @@ class DbscanDialog(QtWidgets.QDialog):
             "min_density": dialog.density.value(),
             "min_locs": dialog.min_locs.value(),
             "save_centers": dialog.save_centers.isChecked(),
+            "save_areas": dialog.save_areas.isChecked(),
         }, result == QtWidgets.QDialog.Accepted
 
 
@@ -1763,6 +1773,10 @@ class HdbscanDialog(QtWidgets.QDialog):
     min_samples : QSpinBox
         Contains the number of locs in a neighbourhood for a loc to be
         considered a core point.
+    save_areas : QCheckBox
+        Whether to save cluster areas as .csv file.
+    save_centers : QCheckBox
+        Whether to save cluster centers.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -1799,6 +1813,10 @@ class HdbscanDialog(QtWidgets.QDialog):
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
+        # save cluster areas
+        self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setChecked(False)
+        grid.addWidget(self.save_areas, 4, 0, 1, 2)
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1824,6 +1842,7 @@ class HdbscanDialog(QtWidgets.QDialog):
                 "min_samples": dialog.min_samples.value(),
                 "cluster_eps": dialog.cluster_eps.value(),
                 "save_centers": dialog.save_centers.isChecked(),
+                "save_areas": dialog.save_areas.isChecked(),
             },
             result == QtWidgets.QDialog.Accepted,
         )
@@ -1907,6 +1926,8 @@ class SMLMDialog(QtWidgets.QDialog):
         is present.
     min_locs : QSpinBox
         Contains minimum number of locs in cluster.
+    save_areas : QCheckBox
+        Controls whether cluster areas are saved.
     save_centers : QCheckBox
         Controls whether cluster centers are saved.
     frame_analysis : QCheckBox
@@ -1952,16 +1973,20 @@ class SMLMDialog(QtWidgets.QDialog):
         self.min_locs.setRange(1, int(1e6))
         self.min_locs.setValue(10)
         grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
-        # save cluster centers
-        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
-        self.save_centers.setChecked(False)
-        grid.addWidget(self.save_centers, grid.rowCount(), 0, 1, 2)
         # perform basic frame analysis
         self.frame_analysis = QtWidgets.QCheckBox(
             "Perform basic frame analysis"
         )
         self.frame_analysis.setChecked(True)
         grid.addWidget(self.frame_analysis, grid.rowCount(), 0, 1, 2)
+        # save cluster centers
+        self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setChecked(False)
+        grid.addWidget(self.save_centers, grid.rowCount(), 0, 1, 2)
+        # save cluster areas
+        self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setChecked(False)
+        grid.addWidget(self.save_areas, grid.rowCount(), 0, 1, 2)
 
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -1990,8 +2015,9 @@ class SMLMDialog(QtWidgets.QDialog):
                 "radius_xy": dialog.radius_xy.value(),
                 "radius_z": dialog.radius_z.value(),
                 "min_locs": dialog.min_locs.value(),
-                "save_centers": dialog.save_centers.isChecked(),
                 "frame_analysis": dialog.frame_analysis.isChecked(),
+                "save_centers": dialog.save_centers.isChecked(),
+                "save_areas": dialog.save_areas.isChecked(),
             },
             result == QtWidgets.QDialog.Accepted,
         )
@@ -5526,7 +5552,8 @@ class View(QtWidgets.QLabel):
         radius: float,
         min_density: int,
         min_locs: int,
-        save_centers: bool,
+        save_centers: bool = False,
+        save_areas: bool = False,
     ) -> None:
         """Perform DBSCAN in a given channel with user-defined
         parameters and save the result.
@@ -5543,8 +5570,12 @@ class View(QtWidgets.QLabel):
             Minimum local density for DBSCAN clustering.
         min_locs : int
             Minimum number of localizations in a cluster.
-        save_centers : bool
-            Specifies if cluster centers should be saved.
+        save_centers : bool, optional
+            Specifies if cluster centers should be saved. Default is
+            False.
+        save_areas : bool, optional
+            Specifies if cluster areas should be saved. Default is
+            False.
         """
         status = lib.StatusDialog(
             "Applying DBSCAN. This may take a while.", self
@@ -5580,6 +5611,15 @@ class View(QtWidgets.QLabel):
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [dbscan_info])
             status.close()
+        if save_areas:
+            progress = lib.ProgressDialog(
+                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+            )
+            progress.set_value(0)
+            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            path = path.replace(".hdf5", "_areas.csv")
+            areas.to_csv(path, index=False)
+            progress.close()
 
     def hdbscan(self) -> None:
         """Get a channel, parameters and path for HDBSCAN."""
@@ -5624,7 +5664,8 @@ class View(QtWidgets.QLabel):
         min_cluster: int,
         min_samples: int,
         cluster_eps: float,
-        save_centers: bool,
+        save_centers: bool = False,
+        save_areas: bool = False,
     ) -> None:
         """Perform HDBSCAN in a given channel with user-defined
         parameters and save the result.
@@ -5643,8 +5684,12 @@ class View(QtWidgets.QLabel):
         cluster_eps : float
             Distance threshold. Clusters below this value will be
             merged.
-        save_centers : bool
-            Specifies if cluster centers should be saved.
+        save_centers : bool, optional
+            Specifies if cluster centers should be saved. Default is
+            False.
+        save_areas : bool, optional
+            Specifies if cluster areas should be saved. Default is
+            False.
         """
         status = lib.StatusDialog(
             "Applying HDBSCAN. This may take a while.", self
@@ -5682,6 +5727,15 @@ class View(QtWidgets.QLabel):
             centers = clusterer.find_cluster_centers(locs, pixelsize=pixelsize)
             io.save_locs(path, centers, self.infos[channel] + [hdbscan_info])
             status.close()
+        if save_areas:
+            progress = lib.ProgressDialog(
+                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+            )
+            progress.set_value(0)
+            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            path = path.replace(".hdf5", "_areas.csv")
+            areas.to_csv(path, index=False)
+            progress.close()
 
     def smlm_clusterer(self) -> None:
         """Get a channel, parameters and path for SMLM clustering."""
@@ -5736,7 +5790,8 @@ class View(QtWidgets.QLabel):
         radius_z: float,
         min_locs: int,
         frame_analysis: bool,
-        save_centers: bool,
+        save_centers: bool = False,
+        save_areas: bool = False,
     ) -> None:
         """Perform SMLM clustering in a given channel with user-defined
         parameters and save the result.
@@ -5756,8 +5811,10 @@ class View(QtWidgets.QLabel):
             Minimum number of localizations in a cluster.
         frame_analysis : bool
             If True, performs basic frame analysis.
-        save_centers : bool
-            If True, saves cluster centers.
+        save_centers : bool, optional
+            If True, saves cluster centers. Default is False.
+        save_areas : bool, optional
+            If True, saves cluster areas. Default is False.
         """
         # for converting z coordinates
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
@@ -5803,6 +5860,15 @@ class View(QtWidgets.QLabel):
             centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
             io.save_locs(path, centers, info)
             status.close()
+        if save_areas:
+            progress = lib.ProgressDialog(
+                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+            )
+            progress.set_value(0)
+            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            path = path.replace(".hdf5", "_areas.csv")
+            areas.to_csv(path, index=False)
+            progress.close()
 
     def shifts_from_picked_coordinate(
         self,
@@ -7759,7 +7825,7 @@ class View(QtWidgets.QLabel):
 
             # save pick properties
             base, ext = os.path.splitext(path)
-            out_path = base + "_pickprops.hdf5"
+            out_path = base + "_properties.hdf5"
 
             r_max = 2 * max(
                 self.infos[channel][0]["Height"],
@@ -8680,7 +8746,8 @@ class View(QtWidgets.QLabel):
                 )
 
     def save_pick_properties(self, path: str, channel: int) -> None:
-        """Save picks' properties in a given channel to path.
+        """Save picks' (or groups) properties in a given channel to
+        path.
 
         Properties include number of localizations, mean and std of all
         localizations dtypes (x, y, photons, etc) and others.
@@ -8692,9 +8759,27 @@ class View(QtWidgets.QLabel):
         channel : int
             Channel of locs to be saved.
         """
-        picked_locs = self.picked_locs(channel)
-        pick_diameter = self.window.tools_settings_dialog.pick_diameter.value()
+        warnings.simplefilter("ignore", category=(OptimizeWarning, RuntimeWarning))
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        # allow running even if no picks are present but group info is
+        if len(self._picks) == 0:
+            locs = self.all_locs[channel]
+            if not hasattr(locs, "group"):
+                message = (
+                    "No picks found. Please create picks or assign group "
+                    "identity to localizations before calculating pick "
+                    "properties."
+                )
+                QtWidgets.QMessageBox.warning(self, "Warning", message)
+                return
+            picked_locs = [
+                locs[locs["group"] == i]
+                for i in np.unique(locs["group"])
+            ]
+            pick_diameter = 200 / pixelsize  # 200 nm
+        else:
+            picked_locs = self.picked_locs(channel)
+            pick_diameter = self.window.tools_settings_dialog.pick_diameter.value()
         r_max = min(pick_diameter / pixelsize, 1)
         max_dark = self.window.info_dialog.max_dark_time.value()
         out_locs = []
@@ -8702,26 +8787,40 @@ class View(QtWidgets.QLabel):
             "Calculating kinetics", 0, len(picked_locs), self
         )
         progress.set_value(0)
-        dark = np.empty(len(picked_locs))  # estimated mean dark time
-        length = np.empty(len(picked_locs))  # estimated mean bright time
-        no_locs = np.empty(len(picked_locs))  # number of locs
+        dark = []  # estimated mean dark time
+        length = []  # estimated mean bright time
+        no_locs = []  # number of locs
         for i, pick_locs in enumerate(picked_locs):
-            no_locs[i] = len(pick_locs)
-            if no_locs[i] > 0:
-                if not hasattr(pick_locs, "len"):
-                    pick_locs = postprocess.link(
-                        pick_locs,
-                        self.infos[channel],
-                        r_max=r_max,
-                        max_dark_time=max_dark,
-                    )
-                pick_locs = postprocess.compute_dark_times(pick_locs)
-                length[i] = estimate_kinetic_rate(pick_locs["len"].to_numpy())
-                dark[i] = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
-                out_locs.append(pick_locs)
             progress.set_value(i + 1)
+            if not len(pick_locs):
+                continue
+            if not hasattr(pick_locs, "len"):
+                pick_locs = postprocess.link(
+                    pick_locs,
+                    self.infos[channel],
+                    r_max=r_max,
+                    max_dark_time=max_dark,
+                )
+            if not len(pick_locs):
+                continue
+            pick_locs = postprocess.compute_dark_times(pick_locs)
+            if not len(pick_locs):
+                continue
+            try:
+                length_ = estimate_kinetic_rate(pick_locs["len"].to_numpy())
+                dark_ = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+            except RuntimeError:
+                continue
+            length.append(length_)
+            dark.append(dark_)
+            no_locs.append(len(pick_locs))
+            out_locs.append(pick_locs)
+        length = np.array(length)
+        dark = np.array(dark)
+        no_locs = np.array(no_locs)
+        n_groups = len(out_locs)
         out_locs = pd.concat(out_locs, ignore_index=True)
-        n_groups = len(picked_locs)
+
         progress = lib.ProgressDialog(
             "Calculating pick properties", 0, n_groups, self
         )
@@ -8730,12 +8829,14 @@ class View(QtWidgets.QLabel):
         pick_props = postprocess.groupprops(
             out_locs, callback=progress.set_value
         )
-        # add the area of the picks to the properties
-        areas = self.pick_areas()
-        if self._pick_shape == "Circle":  # duplicate values for each pick
-            areas = np.repeat(areas, n_groups)
-        pick_props["pick_area_um2"] = areas
+        # add the area of the picks to the properties (if available)
+        if len(self._picks):
+            areas = self.pick_areas()
+            if self._pick_shape == "Circle":  # duplicate values for each pick
+                areas = np.repeat(areas, n_groups)
+            pick_props["pick_area_um2"] = areas
         progress.close()
+        warnings.simplefilter("default", category=(OptimizeWarning, RuntimeWarning))
         # QPAINT estimate of number of binding sites
         n_units = self.window.info_dialog.calculate_n_units(dark)
         pick_props["n_units"] = n_units
@@ -10048,7 +10149,7 @@ class Window(QtWidgets.QMainWindow):
             self.save_picked_locs_separately
         )
         save_pick_properties_action = file_menu.addAction(
-            "Save pick properties"
+            "Save pick/group properties"
         )
         save_pick_properties_action.triggered.connect(
             self.save_pick_properties
@@ -11092,7 +11193,7 @@ class Window(QtWidgets.QMainWindow):
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_pickprops",
+                    "_properties",
                 )
                 if ok:
                     for channel in range(len(self.view.locs_paths)):
@@ -11103,7 +11204,7 @@ class Window(QtWidgets.QMainWindow):
                         self.view.save_pick_properties(out_path, channel)
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
-                out_path = base + "_pickprops.hdf5"
+                out_path = base + "_properties.hdf5"
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self, "Save pick properties", out_path, filter="*.hdf5"
                 )

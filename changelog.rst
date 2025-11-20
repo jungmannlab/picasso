@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 06-NOV-2025 CEST
+Last change: 20-NOV-2025 CEST
 
 0.9.0
 -----
@@ -9,21 +9,23 @@ Important updates:
 ^^^^^^^^^^^^^^^^^^
 
 - Picasso does not use ``numpy.recarray`` objects anymore. ``pandas.DataFrame`` are used instead. This applies to localizations, drift data, cluster centers, etc. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
-- Removed dependency ``h5py``. Picasso now uses ``pandas`` to read and write HDF5 files
 - Updated other dependencies, most importantly, ``numpy`` is now in version 2
 - Old setup files were replaced by ``pyproject.toml`` for building and packaging Picasso
-- Black-based code formatting applied to all scripts
+- New option to save cluster areas/volumes in DBSCAN, HDBSCAN and SMLM clusterer
 - Render: unfold groups was removed as it is contained within the square grid unfolding
+- Render: save pick properties extended to saving group properties, also qpaint index is saved
 - SPINNA: improved saved fit results summary (see issue #560)
 
 *Small improvements and bug fixes:*
 +++++++++++++++++++++++++++++++++++
 
+- Black-based code formatting applied to all scripts
 - Render: unfold groups/picks (rectangular grid) fixed for nonconsecutive grouping (the grid might have had missing elements before)
 - Render: apply drift from external file fixed
 - Render: fix masking (issue #560)
 - Render: fix loading camera pixel size from metadata (see issue #560)
 - Render: saving picks separately fixed areas in the .yaml files
+- Render: save pick/group properties saves qpaint index (1 / mean dark time)
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
 - Render 3D: display adjusted after changing blur method

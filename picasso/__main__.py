@@ -210,6 +210,7 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
     """Link localizations in HDF5 files, see ``postprocess.link`` for
     details."""
     import glob
+    import h5py
     import numpy as _np
     from tqdm import tqdm as _tqdm
 
@@ -263,7 +264,11 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
                     linked_photonrate,
                     dtype=_np.float32,
                 )
-                clusters.to_hdf5(cluster_path, "clusters", mode="a")
+                # clusters.to_hdf(cluster_path, "clusters", mode="a")
+                # cannot use to_hdf for backward compatibility with older Picasso
+                rec_clusters = clusters.to_records(index=False)
+                with h5py.File(cluster_path, "w") as locs_file:
+                    locs_file.create_dataset("clusters", data=rec_clusters)
             except Exception:
                 print("No clusterfile found for updating.")
                 continue

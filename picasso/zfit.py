@@ -230,7 +230,8 @@ def _fit_z_target(
     coordinates given the single-emitter image width and height as well
     as the calibration curve coefficients. It calculates the difference
     between the square root of the spot width/height and the polynomial
-    fit of the z-axis calibration curve."""
+    fit of the z-axis calibration curve. Based on Huang et al. Science,
+    2008. DOI: 10.1126/science.1153529."""
     z2 = z * z
     z3 = z * z2
     z4 = z * z3
