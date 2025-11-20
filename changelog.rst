@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 18-NOV-2025 CEST
+Last change: 20-NOV-2025 CEST
 
 0.9.0
 -----
@@ -14,6 +14,7 @@ Important updates:
 - Old setup files were replaced by ``pyproject.toml`` for building and packaging Picasso
 - New option to save cluster areas/volumes in DBSCAN, HDBSCAN and SMLM clusterer
 - Render: unfold groups was removed as it is contained within the square grid unfolding
+- Render: save pick properties extended to saving group properties, also qpaint index is saved
 - SPINNA: improved saved fit results summary (see issue #560)
 
 *Small improvements and bug fixes:*
@@ -25,6 +26,7 @@ Important updates:
 - Render: fix masking (issue #560)
 - Render: fix loading camera pixel size from metadata (see issue #560)
 - Render: saving picks separately fixed areas in the .yaml files
+- Render: save pick/group properties saves qpaint index (1 / mean dark time)
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
 - Render 3D: display adjusted after changing blur method

@@ -15,6 +15,7 @@ import os
 import re
 import sys
 import traceback
+import warnings
 import copy
 import time
 import os.path
@@ -34,7 +35,7 @@ import pandas as pd
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from scipy.ndimage.filters import gaussian_filter
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, OptimizeWarning
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
 from PyQt5 import QtCore, QtGui, QtWidgets
@@ -7824,7 +7825,7 @@ class View(QtWidgets.QLabel):
 
             # save pick properties
             base, ext = os.path.splitext(path)
-            out_path = base + "_pickprops.hdf5"
+            out_path = base + "_properties.hdf5"
 
             r_max = 2 * max(
                 self.infos[channel][0]["Height"],
@@ -8745,7 +8746,8 @@ class View(QtWidgets.QLabel):
                 )
 
     def save_pick_properties(self, path: str, channel: int) -> None:
-        """Save picks' properties in a given channel to path.
+        """Save picks' (or groups) properties in a given channel to
+        path.
 
         Properties include number of localizations, mean and std of all
         localizations dtypes (x, y, photons, etc) and others.
@@ -8757,9 +8759,27 @@ class View(QtWidgets.QLabel):
         channel : int
             Channel of locs to be saved.
         """
-        picked_locs = self.picked_locs(channel)
-        pick_diameter = self.window.tools_settings_dialog.pick_diameter.value()
+        warnings.simplefilter("ignore", category=(OptimizeWarning, RuntimeWarning))
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        # allow running even if no picks are present but group info is
+        if len(self._picks) == 0:
+            locs = self.all_locs[channel]
+            if not hasattr(locs, "group"):
+                message = (
+                    "No picks found. Please create picks or assign group "
+                    "identity to localizations before calculating pick "
+                    "properties."
+                )
+                QtWidgets.QMessageBox.warning(self, "Warning", message)
+                return
+            picked_locs = [
+                locs[locs["group"] == i]
+                for i in np.unique(locs["group"])
+            ]
+            pick_diameter = 200 / pixelsize  # 200 nm
+        else:
+            picked_locs = self.picked_locs(channel)
+            pick_diameter = self.window.tools_settings_dialog.pick_diameter.value()
         r_max = min(pick_diameter / pixelsize, 1)
         max_dark = self.window.info_dialog.max_dark_time.value()
         out_locs = []
@@ -8767,26 +8787,40 @@ class View(QtWidgets.QLabel):
             "Calculating kinetics", 0, len(picked_locs), self
         )
         progress.set_value(0)
-        dark = np.empty(len(picked_locs))  # estimated mean dark time
-        length = np.empty(len(picked_locs))  # estimated mean bright time
-        no_locs = np.empty(len(picked_locs))  # number of locs
+        dark = []  # estimated mean dark time
+        length = []  # estimated mean bright time
+        no_locs = []  # number of locs
         for i, pick_locs in enumerate(picked_locs):
-            no_locs[i] = len(pick_locs)
-            if no_locs[i] > 0:
-                if not hasattr(pick_locs, "len"):
-                    pick_locs = postprocess.link(
-                        pick_locs,
-                        self.infos[channel],
-                        r_max=r_max,
-                        max_dark_time=max_dark,
-                    )
-                pick_locs = postprocess.compute_dark_times(pick_locs)
-                length[i] = estimate_kinetic_rate(pick_locs["len"].to_numpy())
-                dark[i] = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
-                out_locs.append(pick_locs)
             progress.set_value(i + 1)
+            if not len(pick_locs):
+                continue
+            if not hasattr(pick_locs, "len"):
+                pick_locs = postprocess.link(
+                    pick_locs,
+                    self.infos[channel],
+                    r_max=r_max,
+                    max_dark_time=max_dark,
+                )
+            if not len(pick_locs):
+                continue
+            pick_locs = postprocess.compute_dark_times(pick_locs)
+            if not len(pick_locs):
+                continue
+            try:
+                length_ = estimate_kinetic_rate(pick_locs["len"].to_numpy())
+                dark_ = estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+            except RuntimeError:
+                continue
+            length.append(length_)
+            dark.append(dark_)
+            no_locs.append(len(pick_locs))
+            out_locs.append(pick_locs)
+        length = np.array(length)
+        dark = np.array(dark)
+        no_locs = np.array(no_locs)
+        n_groups = len(out_locs)
         out_locs = pd.concat(out_locs, ignore_index=True)
-        n_groups = len(picked_locs)
+
         progress = lib.ProgressDialog(
             "Calculating pick properties", 0, n_groups, self
         )
@@ -8795,12 +8829,14 @@ class View(QtWidgets.QLabel):
         pick_props = postprocess.groupprops(
             out_locs, callback=progress.set_value
         )
-        # add the area of the picks to the properties
-        areas = self.pick_areas()
-        if self._pick_shape == "Circle":  # duplicate values for each pick
-            areas = np.repeat(areas, n_groups)
-        pick_props["pick_area_um2"] = areas
+        # add the area of the picks to the properties (if available)
+        if len(self._picks):
+            areas = self.pick_areas()
+            if self._pick_shape == "Circle":  # duplicate values for each pick
+                areas = np.repeat(areas, n_groups)
+            pick_props["pick_area_um2"] = areas
         progress.close()
+        warnings.simplefilter("default", category=(OptimizeWarning, RuntimeWarning))
         # QPAINT estimate of number of binding sites
         n_units = self.window.info_dialog.calculate_n_units(dark)
         pick_props["n_units"] = n_units
@@ -10113,7 +10149,7 @@ class Window(QtWidgets.QMainWindow):
             self.save_picked_locs_separately
         )
         save_pick_properties_action = file_menu.addAction(
-            "Save pick properties"
+            "Save pick/group properties"
         )
         save_pick_properties_action.triggered.connect(
             self.save_pick_properties
@@ -11157,7 +11193,7 @@ class Window(QtWidgets.QMainWindow):
                     "Input Dialog",
                     "Enter suffix",
                     QtWidgets.QLineEdit.Normal,
-                    "_pickprops",
+                    "_properties",
                 )
                 if ok:
                     for channel in range(len(self.view.locs_paths)):
@@ -11168,7 +11204,7 @@ class Window(QtWidgets.QMainWindow):
                         self.view.save_pick_properties(out_path, channel)
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
-                out_path = base + "_pickprops.hdf5"
+                out_path = base + "_properties.hdf5"
                 path, ext = QtWidgets.QFileDialog.getSaveFileName(
                     self, "Save pick properties", out_path, filter="*.hdf5"
                 )

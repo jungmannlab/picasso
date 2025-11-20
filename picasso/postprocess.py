@@ -1185,7 +1185,7 @@ def link(
         if hasattr(locs, "photons"):
             linked_locs["photon_rate"] = np.array([], dtype=np.float32)
     else:
-        locs.sort_values(kind="mergesort", by="frame", inplace=True)
+        locs = locs.sort_values(kind="mergesort", by="frame")
         if hasattr(locs, "group"):
             group = locs["group"].values
         else:
@@ -1496,7 +1496,7 @@ def get_link_groups(
     x: np.ndarray,
     y: np.ndarray,
     d_max: float,
-    max_dark_time: float,
+    max_dark_time: int,
     group: np.ndarray,
 ) -> np.ndarray:
     """Find the groups for linking localizations into binding events.
@@ -1510,8 +1510,9 @@ def get_link_groups(
         Coordinates of localizations.
     d_max : float
         Maximum distance for linking localizations.
-    max_dark_time : float
-        Maximum dark time for linking localizations.
+    max_dark_time : int
+        Maximum number of frames between localizations to be considered
+        as originating from the same binding event.
     group : np.ndarray
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
@@ -2195,8 +2196,6 @@ def groupprops(
     """Calculate group statistics for localizations, such as mean and
     standard deviation.
 
-    TODO: does it work now with data frames?
-
     Parameters
     ----------
     locs : pd.DataFrame
@@ -2246,6 +2245,9 @@ def groupprops(
             **{name + "_std": np.float32 for name in locs.columns},
         }
     )
+    # add qpaint idx
+    if hasattr(groups, "dark_mean"):
+        groups["qpaint_idx"] = 1 / groups["dark_mean"]
     return groups
 
 
