@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 20-NOV-2025 CEST
+Last change: 21-NOV-2025 CEST
 
 0.9.0
 -----
@@ -20,6 +20,7 @@ Important updates:
 +++++++++++++++++++++++++++++++++++
 
 - Black-based code formatting applied to all scripts
+- Cleaned up code for adjusting the size of QWidgets
 - Render: unfold groups/picks (rectangular grid) fixed for nonconsecutive grouping (the grid might have had missing elements before)
 - Render: apply drift from external file fixed
 - Render: fix masking (issue #560)

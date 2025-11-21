@@ -352,6 +352,45 @@ def _sound_notification_dir() -> str:
     )
 
 
+def adjust_widget_size(
+    widget: QtWidgets.QWidget,
+    size_hint: QtCore.QSize,
+    width_offset: int = 0,
+    height_offset: int = 0,
+) -> None:
+    """Adjust the size of a QWidget based on its size hint. The user
+    can specify the offsets to be added to the width and height of the
+    size hint. The user can also specify whether to limit the width
+    and height to the screen size.
+
+    Parameters
+    ----------
+    widget : QtWidgets.QWidget
+        The widget to be adjusted.
+    size_hint : QtCore.QSize
+        The size hint of the widget. Can be obtained with 
+        widget.sizeHint().
+    width_offset : int, optional
+        The offset to be added to the width of the size hint. Default is
+        0.
+    height_offset : int, optional
+        The offset to be added to the height of the size hint. Default
+        is 0.
+    """
+    widget.resize(
+        size_hint.width() + width_offset,
+        size_hint.height() + height_offset,
+    )
+    screen = QtWidgets.QApplication.primaryScreen()
+    screen_height = 1000 if screen is None else screen.size().height()
+    screen_width = 1000 if screen is None else screen.size().width()
+    # adjust to the screen size if necessary
+    if widget.width() > screen_width:
+        widget.resize(screen_width - 100, widget.height())
+    if widget.height() > screen_height:
+        widget.resize(widget.width(), screen_height - 100)
+    
+
 def get_colors(n_channels):
     """Create a list with rgb channels for each channel.
 

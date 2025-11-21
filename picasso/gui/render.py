@@ -609,15 +609,9 @@ class DatasetDialog(QtWidgets.QDialog):
         self.scroll_area.addWidget(p, currentline, 5)
 
         # adjust the size of the dialog
+
         hint = self.scroll_area.sizeHint()
-        self.resize(hint.width() + 45, self.height())
-        # if room is available on the screen, adjust the height as well
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_height = 1000 if screen is None else screen.size().height()
-        height_offset = 150
-        max_height = screen_height - height_offset - 100
-        if hint.height() + height_offset < max_height:
-            self.resize(self.width(), hint.height() + height_offset)
+        lib.adjust_widget_size(self, hint, 45, 150)
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -649,7 +643,7 @@ class DatasetDialog(QtWidgets.QDialog):
                     self.update_viewport()
                     # change size of the dialog
                     hint = self.scroll_area.sizeHint()
-                    self.resize(hint.width() + 45, self.height())
+                    lib.adjust_widget_size(self, hint, 45, 150)
                     # change name in the fast render dialog
                     self.window.fast_render_dialog.channel.setItemText(
                         i + 1, new_title
@@ -742,8 +736,7 @@ class DatasetDialog(QtWidgets.QDialog):
 
             # adjust the size of the dialog
             hint = self.scroll_area.sizeHint()
-            height = min(hint.height() + 150, self.height())
-            self.resize(hint.width() + 45, height)
+            lib.adjust_widget_size(self, hint, 45, 150)
 
     def update_viewport(self) -> None:
         """Update the scene in the main window."""
@@ -3082,13 +3075,7 @@ class InfoDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = self.container.sizeHint()
-        print(f"hint at init: {hint.width()} x {hint.height()}")
-        self.setMinimumWidth(hint.width() + 70)
-        # if room is available on the screen, adjust the height as well
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_height = 1000 if screen is None else screen.size().height()
-        if hint.height() + 45 < screen_height:
-            self.resize(self.width(), hint.height() + 45)
+        lib.adjust_widget_size(self, hint, 70, 45)
 
     def calculate_nena_lp(self) -> None:
         """Calculate and plot NeNA precision in a given channel."""
@@ -3134,6 +3121,9 @@ class InfoDialog(QtWidgets.QDialog):
                 self.movie_grid.addWidget(recalculate_nena, 1, 2)
 
             self.nena_calculated = True
+
+            hint = self.container.sizeHint()
+            lib.adjust_widget_size(self, hint, 85, 50)
 
     def calibrate_influx(self) -> None:
         """Calculate influx rate (1/frames)."""
@@ -3396,14 +3386,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = self.container.sizeHint()
-        self.resize(hint.width() + 45, self.height())
-        # if room is available on the screen, adjust the height as well
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_height = 1000 if screen is None else screen.size().height()
-        if hint.height() + 45 < screen_height:
-            self.resize(self.width(), hint.height() + 45)
-        else:
-            self.resize(self.width(), screen_height - 100)
+        lib.adjust_widget_size(self, hint, 45, 45)
         self.show()
 
     def generate_image(self) -> None:
@@ -4469,14 +4452,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
-        self.setMinimumWidth(hint.width() + 45)
-        # if room is available on the screen, adjust the height as well
-        screen = QtWidgets.QApplication.primaryScreen()
-        screen_height = 1000 if screen is None else screen.size().height()
-        if hint.height() + 45 < screen_height:
-            self.resize(self.width(), hint.height() + 45)
-        else:
-            self.resize(self.width(), screen_height - 100)
+        lib.adjust_widget_size(self, hint, 45, 45)
 
     def on_cmap_changed(self) -> None:
         """Load custom colormap if requested."""
