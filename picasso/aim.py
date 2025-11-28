@@ -689,19 +689,10 @@ def aim(
         Drift in x and y directions (and z if applicable).
     """
     # extract metadata
-    width = np.nan
-    height = np.nan
-    pixelsize = np.nan
-    n_frames = np.nan
-    for inf in info:
-        if val := inf.get("Width"):
-            width = val
-        if val := inf.get("Height"):
-            height = val
-        if val := inf.get("Frames"):
-            n_frames = val - locs["frame"].min()
-        if val := inf.get("Pixelsize"):
-            pixelsize = val
+    width = lib.get_from_metadata(info, "Width", np.nan)
+    height = lib.get_from_metadata(info, "Height", np.nan)
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", np.nan)
+    n_frames = lib.get_from_metadata(info, "Frames", np.nan)
     if np.any(np.isnan([width, height, pixelsize, n_frames])):
         raise KeyError(
             "Insufficient metadata available. Please specify 'Width', 'Height'"
