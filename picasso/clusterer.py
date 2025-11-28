@@ -27,6 +27,8 @@ from tqdm import tqdm
 from scipy.spatial import ConvexHull, KDTree, QhullError, Delaunay
 from sklearn.cluster import DBSCAN, HDBSCAN
 
+from . import lib
+
 
 def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     """Verify which clusters pass basic frame analysis. Reject clusters
@@ -928,11 +930,7 @@ def cluster_areas(
     ), "Localizations must contain 'group' column."
 
     # get pixel size from info
-    pixelsize = None
-    for inf in info:
-        if val := inf.get("Pixelsize"):
-            pixelsize = val
-            break
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=None)
     assert (
         isinstance(pixelsize, (int, float))
     ), "Pixelsize not found in info."

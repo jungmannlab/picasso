@@ -389,6 +389,34 @@ def adjust_widget_size(
         widget.resize(screen_width - 100, widget.height())
     if widget.height() > screen_height:
         widget.resize(widget.width(), screen_height - 100)
+
+
+def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
+    """Get a value from the localization metadata (list of dictionaries or a dictionary). Returns default if
+    the key is not found.
+
+    Parameters
+    ----------
+    info : list of dicts or dict
+        Localization metadata.
+    key : Any
+        Key to be searched in the metadata.
+
+    Returns
+    -------
+    value : Any
+        Value corresponding to the key in the metadata. If the key is
+        not found, default is returned.
+    """
+    if isinstance(info, dict):
+        return info.get(key, default)
+    elif isinstance(info, list):
+        for inf in info:
+            if val := inf.get(key):
+                return val
+        return default
+    else:
+        raise ValueError("info must be a dict or a list of dicts.")
     
 
 def get_colors(n_channels):

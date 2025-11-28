@@ -137,7 +137,7 @@ def fit_cum_exp(data: np.ndarray) -> dict:
 
 
 def estimate_kinetic_rate(data: np.ndarray) -> float:
-    """Finds the mean dark/bright time from fitting a cumulative
+    """Find the mean dark/bright time by fitting a cumulative
     exponential function.
 
     Parameters
@@ -8765,7 +8765,7 @@ class View(QtWidgets.QLabel):
                 locs[locs["group"] == i]
                 for i in np.unique(locs["group"])
             ]
-            pick_diameter = 200 / pixelsize  # 200 nm
+            pick_diameter = 200 # nm
         else:
             picked_locs = self.picked_locs(channel)
             pick_diameter = self.window.tools_settings_dialog.pick_diameter.value()
@@ -9664,6 +9664,7 @@ class View(QtWidgets.QLabel):
                 "Calculating pick statistics", 0, len(picked_locs), self
             )
             progress.set_value(0)
+            warnings.simplefilter("ignore", category=RuntimeWarning)
             for i, locs in enumerate(picked_locs):
                 if len(locs) > 0:
                     N[i] = len(locs)
@@ -9692,6 +9693,7 @@ class View(QtWidgets.QLabel):
                 else:
                     self.remove_picks(self._picks[i])
                 progress.set_value(i + 1)
+            warnings.simplefilter("default", category=RuntimeWarning)
 
             # update labels in info dialog
             self.window.info_dialog.n_localizations_mean.setText(
