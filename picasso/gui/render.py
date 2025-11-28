@@ -8832,6 +8832,7 @@ class View(QtWidgets.QLabel):
         pick_props["locs"] = no_locs
         pick_props["length_cdf"] = length
         pick_props["dark_cdf"] = dark
+        pick_props["qpaint_idx_cdf"] = dark ** -1
         influx = self.window.info_dialog.influx_rate.value()
         info = self.infos[channel] + [
             {
