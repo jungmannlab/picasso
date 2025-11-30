@@ -5159,7 +5159,9 @@ class View(QtWidgets.QLabel):
         # if this is the first loc file, find the median localization
         # precision and set group colors and prepare render by property
         disp_sett_dlg = self.window.display_settings_dlg
+        disp_sett_dlg.render_check.blockSignals(True)
         disp_sett_dlg.render_check.setChecked(False)
+        disp_sett_dlg.render_check.blockSignals(False)
         if len(self.locs) == 1:
             self.median_lp = np.mean(
                 [np.median(locs.lpx), np.median(locs.lpy)]
@@ -5188,9 +5190,6 @@ class View(QtWidgets.QLabel):
         # allow using View, Tools and Postprocess menus
         for menu in self.window.menus:
             menu.setDisabled(False)
-
-        # change current working directory
-        os.chdir(os.path.dirname(path))
 
         # add the locs to the dataset dialog
         self.window.dataset_dialog.add_entry(path)
