@@ -43,6 +43,7 @@ Important updates:
 - SPINNA: smaller font size in NND plot for better readability
 - SPINNA: read camera pixel size from metadata fixed (if available)
 - SPINNA: clean up progress dialog
+- SPINNA: NN plotting is normalized to 1000 nm
 - Simplify the API for picking similar in ``picasso.postprocess``
 - Progress dialog shows remaining time estimate more accurately (ignores the offset due to, for example, multiprocessing startup time)
 
