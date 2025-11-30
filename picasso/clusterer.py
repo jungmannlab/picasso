@@ -24,10 +24,11 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from scipy.spatial import ConvexHull, KDTree, QhullError, Delaunay
+from scipy.spatial import ConvexHull, KDTree, QhullError
+from scipy.ndimage import gaussian_filter
 from sklearn.cluster import DBSCAN, HDBSCAN
 
-from . import lib
+from . import lib, masking
 
 
 def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
@@ -838,67 +839,43 @@ def cluster_center(
     return result
 
 
-def _delaunay_area(triangles: np.ndarray) -> float:
-    """Calculate area of 2D Delaunay triangulation.
-
-    Parameters
-    ----------
-    triangles : np.ndarray
-        Array of shape (n_triangles, 3, 2) containing triangle vertex
-        coordinates. Obtained with ``Delaunay.simplices``.
-
-    Returns
-    -------
-    area : float
-        Total area of the triangulation.
-    """
-    v1 = triangles[:, 1] - triangles[:, 0]
-    v2 = triangles[:, 2] - triangles[:, 0]
-    areas = 0.5 * np.abs(np.cross(v1, v2))
-    return areas.sum()
-
-
-def _delaunay_volume(triangles: np.ndarray) -> float:
-    """Calculate volume of 3D Delaunay triangulation. TODO: make sure this works
-
-    Parameters
-    ----------
-    triangles : np.ndarray
-        Array of shape (n_tetrahedra, 4, 3) containing tetrahedron vertex
-        coordinates. Obtained with ``Delaunay.simplices``.
-
-    Returns
-    -------
-    volume : float
-        Total volume of the triangulation.
-    """
-    v1 = triangles[:, 1] - triangles[:, 0]
-    v2 = triangles[:, 2] - triangles[:, 0]
-    v3 = triangles[:, 3] - triangles[:, 0]
-    volumes = np.abs(np.linalg.det(np.stack([v1, v2, v3], axis=2))) / 6
-    return volumes.sum()
-
-
-def _cluster_area(X: np.ndarray) -> float:
-    """Calculate cluster area (2D) or volume (3D) using Delaunay
-    triangulation.
+def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
+    """Calculate cluster area (2D) or volume (3D). Uses Otsu
+    thresholding of the images of the clusters to find areas/volumes.
 
     Parameters
     ----------
     X : np.ndarray
         Array of points of shape (n_points, n_dim).
+    lp : np.ndarray
+        Localization precision in x and y of the cluster. The median
+        is taken to define the pixel size for image rendering
 
     Returns
     -------
     area : float
-        Cluster area (2D) or volume (3D).
+        Cluster area (2D) or volume (3D) in units of LP.
     """
-    delaunay = Delaunay(X)
-    triangles = X[delaunay.simplices]
-    if X.shape[1] == 2:  # 2D
-        return _delaunay_area(triangles)
-    elif X.shape[1] == 3:  # 3D
-        return _delaunay_volume(triangles)
+    # get image
+    bin_size = np.median(lp) / 2  # pixel size for rendering
+    if X.shape[1] == 3:  # 3D
+        bin_size_z = bin_size * 2.5  # just a rough estimate
+        edges = [
+            np.arange(X[:, 0].min(), X[:, 0].max() + bin_size, bin_size),
+            np.arange(X[:, 1].min(), X[:, 1].max() + bin_size, bin_size),
+            np.arange(X[:, 2].min(), X[:, 2].max() + bin_size_z, bin_size_z),
+        ]
+    else:  # 2D
+        edges = [
+            np.arange(X[:, 0].min(), X[:, 0].max() + bin_size, bin_size),
+            np.arange(X[:, 1].min(), X[:, 1].max() + bin_size, bin_size),
+        ]
+    image = np.histogramdd(X, bins=edges)[0]
+    image = gaussian_filter(image, sigma=2)  # smooth image with sigma = LP
+    # threshold the image and calculate area/volume
+    thresh = masking.threshold_otsu(image.reshape(-1))
+    area = np.sum(image >= thresh) / (2 ** X.shape[1])  # area in LP^2, bins are 0.5 LP
+    return area
 
 
 def cluster_areas(
@@ -908,7 +885,8 @@ def cluster_areas(
 ) -> pd.DataFrame:
     """Calculate cluster areas (2D) or volumes (3D).
 
-    Uses Delaunay triangulation to find the area/volume.
+    Uses Otsu thresholding of the images of the clusters to find areas/
+    volumes.
 
     Parameters
     ----------
@@ -936,7 +914,7 @@ def cluster_areas(
     ), "Pixelsize not found in info."
 
     groups = np.unique(locs["group"])
-    area_key = "area (nm^2)" if not hasattr(locs, "z") else "volume (nm^3)"
+    area_key = "Area (LP^2)" if not hasattr(locs, "z") else "Volume (LP^3)"
     areas = {
         "group": groups.astype(np.int32), 
         area_key: np.zeros(len(groups), dtype=np.float32)
@@ -949,16 +927,15 @@ def cluster_areas(
     for idx in iterator:
         group_id = groups[idx]
         grouplocs = locs[locs["group"] == group_id]
+        if not len(grouplocs):
+            continue
+        lp = locs[["lpx", "lpy"]].values.mean(axis=1)
         if hasattr(grouplocs, "z"):
-            if len(grouplocs) < 4:
-                continue
             X = grouplocs[["x", "y", "z"]].values
-            X[:, :2] *= pixelsize  # convert z to camera pixels
+            X[:, 2] /= pixelsize  # convert z to pixels
         else:
-            if len(grouplocs) < 3:
-                continue
-            X = grouplocs[["x", "y"]].values * pixelsize
-        areas[area_key][idx] = _cluster_area(X)
+            X = grouplocs[["x", "y"]].values
+        areas[area_key][idx] = _cluster_area(X, lp)
         if progress is not None:
             progress(idx + 1)
     return pd.DataFrame(areas)

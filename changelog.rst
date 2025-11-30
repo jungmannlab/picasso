@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 28-NOV-2025 CEST
+Last change: 30-NOV-2025 CEST
 
 0.9.0
 -----
@@ -11,7 +11,7 @@ Important updates:
 - Picasso does not use ``numpy.recarray`` objects anymore. ``pandas.DataFrame`` are used instead. This applies to localizations, drift data, cluster centers, etc. **This change may cause backward compatibility issues when using Picasso as a package (downloaded from PyPI).**
 - Updated other dependencies, most importantly, ``numpy`` is now in version 2
 - Old setup files were replaced by ``pyproject.toml`` for building and packaging Picasso
-- New option to save cluster areas/volumes in DBSCAN, HDBSCAN and SMLM clusterer
+- New option to save cluster areas/volumes in DBSCAN, HDBSCAN and SMLM clusterer using Otsu thresholding of rendered images
 - Localize: ensure that 3D calibration is centered at z = 0; this guarantees the correct z scaling (magnification factor)
 - Render: unfold groups was removed as it is contained within the square grid unfolding
 - Render: save pick properties extended to saving group properties, also qpaint index is saved
