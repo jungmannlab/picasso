@@ -13,26 +13,26 @@ When loading raw binary files, the user will be prompted for movie metadata such
 HDF5 Files
 ----------
 
-HDF5 is a generic and efficient binary file format for storing data. In Picasso, HDF5 files are used for storing tabular data of localization properties with the file extension .hdf5. Furthermore, Picasso saves the statistical properties of groups of localizations in an HDF5 file.
+HDF5 is a generic and efficient binary file format for storing data. In Picasso, HDF5 files are used for storing tabular data of localizations with the file extension ``.hdf5``. Furthermore, Picasso saves the statistical properties of groups of localizations in an HDF5 file.
 
 Generally, several datasets can be stored within an HDF5 file. These datasets are accessible by specifying a path within the HDF5 file, similar to a path of an operating system. When saving localizations, Picasso stores tabular data under the path ``/locs``. When saving statistical properties of groups of localizations, Picasso saves the table under the path ``/groups``.
 
+An HDF5 file can be opened with various software packages. In Picasso, we use ``pandas`` for this purpose. For example, to open localizations, ``pandas.read_hdf(PATH_TO_LOCALIZATIONS, key="locs")`` is used. The ``key`` argument can be adjusted for other datasets. The available keys can be verified using ``pandas.HDFStore(PATH_TO_FILE).keys()``.
 
-Importing HDF5 files in Pandas, MATLAB and Origin
--------------------------------------------------
+**Note:** Picasso HDF5 files are accompanied by YAML metadata files which are read together using ``locs, info = picasso.io.load_locs``. See ``YAML Metadata Files`` below for more details.
 
-In Pandas, use ``pandas.read_hdf(key='locs')`` or ``pandas.read_hdf(keys='group')``. 
+
+Importing HDF5 files in MATLAB and Origin
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 In MATLAB, execute the command ``locs = h5read(filename, dataset)``. Replace dataset with ``/locs`` for localization files and with ``/groups`` for pick property files.
 
 In Origin, select ``File > Import > HDF5`` or drag and drop the file into the main window.
 
-Picasso uses ``h5py``. To load localizations, Picasso uses the function ``load_locs(filename)`` located in the ``io.py`` package of Picasso.
-
 Localization HDF5 Files
 -----------------------
 
-Localization HDF5 files must always be accompanied by a YAML metadata file with the same filename, but with the extension .yaml. See ``YAML Metadata File`` for more details. The localization table is stored as a dataset of the HDF5 file in the path ``/locs``. This table can be visualized by opening the HDF5 file with ``Picasso: Filter``. The localization table can have an unlimited number of columns. Table 1 describes the meaning of Picasso’s main column names.
+Picasso's localization HDF5 files are accompanied by a YAML metadata file with the same filename, but with the extension .yaml. See ``YAML Metadata File`` for more details. ``locs, info = picasso.io.load_locs`` is used to read both the HDF5 file and the metadata. The localization table is stored as a dataset of the HDF5 file in the path ``/locs``. This table can be explored by opening the HDF5 file with ``Picasso: Filter``. The localization table can have an unlimited number of columns. Table 1 explains the main column names in Picasso.
 
 .. csv-table:: Table 1: Name, description and data type for the main columns used in Picasso.
    :file: table01.csv

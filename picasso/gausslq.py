@@ -1,11 +1,11 @@
 """
-    picasso.gausslq
-    ~~~~~~~~~~~~~~~
+picasso.gausslq
+~~~~~~~~~~~~~~~
 
-    Fit spots (single-molecule images) with 2D Gaussian least squares.
+Fit spots (single-molecule images) with 2D Gaussian least squares.
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from concurrent import futures
 
 import numba
 import numpy as np
+import pandas as pd
 from scipy import optimize
 from tqdm import tqdm
 
@@ -130,7 +131,7 @@ def _outer(
     size: int,
     model: np.ndarray,
     n: float,
-    bg: float
+    bg: float,
 ) -> None:
     """Compute the outer product of two vectors a and b, scaled by n and
     added a background value bg, and store the result in model."""
@@ -154,9 +155,7 @@ def _compute_model(
     model_x[:] = _gaussian(
         theta[0], theta[4], grid
     )  # sx and sy are wrong with integrated gaussian
-    model_y[:] = _gaussian(
-        theta[1], theta[5], grid
-    )
+    model_y[:] = _gaussian(theta[1], theta[5], grid)
     _outer(model_y, model_x, size, model, theta[2], theta[3])
     return model
 
@@ -293,16 +292,18 @@ def fit_spots_parallel(
     n_spots = len(spots)
     n_tasks = 100 * n_workers
     spots_per_task = [
-        int(n_spots / n_tasks + 1)
-        if _ < n_spots % n_tasks
-        else int(n_spots / n_tasks)
+        (
+            int(n_spots / n_tasks + 1)
+            if _ < n_spots % n_tasks
+            else int(n_spots / n_tasks)
+        )
         for _ in range(n_tasks)
     ]
     start_indices = np.cumsum([0] + spots_per_task[:-1])
     fs = []
     executor = futures.ProcessPoolExecutor(n_workers)
     for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i:i + n_spots_task]))
+        fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
     if asynch:
         return fs
     with tqdm(desc="LQ fitting", total=n_tasks, unit="task") as progress_bar:
@@ -361,17 +362,17 @@ def fits_from_futures(futures: list[futures.Future]) -> np.ndarray:
 
 
 def locs_from_fits(
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     theta: np.ndarray,
     box: int,
     em: bool,
-) -> np.recarray:
-    """Convert the fit results into a structured array of localizations.
+) -> pd.DataFrame:
+    """Convert the fit results into a data frame of localizations.
 
     Parameters
     ----------
-    identifications : np.recarray
-        A structured array containing the identifications of the spots,
+    identifications : pd.DataFrame
+        Data frame containing the identifications of the spots,
         including frame numbers, x and y coordinates, and net gradient.
     theta : np.ndarray
         A 2D array with the optimized parameters for each spot, where
@@ -385,100 +386,77 @@ def locs_from_fits(
 
     Returns
     -------
-    locs : np.recarray
-        A structured array containing the localized spots.
+    locs : pd.DataFrame
+        Data frame containing the localized spots.
     """
-    # box_offset = int(box/2)
-    x = theta[:, 0] + identifications.x  # - box_offset
-    y = theta[:, 1] + identifications.y  # - box_offset
-    lpx = postprocess.localization_precision(
-        theta[:, 2], theta[:, 4], theta[:, 3], em=em
+    # box_offset = int(box / 2)
+    x = theta[:, 0] + identifications["x"]  # - box_offset
+    y = theta[:, 1] + identifications["y"]  # - box_offset
+    lpx = localization_precision(
+        theta[:, 2], theta[:, 4], theta[:, 5], theta[:, 3], em=em
     )
-    lpy = postprocess.localization_precision(
-        theta[:, 2], theta[:, 5], theta[:, 3], em=em
+    lpy = localization_precision(
+        theta[:, 2], theta[:, 5], theta[:, 4], theta[:, 3], em=em
     )
     a = np.maximum(theta[:, 4], theta[:, 5])
     b = np.minimum(theta[:, 4], theta[:, 5])
     ellipticity = (a - b) / a
 
     if hasattr(identifications, "n_id"):
-        locs = np.rec.array(
-            (
-                identifications.frame,
-                x,
-                y,
-                theta[:, 2],
-                theta[:, 4],
-                theta[:, 5],
-                theta[:, 3],
-                lpx,
-                lpy,
-                ellipticity,
-                identifications.net_gradient,
-                identifications.n_id,
-            ),
-            dtype=[
-                ("frame", "u4"),
-                ("x", "f4"),
-                ("y", "f4"),
-                ("photons", "f4"),
-                ("sx", "f4"),
-                ("sy", "f4"),
-                ("bg", "f4"),
-                ("lpx", "f4"),
-                ("lpy", "f4"),
-                ("ellipticity", "f4"),
-                ("net_gradient", "f4"),
-                ("n_id", "u4"),
-            ],
+        locs = pd.DataFrame(
+            {
+                "frame": identifications["frame"].astype(np.uint32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "photons": theta[:, 2].astype(np.float32),
+                "sx": theta[:, 4].astype(np.float32),
+                "sy": theta[:, 5].astype(np.float32),
+                "bg": theta[:, 3].astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": (
+                    identifications["net_gradient"].astype(np.float32)
+                ),
+                "n_id": identifications["n_id"].astype(np.uint32),
+            }
         )
-        locs.sort(kind="mergesort", order="n_id")
+        locs.sort_values(by="n_id", kind="mergesort", inplace=True)
     else:
-        locs = np.rec.array(
-            (
-                identifications.frame,
-                x,
-                y,
-                theta[:, 2],
-                theta[:, 4],
-                theta[:, 5],
-                theta[:, 3],
-                lpx,
-                lpy,
-                ellipticity,
-                identifications.net_gradient,
-            ),
-            dtype=[
-                ("frame", "u4"),
-                ("x", "f4"),
-                ("y", "f4"),
-                ("photons", "f4"),
-                ("sx", "f4"),
-                ("sy", "f4"),
-                ("bg", "f4"),
-                ("lpx", "f4"),
-                ("lpy", "f4"),
-                ("ellipticity", "f4"),
-                ("net_gradient", "f4"),
-            ],
+        locs = pd.DataFrame(
+            {
+                "frame": identifications["frame"].astype(np.uint32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "photons": theta[:, 2].astype(np.float32),
+                "sx": theta[:, 4].astype(np.float32),
+                "sy": theta[:, 5].astype(np.float32),
+                "bg": theta[:, 3].astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": (
+                    identifications["net_gradient"].astype(np.float32)
+                ),
+            }
         )
-        locs.sort(kind="mergesort", order="frame")
+        locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs
 
 
 def locs_from_fits_gpufit(
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     theta: np.ndarray,
     box: int,
     em: bool,
-) -> np.recarray:
-    """Convert the fit results from GPU-based fitting into a structured
+) -> pd.DataFrame:
+    """Convert the fit results from GPU-based fitting into a data frame
     array of localizations.
 
     Parameters
     ----------
-    identifications : np.recarray
-        A structured array containing the identifications of the spots,
+    identifications : pd.DataFrame
+        Data frame containing the identifications of the spots,
         including frame numbers, x and y coordinates, and net gradient.
     theta : np.ndarray
         A 2D array with the optimized parameters for each spot, where
@@ -492,48 +470,80 @@ def locs_from_fits_gpufit(
 
     Returns
     -------
-    locs : np.recarray
-        A structured array containing the localized spots.
+    locs : pd.DataFrame
+        Data frame containing the localized spots.
     """
-    box_offset = int(box / 2)
-    x = theta[:, 1] + identifications.x - box_offset
-    y = theta[:, 2] + identifications.y - box_offset
-    lpx = postprocess.localization_precision(
-        theta[:, 0], theta[:, 3], theta[:, 5], em=em
+    # box_offset = int(box / 2)
+    x = theta[:, 1] + identifications["x"]  # - box_offset
+    y = theta[:, 2] + identifications["y"]  # - box_offset
+    lpx = localization_precision(
+        theta[:, 0], theta[:, 3], theta[:, 4], theta[:, 5], em=em
     )
-    lpy = postprocess.localization_precision(
-        theta[:, 0], theta[:, 4], theta[:, 5], em=em
+    lpy = localization_precision(
+        theta[:, 0], theta[:, 4], theta[:, 3], theta[:, 5], em=em
     )
     a = np.maximum(theta[:, 3], theta[:, 4])
     b = np.minimum(theta[:, 3], theta[:, 4])
     ellipticity = (a - b) / a
-    locs = np.rec.array(
-        (
-            identifications.frame,
-            x,
-            y,
-            theta[:, 0],
-            theta[:, 3],
-            theta[:, 4],
-            theta[:, 5],
-            lpx,
-            lpy,
-            ellipticity,
-            identifications.net_gradient,
-        ),
-        dtype=[
-            ("frame", "u4"),
-            ("x", "f4"),
-            ("y", "f4"),
-            ("photons", "f4"),
-            ("sx", "f4"),
-            ("sy", "f4"),
-            ("bg", "f4"),
-            ("lpx", "f4"),
-            ("lpy", "f4"),
-            ("ellipticity", "f4"),
-            ("net_gradient", "f4"),
-        ],
+    locs = pd.DataFrame(
+        {
+            "frame": identifications["frame"].astype(np.uint32),
+            "x": x.astype(np.float32),
+            "y": y.astype(np.float32),
+            "photons": theta[:, 0].astype(np.float32),
+            "sx": theta[:, 3].astype(np.float32),
+            "sy": theta[:, 4].astype(np.float32),
+            "bg": theta[:, 5].astype(np.float32),
+            "lpx": lpx.astype(np.float32),
+            "lpy": lpy.astype(np.float32),
+            "ellipticity": ellipticity.astype(np.float32),
+            "net_gradient": identifications["net_gradient"].astype(np.float32),
+        }
     )
-    locs.sort(kind="mergesort", order="frame")
+    locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs
+
+
+def localization_precision(
+    photons: np.ndarray,
+    s: np.ndarray,
+    s_orth: np.ndarray,
+    bg: np.ndarray,
+    em: bool,
+) -> np.ndarray:
+    """Calculate the theoretical localization precision according to
+    Mortensen et al., Nat Meth, 2010 for a 2D unweighted Gaussian fit.
+
+    Edit v0.9.0: corrected formula for diagonal covariance Gaussian
+    (i.e., sx != sy). The background term includes the orthogonal sigma.
+
+    Parameters
+    ----------
+    photons : np.ndarray
+        Number of photons collected for the localization.
+    s : np.ndarray
+        Size of the single-emitter image for each localization.
+    s_orth : np.ndarray
+        Size of the single-emitter image in the orthogonal direction
+        for each localization.
+    bg : np.ndarray
+        Background signal for each localization (per pixel).
+    em : bool
+        Whether EMCCD was used for the localization.
+
+    Returns
+    -------
+    np.ndarray
+        Cramer-Rao lower bound for localization precision for each
+        localization.
+    """
+    s2 = s**2
+    sa2 = s2 + 1 / 12
+    sa = sa2**0.5
+    sa_orth2 = s_orth**2 + 1 / 12
+    sa_orth = sa_orth2**0.5
+    v = sa2 * (16 / 9 + (8 * np.pi * sa * sa_orth * bg) / photons) / photons
+    if em:
+        v *= 2
+    with np.errstate(invalid="ignore"):
+        return np.sqrt(v)

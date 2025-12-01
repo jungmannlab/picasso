@@ -1,7 +1,61 @@
 Changelog
 =========
 
-Last change: 05-OCT-2025 CEST
+Last change: 01-DEC-2025 CEST
+
+0.9.0
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+
+- Picasso does not use ``numpy.recarray`` objects anymore. ``pandas.DataFrame`` are used instead. This applies to localizations, drift data, cluster centers, etc. **This change may cause backward compatibility issues when using Picasso as a package (downloaded from PyPI).**
+- Updated other dependencies, most importantly, ``numpy`` is now in version 2
+- Old setup files were replaced by ``pyproject.toml`` for building and packaging Picasso
+- New option to save cluster areas/volumes in DBSCAN, HDBSCAN and SMLM clusterer using Otsu thresholding of rendered images
+- Localize: ensure that 3D calibration is centered at z = 0; this guarantees the correct z scaling (magnification factor)
+- Render: unfold groups was removed as it is contained within the square grid unfolding
+- Render: new pick shape - square
+- Render: synchronize groups across channels - removes localizations from groups that are not present in all channels, e.g., after filtering cluster centers by frame analysis, the cluster localizations corresponding to removed cluster centers are also removed
+- Render: save pick properties extended to saving group properties, also qpaint index is saved
+- SPINNA: improved saved fit results summary (see issue #560)
+
+*Small improvements:*
++++++++++++++++++++++
+
+- Black-based code formatting applied to all scripts
+- Cleaned up code for adjusting the size of QWidgets
+- Progress dialog shows remaining time estimate more accurately (ignores the offset due to, for example, multiprocessing startup time)
+- Render: save pick/group properties saves qpaint index (1 / mean dark time)
+- Render: clustering metadata saves fraction of rejected localizations
+- Render: screenshot .yaml files can be dragged and dropped to load the display settings
+- Render: DBSCAN clustering .yaml file saves min. number of localizations per cluster
+- Render 3D: display adjusted after changing blur method
+- Localize: localization precision formula for least-squares fitting was corrected to account for a diagonal covariance Gaussian (background term is affected); the function for localization precision was moved from ``picasso.postprocess`` to ``picasso.gausslq``
+- SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
+- SPINNA: save last opened folder added
+- SPINNA: smaller font size in NND plot for better readability
+- SPINNA: clean up progress dialog
+- SPINNA: NN plotting is normalized to 1000 nm
+- Simplify the API for picking similar in ``picasso.postprocess``
+
+*Bug fixes:*
+++++++++++++
+- Render: unfold groups/picks (rectangular grid) fixed for nonconsecutive grouping (the grid might have had missing elements before)
+- Render: apply drift from external file fixed
+- Render: fix masking (issue #560)
+- Render: fix loading camera pixel size from metadata (see issue #560)
+- Render: saving picks separately fixed areas in the .yaml files
+- Render: loading a new channel with rendering by property fixed
+- Render: mouse events are ignored if no localizations are loaded
+- Render 3D: remove measurement points fixed
+- Render 3D: save rotated localizations fixed
+- Render 3D: fixed ind. loc. prec.
+- Render 3D: rendering an empty pick fixed
+- Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
+- Localize: fixed acquisition comment extraction from uManager .tif files
+- SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
+- SPINNA: save NND plot fixed (when no simulations were run)
+- SPINNA: read camera pixel size from metadata fixed (if available)
 
 0.8.8
 -----

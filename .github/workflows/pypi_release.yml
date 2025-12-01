@@ -22,7 +22,7 @@ jobs:
       - name: Prepare distribution
         shell: bash -l {0}
         run: |
-          cd distribution/pypi
+          cd release/pypi
           . ./prepare_pypi_wheel.sh
       - name: Publish distribution to Test PyPI
         uses: pypa/gh-action-pypi-publish@master
@@ -32,7 +32,7 @@ jobs:
       - name: Test PyPI test release
         shell: bash -l {0}
         run: |
-          cd distribution/pypi
+          cd release/pypi
           . ./install_test_pypi_wheel.sh
       - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@master
@@ -58,5 +58,5 @@ jobs:
       - name: Test pip installation from PyPi
         shell: bash -l {0}
         run: |
-          cd distribution/pypi
+          cd release/pypi
           . ./install_pypi_wheel.sh

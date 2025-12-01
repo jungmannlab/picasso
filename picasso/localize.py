@@ -1,12 +1,12 @@
 """
-    picasso.localize
-    ~~~~~~~~~~~~~~~~
+picasso.localize
+~~~~~~~~~~~~~~~~
 
-    Identify and localize fluorescent single molecules in a frame
-    sequence.
+Identify and localize fluorescent single molecules in a frame
+sequence.
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -63,15 +63,17 @@ MEAN_COLS = [
     "d_zcalib",
 ]
 SET_COLS = [
-    "Frames", "Height", "Width", "Box Size", "Min. Net Gradient", "Pixelsize",
+    "Frames",
+    "Height",
+    "Width",
+    "Box Size",
+    "Min. Net Gradient",
+    "Pixelsize",
 ]
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
-def local_maxima(
-    frame: np.ndarray,
-    box: int
-) -> tuple[np.ndarray, np.ndarray]:
+def local_maxima(frame: np.ndarray, box: int) -> tuple[np.ndarray, np.ndarray]:
     """Find pixels with maximum value within a region of interest.
 
     Parameters
@@ -96,8 +98,8 @@ def local_maxima(
     for i in range(box_half, Y - box_half_1):
         for j in range(box_half, X - box_half_1):
             local_frame = frame[
-                i - box_half:i + box_half + 1,
-                j - box_half:j + box_half + 1,
+                i - box_half : i + box_half + 1,
+                j - box_half : j + box_half + 1,
             ]
             flat_max = np.argmax(local_frame)
             i_local_max = int(flat_max / box)
@@ -268,7 +270,7 @@ def identify_in_frame(
         (len(y),).
     """
     if roi is not None:
-        frame = frame[roi[0][0]:roi[1][0], roi[0][1]:roi[1][1]]
+        frame = frame[roi[0][0] : roi[1][0], roi[0][1] : roi[1][1]]
     image = np.float32(frame)  # otherwise numba goes crazy
     y, x, net_gradient = identify_in_image(image, minimum_ng, box)
     if roi is not None:
@@ -284,7 +286,7 @@ def identify_by_frame_number(
     frame_number: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
     lock: threading.Lock | None = None,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Identify local maxima in a specific frame of a movie and
     calculate the net gradient at those maxima. Optionally, a lock can
     be used to ensure thread safety when accessing the movie data.
@@ -313,9 +315,9 @@ def identify_by_frame_number(
 
     Returns
     -------
-    result : np.recarray
-        A structured numpy array containing the frame number, x and y
-        coordinates of the identified maxima, and their net gradient.
+    identifications : pd.DataFrame
+        DataFrame containing the frame number, x and y coordinates of
+        the identified maxima, and their net gradient.
     """
     if lock is not None:
         with lock:
@@ -324,10 +326,15 @@ def identify_by_frame_number(
         frame = movie[frame_number]
     y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
     frame = frame_number * np.ones(len(x))
-    return np.rec.array(
-        (frame, x, y, net_gradient),
-        dtype=[("frame", "i"), ("x", "i"), ("y", "i"), ("net_gradient", "f4")],
+    identifications = pd.DataFrame(
+        {
+            "frame": frame.astype(int),
+            "x": x.astype(int),
+            "y": y.astype(int),
+            "net_gradient": net_gradient.astype(np.float32),
+        }
     )
+    return identifications
 
 
 def _identify_worker(
@@ -337,7 +344,7 @@ def _identify_worker(
     box: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | None,
     lock: threading.Lock | None,
-) -> list[np.recarray]:
+) -> list[pd.DataFrame]:
     """Worker function for identifying local maxima in a movie. This
     function is designed to be run in a separate thread and processes
     each frame independently."""
@@ -356,9 +363,9 @@ def _identify_worker(
 
 def identifications_from_futures(
     futures: list[multiprocessing.pool.Future],
-) -> np.recarray:
+) -> pd.DataFrame:
     """Collect the results from a list of futures and combines them
-    into a single structured numpy array.
+    into a single ``DataFrame``.
 
     Parameters
     ----------
@@ -367,15 +374,15 @@ def identifications_from_futures(
 
     Returns
     -------
-    ids : np.recarray
-        A structured numpy array containing the combined results from
-        all futures. Contains fields `frame`, `x`, `y`, and
-        `net_gradient`.
+    ids : pd.DataFrame
+        Data frame containing the combined results from
+        all futures. Contains fields ``frame``, ``x``, ``y``, and
+        ``net_gradient``.
     """
     ids_list_of_lists = [_.result() for _ in futures]
     ids_list = list(chain(*ids_list_of_lists))
-    ids = np.hstack(ids_list).view(np.recarray)
-    ids.sort(kind="mergesort", order="frame")
+    ids = pd.concat(ids_list, ignore_index=True)
+    ids.sort_values(by="frame", kind="mergesort", inplace=True)
     return ids
 
 
@@ -435,7 +442,13 @@ def identify_async(
     executor = ThreadPoolExecutor(n_workers)
     f = [
         executor.submit(
-            _identify_worker, movie, current, minimum_ng, box, roi, lock,
+            _identify_worker,
+            movie,
+            current,
+            minimum_ng,
+            box,
+            roi,
+            lock,
         )
         for _ in range(n_workers)
     ]
@@ -448,7 +461,7 @@ def identify(
     minimum_ng: float,
     box: int,
     threaded: bool = True,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Identify local maxima in a movie and calculate the net
     gradient at those maxima. This function can run in a threaded or
     non-threaded mode.
@@ -466,9 +479,9 @@ def identify(
 
     Returns
     -------
-    ids : np.recarray
-        A structured numpy array containing the identified spots.
-        Contains fields `frame`, `x`, `y`, and `net_gradient`.
+    ids : pd.DataFrame
+        Data frame containing the identified spots. Contains fields
+        `frame`, `x`, `y`, and `net_gradient`.
     """
     if threaded:
         current, futures = identify_async(movie, minimum_ng, box)
@@ -479,7 +492,7 @@ def identify(
             identify_by_frame_number(movie, minimum_ng, box, i)
             for i in range(len(movie))
         ]
-    ids = np.hstack(identifications).view(np.recarray)
+    ids = pd.concat(identifications, ignore_index=True)
     return ids
 
 
@@ -496,7 +509,7 @@ def _cut_spots_numba(
     r = int(box / 2)
     spots = np.zeros((n_spots, box, box), dtype=movie.dtype)
     for id, (frame, xc, yc) in enumerate(zip(ids_frame, ids_x, ids_y)):
-        spots[id] = movie[frame, yc - r:yc + r + 1, xc - r:xc + r + 1]
+        spots[id] = movie[frame, yc - r : yc + r + 1, xc - r : xc + r + 1]
     return spots
 
 
@@ -520,12 +533,20 @@ def _cut_spots_frame(
             break
         yc = ids_y[j]
         xc = ids_x[j]
-        spots[j] = frame[yc - r:yc + r + 1, xc - r:xc + r + 1]
+        spots[j] = frame[yc - r : yc + r + 1, xc - r : xc + r + 1]
     return j
 
 
 @numba.jit(nopython=True, cache=False)
-def _cut_spots_daskmov(movie, l_mov, ids_frame, ids_x, ids_y, box, spots):
+def _cut_spots_daskmov(
+    movie: np.ndarray,
+    l_mov: np.ndarray,
+    ids_frame: np.ndarray,
+    ids_x: np.ndarray,
+    ids_y: np.ndarray,
+    box: int,
+    spots: np.ndarray,
+):
     """Extract the spots out of a movie frame by frame.
 
     Parameters
@@ -568,7 +589,14 @@ def _cut_spots_daskmov(movie, l_mov, ids_frame, ids_x, ids_y, box, spots):
     return spots
 
 
-def _cut_spots_framebyframe(movie, ids_frame, ids_x, ids_y, box, spots):
+def _cut_spots_framebyframe(
+    movie: np.ndarray,
+    ids_frame: np.ndarray,
+    ids_x: np.ndarray,
+    ids_y: np.ndarray,
+    box: int,
+    spots: np.ndarray,
+):
     """Extract the spots out of a movie frame by frame.
 
     Parameters
@@ -610,20 +638,26 @@ def _cut_spots_framebyframe(movie, ids_frame, ids_x, ids_y, box, spots):
 
 def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
     """Cut out spots from a movie based on the identified positions."""
-    N = len(ids.frame)
+    N = len(ids)
     if isinstance(movie, np.ndarray):
-        return _cut_spots_numba(movie, ids.frame, ids.x, ids.y, box)
+        return _cut_spots_numba(
+            movie,
+            ids["frame"].values,
+            ids["x"].values,
+            ids["y"].values,
+            box,
+        )
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
-        """ Assumes that identifications are in order of frames! """
+        """Assumes that identifications are in order of frames!"""
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         spots = da.apply_gufunc(
             _cut_spots_daskmov,
-            '(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)',
+            "(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)",
             movie.data,
             np.array([len(movie)]),
-            ids.frame,
-            ids.x,
-            ids.y,
+            ids["frame"].values,
+            ids["x"].values,
+            ids["y"].values,
             box,
             spots,
             output_dtypes=[movie.dtype],
@@ -632,10 +666,15 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
         return spots
     else:
         """Assumes that identifications are in order of frames!"""
-        N = len(ids.frame)
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         spots = _cut_spots_framebyframe(
-            movie, ids.frame, ids.x, ids.y, box, spots)
+            movie,
+            ids["frame"].values,
+            ids["x"].values,
+            ids["y"].values,
+            box,
+            spots,
+        )
         return spots
 
 
@@ -653,7 +692,7 @@ def _to_photons(spots: np.ndarray, camera_info: dict) -> np.ndarray:
 
 def get_spots(
     movie: np.ndarray,
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     box: int,
     camera_info: dict,
 ) -> np.ndarray:
@@ -664,9 +703,9 @@ def get_spots(
     ----------
     movie : np.ndarray
         The input movie data as a 3D numpy array.
-    identifications : np.recarray
-        A structured numpy array containing the identified spots.
-        Contains fields `frame`, `x`, `y`, and `net_gradient`.
+    identifications : pd.DataFrame
+        Data frame containing the identified spots. Contains fields
+        `frame`, `x`, `y`, and `net_gradient`.
     box : int
         Size of the box to cut out around each spot. Should be an odd
         integer.
@@ -687,12 +726,12 @@ def get_spots(
 def fit(
     movie: np.ndarray,
     camera_info: dict,
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     box: int,
     eps: float = 0.001,
     max_it: int = 100,
     method: Literal["sigma", "sigmaxy"] = "sigma",
-) -> np.recarray:
+) -> pd.DataFrame:
     """Fit Gaussians using Maximum Likelihood Estimation (MLE) to the
     identified spots in a movie to localize fluorescent molecules. See
     Smith, et al. Nature Methods, 2010. DOI: 10.1038/nmeth.1449.
@@ -704,9 +743,9 @@ def fit(
     camera_info : dict
         A dictionary containing camera information such as
         `Baseline`, `Sensitivity`, and `Gain`.
-    identifications : np.recarray
-        A structured numpy array containing the identified spots.
-        Contains fields `frame`, `x`, `y`, and `net_gradient`.
+    identifications : pd.DataFrame
+        Data frame containing the identified spots. Contains fields
+        `frame`, `x`, `y`, and `net_gradient`.
     box : int
         Size of the box to cut out around each spot. Should be an odd
         integer.
@@ -722,24 +761,30 @@ def fit(
 
     Returns
     -------
-    locs : np.recarray
-        A structured numpy array containing the localized spots. The
-        fields include `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`,
-        `lpx`, `lpy`, `net_gradient`, `likelihood`, and `iterations`.
+    locs : pd.DataFrame
+        Data frame containing the localized spots. The fields include
+        `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
+        `net_gradient`, `likelihood`, and `iterations`.
     """
     spots = get_spots(movie, identifications, box, camera_info)
     theta, CRLBs, likelihoods, iterations = gaussmle.gaussmle(
         spots, eps, max_it, method=method
     )
-    return locs_from_fits(
-        identifications, theta, CRLBs, likelihoods, iterations, box,
+    locs = locs_from_fits(
+        identifications,
+        theta,
+        CRLBs,
+        likelihoods,
+        iterations,
+        box,
     )
+    return locs
 
 
 def fit_async(
     movie: np.ndarray,
     camera_info: dict,
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     box: int,
     eps: float = 0.001,
     max_it: int = 100,
@@ -758,9 +803,9 @@ def fit_async(
     camera_info : dict
         A dictionary containing camera information such as
         `Baseline`, `Sensitivity`, and `Gain`.
-    identifications : np.recarray
-        A structured numpy array containing the identified spots.
-        Contains fields `frame`, `x`, `y`, and `net_gradient`.
+    identifications : pd.DataFrame
+        Data frame containing the identified spots. Contains fields
+        `frame`, `x`, `y`, and `net_gradient`.
     box : int
         Size of the box to cut out around each spot. Should be an odd
         integer.
@@ -794,21 +839,21 @@ def fit_async(
 
 
 def locs_from_fits(
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     theta: np.ndarray,
     CRLBs: np.ndarray,
     likelihoods: np.ndarray,
     iterations: np.ndarray,
     box: int,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Convert the resulting localizations from the list of Futures
-    into a structured array.
+    into a data frame.
 
     Parameters
     ----------
-    identifications : np.recarray
-        A structured numpy array containing the identified spots.
-        Contains fields `frame`, `x`, `y`, and `net_gradient`.
+    identifications : pd.DataFrame
+        Data frame containing the identified spots. Contains fields
+        `frame`, `x`, `y`, and `net_gradient`.
     theta : np.ndarray
         The fitted Gaussian parameters for each spot (x, y positions,
         photon counts, background, single-emitter image size in x and
@@ -824,34 +869,35 @@ def locs_from_fits(
 
     Returns
     -------
-    locs : np.recarray
-        A structured numpy array containing the localized spots. The
-        fields include `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`,
-        `lpx`, `lpy`, `net_gradient`, `likelihood`, and `iterations`.
+    locs : pd.DataFrame
+        Data frame containing the localized spots. The fields include
+        `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
+        `net_gradient`, `likelihood`, and `iterations`.
     """
-    box_offset = int(box / 2)
-    y = theta[:, 0] + identifications.y - box_offset
-    x = theta[:, 1] + identifications.x - box_offset
+    # box_offset = int(box / 2)
+    y = theta[:, 0] + identifications["y"]  # - box_offset
+    x = theta[:, 1] + identifications["x"]  # - box_offset
     lpy = np.sqrt(CRLBs[:, 0])
     lpx = np.sqrt(CRLBs[:, 1])
-    locs = np.rec.array(
-        (
-            identifications.frame,
-            x,
-            y,
-            theta[:, 2],
-            theta[:, 5],
-            theta[:, 4],
-            theta[:, 3],
-            lpx,
-            lpy,
-            identifications.net_gradient,
-            likelihoods,
-            iterations,
-        ),
-        dtype=LOCS_DTYPE,
+    locs = pd.DataFrame(
+        {
+            "frame": identifications["frame"].values.astype(np.uint32),
+            "x": x.astype(np.float32),
+            "y": y.astype(np.float32),
+            "photons": theta[:, 2].astype(np.float32),
+            "sx": theta[:, 5].astype(np.float32),
+            "sy": theta[:, 4].astype(np.float32),
+            "bg": theta[:, 3].astype(np.float32),
+            "lpx": lpx.astype(np.float32),
+            "lpy": lpy.astype(np.float32),
+            "net_gradient": (
+                identifications["net_gradient"].values.astype(np.float32)
+            ),
+            "likelihood": likelihoods.astype(np.float32),
+            "iterations": iterations.astype(np.int32),
+        }
     )
-    locs.sort(kind="mergesort", order="frame")
+    locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs
 
 
@@ -859,7 +905,7 @@ def localize(
     movie: np.ndarray,
     camera_info: dict,
     parameters: dict,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Localize (i.e., identify and fit) spots in a movie using
     the specified parameters.
 
@@ -878,11 +924,10 @@ def localize(
 
     Returns
     -------
-    locs : np.recarray
-        A structured numpy array containing the localized spots.
-        The fields include `frame`, `x`, `y`, `photons`, `sx`, `sy`,
-        `bg`, `lpx`, `lpy`, `net_gradient`, `likelihood`, and
-        `iterations`.
+    locs : pd.DataFrame
+        Data frame containing the localized spots. The fields include
+        `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
+        `net_gradient`, `likelihood`, and `iterations`.
     """
     identifications = identify(
         movie,
@@ -894,7 +939,7 @@ def localize(
 
 
 def check_nena(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     info: None,
     callback: Callable[[int], None] = None,
 ) -> float:
@@ -903,8 +948,8 @@ def check_nena(
 
     Parameters
     ----------
-    locs : np.recarray
-        A structured numpy array containing the localized spots.
+    locs : pd.DataFrame
+        Data frame containing the localized spots.
     info : None
         Not used.
     callback : Callable[[int], None], optional
@@ -918,7 +963,7 @@ def check_nena(
         The NeNA value in pixels, representing the experimental
         localization precision.
     """
-    print('Calculating NeNA.. ', end='')
+    print("Calculating NeNA.. ", end="")
     locs = locs[0:MAX_LOCS]
     try:
         result, nena_px = postprocess.nena(locs, None, callback=callback)
@@ -929,13 +974,13 @@ def check_nena(
     return nena_px
 
 
-def check_kinetics(locs: np.recarray, info: list[dict]) -> float:
+def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
     """Calculate the mean length of binding events from localizations.
 
     Parameters
     ----------
-    locs : np.recarray
-        A structured numpy array containing the localized spots.
+    locs : pd.DataFrame
+        Data frame containing the localized spots.
     info : list of dicts
         A list of dictionaries containing metadata about the movie.
 
@@ -944,8 +989,8 @@ def check_kinetics(locs: np.recarray, info: list[dict]) -> float:
     len_mean : float
         The mean length of binding events in frames.
     """
-    print("Linking.. ", end='')
-    locs = locs[0:MAX_LOCS]
+    print("Linking.. ", end="")
+    locs = locs.iloc[0:MAX_LOCS].copy()
     locs = postprocess.link(locs, info=info)
     len_mean = locs.len.mean()
     print(f"Mean length {len_mean:.2f} frames.")
@@ -953,7 +998,7 @@ def check_kinetics(locs: np.recarray, info: list[dict]) -> float:
 
 
 def check_drift(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     info: list[dict],
     callback: Callable[[int], None] = None,
 ) -> tuple[float, float]:
@@ -961,8 +1006,8 @@ def check_drift(
 
     Parameters
     ----------
-    locs : np.recarray
-        A structured numpy array containing the localized spots.
+    locs : pd.DataFrame
+        Data frame containing the localized spots.
     info : list[dict]
         A list of dictionaries containing metadata about the movie.
     callback : Callable[[int], None], optional
@@ -979,11 +1024,9 @@ def check_drift(
     """
     steps = int(len(locs) // (MAX_LOCS))
     steps = max(1, steps)
-
     locs = locs[::steps]
 
     n_frames = info[0]["Frames"]
-
     segmentation = max(1, int(n_frames // 10))
 
     print(f"Estimating drift with segmentation {segmentation}")
@@ -994,7 +1037,6 @@ def check_drift(
         display=False,
         rcc_callback=callback,
     )
-
     drift_x = float(drift["x"].mean())
     drift_y = float(drift["y"].mean())
 
@@ -1047,7 +1089,7 @@ def get_file_summary(
         try:
             summary[col + "_mean"] = locs[col].mean()
             summary[col + "_std"] = locs[col].std()
-        except ValueError:
+        except KeyError:
             summary[col + "_mean"] = float("nan")
             summary[col + "_std"] = float("nan")
 
@@ -1090,7 +1132,6 @@ def get_file_summary(
     summary["filename_hdf"] = file_hdf
     summary["file_created"] = datetime.fromtimestamp(os.path.getmtime(file))
     summary["entry_created"] = datetime.now()
-
     return summary
 
 
@@ -1116,7 +1157,7 @@ def add_file_to_db(
     file_hdf: str,
     drift: tuple[float, float] | None = None,
     len_mean: float | None = None,
-    nena: float | None = None
+    nena: float | None = None,
 ) -> None:
     """Add a localization file summary to the SQLite database."""
     summary = get_file_summary(file, file_hdf, drift, len_mean, nena)

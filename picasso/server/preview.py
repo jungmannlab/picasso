@@ -21,11 +21,11 @@ def load_file(path: str):
 
 
 @st.cache_data
-def picasso_render(locs: np.ndarray, viewport: tuple, oversampling: float):
+def picasso_render(locs: pd.DataFrame, viewport: tuple, oversampling: float):
     """Helper function to render a viewport. Cached.
 
     Args:
-        locs (np.ndarray): Record array with localization data.
+        locs (pd.DataFrame): Localizations.
         viewport (tuple): Viewport as tuple.
         oversampling (int): Oversampling.
     """
@@ -93,8 +93,8 @@ def preview():
                         oversampling = c1.number_input(
                             "Oversampling",
                             value=5.0,
-                            min_value=1.,
-                            max_value=40.,
+                            min_value=1.0,
+                            max_value=40.0,
                         )
 
                         image = picasso_render(locs, viewport, oversampling)

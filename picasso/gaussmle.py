@@ -1,12 +1,12 @@
 """
-    picasso.gaussmle
-    ~~~~~~~~~~~~~~~~
+picasso.gaussmle
+~~~~~~~~~~~~~~~~
 
-    Maximum likelihood fits for single particle localization. Based on
-    Smith, et al. Nature Methods, 2010.
+Maximum likelihood fits for single particle localization. Based on
+Smith, et al. Nature Methods, 2010.
 
-    :authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss, 2016-2018
+:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -19,8 +19,7 @@ from typing import Literal
 
 import numba
 import numpy as np
-
-from . import lib
+import pandas as pd
 
 GAMMA = np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
 
@@ -131,8 +130,8 @@ def _initial_theta_sigma(spot: np.ndarray, size: int) -> np.ndarray:
     sigma for both x and y dimensions - x, y, photons, background,
     sigma."""
     theta = np.zeros(5, dtype=np.float32)
-    theta[0], theta[1], theta[2], theta[3], sx, sy = (
-        _initial_parameters(spot, size)
+    theta[0], theta[1], theta[2], theta[3], sx, sy = _initial_parameters(
+        spot, size
     )
     theta[4] = (sx + sy) / 2
     return theta
@@ -180,11 +179,8 @@ def _erf(x: float) -> float:
                 (
                     (
                         (
-                            (
-                                -1.36864857382717e-07
-                                * ax
-                                + 5.64195517478974e-01
-                            ) * ax
+                            (-1.36864857382717e-07 * ax + 5.64195517478974e-01)
+                            * ax
                             + 7.21175825088309e00
                         )
                         * ax
@@ -204,10 +200,11 @@ def _erf(x: float) -> float:
                 (
                     (
                         (
-                            (1.0 * ax + 1.27827273196294e01)
-                            * ax
+                            (1.0 * ax + 1.27827273196294e01) * ax
                             + 7.70001529352295e01
-                        ) * ax + 2.77585444743988e02
+                        )
+                        * ax
+                        + 2.77585444743988e02
                     )
                     * ax
                     + 6.38980264465631e02
@@ -227,17 +224,19 @@ def _erf(x: float) -> float:
         t = 1.0 / x2
         top = (
             (
-                (2.10144126479064e00 * t + 2.62370141675169e01)
-                * t
+                (2.10144126479064e00 * t + 2.62370141675169e01) * t
                 + 2.13688200555087e01
-            ) * t + 4.65807828718470e00
+            )
+            * t
+            + 4.65807828718470e00
         ) * t + 2.82094791773523e-01
         bot = (
             (
-                (9.41537750555460e01 * t + 1.87114811799590e02)
-                * t
+                (9.41537750555460e01 * t + 1.87114811799590e02) * t
                 + 9.90191814623914e01
-            ) * t + 1.80124575948747e01
+            )
+            * t
+            + 1.80124575948747e01
         ) * t + 1.0
         erf = (0.564189583547756e0 - top / (x2 * bot)) / ax
         erf = 0.5 + (0.5 - np.exp(-x2) * erf)
@@ -315,15 +314,23 @@ def _derivative_gaussian_integral_2d_sigma(
     sigma: float,
     photons: float,
     PSFx: float,
-    PSFy: float
+    PSFy: float,
 ) -> tuple[float, float]:
     """Calculate the first and second derivatives of the integral of a
     Gaussian function with respect to sigma in 2D."""
     dSx, ddSx = _derivative_gaussian_integral_1d_sigma(
-        x, mu, sigma, photons, PSFy,
+        x,
+        mu,
+        sigma,
+        photons,
+        PSFy,
     )
     dSy, ddSy = _derivative_gaussian_integral_1d_sigma(
-        y, nu, sigma, photons, PSFx,
+        y,
+        nu,
+        sigma,
+        photons,
+        PSFx,
     )
     dudt = dSx + dSy
     d2udt2 = ddSx + ddSy
@@ -560,9 +567,8 @@ def _mlefit_sigma(
         theta[4] = np.minimum(theta[4], size)
 
         # Check for convergence
-        if (
-            (np.abs(old_x - theta[0]) < eps) and
-            (np.abs(old_y - theta[1]) < eps)
+        if (np.abs(old_x - theta[0]) < eps) and (
+            np.abs(old_y - theta[1]) < eps
         ):
             break
         else:
@@ -607,11 +613,9 @@ def _mlefit_sigma(
                 data = spot[ii, jj]
                 if data > 0:
                     Div += (
-                        data
-                        * np.log(model)
+                        data * np.log(model)
                         - model
-                        - data
-                        * np.log(data)
+                        - data * np.log(data)
                         + data
                     )
                 else:
@@ -779,11 +783,9 @@ def _mlefit_sigmaxy(
                 data = spot[ii, jj]
                 if data > 0:
                     Div += (
-                        data
-                        * np.log(model)
+                        data * np.log(model)
                         - model
-                        - data
-                        * np.log(data)
+                        - data * np.log(data)
                         + data
                     )
                 else:
@@ -800,20 +802,20 @@ def _mlefit_sigmaxy(
 
 
 def locs_from_fits(
-    identifications: np.recarray,
+    identifications: pd.DataFrame,
     theta: np.ndarray,
     CRLBs: np.ndarray,
     log_likelihoods: np.ndarray,
     iterations: np.ndarray,
     box: int,
-) -> np.recarray:
-    """Convert the results of Gaussian fits into a structured array
+) -> pd.DataFrame:
+    """Convert the results of Gaussian fits into a data frame array
     suitable for further analysis or visualization.
 
     Parameters
     ----------
-    identifications : np.recarray
-        The structured array containing the identifications of the
+    identifications : pd.DataFrame
+        Data frame containing the identifications of the
         spots, which should include 'frame', 'x', 'y' and
         'net_gradient'.
     theta : np.ndarray
@@ -833,58 +835,43 @@ def locs_from_fits(
 
     Returns
     -------
-    locs : np.recarray
-        A structured array containing the fitted parameters and
-        additional information for each spot, including frame, x, y,
-        photons, sigma_x, sigma_y, background, localization precision
+    locs : pd.DataFrame
+        DataFrame containing the fitted parameters and additional
+        information for each spot, including frame, x, y, photons,
+        sigma_x, sigma_y, background, localization precision
         (lpx, lpy), ellipticity, net gradient and identification ID
         (if available).
     """
     box_offset = int(box / 2)
-    y = theta[:, 0] + identifications.y - box_offset
-    x = theta[:, 1] + identifications.x - box_offset
+    x = theta[:, 1] + identifications["x"] - box_offset
+    y = theta[:, 0] + identifications["y"] - box_offset
     with np.errstate(invalid="ignore"):
         lpy = np.sqrt(CRLBs[:, 0])
         lpx = np.sqrt(CRLBs[:, 1])
         a = np.maximum(theta[:, 4], theta[:, 5])
         b = np.minimum(theta[:, 4], theta[:, 5])
         ellipticity = (a - b) / a
-    
-    locs = np.rec.array(
-        (
-            identifications.frame,
-            x,
-            y,
-            theta[:, 2],
-            theta[:, 4],
-            theta[:, 5],
-            theta[:, 3],
-            lpx,
-            lpy,
-            ellipticity,
-            identifications.net_gradient,
-            log_likelihoods,
-            iterations,
-        ),
-        dtype=[
-            ("frame", "u4"),
-            ("x", "f4"),
-            ("y", "f4"),
-            ("photons", "f4"),
-            ("sx", "f4"),
-            ("sy", "f4"),
-            ("bg", "f4"),
-            ("lpx", "f4"),
-            ("lpy", "f4"),
-            ("ellipticity", "f4"),
-            ("net_gradient", "f4"),
-            ("log_likelihood", "f4"),
-            ("iterations", "u4"),
-        ],
+
+    locs = pd.DataFrame(
+        {
+            "frame": identifications["frame"].to_numpy(dtype=np.uint32),
+            "x": x.astype(np.float32),
+            "y": y.astype(np.float32),
+            "photons": theta[:, 2].astype(np.float32),
+            "sx": theta[:, 4].astype(np.float32),
+            "sy": theta[:, 5].astype(np.float32),
+            "bg": theta[:, 3].astype(np.float32),
+            "lpx": lpx.astype(np.float32),
+            "lpy": lpy.astype(np.float32),
+            "ellipticity": ellipticity.astype(np.float32),
+            "net_gradient": identifications["net_gradient"].astype(np.float32),
+            "log_likelihood": log_likelihoods.astype(np.float32),
+            "iterations": iterations.astype(np.uint32),
+        }
     )
     if hasattr(identifications, "n_id"):
-        locs = lib.append_fields(locs, "n_id", identifications.n_id)
-        locs.sort(kind="mergesort", order="n_id")
+        locs["n_id"] = identifications.n_id.astype(np.uint32)
+        locs.sort_values(by=["n_id"], kind="mergesort", inplace=True)
     else:
-        locs.sort(kind="mergesort", order="frame")
+        locs.sort_values(by=["frame"], kind="mergesort", inplace=True)
     return locs

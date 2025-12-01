@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "picassosr"
+version = "0.9.0"
+authors = [
+    {name = "Joerg Schnitzbauer", email = "joschnitzbauer@gmail.com"},
+    {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
+    {name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"}
+]
+keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
+description = "A collection of tools for painting super-resolution images"
+readme = "readme.rst"
+requires-python = "==3.10.13"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.10",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "PyQt5",
+    "numpy==2.2.6",
+    "matplotlib==3.10.7",
+    "h5py==3.15.1",
+    "numba==0.62.1",
+    "scipy==1.15.3",
+    "pandas==2.3.3",
+    "tables==3.10.1",
+    "pyyaml==6.0.3",
+    "scikit-learn==1.7.2",
+    "tqdm==4.67.1",
+    "streamlit==1.50.0",
+    "nd2==0.10.4",
+    "sqlalchemy==2.0.44",
+    "plotly-express==0.4.1",
+    "watchdog==6.0.0",
+    "psutil==7.1.1",
+    "playsound3==3.2.8",
+    "imageio==2.37.0",
+    "imageio-ffmpeg==0.6.0",
+    "PyImarisWriter==0.7.0; sys_platform=='win32'"
+]
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "black",
+    "pre-commit",
+    "twine",
+    "bumpversion"
+]
+
+[project.urls]
+Homepage = "https://github.com/jungmannlab/picasso"
+Documentation = "https://picassosr.readthedocs.io/en/latest/index.html"
+Changelog = "https://github.com/jungmannlab/picasso/blob/master/changelog.rst"
+Publications = "https://doi.org/10.1038/nprot.2017.024"
+
+[project.scripts]
+picasso = "picasso.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["picasso*"]
+
+[tool.setuptools.package-data]
+picasso = [
+    "gui/icons/*.ico",
+    "gui/icons/*.png",
+    "gui/notification_sounds/*.mp3",
+    "gui/notification_sounds/*.wav",
+    "config_template.yaml",
+]
+
+[tool.black]
+line-length = 79
+include = "\\.pyi?$"
+exclude = '''
+(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)
+'''

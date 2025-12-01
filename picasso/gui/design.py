@@ -1,11 +1,11 @@
 """
-    picasso.gui.design
-    ~~~~~~~~~~~~~~~~~~
+picasso.gui.design
+~~~~~~~~~~~~~~~~~~
 
-    GUI for designing rectangular rothemund origami.
+GUI for designing rectangular rothemund origami.
 
-    :author: Maximilian Thomas Strauss, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:author: Maximilian Thomas Strauss, 2016
+:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 import glob
@@ -97,9 +97,14 @@ def plotPlate(
                 )
             ax.add_artist(circle)
     # inner rectangle
-    ax.add_patch(patches.Rectangle(
-        (0, 0), cols * 2 * radius, rows * 2 * radius, fill=False,
-    ))
+    ax.add_patch(
+        patches.Rectangle(
+            (0, 0),
+            cols * 2 * radius,
+            rows * 2 * radius,
+            fill=False,
+        )
+    )
     # outer Rectangle
     ax.add_patch(
         patches.Rectangle(
@@ -363,7 +368,8 @@ class PipettingDialog(QtWidgets.QDialog):
             )
         else:
             path = QtWidgets.QFileDialog.getExistingDirectory(
-                self, "Select Directory",
+                self,
+                "Select Directory",
             )
         if path:
             self.folderEdit.setText(path)
@@ -485,7 +491,9 @@ class SeqDialog(QtWidgets.QDialog):
         for i in range(len(colorcounts) - 1):
             if colorcounts[i] > 0:
                 self.table.setItem(
-                    rowRunner, 0, QtWidgets.QTableWidgetItem(str(i + 1)),
+                    rowRunner,
+                    0,
+                    QtWidgets.QTableWidgetItem(str(i + 1)),
                 )
                 self.table.setItem(
                     rowRunner, 1, QtWidgets.QTableWidgetItem(f"Ext {i + 1}")
@@ -552,18 +560,18 @@ class SeqDialog(QtWidgets.QDialog):
 
         for i in range(self.table.rowCount()):
             try:
-                tableshort[
-                    int(self.table.item(i, 0).text()) - 1
-                ] = self.table.item(i, 3).text()
+                tableshort[int(self.table.item(i, 0).text()) - 1] = (
+                    self.table.item(i, 3).text()
+                )
                 if tableshort[i] == "":
                     tableshort[i] = "None"
             except AttributeError:
                 tableshort[i] = "None"
 
             try:
-                tablelong[
-                    int(self.table.item(i, 0).text()) - 1
-                ] = self.table.item(i, 4).text()
+                tablelong[int(self.table.item(i, 0).text()) - 1] = (
+                    self.table.item(i, 4).text()
+                )
                 if tablelong[i] == "":
                     tablelong[i] = "None"
             except AttributeError:
@@ -710,7 +718,7 @@ class FoldingDialog(QtWidgets.QDialog):
         self.table.item(row, col).setBackground(color)
 
     def setExt(
-        parent: QtWidgets.QWidget | None = None
+        parent: QtWidgets.QWidget | None = None,
     ) -> tuple[list[str], list[str], bool]:
         dialog = FoldingDialog(parent)
         result = dialog.exec_()
@@ -783,7 +791,7 @@ class PlateDialog(QtWidgets.QDialog):
 
     @staticmethod
     def getSelection(
-        parent: QtWidgets.QWidget | None = None
+        parent: QtWidgets.QWidget | None = None,
     ) -> tuple[int, bool]:
         dialog = PlateDialog(parent)
         result = dialog.exec_()
@@ -805,40 +813,22 @@ class BindingSiteItem(QtWidgets.QGraphicsPolygonItem):
     def __init__(self, y: int, x: int) -> None:
         hex_center_x, hex_center_y = indextoHex(y, x)
         center = QtCore.QPointF(hex_center_x, hex_center_y)
-        point1 = (
-            HEX_SCALE
-            * HEX_SIDE_HALF
-            * QtCore.QPointF(-1, 0)
-            + center
-        )
+        point1 = HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(-1, 0) + center
         point2 = (
-            HEX_SCALE
-            * HEX_SIDE_HALF
-            * QtCore.QPointF(-0.5, sqrt(3) / 2)
+            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(-0.5, sqrt(3) / 2)
             + center
         )
         point3 = (
-            HEX_SCALE
-            * HEX_SIDE_HALF
-            * QtCore.QPointF(0.5, sqrt(3) / 2)
+            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(0.5, sqrt(3) / 2)
             + center
         )
-        point4 = (
-            HEX_SCALE
-            * HEX_SIDE_HALF
-            * QtCore.QPointF(1, 0)
-            + center
-        )
+        point4 = HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(1, 0) + center
         point5 = (
-            HEX_SCALE
-            * HEX_SIDE_HALF
-            * QtCore.QPointF(0.5, -sqrt(3) / 2)
+            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(0.5, -sqrt(3) / 2)
             + center
         )
         point6 = (
-            HEX_SCALE
-            * HEX_SIDE_HALF
-            * QtCore.QPointF(-0.5, -sqrt(3) / 2)
+            HEX_SCALE * HEX_SIDE_HALF * QtCore.QPointF(-0.5, -sqrt(3) / 2)
             + center
         )
         points = [point1, point2, point3, point4, point5, point6]
@@ -998,9 +988,9 @@ class Scene(QtWidgets.QGraphicsScene):
                 * HEX_SIDE_HALF
                 * (labelspacer + COLOR_SITES[8 - paletteindex][1] + xofflbl),
                 -labelspacer
-                - sqrt(3) * HEX_SIDE_HALF * (
-                    COLOR_SITES[8 - paletteindex][0] + yoff
-                ),
+                - sqrt(3)
+                * HEX_SIDE_HALF
+                * (COLOR_SITES[8 - paletteindex][0] + yoff),
             )
         )
         self.addItem(self.cclabel)
@@ -1631,7 +1621,9 @@ class Window(QtWidgets.QMainWindow):
                             selectioncolors.append(pipettlist[y][4])
 
                     allfig[x] = plotPlate(
-                        selection, selectioncolors, platename,
+                        selection,
+                        selectioncolors,
+                        platename,
                     )
                 if hasattr(self, "pwd"):
                     path, ext = QtWidgets.QFileDialog.getSaveFileName(
@@ -1702,7 +1694,9 @@ class Window(QtWidgets.QMainWindow):
         for i in range(len(colorcounts) - 1):
             if colorcounts[i] != 0:
                 fdialog.writeTable(
-                    mixno + 2, 0, self.mainscene.tableshort[i] + " Mix",
+                    mixno + 2,
+                    0,
+                    self.mainscene.tableshort[i] + " Mix",
                 )
                 fdialog.writeTable(mixno + 2, 2, str(colorcounts[i]))
                 fdialog.writeTable(mixno + 2, 1, str(100))
@@ -1804,8 +1798,7 @@ def main():
 
     plugins = [
         importlib.import_module(name)
-        for finder, name, ispkg
-        in iter_namespace(plugins)
+        for finder, name, ispkg in iter_namespace(plugins)
     ]
 
     for plugin in plugins:
@@ -1820,7 +1813,9 @@ def main():
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
         errorbox = QtWidgets.QMessageBox.critical(
-            window, "An error occured", message,
+            window,
+            "An error occured",
+            message,
         )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)

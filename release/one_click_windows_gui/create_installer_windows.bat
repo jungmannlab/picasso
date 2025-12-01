@@ -8,10 +8,11 @@ call cd %~dp0\..\..
 call conda create -n picasso_installer python=3.10.15 -y
 call conda activate picasso_installer
 
-call python setup.py sdist bdist_wheel
+call pip install build
+call python -m build
 
 call cd release/one_click_windows_gui
-call pip install "../../dist/picassosr-0.8.8-py3-none-any.whl"
+call pip install "../../dist/picassosr-0.9.0-py3-none-any.whl"
 
 call pip install pyinstaller==5.12
 call pyinstaller ../pyinstaller/picasso.spec -y --clean

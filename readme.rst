@@ -23,15 +23,13 @@ Picasso
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
-
-Picasso 0.8.0
+Picasso 0.9.0
 -------------
-- **New module SPINNA for investigating oligomerization of proteins**, `DOI: 10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`_.
-- NeNA bug fix: old values were too large by a factor of sqrt(2).
+In this version, localizations (and other ``.hdf5`` files) are read using ``pandas.read_hdf`` rather than converting an ``h5py.File`` object to a numpy recarray. Thus, rather than ``numpy.recarray``, localizations are now ``pandas.DataFrame`` objects. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
 
-Previous versions
------------------
-To see all changes introduced in previous versions, click `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
+Changelog
+---------
+To see all changes introduced across releases, see `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
 
 Installation
 ------------
@@ -53,8 +51,8 @@ Via PyPI
 3. Install Picasso package using: ``pip install picassosr``.
 4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
 
-For Developers
-^^^^^^^^^^^^^^
+For Developers (local, editable installation)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If you wish to use your local version of Picasso with your own modifications:
 
@@ -64,7 +62,7 @@ If you wish to use your local version of Picasso with your own modifications:
 4. Clone this GitHub repository by running ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
 5. Open the Picasso directory: ``cd picasso``.
 6. You can modify Picasso code in this directory.
-7. To create a *local* Picasso package to use it in other Python scripts, run ``pip install -e .``. When you change the code in the ``picasso`` directory, the changes will be reflected in the package.
+7. To create a *local* Picasso package to use it in other Python scripts, run ``pip install -e ".[dev]"``. When you change the code in the ``picasso`` directory, the changes will be reflected in the package.
 8. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
 
 Optional packages
@@ -79,7 +77,7 @@ Regardless of whether Picasso was installed via PyPI or by cloning the GitHub re
 Updating
 ^^^^^^^^
 
-If Picasso was installed from PyPI, run the following command:
+If Picasso was installed from PyPI (not the developer version), run the following command:
 
 ``pip install --upgrade picassosr``
 
@@ -105,12 +103,12 @@ Besides using the GUI, you can use picasso like any other Python module. Conside
   print('Average bright time {:.2f} frames'.format(np.mean(linked_locs_dark.n)))
   print('Average dark time {:.2f} frames'.format(np.mean(linked_locs_dark.dark)))
 
-This codeblock loads data from testdata_locs and uses the postprocess functions programmatically.
+This codeblock loads data from testdata_locs and uses the postprocess functions programmatically. For more examples, visit the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
 
 Jupyter Notebooks
 -----------------
 
-Check picasso/samples/ for Jupyter Notebooks that show how to interact with the Picasso codebase.
+Check the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__ that show how to interact with the Picasso codebase.
 
 Contributing
 ------------

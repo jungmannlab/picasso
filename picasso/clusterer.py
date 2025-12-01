@@ -1,74 +1,34 @@
 """
-    picasso.clusterer
-    ~~~~~~~~~~~~~~~~~
+picasso.clusterer
+~~~~~~~~~~~~~~~~~
 
-    Clusterer for single molecules optimized for DNA-PAINT.
-    Implementation of DBSCAN and HDBSCAN.
+Clusterer for single molecules optimized for DNA-PAINT.
+Additionally, contains implementations of DBSCAN and HDBSCAN and other
+clustering-related functions.
 
-    SMLM clusterer is based on:
-    * Schlichthaerle, et al. Nature Comm, 2021
-      (DOI: 10.1038/s41467-021-22606-1)
-    * Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
-      (DOI: 10.1038/s41586-023-05925-9)
+SMLM clusterer is based on:
+* Schlichthaerle, et al. Nature Comm, 2021
+  (DOI: 10.1038/s41467-021-22606-1)
+* Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
+  (DOI: 10.1038/s41586-023-05925-9)
 
-    :authors: Thomas Schlichthaerle, Susanne Reinhardt,
-        Rafal Kowalewski, 2020-2022
-    :copyright: Copyright (c) 2022 Jungmann Lab, MPI of Biochemistry
+:authors: Rafal Kowalewski, Susanne Reinhardt,
+    Thomas Schlichthaerle, 2020-2025
+:copyright: Copyright (c) 2022-2025 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from scipy.spatial import ConvexHull, KDTree, QhullError
+from scipy.ndimage import gaussian_filter
 from sklearn.cluster import DBSCAN, HDBSCAN
 
-from . import lib as _lib
-
-CLUSTER_CENTERS_DTYPE_2D = [
-    ("frame", "f4"),
-    ("std_frame", "f4"),
-    ("x", "f4"),
-    ("y", "f4"),
-    ("std_x", "f4"),
-    ("std_y", "f4"),
-    ("photons", "f4"),
-    ("sx", "f4"),
-    ("sy", "f4"),
-    ("bg", "f4"),
-    ("lpx", "f4"),
-    ("lpy", "f4"),
-    ("ellipticity", "f4"),
-    ("net_gradient", "f4"),
-    ("n", "u4"),
-    ("n_events", "i4"),
-    ("area", "f4"),
-    ("convexhull", "f4"),
-    ("group", "i4"),
-]
-CLUSTER_CENTERS_DTYPE_3D = [
-    ("frame", "f4"),
-    ("std_frame", "f4"),
-    ("x", "f4"),
-    ("y", "f4"),
-    ("std_x", "f4"),
-    ("std_y", "f4"),
-    ("z", "f4"),
-    ("photons", "f4"),
-    ("sx", "f4"),
-    ("sy", "f4"),
-    ("bg", "f4"),
-    ("lpx", "f4"),
-    ("lpy", "f4"),
-    ("std_z", "f4"),
-    ("ellipticity", "f4"),
-    ("net_gradient", "f4"),
-    ("n", "u4"),
-    ("n_events", "u4"),
-    ("volume", "f4"),
-    ("convexhull", "f4"),
-    ("group", "i4"),
-]
+from . import lib, masking
 
 
 def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
@@ -141,7 +101,7 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
     frame_grouped = frame_pd.groupby(frame_pd.index)
 
     # perform frame analysis
-    true_cluster = frame_grouped.apply(_frame_analysis, frame.max()+1)
+    true_cluster = frame_grouped.apply(_frame_analysis, frame.max() + 1)
 
     # cluster ids that did not pass frame analysis
     discard = true_cluster.index[true_cluster == 0].values
@@ -317,13 +277,13 @@ def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
 
 
 def cluster(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     radius_xy: float,
     min_locs: int,
     frame_analysis: bool,
     radius_z: float | None = None,
     pixelsize: float | None = None,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Cluster localizations from single molecules (SMLM clusterer).
 
     The general workflow is as follows:
@@ -346,7 +306,7 @@ def cluster(
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations to be clustered.
     radius_xy : float
         Clustering radius in xy plane (camera pixels).
@@ -362,7 +322,7 @@ def cluster(
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
@@ -374,10 +334,10 @@ def cluster(
                 " specified for 3D clustering."
             )
         labels = cluster_3D(
-            locs.x,
-            locs.y,
-            locs.z / pixelsize,  # convert z coordinates from nm to px
-            locs.frame,
+            locs["x"].values,
+            locs["y"].values,
+            locs["z"].values / pixelsize,  # convert from nm to px
+            locs["frame"].values,
             radius_xy,
             radius_z,
             min_locs,
@@ -385,9 +345,9 @@ def cluster(
         )
     else:
         labels = cluster_2D(
-            locs.x,
-            locs.y,
-            locs.frame,
+            locs["x"].values,
+            locs["y"].values,
+            locs["frame"].values,
             radius_xy,
             min_locs,
             frame_analysis,
@@ -435,19 +395,19 @@ def _dbscan(
 
 
 def dbscan(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     radius: float,
     min_samples: int,
     min_locs: int = 10,
     pixelsize: int | None = None,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Perform DBSCAN on localizations.
 
     See Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
 
     Parameters
     ---------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations to be clustered.
     radius : float
         DBSCAN search radius, often referred to as "epsilon". Same units
@@ -463,7 +423,7 @@ def dbscan(
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
@@ -474,9 +434,11 @@ def dbscan(
                 "Camera pixel size must be specified as an integer for 3D"
                 " clustering."
             )
-        X = np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
+        X = np.vstack(
+            (locs["x"].values, locs["y"].values, locs["z"].values / pixelsize)
+        ).T
     else:
-        X = np.vstack((locs.x, locs.y)).T
+        X = np.vstack((locs["x"].values, locs["y"].values)).T
     labels = _dbscan(X, radius, min_samples, min_locs)
     locs = extract_valid_labels(locs, labels)
     return locs
@@ -520,19 +482,19 @@ def _hdbscan(
 
 
 def hdbscan(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     min_cluster_size: int,
     min_samples: int,
     pixelsize: int | None = None,
     cluster_eps: float = 0.0,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Perform HDBSCAN on localizations.
 
     See Campello, et al. PAKDD, 2013 (DOI: 10.1007/978-3-642-37456-2_14).
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations to be clustered.
     min_cluster_size : int
         Minimum number of localizations in cluster.
@@ -546,7 +508,7 @@ def hdbscan(
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
@@ -557,9 +519,11 @@ def hdbscan(
                 "Camera pixel size (nm) must be specified as an integer for 3D"
                 " clustering."
             )
-        X = np.vstack((locs.x, locs.y, locs.z / pixelsize)).T
+        X = np.vstack(
+            (locs["x"].values, locs["y"].values, locs["z"].values / pixelsize)
+        ).T
     else:
-        X = np.vstack((locs.x, locs.y)).T
+        X = np.vstack((locs["x"].values, locs["y"].values)).T
     labels = _hdbscan(
         X, min_cluster_size, min_samples, cluster_eps=cluster_eps
     )
@@ -568,15 +532,15 @@ def hdbscan(
 
 
 def extract_valid_labels(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     labels: np.ndarray,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Extract localizations based on clustering results. Localizations
     that were not clustered are excluded.
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations to be filtered.
     labels : np.ndarray
         Array of cluster labels for each localization. -1 means no
@@ -584,15 +548,15 @@ def extract_valid_labels(
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization list with "group" column appended, providing
         cluster label.
     """
     # add cluster id to locs, as "group"
-    locs = _lib.append_to_rec(locs, labels, "group")
+    locs["group"] = labels
 
     # -1 means no cluster assigned to a loc
-    locs = locs[locs.group != -1]
+    locs = locs[locs["group"] != -1]
     return locs
 
 
@@ -618,16 +582,16 @@ def extract_valid_labels(
 
 
 def find_cluster_centers(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     pixelsize: float | None = None,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Calculate cluster centers.
 
     Uses ``pandas.groupby`` to quickly run across all cluster ids.
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Clustered localizations (contain group info)
     pixelsize : int, optional
         Camera pixel size (used for finding volume and 3D convex hull).
@@ -635,18 +599,17 @@ def find_cluster_centers(
 
     Returns
     -------
-    centers : np.recarray
+    centers : pd.DataFrame
         Cluster centers saved in the format of localizations.
     """
     # group locs by their cluster id (group)
-    locs_pd = pd.DataFrame(locs)
-    grouplocs = locs_pd.groupby(locs_pd.group)
+    grouplocs = locs.groupby(locs["group"])
 
     # get cluster centers
-    res = grouplocs.apply(cluster_center, pixelsize)
+    res = grouplocs.apply(cluster_center, pixelsize, include_groups=False)
     centers_ = res.values
 
-    # convert to recarray and save
+    # convert to DataFrame and save
     frame = np.array([_[0] for _ in centers_])
     std_frame = np.array([_[1] for _ in centers_])
     x = np.array([_[2] for _ in centers_])
@@ -669,63 +632,60 @@ def find_cluster_centers(
         std_z = np.array([_[17] for _ in centers_])
         volume = np.array([_[18] for _ in centers_])
         convexhull = np.array([_[19] for _ in centers_])
-        centers = np.rec.array(
-            (
-                frame,
-                std_frame,
-                x,
-                y,
-                std_x,
-                std_y,
-                z,
-                photons,
-                sx,
-                sy,
-                bg,
-                lpx,
-                lpy,
-                std_z,
-                ellipticity,
-                net_gradient,
-                n,
-                n_events,
-                volume,
-                convexhull,
-                res.index.values,  # group id
-            ),
-            dtype=CLUSTER_CENTERS_DTYPE_3D,
+        centers = pd.DataFrame(
+            {
+                "frame": frame.astype(np.float32),
+                "std_frame": std_frame.astype(np.float32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "std_x": std_x.astype(np.float32),
+                "std_y": std_y.astype(np.float32),
+                "z": z.astype(np.float32),
+                "photons": photons.astype(np.float32),
+                "sx": sx.astype(np.float32),
+                "sy": sy.astype(np.float32),
+                "bg": bg.astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "std_z": std_z.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": net_gradient.astype(np.float32),
+                "n": n.astype(np.uint32),
+                "n_events": n_events.astype(np.int32),
+                "volume": volume.astype(np.float32),
+                "convexhull": convexhull.astype(np.float32),
+                "group": res.index.values.astype(np.int32),  # group id
+            }
         )
     else:
         area = np.array([_[16] for _ in centers_])
         convexhull = np.array([_[17] for _ in centers_])
-        centers = np.rec.array(
-            (
-                frame,
-                std_frame,
-                x,
-                y,
-                std_x,
-                std_y,
-                photons,
-                sx,
-                sy,
-                bg,
-                lpx,
-                lpy,
-                ellipticity,
-                net_gradient,
-                n,
-                n_events,
-                area,
-                convexhull,
-                res.index.values,  # group id
-            ),
-            dtype=CLUSTER_CENTERS_DTYPE_2D,
+        centers = pd.DataFrame(
+            {
+                "frame": frame.astype(np.float32),
+                "std_frame": std_frame.astype(np.float32),
+                "x": x.astype(np.float32),
+                "y": y.astype(np.float32),
+                "std_x": std_x.astype(np.float32),
+                "std_y": std_y.astype(np.float32),
+                "photons": photons.astype(np.float32),
+                "sx": sx.astype(np.float32),
+                "sy": sy.astype(np.float32),
+                "bg": bg.astype(np.float32),
+                "lpx": lpx.astype(np.float32),
+                "lpy": lpy.astype(np.float32),
+                "ellipticity": ellipticity.astype(np.float32),
+                "net_gradient": net_gradient.astype(np.float32),
+                "n": n.astype(np.uint32),
+                "n_events": n_events.astype(np.int32),
+                "area": area.astype(np.float32),
+                "convexhull": convexhull.astype(np.float32),
+                "group": res.index.values.astype(np.int32),  # group id
+            }
         )
-
     if hasattr(locs, "group_input"):
         group_input = np.array([_[-1] for _ in centers_])
-        centers = _lib.append_to_rec(centers, group_input, "group_input")
+        centers["group_input"] = group_input.astype(np.int32)
 
     return centers
 
@@ -734,7 +694,7 @@ def cluster_center(
     grouplocs: pd.SeriesGroupBy,
     pixelsize: float | None = None,
     separate_lp: bool = False,
-) -> list:
+) -> pd.Series:
     """Find cluster centers and their attributes, such as mean number
     of photons per localization, etc.
 
@@ -754,9 +714,9 @@ def cluster_center(
 
     Returns
     -------
-    results : list
-        Attributes used for saving the given cluster as .hdf5
-        (frame, x, y, etc)
+    results : pd.Series
+        Cluster center attributes. For each group, a list of values is
+        returned: x, y, (z, optional), etc.
     """
     # mean and std frame
     frame = grouplocs.frame.mean()
@@ -782,8 +742,8 @@ def cluster_center(
     #     error_sums_wtd(grouplocs.y, grouplocs.lpy)
     #     / (len(grouplocs) - 1)
     # )
-    lpx = np.std(grouplocs.x) / len(grouplocs)**0.5
-    lpy = np.std(grouplocs.y) / len(grouplocs)**0.5
+    lpx = np.std(grouplocs.x) / len(grouplocs) ** 0.5
+    lpy = np.std(grouplocs.y) / len(grouplocs) ** 0.5
     if not separate_lp:
         lpx = (lpx + lpy) / 2
         lpy = lpx
@@ -795,7 +755,7 @@ def cluster_center(
     # number of binding events
     split_idx = np.where(np.diff(grouplocs.frame) > 3)[0] + 1  # split locs by
     # consecutive frames
-    x_events = np.split(grouplocs.x, split_idx)
+    x_events = np.split(grouplocs.x.values, split_idx)
     n_events = len(x_events)  # number of binding events
     if hasattr(grouplocs, "z"):
         if pixelsize is None:
@@ -805,13 +765,13 @@ def cluster_center(
             )
         z = np.average(
             grouplocs.z,
-            weights=1/((grouplocs.lpx+grouplocs.lpy)**2),
+            weights=1 / ((grouplocs.lpx + grouplocs.lpy) ** 2),
         )  # take lpz = 2 * mean(lpx, lpy)
         std_z = grouplocs.z.std()
         # lpz = std_z
-        volume = np.power(
-            (std_x + std_y + std_z / pixelsize) / 3 * 2, 3
-        ) * 4.18879
+        volume = (
+            np.power((std_x + std_y + std_z / pixelsize) / 3 * 2, 3) * 4.18879
+        )
         try:
             X = np.stack(
                 (grouplocs.x, grouplocs.y, grouplocs.z / pixelsize),
@@ -877,3 +837,106 @@ def cluster_center(
         # assumes only one group input!
         result.append(np.unique(grouplocs.group_input)[0])
     return result
+
+
+def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
+    """Calculate cluster area (2D) or volume (3D). Uses Otsu
+    thresholding of the images of the clusters to find areas/volumes.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Array of points of shape (n_points, n_dim).
+    lp : np.ndarray
+        Localization precision in x and y of the cluster. The median
+        is taken to define the pixel size for image rendering
+
+    Returns
+    -------
+    area : float
+        Cluster area (2D) or volume (3D) in units of LP.
+    """
+    # get image
+    bin_size = np.median(lp) / 2  # pixel size for rendering
+    if X.shape[1] == 3:  # 3D
+        bin_size_z = bin_size * 2.5  # just a rough estimate
+        edges = [
+            np.arange(X[:, 0].min(), X[:, 0].max() + bin_size, bin_size),
+            np.arange(X[:, 1].min(), X[:, 1].max() + bin_size, bin_size),
+            np.arange(X[:, 2].min(), X[:, 2].max() + bin_size_z, bin_size_z),
+        ]
+    else:  # 2D
+        edges = [
+            np.arange(X[:, 0].min(), X[:, 0].max() + bin_size, bin_size),
+            np.arange(X[:, 1].min(), X[:, 1].max() + bin_size, bin_size),
+        ]
+    image = np.histogramdd(X, bins=edges)[0]
+    image = gaussian_filter(image, sigma=2)  # smooth image with sigma = LP
+    # threshold the image and calculate area/volume
+    thresh = masking.threshold_otsu(image.reshape(-1))
+    if X.shape[1] == 3:  # 3D
+        area = np.sum(image >= thresh) / (
+            16 / 5
+        )  # volume in LP^3, bins are 0.5 LP in xy and 1.25 LP in z
+    else:  # 2D
+        area = np.sum(image >= thresh) / 4  # area in LP^2, bins are 0.5 LP
+    return area
+
+
+def cluster_areas(
+    locs: pd.DataFrame,
+    info: list[dict],
+    progress: Callable[[int], None] | None = None,
+) -> pd.DataFrame:
+    """Calculate cluster areas (2D) or volumes (3D).
+
+    Uses Otsu thresholding of the images of the clusters to find areas/
+    volumes.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Clustered localizations (contain group info).
+    info : list of dict
+        Localization metadata, see `picasso.io.load_locs`.
+    progress : picasso.lib.ProgressDialog, optional
+        Progress dialog. If None, progress is displayed with into the
+        console. Default is None.
+
+    Returns
+    -------
+    areas : pd.DataFrame
+        Cluster areas/volumes for each cluster.
+    """
+    assert hasattr(locs, "group"), "Localizations must contain 'group' column."
+
+    # get pixel size from info
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=None)
+    assert isinstance(pixelsize, (int, float)), "Pixelsize not found in info."
+
+    groups = np.unique(locs["group"])
+    area_key = "Area (LP^2)" if not hasattr(locs, "z") else "Volume (LP^3)"
+    areas = {
+        "group": groups.astype(np.int32),
+        area_key: np.zeros(len(groups), dtype=np.float32),
+    }
+    if progress is None:
+        iterator = tqdm(range(len(groups)), desc="Calculating cluster areas")
+    else:
+        iterator = range(len(groups))
+
+    for idx in iterator:
+        group_id = groups[idx]
+        grouplocs = locs[locs["group"] == group_id]
+        if not len(grouplocs):
+            continue
+        lp = locs[["lpx", "lpy"]].values.mean(axis=1)
+        if hasattr(grouplocs, "z"):
+            X = grouplocs[["x", "y", "z"]].values
+            X[:, 2] /= pixelsize  # convert z to pixels
+        else:
+            X = grouplocs[["x", "y"]].values
+        areas[area_key][idx] = _cluster_area(X, lp)
+        if progress is not None:
+            progress(idx + 1)
+    return pd.DataFrame(areas)

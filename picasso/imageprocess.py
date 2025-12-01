@@ -1,11 +1,11 @@
 """
-    picasso.imageprocess
-    ~~~~~~~~~~~~~~~~~~~~
+picasso.imageprocess
+~~~~~~~~~~~~~~~~~~~~
 
-    Image processing functions
+Image processing functions
 
-    :author: Joerg Schnitzbauer, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:author: Joerg Schnitzbauer, 2016
+:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Callable
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
 from tqdm import tqdm
@@ -99,12 +100,12 @@ def get_image_shift(
     # A quarter of the fit ROI
     fit_X = int(box / 2)
     # A coordinate grid for the fitting ROI
-    y, x = np.mgrid[-fit_X:fit_X + 1, -fit_X:fit_X + 1]
+    y, x = np.mgrid[-fit_X : fit_X + 1, -fit_X : fit_X + 1]
     # Find the brightest pixel and cut out the fit ROI
     y_max_, x_max_ = np.unravel_index(XCorr.argmax(), XCorr.shape)
     FitROI = XCorr[
-        y_max_ - fit_X:y_max_ + fit_X + 1,
-        x_max_ - fit_X:x_max_ + fit_X + 1,
+        y_max_ - fit_X : y_max_ + fit_X + 1,
+        x_max_ - fit_X : x_max_ + fit_X + 1,
     ]
 
     dimensions = FitROI.shape
@@ -112,6 +113,7 @@ def get_image_shift(
     if 0 in dimensions or dimensions[0] != dimensions[1]:
         xc, yc = 0, 0
     else:
+
         def flat_2d_gaussian(coords, a, xc, yc, s, b):
             x, y = coords
             A = a * np.exp(-0.5 * ((x - xc) ** 2 + (y - yc) ** 2) / s**2) + b
@@ -123,7 +125,11 @@ def get_image_shift(
             [np.inf, np.inf, np.inf, np.inf, np.inf],
         )
         popt, _ = curve_fit(
-            flat_2d_gaussian, (x, y), FitROI.flatten(), p0=p0, bounds=bounds,
+            flat_2d_gaussian,
+            (x, y),
+            FitROI.flatten(),
+            p0=p0,
+            bounds=bounds,
         )
 
         # Get maximum coordinates and add offsets
@@ -210,7 +216,7 @@ def rcc(
 
 
 def find_fiducials(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     info: list[dict],
 ) -> tuple[list[tuple[int, int]], int]:
     """Find the xy coordinates of regions with high density of
@@ -222,7 +228,7 @@ def find_fiducials(
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     info : list of dicts
         Localizations' metadata (from the corresponding .yaml file).
@@ -247,11 +253,7 @@ def find_fiducials(
     threshold = np.percentile(image.flatten(), 99)
     # box size should be an odd number, corresponding to approximately
     # 900 nm
-    pixelsize = 130
-    for inf in info:
-        if val := inf.get("Pixelsize"):
-            pixelsize = val
-            break
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=130)
     box = int(np.round(900 / pixelsize))
     box = box + 1 if box % 2 == 0 else box
 
@@ -260,14 +262,15 @@ def find_fiducials(
     picks = [(xi, yi) for xi, yi in zip(x, y)]
 
     # select the picks with appropriate number of localizations
-    n_frames = 0
-    for inf in info:
-        if val := inf.get("Frames"):
-            n_frames = val
-            break
+    n_frames = lib.get_from_metadata(info, "Frames", default=0)
     min_n = 0.8 * n_frames
     picked_locs = postprocess.picked_locs(
-        locs, info, picks, "Circle", pick_size=box/2, add_group=False,
+        locs,
+        info,
+        picks,
+        "Circle",
+        pick_size=box / 2,
+        add_group=False,
     )
     picks = [
         pick for i, pick in enumerate(picks) if len(picked_locs[i]) > min_n

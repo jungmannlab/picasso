@@ -1,11 +1,11 @@
 """
-    picasso.gui.nanotron
-    ~~~~~~~~~~~~~~~~~~~~
+picasso.gui.nanotron
+~~~~~~~~~~~~~~~~~~~~
 
-    Graphical user interface for classification using deep learning
+Graphical user interface for classification using deep learning
 
-    :author: Alexander Auer, Maximilian Strauss 2020
-    :copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
+:author: Alexander Auer, Maximilian Strauss 2020
+:copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -24,6 +24,7 @@ import concurrent.futures
 from time import sleep
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
@@ -35,7 +36,10 @@ from PyQt5.QtGui import QIcon
 from .. import io, lib, render, nanotron, __version__
 
 DEFAULT_MODEL_PATH = os.path.join(
-    os.sep, "picasso", "model", "default_model.sav",
+    os.sep,
+    "picasso",
+    "model",
+    "default_model.sav",
 )
 default_model = False
 
@@ -250,10 +254,8 @@ class Trainer(QtCore.QThread):
         self.iterations = parameter["iterations"]
         self.learning_rate = parameter["learning_rate"]
         self.solver = parameter["solver"]
-        (
-            self.X_train, self.X_test, self.Y_train, self.Y_test
-        ) = train_test_split(
-            X_train, Y_train, test_size=0.30, random_state=42
+        (self.X_train, self.X_test, self.Y_train, self.Y_test) = (
+            train_test_split(X_train, Y_train, test_size=0.30, random_state=42)
         )
         self.mlp_list = []  # container to carry mlp class
         self.cm_list = []  # container to carry confusion_matrix
@@ -287,7 +289,10 @@ class Trainer(QtCore.QThread):
         self.cm_list.append(cm)
 
         self.training_finished.emit(
-            self.mlp_list, score, test_score, self.cm_list,
+            self.mlp_list,
+            score,
+            test_score,
+            self.cm_list,
         )
 
 
@@ -298,9 +303,9 @@ class Predictor(QtCore.QThread):
 
     Attributes
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         The input localizations for the model. Must contain the 'group'
-        field.
+        column.
     model : MLPClassifier
         The trained MLPClassifier model.
     n_groups : int
@@ -311,7 +316,7 @@ class Predictor(QtCore.QThread):
         Number of display pixels per camera pixel.
     pick_radius : float
         The radius used for picking localizations.
-    prediction : np.recarray
+    prediction : pd.DataFrame
         The predicted labels for the input localizations, one per group,
         i.e., pick.
 
@@ -319,9 +324,9 @@ class Predictor(QtCore.QThread):
     ----------
     mlp : MLPClassifier
         The trained MLPClassifier model.
-    locs : np.recarray
+    locs : pd.DataFrame
         The input localizations for the model. Must contain the 'group'
-        field.
+        column.
     pick_radius : float
         The radius used for picking localizations.
     oversampling : float
@@ -331,12 +336,12 @@ class Predictor(QtCore.QThread):
     """
 
     predictions_made = QtCore.pyqtSignal(int, int)
-    prediction_finished = QtCore.pyqtSignal(np.recarray)
+    prediction_finished = QtCore.pyqtSignal(pd.DataFrame)
 
     def __init__(
         self,
         mlp: MLPClassifier,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         pick_radius: float,
         oversampling: float,
         parent: QtWidgets.QWidget | None = None,
@@ -361,7 +366,7 @@ class Predictor(QtCore.QThread):
     def _worker(
         self,
         mlp: MLPClassifier,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         picks: np.ndarray,
         pick_radius: float,
         oversampling: float,
@@ -398,7 +403,7 @@ class Predictor(QtCore.QThread):
     def _predict_async(
         self,
         model: MLPClassifier,
-        locs: np.recarray,
+        locs: pd.DataFrame,
         picks: np.ndarray,
         pick_radius: float,
         oversampling: float,
@@ -456,13 +461,8 @@ class Predictor(QtCore.QThread):
 
         assert self.checkConsecutive(picks)
 
-        self.locs = lib.append_to_rec(
-            self.locs, classes[self.locs["group"]], "prediction"
-        )
-        self.locs = lib.append_to_rec(
-            self.locs, probas[self.locs["group"]], "score"
-        )
-
+        self.locs["prediction"] = classes[self.locs["group"]]
+        self.locs["score"] = probas[self.locs["group"]]
         self.prediction_finished.emit(self.locs)
 
 
@@ -567,7 +567,9 @@ class train_dialog(QtWidgets.QDialog):
         self.iterations.setValue(400)
         train_parameter_grid.addWidget(self.iterations, 0, 1)
         train_parameter_grid.addWidget(
-            QtWidgets.QLabel("Learning Rate:"), 1, 0,
+            QtWidgets.QLabel("Learning Rate:"),
+            1,
+            0,
         )
         self.learing_rate = QtWidgets.QDoubleSpinBox()
         self.learing_rate.resize(200, 50)
@@ -725,7 +727,9 @@ class train_dialog(QtWidgets.QDialog):
             ax1.set_ylabel("Loss")
 
             im = ax2.imshow(
-                self.cm, interpolation="nearest", cmap=plt.cm.Blues,
+                self.cm,
+                interpolation="nearest",
+                cmap=plt.cm.Blues,
             )
             ax2.figure.colorbar(im, ax=ax2)
             ax2.set(
@@ -866,9 +870,9 @@ class train_dialog(QtWidgets.QDialog):
 
                 if val >= 1.5:
                     print("Dataset {} will be downsampled.".format(key))
-                    self.training_files[key] = (
-                        file[file["group"] <= median_length]
-                    )
+                    self.training_files[key] = file[
+                        file["group"] <= median_length
+                    ]
 
                     msgBox = QtWidgets.QMessageBox(self)
                     msgBox.setIcon(QtWidgets.QMessageBox.Information)
@@ -949,7 +953,11 @@ class train_dialog(QtWidgets.QDialog):
             msgBox.exec_()
 
     def prepare_progress(
-        self, current_dataset, last_dataset, current_img, last_img,
+        self,
+        current_dataset,
+        last_dataset,
+        current_img,
+        last_img,
     ):
 
         self.progress_sets_label.setText(f"{current_dataset}/{last_dataset}")
@@ -994,7 +1002,8 @@ class View(QtWidgets.QLabel):
         self._pixmap = None
         self.locs = None
         self.rubberband = QtWidgets.QRubberBand(
-            QtWidgets.QRubberBand.Rectangle, self,
+            QtWidgets.QRubberBand.Rectangle,
+            self,
         )
         self.rubberband.setStyleSheet("selection-background-color: white")
 
@@ -1463,10 +1472,12 @@ class Window(QtWidgets.QMainWindow):
 
                 for pick in np.unique(filtered_locs["group"]):
                     pick_locs = filtered_locs[filtered_locs["group"] == pick]
-                    pick_centers.append([
-                        float(np.mean(pick_locs.x)),
-                        float(np.mean(pick_locs.y)),
-                    ])
+                    pick_centers.append(
+                        [
+                            float(np.mean(pick_locs.x)),
+                            float(np.mean(pick_locs.y)),
+                        ]
+                    )
 
                 pick_regions["Centers"] = pick_centers
                 pick_regions["Diameter"] = self.model_info["Pick Diameter"]
@@ -1500,8 +1511,7 @@ def main():
 
     plugins = [
         importlib.import_module(name)
-        for finder, name, ispkg
-        in iter_namespace(plugins)
+        for finder, name, ispkg in iter_namespace(plugins)
     ]
 
     for plugin in plugins:
@@ -1515,7 +1525,9 @@ def main():
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
         errorbox = QtWidgets.QMessageBox.critical(
-            window, "An error occured", message,
+            window,
+            "An error occured",
+            message,
         )
         errorbox.exec_()
         sys.__excepthook__(type, value, tback)

@@ -1,14 +1,14 @@
 """
-    ext/bitplane
-    ~~~~~~~~~~~~
-    Utility functions to handle bitplane data.
-    :author: Maximilian T Strauss, 2021-2022
-    :copyright: Copyright (c) 2021-2022 Maximilian T Strauss
+ext/bitplane
+~~~~~~~~~~~~
+Utility functions to handle bitplane data.
+:author: Maximilian T Strauss, 2021-2022
+:copyright: Copyright (c) 2021-2022 Maximilian T Strauss
 """
 
 import os.path as _ospath
 import numpy as np
-import h5py
+import pandas as pd
 import datetime
 
 try:
@@ -106,7 +106,7 @@ if IMSWRITER:
             if verbose:
                 print("Reading info from {}".format(path))
             self.path = _ospath.abspath(path)
-            self.file = h5py.File(path, "r")
+            self.file = pd.read_hdf(self.path)
 
             self.frames = list(self.file["DataSet"][self.RL].keys())
             self.n_frames = len(self.frames)
@@ -334,7 +334,7 @@ if IMSWRITER:
         info,
         z_min,
         z_max,
-        pixelsize
+        pixelsize,
     ):
 
         if len(array.shape) == 3:

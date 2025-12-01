@@ -1,14 +1,15 @@
 """
-    picasso.nanotron
-    ~~~~~~~~~~~~~~~~
+picasso.nanotron
+~~~~~~~~~~~~~~~~
 
-    Deep learning library for classification of picked localizations.
+Deep learning library for classification of picked localizations.
 
-    :author: Alexander Auer, Maximilian Strauss 2020
-    :copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
+:author: Alexander Auer, Maximilian Strauss 2020
+:copyright: Copyright (c) 2020 Jungmann Lab, MPI of Biochemistry
 """
 
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 from tqdm import tqdm as tqdm
 from scipy import ndimage
@@ -42,7 +43,7 @@ def prepare_img(
         Prepared image.
     """
     img = alpha * img - bg
-    img = img.astype('float')
+    img = img.astype("float")
     img = img / img.max()
     img = img.clip(min=0)
     img = img.reshape(img_shape**2)
@@ -71,7 +72,7 @@ def rotate_img(img: np.ndarray, angle: float) -> np.ndarray:
 
 
 def roi_to_img(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     pick: int,
     radius: float,
     oversampling: float,
@@ -82,7 +83,7 @@ def roi_to_img(
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations from which to create the image.
     pick : int
         The group number of the localizations to be picked.
@@ -104,16 +105,16 @@ def roi_to_img(
     # Isolate locs from pick
     pick_locs = []
     if picks is None:
-        pick_locs = locs[(locs["group"] == pick)]
+        pick_locs = locs[locs["group"] == pick]
     else:
         x, y = picks
         pick_locs = lib.locs_at(x, y, locs, radius)
-        pick_locs.sort(kind="mergesort", order="frame")
+        pick_locs.sort_values(by="frame", kind="mergesort", inplace=True)
     # dirty method to avoid floating point errors with render
     radius -= 0.001
 
-    x_mean = np.mean(pick_locs.x)
-    y_mean = np.mean(pick_locs.y)
+    x_mean = np.mean(pick_locs["x"])
+    y_mean = np.mean(pick_locs["y"])
 
     x_min = x_mean - radius
     x_max = x_mean + radius
@@ -125,24 +126,27 @@ def roi_to_img(
     # for debugging
     if False:
         print("mean x: {}".format(np.mean(pick_locs.x)))
-        print('length x: {}'.format(x_max - x_min))
+        print("length x: {}".format(x_max - x_min))
         print("mean y: {}".format(np.mean(pick_locs.y)))
-        print('length y: {}'.format(y_max - y_min))
-        print('radius: {}'.format(radius))
-        print('viewport: {}'.format(viewport))
+        print("length y: {}".format(y_max - y_min))
+        print("radius: {}".format(radius))
+        print("viewport: {}".format(viewport))
 
     # Render locs with Picasso render function
     try:
-        len_x, pick_img = render.render(pick_locs, viewport=viewport,
-                                        oversampling=oversampling,
-                                        blur_method='smooth')
+        len_x, pick_img = render.render(
+            pick_locs,
+            viewport=viewport,
+            oversampling=oversampling,
+            blur_method="smooth",
+        )
     except Exception:
         pass
     return pick_img
 
 
 def prepare_data(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     label: int,
     pick_radius: float,
     oversampling: float,
@@ -155,7 +159,7 @@ def prepare_data(
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations from which to create the images.
     label : int
         Label for the data, typically the group number.
@@ -183,22 +187,26 @@ def prepare_data(
     data = []
     labels = []
 
-    for pick in tqdm(range(locs.group.max()), desc='Prepare '+str(label)):
+    for pick in tqdm(range(locs["group"].max()), desc="Prepare " + str(label)):
 
-        pick_img = roi_to_img(locs, pick,
-                              radius=pick_radius,
-                              oversampling=oversampling)
+        pick_img = roi_to_img(
+            locs, pick, radius=pick_radius, oversampling=oversampling
+        )
 
         if export is True and pick < 10:
-            filename = 'label' + str(label) + '-' + str(pick)
+            filename = "label" + str(label) + "-" + str(pick)
             plt.imsave(
-                './img/' + filename + '.png', (alpha*pick_img-bg),
-                cmap='Greys',
+                "./img/" + filename + ".png",
+                (alpha * pick_img - bg),
+                cmap="Greys",
                 vmax=10,
             )
 
         pick_img = prepare_img(
-            pick_img, img_shape=img_shape, alpha=alpha, bg=bg,
+            pick_img,
+            img_shape=img_shape,
+            alpha=alpha,
+            bg=bg,
         )
 
         data.append(pick_img)
@@ -209,7 +217,7 @@ def prepare_data(
 
 def predict_structure(
     mlp: MLPClassifier,
-    locs: np.recarray,
+    locs: pd.DataFrame,
     pick: int,
     pick_radius: float,
     oversampling: float,
@@ -222,7 +230,7 @@ def predict_structure(
     ----------
     mlp : MLPClassifier
         Trained MLP classifier.
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations to predict.
     pick : int
         Index of the localizations to predict.

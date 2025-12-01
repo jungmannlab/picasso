@@ -1,11 +1,11 @@
 """
-    picasso.lib
-    ~~~~~~~~~~~
+picasso.lib
+~~~~~~~~~~~
 
-    Handy functions and classes.
+Handy functions and classes.
 
-    :author: Joerg Schnitzbauer, 2016
-    :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
+:author: Joerg Schnitzbauer, 2016
+:copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
 from __future__ import annotations
@@ -15,18 +15,19 @@ import collections
 import colorsys
 import os
 import time
+import warnings
 from typing import Any
 from collections.abc import Callable
 from asyncio import Future
 
 import numba
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
-from numpy.lib.recfunctions import append_fields
-from numpy.lib.recfunctions import drop_fields
-from numpy.lib.recfunctions import stack_arrays
+from numpy.lib.recfunctions import append_fields, drop_fields
 from matplotlib.backends.backend_qt5agg import (
-    FigureCanvas, NavigationToolbar2QT
+    FigureCanvas,
+    NavigationToolbar2QT,
 )
 from PyQt5 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
@@ -66,6 +67,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.t0 = time.time()
         self.app = QtCore.QCoreApplication.instance()
         self.initalized = True
+        self.count_started = False
         self.finished = False
         # sound notification
         self.sound_notification_path = get_sound_notification_path()
@@ -74,31 +76,39 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         if not self.initalized:
             self.init()
         self.setValue(value)
-        # estimate time left
-        elapsed = time.time() - self.t0
-        remaining = int((self.maximum() - value) * elapsed / (value + 1e-6))
-        # convert to hh-mm-ss
-        hours, remainder = divmod(remaining, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        # format time estimate
-        if hours > 0:
-            hours = min(10, hours)  # limit hours to 10 for display
-            time_estimate = f"{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
-        else:
-            time_estimate = f"{minutes:02d}m:{seconds:02d}s"
-        # set label text with time estimate
-        description = (
-            f"{self.description_base}"
-            f"\nEstimated time remaining: {time_estimate}"
-        )
-        self.setLabelText(description)
+        if self.count_started:
+            # estimate time left
+            elapsed = time.time() - self.t0_est
+            remaining = int(
+                (self.maximum() - value) * elapsed / (value + 1e-6)
+            )
+            # convert to hh-mm-ss
+            hours, remainder = divmod(remaining, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            # format time estimate
+            if hours > 0:
+                hours = min(10, hours)  # limit hours to 10 for display
+                time_estimate = f"{hours:02d}h:{minutes:02d}m:{seconds:02d}s"
+            else:
+                time_estimate = f"{minutes:02d}m:{seconds:02d}s"
+            # set label text with time estimate
+            description = (
+                f"{self.description_base}"
+                f"\nEstimated time remaining: {time_estimate}"
+            )
+            self.setLabelText(description)
+        # sound notification
         if value >= self.maximum() and self.finished is False:
             self.finished = True
             self.play_sound_notification()
+        # if value is above zero, count has started, enabling time estimate
+        if not self.count_started:
+            if value > 0:
+                self.count_started = True
+                self.t0_est = time.time()
         self.app.processEvents()
 
     def closeEvent(self, event):
-        time.sleep(0.3)  # TODO: does it fixthe issue of dialogs not closing
         _dialogs.remove(self)
         if self.finished is False:
             self.finished = True
@@ -124,7 +134,8 @@ class StatusDialog(QtWidgets.QDialog):
 
     def __init__(self, description, parent):
         super(StatusDialog, self).__init__(
-            parent, QtCore.Qt.CustomizeWindowHint,
+            parent,
+            QtCore.Qt.CustomizeWindowHint,
         )
         _dialogs.append(self)
         vbox = QtWidgets.QVBoxLayout(self)
@@ -136,14 +147,13 @@ class StatusDialog(QtWidgets.QDialog):
         QtCore.QCoreApplication.instance().processEvents()
 
     def closeEvent(self, event):
-        time.sleep(0.3)  # TODO: does it fixthe issue of dialogs not closing
         _dialogs.remove(self)
         if self.sound_notification_path is not None:
             if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
                 playsound(self.sound_notification_path, block=False)
 
 
-class MockProgress():
+class MockProgress:
     """Class to mock a progress bar or dialog, allowing for calling
     the same methods but not displaying anything."""
 
@@ -282,9 +292,8 @@ def get_sound_notification_path() -> str | None:
         io.save_user_settings(settings)
     filename = settings["Sound_notification"]["filename"]
     sounds_dir = _sound_notification_dir()
-    if (
-        filename is not None and
-        os.path.isfile(os.path.join(sounds_dir, filename))
+    if filename is not None and os.path.isfile(
+        os.path.join(sounds_dir, filename)
     ):
         ext = os.path.splitext(filename)[1].lower()
         if ext not in [".mp3", ".wav"]:
@@ -307,9 +316,10 @@ def get_available_sound_notifications() -> list[str | None]:
     """
     sounds_dir = _sound_notification_dir()
     filenames = [
-        _ for _ in os.listdir(sounds_dir)
-        if os.path.isfile(os.path.join(sounds_dir, _)) and
-        os.path.splitext(_)[1].lower() in [".mp3", ".wav"]
+        _
+        for _ in os.listdir(sounds_dir)
+        if os.path.isfile(os.path.join(sounds_dir, _))
+        and os.path.splitext(_)[1].lower() in [".mp3", ".wav"]
     ]
     filenames = ["None"] + filenames
     return filenames
@@ -340,6 +350,73 @@ def _sound_notification_dir() -> str:
         "gui",
         "notification_sounds",
     )
+
+
+def adjust_widget_size(
+    widget: QtWidgets.QWidget,
+    size_hint: QtCore.QSize,
+    width_offset: int = 0,
+    height_offset: int = 0,
+) -> None:
+    """Adjust the size of a QWidget based on its size hint. The user
+    can specify the offsets to be added to the width and height of the
+    size hint. The user can also specify whether to limit the width
+    and height to the screen size.
+
+    Parameters
+    ----------
+    widget : QtWidgets.QWidget
+        The widget to be adjusted.
+    size_hint : QtCore.QSize
+        The size hint of the widget. Can be obtained with
+        widget.sizeHint().
+    width_offset : int, optional
+        The offset to be added to the width of the size hint. Default is
+        0.
+    height_offset : int, optional
+        The offset to be added to the height of the size hint. Default
+        is 0.
+    """
+    widget.resize(
+        size_hint.width() + width_offset,
+        size_hint.height() + height_offset,
+    )
+    screen = QtWidgets.QApplication.primaryScreen()
+    screen_height = 1000 if screen is None else screen.size().height()
+    screen_width = 1000 if screen is None else screen.size().width()
+    # adjust to the screen size if necessary
+    if widget.width() > screen_width:
+        widget.resize(screen_width - 100, widget.height())
+    if widget.height() > screen_height:
+        widget.resize(widget.width(), screen_height - 100)
+
+
+def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
+    """Get a value from the localization metadata (list of dictionaries
+    or a dictionary). Returns default if the key is not found.
+
+    Parameters
+    ----------
+    info : list of dicts or dict
+        Localization metadata.
+    key : Any
+        Key to be searched in the metadata.
+
+    Returns
+    -------
+    value : Any
+        Value corresponding to the key in the metadata. If the key is
+        not found, default is returned.
+    """
+    if isinstance(info, dict):
+        return info.get(key, default)
+    elif isinstance(info, list):
+        for inf in info:
+            if val := inf.get(key):
+                return val
+        return default
+    else:
+        raise ValueError("info must be a dict or a list of dicts.")
 
 
 def get_colors(n_channels):
@@ -377,13 +454,32 @@ def is_hexadecimal(text):
         True if text represents rgb, False otherwise.
     """
     allowed_characters = [
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
-        'a', 'b', 'c', 'd', 'e', 'f',
-        'A', 'B', 'C', 'D', 'E', 'F',
+        "0",
+        "1",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
+        "9",
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "f",
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
     ]
     sum_char = 0
     if isinstance(text, str):
-        if text[0] == '#':
+        if text[0] == "#":
             if len(text) == 7:
                 for char in text[1:]:
                     if char in allowed_characters:
@@ -461,6 +557,12 @@ def append_to_rec(
     rec_array : np.recarray
         Recarray with the new column.
     """
+    warnings.warn(
+        "Appending to recarrays is deprecated and will be removed in Picasso"
+        " 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
+        " recarrays. Simply use locs['new_column'] = data to add a new column"
+        " to the DataFrame."
+    )
     if hasattr(rec_array, name):
         rec_array = remove_from_rec(rec_array, name)
     rec_array = append_fields(
@@ -475,15 +577,15 @@ def append_to_rec(
 
 
 def merge_locs(
-    locs_list: list[np.recarray],
+    locs_list: list[pd.DataFrame],
     increment_frames: bool = True,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Merge localization lists into one file. Can increment frames
     to avoid overlapping frames.
 
     Parameters
     ----------
-    locs_list : list of np.recarrays
+    locs_list : list of pd.DataFrame's
         List of localization lists to be merged.
     increment_frames : bool, optional
         If True, increments frames of each localization list by the
@@ -493,7 +595,7 @@ def merge_locs(
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Merged localizations.
     """
     if increment_frames:
@@ -502,43 +604,40 @@ def merge_locs(
             locs["frame"] += last_frame
             last_frame = locs["frame"][-1].max()
             locs_list[i] = locs
-    locs = stack_arrays(locs_list, usemask=False, asrecarray=True)
+    locs = pd.concat(locs_list, ignore_index=True)
     return locs
 
 
-def ensure_sanity(locs: np.recarray, info: list[dict]) -> np.recarray:
+def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     """Ensure that localizations are within the image dimensions
     and have positive localization precisions and other parameters.
 
     Parameters
     ----------
-    locs : np.recarray
-        Localizations list.
+    locs : pd.DataFrame
+        Localizations.
     info : list of dicts
         Localization metadata.
 
     Returns
     -------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations that pass the sanity checks.
     """
-    # no inf or nan:
-    locs = locs[
-        np.all(
-            np.array([np.isfinite(locs[_]) for _ in locs.dtype.names]),
-            axis=0,
-        )
-    ]
+    # no inf and nan:
+    locs = locs.copy()
+    locs.replace([np.inf, -np.inf], np.nan, inplace=True)
+    locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:
-    locs = locs[locs.x < info[0]["Width"]]
-    locs = locs[locs.y < info[0]["Height"]]
+    locs = locs[locs["x"] < info[0]["Width"]]
+    locs = locs[locs["y"] < info[0]["Height"]]
     for attr in ["x", "y", "lpx", "lpy", "photons", "ellipticity", "sx", "sy"]:
-        if hasattr(locs, attr):
+        if attr in locs.columns:
             locs = locs[locs[attr] >= 0]
     return locs
 
 
-def is_loc_at(x: float, y: float, locs: np.recarray, r: float) -> np.ndarray:
+def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
     """Check which localizations are within radius ``r`` from position
     ``(x, y)``.
 
@@ -546,8 +645,8 @@ def is_loc_at(x: float, y: float, locs: np.recarray, r: float) -> np.ndarray:
     ----------
     x, y : float
         x and y-coordinate of the position.
-    locs : np.recarray
-        Localizations list.
+    locs : pd.DataFrame
+        Localizations.
     r : float
         Radius.
 
@@ -557,14 +656,14 @@ def is_loc_at(x: float, y: float, locs: np.recarray, r: float) -> np.ndarray:
         Boolean array - True if a localization is within radius r
         of position (x, y).
     """
-    dx = locs.x - x
-    dy = locs.y - y
+    dx = locs["x"].values - x
+    dy = locs["y"].values - y
     r2 = r**2
     is_picked = dx**2 + dy**2 < r2
     return is_picked
 
 
-def locs_at(x: float, y: float, locs: np.recarray, r: float) -> np.recarray:
+def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:
     """Return localizations within radius ``r`` from the position
     ``(x, y)``.
 
@@ -572,14 +671,14 @@ def locs_at(x: float, y: float, locs: np.recarray, r: float) -> np.recarray:
     ----------
     x, y : float
         x and y-coordinate of the position.
-    locs : np.recarray
-        Localizations list.
+    locs : pd.DataFrame
+        Localizations.
     r : float
         Radius.
 
     Returns
     -------
-    picked_locs : np.recarray
+    picked_locs : pd.DataFrame
         Localizations in the specified area.
     """
     is_picked = is_loc_at(x, y, locs, r)
@@ -618,11 +717,11 @@ def check_if_in_polygon(
         count = 0
         for j in range(n_polygon):
             j_next = (j + 1) % n_polygon
-            if (
-                ((Y[j] > y[i]) != (Y[j_next] > y[i])) and
+            if ((Y[j] > y[i]) != (Y[j_next] > y[i])) and (
                 (
-                    (x[i] < X[j] + (X[j_next] - X[j])
-                     * (y[i] - Y[j]) / (Y[j_next] - Y[j]))
+                    x[i]
+                    < X[j]
+                    + (X[j_next] - X[j]) * (y[i] - Y[j]) / (Y[j_next] - Y[j])
                 )
             ):
                 count += 1
@@ -633,27 +732,27 @@ def check_if_in_polygon(
 
 
 def locs_in_polygon(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     X: np.ndarray,
     Y: np.ndarray,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Return localizations within the polygon defined by corners
     ``(X, Y)``.
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localizations.
     X, Y : list
         x and y-coordinates of polygon corners.
 
     Returns
     -------
-    picked_locs : np.recarray
+    picked_locs : pd.DataFrame
         Localizations in polygon.
     """
     is_in_polygon = check_if_in_polygon(
-        locs.x, locs.y, np.array(X), np.array(Y)
+        locs["x"].values, locs["y"].values, np.array(X), np.array(Y)
     )
     return locs[is_in_polygon]
 
@@ -711,27 +810,27 @@ def check_if_in_rectangle(
 
 
 def locs_in_rectangle(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     X: np.ndarray,
     Y: np.ndarray,
-) -> np.recarray:
+) -> pd.DataFrame:
     """Return localizations within the rectangle defined by corners
     ``(X, Y)``.
 
     Parameters
     ----------
-    locs : np.recarray
-        Localizations list.
+    locs : pd.DataFrame
+        Localizations.
     X, Y : list
         x and y coordinates of rectangle corners.
 
     Returns
     -------
-    picked_locs : np.recarray
+    picked_locs : pd.DataFrame
         Localizations in rectangle.
     """
     is_in_rectangle = check_if_in_rectangle(
-        locs.x, locs.y, np.array(X), np.array(Y)
+        locs["x"].values, locs["y"].values, np.array(X), np.array(Y)
     )
     picked_locs = locs[is_in_rectangle]
     return picked_locs
@@ -805,13 +904,19 @@ def remove_from_rec(rec_array: np.recarray, name: str) -> np.recarray:
     rec_array : np.recarray
         Recarray without the column.
     """
+    warnings.warn(
+        "Removing columns from recarrays is deprecated and will be removed in "
+        " Picasso 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
+        " recarrays. Simply use locs.drop('new_column', axis=1) to remove a"
+        " column from the DataFrame."
+    )
     rec_array = drop_fields(rec_array, name, usemask=False, asrecarray=True)
     return rec_array
 
 
 def locs_glob_map(
     func: Callable[
-        [np.recarray, dict, str, Any], tuple[np.recarray, list[dict]]
+        [pd.DataFrame, dict, str, Any], tuple[pd.DataFrame, list[dict]]
     ],
     pattern: str,
     args: list = [],

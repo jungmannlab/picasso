@@ -1,11 +1,11 @@
 """
-    picasso.simulate
-    ~~~~~~~~~~~~~~~~
+picasso.simulate
+~~~~~~~~~~~~~~~~
 
-    Simulate single molecule fluorescence data.
+Simulate single molecule fluorescence data.
 
-    :author: Maximilian Thomas Strauss, 2016-2018
-    :copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
+:author: Maximilian Thomas Strauss, 2016-2018
+:copyright: Copyright (c) 2016-2018 Jungmann Lab, MPI of Biochemistry
 """
 
 import numpy as np
@@ -251,7 +251,8 @@ def paintgen(
                 photonsinframe[1 + tempFrame] = int(
                     np.random.poisson(
                         ((tempFrame + 1) * time - eventsum[i - 1])
-                        / time * photons
+                        / time
+                        * photons
                     )
                 )
             # CASE 2: all photons are emitted in two frames
@@ -260,14 +261,16 @@ def paintgen(
                     photonsinframe[1 + tempFrame] = int(
                         np.random.poisson(
                             ((tempFrame + 1) * time - eventsum[i - 1])
-                            / time * photons
+                            / time
+                            * photons
                         )
                     )
                 else:  # photons in second onframe
                     photonsinframe[2 + tempFrame] = int(
                         np.random.poisson(
                             (eventsum[i] - (tempFrame + 1) * time)
-                            / time * photons
+                            / time
+                            * photons
                         )
                     )
             else:  # CASE 3: all photons are mitted in three or more frames
@@ -275,7 +278,8 @@ def paintgen(
                     photonsinframe[1 + tempFrame] = int(
                         np.random.poisson(
                             ((tempFrame + 1) * time - eventsum[i - 1])
-                            / time * photons
+                            / time
+                            * photons
                         )
                     )  # Indexing starts with 0
                 elif j == onFrames:
@@ -287,12 +291,12 @@ def paintgen(
                         )
                     )
                 else:
-                    photonsinframe[tempFrame + j] = (
-                        int(np.random.poisson(photons))
+                    photonsinframe[tempFrame + j] = int(
+                        np.random.poisson(photons)
                     )
 
-        totalphotons = (
-            np.sum(photonsinframe[1 + tempFrame:tempFrame + 1 + onFrames])
+        totalphotons = np.sum(
+            photonsinframe[1 + tempFrame : tempFrame + 1 + onFrames]
         )
         if totalphotons > photonbudget:
             photonsinframe[onFrames + tempFrame] = int(
@@ -435,9 +439,9 @@ def distphotonsxy(
         if photoncount > 0:
             mu = [bindingsitesx[i], bindingsitesy[i]]
             photonpos = np.random.multivariate_normal(mu, cov, photoncount)
-            photonposframe[
-                n_photons_step[i]:n_photons_step[i + 1], :
-            ] = photonpos
+            photonposframe[n_photons_step[i] : n_photons_step[i + 1], :] = (
+                photonpos
+            )
 
     return photonposframe
 
@@ -642,8 +646,7 @@ def rotateStructure(structure: np.ndarray) -> np.ndarray:
 
 
 def incorporateStructure(
-    structure: np.ndarray,
-    incorporation: float
+    structure: np.ndarray, incorporation: float
 ) -> np.ndarray:
     """Return a subset of the structure to reflect incorporation of
     staples.
@@ -662,9 +665,9 @@ def incorporateStructure(
         Array containing the subset of the structure after applying the
         incorporation probability.
     """
-    newstructure = (
-        structure[:, (np.random.rand(structure.shape[1]) < incorporation)]
-    )
+    newstructure = structure[
+        :, (np.random.rand(structure.shape[1]) < incorporation)
+    ]
     return newstructure
 
 
