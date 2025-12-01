@@ -10576,6 +10576,10 @@ class Window(QtWidgets.QMainWindow):
         postprocess_menu.addSeparator()
         group_action = postprocess_menu.addAction("Remove group info")
         group_action.triggered.connect(self.remove_group)
+        sync_group_action = postprocess_menu.addAction(
+            "Synchronize groups across channels"
+        )
+        sync_group_action.triggered.connect(self.sync_groups)
         unfold_action_square = postprocess_menu.addAction(
             "Unfold groups/picks (square grid)"
         )
@@ -11392,6 +11396,21 @@ class Window(QtWidgets.QMainWindow):
             self.view.locs[channel].drop(columns="group", inplace=True)
             self.view.all_locs[channel].drop(columns="group", inplace=True)
             self.view.update_scene()
+
+    def sync_groups(self) -> None:
+        """Remove localizations whose group field is not found in all
+        channels."""
+        if len(self.view.locs_paths) < 2:
+            return
+
+        unique_groups = [np.unique(_["group"]) for _ in self.view.all_locs]
+        common_groups = set(unique_groups[0]).intersection(*unique_groups)
+        for channel in range(len(self.view.locs_paths)):
+            all_locs = self.view.all_locs[channel]
+            mask = all_locs["group"].isin(common_groups)
+            self.view.all_locs[channel] = all_locs[mask].reset_index(drop=True)
+            self.view.locs[channel] = self.view.all_locs[channel].copy()
+        self.view.update_scene()
 
     def save_pick_properties(self) -> None:
         """Save pick properties in a given channel (or channels)."""
