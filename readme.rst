@@ -46,7 +46,7 @@ As an alternative to the stand-alone program for end-users, Picasso can be insta
 Via PyPI
 ^^^^^^^^
 
-1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10.13``
+1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
 2. Activate the environment: ``conda activate picasso``.
 3. Install Picasso package using: ``pip install picassosr``.
 4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
@@ -56,7 +56,7 @@ For Developers (local, editable installation)
 
 If you wish to use your local version of Picasso with your own modifications:
 
-1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10.13``
+1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
 2. Activate the environment: ``conda activate picasso``.
 3. Change to the directory of choice using ``cd``.
 4. Clone this GitHub repository by running ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
