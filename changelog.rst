@@ -27,6 +27,7 @@ Important updates:
 - Render: clustering metadata saves fraction of rejected localizations
 - Render: screenshot .yaml files can be dragged and dropped to load the display settings
 - Render 3D: display adjusted after changing blur method
+- Localize: localization precision formula for least-squares fitting was corrected to account for a diagonal covariance Gaussian (background term is affected); the function for localization precision was moved from ``picasso.postprocess`` to ``picasso.gausslq``
 - SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
 - SPINNA: save last opened folder added
 - SPINNA: smaller font size in NND plot for better readability
