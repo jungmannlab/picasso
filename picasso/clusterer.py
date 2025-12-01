@@ -874,7 +874,10 @@ def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
     image = gaussian_filter(image, sigma=2)  # smooth image with sigma = LP
     # threshold the image and calculate area/volume
     thresh = masking.threshold_otsu(image.reshape(-1))
-    area = np.sum(image >= thresh) / (2 ** X.shape[1])  # area in LP^2, bins are 0.5 LP
+    if X.shape[1] == 3:  # 3D
+        area = np.sum(image >= thresh) / (16 / 5)  # volume in LP^3, bins are 0.5 LP in xy and 1.25 LP in z
+    else:  # 2D
+        area = np.sum(image >= thresh) / 4  # area in LP^2, bins are 0.5 LP
     return area
 
 
