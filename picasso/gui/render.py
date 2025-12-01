@@ -5592,10 +5592,15 @@ class View(QtWidgets.QLabel):
             status.close()
         if save_areas:
             progress = lib.ProgressDialog(
-                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+                "Calculating cluster areas",
+                0,
+                len(np.unique(locs.group)),
+                self,
             )
             progress.set_value(0)
-            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            areas = clusterer.cluster_areas(
+                locs, self.infos[channel], progress.set_value
+            )
             path = path.replace(".hdf5", "_areas.csv")
             areas.to_csv(path, index=False)
             progress.close()
@@ -5712,10 +5717,15 @@ class View(QtWidgets.QLabel):
             status.close()
         if save_areas:
             progress = lib.ProgressDialog(
-                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+                "Calculating cluster areas",
+                0,
+                len(np.unique(locs.group)),
+                self,
             )
             progress.set_value(0)
-            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            areas = clusterer.cluster_areas(
+                locs, self.infos[channel], progress.set_value
+            )
             path = path.replace(".hdf5", "_areas.csv")
             areas.to_csv(path, index=False)
             progress.close()
@@ -5850,10 +5860,15 @@ class View(QtWidgets.QLabel):
             status.close()
         if save_areas:
             progress = lib.ProgressDialog(
-                "Calculating cluster areas", 0, len(np.unique(locs.group)), self
+                "Calculating cluster areas",
+                0,
+                len(np.unique(locs.group)),
+                self,
             )
             progress.set_value(0)
-            areas = clusterer.cluster_areas(locs, self.infos[channel], progress.set_value)
+            areas = clusterer.cluster_areas(
+                locs, self.infos[channel], progress.set_value
+            )
             path = path.replace(".hdf5", "_areas.csv")
             areas.to_csv(path, index=False)
             progress.close()
@@ -6882,7 +6897,9 @@ class View(QtWidgets.QLabel):
             disp_dlg.min_blur_width.setValue(file["Min. blur (cam. px)"])
         if "Colors" in file and len(file["Colors"]) == len(self.locs):
             for i, color in enumerate(file["Colors"]):
-                self.window.dataset_dialog.colorselection[i].setCurrentText(color)
+                self.window.dataset_dialog.colorselection[i].setCurrentText(
+                    color
+                )
         if "Scalebar length (nm)" in file:
             disp_dlg.scalebar.setValue(file["Scalebar length (nm)"])
 
@@ -8785,7 +8802,9 @@ class View(QtWidgets.QLabel):
         channel : int
             Channel of locs to be saved.
         """
-        warnings.simplefilter("ignore", category=(OptimizeWarning, RuntimeWarning))
+        warnings.simplefilter(
+            "ignore", category=(OptimizeWarning, RuntimeWarning)
+        )
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
         # allow running even if no picks are present but group info is
         if len(self._picks) == 0:
@@ -8799,13 +8818,14 @@ class View(QtWidgets.QLabel):
                 QtWidgets.QMessageBox.warning(self, "Warning", message)
                 return
             picked_locs = [
-                locs[locs["group"] == i]
-                for i in np.unique(locs["group"])
+                locs[locs["group"] == i] for i in np.unique(locs["group"])
             ]
-            pick_diameter = 200 # nm
+            pick_diameter = 200  # nm
         else:
             picked_locs = self.picked_locs(channel)
-            pick_diameter = self.window.tools_settings_dialog.pick_diameter.value()
+            pick_diameter = (
+                self.window.tools_settings_dialog.pick_diameter.value()
+            )
         r_max = min(pick_diameter / pixelsize, 1)
         max_dark = self.window.info_dialog.max_dark_time.value()
         out_locs = []
@@ -8862,14 +8882,16 @@ class View(QtWidgets.QLabel):
                 areas = np.repeat(areas, n_groups)
             pick_props["pick_area_um2"] = areas
         progress.close()
-        warnings.simplefilter("default", category=(OptimizeWarning, RuntimeWarning))
+        warnings.simplefilter(
+            "default", category=(OptimizeWarning, RuntimeWarning)
+        )
         # QPAINT estimate of number of binding sites
         n_units = self.window.info_dialog.calculate_n_units(dark)
         pick_props["n_units"] = n_units
         pick_props["locs"] = no_locs
         pick_props["length_cdf"] = length
         pick_props["dark_cdf"] = dark
-        pick_props["qpaint_idx_cdf"] = dark ** -1
+        pick_props["qpaint_idx_cdf"] = dark**-1
         influx = self.window.info_dialog.influx_rate.value()
         info = self.infos[channel] + [
             {

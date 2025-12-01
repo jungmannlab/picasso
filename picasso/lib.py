@@ -368,7 +368,7 @@ def adjust_widget_size(
     widget : QtWidgets.QWidget
         The widget to be adjusted.
     size_hint : QtCore.QSize
-        The size hint of the widget. Can be obtained with 
+        The size hint of the widget. Can be obtained with
         widget.sizeHint().
     width_offset : int, optional
         The offset to be added to the width of the size hint. Default is
@@ -417,7 +417,7 @@ def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
         return default
     else:
         raise ValueError("info must be a dict or a list of dicts.")
-    
+
 
 def get_colors(n_channels):
     """Create a list with rgb channels for each channel.

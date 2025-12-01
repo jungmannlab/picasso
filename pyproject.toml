@@ -50,6 +50,7 @@ dependencies = [
 dev = [
     "build",
     "black",
+    "pre-commit",
     "twine",
     "bumpversion"
 ]
