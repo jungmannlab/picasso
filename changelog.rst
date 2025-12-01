@@ -14,6 +14,7 @@ Important updates:
 - New option to save cluster areas/volumes in DBSCAN, HDBSCAN and SMLM clusterer using Otsu thresholding of rendered images
 - Localize: ensure that 3D calibration is centered at z = 0; this guarantees the correct z scaling (magnification factor)
 - Render: unfold groups was removed as it is contained within the square grid unfolding
+- Render: new pick shape - square
 - Render: save pick properties extended to saving group properties, also qpaint index is saved
 - SPINNA: improved saved fit results summary (see issue #560)
 

@@ -644,6 +644,10 @@ class ViewRotation(QtWidgets.QLabel):
                 ) / self.pixelsize
             elif self.pick_shape == "Polygon":
                 self.pick_size = None
+            elif self.pick_shape == "Square":
+                self.pick_size = (
+                    w.tools_settings_dialog.pick_side_length.value()
+                ) / self.pixelsize
             else:
                 print("This should never happen.")
 
@@ -1324,6 +1328,13 @@ class ViewRotation(QtWidgets.QLabel):
             x_max = max(X)
             y_min = min(Y)
             y_max = max(Y)
+        elif self.pick_shape == "Square":
+            s = self.pick_size
+            x, y = self.pick
+            x_min = x - s / 2
+            x_max = x + s / 2
+            y_min = y - s / 2
+            y_max = y + s / 2
 
         viewport = [(y_min, x_min), (y_max, x_max)]
         if get_viewport:
@@ -2070,7 +2081,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         dx, dy : float
             Pick shift in x or y axis (camera pixels).
         """
-        if self.view_rot.pick_shape == "Circle":
+        if self.view_rot.pick_shape in ["Circle", "Square"]:
             x = self.window.view._picks[0][0]
             y = self.window.view._picks[0][1]
             self.window.view._picks = [(x + dx, y + dy)]  # main window
@@ -2136,7 +2147,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             angy = int(self.view_rot.angy * 180 / np.pi)
             angz = int(self.view_rot.angz * 180 / np.pi)
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
-            if self.view_rot.pick_shape == "Circle":
+            if self.view_rot.pick_shape in ["Circle", "Square"]:
                 x, y = self.view_rot.pick
                 pick = [float(x), float(y)]
                 size = self.view_rot.pick_size

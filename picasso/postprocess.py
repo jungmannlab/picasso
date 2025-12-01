@@ -187,7 +187,7 @@ def picked_locs(
     locs: pd.DataFrame,
     info: list[dict],
     picks: list[tuple],
-    pick_shape: str,
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
     pick_size: float = None,
     add_group: bool = True,
     callback: Callable[[int], None] | Literal["console"] | None = None,
@@ -203,7 +203,7 @@ def picked_locs(
         Metadata of the localizations list.
     picks : list
         List of picks.
-    pick_shape : {'Circle', 'Rectangle', 'Polygon'}
+    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}
         Shape of the pick.
     pick_size : float (default=None)
         Size of the pick. Radius for the circles, width for the
@@ -220,7 +220,7 @@ def picked_locs(
     picked_locs : list of pd.DataFrames
         List of pd.DataFrames, each containing locs from one pick.
     """
-    _valid_shapes = ("Circle", "Rectangle", "Polygon")
+    _valid_shapes = ("Circle", "Rectangle", "Polygon", "Square")
     assert (
         pick_shape in _valid_shapes
     ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
@@ -310,6 +310,32 @@ def picked_locs(
                 group_locs = group_locs[group_locs["y"] > min(Y)]
                 group_locs = group_locs[group_locs["y"] < max(Y)]
                 group_locs = lib.locs_in_polygon(group_locs, X, Y)
+                if add_group:
+                    group_locs["group"] = i * np.ones(
+                        len(group_locs), dtype=np.int32
+                    )
+                group_locs.sort_values(
+                    by="frame", kind="mergesort", inplace=True
+                )
+                picked_locs.append(group_locs)
+
+                if callback == "console":
+                    progress.update(1)
+                elif callback is not None:
+                    callback(i + 1)
+
+        elif pick_shape == "Square":
+            for i, pick in enumerate(picks):
+                x, y = pick
+                half_a = pick_size / 2
+                x_min = x - half_a
+                x_max = x + half_a
+                y_min = y - half_a
+                y_max = y + half_a
+                group_locs = locs[locs["x"] > x_min]
+                group_locs = group_locs[group_locs["x"] < x_max]
+                group_locs = group_locs[group_locs["y"] > y_min]
+                group_locs = group_locs[group_locs["y"] < y_max]
                 if add_group:
                     group_locs["group"] = i * np.ones(
                         len(group_locs), dtype=np.int32

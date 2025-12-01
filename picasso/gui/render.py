@@ -3777,6 +3777,31 @@ class PickToolRectangleSettings(QtWidgets.QWidget):
         self.grid.setRowStretch(1, 1)
 
 
+class PickToolSquareSettings(QtWidgets.QWidget):
+    """Choose parameters for square picks."""
+
+    def __init__(
+        self,
+        window: QtWidgets.QMainWindow,
+        tools_settings_dialog: ToolsSettingsDialog,
+    ) -> None:
+        super().__init__()
+        self.window = window
+        self.grid = QtWidgets.QGridLayout(self)
+        self.grid.addWidget(QtWidgets.QLabel("Side length (nm):"), 0, 0)
+        self.pick_side_length = QtWidgets.QDoubleSpinBox()
+        self.pick_side_length.setRange(0.1, 99999999.0)
+        self.pick_side_length.setValue(100.0)
+        self.pick_side_length.setSingleStep(5.0)
+        self.pick_side_length.setDecimals(1)
+        self.pick_side_length.setKeyboardTracking(False)
+        self.pick_side_length.valueChanged.connect(
+            tools_settings_dialog.on_pick_dimension_changed
+        )
+        self.grid.addWidget(self.pick_side_length, 0, 1)
+        self.grid.setRowStretch(1, 1)
+
+
 class ToolsSettingsDialog(QtWidgets.QDialog):
     """Customize picks - shape and size, annotate, change std for
     picking similar.
@@ -3811,7 +3836,7 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
 
         pick_grid.addWidget(QtWidgets.QLabel("Shape:"), 1, 0)
         self.pick_shape = QtWidgets.QComboBox()
-        self.pick_shape.addItems(["Circle", "Rectangle", "Polygon"])
+        self.pick_shape.addItems(["Circle", "Rectangle", "Polygon", "Square"])
         pick_grid.addWidget(self.pick_shape, 1, 1)
         pick_stack = QtWidgets.QStackedWidget()
         pick_grid.addWidget(pick_stack, 2, 0, 1, 2)
@@ -3831,6 +3856,11 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
         # Polygon
         self.pick_polygon_settings = QtWidgets.QWidget()
         pick_stack.addWidget(self.pick_polygon_settings)
+
+        # Square
+        self.pick_square_settings = PickToolSquareSettings(window, self)
+        pick_stack.addWidget(self.pick_square_settings)
+        self.pick_side_length = self.pick_square_settings.pick_side_length
 
         self.pick_annotation = QtWidgets.QCheckBox("Annotate picks")
         self.pick_annotation.stateChanged.connect(self.update_scene_with_cache)
@@ -6143,6 +6173,38 @@ class View(QtWidgets.QLabel):
                             str(i),
                         )
             painter.end()
+
+        # square - like rectangle but without rotation
+        elif self._pick_shape == "Square":
+            w = t_dialog.pick_side_length.value() / pixelsize
+            w *= self.width() / self.viewport_width()
+            w = int(w)
+            painter = QtGui.QPainter(image)
+            painter.setPen(QtGui.QColor("yellow"))
+            # yellow is barely visible on white background
+            if self.window.dataset_dialog.wbackground.isChecked():
+                painter.setPen(QtGui.QColor("red"))
+
+            for i, pick in enumerate(self._picks):
+                # check that the pick is within the view
+                if (
+                    pick[0] < self.viewport[0][1]
+                    or pick[0] > self.viewport[1][1]
+                    or pick[1] < self.viewport[0][0]
+                    or pick[1] > self.viewport[1][0]
+                ):
+                    continue
+
+                # convert from camera units to display units
+                cx, cy = self.map_to_view(*pick)
+                painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
+
+                # annotate picks
+                if t_dialog.pick_annotation.isChecked():
+                    painter.drawText(
+                        int(cx + w / 2) + 10, int(cy + w / 2) + 10, str(i)
+                    )
+            painter.end()
         return image
 
     def draw_rectangle_pick_ongoing(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -6573,6 +6635,16 @@ class View(QtWidgets.QLabel):
                     x_max = max(X) + 0.2 * (max(X) - min(X))
                     y_min = min(Y) - 0.2 * (max(Y) - min(Y))
                     y_max = max(Y) + 0.2 * (max(Y) - min(Y))
+                elif self._pick_shape == "Square":
+                    w = (
+                        self.window.tools_settings_dialog.pick_side_length.value()
+                        / pixelsize
+                    )
+                    x, y = self._picks[pick_no]
+                    x_min = x - 1.4 * (w / 2)
+                    x_max = x + 1.4 * (w / 2)
+                    y_min = y - 1.4 * (w / 2)
+                    y_max = y + 1.4 * (w / 2)
                 viewport = [(y_min, x_min), (y_max, x_max)]
                 self.update_scene(viewport=viewport)
 
@@ -7070,7 +7142,7 @@ class View(QtWidgets.QLabel):
             else:
                 event.ignore()
         elif self._mode == "Pick":
-            if self._pick_shape == "Circle":
+            if self._pick_shape in ["Circle", "Square"]:
                 # add pick
                 if event.button() == QtCore.Qt.LeftButton:
                     x, y = self.map_to_movie(event.pos())
@@ -8062,6 +8134,9 @@ class View(QtWidgets.QLabel):
             areas = lib.pick_areas_rectangle(self._picks, w)
         elif self._pick_shape == "Polygon":
             areas = lib.pick_areas_polygon(self._picks)
+        elif self._pick_shape == "Square":
+            a = self.window.tools_settings_dialog.pick_side_length.value() / px
+            areas = np.array([a**2])
         areas *= (px * 1e-3) ** 2  # convert to um^2
         return areas
 
@@ -8180,6 +8255,11 @@ class View(QtWidgets.QLabel):
                 pick_size = (
                     self.window.tools_settings_dialog.pick_width.value() / px
                 )
+            elif self._pick_shape == "Square":
+                pick_size = (
+                    self.window.tools_settings_dialog.pick_side_length.value()
+                    / px
+                )
             else:
                 pick_size = None
 
@@ -8229,6 +8309,14 @@ class View(QtWidgets.QLabel):
                         x, y, np.array(X), np.array(Y)
                     )[0]:
                         new_picks.append(pick)
+        elif self._pick_shape == "Square":
+            side = tool_dlg.pick_side_length.value() / px
+            for x_, y_ in self._picks:
+                if not (
+                    (x_ - side / 2 <= x <= x_ + side / 2)
+                    and (y_ - side / 2 <= y <= y_ + side / 2)
+                ):
+                    new_picks.append((x_, y_))
 
         # delete picks and add new_picks
         self._picks = []
@@ -8658,6 +8746,12 @@ class View(QtWidgets.QLabel):
                 and self._picks[-1][0] != self._picks[-1][-1]
             ):
                 pick_info["Number of picks"] -= 1
+            elif self._pick_shape == "Square":
+                a = self.window.tools_settings_dialog.pick_side_length.value()
+                pick_info["Pick Side Length (nm)"] = a
+                pick_info["Area (um^2)"] = pick_info["Area (um^2)"] * len(
+                    self._picks
+                )
             io.save_locs(path, locs, self.infos[channel] + [pick_info])
 
     def save_picked_locs_sep(self, path: str, channel: int) -> None:
@@ -8678,7 +8772,11 @@ class View(QtWidgets.QLabel):
         if locs is not None:
             areas = self.pick_areas()
             for i, pick_locs in enumerate(locs):
-                area = areas[i] if self._pick_shape != "Circle" else areas[0]
+                area = (
+                    areas[i]
+                    if self._pick_shape not in ["Circle", "Square"]
+                    else areas[0]
+                )
                 pick_info = {
                     "Generated by": f"Picasso v{__version__} Render : Pick",
                     "Pick Shape": self._pick_shape,
@@ -8696,6 +8794,11 @@ class View(QtWidgets.QLabel):
                     and self._picks[-1][0] != self._picks[-1][-1]
                 ):
                     pick_info["Number of picks"] -= 1
+                elif self._pick_shape == "Square":
+                    a = (
+                        self.window.tools_settings_dialog.pick_side_length.value()
+                    )
+                    pick_info["Pick Side Length (nm)"] = a
                 io.save_locs(
                     path.replace(".hdf5", f"_{i}.hdf5"),
                     pick_locs,
@@ -8724,10 +8827,10 @@ class View(QtWidgets.QLabel):
         if locs is not None:
             areas = self.pick_areas()
             pick_info = {
-                "Generated by:": f"Picasso v{__version__} Render : Pick",
-                "Pick Shape:": self._pick_shape,
+                "Generated by": f"Picasso v{__version__} Render : Pick",
+                "Pick Shape": self._pick_shape,
                 "Pick Areas (um^2)": [float(_) for _ in areas],
-                "Total Picked Area (um^2)": float(np.sum(areas)),
+                "Area (um^2)": float(np.sum(areas)),
                 "Number of picks": len(self._picks),
                 "Channels combined": self.locs_paths,
             }
@@ -8737,6 +8840,15 @@ class View(QtWidgets.QLabel):
             elif self._pick_shape == "Rectangle":
                 w = self.window.tools_settings_dialog.pick_width.value()
                 pick_info["Pick Width (nm)"] = w
+            # if polygon pick and the last not closed, ignore the last pick
+            elif (
+                self._pick_shape == "Polygon"
+                and self._picks[-1][0] != self._picks[-1][-1]
+            ):
+                pick_info["Number of picks"] -= 1
+            elif self._pick_shape == "Square":
+                a = self.window.tools_settings_dialog.pick_side_length.value()
+                pick_info["Pick Side Length (nm)"] = a
             io.save_locs(path, locs, self.infos[0] + [pick_info])
 
     def save_picked_locs_multi_sep(self, path: str) -> None:
@@ -8763,7 +8875,11 @@ class View(QtWidgets.QLabel):
             areas = self.pick_areas()
             for i, pick_locs in enumerate(locs):
                 # area is the same for all picks, if circle
-                area = areas[i] if self._pick_shape != "Circle" else areas[0]
+                area = (
+                    areas[i]
+                    if self._pick_shape not in ["Circle", "Square"]
+                    else areas[0]
+                )
                 pick_info = {
                     "Generated by": f"Picasso v{__version__} Render : Pick",
                     "Pick Shape": self._pick_shape,
@@ -8782,6 +8898,11 @@ class View(QtWidgets.QLabel):
                     and self._picks[-1][0] != self._picks[-1][-1]
                 ):
                     pick_info["Number of picks"] -= 1
+                elif self._pick_shape == "Square":
+                    a = (
+                        self.window.tools_settings_dialog.pick_side_length.value()
+                    )
+                    pick_info["Pick Side Length (nm)"] = a
                 io.save_locs(
                     path.replace(".hdf5", f"_{i}.hdf5"),
                     pick_locs,
@@ -8878,7 +8999,10 @@ class View(QtWidgets.QLabel):
         # add the area of the picks to the properties (if available)
         if len(self._picks):
             areas = self.pick_areas()
-            if self._pick_shape == "Circle":  # duplicate values for each pick
+            if self._pick_shape in [
+                "Circle",
+                "Square",
+            ]:  # duplicate values for each pick
                 areas = np.repeat(areas, n_groups)
             pick_props["pick_area_um2"] = areas
         progress.close()
@@ -8937,6 +9061,12 @@ class View(QtWidgets.QLabel):
                             [float(vertex[0]), float(vertex[1])]
                         )
             picks["Vertices"] = vertices
+        elif self._pick_shape == "Square":
+            a = self.window.tools_settings_dialog.pick_side_length.value()
+            picks["Side Length (nm)"] = float(a)
+            picks["Centers"] = [
+                [float(_[0]), float(_[1])] for _ in self._picks
+            ]
         picks["Shape"] = self._pick_shape
         with open(path, "w") as f:
             yaml.dump(picks, f)
@@ -9689,6 +9819,31 @@ class View(QtWidgets.QLabel):
                 painter.end()
                 cursor = QtGui.QCursor(pixmap)
                 self.setCursor(cursor)
+            elif self._pick_shape == "Square":
+                side_length = (
+                    self.window.tools_settings_dialog.pick_side_length.value()
+                    / self.window.display_settings_dlg.pixelsize.value()
+                )
+                side_length = int(
+                    self.width() * side_length / self.viewport_width()
+                )
+                if side_length < 100:
+                    pixmap_size = ceil(side_length) + 1
+                    pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
+                    pixmap.fill(QtCore.Qt.transparent)
+                    painter = QtGui.QPainter(pixmap)
+                    painter.setPen(QtGui.QColor("white"))
+                    if self.window.dataset_dialog.wbackground.isChecked():
+                        painter.setPen(QtGui.QColor("black"))
+                    offset = int((pixmap_size - side_length) / 2)
+                    painter.drawRect(offset, offset, side_length, side_length)
+                    painter.end()
+                    cursor = QtGui.QCursor(pixmap)
+                    self.setCursor(cursor)
+                else:
+                    self.unsetCursor()
+            else:
+                self.unsetCursor()
 
     def update_pick_info_long(self) -> None:
         """Evaluate pick statistics in ``InfoDialog``."""
@@ -11213,8 +11368,12 @@ class Window(QtWidgets.QMainWindow):
                     self.tools_settings_dialog.pick_diameter.setValue(
                         self.view.infos[0][-1]["Pick size (nm)"]
                     )
-                else:
+                elif self.view._pick_shape == "Rectangle":
                     self.tools_settings_dialog.pick_width.setValue(
+                        self.view.infos[0][-1]["Pick size (nm)"]
+                    )
+                elif self.view._pick_shape == "Square":
+                    self.tools_settings_dialog.pick_side_length.setValue(
                         self.view.infos[0][-1]["Pick size (nm)"]
                     )
                 self.window_rot.view_rot.angx = self.view.infos[0][-1]["angx"]
