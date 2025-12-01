@@ -13,7 +13,7 @@ authors = [
 keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
 description = "A collection of tools for painting super-resolution images"
 readme = "readme.rst"
-requires-python = "==3.10.19"
+requires-python = "==3.10.13"
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
