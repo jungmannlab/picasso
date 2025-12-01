@@ -44,6 +44,7 @@ Important updates:
 - Render: fix loading camera pixel size from metadata (see issue #560)
 - Render: saving picks separately fixed areas in the .yaml files
 - Render: loading a new channel with rendering by property fixed
+- Render: mouse events are ignored if no localizations are loaded
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
 - Render 3D: fixed ind. loc. prec.

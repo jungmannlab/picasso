@@ -6961,6 +6961,9 @@ class View(QtWidgets.QLabel):
     def mouseMoveEvent(self, event: QtCore.QEvent) -> None:
         """Drawing zoom-in rectangle, panning or drawing a rectangular
         pick."""
+        if not len(self.locs):
+            return
+
         if self._mode == "Zoom":
             # if zooming in
             if self.rubberband.isVisible():
@@ -6985,6 +6988,9 @@ class View(QtWidgets.QLabel):
     def mousePressEvent(self, event: QtCore.QEvent) -> None:
         """Start drawing a zoom-in rectangle, start padding, start
         drawing a pick rectangle."""
+        if not len(self.locs):
+            return
+
         if self._mode == "Zoom":
             # start drawing a zoom-in rectangle
             if event.button() == QtCore.Qt.LeftButton:
@@ -7016,6 +7022,9 @@ class View(QtWidgets.QLabel):
     def mouseReleaseEvent(self, event: QtCore.QEvent) -> None:
         """Zoom in, stop panning, add and remove picks, add and remove
         measure points."""
+        if not len(self.locs):
+            return
+
         if self._mode == "Zoom":
             if (
                 event.button() == QtCore.Qt.LeftButton
