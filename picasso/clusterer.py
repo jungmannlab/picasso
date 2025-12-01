@@ -606,7 +606,7 @@ def find_cluster_centers(
     grouplocs = locs.groupby(locs["group"])
 
     # get cluster centers
-    res = grouplocs.apply(cluster_center, pixelsize)
+    res = grouplocs.apply(cluster_center, pixelsize, include_groups=False)
     centers_ = res.values
 
     # convert to DataFrame and save
