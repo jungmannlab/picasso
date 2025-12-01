@@ -10419,7 +10419,7 @@ class Window(QtWidgets.QMainWindow):
         hdbscan_action.triggered.connect(self.view.hdbscan)
         clusterer_action = clustering_menu.addAction("SMLM clusterer")
         clusterer_action.triggered.connect(self.view.smlm_clusterer)
-        test_cluster_action = clustering_menu.addAction("Test clusterer")
+        test_cluster_action = clustering_menu.addAction("Test clustering")
         test_cluster_action.triggered.connect(self.test_clusterer_dialog.show)
 
         postprocess_menu.addSeparator()
