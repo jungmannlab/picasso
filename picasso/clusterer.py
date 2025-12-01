@@ -875,7 +875,9 @@ def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
     # threshold the image and calculate area/volume
     thresh = masking.threshold_otsu(image.reshape(-1))
     if X.shape[1] == 3:  # 3D
-        area = np.sum(image >= thresh) / (16 / 5)  # volume in LP^3, bins are 0.5 LP in xy and 1.25 LP in z
+        area = np.sum(image >= thresh) / (
+            16 / 5
+        )  # volume in LP^3, bins are 0.5 LP in xy and 1.25 LP in z
     else:  # 2D
         area = np.sum(image >= thresh) / 4  # area in LP^2, bins are 0.5 LP
     return area
@@ -906,21 +908,17 @@ def cluster_areas(
     areas : pd.DataFrame
         Cluster areas/volumes for each cluster.
     """
-    assert hasattr(
-        locs, "group"
-    ), "Localizations must contain 'group' column."
+    assert hasattr(locs, "group"), "Localizations must contain 'group' column."
 
     # get pixel size from info
     pixelsize = lib.get_from_metadata(info, "Pixelsize", default=None)
-    assert (
-        isinstance(pixelsize, (int, float))
-    ), "Pixelsize not found in info."
+    assert isinstance(pixelsize, (int, float)), "Pixelsize not found in info."
 
     groups = np.unique(locs["group"])
     area_key = "Area (LP^2)" if not hasattr(locs, "z") else "Volume (LP^3)"
     areas = {
-        "group": groups.astype(np.int32), 
-        area_key: np.zeros(len(groups), dtype=np.float32)
+        "group": groups.astype(np.int32),
+        area_key: np.zeros(len(groups), dtype=np.float32),
     }
     if progress is None:
         iterator = tqdm(range(len(groups)), desc="Calculating cluster areas")

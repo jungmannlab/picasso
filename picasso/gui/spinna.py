@@ -2781,7 +2781,7 @@ class SimulationsTab(QtWidgets.QDialog):
             pick_area = lib.get_from_metadata(info, "Area (um^2)")
             if pick_area is not None:
                 idx = self.targets.index(target)
-                self.densities_spins[idx].setValue(len(locs) / pick_area)                        
+                self.densities_spins[idx].setValue(len(locs) / pick_area)
 
             if hasattr(locs, "z"):
                 coords = np.stack(

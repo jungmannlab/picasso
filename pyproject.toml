@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "picassosr"
-version = "0.8.10"
+version = "0.9.0"
 authors = [
     {name = "Joerg Schnitzbauer", email = "joschnitzbauer@gmail.com"},
     {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
@@ -50,6 +50,7 @@ dependencies = [
 dev = [
     "build",
     "black",
+    "pre-commit",
     "twine",
     "bumpversion"
 ]

@@ -509,7 +509,7 @@ def localization_precision(
     s: np.ndarray,
     s_orth: np.ndarray,
     bg: np.ndarray,
-    em: bool
+    em: bool,
 ) -> np.ndarray:
     """Calculate the theoretical localization precision according to
     Mortensen et al., Nat Meth, 2010 for a 2D unweighted Gaussian fit.
@@ -539,9 +539,9 @@ def localization_precision(
     """
     s2 = s**2
     sa2 = s2 + 1 / 12
-    sa = sa2 ** 0.5
+    sa = sa2**0.5
     sa_orth2 = s_orth**2 + 1 / 12
-    sa_orth = sa_orth2 ** 0.5
+    sa_orth = sa_orth2**0.5
     v = sa2 * (16 / 9 + (8 * np.pi * sa * sa_orth * bg) / photons) / photons
     if em:
         v *= 2

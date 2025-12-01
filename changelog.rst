@@ -14,6 +14,8 @@ Important updates:
 - New option to save cluster areas/volumes in DBSCAN, HDBSCAN and SMLM clusterer using Otsu thresholding of rendered images
 - Localize: ensure that 3D calibration is centered at z = 0; this guarantees the correct z scaling (magnification factor)
 - Render: unfold groups was removed as it is contained within the square grid unfolding
+- Render: new pick shape - square
+- Render: synchronize groups across channels - removes localizations from groups that are not present in all channels, e.g., after filtering cluster centers by frame analysis, the cluster localizations corresponding to removed cluster centers are also removed
 - Render: save pick properties extended to saving group properties, also qpaint index is saved
 - SPINNA: improved saved fit results summary (see issue #560)
 
@@ -48,6 +50,7 @@ Important updates:
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
 - Render 3D: fixed ind. loc. prec.
+- Render 3D: rendering an empty pick fixed
 - Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
 - Localize: fixed acquisition comment extraction from uManager .tif files
 - SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
