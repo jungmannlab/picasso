@@ -17,35 +17,39 @@ Important updates:
 - Render: save pick properties extended to saving group properties, also qpaint index is saved
 - SPINNA: improved saved fit results summary (see issue #560)
 
-*Small improvements and bug fixes:*
-+++++++++++++++++++++++++++++++++++
+*Small improvements:*
++++++++++++++++++++++
 
 - Black-based code formatting applied to all scripts
 - Cleaned up code for adjusting the size of QWidgets
+- Progress dialog shows remaining time estimate more accurately (ignores the offset due to, for example, multiprocessing startup time)
+- Render: save pick/group properties saves qpaint index (1 / mean dark time)
+- Render: clustering metadata saves fraction of rejected localizations
+- Render: screenshot .yaml files can be dragged and dropped to load the display settings
+- Render 3D: display adjusted after changing blur method
+- SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
+- SPINNA: save last opened folder added
+- SPINNA: smaller font size in NND plot for better readability
+- SPINNA: clean up progress dialog
+- SPINNA: NN plotting is normalized to 1000 nm
+- Simplify the API for picking similar in ``picasso.postprocess``
+
+*Bug fixes:*
+++++++++++++
 - Render: unfold groups/picks (rectangular grid) fixed for nonconsecutive grouping (the grid might have had missing elements before)
 - Render: apply drift from external file fixed
 - Render: fix masking (issue #560)
 - Render: fix loading camera pixel size from metadata (see issue #560)
 - Render: saving picks separately fixed areas in the .yaml files
-- Render: save pick/group properties saves qpaint index (1 / mean dark time)
-- Render: clustering metadata saves fraction of rejected localizations
 - Render: loading a new channel with rendering by property fixed
 - Render 3D: remove measurement points fixed
 - Render 3D: save rotated localizations fixed
-- Render 3D: display adjusted after changing blur method
 - Render 3D: fixed ind. loc. prec.
 - Localize: user-friendly display of large numbers (for example, 1,052,102 instead of 1052102)
 - Localize: fixed acquisition comment extraction from uManager .tif files
 - SPINNA: fixed all the bugs related to masking and search space generation (see issue #560)
-- SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
-- SPINNA: save last opened folder added
 - SPINNA: save NND plot fixed (when no simulations were run)
-- SPINNA: smaller font size in NND plot for better readability
 - SPINNA: read camera pixel size from metadata fixed (if available)
-- SPINNA: clean up progress dialog
-- SPINNA: NN plotting is normalized to 1000 nm
-- Simplify the API for picking similar in ``picasso.postprocess``
-- Progress dialog shows remaining time estimate more accurately (ignores the offset due to, for example, multiprocessing startup time)
 
 0.8.8
 -----

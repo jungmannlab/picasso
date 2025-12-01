@@ -476,9 +476,9 @@ class DatasetDialog(QtWidgets.QDialog):
         # the non-scrollable elements
         scroll = QtWidgets.QScrollArea(self)
         scroll.setWidgetResizable(True)
-        container = QtWidgets.QWidget()
-        scroll.setWidget(container)
-        self.scroll_area = QtWidgets.QGridLayout(container)
+        self.container = QtWidgets.QWidget()
+        scroll.setWidget(self.container)
+        self.scroll_area = QtWidgets.QGridLayout(self.container)
         self.scroll_area.setAlignment(QtCore.Qt.AlignTop)
         layout.addWidget(scroll, 4, 0, 1, 3)
 
@@ -609,8 +609,7 @@ class DatasetDialog(QtWidgets.QDialog):
         self.scroll_area.addWidget(p, currentline, 5)
 
         # adjust the size of the dialog
-
-        hint = self.scroll_area.sizeHint()
+        hint = self.container.sizeHint()
         lib.adjust_widget_size(self, hint, 45, 150)
 
     def update_colors(self) -> None:
@@ -6491,9 +6490,13 @@ class View(QtWidgets.QLabel):
             self.load_fov_drop(paths[0])
         if extensions == [".yaml"]:  # just one yaml dropped
             with open(paths[0], "r") as f:
-                regions = yaml.full_load(f)
-            if "Shape" in regions:
-                loaded_shape = regions["Shape"]
+                file = yaml.full_load(f)
+            # try loading a screenshot
+            if "Max. density" in file:
+                self.load_screenshot(file)
+            # load pick regions
+            if "Shape" in file:
+                loaded_shape = file["Shape"]
                 if loaded_shape in ["Circle", "Rectangle", "Polygon"]:
                     self.load_picks(paths[0])
         else:
@@ -6856,6 +6859,31 @@ class View(QtWidgets.QLabel):
         # update Info Dialog
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
+
+    def load_screenshot(self, file: dict) -> None:
+        """Load screenshot settings from a .yaml file."""
+        disp_dlg = self.window.display_settings_dlg
+        x, y, w, h = file["FOV (X, Y, Width, Height)"]
+        viewport = [(y, x), (y + h, x + w)]
+        self.update_scene(viewport=viewport)
+        if "Max. density" in file:
+            disp_dlg.maximum.setValue(file["Max. density"])
+        if "Min. density" in file:
+            disp_dlg.minimum.setValue(file["Min. density"])
+        if "Colormap" in file:
+            disp_dlg.colormap.setCurrentText(file["Colormap"])
+        if "Blur method" in file:
+            for button in disp_dlg.blur_buttongroup.buttons():
+                if button.text() == file["Blur method"]:
+                    button.setChecked(True)
+                    break
+        if "Min. blur (cam. px)" in file:
+            disp_dlg.min_blur_width.setValue(file["Min. blur (cam. px)"])
+        if "Colors" in file and len(file["Colors"]) == len(self.locs):
+            for i, color in enumerate(file["Colors"]):
+                self.window.dataset_dialog.colorselection[i].setCurrentText(color)
+        if "Scalebar length (nm)" in file:
+            disp_dlg.scalebar.setValue(file["Scalebar length (nm)"])
 
     def subtract_picks(self, path: str) -> None:
         """Clear selected picks that cover the picks loaded from path.
