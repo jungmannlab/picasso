@@ -5579,6 +5579,7 @@ class View(QtWidgets.QLabel):
             "Number of clusters": len(np.unique(locs.group)),
             "Radius (nm)": radius,
             "Minimum local density": min_density,
+            "Min. localizations per cluster": min_locs,
             "Fraction of rejected locs (%)": rejected,
         }
         io.save_locs(path, locs, self.infos[channel] + [dbscan_info])

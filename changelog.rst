@@ -26,6 +26,7 @@ Important updates:
 - Render: save pick/group properties saves qpaint index (1 / mean dark time)
 - Render: clustering metadata saves fraction of rejected localizations
 - Render: screenshot .yaml files can be dragged and dropped to load the display settings
+- Render: DBSCAN clustering .yaml file saves min. number of localizations per cluster
 - Render 3D: display adjusted after changing blur method
 - Localize: localization precision formula for least-squares fitting was corrected to account for a diagonal covariance Gaussian (background term is affected); the function for localization precision was moved from ``picasso.postprocess`` to ``picasso.gausslq``
 - SPINNA: GUI single sim does not allow the sum of proportions to exceed 100% (see issue #560)
