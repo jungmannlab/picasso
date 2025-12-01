@@ -4186,10 +4186,10 @@ class Window(QtWidgets.QMainWindow):
         self.tabs.setCurrentIndex(0)
 
         # menu bar
-        self.menu_bar = self.menuBar()
-        file_menu = self.menu_bar.addMenu("File")
+        self.menuBar().setAutoFillBackground(True)
+        file_menu = self.menuBar().addMenu("File")
         sounds_menu = file_menu.addMenu("Sound notifications")
-        sounds_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
+        sounds_actiongroup = QtWidgets.QActionGroup(self.menuBar())
         default_sound_path = lib.get_sound_notification_path()  # last used
         default_sound_name = os.path.basename(str(default_sound_path))
         for sound in lib.get_available_sound_notifications():
@@ -4203,8 +4203,7 @@ class Window(QtWidgets.QMainWindow):
             sounds_menu.addAction(action)
         sounds_actiongroup.triggered.connect(lib.set_sound_notification)
 
-        menu_bar = self.menuBar()
-        self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+        self.plugin_menu = self.menuBar().addMenu("Plugins")  # do not delete
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Save the most recent directory in the user settings on
