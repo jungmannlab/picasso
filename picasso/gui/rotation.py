@@ -1888,13 +1888,8 @@ class ViewRotation(QtWidgets.QLabel):
             if image.ndim == 2:
                 max_ = image.max()
             else:
-                max_ = min(
-                    [
-                        _.max()
-                        for _ in image  # single channel locs with only
-                        if _.max() != 0  # one group have
-                    ]  # N_GROUP_COLORS - 1 images of
-                )  # only zeroes
+                max_per_image = [_.max() for _ in image if _.max() != 0]
+                max_ = 0.01 if len(max_per_image) == 0 else min(max_per_image)
             upper = INITIAL_REL_MAXIMUM * max_
             self.window.display_settings_dlg.silent_minimum_update(0)
             self.window.display_settings_dlg.silent_maximum_update(upper)
