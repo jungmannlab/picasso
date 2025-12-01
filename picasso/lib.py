@@ -392,8 +392,8 @@ def adjust_widget_size(
 
 
 def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
-    """Get a value from the localization metadata (list of dictionaries or a dictionary). Returns default if
-    the key is not found.
+    """Get a value from the localization metadata (list of dictionaries
+    or a dictionary). Returns default if the key is not found.
 
     Parameters
     ----------

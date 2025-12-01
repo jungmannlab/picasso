@@ -530,7 +530,7 @@ def plot_NN(
         if mode == "hist":
             ax.hist(
                 data,
-                bins=np.arange(xlim[0], xlim[1] + binsize, binsize),
+                bins=np.arange(0, 1000, binsize),  # normalize to infinity
                 edgecolor=edgecolor,
                 color=colors[i],
                 label=f"exp {i+1}th NN",
@@ -541,7 +541,7 @@ def plot_NN(
         elif mode == "plot":
             counts, bin_edges = np.histogram(
                 data,
-                bins=np.arange(xlim[0], xlim[1] + binsize, binsize),
+                bins=np.arange(0, 1000, binsize),  # normalize to infinity
                 density=True,
             )
             bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2

@@ -10,8 +10,7 @@ picasso.__init__.py
 
 import os.path
 import yaml
-
-__version__ = "0.8.9"
+from .version import __version__
 
 _this_file = os.path.abspath(__file__)
 _this_dir = os.path.dirname(_this_file)

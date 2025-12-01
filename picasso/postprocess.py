@@ -1844,38 +1844,6 @@ def link_loc_groups(
     return linked_locs
 
 
-def localization_precision(
-    photons: np.ndarray, s: np.ndarray, bg: np.ndarray, em: bool
-) -> np.ndarray:
-    """Calculate the theoretical localization precision according to
-    Mortensen et al., Nat Meth, 2010 for a 2D unweighted Gaussian fit.
-
-    Parameters
-    ----------
-    photons : np.ndarray
-        Number of photons collected for the localization.
-    s : np.ndarray
-        Size of the single-emitter image for each localization.
-    bg : np.ndarray
-        Background signal for each localization (per pixel).
-    em : bool
-        Whether EMCCD was used for the localization.
-
-    Returns
-    -------
-    np.ndarray
-        Cramer-Rao lower bound for localization precision for each
-        localization.
-    """
-    s2 = s**2
-    sa2 = s2 + 1 / 12
-    v = sa2 * (16 / 9 + (8 * np.pi * sa2 * bg) / photons) / photons
-    if em:
-        v *= 2
-    with np.errstate(invalid="ignore"):
-        return np.sqrt(v)
-
-
 def n_segments(info: list[dict], segmentation: int) -> int:
     """Calculate the number of segments for the given segmentation
     for undrifting.
