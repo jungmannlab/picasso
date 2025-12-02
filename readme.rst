@@ -23,8 +23,8 @@ Picasso
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
-Picasso 0.9.0
--------------
+Picasso 0.9
+-----------
 In this version, localizations (and other ``.hdf5`` files) are read using ``pandas.read_hdf`` rather than converting an ``h5py.File`` object to a numpy recarray. Thus, rather than ``numpy.recarray``, localizations are now ``pandas.DataFrame`` objects. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
 
 Changelog

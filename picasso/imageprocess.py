@@ -253,11 +253,7 @@ def find_fiducials(
     threshold = np.percentile(image.flatten(), 99)
     # box size should be an odd number, corresponding to approximately
     # 900 nm
-    pixelsize = 130
-    for inf in info:
-        if val := inf.get("Pixelsize"):
-            pixelsize = val
-            break
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=130)
     box = int(np.round(900 / pixelsize))
     box = box + 1 if box % 2 == 0 else box
 
@@ -266,11 +262,7 @@ def find_fiducials(
     picks = [(xi, yi) for xi, yi in zip(x, y)]
 
     # select the picks with appropriate number of localizations
-    n_frames = 0
-    for inf in info:
-        if val := inf.get("Frames"):
-            n_frames = val
-            break
+    n_frames = lib.get_from_metadata(info, "Frames", default=0)
     min_n = 0.8 * n_frames
     picked_locs = postprocess.picked_locs(
         locs,
@@ -293,7 +285,7 @@ def central_roi(
 ) -> tuple[np.recarray, tuple[tuple[float, float], tuple[float, float]]]:
     """Select localizations within a central square region of interest
     (ROI) of the given size.
-    
+
     Parameters
     ----------
     locs : np.recarray
@@ -316,9 +308,9 @@ def central_roi(
     image_height = info[0]["Height"]  # cam. pixels
     roi_lim_x = size / camera_pixelsize  # cam. pixels
     roi_lim_y = size / camera_pixelsize  # cam. pixels
-    assert roi_lim_x < image_width and roi_lim_y < image_height, (
-        "Image is smaller than the ROI for FRC calculation."
-    )
+    assert (
+        roi_lim_x < image_width and roi_lim_y < image_height
+    ), "Image is smaller than the ROI for FRC calculation."
     locs = locs[
         (locs.x > (image_width - roi_lim_x) // 2)
         & (locs.x < (image_width + roi_lim_x) // 2)

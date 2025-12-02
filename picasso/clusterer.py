@@ -3,7 +3,8 @@ picasso.clusterer
 ~~~~~~~~~~~~~~~~~
 
 Clusterer for single molecules optimized for DNA-PAINT.
-Implementation of DBSCAN and HDBSCAN.
+Additionally, contains implementations of DBSCAN and HDBSCAN and other
+clustering-related functions.
 
 SMLM clusterer is based on:
 * Schlichthaerle, et al. Nature Comm, 2021
@@ -18,10 +19,16 @@ SMLM clusterer is based on:
 
 from __future__ import annotations
 
+from typing import Callable
+
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
 from scipy.spatial import ConvexHull, KDTree, QhullError
+from scipy.ndimage import gaussian_filter
 from sklearn.cluster import DBSCAN, HDBSCAN
+
+from . import lib, masking
 
 
 def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
@@ -599,7 +606,7 @@ def find_cluster_centers(
     grouplocs = locs.groupby(locs["group"])
 
     # get cluster centers
-    res = grouplocs.apply(cluster_center, pixelsize)
+    res = grouplocs.apply(cluster_center, pixelsize, include_groups=False)
     centers_ = res.values
 
     # convert to DataFrame and save
@@ -830,3 +837,106 @@ def cluster_center(
         # assumes only one group input!
         result.append(np.unique(grouplocs.group_input)[0])
     return result
+
+
+def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
+    """Calculate cluster area (2D) or volume (3D). Uses Otsu
+    thresholding of the images of the clusters to find areas/volumes.
+
+    Parameters
+    ----------
+    X : np.ndarray
+        Array of points of shape (n_points, n_dim).
+    lp : np.ndarray
+        Localization precision in x and y of the cluster. The median
+        is taken to define the pixel size for image rendering
+
+    Returns
+    -------
+    area : float
+        Cluster area (2D) or volume (3D) in units of LP.
+    """
+    # get image
+    bin_size = np.median(lp) / 2  # pixel size for rendering
+    if X.shape[1] == 3:  # 3D
+        bin_size_z = bin_size * 2.5  # just a rough estimate
+        edges = [
+            np.arange(X[:, 0].min(), X[:, 0].max() + bin_size, bin_size),
+            np.arange(X[:, 1].min(), X[:, 1].max() + bin_size, bin_size),
+            np.arange(X[:, 2].min(), X[:, 2].max() + bin_size_z, bin_size_z),
+        ]
+    else:  # 2D
+        edges = [
+            np.arange(X[:, 0].min(), X[:, 0].max() + bin_size, bin_size),
+            np.arange(X[:, 1].min(), X[:, 1].max() + bin_size, bin_size),
+        ]
+    image = np.histogramdd(X, bins=edges)[0]
+    image = gaussian_filter(image, sigma=2)  # smooth image with sigma = LP
+    # threshold the image and calculate area/volume
+    thresh = masking.threshold_otsu(image.reshape(-1))
+    if X.shape[1] == 3:  # 3D
+        area = np.sum(image >= thresh) / (
+            16 / 5
+        )  # volume in LP^3, bins are 0.5 LP in xy and 1.25 LP in z
+    else:  # 2D
+        area = np.sum(image >= thresh) / 4  # area in LP^2, bins are 0.5 LP
+    return area
+
+
+def cluster_areas(
+    locs: pd.DataFrame,
+    info: list[dict],
+    progress: Callable[[int], None] | None = None,
+) -> pd.DataFrame:
+    """Calculate cluster areas (2D) or volumes (3D).
+
+    Uses Otsu thresholding of the images of the clusters to find areas/
+    volumes.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Clustered localizations (contain group info).
+    info : list of dict
+        Localization metadata, see `picasso.io.load_locs`.
+    progress : picasso.lib.ProgressDialog, optional
+        Progress dialog. If None, progress is displayed with into the
+        console. Default is None.
+
+    Returns
+    -------
+    areas : pd.DataFrame
+        Cluster areas/volumes for each cluster.
+    """
+    assert hasattr(locs, "group"), "Localizations must contain 'group' column."
+
+    # get pixel size from info
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=None)
+    assert isinstance(pixelsize, (int, float)), "Pixelsize not found in info."
+
+    groups = np.unique(locs["group"])
+    area_key = "Area (LP^2)" if not hasattr(locs, "z") else "Volume (LP^3)"
+    areas = {
+        "group": groups.astype(np.int32),
+        area_key: np.zeros(len(groups), dtype=np.float32),
+    }
+    if progress is None:
+        iterator = tqdm(range(len(groups)), desc="Calculating cluster areas")
+    else:
+        iterator = range(len(groups))
+
+    for idx in iterator:
+        group_id = groups[idx]
+        grouplocs = locs[locs["group"] == group_id]
+        if not len(grouplocs):
+            continue
+        lp = locs[["lpx", "lpy"]].values.mean(axis=1)
+        if hasattr(grouplocs, "z"):
+            X = grouplocs[["x", "y", "z"]].values
+            X[:, 2] /= pixelsize  # convert z to pixels
+        else:
+            X = grouplocs[["x", "y"]].values
+        areas[area_key][idx] = _cluster_area(X, lp)
+        if progress is not None:
+            progress(idx + 1)
+    return pd.DataFrame(areas)

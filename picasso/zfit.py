@@ -118,6 +118,14 @@ def calibrate_z(
     cx = np.polyfit(z_range, mean_sx, 6, full=False)
     cy = np.polyfit(z_range, mean_sy, 6, full=False)
 
+    # make sure that the calibration curves cross at z = 0
+    z = np.linspace(z_range[0], z_range[-1], 10000)
+    spot_width = np.poly1d(cx)
+    spot_height = np.poly1d(cy)
+    z_range -= z[np.argmin(np.abs(spot_width(z) - spot_height(z)))]
+    cx = np.polyfit(z_range, mean_sx, 6, full=False)
+    cy = np.polyfit(z_range, mean_sy, 6, full=False)
+
     calibration = {
         "X Coefficients": [float(_) for _ in cx],
         "Y Coefficients": [float(_) for _ in cy],
@@ -230,7 +238,8 @@ def _fit_z_target(
     coordinates given the single-emitter image width and height as well
     as the calibration curve coefficients. It calculates the difference
     between the square root of the spot width/height and the polynomial
-    fit of the z-axis calibration curve."""
+    fit of the z-axis calibration curve. Based on Huang et al. Science,
+    2008. DOI: 10.1126/science.1153529."""
     z2 = z * z
     z3 = z * z2
     z4 = z * z3

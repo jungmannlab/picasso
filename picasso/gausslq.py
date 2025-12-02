@@ -392,11 +392,11 @@ def locs_from_fits(
     # box_offset = int(box / 2)
     x = theta[:, 0] + identifications["x"]  # - box_offset
     y = theta[:, 1] + identifications["y"]  # - box_offset
-    lpx = postprocess.localization_precision(
-        theta[:, 2], theta[:, 4], theta[:, 3], em=em
+    lpx = localization_precision(
+        theta[:, 2], theta[:, 4], theta[:, 5], theta[:, 3], em=em
     )
-    lpy = postprocess.localization_precision(
-        theta[:, 2], theta[:, 5], theta[:, 3], em=em
+    lpy = localization_precision(
+        theta[:, 2], theta[:, 5], theta[:, 4], theta[:, 3], em=em
     )
     a = np.maximum(theta[:, 4], theta[:, 5])
     b = np.minimum(theta[:, 4], theta[:, 5])
@@ -476,11 +476,11 @@ def locs_from_fits_gpufit(
     # box_offset = int(box / 2)
     x = theta[:, 1] + identifications["x"]  # - box_offset
     y = theta[:, 2] + identifications["y"]  # - box_offset
-    lpx = postprocess.localization_precision(
-        theta[:, 0], theta[:, 3], theta[:, 5], em=em
+    lpx = localization_precision(
+        theta[:, 0], theta[:, 3], theta[:, 4], theta[:, 5], em=em
     )
-    lpy = postprocess.localization_precision(
-        theta[:, 0], theta[:, 4], theta[:, 5], em=em
+    lpy = localization_precision(
+        theta[:, 0], theta[:, 4], theta[:, 3], theta[:, 5], em=em
     )
     a = np.maximum(theta[:, 3], theta[:, 4])
     b = np.minimum(theta[:, 3], theta[:, 4])
@@ -502,3 +502,48 @@ def locs_from_fits_gpufit(
     )
     locs.sort_values(by="frame", kind="mergesort", inplace=True)
     return locs
+
+
+def localization_precision(
+    photons: np.ndarray,
+    s: np.ndarray,
+    s_orth: np.ndarray,
+    bg: np.ndarray,
+    em: bool,
+) -> np.ndarray:
+    """Calculate the theoretical localization precision according to
+    Mortensen et al., Nat Meth, 2010 for a 2D unweighted Gaussian fit.
+
+    Edit v0.9.0: corrected formula for diagonal covariance Gaussian
+    (i.e., sx != sy). The background term includes the orthogonal sigma.
+
+    Parameters
+    ----------
+    photons : np.ndarray
+        Number of photons collected for the localization.
+    s : np.ndarray
+        Size of the single-emitter image for each localization.
+    s_orth : np.ndarray
+        Size of the single-emitter image in the orthogonal direction
+        for each localization.
+    bg : np.ndarray
+        Background signal for each localization (per pixel).
+    em : bool
+        Whether EMCCD was used for the localization.
+
+    Returns
+    -------
+    np.ndarray
+        Cramer-Rao lower bound for localization precision for each
+        localization.
+    """
+    s2 = s**2
+    sa2 = s2 + 1 / 12
+    sa = sa2**0.5
+    sa_orth2 = s_orth**2 + 1 / 12
+    sa_orth = sa_orth2**0.5
+    v = sa2 * (16 / 9 + (8 * np.pi * sa * sa_orth * bg) / photons) / photons
+    if em:
+        v *= 2
+    with np.errstate(invalid="ignore"):
+        return np.sqrt(v)

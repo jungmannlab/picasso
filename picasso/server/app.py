@@ -15,7 +15,7 @@ from history import history
 from watcher import watcher
 from compare import compare
 
-from picasso.__version__ import VERSION_NO
+from picasso import __version__ as VERSION_NO
 
 st.set_page_config(layout="wide")
 

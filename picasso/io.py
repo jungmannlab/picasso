@@ -20,6 +20,7 @@ import threading
 from typing import Callable
 
 import yaml
+import h5py
 import nd2
 import numpy as np
 import pandas as pd
@@ -1521,8 +1522,13 @@ def to_raw(path: str, verbose: bool = True) -> None:
 
 def save_datasets(path: str, info: dict, **kwargs) -> None:
     """Save multiple datasets to an HDF5 file at the specified path."""
-    for key, val in kwargs.items():
-        val.to_hdf(path, key=key, mode="a")
+    # for key, val in kwargs.items():
+    #     val.to_hdf(path, key=key, mode="a")
+    # cannot use to_hdf for backward compatibility with older Picasso
+    with h5py.File(path, "w") as locs_file:
+        for key, val in kwargs.items():
+            rec_locs = val.to_records(index=False)
+            locs_file.create_dataset(key, data=rec_locs)
     base, ext = os.path.splitext(path)
     info_path = base + ".yaml"
     save_info(info_path, info)
@@ -1542,7 +1548,11 @@ def save_locs(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         data.
     """
     locs = lib.ensure_sanity(locs, info)
-    locs.to_hdf(path, key="locs", mode="a")
+    # locs.to_hdf(path, key="locs", mode="w", format="fixed")
+    # cannot use to_hdf for backward compatibility with older Picasso
+    rec_locs = locs.to_records(index=False)
+    with h5py.File(path, "w") as locs_file:
+        locs_file.create_dataset("locs", data=rec_locs)
     base, ext = os.path.splitext(path)
     info_path = base + ".yaml"
     save_info(info_path, info)

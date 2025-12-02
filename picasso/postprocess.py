@@ -187,7 +187,7 @@ def picked_locs(
     locs: pd.DataFrame,
     info: list[dict],
     picks: list[tuple],
-    pick_shape: str,
+    pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
     pick_size: float = None,
     add_group: bool = True,
     callback: Callable[[int], None] | Literal["console"] | None = None,
@@ -203,7 +203,7 @@ def picked_locs(
         Metadata of the localizations list.
     picks : list
         List of picks.
-    pick_shape : {'Circle', 'Rectangle', 'Polygon'}
+    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}
         Shape of the pick.
     pick_size : float (default=None)
         Size of the pick. Radius for the circles, width for the
@@ -220,7 +220,7 @@ def picked_locs(
     picked_locs : list of pd.DataFrames
         List of pd.DataFrames, each containing locs from one pick.
     """
-    _valid_shapes = ("Circle", "Rectangle", "Polygon")
+    _valid_shapes = ("Circle", "Rectangle", "Polygon", "Square")
     assert (
         pick_shape in _valid_shapes
     ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
@@ -310,6 +310,32 @@ def picked_locs(
                 group_locs = group_locs[group_locs["y"] > min(Y)]
                 group_locs = group_locs[group_locs["y"] < max(Y)]
                 group_locs = lib.locs_in_polygon(group_locs, X, Y)
+                if add_group:
+                    group_locs["group"] = i * np.ones(
+                        len(group_locs), dtype=np.int32
+                    )
+                group_locs.sort_values(
+                    by="frame", kind="mergesort", inplace=True
+                )
+                picked_locs.append(group_locs)
+
+                if callback == "console":
+                    progress.update(1)
+                elif callback is not None:
+                    callback(i + 1)
+
+        elif pick_shape == "Square":
+            for i, pick in enumerate(picks):
+                x, y = pick
+                half_a = pick_size / 2
+                x_min = x - half_a
+                x_max = x + half_a
+                y_min = y - half_a
+                y_max = y + half_a
+                group_locs = locs[locs["x"] > x_min]
+                group_locs = group_locs[group_locs["x"] < x_max]
+                group_locs = group_locs[group_locs["y"] > y_min]
+                group_locs = group_locs[group_locs["y"] < y_max]
                 if add_group:
                     group_locs["group"] = i * np.ones(
                         len(group_locs), dtype=np.int32
@@ -962,8 +988,8 @@ def frc(
     # # split the locs in two random halves
     np.random.seed(random_seed)
     random_indices = np.random.permutation(len(locs))
-    locs1 = locs[random_indices[:len(locs) // 2]]
-    locs2 = locs[random_indices[len(locs) // 2:]]
+    locs1 = locs[random_indices[: len(locs) // 2]]
+    locs2 = locs[random_indices[len(locs) // 2 :]]
     # generate pairs of images (splitting locs in half) with pixel size
     # of 1/2 of median loc. precision
     median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
@@ -999,8 +1025,9 @@ def frc(
     idx = np.where(frc_curve < 1 / 7)[0]
     # TODO: check below is correct
     frequencies = np.fft.fftfreq(
-        len(frc_curve), d=pixelsize,
-    )[:len(frc_curve) // 2]
+        len(frc_curve),
+        d=pixelsize,
+    )[: len(frc_curve) // 2]
     resolution = 1 / frequencies[idx] if len(frequencies) else np.inf
     resolution *= camera_pixelsize  # convert to nm
     # TODO: other things that were skipped so far:
@@ -1093,9 +1120,7 @@ def radialsum(
         raise ValueError("Input image must be 2-dimensional")
 
     if max_radius not in ["inner_radius", "outer_radius"]:
-        raise ValueError(
-            "max_radius must be 'inner_radius' or 'outer_radius'"
-        )
+        raise ValueError("max_radius must be 'inner_radius' or 'outer_radius'")
 
     height, width = image.shape
 
@@ -1426,7 +1451,7 @@ def link(
         if hasattr(locs, "photons"):
             linked_locs["photon_rate"] = np.array([], dtype=np.float32)
     else:
-        locs.sort_values(kind="mergesort", by="frame", inplace=True)
+        locs = locs.sort_values(kind="mergesort", by="frame")
         if hasattr(locs, "group"):
             group = locs["group"].values
         else:
@@ -1737,7 +1762,7 @@ def get_link_groups(
     x: np.ndarray,
     y: np.ndarray,
     d_max: float,
-    max_dark_time: float,
+    max_dark_time: int,
     group: np.ndarray,
 ) -> np.ndarray:
     """Find the groups for linking localizations into binding events.
@@ -1751,8 +1776,9 @@ def get_link_groups(
         Coordinates of localizations.
     d_max : float
         Maximum distance for linking localizations.
-    max_dark_time : float
-        Maximum dark time for linking localizations.
+    max_dark_time : int
+        Maximum number of frames between localizations to be considered
+        as originating from the same binding event.
     group : np.ndarray
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
@@ -2084,38 +2110,6 @@ def link_loc_groups(
     return linked_locs
 
 
-def localization_precision(
-    photons: np.ndarray, s: np.ndarray, bg: np.ndarray, em: bool
-) -> np.ndarray:
-    """Calculate the theoretical localization precision according to
-    Mortensen et al., Nat Meth, 2010 for a 2D unweighted Gaussian fit.
-
-    Parameters
-    ----------
-    photons : np.ndarray
-        Number of photons collected for the localization.
-    s : np.ndarray
-        Size of the single-emitter image for each localization.
-    bg : np.ndarray
-        Background signal for each localization (per pixel).
-    em : bool
-        Whether EMCCD was used for the localization.
-
-    Returns
-    -------
-    np.ndarray
-        Cramer-Rao lower bound for localization precision for each
-        localization.
-    """
-    s2 = s**2
-    sa2 = s2 + 1 / 12
-    v = sa2 * (16 / 9 + (8 * np.pi * sa2 * bg) / photons) / photons
-    if em:
-        v *= 2
-    with np.errstate(invalid="ignore"):
-        return np.sqrt(v)
-
-
 def n_segments(info: list[dict], segmentation: int) -> int:
     """Calculate the number of segments for the given segmentation
     for undrifting.
@@ -2436,8 +2430,6 @@ def groupprops(
     """Calculate group statistics for localizations, such as mean and
     standard deviation.
 
-    TODO: does it work now with data frames?
-
     Parameters
     ----------
     locs : pd.DataFrame
@@ -2471,11 +2463,11 @@ def groupprops(
         )
     for i, group_id in it:
         group_locs = locs[locs["group"] == group_id]
-        groups["group"][i] = group_id
-        groups["n_events"][i] = len(group_locs)
+        groups.loc[i, "group"] = group_id
+        groups.loc[i, "n_events"] = len(group_locs)
         for name in locs.columns:
-            groups[name + "_mean"][i] = group_locs[name].mean()
-            groups[name + "_std"][i] = group_locs[name].std()
+            groups.loc[i, name + "_mean"] = group_locs[name].mean()
+            groups.loc[i, name + "_std"] = group_locs[name].std()
         if callback is not None:
             callback(i + 1)
     # set dtypes
@@ -2487,6 +2479,9 @@ def groupprops(
             **{name + "_std": np.float32 for name in locs.columns},
         }
     )
+    # add qpaint idx
+    if hasattr(groups, "dark_mean"):
+        groups["qpaint_idx"] = 1 / groups["dark_mean"]
     return groups
 
 

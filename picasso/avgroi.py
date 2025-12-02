@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from . import postprocess
+from . import gausslq
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -96,11 +96,11 @@ def locs_from_fits(
     box_offset = int(box / 2)
     x = theta[:, 0] + identifications["x"] - box_offset
     y = theta[:, 1] + identifications["y"] - box_offset
-    lpx = postprocess.localization_precision(
-        theta[:, 2], theta[:, 4], theta[:, 3], em=em
+    lpx = gausslq.localization_precision(
+        theta[:, 2], theta[:, 4], theta[:, 5], theta[:, 3], em=em
     )
-    lpy = postprocess.localization_precision(
-        theta[:, 2], theta[:, 5], theta[:, 3], em=em
+    lpy = gausslq.localization_precision(
+        theta[:, 2], theta[:, 5], theta[:, 4], theta[:, 3], em=em
     )
     a = np.maximum(theta[:, 4], theta[:, 5])
     b = np.minimum(theta[:, 4], theta[:, 5])
