@@ -39,7 +39,7 @@ dependencies = [
     "sqlalchemy==2.0.44",
     "plotly-express==0.4.1",
     "watchdog==6.0.0",
-    "psutil==7.1.1",
+    "psutil==7.1.3",
     "playsound3==3.2.8",
     "imageio==2.37.0",
     "imageio-ffmpeg==0.6.0",
