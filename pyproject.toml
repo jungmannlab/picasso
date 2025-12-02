@@ -40,7 +40,7 @@ dependencies = [
     "plotly-express==0.4.1",
     "watchdog==6.0.0",
     "psutil==7.1.1",
-    "playsound3==3.2.8",
+    "playsound3==3.3.0",
     "imageio==2.37.0",
     "imageio-ffmpeg==0.6.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'"
