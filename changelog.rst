@@ -1,7 +1,20 @@
 Changelog
 =========
 
-Last change: 02-DEC-2025 CEST
+Last change: 04-DEC-2025 CEST
+
+0.9.2
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- Improved and updated `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
+
+*Small improvements:*
++++++++++++++++++++++
+
+*Bug fixes:*
+++++++++++++
+- AIM (``picasso.aim.aim``) copies localizations to avoid modifying the input DataFrame.
 
 0.9.0-1
 -------

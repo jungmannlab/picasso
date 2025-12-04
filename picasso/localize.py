@@ -905,6 +905,8 @@ def localize(
     movie: np.ndarray,
     camera_info: dict,
     parameters: dict,
+    *,
+    threaded: bool = True,
 ) -> pd.DataFrame:
     """Localize (i.e., identify and fit) spots in a movie using
     the specified parameters.
@@ -921,6 +923,9 @@ def localize(
         - `Min. Net Gradient`: Minimum net gradient for spot
           identification.
         - `Box Size`: Size of the box to cut out around each spot.
+    threaded : bool, optional
+        Whether to use threading for the identification process. Default
+        is True.
 
     Returns
     -------
@@ -933,6 +938,7 @@ def localize(
         movie,
         parameters["Min. Net Gradient"],
         parameters["Box Size"],
+        threaded=threaded,
     )
     locs = fit(movie, camera_info, identifications, parameters["Box Size"])
     return locs

@@ -688,6 +688,7 @@ def aim(
     drift : pd.DataFrame
         Drift in x and y directions (and z if applicable).
     """
+    locs = locs.copy()
     # extract metadata
     width = lib.get_from_metadata(info, "Width", np.nan)
     height = lib.get_from_metadata(info, "Height", np.nan)

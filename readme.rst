@@ -96,14 +96,15 @@ Besides using the GUI, you can use picasso like any other Python module. Conside
 
   path = 'testdata_locs.hdf5'
   locs, info = io.load_locs(path)
+  
   # Link localizations and calcualte dark times
   linked_locs = postprocess.link(picked_locs, info, r_max=0.05, max_dark_time=1)
   linked_locs_dark = postprocess.compute_dark_times(linked_locs)
 
-  print('Average bright time {:.2f} frames'.format(np.mean(linked_locs_dark.n)))
-  print('Average dark time {:.2f} frames'.format(np.mean(linked_locs_dark.dark)))
+  print(f"Average bright time {linked_locs_dark['n'].mean():.2f} frames")
+  print(f"Average dark time {linked_locs_dark['dark'].mean():.2f} frames")
 
-This codeblock loads data from testdata_locs and uses the postprocess functions programmatically. For more examples, visit the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
+For more examples, visit the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
 
 Jupyter Notebooks
 -----------------
