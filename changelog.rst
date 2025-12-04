@@ -3,6 +3,12 @@ Changelog
 
 Last change: 04-DEC-2025 CEST
 
+G5M
+---
+- Added G5M
+- Axial localization precision
+- Subclustering test in picasso.clusterer
+
 0.9.2
 -----
 Important updates:

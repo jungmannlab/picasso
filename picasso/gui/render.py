@@ -6239,6 +6239,16 @@ class View(QtWidgets.QLabel):
                     )
                     if clustered_locs is not None:
                         io.save_locs(path, clustered_locs, info)
+                # automatically save the subclustering check
+                clust_events, sparse_events = clusterer.test_subclustering(
+                    g5m_centers,
+                    info,
+                )
+                lib.plot_subclustering(
+                    clust_events,
+                    sparse_events,
+                    path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                )
         else:
             if not self.check_dbscan(channel):
                 return
@@ -6268,8 +6278,13 @@ class View(QtWidgets.QLabel):
                     if clustered_locs is not None:
                         io.save_locs(path_clusters, clustered_locs, info)
                 # automatically save the subclustering check
-                plot_subclustering(
+                clust_events, sparse_events = clusterer.test_subclustering(
                     g5m_centers,
+                    info,
+                )
+                lib.plot_subclustering(
+                    clust_events,
+                    sparse_events,
                     path_molecules.replace(".hdf5", "_subcluster_check.png"),
                 )
 
