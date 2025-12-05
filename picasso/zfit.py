@@ -626,8 +626,8 @@ def _axial_localization_precision_astig(
     sqrt_wx_calib_prime = wx_calib_prime / (2 * sqrt_wx_calib)
     sqrt_wy_calib = np.sqrt(wy_calib)
     sqrt_wy_calib_prime = wy_calib_prime / (2 * sqrt_wy_calib)
-    se_sx = sigma_uncertainty(sx, sy, photons, bg, fitting_method) * pixelsize
-    se_sy = sigma_uncertainty(sy, sx, photons, bg, fitting_method) * pixelsize
+    se_sx = sigma_uncertainty(sx, sy, photons, bg) * pixelsize
+    se_sy = sigma_uncertainty(sy, sx, photons, bg) * pixelsize
     delta_sqrt_wx = (1 / (2 * np.sqrt(sx * pixelsize))) * se_sx
     delta_sqrt_wy = (1 / (2 * np.sqrt(sy * pixelsize))) * se_sy
     swxc2 = sqrt_wx_calib_prime**2

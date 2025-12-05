@@ -1390,6 +1390,7 @@ def run_g5m_group_3D(
     ), "sigma_bounds must be a tuple of two values."
     # make sure lpz is available (assume gauss least-squares used for localization)
     if not hasattr(locs_group, "lpz"):
+        locs_group = locs_group.copy()
         locs_group["lpz"] = zfit.axial_localization_precision(
             locs_group, [{"Pixelsize": pixelsize}], calibration, "gausslq"
         )
@@ -2098,8 +2099,8 @@ def run_g5m_in_clusters(
     calibration: dict | None,
     max_locs_per_cluster: int,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run G5M for a given group of localizations clusters. See
-    ``run_g5m`` for parameters explanation.
+    """Run G5M for a given group of localizations clusters. See ``g5m``
+    for parameters explanation.
 
     Parameters
     ----------
@@ -2161,7 +2162,7 @@ def run_g5m_parallel(
     calibration: dict | None = None,
     max_locs_per_cluster: int = np.inf,
 ) -> list:
-    """Run G5M in parallel using multiprocessing. See ``run_g5m`` for
+    """Run G5M in parallel using multiprocessing. See ``g5m`` for
     parameters explanation.
 
     Returns
@@ -2204,7 +2205,7 @@ def run_g5m_parallel(
     return fs
 
 
-def run_g5m(
+def g5m(
     locs: pd.DataFrame,
     info: list[dict],
     *,

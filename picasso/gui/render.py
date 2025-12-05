@@ -6250,7 +6250,7 @@ class View(QtWidgets.QLabel):
                     path_molecules.replace(".hdf5", "_subcluster_check.png"),
                 )
         else:
-            if not self.check_dbscan(channel):
+            if not self.check_group(channel):
                 return
             base, _ = os.path.splitext(self.window.view.locs_paths[channel])
             out_path = base + "_molmap.hdf5"
@@ -6328,7 +6328,7 @@ class View(QtWidgets.QLabel):
             if ret == qm.Yes:
                 max_locs_per_cluster = max_locs
 
-        centers, clustered_locs, info = g5m.run_g5m(
+        centers, clustered_locs, info = g5m.g5m(
             locs=locs,
             info=info,
             min_locs=params["min_locs"],
