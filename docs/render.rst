@@ -84,6 +84,11 @@ Next, the user needs to specify whether or not to save clustered localizations o
 
 Upon clicking ``Perform RESI analysis``, each of the loaded channels is clustered, cluster centers are extracted and combined from all RESI channels to create the final RESI file.
 
+G5M
+---
+
+In Picasso 0.9.3, a new algorithm for molecular mapping (i.e., finding the positions of individual molecules from localizations) was introduced: G5M (Gaussian Mixture Modeling with Modifications for Molecular Mapping; Kowalewski et al., in preparation). G5M is based on Gaussian Mixture Modeling (GMM) but includes several modifications to make it suitable for molecular mapping. All the technicalities as well as the user guide of the method are explained in the publication mentioned and its Supplementary Information. Please refer to ``picasso.g5m`` for the details of the implementation.
+
 Dialogs
 -------
 
