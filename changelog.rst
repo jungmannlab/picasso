@@ -7,7 +7,7 @@ G5M
 ---
 - Added G5M
 - Axial localization precision
-- Subclustering test in picasso.clusterer
+- Subclustering test in picasso.clusterer and Filter and after g5m in render
 
 0.9.2
 -----

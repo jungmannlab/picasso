@@ -6244,7 +6244,7 @@ class View(QtWidgets.QLabel):
                     g5m_centers,
                     info,
                 )
-                lib.plot_subclustering(
+                lib.plot_subclustering_check(
                     clust_events,
                     sparse_events,
                     path_molecules.replace(".hdf5", "_subcluster_check.png"),
@@ -6282,7 +6282,7 @@ class View(QtWidgets.QLabel):
                     g5m_centers,
                     info,
                 )
-                lib.plot_subclustering(
+                lib.plot_subclustering_check(
                     clust_events,
                     sparse_events,
                     path_molecules.replace(".hdf5", "_subcluster_check.png"),

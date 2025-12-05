@@ -922,7 +922,23 @@ def run_g5m_group_2D(
 
 
 class G5M_2D(G5M):
-    """G5M for 2D data."""
+    """G5M for 2D data. See ``G5M`` for more details.
+
+    Parameters
+    ----------
+    n_components : int
+        Number of components in the model.
+    min_locs : int
+        Minimum number of localizations per component.
+    sigma_bounds : tuple
+        Bounds for the standard deviation (sigma) of the Gaussian
+        components. If local loc. prec. is used, the bounds specify the
+        margin of error in units of localization precision. Else,
+        absolute bounds on sigma.
+    means_init : np.ndarray or None, optional
+        Initial means (mu) of the Gaussian components. If None, the
+        means are initialized using kmeans++. Default is None.
+    """
 
     def __init__(
         self,
@@ -1429,7 +1445,31 @@ def run_g5m_group_3D(
 
 
 class G5M_3D(G5M):
-    """G5M for 3D data (astigmatism)."""
+    """G5M for 3D data (astigmatism). See ``G5M`` for more details.
+
+    Parameters
+    ----------
+    n_components : int
+        Number of components in the model.
+    min_locs : int
+        Minimum number of localizations per component.
+    sigma_bounds : tuple
+        Bounds for the standard deviation (sigma) of the Gaussian
+        components. If local loc. prec. is used, the bounds specify the
+        margin of error in units of localization precision. Else,
+        absolute bounds on sigma.
+    spot_size : np.ndarray
+        Spot width and height from the 3D calibration for each z
+        position.
+    z_range : np.ndarray
+        Corresponding z values (in camera pixels) for the spot size.
+    mag_factor : float, optional
+        Magnification factor used for correcting the refractive index
+        mismatch for 3D imaging. Default is 0.79.
+    means_init : np.ndarray or None, optional
+        Initial means (mu) of the Gaussian components. If None, the
+        means are initialized using kmeans++. Default is None.
+    """
 
     def __init__(
         self,

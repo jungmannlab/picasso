@@ -1167,7 +1167,7 @@ def pick_areas_rectangle(
     return areas
 
 
-def plot_subclustering(
+def plot_subclustering_check(
     clustered_n_events: np.ndarray,
     sparse_n_eveents: np.ndarray,
     plot_path: str | list[str] = "",
