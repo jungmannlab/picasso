@@ -798,9 +798,9 @@ def render_gaussian_iso(
         blur_height = oversampling * np.maximum(
             locs["lpy"].values, min_blur_width
         )
-        # for now, let lpz be twice the mean of lpx and lpy (TODO):
+        # for now, let lpz be twice the mean of lpx and lpy
         if "lpz" in locs:
-            lpz = locs["lpz"].values  # NOTE: lpz must have same units as lpx
+            lpz = locs["lpz"].values
         else:
             lpz = 2 * locs[["lpx", "lpy"]].to_numpy().mean(axis=1)
         blur_depth = oversampling * np.maximum(lpz, min_blur_width)
