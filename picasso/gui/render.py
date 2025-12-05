@@ -77,7 +77,7 @@ POLYGON_POINTER_SIZE = 16  # must be even
 
 
 # G5M default params
-MIN_LOCS_G5M = 15
+MIN_LOCS_G5M = 10
 MAX_ROUNDS_WITHOUT_BEST_BIC_G5M = 3
 MIN_SIGMA_FACTOR_G5M = 0.8
 MAX_SIGMA_FACTOR_G5M = 1.5
@@ -6334,7 +6334,6 @@ class View(QtWidgets.QLabel):
             min_locs=params["min_locs"],
             loc_prec_handle=params["loc_prec_handle"],
             sigma_bounds=params["sigma_bounds"],
-            pixelsize=self.window.display_settings_dlg.pixelsize.value(),
             bootstrap_check=params["bootstrap_check"],
             calibration=params.get("calibration", None),
             postprocess=params["postprocess_check"],

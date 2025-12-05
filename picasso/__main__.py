@@ -8,8 +8,11 @@ Picasso command line interface.
 :copyright: Copyright (c) 2016-2019 Jungmann Lab, MPI of Biochemistry
 """
 
+from __future__ import annotations
+
 import os.path
 import argparse
+from typing import Literal
 from . import __version__
 
 
@@ -1769,8 +1772,66 @@ def _spinna_batch_analysis(
     )
 
 
+def _g5m(
+    files: str,
+    min_locs: int = 10,
+    loc_prec_handle: Literal["local", "abs"] = "local",
+    min_sigma: float = 0.8,
+    max_sigma: float = 1.5,
+    max_rounds: int = 3,
+    bootstrap_sem: bool = False,
+    calibration: str = "",
+    postprocess: bool = True,
+    max_locs: int = 100000,
+    asynch: bool = True,
+) -> None:
+    """G5M analysis of clustered localizations. See ``picasso.g5m.g5m``
+    for details on the parameters."""
+    from glob import glob
+    from os.path import isdir
+    import yaml
+    from .io import load_locs, save_locs
+    from .g5m import g5m
+
+    if isdir(files):
+        print("Analyzing folder")
+        paths = glob(files + "/*.hdf5")
+    else:
+        paths = [files]
+
+    print(
+        f"A total of {len(paths)} file{'s' if len(paths) > 1 else ''} detected."
+    )
+    for path in paths:
+        print("------------------------------------------")
+        print(f"Processing {path}")
+        locs, info = load_locs(path)
+        if hasattr(locs, "z"):
+            if calibration != "":
+                with open(calibration, "r") as f:
+                    calib = yaml.full_load(f)
+        else:
+            calib = None
+        mols, _, g5m_info = g5m(
+            locs,
+            info,
+            min_locs=min_locs,
+            loc_prec_handle=loc_prec_handle,
+            sigma_bounds=(min_sigma, max_sigma),
+            max_rounds_without_best_bic=max_rounds,
+            bootstrap_check=bootstrap_sem,
+            calibration=calib,
+            postprocess=postprocess,
+            max_locs_per_cluster=max_locs,
+            asynch=asynch,
+            callback_parent="console",
+        )
+        save_locs(path.replace(".hdf5", "_molmap.hdf5"), mols, g5m_info)
+
+
 def main():
     # Main parser
+    # picasso_logo()
     parser = argparse.ArgumentParser("picasso")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -2399,6 +2460,85 @@ def main():
         help="display progress bar for each row",
     )
 
+    g5m_parser = subparsers.add_parser(
+        "g5m",
+        help=(
+            "Gaussian Mixture Modeling with Modifications for Molecular Mapping"
+            "\nFor more details see: https://doi.org"  # TODO: add link
+        ),
+    )
+    g5m_parser.add_argument(
+        "files",
+        nargs="?",
+        help=(
+            "path clustered localization file(s) (.hdf5) specified by a unix "
+            "style path pattern or a path to the folder in which all .hdf5 "
+            "files will be analyzed"
+        ),
+    )
+    g5m_parser.add_argument(
+        "-ml",
+        "--min-locs",
+        type=int,
+        default=10,
+        help="min. number of locs per molecule",
+    )
+    g5m_parser.add_argument(
+        "-lph",
+        "--loc-prec-handle",
+        type=str,
+        default="local",
+        help="loc. precision handle, either 'local' or 'abs'",
+    )
+    g5m_parser.add_argument(
+        "--min-sigma",
+        type=float,
+        default=0.8,
+        help="minimum sigma factor/value",
+    )
+    g5m_parser.add_argument(
+        "--max-sigma",
+        type=float,
+        default=1.5,
+        help="maximum sigma factor/value",
+    )
+    g5m_parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=3,
+        help="max. rounds without BIC improvement to terminate",
+    )
+    g5m_parser.add_argument(
+        "--bootstrap-sem",
+        action="store_true",
+        help="bootstrap to get SEM of mol. positions; 0 to disable",
+    )
+    g5m_parser.add_argument(
+        "-c",
+        "--calibration",
+        type=str,
+        default="",
+        help="path to calibration file, used only for 3D data",
+    )
+    g5m_parser.add_argument(
+        "-p",
+        "--postprocess",
+        action="store_false",
+        help="do not postprocess results to remove sticking events and low-quality fits",
+    )
+    g5m_parser.add_argument(
+        "--max-locs",
+        type=int,
+        default=100000,
+        help="maximum number of localizations to process per cluster; useful for excluding fiducials",
+    )
+    g5m_parser.add_argument(
+        "-a",
+        "--asynch",
+        action="store_false",
+        help="do not perform fitting asynchronously (multiprocessing)",
+    )
+
     # Parse
     args = parser.parse_args()
     if args.command:
@@ -2526,6 +2666,20 @@ def main():
                 from .gui import spinna
 
                 spinna.main()
+        elif args.command == "g5m":
+            _g5m(
+                args.files,
+                args.min_locs,
+                args.loc_prec_handle,
+                args.min_sigma,
+                args.max_sigma,
+                args.max_rounds,
+                args.bootstrap_sem,
+                args.calibration,
+                args.postprocess,
+                args.max_locs,
+                args.asynch,
+            )
     else:
         parser.print_help()
 

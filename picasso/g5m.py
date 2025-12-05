@@ -2,7 +2,7 @@
 picasso.g5m
 ~~~~~~~~~~~
 
-Gaussian Mixture Modelling with Modifications for Molecular Mapping
+Gaussian Mixture Modeling with Modifications for Molecular Mapping
 (G5M). Published in: TODO: add DOI
 
 G5M is based on the sklearn implementation of Gaussian Mixture Modeling
@@ -34,7 +34,7 @@ from PyQt5 import QtWidgets
 from . import lib, zfit, __version__
 
 # default min. number of localizations per molecule
-MIN_LOCS = 15
+MIN_LOCS = 10
 # default number of rounds without BIC improvement to terminate the
 # search for n_components
 MAX_ROUNDS_WITHOUT_BEST_BIC = 3
@@ -2252,7 +2252,6 @@ def g5m(
     min_locs: int = MIN_LOCS,
     loc_prec_handle: Literal["local", "abs"] = "local",
     sigma_bounds: tuple[float, float] = (MIN_SIGMA_FACTOR, MAX_SIGMA_FACTOR),
-    pixelsize: float = 130.0,
     max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
     bootstrap_check: bool = False,
     calibration: dict | None = None,
@@ -2291,8 +2290,6 @@ def g5m(
     max_rounds_without_best_bic : int, optional
         Maximum number of rounds without BIC improvement to terminate
         the search for optimal G5M n_components. Default is 3.
-    pixelsize : float, optional
-        Camera pixel size in nm. Default is 130.0.
     bootstrap_check : bool, optional
         If True, the standard error of the means (SEM) is calculated
         using bootstrapping. If False, the standard, single Gaussian SEM
@@ -2342,6 +2339,10 @@ def g5m(
     assert hasattr(
         locs, "group"
     ), "Localizations must be grouped. Use DBSCAN or similar."
+
+    pixelsize = lib.get_from_metadata(info, "Pixelsize")
+    if pixelsize is None:
+        raise ValueError("Camera pixel size must be provided in info.")
 
     # check that calibration is provided for 3D data
     if hasattr(locs, "z") and calibration is None:
