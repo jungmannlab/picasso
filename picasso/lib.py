@@ -411,7 +411,7 @@ def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
     if isinstance(info, dict):
         return info.get(key, default)
     elif isinstance(info, list):
-        for inf in info:
+        for inf in info[::-1]:
             if val := inf.get(key):
                 return val
         return default
