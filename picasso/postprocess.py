@@ -2328,10 +2328,10 @@ def _undrift_from_picked_coordinate(
     coordinate: Literal["x", "y", "z"],
 ) -> np.ndarray:
     """Calculate drift in a given coordinate from picked localizations.
-    Uses the center of mass of each pick to find the drift
-    in the specified coordinate across all frames. The drift is
-    calculated as the average of the localizations' coordinates
-    minus the mean of the coordinates for each pick.
+    Uses the center of mass of each pick to find the drift in the
+    specified coordinate across all frames. The drift is calculated as
+    the average of the localizations' coordinates minus the mean of the
+    coordinates for each pick.
 
     Parameters
     ----------

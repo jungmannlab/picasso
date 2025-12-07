@@ -1,7 +1,23 @@
 Changelog
 =========
 
-Last change: 02-DEC-2025 CEST
+Last change: 07-DEC-2025 CEST
+
+0.9.2
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- Improved and updated `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
+
+*Small improvements:*
++++++++++++++++++++++
+
+*Bug fixes:*
+++++++++++++
+- AIM (``picasso.aim.aim``) copies localizations to avoid modifying the input DataFrame.
+- Simulate: fixed repetead axes tick labels
+- SPINNA: fixed NND plot showing bins/lines outside of xlim
+- SPINNA: extract the picked area based on the last .yaml file entry, not the first one (fixes the issue of incorrect densities extracted for localizations that were picked multiple times)
 
 0.9.0-1
 -------

@@ -157,31 +157,31 @@ class MockProgress:
     """Class to mock a progress bar or dialog, allowing for calling
     the same methods but not displaying anything."""
 
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         pass
 
-    def init(self):
+    def init(self, *args, **kwargs):
         pass
 
-    def set_value(self, value):
+    def set_value(self, *args, **kwargs):
         pass
 
-    def update(self, value):
+    def update(self, *args, **kwargs):
         pass
 
-    def closeEvent(self, event):
+    def closeEvent(self, *args, **kwargs):
         pass
 
-    def zero_progress(self, description=None):
+    def zero_progress(self, *args, **kwargs):
         pass
 
-    def close(self):
+    def close(self, *args, **kwargs):
         pass
 
-    def setLabelText(self, text):
+    def setLabelText(self, *args, **kwargs):
         pass
 
-    def play_sound_notification(self):
+    def play_sound_notification(self, *args, **kwargs):
         pass
 
 
@@ -411,7 +411,7 @@ def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
     if isinstance(info, dict):
         return info.get(key, default)
     elif isinstance(info, list):
-        for inf in info:
+        for inf in info[::-1]:
             if val := inf.get(key):
                 return val
         return default

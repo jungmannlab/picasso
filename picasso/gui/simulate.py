@@ -850,7 +850,9 @@ class Window(QtWidgets.QMainWindow):
         strgrid = QtWidgets.QGridLayout(str_groupbox)
 
         self.figure1 = plt.figure(figsize=(2, 2), constrained_layout=True)
+        self.ax1 = self.figure1.add_subplot(111)
         self.figure2 = plt.figure(figsize=(2, 2), constrained_layout=True)
+        self.ax2 = self.figure2.add_subplot(111)
         self.canvas1 = FigureCanvas(self.figure1)
         csize = 180
         self.canvas1.setMinimumSize(csize, csize)
@@ -1791,11 +1793,8 @@ class Window(QtWidgets.QMainWindow):
         structurexx, structureyy, structureex, _ = self.readStructure()
         noexchangecolors = len(set(structureex))
         exchangecolors = list(set(structureex))
-        # self.figure2.suptitle('Structure [nm]')
-        ax1 = self.figure2.add_subplot(111)
-        ax1.cla()
-        # ax1.hold(True)
-        ax1.axis("equal")
+        self.ax2.clear()
+        self.ax2.axis("equal")
 
         for i in range(0, noexchangecolors):
             plotxx = []
@@ -1804,13 +1803,10 @@ class Window(QtWidgets.QMainWindow):
                 if structureex[j] == exchangecolors[i]:
                     plotxx.append(structurexx[j])
                     plotyy.append(structureyy[j])
-            ax1.plot(plotxx, plotyy, "o")
+            self.ax2.plot(plotxx, plotyy, "o")
 
         distx = round(1 / 10 * (max(structurexx) - min(structurexx)))
         disty = round(1 / 10 * (max(structureyy) - min(structureyy)))
-
-        ax1.axes.set_xlim((min(structurexx) - distx, max(structurexx) + distx))
-        ax1.axes.set_ylim((min(structureyy) - disty, max(structureyy) + disty))
         self.canvas2.draw()
 
         exchangecolorsList = ",".join(map(str, exchangecolors))
@@ -1885,14 +1881,11 @@ class Window(QtWidgets.QMainWindow):
             in_frame = np.logical_and(in_x, in_y)
             self.newstruct = self.newstruct[:, in_frame]
 
-        # self.figure1.suptitle('Positions [Px]')
-        ax1 = self.figure1.add_subplot(111)
-        ax1.cla()
-        # ax1.hold(True)
-        ax1.axis("equal")
-        ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
+        self.ax1.clear()
+        self.ax1.axis("equal")
+        self.ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
         # PLOT FRAME
-        ax1.add_patch(
+        self.ax1.add_patch(
             patches.Rectangle(
                 (frame, frame),
                 imageSize - 2 * frame,
@@ -1903,9 +1896,6 @@ class Window(QtWidgets.QMainWindow):
             )
         )
 
-        ax1.axes.set_xlim(0, imageSize)
-        ax1.axes.set_ylim(0, imageSize)
-
         self.canvas1.draw()
 
         # PLOT first structure
@@ -1914,12 +1904,10 @@ class Window(QtWidgets.QMainWindow):
         noexchangecolors = len(set(struct1[2, :]))
         exchangecolors = list(set(struct1[2, :]))
         self.noexchangecolors = exchangecolors
-        # self.figure2.suptitle('Structure [nm]')
-        ax1 = self.figure2.add_subplot(111)
-        ax1.cla()
-        # ax1.hold(True)
-        ax1.axis("equal")
 
+        self.ax2.clear()
+        # self.ax2.hold(True)
+        self.ax2.axis("equal")
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
         structureex = struct1[2, :]
@@ -1933,17 +1921,11 @@ class Window(QtWidgets.QMainWindow):
                 if structureex[j] == exchangecolors[i]:
                     plotxx.append(structurexx_nm[j])
                     plotyy.append(structureyy_nm[j])
-            ax1.plot(plotxx, plotyy, "o")
+            self.ax2.plot(plotxx, plotyy, "o")
 
             distx = round(1 / 10 * (max(structurexx_nm) - min(structurexx_nm)))
             disty = round(1 / 10 * (max(structureyy_nm) - min(structureyy_nm)))
 
-            ax1.axes.set_xlim(
-                (min(structurexx_nm) - distx, max(structurexx_nm) + distx)
-            )
-            ax1.axes.set_ylim(
-                (min(structureyy_nm) - disty, max(structureyy_nm) + disty)
-            )
         self.canvas2.draw()
 
     def plotPositions(self) -> None:
@@ -1954,13 +1936,11 @@ class Window(QtWidgets.QMainWindow):
         frame = self.structureframeEdit.value()
 
         # self.figure1.suptitle('Positions [Px]')
-        ax1 = self.figure1.add_subplot(111)
-        ax1.cla()
-        # ax1.hold(True)
-        ax1.axis("equal")
-        ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
+        self.ax1.clear()
+        self.ax1.axis("equal")
+        self.ax1.plot(self.newstruct[0, :], self.newstruct[1, :], "+")
         # PLOT FRAME
-        ax1.add_patch(
+        self.ax1.add_patch(
             patches.Rectangle(
                 (frame, frame),
                 imageSize - 2 * frame,
@@ -1971,9 +1951,6 @@ class Window(QtWidgets.QMainWindow):
             )
         )
 
-        ax1.axes.set_xlim(0, imageSize)
-        ax1.axes.set_ylim(0, imageSize)
-
         self.canvas1.draw()
 
         # PLOT first structure
@@ -1982,10 +1959,7 @@ class Window(QtWidgets.QMainWindow):
         noexchangecolors = len(set(struct1[2, :]))
         exchangecolors = list(set(struct1[2, :]))
         self.noexchangecolors = exchangecolors
-        # self.figure2.suptitle('Structure [nm]')
-        ax1 = self.figure2.add_subplot(111)
-        ax1.cla()
-        # ax1.hold(True)
+        self.ax2.clear()
 
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
@@ -2000,17 +1974,11 @@ class Window(QtWidgets.QMainWindow):
                 if structureex[j] == exchangecolors[i]:
                     plotxx.append(structurexx_nm[j])
                     plotyy.append(structureyy_nm[j])
-            ax1.plot(plotxx, plotyy, "o")
+            self.ax2.plot(plotxx, plotyy, "o")
 
             distx = round(1 / 10 * (max(structurexx_nm) - min(structurexx_nm)))
             disty = round(1 / 10 * (max(structureyy_nm) - min(structureyy_nm)))
 
-            ax1.axes.set_xlim(
-                (min(structurexx_nm) - distx, max(structurexx_nm) + distx)
-            )
-            ax1.axes.set_ylim(
-                (min(structureyy_nm) - disty, max(structureyy_nm) + disty)
-            )
         self.canvas2.draw()
 
     def openDialog(self) -> None:
