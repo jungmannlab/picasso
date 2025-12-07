@@ -16,6 +16,7 @@ Important updates:
 ++++++++++++
 - AIM (``picasso.aim.aim``) copies localizations to avoid modifying the input DataFrame.
 - Simulate: fixed repetead axes tick labels
+- SPINNA: fixed NND plot showing bins/lines outside of xlim
 
 0.9.0-1
 -------

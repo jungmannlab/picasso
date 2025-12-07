@@ -503,6 +503,30 @@ def plot_NN(
     savefig : str (default='')
         Path to save the plot. If '', the plot is not saved.
     """
+
+    def remove_patches_and_data(ax, xmax):
+        # remove the bins above the xlim if given (downstream they
+        # will be displayed by PyQt somehow)
+        for patch in ax.patches:
+            left = patch.get_x()
+            right = left + patch.get_width()
+            if right > xmax:
+                #     new_patches.append(patch)
+                # else:
+                patch.remove()
+        # same for lines
+        for line in ax.lines:
+            xdata = line.get_xdata()
+            ydata = line.get_ydata()
+            new_xdata = []
+            new_ydata = []
+            for x, y in zip(xdata, ydata):
+                if x <= xmax:
+                    new_xdata.append(x)
+                    new_ydata.append(y)
+            line.set_xdata(new_xdata)
+            line.set_ydata(new_ydata)
+
     # initiate figure and axis
     if fig is None or ax is None:
         fig, ax = plt.subplots(
@@ -553,6 +577,8 @@ def plot_NN(
                 alpha=alpha,
                 label=f"sim {i+1}th NN",
             )
+    if xlim is not None:
+        remove_patches_and_data(ax, xlim[1])
 
     # display parameters
     if show_legend:
