@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 04-DEC-2025 CEST
+Last change: 07-DEC-2025 CEST
 
 0.9.2
 -----
@@ -15,6 +15,7 @@ Important updates:
 *Bug fixes:*
 ++++++++++++
 - AIM (``picasso.aim.aim``) copies localizations to avoid modifying the input DataFrame.
+- Simulate: fixed repetead axes tick labels
 
 0.9.0-1
 -------
