@@ -453,7 +453,7 @@ def plot_NN(
     edgecolor: str = "black",
     show: bool = False,
     return_fig: bool = False,
-    savefig: str = "",
+    savefig: str | list[str] = "",
 ) -> tuple[plt.Figure, plt.axes] | None:
     """Plot a nearest neighbor distances histogram.
 
@@ -500,8 +500,10 @@ def plot_NN(
     return_fig : bool (default=False)
         If True, fig and ax are returned and can be used for further
         processing.
-    savefig : str (default='')
-        Path to save the plot. If '', the plot is not saved.
+    savefig : str or list of strs (default='')
+        Path to save the plot. If '', the plot is not saved. If a list
+        of strings is given, several paths can be specified (with
+        different extensions).
     """
 
     def remove_patches_and_data(ax, xmax):

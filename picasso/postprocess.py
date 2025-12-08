@@ -984,7 +984,9 @@ def frc(
         Estimated resolution in nm, given the 1/7 threshold.
     """
     # select a central ROI
-    locs, viewport = imageprocess.central_roi(locs, info, size=1e4)  # 10 um
+    locs, viewport = imageprocess.central_roi(
+        locs, info, size=1e4
+    )  # 10 um TODO: just take 1001 pixels around some location? because the calculations take too long
     # # split the locs in two random halves
     np.random.seed(random_seed)
     random_indices = np.random.permutation(len(locs))
@@ -1013,10 +1015,10 @@ def frc(
     # fourier transform the images and calculate FRC
     im1 = np.fft.fft2(im1)
     im2 = np.fft.fft2(im2)
-    frc_numerator = np.real(radialsum(im1 * np.conj(im2)))
+    frc_numerator = np.real(radial_sum(im1 * np.conj(im2)))
     sq_im1 = np.abs(im1) ** 2
     sq_im2 = np.abs(im2) ** 2
-    frc_denominator = np.sqrt(np.abs(radialsum(sq_im1) * radialsum(sq_im2)))
+    frc_denominator = np.sqrt(np.abs(radial_sum(sq_im1) * radial_sum(sq_im2)))
     with np.errstate(divide="ignore", invalid="ignore"):
         frc_curve = frc_numerator / frc_denominator
     frc_curve[np.isnan(frc_curve)] = 0  # Remove NaNs
@@ -1040,157 +1042,45 @@ def frc(
     return frc_result, resolution
 
 
-# def radialsum(image):
-#     """Compute the radial sum of a 2D image.
-
-#     Parameters
-#     ----------
-#     image : 2D numpy array
-#         Input image (e.g., Fourier spectrum).
-
-#     Returns
-#     -------
-#     profile : 1D numpy array
-#         Radial sum as a function of radius.
-#     """
-#     # Image shape
-#     nx, ny = image.shape
-
-#     # Coordinates relative to center
-#     cx, cy = nx // 2, ny // 2
-#     y, x = np.indices((nx, ny))
-#     r = np.sqrt((x - cy)**2 + (y - cx)**2)
-#     r_int = np.round(r).astype(int)
-
-#     # Maximum radius
-#     max_r = r_int.max()
-
-#     # Radial sum
-#     radial_sum = np.bincount(
-#         r_int.ravel(), weights=image.ravel(), minlength=max_r + 1,
-#     )
-#     return radial_sum
-
-
-def radialsum(
-    image: np.ndarray,
-    mask: np.ndarray | None = None,
-    bin_size: float = 1.0,
-    max_radius: Literal["inner_radius", "outer_radius"] = "outer_radius",
-    center: tuple[float, float] | None = None,
-) -> np.ndarray:
+def radial_sum(image: np.ndarray) -> np.ndarray:
     """Compute the radial projection of the sum of pixel values.
 
     If the radial distance of a pixel to center is r, then the sum of the
-    intensities of all pixels with n * bin_size <= r < (n + 1) * bin_size
-    is stored at position n in the output array.
+    intensities of all pixels with n <= r < (n + 1) is stored at
+    position n in the output array.
 
     Parameters
     ----------
     image : np.ndarray
         Input image array.
-    mask : np.ndarray, optional
-        Binary mask to specify which pixels to include. If None,
-        all pixels are included.
-    bin_size : float, optional
-        Size of the bins (pixels) in the radial output dimension.
-        Default is 1.0.
-    max_radius : str, optional
-        Maximum radius for the projection. Can be "inner_radius"
-        (smallest distance from center to any edge) or "outer_radius"
-        (largest distance from center to any edge). Default is
-        "outer_radius".
-    center : tuple of float, optional
-        Center coordinates (x, y). If None, defaults to the image
-        center.
 
     Returns
     -------
     radial_profile : np.ndarray
-        1D array containing the radial sum values. The array has dtype
-        np.float64 for real inputs and np.complex128 for complex
-        inputs.
+        1D array containing the radial sum values.
 
     Raises
     ------
     ValueError
         If ``max_radius`` is not "inner_radius" or "outer_radius".
     """
-    if image.ndim != 2:
-        raise ValueError("Input image must be 2-dimensional")
+    assert image.ndim == 2, "Input image must be 2D."
+    assert image.shape[0] == image.shape[1], "Input image must be square."
+    assert image.shape[0] % 2 == 1, "Input image size must be odd."
 
-    if max_radius not in ["inner_radius", "outer_radius"]:
-        raise ValueError("max_radius must be 'inner_radius' or 'outer_radius'")
-
-    height, width = image.shape
-
-    # Set default center if not provided
-    if center is None:
-        center = (width / 2.0, height / 2.0)
-
-    center_x, center_y = center
-
-    # Calculate maximum radius based on the specified method
-    if max_radius == "inner_radius":
-        # Distance to closest edge
-        max_r = min(
-            center_x,
-            center_y,
-            width - center_x,
-            height - center_y,
-        )
-    else:  # outer_radius
-        # Distance to farthest corner
-        corners = [
-            (0, 0),
-            (0, height),
-            (width, 0),
-            (width, height),
-        ]
-        max_r = max(
-            np.sqrt((corner[0] - center_x) ** 2 + (corner[1] - center_y) ** 2)
-            for corner in corners
-        )
-
-    # Number of radial bins
-    n_bins = int(np.ceil(max_r / bin_size))
-
-    # Choose output data type based on input
-    if np.iscomplexobj(image):
-        output_dtype = np.complex128
-    else:
-        output_dtype = np.float64
-
-    # Initialize output array
-    radial_profile = np.zeros(n_bins, dtype=output_dtype)
-
-    # Create coordinate arrays
-    y_coords, x_coords = np.ogrid[:height, :width]
-
-    # Calculate radial distances from center
-    distances = np.sqrt(
-        (x_coords - center_x) ** 2 + (y_coords - center_y) ** 2
-    )
-
-    # Calculate bin indices for each pixel
-    bin_indices = np.floor(distances / bin_size).astype(np.int32)
-
-    # Create mask for valid bins (within max_radius)
-    valid_mask = bin_indices < n_bins
-
-    # Apply user mask if provided
-    if mask is not None:
-        if mask.shape != image.shape:
-            raise ValueError("Mask shape must match image shape")
-        valid_mask = valid_mask & mask.astype(bool)
-
-    # Sum pixel values into radial bins
-    for bin_idx in range(n_bins):
-        pixel_mask = valid_mask & (bin_indices == bin_idx)
-        if np.any(pixel_mask):
-            radial_profile[bin_idx] = np.sum(image[pixel_mask])
-
-    return radial_profile
+    size = image.shape[0]
+    center = size // 2
+    r = np.arange(0, center + 1)
+    # get the square distances of each pixel from the center
+    y, x = np.ogrid[:size, :size]
+    dist_sq = (x - center) ** 2 + (y - center) ** 2
+    # create an array to hold the counts
+    counts = np.zeros_like(r, dtype=image.dtype)
+    # iterate over each radius and compute the sum and count
+    for r_idx, radius in enumerate(r):
+        mask = (dist_sq >= radius**2) & (dist_sq < (radius + 1) ** 2)
+        counts[r_idx] = np.sum(image[mask])
+    return counts
 
 
 def pair_correlation(
