@@ -322,3 +322,44 @@ def central_roi(
         ((image_height + roi_lim_y) // 2, (image_width + roi_lim_x) // 2),
     )
     return locs, viewport
+
+
+def radial_sum(image: np.ndarray) -> np.ndarray:
+    """Compute the radial projection of the sum of pixel values.
+
+    If the radial distance of a pixel to center is r, then the sum of the
+    intensities of all pixels with n <= r < (n + 1) is stored at
+    position n in the output array.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Input image array.
+
+    Returns
+    -------
+    radial_profile : np.ndarray
+        1D array containing the radial sum values.
+
+    Raises
+    ------
+    ValueError
+        If ``max_radius`` is not "inner_radius" or "outer_radius".
+    """
+    assert image.ndim == 2, "Input image must be 2D."
+    assert image.shape[0] == image.shape[1], "Input image must be square."
+    assert image.shape[0] % 2 == 1, "Input image size must be odd."
+
+    size = image.shape[0]
+    center = size // 2
+    r = np.arange(0, center + 1)
+    # get the square distances of each pixel from the center
+    y, x = np.ogrid[:size, :size]
+    dist_sq = (x - center) ** 2 + (y - center) ** 2
+    # create an array to hold the counts
+    counts = np.zeros_like(r, dtype=image.dtype)
+    # iterate over each radius and compute the sum and count
+    for r_idx, radius in enumerate(r):
+        mask = (dist_sq >= radius**2) & (dist_sq < (radius + 1) ** 2)
+        counts[r_idx] = np.sum(image[mask])
+    return counts

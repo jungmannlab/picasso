@@ -28,7 +28,7 @@ from scipy.spatial import distance
 from tqdm import tqdm, trange
 from sklearn.neighbors import NearestNeighbors as NN
 
-from . import lib, render, imageprocess
+from . import lib, render, imageprocess, masking
 
 
 def get_index_blocks(
@@ -954,18 +954,19 @@ def _fill_dnfl(
 
 
 def frc(
-    locs: np.recarray,
+    locs: pd.DataFrame,
     info: list[dict],
+    n_repeats: int = 20,
     callback: Callable[[int], None] | None = None,
     random_seed: int = 42,
-) -> tuple[dict, float]:
+) -> tuple[dict, tuple[float, float]]:
     """Calculate the Fourier Ring Correlation (FRC) resolution.
 
     See Nieuwenhuizen et al., Nat. Methods 10, 557–562 (2013).
 
     Parameters
     ----------
-    locs : np.recarray
+    locs : pd.DataFrame
         Localization list.
     info : list of dicts
         Metadata of the localizations list.
@@ -980,107 +981,131 @@ def frc(
     frc_result : dict
         Dictionary with keys "frc_curve", "frequencies" (for spatial
         frequencies)
-    resolution : float
-        Estimated resolution in nm, given the 1/7 threshold.
+    resolution, resolution_std : float
+        Estimated resolution in nm, given the 1/7 threshold, and its
+        standard deviation over n_repeats.
     """
-    # select a central ROI
-    locs, viewport = imageprocess.central_roi(
-        locs, info, size=1e4
-    )  # 10 um TODO: just take 1001 pixels around some location? because the calculations take too long
-    # # split the locs in two random halves
-    np.random.seed(random_seed)
-    random_indices = np.random.permutation(len(locs))
-    locs1 = locs[random_indices[: len(locs) // 2]]
-    locs2 = locs[random_indices[len(locs) // 2 :]]
-    # generate pairs of images (splitting locs in half) with pixel size
-    # of 1/2 of median loc. precision
-    median_lp = np.mean([np.median(locs.lpx), np.median(locs.lpy)])
-    pixelsize = median_lp / 2  # frc image pixel size (in cam. pixels)
-    camera_pixelsize = info[1]["Pixelsize"]  # nm
-    oversampling = camera_pixelsize / pixelsize
-    im1 = render.render(
-        locs1,
-        info=None,
-        oversampling=oversampling,
-        viewport=viewport,
-        blur_method="convolve",
-    )[1]
-    im2 = render.render(
-        locs2,
-        info=None,
-        oversampling=oversampling,
-        viewport=viewport,
-        blur_method="convolve",
-    )[1]
-    # fourier transform the images and calculate FRC
-    im1 = np.fft.fft2(im1)
-    im2 = np.fft.fft2(im2)
-    frc_numerator = np.real(radial_sum(im1 * np.conj(im2)))
-    sq_im1 = np.abs(im1) ** 2
-    sq_im2 = np.abs(im2) ** 2
-    frc_denominator = np.sqrt(np.abs(radial_sum(sq_im1) * radial_sum(sq_im2)))
-    with np.errstate(divide="ignore", invalid="ignore"):
-        frc_curve = frc_numerator / frc_denominator
-    frc_curve[np.isnan(frc_curve)] = 0  # Remove NaNs
+    pixelsize = lib.get_from_metadata(info, "Pixelsize")
+    if pixelsize is None:
+        raise ValueError("Pixelsize not found in metadata.")
+    median_lp = np.median(locs[["lpx", "lpy"]].mean(axis=1))
 
-    # smooth the frc curve and get the resolution as 1/7 threshold TODO
-    idx = np.where(frc_curve < 1 / 7)[0]
-    # TODO: check below is correct
-    frequencies = np.fft.fftfreq(
-        len(frc_curve),
-        d=pixelsize,
-    )[: len(frc_curve) // 2]
-    resolution = 1 / frequencies[idx] if len(frequencies) else np.inf
-    resolution *= camera_pixelsize  # convert to nm
-    # TODO: other things that were skipped so far:
-    # - masking of the rendered images (before fourier) (tukey window)
-    # - smoothing of the frc curve
+    np.random.seed(random_seed)
+    frc_curves = []
+    resolutions = []
+    for _ in range(n_repeats):
+        frc_curve, frequencies, resolution, im1, im2 = _frc_once(
+            locs, info, median_lp
+        )
+        if resolution is not None:
+            frc_curves.append(frc_curve)
+            resolutions.append(resolution)
+    mean_frc_curve = np.mean(frc_curves, axis=0)
+    resolution = np.mean(resolutions)
+    resolution_std = np.std(resolutions)
     frc_result = {
-        "frc_curve": frc_curve,
+        "frc_curve": mean_frc_curve,
         "frequencies": frequencies,
     }
-    return frc_result, resolution
+    return frc_result, (resolution, resolution_std)
 
 
-def radial_sum(image: np.ndarray) -> np.ndarray:
-    """Compute the radial projection of the sum of pixel values.
+def _frc_once(
+    locs: pd.DataFrame,
+    info: list[dict],
+    median_lp: float,
+) -> tuple[np.ndarray, float | None, np.ndarray, np.ndarray]:
+    """Calculate the Fourier Ring Correlation (FRC) resolution once.
 
-    If the radial distance of a pixel to center is r, then the sum of the
-    intensities of all pixels with n <= r < (n + 1) is stored at
-    position n in the output array.
+    Extracts a random small ROI from the localizations, splits the
+    localizations into two halves, generates images from the two halves,
+    and calculates the FRC curve and resolution.
+
+    See Nieuwenhuizen et al., Nat. Methods 10, 557–562 (2013).
+
+    TODO: simplify this function!!!! split into smaller functions!!!
 
     Parameters
     ----------
-    image : np.ndarray
-        Input image array.
+    locs : pd.DataFrame
+        Localization list.
+    info : list of dicts
+        Metadata of the localizations list.
+    median_lp : float
+        Median localization precision.
 
     Returns
     -------
-    radial_profile : np.ndarray
-        1D array containing the radial sum values.
-
-    Raises
-    ------
-    ValueError
-        If ``max_radius`` is not "inner_radius" or "outer_radius".
+    frc_curve : np.ndarray
+        FRC curve.
+    frequencies : np.ndarray
+        Spatial frequencies corresponding to the FRC curve (nm^-1).
+    resolution : float or None
+        Estimated resolution in nm, given the 1/7 threshold. None if
+        resolution could not be determined.
+    im1, im2 : np.ndarray
+        Images generated from the two halves of the localizations.
     """
-    assert image.ndim == 2, "Input image must be 2D."
-    assert image.shape[0] == image.shape[1], "Input image must be square."
-    assert image.shape[0] % 2 == 1, "Input image size must be odd."
+    pixelsize = lib.get_from_metadata(info, "Pixelsize")
+    if pixelsize is None:
+        raise ValueError("Pixelsize not found in metadata.")
 
-    size = image.shape[0]
-    center = size // 2
-    r = np.arange(0, center + 1)
-    # get the square distances of each pixel from the center
-    y, x = np.ogrid[:size, :size]
-    dist_sq = (x - center) ** 2 + (y - center) ** 2
-    # create an array to hold the counts
-    counts = np.zeros_like(r, dtype=image.dtype)
-    # iterate over each radius and compute the sum and count
-    for r_idx, radius in enumerate(r):
-        mask = (dist_sq >= radius**2) & (dist_sq < (radius + 1) ** 2)
-        counts[r_idx] = np.sum(image[mask])
-    return counts
+    # get a random viewport (ROI)
+    locs, viewport = lib.random_viewport(locs, info)
+    r_idx = np.random.permutation(len(locs))
+    locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
+    locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
+
+    # generate two images
+    median_lp = np.median(locs[["lpx", "lpy"]].mean(axis=1))
+    binsize = median_lp / 2
+    oversampling = 1 / binsize
+    im1 = render.render(locs1, None, oversampling, viewport, "gaussian")
+    im2 = render.render(locs2, None, oversampling, viewport, "gaussian")
+
+    # ensure the images are odd-sized and mask them (tukey)
+    if im1.shape[0] % 2 == 0:
+        im1 = im1[:-1, :-1]
+        im2 = im2[:-1, :-1]
+    mask = masking.threshold_tukey(im1)
+    im1 *= mask
+    im2 *= mask
+
+    # fourier
+    f1 = np.fft.fftshift(np.fft.fft2(im1))
+    f2 = np.fft.fftshift(np.fft.fft2(im2))
+
+    # frc curve
+    frc_num = np.real(imageprocess.radial_sum(im1 * np.conj(im2)))
+    frc_denom1 = np.abs(f1) ** 2
+    frc_denom2 = np.abs(f2) ** 2
+    frc_denom = np.sqrt(
+        np.abs(
+            imageprocess.radial_sum(frc_denom1)
+            * imageprocess.radial_sum(frc_denom2)
+        )
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        frc_curve = frc_num / frc_denom
+    frc_curve[np.isnan(frc_curve)] = 0
+
+    frequencies = (
+        np.arange(len(frc_curve)) / im1.shape[0] / (pixelsize * binsize)
+    )
+    # resolution at 1/7 threshold
+    threshold = 1 / 7
+    resolution = None
+    for i in range(1, len(frc_curve)):
+        if frc_curve[i - 1] >= threshold and frc_curve[i] < threshold:
+            # linear interpolation
+            f1 = frequencies[i - 1]
+            f2 = frequencies[i]
+            r1 = frc_curve[i - 1]
+            r2 = frc_curve[i]
+            f_res = f1 + (threshold - r1) * (f2 - f1) / (r2 - r1)
+            resolution = 1 / f_res  # in nm
+            break
+    return frc_curve, frequencies, resolution, im1, im2
 
 
 def pair_correlation(
