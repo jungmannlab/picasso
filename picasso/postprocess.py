@@ -957,6 +957,7 @@ def frc(
     locs: pd.DataFrame,
     info: list[dict],
     viewport: tuple[tuple[float, float], tuple[float, float]],
+    *,
     n_repeats: int = 20,
     callback: Callable[[int], None] | None = None,
     random_seed: int = 42,
@@ -1027,7 +1028,7 @@ def frc(
         if resolution is not None:
             frc_curves.append(frc_curve)
             resolutions.append(resolution)
-        callback.set_value(i + 1)
+        callback(i + 1)
     # summarize findings
     mean_frc_curve = np.mean(frc_curves, axis=0)
     resolution = np.mean(resolutions)
@@ -1038,7 +1039,6 @@ def frc(
         "resolution": resolution,
         "resolution_std": resolution_std,
     }
-    callback.close()
     return frc_result
 
 
@@ -1055,6 +1055,8 @@ def _frc_once(
     the FRC curve and resolution (at 1/7 threshold).
 
     See Nieuwenhuizen et al., Nat. Methods 10, 557–562 (2013).
+
+    Note: do not use this function directly, use ``frc`` instead.
 
     Parameters
     ----------
@@ -1083,8 +1085,8 @@ def _frc_once(
     # render images
     binsize = lp / 2
     oversampling = 1 / binsize
-    im1 = render.render(locs1, None, oversampling, viewport, None)
-    im2 = render.render(locs2, None, oversampling, viewport, None)
+    im1 = render.render(locs1, None, oversampling, viewport, None)[1]
+    im2 = render.render(locs2, None, oversampling, viewport, None)[1]
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:

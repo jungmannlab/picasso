@@ -8,6 +8,7 @@ Last change: 07-DEC-2025 CEST
 Important updates:
 ^^^^^^^^^^^^^^^^^^
 - Improved and updated `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
+- Render: FRC resolution implementation
 
 *Small improvements:*
 +++++++++++++++++++++

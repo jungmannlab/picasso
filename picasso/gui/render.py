@@ -2867,10 +2867,11 @@ class InfoDialog(QtWidgets.QDialog):
         Shows the std dark time (frames) in all picks.
     fit_precision : QLabel
         Shows median fit precision of the first channel (camera pixels).
-    frc_button : QPushButton
-        Calculates FRC resolution.
-    frc_calculated : bool
-        True, if FRC resolution has been calculated.
+    frc_plot_window : FRCPlotWindow(QDialog)
+        Window displaying the FRC curve.
+    frc_result : dict
+        Summary of FRC calculation (FRC curve, frequencies and
+        resolution).
     influx_rate : FloatEdit(QLineEdit)
         Contains the calculated or input influx rate (1/frames).
     locs_label : QLabel
@@ -2885,8 +2886,6 @@ class InfoDialog(QtWidgets.QDialog):
         Contains all the info about the fit precision.
     nena_button : QPushButton
         Calculates nearest neighbor based analysis fit precision.
-    nena_calculated : bool
-        True, if NeNA precision has been calculated.
     n_localization_mean : QLabel
         Shows the mean number of locs in all picks.
     n_localization_std : QLabel
@@ -2929,8 +2928,8 @@ class InfoDialog(QtWidgets.QDialog):
         self.setWindowTitle("Info")
         self.setModal(False)
         self.lp = None
-        self.nena_calculated = False
-        self.frc_calculated = False
+        self.nena_result = {}
+        self.frc_result = {}
         self.change_fov = ChangeFOV(self.window)
 
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -2974,17 +2973,31 @@ class InfoDialog(QtWidgets.QDialog):
         self.fit_precision = QtWidgets.QLabel("-")
         self.movie_grid.addWidget(self.fit_precision, 0, 1)
         self.movie_grid.addWidget(QtWidgets.QLabel("NeNA precision:"), 1, 0)
-        self.nena_button = QtWidgets.QPushButton("Calculate")
+        self.nena_label = QtWidgets.QLabel("-")
+        self.movie_grid.addWidget(self.nena_label, 1, 1)
+        self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
         self.nena_button.clicked.connect(self.calculate_nena_lp)
         self.nena_button.setDefault(False)
         self.nena_button.setAutoDefault(False)
-        self.movie_grid.addWidget(self.nena_button, 1, 1)
-        self.movie_grid.addWidget(QtWidgets.QLabel("FRC resolution:"), 2, 0)
-        self.frc_button = QtWidgets.QPushButton("Calculate")
-        self.frc_button.clicked.connect(self.calculate_frc)
-        self.frc_button.setDefault(False)
-        self.frc_button.setAutoDefault(False)
-        self.movie_grid.addWidget(self.frc_button, 2, 1)
+        self.movie_grid.addWidget(self.nena_button, 2, 0)
+        show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
+        show_nena_plot_button.clicked.connect(self.show_nena_plot)
+        self.movie_grid.addWidget(show_nena_plot_button, 2, 1)
+
+        # FRC
+        frc_groupbox = QtWidgets.QGroupBox("FRC")
+        vbox.addWidget(frc_groupbox)
+        self.frc_grid = QtWidgets.QGridLayout(frc_groupbox)
+        self.frc_grid.addWidget(QtWidgets.QLabel("FRC resolution (nm):"), 0, 0)
+        self.frc_resolution = QtWidgets.QLabel("-")
+        self.frc_grid.addWidget(self.frc_resolution, 0, 1)
+        calculate_frc_button = QtWidgets.QPushButton("Calculate FRC")
+        calculate_frc_button.clicked.connect(self.calculate_frc_resolution)
+        self.frc_grid.addWidget(calculate_frc_button, 1, 0)
+        show_frc_button = QtWidgets.QPushButton("Show FRC plot")
+        show_frc_button.clicked.connect(self.show_frc_plot)
+        self.frc_grid.addWidget(show_frc_button, 1, 1)
+
         # FOV
         fov_groupbox = QtWidgets.QGroupBox("Field of view")
         vbox.addWidget(fov_groupbox)
@@ -3089,8 +3102,32 @@ class InfoDialog(QtWidgets.QDialog):
         hint = self.container.sizeHint()
         lib.adjust_widget_size(self, hint, 70, 45)
 
+    def calculate_frc_resolution(self) -> None:
+        """Calculate FRC resolution in a given channel."""
+        channel = self.window.view.get_channel("Calculate FRC resolution")
+        if channel is not None:
+            locs = self.window.view.locs[channel]
+            info = self.window.view.infos[channel]
+
+            # calculate frc
+            n_repeats = 20
+            progress = lib.ProgressDialog(
+                "Calculating FRC resolution", 0, n_repeats, self
+            )
+            self.frc_result = postprocess.frc(
+                locs.copy(),
+                info,
+                self.window.view.viewport,
+                n_repeats=n_repeats,
+                callback=progress.set_value,
+            )
+            res_nm = self.frc_result["resolution"]
+            res_std = self.frc_result["resolution_std"]
+            self.frc_resolution.setText(f"{res_nm:.2f} nm ± {res_std:.2f} nm")
+            progress.close()
+
     def calculate_nena_lp(self) -> None:
-        """Calculate and plot NeNA precision in a given channel."""
+        """Calculate NeNA precision in a given channel."""
         channel = self.window.view.get_channel("Calculate NeNA precision")
         if channel is not None:
             locs = self.window.view.locs[channel]
@@ -3100,84 +3137,14 @@ class InfoDialog(QtWidgets.QDialog):
             progress = lib.ProgressDialog(
                 "Calculating NeNA precision", 0, 100, self
             )
-            result_lp = postprocess.nena(locs.copy(), info, progress.set_value)
-
-            # modify the movie grid
-            if not self.nena_calculated:  # if nena calculated first time
-                self.nena_button.setParent(None)
-                self.movie_grid.removeWidget(self.nena_button)
-            else:
-                self.movie_grid.removeWidget(self.nena_label)
-                self.movie_grid.removeWidget(self.show_plot_button)
-
-            self.nena_label = QtWidgets.QLabel()
-            self.movie_grid.addWidget(self.nena_label, 1, 1)
-            nena_result, self.lp = result_lp
-            self.lp *= self.window.display_settings_dlg.pixelsize.value()
-            self.nena_label.setText("{:.3} nm".format(self.lp))
-
-            # Nena plot
-            nena_window = NenaPlotWindow(self)
-            nena_window.plot(nena_result)
-
-            self.show_plot_button = QtWidgets.QPushButton("Show plot")
-            self.show_plot_button.clicked.connect(nena_window.show)
-            self.movie_grid.addWidget(self.show_plot_button, 0, 2)
-
-            if not self.nena_calculated:
-                # add recalculate nena
-                recalculate_nena = QtWidgets.QPushButton("Recalculate NeNA")
-                recalculate_nena.clicked.connect(self.calculate_nena_lp)
-                recalculate_nena.setDefault(False)
-                recalculate_nena.setAutoDefault(False)
-                self.movie_grid.addWidget(recalculate_nena, 1, 2)
-
-            self.nena_calculated = True
-
-            hint = self.container.sizeHint()
-            lib.adjust_widget_size(self, hint, 85, 50)
-
-    def calculate_frc(self) -> None:
-        """Calculate and plot FRC resolution in a given channel."""
-        channel = self.window.view.get_channel("Calculate FRC resolution")
-        if channel is not None:
-            locs = self.window.view.locs[channel]
-            info = self.window.view.infos[channel]
-
-            # calculate frc
-            progress = lib.ProgressDialog(
-                "Calculating FRC resolution", 0, 100, self
+            self.nena_result, self.lp = postprocess.nena(
+                locs.copy(), info, progress.set_value
             )
-            frc_result = postprocess.frc(locs, info, progress.set_value)
+            self.lp *= self.window.display_settings_dlg.pixelsize.value()
+            self.nena_label.setText(f"{self.lp:.3} nm")
 
-            # modify the movie grid
-            if not self.frc_calculated:  # if frc calculated first time
-                self.frc_button.setParent(None)
-                self.movie_grid.removeWidget(self.frc_button)
-            else:
-                self.movie_grid.removeWidget(self.frc_label)
-                self.movie_grid.removeWidget(self.show_frc_plot_button)
-
-            self.frc_label = QtWidgets.QLabel()
-            self.movie_grid.addWidget(self.frc_label, 2, 1)
-            px = self.window.display_settings_dlg.pixelsize.value()
-            self.frc_label.setText(f"{(px * frc_result['resolution']):.2f} nm")
-
-            # FRC plot
-            frc_window = FRCPlotWindow(self)
-            frc_window.plot(frc_result)
-
-            self.show_frc_plot_button = QtWidgets.QPushButton("Show plot")
-            self.show_frc_plot_button.clicked.connect(frc_window.show)
-            self.movie_grid.addWidget(self.show_frc_plot_button, 2, 2)
-
-            if not self.frc_calculated:
-                # add recalculate frc
-                recalculate_frc = QtWidgets.QPushButton("Recalculate FRC")
-                recalculate_frc.clicked.connect(self.calculate_frc)
-                recalculate_frc.setDefault(False)
-                recalculate_frc.setAutoDefault(False)
-                self.movie_grid.addWidget(recalculate_frc, 2, 2)
+            # hint = self.container.sizeHint()
+            # lib.adjust_widget_size(self, hint, 85, 50) TODO: i think this can be removed?
 
     def calibrate_influx(self) -> None:
         """Calculate influx rate (1/frames)."""
@@ -3191,6 +3158,32 @@ class InfoDialog(QtWidgets.QDialog):
         """Calculate number of units in each pick."""
         influx = self.influx_rate.value()
         return 1 / (influx * dark)
+
+    def show_frc_plot(self) -> None:
+        """Show FRC plot window."""
+        if not self.frc_result:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "FRC not calculated",
+                "Please calculate FRC resolution first.",
+            )
+            return
+        frc_window = FRCPlotWindow(self)
+        frc_window.plot(self.frc_result)
+        frc_window.show()
+
+    def show_nena_plot(self) -> None:
+        """Show NeNA plot window."""
+        if not self.nena_result:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "NeNA not calculated",
+                "Please calculate NeNA precision first.",
+            )
+            return
+        nena_window = NenaPlotWindow(self)
+        nena_window.plot(self.nena_result)
+        nena_window.show()
 
     def update_n_units(self) -> None:
         """Display the mean and std number of units in the Dialog."""
@@ -3255,23 +3248,15 @@ class FRCPlotWindow(QtWidgets.QTabWidget):
         # TODO: change the plot - axes labels units etc
         self.figure.clear()
         q = frc_result["frequencies"]
-        q /= (
-            self.info_dialog.window.display_settings_dlg.pixelsize.value()
-        )  # in 1/nm
         frc_curve = frc_result["frc_curve"]
-        resolutions = []
-        thresholds = [1 / 7, 1 / 3, 1 / 2]
-        for threshold in thresholds:
-            res = np.where(frc_curve < threshold)[0]
-            if len(res):
-                resolutions.append(1 / q[res[0]])
-            else:
-                resolutions.append(np.inf)
+        res, res_std = frc_result["resolution"], frc_result["resolution_std"]
         ax = self.figure.add_subplot(111)
-        ax.set_title("FRC Resolution")
-        ax.plot(q, frc_curve)
+        ax.plot(q, frc_curve, label="Avg FRC curve (20 repeats)")
+        ax.axhline(1 / 7, color="blue", linestyle="--", label="1/7 threshold")
         ax.set_xlabel("Spatial frequency (nm\u207b\u00b9)")
         ax.set_ylabel("FRC")
+        ax.set_title(f"FIRE resolution: {res:.2f} ± {res_std:.2f} nm")
+        ax.legend()
         self.canvas.draw()
 
 
@@ -10880,12 +10865,12 @@ class Window(QtWidgets.QMainWindow):
         )
         if channel is not None:
             base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".frc.txt"
+            out_path = base + ".txt"
             path, ext = QtWidgets.QFileDialog.getSaveFileName(
                 self,
                 "Save localizations as txt (frames,x,y)",
                 out_path,
-                filter="*.frc.txt",
+                filter="*.txt",
             )
             if path:
                 locs = self.view.all_locs[channel]
@@ -11036,7 +11021,7 @@ class Window(QtWidgets.QMainWindow):
     def export_multi(self):
         """Ask the user to choose a type of export."""
         items = [
-            ".txt for FRC (ImageJ)",
+            ".txt for ImageJ",
             ".txt for NIS",
             ".xyz for Chimera",
             ".3d for ViSP",
@@ -11046,7 +11031,7 @@ class Window(QtWidgets.QMainWindow):
             self, "Select Export", "Formats", items, 0, False
         )
         if ok and item:
-            if item == ".txt for FRC (ImageJ)":
+            if item == ".txt for ImageJ":
                 self.export_txt()
             elif item == ".txt for NIS":
                 self.export_txt_nis()
