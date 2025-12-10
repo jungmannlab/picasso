@@ -1015,7 +1015,7 @@ def frc(
     locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
     locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
     # run FRC
-    frc_curve, frc_curve_smooth, frequencies, resolution = _frc_once(
+    frc_curve, frc_curve_smooth, frequencies, resolution = _frc(
         locs1, locs2, pixelsize, lp, viewport
     )
     # smooth the FRC curve and summarize findings
@@ -1028,7 +1028,7 @@ def frc(
     return frc_result
 
 
-def _frc_once(
+def _frc(
     locs1: pd.DataFrame,
     locs2: pd.DataFrame,
     pixelsize: float,
@@ -1075,7 +1075,6 @@ def _frc_once(
     oversampling = 1 / binsize
     im1 = render.render(locs1, None, oversampling, viewport, "gaussian")[1]
     im2 = render.render(locs2, None, oversampling, viewport, "gaussian")[1]
-    print(f"{im1.shape=}")
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:
@@ -1100,6 +1099,9 @@ def _frc_once(
     with np.errstate(divide="ignore", invalid="ignore"):
         frc_curve = frc_num / frc_denom
     frc_curve[np.isnan(frc_curve)] = 0
+
+    # smooth the frc curve
+    sspan = max(int(np.ceil(int(im1.shape[0] / 2) / 20)), 5)
     frc_curve_smooth = masking.loess_smooth(frc_curve, sspan)
 
     # find the frequencies (q) and resolution
@@ -1121,7 +1123,6 @@ def _frc_once(
             f_res = f1 + (threshold - r1) * (f2 - f1) / (r2 - r1)
             resolution = 1 / f_res  # in nm
             break
-    sspan = max(int(np.ceil(int(im1.shape[0] / 2) / 20)), 5)
     return frc_curve, frc_curve_smooth, frequencies, resolution
 
 

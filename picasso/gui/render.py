@@ -3177,9 +3177,9 @@ class InfoDialog(QtWidgets.QDialog):
                 "Please calculate FRC resolution first.",
             )
             return
-        frc_window = FRCPlotWindow(self)
-        frc_window.plot(self.frc_result)
-        frc_window.show()
+        self.frc_window = FRCPlotWindow(self)
+        self.frc_window.plot(self.frc_result)
+        self.frc_window.show()
 
     def show_nena_plot(self) -> None:
         """Show NeNA plot window."""
@@ -3190,9 +3190,10 @@ class InfoDialog(QtWidgets.QDialog):
                 "Please calculate NeNA precision first.",
             )
             return
-        nena_window = NenaPlotWindow(self)
-        nena_window.plot(self.nena_result)
-        nena_window.show()
+        # keep a reference to the window to prevent garbage collection
+        self.nena_window = NenaPlotWindow(self)
+        self.nena_window.plot(self.nena_result)
+        self.nena_window.show()
 
     def update_n_units(self) -> None:
         """Display the mean and std number of units in the Dialog."""
@@ -3271,6 +3272,7 @@ class FRCPlotWindow(QtWidgets.QTabWidget):
         )
         ax.set_xlabel("Spatial frequency (nm\u207b\u00b9)")
         ax.set_ylabel("FRC")
+        ax.set_title(f"FIRE resolution: {res:.2f} nm")
         ax.legend()
         self.canvas.draw()
 
