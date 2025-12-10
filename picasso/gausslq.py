@@ -23,8 +23,10 @@ from . import postprocess
 
 try:
     from pygpufit import gpufit as gf
+
+    gpufit_installed = True
 except ImportError:
-    pass
+    gpufit_installed = False
 
 
 @numba.jit(nopython=True, nogil=True)
