@@ -3109,22 +3109,33 @@ class InfoDialog(QtWidgets.QDialog):
             locs = self.window.view.locs[channel]
             info = self.window.view.infos[channel]
 
+            # make sure the viewport is not too large
+            median_lp = self.window.view.median_lp
+            max_size = 2000 * (median_lp / 2)
+            height, width = self.window.view.viewport_size()
+            if height > max_size or width > max_size:
+                text = (
+                    "The current FOV is large and will likely lead to a long "
+                    f"computation time (current FOV leads to an image of size "
+                    f"{int(width/median_lp/2):,} x {int(height/median_lp/2):,} pixels).\n\n"
+                    "Please consider reducing the FOV size before calculating "
+                    "the FRC resolution.\n\nDo you want to proceed?"
+                )
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Viewport too large",
+                    text,
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                )
+                if not reply == QtWidgets.QMessageBox.Yes:
+                    return
+
             # calculate frc
-            n_repeats = 20
-            progress = lib.ProgressDialog(
-                "Calculating FRC resolution", 0, n_repeats, self
-            )
             self.frc_result = postprocess.frc(
-                locs.copy(),
-                info,
-                self.window.view.viewport,
-                n_repeats=n_repeats,
-                callback=progress.set_value,
+                locs.copy(), info, self.window.view.viewport
             )
             res_nm = self.frc_result["resolution"]
-            res_std = self.frc_result["resolution_std"]
-            self.frc_resolution.setText(f"{res_nm:.2f} nm ± {res_std:.2f} nm")
-            progress.close()
+            self.frc_resolution.setText(f"{res_nm:.2f} nm")
 
     def calculate_nena_lp(self) -> None:
         """Calculate NeNA precision in a given channel."""
@@ -3142,9 +3153,6 @@ class InfoDialog(QtWidgets.QDialog):
             )
             self.lp *= self.window.display_settings_dlg.pixelsize.value()
             self.nena_label.setText(f"{self.lp:.3} nm")
-
-            # hint = self.container.sizeHint()
-            # lib.adjust_widget_size(self, hint, 85, 50) TODO: i think this can be removed?
 
     def calibrate_influx(self) -> None:
         """Calculate influx rate (1/frames)."""
@@ -3245,17 +3253,23 @@ class FRCPlotWindow(QtWidgets.QTabWidget):
         vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
 
     def plot(self, frc_result: dict) -> None:
-        # TODO: change the plot - axes labels units etc
         self.figure.clear()
         q = frc_result["frequencies"]
         frc_curve = frc_result["frc_curve"]
-        res, res_std = frc_result["resolution"], frc_result["resolution_std"]
+        frc_curve_smooth = frc_result["frc_curve_smooth"]
+        res = frc_result["resolution"]
         ax = self.figure.add_subplot(111)
-        ax.plot(q, frc_curve, label="Avg FRC curve (20 repeats)")
-        ax.axhline(1 / 7, color="blue", linestyle="--", label="1/7 threshold")
+        ax.plot(q, frc_curve, color="gray", alpha=0.5, label="FRC curve")
+        ax.plot(q, frc_curve_smooth, label="Smoothed")
+        ax.axhline(
+            1 / 7,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            label="1/7 threshold",
+        )
         ax.set_xlabel("Spatial frequency (nm\u207b\u00b9)")
         ax.set_ylabel("FRC")
-        ax.set_title(f"FIRE resolution: {res:.2f} ± {res_std:.2f} nm")
         ax.legend()
         self.canvas.draw()
 

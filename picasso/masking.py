@@ -3,7 +3,7 @@ picasso.masking
 ~~~~~~~~~~~~~~~
 
 Functions for masking localizations based on binary masks or
-thresholding of images.
+thresholding of images, as well as curve smoothing.
 
 Thresholding functions are adapted from scikit-image. The package is
 not used directly to avoid extra dependencies.
@@ -18,6 +18,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 from scipy import ndimage as ndi
+from statsmodels.nonparametric.smoothers_lowess import lowess as loess
 
 
 def mask_locs(
@@ -617,3 +618,23 @@ def threshold_tukey(image: np.ndarray) -> np.ndarray:
     mask[np.abs(x_im) < ((nfac - 2) / (nfac * 2))] = 1
     mask = mask * np.rot90(mask)
     return mask
+
+
+def loess_smooth(arr: np.ndarray, span: int = 5) -> np.ndarray:
+    """Smooth an array using LOESS smoothing.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        Input array to be smoothed (1D).
+
+    Returns
+    -------
+    smoothed_arr : np.ndarray
+        Smoothed array.
+    """
+    # smooth the frc curve
+    span += 1 - (span % 2)  # make sure span is odd
+    x = np.arange(len(arr))
+    smoothed_arr = loess(arr, x, span / len(arr), return_sorted=False)
+    return smoothed_arr

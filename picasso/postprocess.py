@@ -958,8 +958,6 @@ def frc(
     info: list[dict],
     viewport: tuple[tuple[float, float], tuple[float, float]],
     *,
-    n_repeats: int = 20,
-    callback: Callable[[int], None] | None = None,
     random_seed: int = 42,
 ) -> dict:
     """Calculate the Fourier Ring Correlation (FRC) resolution.
@@ -976,25 +974,16 @@ def frc(
         Viewport ((y_min, x_min), (y_max, x_max)) for rendering the
         images. Note that the origin of the image is in the top-left
         corner.
-    n_repeats : int, optional
-        Number of repeats for estimating the resolution and its standard
-        deviation. Default is 20.
-    callback : function or None, optional
-        Function to display progress. If None, no progress is displayed.
-        Default is None.
     random_seed : int, optional
         Random seed for splitting the data into halves. Default is 42.
 
     Returns
     -------
     frc_result : dict
-        Dictionary with keys "frc_curve", "frequencies" (for spatial
-        frequencies, "resolution" (estimated resolution in nm) and
-        "resolution_std" (standard deviation of the resolution over
-        repeats).
+        Dictionary with keys "frc_curve", "frc_curve_smooth",
+        "frequencies" (for spatial frequencies probed (nm^-1)) and
+        "resolution" (estimated resolution in nm).
     """
-    if callback is None:
-        callback = lib.MockProgress()
     pixelsize = lib.get_from_metadata(info, "Pixelsize")
     if pixelsize is None:
         raise ValueError("Pixelsize not found in metadata.")
@@ -1013,31 +1002,28 @@ def frc(
         x_max = x_center + viewport_height / 2
         viewport = ((viewport[0][0], x_min), (viewport[1][0], x_max))
 
+    # select the locs within the viewport
+    (y_min, x_min), (y_max, x_max) = viewport
+    x = locs["x"].values
+    y = locs["y"].values
+    in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
+    locs = locs.iloc[in_view]
+
     np.random.seed(random_seed)
-    frc_curves = []
-    resolutions = []
-    for i in range(n_repeats):
-        # split locs randomly into two halves
-        r_idx = np.random.permutation(len(locs))
-        locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
-        locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
-        # run FRC
-        frc_curve, frequencies, resolution = _frc_once(
-            locs1, locs2, pixelsize, lp, viewport
-        )
-        if resolution is not None:
-            frc_curves.append(frc_curve)
-            resolutions.append(resolution)
-        callback(i + 1)
-    # summarize findings
-    mean_frc_curve = np.mean(frc_curves, axis=0)
-    resolution = np.mean(resolutions)
-    resolution_std = np.std(resolutions)
+    # split locs randomly into two halves
+    r_idx = np.random.permutation(len(locs))
+    locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
+    locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
+    # run FRC
+    frc_curve, frc_curve_smooth, frequencies, resolution = _frc_once(
+        locs1, locs2, pixelsize, lp, viewport
+    )
+    # smooth the FRC curve and summarize findings
     frc_result = {
-        "frc_curve": mean_frc_curve,
+        "frc_curve": frc_curve,
+        "frc_curve_smooth": frc_curve_smooth,
         "frequencies": frequencies,
         "resolution": resolution,
-        "resolution_std": resolution_std,
     }
     return frc_result
 
@@ -1048,7 +1034,7 @@ def _frc_once(
     pixelsize: float,
     lp: float,
     viewport: tuple[tuple[float, float], tuple[float, float]],
-) -> tuple[np.ndarray, float | None, np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float | None]:
     """Calculate the Fourier Ring Correlation (FRC) resolution once.
 
     Generates images from the two sets of localizations and calculates
@@ -1076,6 +1062,8 @@ def _frc_once(
     -------
     frc_curve : np.ndarray
         FRC curve.
+    frc_curve_smooth : np.ndarray
+        Smoothed FRC curve (LOESS).
     frequencies : np.ndarray
         Spatial frequencies corresponding to the FRC curve (nm^-1).
     resolution : float or None
@@ -1085,8 +1073,9 @@ def _frc_once(
     # render images
     binsize = lp / 2
     oversampling = 1 / binsize
-    im1 = render.render(locs1, None, oversampling, viewport, None)[1]
-    im2 = render.render(locs2, None, oversampling, viewport, None)[1]
+    im1 = render.render(locs1, None, oversampling, viewport, "gaussian")[1]
+    im2 = render.render(locs2, None, oversampling, viewport, "gaussian")[1]
+    print(f"{im1.shape=}")
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:
@@ -1101,7 +1090,7 @@ def _frc_once(
     f2 = np.fft.fftshift(np.fft.fft2(im2))
 
     # frc curve
-    frc_num = np.real(imageprocess.radial_sum(im1 * np.conj(im2)))
+    frc_num = np.real(imageprocess.radial_sum(f1 * np.conj(f2)))
     frc_denom = np.sqrt(
         np.abs(
             imageprocess.radial_sum(np.abs(f1) ** 2)
@@ -1128,7 +1117,9 @@ def _frc_once(
             f_res = f1 + (threshold - r1) * (f2 - f1) / (r2 - r1)
             resolution = 1 / f_res  # in nm
             break
-    return frc_curve, frequencies, resolution
+    sspan = max(int(np.ceil(int(im1.shape[0] / 2) / 20)), 5)
+    frc_curve_smooth = masking.loess_smooth(frc_curve, sspan)
+    return frc_curve, frc_curve_smooth, frequencies, resolution
 
 
 def pair_correlation(
