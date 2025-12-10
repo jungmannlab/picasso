@@ -2985,7 +2985,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.movie_grid.addWidget(show_nena_plot_button, 2, 1)
 
         # FRC
-        frc_groupbox = QtWidgets.QGroupBox("FRC")
+        frc_groupbox = QtWidgets.QGroupBox("FRC (uses current FOV)")
         vbox.addWidget(frc_groupbox)
         self.frc_grid = QtWidgets.QGridLayout(frc_groupbox)
         self.frc_grid.addWidget(QtWidgets.QLabel("FRC resolution (nm):"), 0, 0)
@@ -3116,10 +3116,11 @@ class InfoDialog(QtWidgets.QDialog):
             if height > max_size or width > max_size:
                 text = (
                     "The current FOV is large and will likely lead to a long "
-                    f"computation time (current FOV leads to an image of size "
-                    f"{int(width/median_lp/2):,} x {int(height/median_lp/2):,} pixels).\n\n"
-                    "Please consider reducing the FOV size before calculating "
-                    "the FRC resolution.\n\nDo you want to proceed?"
+                    "computation time (current FOV leads to an image of size "
+                    f"{int(width/median_lp/2):,} x {int(height/median_lp/2):,}"
+                    " pixels).\n\nPlease consider reducing the FOV size before"
+                    " calculating the FRC resolution.\n\nDo you want to "
+                    "proceed?"
                 )
                 reply = QtWidgets.QMessageBox.question(
                     self,

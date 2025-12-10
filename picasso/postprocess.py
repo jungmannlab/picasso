@@ -1100,6 +1100,7 @@ def _frc_once(
     with np.errstate(divide="ignore", invalid="ignore"):
         frc_curve = frc_num / frc_denom
     frc_curve[np.isnan(frc_curve)] = 0
+    frc_curve_smooth = masking.loess_smooth(frc_curve, sspan)
 
     # find the frequencies (q) and resolution
     frequencies = (
@@ -1107,18 +1108,20 @@ def _frc_once(
     )
     threshold = 1 / 7  # resolution at 1/7 threshold
     resolution = None
-    for i in range(1, len(frc_curve)):
-        if frc_curve[i - 1] >= threshold and frc_curve[i] < threshold:
+    for i in range(1, len(frc_curve_smooth)):
+        if (
+            frc_curve_smooth[i - 1] >= threshold
+            and frc_curve_smooth[i] < threshold
+        ):
             # linear interpolation
             f1 = frequencies[i - 1]
             f2 = frequencies[i]
-            r1 = frc_curve[i - 1]
-            r2 = frc_curve[i]
+            r1 = frc_curve_smooth[i - 1]
+            r2 = frc_curve_smooth[i]
             f_res = f1 + (threshold - r1) * (f2 - f1) / (r2 - r1)
             resolution = 1 / f_res  # in nm
             break
     sspan = max(int(np.ceil(int(im1.shape[0] / 2) / 20)), 5)
-    frc_curve_smooth = masking.loess_smooth(frc_curve, sspan)
     return frc_curve, frc_curve_smooth, frequencies, resolution
 
 
