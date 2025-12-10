@@ -36,7 +36,7 @@ dependencies = [
     "tqdm==4.67.1",
     "streamlit==1.50.0",
     "nd2==0.10.4",
-    "sqlalchemy==2.0.44",
+    "sqlalchemy==2.0.45",
     "plotly-express==0.4.1",
     "watchdog==6.0.0",
     "psutil==7.1.1",
