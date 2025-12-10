@@ -4188,7 +4188,6 @@ class Window(QtWidgets.QMainWindow):
         self.tabs.setCurrentIndex(0)
 
         # menu bar
-        self.menuBar().setAutoFillBackground(True)
         file_menu = self.menuBar().addMenu("File")
         sounds_menu = file_menu.addMenu("Sound notifications")
         sounds_actiongroup = QtWidgets.QActionGroup(self.menuBar())
