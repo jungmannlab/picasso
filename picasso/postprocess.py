@@ -984,9 +984,7 @@ def frc(
         "frequencies" (for spatial frequencies probed (nm^-1)) and
         "resolution" (estimated resolution in nm).
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize")
-    if pixelsize is None:
-        raise ValueError("Pixelsize not found in metadata.")
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     lp = nena(locs, info)[1]
     # correct for the viewport to be square
     viewport_width = viewport[1][1] - viewport[0][1]

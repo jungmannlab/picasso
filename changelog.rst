@@ -12,6 +12,7 @@ Important updates:
 
 *Small improvements:*
 +++++++++++++++++++++
+- ``picasso.lib.get_from_metadata`` function now has an option to raise a KeyError if the key is not found
 
 *Bug fixes:*
 ++++++++++++

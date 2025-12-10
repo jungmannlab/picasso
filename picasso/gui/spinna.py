@@ -2777,7 +2777,9 @@ class SimulationsTab(QtWidgets.QDialog):
             self.window.pwd = os.path.dirname(path)
             # load the data
             locs, info = io.load_locs(path)
-            pixelsize = lib.get_from_metadata(info, "Pixelsize", 130)
+            pixelsize = lib.get_from_metadata(
+                info, "Pixelsize", raise_error=True
+            )
             pick_area = lib.get_from_metadata(info, "Area (um^2)")
             if pick_area is not None:
                 idx = self.targets.index(target)
