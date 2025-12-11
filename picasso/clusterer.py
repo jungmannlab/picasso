@@ -911,8 +911,7 @@ def cluster_areas(
     assert hasattr(locs, "group"), "Localizations must contain 'group' column."
 
     # get pixel size from info
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=None)
-    assert isinstance(pixelsize, (int, float)), "Pixelsize not found in info."
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
 
     groups = np.unique(locs["group"])
     area_key = "Area (LP^2)" if not hasattr(locs, "z") else "Volume (LP^3)"

@@ -28,7 +28,7 @@ from scipy.spatial import distance
 from tqdm import tqdm, trange
 from sklearn.neighbors import NearestNeighbors as NN
 
-from . import lib, render, imageprocess
+from . import lib, render, imageprocess, masking
 
 
 def get_index_blocks(
@@ -951,6 +951,177 @@ def _fill_dnfl(
                     if d <= d_max:
                         bin = int(d / bin_size)
                         dnfl[bin] += 1
+
+
+def frc(
+    locs: pd.DataFrame,
+    info: list[dict],
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    *,
+    random_seed: int = 42,
+) -> dict:
+    """Calculate the Fourier Ring Correlation (FRC) resolution.
+
+    See Nieuwenhuizen et al., Nat. Methods 10, 557–562 (2013).
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localization list.
+    info : list of dicts
+        Metadata of the localizations list.
+    viewport : tuple of floats
+        Viewport ((y_min, x_min), (y_max, x_max)) for rendering the
+        images. Note that the origin of the image is in the top-left
+        corner.
+    random_seed : int, optional
+        Random seed for splitting the data into halves. Default is 42.
+
+    Returns
+    -------
+    frc_result : dict
+        Dictionary with keys "frc_curve", "frc_curve_smooth",
+        "frequencies" (for spatial frequencies probed (nm^-1)) and
+        "resolution" (estimated resolution in nm).
+    """
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    lp = nena(locs, info)[1]
+    # correct for the viewport to be square
+    viewport_width = viewport[1][1] - viewport[0][1]
+    viewport_height = viewport[1][0] - viewport[0][0]
+    if viewport_width < viewport_height:
+        y_center = 0.5 * (viewport[0][0] + viewport[1][0])
+        y_min = y_center - viewport_width / 2
+        y_max = y_center + viewport_width / 2
+        viewport = ((y_min, viewport[0][1]), (y_max, viewport[1][1]))
+    elif viewport_height < viewport_width:
+        x_center = 0.5 * (viewport[0][1] + viewport[1][1])
+        x_min = x_center - viewport_height / 2
+        x_max = x_center + viewport_height / 2
+        viewport = ((viewport[0][0], x_min), (viewport[1][0], x_max))
+
+    # select the locs within the viewport
+    (y_min, x_min), (y_max, x_max) = viewport
+    x = locs["x"].values
+    y = locs["y"].values
+    in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
+    locs = locs.iloc[in_view]
+
+    np.random.seed(random_seed)
+    # split locs randomly into two halves
+    r_idx = np.random.permutation(len(locs))
+    locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
+    locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
+    # run FRC
+    frc_curve, frc_curve_smooth, frequencies, resolution = _frc(
+        locs1, locs2, pixelsize, lp, viewport
+    )
+    # smooth the FRC curve and summarize findings
+    frc_result = {
+        "frc_curve": frc_curve,
+        "frc_curve_smooth": frc_curve_smooth,
+        "frequencies": frequencies,
+        "resolution": resolution,
+    }
+    return frc_result
+
+
+def _frc(
+    locs1: pd.DataFrame,
+    locs2: pd.DataFrame,
+    pixelsize: float,
+    lp: float,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, float | None]:
+    """Calculate the Fourier Ring Correlation (FRC) resolution once.
+
+    Generates images from the two sets of localizations and calculates
+    the FRC curve and resolution (at 1/7 threshold).
+
+    See Nieuwenhuizen et al., Nat. Methods 10, 557–562 (2013).
+
+    Note: do not use this function directly, use ``frc`` instead.
+
+    Parameters
+    ----------
+    locs1, locs2 : pd.DataFrame
+        Localization lists already split to render images.
+    pixelsize: float
+        Camera pixel size in nm.
+    lp : float
+        Average localization precision (NeNA), used for bin size of the
+        rendered images (binsize = lp / 2).
+    viewport : tuple of floats
+        Viewport ((y_min, x_min), (y_max, x_max)) for rendering the
+        images. Note that the origin of the image is in the top-left
+        corner.
+
+    Returns
+    -------
+    frc_curve : np.ndarray
+        FRC curve.
+    frc_curve_smooth : np.ndarray
+        Smoothed FRC curve (LOESS).
+    frequencies : np.ndarray
+        Spatial frequencies corresponding to the FRC curve (nm^-1).
+    resolution : float or None
+        Estimated resolution in nm, given the 1/7 threshold. None if
+        resolution could not be determined.
+    """
+    # render images
+    binsize = lp / 2
+    oversampling = 1 / binsize
+    im1 = render.render(locs1, None, oversampling, viewport, "gaussian")[1]
+    im2 = render.render(locs2, None, oversampling, viewport, "gaussian")[1]
+
+    # ensure the images are odd-sized and mask them (tukey)
+    if im1.shape[0] % 2 == 0:
+        im1 = im1[:-1, :-1]
+        im2 = im2[:-1, :-1]
+    mask = masking.threshold_tukey(im1)
+    im1 *= mask
+    im2 *= mask
+
+    # fourier
+    f1 = np.fft.fftshift(np.fft.fft2(im1))
+    f2 = np.fft.fftshift(np.fft.fft2(im2))
+
+    # frc curve
+    frc_num = np.real(imageprocess.radial_sum(f1 * np.conj(f2)))
+    frc_denom = np.sqrt(
+        np.abs(
+            imageprocess.radial_sum(np.abs(f1) ** 2)
+            * imageprocess.radial_sum(np.abs(f2) ** 2)
+        )
+    )
+    with np.errstate(divide="ignore", invalid="ignore"):
+        frc_curve = frc_num / frc_denom
+    frc_curve[np.isnan(frc_curve)] = 0
+
+    # smooth the frc curve
+    sspan = max(int(np.ceil(int(im1.shape[0] / 2) / 20)), 5)
+    frc_curve_smooth = masking.loess_smooth(frc_curve, sspan)
+
+    # find the frequencies (q) and resolution
+    frequencies = (
+        np.arange(len(frc_curve)) / im1.shape[0] / (pixelsize * binsize)
+    )
+    threshold = 1 / 7  # resolution at 1/7 threshold
+    resolution = None
+    for i in range(1, len(frc_curve_smooth)):
+        if (
+            frc_curve_smooth[i - 1] >= threshold
+            and frc_curve_smooth[i] < threshold
+        ):
+            # linear interpolation
+            f1 = frequencies[i - 1]
+            f2 = frequencies[i]
+            r1 = frc_curve_smooth[i - 1]
+            r2 = frc_curve_smooth[i]
+            f_res = f1 + (threshold - r1) * (f2 - f1) / (r2 - r1)
+            resolution = 1 / f_res  # in nm
+            break
+    return frc_curve, frc_curve_smooth, frequencies, resolution
 
 
 def pair_correlation(

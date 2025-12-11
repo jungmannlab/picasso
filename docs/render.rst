@@ -148,6 +148,10 @@ Movie
 ^^^^^
 Displays the median fit precision of the dataset. Clicking on ``Calculate`` allows calculating the precision via the NeNA approach. See `DOI: 10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`_.
 
+FRC
+^^^
+Displays the FRC resolution of the dataset. Takes in the image in the current FOV and calculates the FRC resolution via splitting the localizations into two halves. Based on the approach from `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`_. Does not take into account the Q factor for multiple blinking.
+
 Field of view
 ^^^^^^^^^^^^^
 Shows the number of localizations in the current FoV.

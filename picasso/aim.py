@@ -426,7 +426,7 @@ def intersection_max(
     """
     assert aim_round in [1, 2], "aim_round must be 1 or 2."
     if progress is None:
-        progress = lib.MockProgress
+        progress = lib.MockProgress()
 
     # number of segments
     n_segments = len(seg_bounds) - 1
@@ -690,16 +690,10 @@ def aim(
     """
     locs = locs.copy()
     # extract metadata
-    width = lib.get_from_metadata(info, "Width", np.nan)
-    height = lib.get_from_metadata(info, "Height", np.nan)
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", np.nan)
-    n_frames = lib.get_from_metadata(info, "Frames", np.nan)
-    if np.any(np.isnan([width, height, pixelsize, n_frames])):
-        raise KeyError(
-            "Insufficient metadata available. Please specify 'Width', 'Height'"
-            ", 'Frames' and 'Pixelsize' in the metadata .yaml of the"
-            " localizations."
-        )
+    width = lib.get_from_metadata(info, "Width", raise_error=True)
+    height = lib.get_from_metadata(info, "Height", raise_error=True)
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
 
     # frames should start at 1
     frame = (locs["frame"] + 1 - locs["frame"].min()).values  # 1d array

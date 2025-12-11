@@ -21,7 +21,10 @@ from tqdm import tqdm
 
 try:
     from pygpufit import gpufit as gf
+
+    gpufit_installed = True
 except ImportError:
+    gpufit_installed = False
     pass
 
 

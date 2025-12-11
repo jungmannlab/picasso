@@ -391,7 +391,13 @@ def adjust_widget_size(
         widget.resize(widget.width(), screen_height - 100)
 
 
-def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
+def get_from_metadata(
+    info: list[dict] | dict,
+    key: Any,
+    default=None,
+    *,
+    raise_error: bool = False,
+) -> Any:
     """Get a value from the localization metadata (list of dictionaries
     or a dictionary). Returns default if the key is not found.
 
@@ -401,6 +407,11 @@ def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
         Localization metadata.
     key : Any
         Key to be searched in the metadata.
+    default : Any, optional
+        Value to be returned if the key is not found. Default is None.
+    raise_error : bool, optional
+        If True, raises a KeyError if the key is not found. Default is
+        False.
 
     Returns
     -------
@@ -409,11 +420,15 @@ def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
         not found, default is returned.
     """
     if isinstance(info, dict):
+        if raise_error and key not in info:
+            raise KeyError(f"Key '{key}' not found in metadata.")
         return info.get(key, default)
     elif isinstance(info, list):
-        for inf in info:
+        for inf in info[::-1]:
             if val := inf.get(key):
                 return val
+        if raise_error:
+            raise KeyError(f"Key '{key}' not found in metadata.")
         return default
     else:
         raise ValueError("info must be a dict or a list of dicts.")
