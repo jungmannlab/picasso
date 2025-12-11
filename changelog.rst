@@ -8,7 +8,7 @@ Last change: 10-DEC-2025 CEST
 Important updates:
 ^^^^^^^^^^^^^^^^^^
 - Improved and updated `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
-- Render: FRC resolution implementation, see DOI: `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
+- Render: FRC resolution implementation, see DOI: `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__. It is calculated for a currently loaded FOV and only one repeat is done. *The exact implementation may change in the future versions.*
 
 *Small improvements:*
 +++++++++++++++++++++
@@ -17,6 +17,7 @@ Important updates:
 *Bug fixes:*
 ++++++++++++
 - AIM (``picasso.aim.aim``) copies localizations to avoid modifying the input DataFrame.
+- AIM: fixed progress bar when no progress object is provided
 - Simulate: fixed repetead axes tick labels
 - SPINNA: fixed NND plot showing bins/lines outside of xlim
 - SPINNA: extract the picked area based on the last .yaml file entry, not the first one (fixes the issue of incorrect densities extracted for localizations that were picked multiple times)

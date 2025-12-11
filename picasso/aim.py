@@ -426,7 +426,7 @@ def intersection_max(
     """
     assert aim_round in [1, 2], "aim_round must be 1 or 2."
     if progress is None:
-        progress = lib.MockProgress
+        progress = lib.MockProgress()
 
     # number of segments
     n_segments = len(seg_bounds) - 1
