@@ -2806,6 +2806,10 @@ class SimulationsTab(QtWidgets.QDialog):
             if self.check_exp_loaded():
                 self.plot_exp_nnds()
 
+            # reset search space
+            self.granularity = None
+            self.n_sim_fit = None
+
     def load_mask(self, name: str) -> None:
         """Load mask for the given molecular target species."""
         target = name[4:]
@@ -2828,6 +2832,10 @@ class SimulationsTab(QtWidgets.QDialog):
                     button.setStyleSheet("background-color : lightgreen")
                     button.setText(f"{target} loaded")
                     break
+
+            # reset search space
+            self.granularity = None
+            self.n_sim_fit = None
 
     def on_dim_changed(self, index: int) -> None:
         """Update widgets for 2D/3D simulation."""
@@ -2889,10 +2897,17 @@ class SimulationsTab(QtWidgets.QDialog):
             target_spin.setDecimals(2)
             target_spin.setSingleStep(0.5)
             target_spin.setValue(100.00)
+            target_spin.valueChanged.connect(self.on_density_changed)
             self.densities_box.content_layout.addRow(
                 QtWidgets.QLabel(f"{target}:"), target_spin
             )
             self.densities_spins.append(target_spin)
+
+    def on_density_changed(self, *args, **kwargs):
+        """Helper function to reset search space when densities
+        change."""
+        self.granularity = None
+        self.n_sim_fit = None
 
     def load_exp_data_widgets(self) -> None:
         """Load the widgets to the load experimental data box."""
