@@ -701,7 +701,8 @@ def rmsd_at_com(locs_xy: np.ndarray) -> float:
 
 @numba.jit(nopython=True, nogil=True)
 def _distance_histogram(
-    locs: pd.DataFrame,
+    x: np.ndarray,
+    y: np.ndarray,
     bin_size: float,
     r_max: float,
     x_index: np.ndarray,
@@ -712,13 +713,11 @@ def _distance_histogram(
     chunk: int,
 ) -> np.ndarray:
     """Calculate the distance histogram for a chunk of localizations."""
-    x = locs["x"].values
-    y = locs["y"].values
     dh_len = np.uint32(r_max / bin_size)
     dh = np.zeros(dh_len, dtype=np.uint32)
     r_max_2 = r_max**2
     K, L = block_starts.shape
-    end = min(start + chunk, len(locs))
+    end = min(start + chunk, len(x))
     for i in range(start, end):
         xi = x[i]
         yi = y[i]
@@ -778,7 +777,8 @@ def distance_histogram(
     starts = range(0, N, chunk)
     args = [
         (
-            locs,
+            locs["x"].values,
+            locs["y"].values,
             bin_size,
             r_max,
             x_index,
@@ -1445,6 +1445,7 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
     ----------
     locs : pd.DataFrame
         Localizations with 'group' and 'cluster' columns.
+
     Returns
     -------
     combined_locs : pd.DataFrame
@@ -1559,12 +1560,12 @@ def cluster_combine_dist(
     to the nearest neighbor in the same group and the distance to the
     nearest neighbor in the same cluster in the same group.
 
-    TODO: i think this does not work at all? z scaling by pixelsize??
-
     Parameters
     ----------
     locs : pd.DataFrame
         Localizations with 'group' and 'cluster' fields.
+    pixelsize : float or None, optional
+        Pixel size in nm for z-scaling. If None, defaults to 130 nm.
 
     Returns
     -------

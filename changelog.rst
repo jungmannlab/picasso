@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 11-DEC-2025 CEST
+Last change: 12-DEC-2025 CEST
 
 0.9.2
 -----
@@ -13,6 +13,7 @@ Important updates:
 *Small improvements:*
 +++++++++++++++++++++
 - ``picasso.lib.get_from_metadata`` function now has an option to raise a KeyError if the key is not found
+- Picasso: Average CMD was removed since no functionality was implemented
 
 *Bug fixes:*
 ++++++++++++
@@ -23,6 +24,7 @@ Important updates:
 - SPINNA: fixed NND plot showing bins/lines outside of xlim
 - SPINNA: extract the picked area based on the last .yaml file entry, not the first one (fixes the issue of incorrect densities extracted for localizations that were picked multiple times)
 - SPINNA: enforce repeated generation of the search space when exp. data/densities/masks change
+- CMD: pair correlation fixed (#588)
 
 0.9.0-1
 -------

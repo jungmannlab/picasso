@@ -46,15 +46,17 @@ def _hdf2visp(path: str, pixel_size: float) -> None:
             print("Converting {}".format(path))
             locs, info = load_locs(path)
             locs = locs[["x", "y", "z", "photons", "frame"]].copy()
-            locs.x *= pixel_size
-            locs.y *= pixel_size
-            outname = os.path.splitext(path)[0] + ".3d"
-            savetxt(
-                outname,
-                locs,
-                fmt=["%.1f", "%.1f", "%.1f", "%.1f", "%d"],
-                newline="\r\n",
-            )
+            locs[["x", "y"]] *= pixel_size
+            locs["frame"] = locs["frame"].astype(int)
+            outname = os.path.splitext(path)[0] + "visp.3d"
+            with open(path, "wb") as f:
+                savetxt(
+                    f,
+                    locs.to_records(index=False),
+                    fmt=["%.1f", "%.1f", "%.1f", "%.1f", "%d"],
+                    newline="\r\n",
+                )
+            locs.to_csv(outname, index=False, header=False)
 
 
 def _csv2hdf(path: str, pixelsize: float) -> None:
@@ -1745,8 +1747,180 @@ def main():
     parser = argparse.ArgumentParser("picasso")
     subparsers = parser.add_subparsers(dest="command")
 
-    for command in ["toraw", "filter"]:
-        subparsers.add_parser(command)
+    # localize
+    localize_parser = subparsers.add_parser(
+        "localize", help="identify and fit single molecule spots"
+    )
+    localize_parser.add_argument(
+        "files",
+        nargs="?",
+        help=(
+            "one movie file or a folder containing movie files"
+            " specified by a unix style path pattern"
+        ),
+    )
+    localize_parser.add_argument(
+        "-b", "--box-side-length", type=int, default=7, help="box side length"
+    )
+    localize_parser.add_argument(
+        "-a",
+        "--fit-method",
+        choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"],
+        default="mle",
+    )
+    localize_parser.add_argument(
+        "-g", "--gradient", type=int, default=5000, help="minimum net gradient"
+    )
+    localize_parser.add_argument(
+        "-d",
+        "--drift",
+        type=int,
+        default=1000,
+        help="segmentation size for subsequent RCC, 0 to deactivate",
+    )
+    localize_parser.add_argument(
+        "-r",
+        "--roi",
+        type=int,
+        nargs=4,
+        default=None,
+        help=(
+            "ROI (y_min, x_min, y_max, x_max) in camera pixels;\n"
+            "note the origin of the image is in the top left corner"
+        ),
+    )
+    localize_parser.add_argument(
+        "-bl", "--baseline", type=int, default=0, help="camera baseline"
+    )
+    localize_parser.add_argument(
+        "-s", "--sensitivity", type=float, default=1, help="camera sensitivity"
+    )
+    localize_parser.add_argument(
+        "-ga", "--gain", type=int, default=1, help="camera gain"
+    )
+    localize_parser.add_argument(
+        "-qe", "--qe", type=float, default=1, help="camera quantum efficiency"
+    )
+    localize_parser.add_argument(
+        "-mf",
+        "--mf",
+        type=float,
+        default=0,
+        help="Magnification factor (only 3d)",
+    )
+    localize_parser.add_argument(
+        "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
+    )
+    localize_parser.add_argument(
+        "-zc",
+        "--zc",
+        type=str,
+        default="",
+        help="Path to 3d calibration file (only 3d)",
+    )
+
+    localize_parser.add_argument(
+        "-sf",
+        "--suffix",
+        type=str,
+        default="",
+        help="Suffix to add to files",
+    )
+
+    localize_parser.add_argument(
+        "-db",
+        "--database",
+        action="store_true",
+        help="do not add to database",
+    )
+
+    subparsers.add_parser("filter", help="filter raw files based on SNR (GUI)")
+
+    # render
+    render_parser = subparsers.add_parser(
+        "render", help="render localization based images"
+    )
+    render_parser.add_argument(
+        "files",
+        nargs="?",
+        help=(
+            "one or multiple localization files"
+            " specified by a unix style path pattern"
+        ),
+    )
+    render_parser.add_argument(
+        "-o",
+        "--oversampling",
+        type=float,
+        default=1.0,
+        help="the number of super-resolution pixels per camera pixels",
+    )
+    render_parser.add_argument(
+        "-b",
+        "--blur-method",
+        choices=["none", "convolve", "gaussian"],
+        default="convolve",
+    )
+    render_parser.add_argument(
+        "-w",
+        "--min-blur-width",
+        type=float,
+        default=0.0,
+        help="minimum blur width if blur is applied",
+    )
+    render_parser.add_argument(
+        "--vmin",
+        type=float,
+        default=0.0,
+        help="minimum colormap level in range 0-100 or absolute value",
+    )
+    render_parser.add_argument(
+        "--vmax",
+        type=float,
+        default=20.0,
+        help="maximum colormap level in range 0-100 or absolute value",
+    )
+    render_parser.add_argument(
+        "--scaling",
+        choices=["yes", "no"],
+        default="yes",
+        help="if scaling the colormap value is relative in the range 0-100",
+    )
+    render_parser.add_argument(
+        "-c",
+        "--cmap",
+        choices=["viridis", "inferno", "plasma", "magma", "hot", "gray"],
+        help="the colormap to be applied",
+    )
+    render_parser.add_argument(
+        "-s",
+        "--silent",
+        action="store_true",
+        help="do not open the image file",
+    )
+
+    # design
+    subparsers.add_parser("design", help="design RRO DNA origami structures")
+
+    # simulate
+    subparsers.add_parser(
+        "simulate",
+        help="simulate single molecule fluorescence data",
+    )
+
+    # nanotron
+    subparsers.add_parser("nanotron", help="segmentation with deep learning")
+
+    # average
+    subparsers.add_parser("average", help="particle averaging (GUI)")
+    subparsers.add_parser(
+        "average3",
+        help="three-dimensional particle averaging (to be deprecated in 1.0)",
+    )  # TODO: deprecate in 1.0
+
+    subparsers.add_parser(
+        "toraw", help="convert image files to raw format (GUI)"
+    )
 
     # link parser
     link_parser = subparsers.add_parser(
@@ -1765,8 +1939,8 @@ def main():
         type=float,
         default=1.0,
         help=(
-            "maximum distance between localizations"
-            " to consider them the same binding event (default=1.0)"
+            "maximum distance between localizations to consider them the same "
+            "binding event in units of camera pixels (default=1.0)"
         ),
     )
     link_parser.add_argument(
@@ -1780,9 +1954,22 @@ def main():
         ),
     )
 
+    # nneighbors
+    nneighbor_parser = subparsers.add_parser(
+        "nneighbor", help="calculate nearest neighbor of a clustered dataset"
+    )
+    nneighbor_parser.add_argument(
+        "files",
+        nargs="?",
+        help=(
+            "one or multiple hdf5 clustered files"
+            " specified by a unix style path pattern"
+        ),
+    )
+
     cluster_combine_parser = subparsers.add_parser(
         "cluster_combine",
-        help="combine localization in each cluster of a group",
+        help="combine localization in each cluster of a group (deprecated in 1.0)",
     )
     cluster_combine_parser.add_argument(
         "files",
@@ -1794,7 +1981,7 @@ def main():
 
     cluster_combine_dist_parser = subparsers.add_parser(
         "cluster_combine_dist",
-        help="calculate the nearest neighbor for each combined cluster",
+        help="calculate the nearest neighbor for each combined cluster (deprecated in 1.0)",
     )
     cluster_combine_dist_parser.add_argument(
         "files",
@@ -1815,17 +2002,19 @@ def main():
             " specified by a unix style path pattern"
         ),
     )
-    clusterfilter_parser.add_argument("clusterfile", help="a hdf5 clusterfile")
     clusterfilter_parser.add_argument(
-        "parameter", type=str, help="parameter to be filtered"
+        "-c", "--clusterfile", help="a hdf5 clusterfile"
     )
     clusterfilter_parser.add_argument(
-        "minval",
+        "-p", "--parameter", type=str, help="parameter to be filtered"
+    )
+    clusterfilter_parser.add_argument(
+        "--minval",
         type=float,
         help="lower boundary",
     )
     clusterfilter_parser.add_argument(
-        "maxval",
+        "--maxval",
         type=float,
         help="upper boundary",
     )
@@ -2102,7 +2291,11 @@ def main():
         "pc", help="calculate the pair-correlation of localizations"
     )
     pc_parser.add_argument(
-        "-b", "--binsize", type=float, default=0.1, help="the bin size"
+        "-b",
+        "--binsize",
+        type=float,
+        default=0.1,
+        help="the bin size (camera pixels)",
     )
     pc_parser.add_argument(
         "-r",
@@ -2119,199 +2312,21 @@ def main():
         ),
     )
 
-    # localize
-    localize_parser = subparsers.add_parser(
-        "localize", help="identify and fit single molecule spots"
+    hdf2visp_parser = subparsers.add_parser(
+        "hdf2visp", help="convert hdf5 to visp format"
     )
-    localize_parser.add_argument(
-        "files",
-        nargs="?",
-        help=(
-            "one movie file or a folder containing movie files"
-            " specified by a unix style path pattern"
-        ),
-    )
-    localize_parser.add_argument(
-        "-b", "--box-side-length", type=int, default=7, help="box side length"
-    )
-    localize_parser.add_argument(
-        "-a",
-        "--fit-method",
-        choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"],
-        default="mle",
-    )
-    localize_parser.add_argument(
-        "-g", "--gradient", type=int, default=5000, help="minimum net gradient"
-    )
-    localize_parser.add_argument(
-        "-d",
-        "--drift",
-        type=int,
-        default=1000,
-        help="segmentation size for subsequent RCC, 0 to deactivate",
-    )
-    localize_parser.add_argument(
-        "-r",
-        "--roi",
-        type=int,
-        nargs=4,
-        default=None,
-        help=(
-            "ROI (y_min, x_min, y_max, x_max) in camera pixels;\n"
-            "note the origin of the image is in the top left corner"
-        ),
-    )
-    localize_parser.add_argument(
-        "-bl", "--baseline", type=int, default=0, help="camera baseline"
-    )
-    localize_parser.add_argument(
-        "-s", "--sensitivity", type=float, default=1, help="camera sensitivity"
-    )
-    localize_parser.add_argument(
-        "-ga", "--gain", type=int, default=1, help="camera gain"
-    )
-    localize_parser.add_argument(
-        "-qe", "--qe", type=float, default=1, help="camera quantum efficiency"
-    )
-    localize_parser.add_argument(
-        "-mf",
-        "--mf",
-        type=float,
-        default=0,
-        help="Magnification factor (only 3d)",
-    )
-    localize_parser.add_argument(
-        "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
-    )
-    localize_parser.add_argument(
-        "-zc",
-        "--zc",
-        type=str,
-        default="",
-        help="Path to 3d calibration file (only 3d)",
-    )
-
-    localize_parser.add_argument(
-        "-sf",
-        "--suffix",
-        type=str,
-        default="",
-        help="Suffix to add to files",
-    )
-
-    localize_parser.add_argument(
-        "-db",
-        "--database",
-        action="store_true",
-        help="do not add to database",
-    )
-
-    # nneighbors
-    nneighbor_parser = subparsers.add_parser(
-        "nneighbor", help="calculate nearest neighbor of a clustered dataset"
-    )
-    nneighbor_parser.add_argument(
-        "files",
-        nargs="?",
-        help=(
-            "one or multiple hdf5 clustered files"
-            " specified by a unix style path pattern"
-        ),
-    )
-
-    # render
-    render_parser = subparsers.add_parser(
-        "render", help="render localization based images"
-    )
-    render_parser.add_argument(
-        "files",
-        nargs="?",
-        help=(
-            "one or multiple localization files"
-            " specified by a unix style path pattern"
-        ),
-    )
-    render_parser.add_argument(
-        "-o",
-        "--oversampling",
-        type=float,
-        default=1.0,
-        help="the number of super-resolution pixels per camera pixels",
-    )
-    render_parser.add_argument(
-        "-b",
-        "--blur-method",
-        choices=["none", "convolve", "gaussian"],
-        default="convolve",
-    )
-    render_parser.add_argument(
-        "-w",
-        "--min-blur-width",
-        type=float,
-        default=0.0,
-        help="minimum blur width if blur is applied",
-    )
-    render_parser.add_argument(
-        "--vmin",
-        type=float,
-        default=0.0,
-        help="minimum colormap level in range 0-100 or absolute value",
-    )
-    render_parser.add_argument(
-        "--vmax",
-        type=float,
-        default=20.0,
-        help="maximum colormap level in range 0-100 or absolute value",
-    )
-    render_parser.add_argument(
-        "--scaling",
-        choices=["yes", "no"],
-        default="yes",
-        help="if scaling the colormap value is relative in the range 0-100",
-    )
-    render_parser.add_argument(
-        "-c",
-        "--cmap",
-        choices=["viridis", "inferno", "plasma", "magma", "hot", "gray"],
-        help="the colormap to be applied",
-    )
-    render_parser.add_argument(
-        "-s",
-        "--silent",
-        action="store_true",
-        help="do not open the image file",
-    )
-
-    # design
-    subparsers.add_parser("design", help="design RRO DNA origami structures")
-    # simulate
-    subparsers.add_parser(
-        "simulate",
-        help="simulate single molecule fluorescence data",
-    )
-
-    # nanotron
-    subparsers.add_parser("nanotron", help="segmentation with deep learning")
-
-    # average
-    average_parser = subparsers.add_parser(
-        "average",
-        help="particle averaging",
-    )
-
-    subparsers.add_parser(
-        "average3", help="three-dimensional particle averaging"
-    )  # TODO: depracate in 1.0
-
-    hdf2visp_parser = subparsers.add_parser("hdf2visp")
     hdf2visp_parser.add_argument("files")
-    hdf2visp_parser.add_argument("pixelsize", type=float)
+    hdf2visp_parser.add_argument("-p", "--pixelsize", type=float)
 
-    csv2hdf_parser = subparsers.add_parser("csv2hdf")
+    csv2hdf_parser = subparsers.add_parser(
+        "csv2hdf", help="convert csv (ThunderSTORM) to hdf5 format"
+    )
     csv2hdf_parser.add_argument("files")
-    csv2hdf_parser.add_argument("pixelsize", type=float)
+    csv2hdf_parser.add_argument("-p", "--pixelsize", type=float)
 
-    hdf2csv_parser = subparsers.add_parser("hdf2csv")
+    hdf2csv_parser = subparsers.add_parser(
+        "hdf2csv", help="convert hdf5 to csv format (ThunderSTORM)"
+    )
     hdf2csv_parser.add_argument("files")
 
     subparsers.add_parser(

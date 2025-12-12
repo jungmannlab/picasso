@@ -11029,7 +11029,13 @@ class Window(QtWidgets.QMainWindow):
                     loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
                     loctxt[["x", "y"]] *= pixelsize
                     loctxt["frame"] = loctxt["frame"].astype(int)
-                    loctxt.to_csv(path, sep=" ", index=False, header=False)
+                    with open(path, "wb") as f:
+                        np.savetxt(
+                            f,
+                            loctxt.to_records(index=False),
+                            fmt=["%.1f", "%.1f", "%.1f", "%.1f", "%d"],
+                            newline="\r\n",
+                        )
                 else:
                     QtWidgets.QMessageBox.information(
                         self, "Dataset error", "Data has no z. Export skipped."
