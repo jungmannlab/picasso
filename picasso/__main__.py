@@ -23,69 +23,6 @@ def picasso_logo():
     print("                                          ")
 
 
-def _average(args: argparse.Namespace) -> None:
-    """Run Picasso: Average.
-
-    Parameters
-    ----------
-    iterations : int
-        Number of iterations for the averaging algorithm.
-    oversampling : int
-        Number of super-resolution pixels per camera pixel.
-    file : list of str
-        List of file paths to the localization files to be averaged.
-    """
-    from glob import glob
-    from .io import load_locs, NoMetadataFileError
-    from picasso.gui import average
-
-    kwargs = {"iterations": args.iterations, "oversampling": args.oversampling}
-    paths = glob(args.file)
-    if paths:
-        for path in paths:
-            print("Averaging {}".format(path))
-            try:
-                locs, info = load_locs(path)
-            except NoMetadataFileError:
-                continue
-            kwargs["path_basename"] = os.path.splitext(path)[0] + "_avg"
-            average(locs, info, **kwargs)
-
-
-def _hdf2visp(path: str, pixel_size: float) -> None:
-    """Convert HDF5 localization files to VISP format.
-
-    Parameters
-    ----------
-    path : str
-        Path to the HDF5 localization files. The file will be saved
-        under the same name with a `.3d` extension.
-    pixel_size : float
-        Camera pixel size in nanometers.
-    """
-    from glob import glob
-
-    paths = glob(path)
-    if paths:
-        from .io import load_locs
-        import os.path
-        from numpy import savetxt
-
-        for path in paths:
-            print("Converting {}".format(path))
-            locs, info = load_locs(path)
-            locs = locs[["x", "y", "z", "photons", "frame"]].copy()
-            locs.x *= pixel_size
-            locs.y *= pixel_size
-            outname = os.path.splitext(path)[0] + ".3d"
-            savetxt(
-                outname,
-                locs,
-                fmt=["%.1f", "%.1f", "%.1f", "%.1f", "%d"],
-                newline="\r\n",
-            )
-
-
 def _csv2hdf(path: str, pixelsize: float) -> None:
     """Convert CSV localization files to HDF5 format.
 
@@ -98,92 +35,20 @@ def _csv2hdf(path: str, pixelsize: float) -> None:
     """
     from glob import glob
     from tqdm import tqdm as _tqdm
-    import pandas as pd
 
     paths = glob(path)
     if paths:
-        from .io import save_locs
-        import os.path
-        import numpy as _np
+        from .io import import_ts
 
-        for path in _tqdm(paths):
-            print("Converting {}".format(path))
-            data = pd.read_csv(path)
-
-            try:
-                frames = data["frame"].astype(int)
-                # make sure frames start at zero:
-                frames = frames - _np.min(frames)
-                x = data["x [nm]"] / pixelsize
-                y = data["y [nm]"] / pixelsize
-                photons = data["intensity [photon]"].astype(int)
-
-                bg = data["offset [photon]"].astype(int)
-                lpx = data["uncertainty_xy [nm]"] / pixelsize
-                lpy = data["uncertainty_xy [nm]"] / pixelsize
-
-                if "z_nm" in list(data):
-                    z = data["z_nm"] / pixelsize
-                    sx = data["sigma1_nm"] / pixelsize
-                    sy = data["sigma2_nm"] / pixelsize
-                    locs = pd.DataFrame(
-                        {
-                            "frame": frames.astype(_np.uint32),
-                            "x": x.astype(_np.float32),
-                            "y": y.astype(_np.float32),
-                            "z": z.astype(_np.float32),
-                            "photons": photons.astype(_np.float32),
-                            "sx": sx.astype(_np.float32),
-                            "sy": sy.astype(_np.float32),
-                            "bg": bg.astype(_np.float32),
-                            "lpx": lpx.astype(_np.float32),
-                            "lpy": lpy.astype(_np.float32),
-                        }
-                    )
-                else:
-                    sx = data["sigma [nm]"] / pixelsize
-                    sy = data["sigma [nm]"] / pixelsize
-                    locs = pd.DataFrame(
-                        {
-                            "frame": frames.astype(_np.uint32),
-                            "x": x.astype(_np.float32),
-                            "y": y.astype(_np.float32),
-                            "photons": photons.astype(_np.float32),
-                            "sx": sx.astype(_np.float32),
-                            "sy": sy.astype(_np.float32),
-                            "bg": bg.astype(_np.float32),
-                            "lpx": lpx.astype(_np.float32),
-                            "lpy": lpy.astype(_np.float32),
-                        }
-                    )
-
-                locs.sort_values(kind="mergesort", by="frame", inplace=True)
-
-                img_info = {}
-                img_info["Generated by"] = f"Picasso v{__version__} csv2hdf"
-                img_info["Frames"] = int(_np.max(frames)) + 1
-                img_info["Height"] = int(_np.ceil(_np.max(y)))
-                img_info["Width"] = int(_np.ceil(_np.max(x)))
-                img_info["Pixelsize"] = float(pixelsize)
-
-                info = []
-                info.append(img_info)
-
-                base, ext = os.path.splitext(path)
-                out_path = base + "_locs.hdf5"
-                save_locs(out_path, locs, info)
-                print("Saved to {}.".format(out_path))
-            except Exception as e:
-                print(e)
-                print("Error. Datatype not understood.")
-                raise e
+        for path in _tqdm(paths, desc="Converting from ThunderSTORM"):
+            import_ts(path, pixelsize)
+    print("Complete.")
 
 
 def _hdf2csv(path: str) -> None:
-    """Convert HDF5 localization files to CSV format."""
+    """Convert HDF5 localization files to CSV format (unchanged
+    columns)."""
     from glob import glob
-    import pandas as pd
-    from tqdm import tqdm as _tqdm
     from os.path import isdir
 
     if isdir(path):
@@ -194,15 +59,129 @@ def _hdf2csv(path: str) -> None:
         import os.path
         from .io import load_locs
 
-        for path in _tqdm(paths):
+        for path in paths:
             base, ext = os.path.splitext(path)
             if ext == ".hdf5":
-                print("Converting {}".format(path))
+                print(f"Converting {path}")
                 out_path = base + ".csv"
                 locs = load_locs(path)[0]
-                df = pd.DataFrame(locs)
-                print("A total of {} rows loaded".format(len(locs)))
-                df.to_csv(out_path, sep=",", encoding="utf-8")
+                print(f"A total of {len(locs)} rows loaded.")
+                locs.to_csv(out_path, sep=",", encoding="utf-8")
+    print("Complete.")
+
+
+def _hdf2ts(path: str) -> None:
+    """Convert HDF5 localization files to ThunderSTORM CSV format."""
+    from glob import glob
+    from os.path import isdir
+
+    if isdir(path):
+        paths = glob(path + "/*.hdf5")
+    else:
+        paths = glob(path)
+    if paths:
+        import os.path
+        from .io import load_locs, export_thunderstorm
+
+        for path in paths:
+            base, ext = os.path.splitext(path)
+            if ext == ".hdf5":
+                print(f"Converting {path}")
+                out_path = base + ".csv"
+                locs, info = load_locs(path)
+                export_thunderstorm(out_path, locs, info)
+    print("Complete.")
+
+
+def _hdf2imagej(path: str) -> None:
+    """Convert HDF5 localization files to ImageJ txt format."""
+    from glob import glob
+    from os.path import isdir
+
+    if isdir(path):
+        paths = glob(path + "/*.hdf5")
+    else:
+        paths = glob(path)
+    if paths:
+        import os.path
+        from .io import load_locs, export_txt_imagej
+
+        for path in paths:
+            base, ext = os.path.splitext(path)
+            if ext == ".hdf5":
+                print(f"Converting {path}")
+                out_path = base + ".txt"
+                locs, info = load_locs(path)
+                export_txt_imagej(out_path, locs, info)
+    print("Complete.")
+
+
+def _hdf2nis(path: str) -> None:
+    """Convert HDF5 localization files to NIS txt format."""
+    from glob import glob
+    from os.path import isdir
+
+    if isdir(path):
+        paths = glob(path + "/*.hdf5")
+    else:
+        paths = glob(path)
+    if paths:
+        import os.path
+        from .io import load_locs, export_txt_nis
+
+        for path in paths:
+            base, ext = os.path.splitext(path)
+            if ext == ".hdf5":
+                print(f"Converting {path}")
+                out_path = base + ".nis.txt"
+                locs, info = load_locs(path)
+                export_txt_nis(out_path, locs, info)
+    print("Complete.")
+
+
+def _hdf2chimera(path: str) -> None:
+    """Convert HDF5 localization files to NIS txt format."""
+    from glob import glob
+    from os.path import isdir
+
+    if isdir(path):
+        paths = glob(path + "/*.hdf5")
+    else:
+        paths = glob(path)
+    if paths:
+        import os.path
+        from .io import load_locs, export_xyz_chimera
+
+        for path in paths:
+            base, ext = os.path.splitext(path)
+            if ext == ".hdf5":
+                print(f"Converting {path}")
+                out_path = base + ".chi.xyz"
+                locs, info = load_locs(path)
+                export_xyz_chimera(out_path, locs, info)
+    print("Complete.")
+
+
+def _hdf2visp(path: str) -> None:
+    """Convert HDF5 localization files to VISP format."""
+    from glob import glob
+    from os.path import isdir
+
+    if isdir(path):
+        paths = glob(path + "/*.hdf5")
+    else:
+        paths = glob(path)
+    if paths:
+        import os.path
+        from .io import load_locs, export_3d_visp
+
+        for path in paths:
+            base, ext = os.path.splitext(path)
+            if ext == ".hdf5":
+                print(f"Converting {path}")
+                out_path = base + ".visp.3d"
+                locs, info = load_locs(path)
+                export_3d_visp(out_path, locs, info)
     print("Complete.")
 
 
@@ -437,7 +416,7 @@ def _clusterfilter(
                 print("Error: Field {} not found.".format(parameter))
 
 
-def _undrift(
+def _undrift_rcc(
     files: str,
     segmentation: int,
     display: bool = True,
@@ -503,7 +482,7 @@ def _undrift(
         info.append(undrift_info)
         base, ext = os.path.splitext(path)
         io.save_locs(base + "_undrift.hdf5", locs, info)
-        savetxt(base + "_drift.txt", drift, header="dx\tdy", newline="\r\n")
+        savetxt(base + "_drift.txt", drift, newline="\r\n")
 
 
 def _undrift_aim(
@@ -534,7 +513,67 @@ def _undrift_aim(
         )
         base, ext = os.path.splitext(path)
         io.save_locs(base + "_aim.hdf5", locs, new_info)
-        savetxt(base + "_aimdrift.txt", drift, header="dx\tdy", newline="\r\n")
+        savetxt(base + "_aimdrift.txt", drift, newline="\r\n")
+
+
+def _undrift_fiducials(files: str) -> None:
+    """Automatically pick fiducials and use them for drift correction.
+    See ``postprocess.undrift_from_picked`` and
+    ``imageprocess.find_fiducials`` for more details.
+
+    Uses RCC with segmentation of 2000 before so that fiducials can be
+    detected.
+    """
+    import glob
+    from numpy import savetxt
+    from . import io, postprocess, imageprocess
+
+    segmentation = 2000
+
+    paths = glob.glob(files)
+    undrift_info = {
+        "Generated by": f"Picasso v{__version__} Undrift by fiducials",
+        "pre-RCC segmentation": segmentation,
+    }
+    for path in paths:
+        try:
+            locs, info = io.load_locs(path)
+        except io.NoMetadataFileError:
+            continue
+
+        print(f"Undrifting file {path}.")
+        drift, locs = postprocess.undrift(
+            locs, info, segmentation, display=False
+        )
+        print(f"pre-RCC done.")
+        fiducials_picks, d = imageprocess.find_fiducials(locs, info)
+        print(f"Found {len(fiducials_picks)} fiducials.")
+        picked_locs = postprocess.picked_locs(
+            locs,
+            info,
+            fiducials_picks,
+            pick_shape="Circle",
+            pick_size=d / 2,
+            add_group=False,
+        )
+        fiducials_drift = postprocess.undrift_from_picked(picked_locs, info)
+        frames = locs["frame"]
+        locs["x"] -= fiducials_drift["x"].iloc[frames].values
+        locs["y"] -= fiducials_drift["y"].iloc[frames].values
+        drift["x"] += fiducials_drift["x"]
+        drift["y"] += fiducials_drift["y"]
+        if hasattr(locs, "z"):
+            locs["z"] -= fiducials_drift["z"].iloc[frames].values
+            drift["z"] += fiducials_drift["z"]
+
+        undrift_info["Drift X"] = float(drift["x"].mean())
+        undrift_info["Drift Y"] = float(drift["y"].mean())
+
+        info.append(undrift_info)
+        base, ext = os.path.splitext(path)
+        io.save_locs(base + "_undrift_fiducials.hdf5", locs, info)
+        savetxt(base + "_drift_fiducials.txt", drift, newline="\r\n")
+        print(f"Saved undrifted localizations.")
 
 
 def _density(files: str, radius: float) -> None:
@@ -1191,7 +1230,7 @@ def _localize(args: argparse.Namespace) -> None:
                 print("Undrifting file:")
                 print("------------------------------------------")
                 try:
-                    _undrift(
+                    _undrift_rcc(
                         out_path,
                         args.drift,
                         display=False,
@@ -1774,109 +1813,235 @@ def main():
     parser = argparse.ArgumentParser("picasso")
     subparsers = parser.add_subparsers(dest="command")
 
-    for command in ["toraw", "filter"]:
-        subparsers.add_parser(command)
-
-    # link parser
-    link_parser = subparsers.add_parser(
-        "link", help="link localizations in consecutive frames"
+    # localize
+    localize_parser = subparsers.add_parser(
+        "localize", help="identify and fit single molecule spots"
     )
-    link_parser.add_argument(
+    localize_parser.add_argument(
         "files",
+        nargs="?",
         help=(
-            "one or multiple hdf5 localization files"
+            "one movie file or a folder containing movie files"
             " specified by a unix style path pattern"
         ),
     )
-    link_parser.add_argument(
+    localize_parser.add_argument(
+        "-b", "--box-side-length", type=int, default=7, help="box side length"
+    )
+    localize_parser.add_argument(
+        "-a",
+        "--fit-method",
+        choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"],
+        default="mle",
+    )
+    localize_parser.add_argument(
+        "-g", "--gradient", type=int, default=5000, help="minimum net gradient"
+    )
+    localize_parser.add_argument(
         "-d",
-        "--distance",
+        "--drift",
+        type=int,
+        default=1000,
+        help="segmentation size for subsequent RCC, 0 to deactivate",
+    )
+    localize_parser.add_argument(
+        "-r",
+        "--roi",
+        type=int,
+        nargs=4,
+        default=None,
+        help=(
+            "ROI (y_min, x_min, y_max, x_max) in camera pixels;\n"
+            "note the origin of the image is in the top left corner"
+        ),
+    )
+    localize_parser.add_argument(
+        "-bl", "--baseline", type=int, default=0, help="camera baseline"
+    )
+    localize_parser.add_argument(
+        "-s", "--sensitivity", type=float, default=1, help="camera sensitivity"
+    )
+    localize_parser.add_argument(
+        "-ga", "--gain", type=int, default=1, help="camera gain"
+    )
+    localize_parser.add_argument(
+        "-qe", "--qe", type=float, default=1, help="camera quantum efficiency"
+    )
+    localize_parser.add_argument(
+        "-mf",
+        "--mf",
+        type=float,
+        default=0,
+        help="Magnification factor (only 3d)",
+    )
+    localize_parser.add_argument(
+        "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
+    )
+    localize_parser.add_argument(
+        "-zc",
+        "--zc",
+        type=str,
+        default="",
+        help="Path to 3d calibration file (only 3d)",
+    )
+
+    localize_parser.add_argument(
+        "-sf",
+        "--suffix",
+        type=str,
+        default="",
+        help="Suffix to add to files",
+    )
+
+    localize_parser.add_argument(
+        "-db",
+        "--database",
+        action="store_true",
+        help="do not add to database",
+    )
+
+    subparsers.add_parser("filter", help="filter raw files based on SNR (GUI)")
+
+    # render
+    render_parser = subparsers.add_parser(
+        "render", help="render localization based images"
+    )
+    render_parser.add_argument(
+        "files",
+        nargs="?",
+        help=(
+            "one or multiple localization files"
+            " specified by a unix style path pattern"
+        ),
+    )
+    render_parser.add_argument(
+        "-o",
+        "--oversampling",
         type=float,
         default=1.0,
-        help=(
-            "maximum distance between localizations"
-            " to consider them the same binding event (default=1.0)"
-        ),
+        help="the number of super-resolution pixels per camera pixels",
     )
-    link_parser.add_argument(
-        "-t",
-        "--tolerance",
-        type=int,
-        default=1,
-        help=(
-            "maximum dark time between localizations"
-            " to still consider them the same binding event (default=1)"
-        ),
+    render_parser.add_argument(
+        "-b",
+        "--blur-method",
+        choices=["none", "convolve", "gaussian"],
+        default="convolve",
     )
-
-    cluster_combine_parser = subparsers.add_parser(
-        "cluster_combine",
-        help="combine localization in each cluster of a group",
-    )
-    cluster_combine_parser.add_argument(
-        "files",
-        help=(
-            "one or multiple hdf5 localization files"
-            " specified by a unix style path pattern"
-        ),
-    )
-
-    cluster_combine_dist_parser = subparsers.add_parser(
-        "cluster_combine_dist",
-        help="calculate the nearest neighbor for each combined cluster",
-    )
-    cluster_combine_dist_parser.add_argument(
-        "files",
-        help=(
-            "one or multiple hdf5 localization files"
-            " specified by a unix style path pattern"
-        ),
-    )
-
-    clusterfilter_parser = subparsers.add_parser(
-        "clusterfilter",
-        help="filter localizations by properties of their clusters",
-    )
-    clusterfilter_parser.add_argument(
-        "files",
-        help=(
-            "one or multiple hdf5 localization files"
-            " specified by a unix style path pattern"
-        ),
-    )
-    clusterfilter_parser.add_argument("clusterfile", help="a hdf5 clusterfile")
-    clusterfilter_parser.add_argument(
-        "parameter", type=str, help="parameter to be filtered"
-    )
-    clusterfilter_parser.add_argument(
-        "minval",
+    render_parser.add_argument(
+        "-w",
+        "--min-blur-width",
         type=float,
-        help="lower boundary",
+        default=0.0,
+        help="minimum blur width if blur is applied",
     )
-    clusterfilter_parser.add_argument(
-        "maxval",
+    render_parser.add_argument(
+        "--vmin",
         type=float,
-        help="upper boundary",
+        default=0.0,
+        help="minimum colormap level in range 0-100 or absolute value",
+    )
+    render_parser.add_argument(
+        "--vmax",
+        type=float,
+        default=20.0,
+        help="maximum colormap level in range 0-100 or absolute value",
+    )
+    render_parser.add_argument(
+        "--scaling",
+        choices=["yes", "no"],
+        default="yes",
+        help="if scaling the colormap value is relative in the range 0-100",
+    )
+    render_parser.add_argument(
+        "-c",
+        "--cmap",
+        choices=["viridis", "inferno", "plasma", "magma", "hot", "gray"],
+        help="the colormap to be applied",
+    )
+    render_parser.add_argument(
+        "-s",
+        "--silent",
+        action="store_true",
+        help="do not open the image file",
     )
 
-    # undrift parser
-    undrift_parser = subparsers.add_parser(
-        "undrift", help="correct localization coordinates for drift"
+    # design
+    subparsers.add_parser("design", help="design RRO DNA origami structures")
+
+    # simulate
+    subparsers.add_parser(
+        "simulate",
+        help="simulate single molecule fluorescence data",
     )
-    undrift_parser.add_argument(
+
+    # server
+    subparsers.add_parser(
+        "server", help="picasso server workflow management system"
+    )
+
+    # spinna
+    spinna_parser = subparsers.add_parser(
+        "spinna",
+        help=(
+            "picasso single protein investigation via nearest neighbor "
+            "analysis"
+        ),
+    )
+    spinna_parser.add_argument(
+        "-p",
+        "--parameters",
+        type=str,
+        help=(
+            ".csv file containing the parameters for spinna batch analysis;"
+            " see the documentation for details explaining the .csv file"
+            " structure."
+        ),
+    )
+    spinna_parser.add_argument(
+        "-a",
+        "--asynch",
+        action="store_false",
+        help="do not perform fitting asynchronously (multiprocessing)",
+    )
+    spinna_parser.add_argument(
+        "-b",
+        "--bootstrap",
+        action="store_true",
+        help="perform bootstrapping",
+    )
+    spinna_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="display progress bar for each row",
+    )
+
+    # nanotron
+    subparsers.add_parser("nanotron", help="segmentation with deep learning")
+
+    # average
+    subparsers.add_parser("average", help="particle averaging (GUI)")
+    subparsers.add_parser(
+        "average3",
+        help="three-dimensional particle averaging (to be deprecated in 1.0)",
+    )  # TODO: deprecate in 1.0
+
+    subparsers.add_parser(
+        "toraw", help="convert image files to raw format (GUI)"
+    )
+
+    # undrift RCC
+    undrift_rcc_parser = subparsers.add_parser(
+        "undrift", help="correct localization coordinates for drift using RCC"
+    )
+    undrift_rcc_parser.add_argument(
         "files",
         help=(
             "one or multiple hdf5 localization files"
             " specified by a unix style path pattern"
         ),
     )
-    # undrift_parser.add_argument(
-    #     "-m",
-    #     "--mode",
-    #     default="render",
-    #     help='"std", "render" or "framepair")',
-    # )
-    undrift_parser.add_argument(
+    undrift_rcc_parser.add_argument(
         "-s",
         "--segmentation",
         type=float,
@@ -1886,20 +2051,20 @@ def main():
             " for one temporal segment (default=1000)"
         ),
     )
-    undrift_parser.add_argument(
+    undrift_rcc_parser.add_argument(
         "-f",
         "--fromfile",
         type=str,
         help="apply drift from specified file instead of computing it",
     )
-    undrift_parser.add_argument(
+    undrift_rcc_parser.add_argument(
         "-d",
         "--nodisplay",
         action="store_false",
         help="do not display estimated drift",
     )
 
-    # undrift by AIM parser
+    # undrift AIM
     undrift_aim_parser = subparsers.add_parser(
         "aim", help="correct localization coordinates for drift with AIM"
     )
@@ -1936,6 +2101,92 @@ def main():
         type=float,
         default=60 / 130,
         help=("max. drift (cam. pixels) between two consecutive" " segments"),
+    )
+
+    # undrift by fiducials parser
+    undrift_fiducial_parser = subparsers.add_parser(
+        "undrift_fiducials",
+        help="correct localization coordinates for drift with fiducials",
+    )
+    undrift_fiducial_parser.add_argument(
+        "files",
+        help=(
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
+        ),
+    )
+
+    # link parser
+    link_parser = subparsers.add_parser(
+        "link", help="link localizations in consecutive frames"
+    )
+    link_parser.add_argument(
+        "files",
+        help=(
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
+        ),
+    )
+    link_parser.add_argument(
+        "-d",
+        "--distance",
+        type=float,
+        default=1.0,
+        help=(
+            "maximum distance between localizations to consider them the same "
+            "binding event in units of camera pixels (default=1.0)"
+        ),
+    )
+    link_parser.add_argument(
+        "-t",
+        "--tolerance",
+        type=int,
+        default=1,
+        help=(
+            "maximum dark time between localizations"
+            " to still consider them the same binding event (default=1)"
+        ),
+    )
+
+    # nneighbors
+    nneighbor_parser = subparsers.add_parser(
+        "nneighbor", help="calculate nearest neighbor of a clustered dataset"
+    )
+    nneighbor_parser.add_argument(
+        "files",
+        nargs="?",
+        help=(
+            "one or multiple hdf5 clustered files"
+            " specified by a unix style path pattern"
+        ),
+    )
+
+    clusterfilter_parser = subparsers.add_parser(
+        "clusterfilter",
+        help="filter localizations by properties of their clusters",
+    )
+    clusterfilter_parser.add_argument(
+        "files",
+        help=(
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
+        ),
+    )
+    clusterfilter_parser.add_argument(
+        "-c", "--clusterfile", help="a hdf5 clusterfile"
+    )
+    clusterfilter_parser.add_argument(
+        "-p", "--parameter", type=str, help="parameter to be filtered"
+    )
+    clusterfilter_parser.add_argument(
+        "--minval",
+        type=float,
+        help="lower boundary",
+    )
+    clusterfilter_parser.add_argument(
+        "--maxval",
+        type=float,
+        help="upper boundary",
     )
 
     # local densitydd
@@ -2131,7 +2382,11 @@ def main():
         "pc", help="calculate the pair-correlation of localizations"
     )
     pc_parser.add_argument(
-        "-b", "--binsize", type=float, default=0.1, help="the bin size"
+        "-b",
+        "--binsize",
+        type=float,
+        default=0.1,
+        help="the bin size (camera pixels)",
     )
     pc_parser.add_argument(
         "-r",
@@ -2148,255 +2403,71 @@ def main():
         ),
     )
 
-    # localize
-    localize_parser = subparsers.add_parser(
-        "localize", help="identify and fit single molecule spots"
+    # export/import conversions
+    csv2hdf_parser = subparsers.add_parser(
+        "csv2hdf", help="convert csv (ThunderSTORM) to hdf5 format"
     )
-    localize_parser.add_argument(
-        "files",
-        nargs="?",
-        help=(
-            "one movie file or a folder containing movie files"
-            " specified by a unix style path pattern"
-        ),
-    )
-    localize_parser.add_argument(
-        "-b", "--box-side-length", type=int, default=7, help="box side length"
-    )
-    localize_parser.add_argument(
-        "-a",
-        "--fit-method",
-        choices=["mle", "lq", "lq-gpu", "lq-3d", "lq-gpu-3d", "avg"],
-        default="mle",
-    )
-    localize_parser.add_argument(
-        "-g", "--gradient", type=int, default=5000, help="minimum net gradient"
-    )
-    localize_parser.add_argument(
-        "-d",
-        "--drift",
-        type=int,
-        default=1000,
-        help="segmentation size for subsequent RCC, 0 to deactivate",
-    )
-    localize_parser.add_argument(
-        "-r",
-        "--roi",
-        type=int,
-        nargs=4,
-        default=None,
-        help=(
-            "ROI (y_min, x_min, y_max, x_max) in camera pixels;\n"
-            "note the origin of the image is in the top left corner"
-        ),
-    )
-    localize_parser.add_argument(
-        "-bl", "--baseline", type=int, default=0, help="camera baseline"
-    )
-    localize_parser.add_argument(
-        "-s", "--sensitivity", type=float, default=1, help="camera sensitivity"
-    )
-    localize_parser.add_argument(
-        "-ga", "--gain", type=int, default=1, help="camera gain"
-    )
-    localize_parser.add_argument(
-        "-qe", "--qe", type=float, default=1, help="camera quantum efficiency"
-    )
-    localize_parser.add_argument(
-        "-mf",
-        "--mf",
-        type=float,
-        default=0,
-        help="Magnification factor (only 3d)",
-    )
-    localize_parser.add_argument(
-        "-px", "--pixelsize", type=int, default=130, help="pixelsize in nm"
-    )
-    localize_parser.add_argument(
-        "-zc",
-        "--zc",
-        type=str,
-        default="",
-        help="Path to 3d calibration file (only 3d)",
-    )
-
-    localize_parser.add_argument(
-        "-sf",
-        "--suffix",
-        type=str,
-        default="",
-        help="Suffix to add to files",
-    )
-
-    localize_parser.add_argument(
-        "-db",
-        "--database",
-        action="store_true",
-        help="do not add to database",
-    )
-
-    # nneighbors
-    nneighbor_parser = subparsers.add_parser(
-        "nneighbor", help="calculate nearest neighbor of a clustered dataset"
-    )
-    nneighbor_parser.add_argument(
-        "files",
-        nargs="?",
-        help=(
-            "one or multiple hdf5 clustered files"
-            " specified by a unix style path pattern"
-        ),
-    )
-
-    # render
-    render_parser = subparsers.add_parser(
-        "render", help="render localization based images"
-    )
-    render_parser.add_argument(
-        "files",
-        nargs="?",
-        help=(
-            "one or multiple localization files"
-            " specified by a unix style path pattern"
-        ),
-    )
-    render_parser.add_argument(
-        "-o",
-        "--oversampling",
-        type=float,
-        default=1.0,
-        help="the number of super-resolution pixels per camera pixels",
-    )
-    render_parser.add_argument(
-        "-b",
-        "--blur-method",
-        choices=["none", "convolve", "gaussian"],
-        default="convolve",
-    )
-    render_parser.add_argument(
-        "-w",
-        "--min-blur-width",
-        type=float,
-        default=0.0,
-        help="minimum blur width if blur is applied",
-    )
-    render_parser.add_argument(
-        "--vmin",
-        type=float,
-        default=0.0,
-        help="minimum colormap level in range 0-100 or absolute value",
-    )
-    render_parser.add_argument(
-        "--vmax",
-        type=float,
-        default=20.0,
-        help="maximum colormap level in range 0-100 or absolute value",
-    )
-    render_parser.add_argument(
-        "--scaling",
-        choices=["yes", "no"],
-        default="yes",
-        help="if scaling the colormap value is relative in the range 0-100",
-    )
-    render_parser.add_argument(
-        "-c",
-        "--cmap",
-        choices=["viridis", "inferno", "plasma", "magma", "hot", "gray"],
-        help="the colormap to be applied",
-    )
-    render_parser.add_argument(
-        "-s",
-        "--silent",
-        action="store_true",
-        help="do not open the image file",
-    )
-
-    # design
-    subparsers.add_parser("design", help="design RRO DNA origami structures")
-    # simulate
-    subparsers.add_parser(
-        "simulate",
-        help="simulate single molecule fluorescence data",
-    )
-
-    # nanotron
-    subparsers.add_parser("nanotron", help="segmentation with deep learning")
-
-    # average
-    average_parser = subparsers.add_parser(
-        "average",
-        help="particle averaging",
-    )
-    average_parser.add_argument(
-        "-o",
-        "--oversampling",
-        type=float,
-        default=10,
-        help=(
-            "oversampling of the super-resolution images"
-            " for alignment evaluation"
-        ),
-    )
-    average_parser.add_argument("-i", "--iterations", type=int, default=20)
-    average_parser.add_argument(
-        "files",
-        nargs="?",
-        help="a localization file with grouped localizations",
-    )
-
-    subparsers.add_parser(
-        "average3", help="three-dimensional particle averaging"
-    )  # TODO: depracate in 1.0
-
-    hdf2visp_parser = subparsers.add_parser("hdf2visp")
-    hdf2visp_parser.add_argument("files")
-    hdf2visp_parser.add_argument("pixelsize", type=float)
-
-    csv2hdf_parser = subparsers.add_parser("csv2hdf")
     csv2hdf_parser.add_argument("files")
-    csv2hdf_parser.add_argument("pixelsize", type=float)
-
-    hdf2csv_parser = subparsers.add_parser("hdf2csv")
-    hdf2csv_parser.add_argument("files")
-
-    subparsers.add_parser(
-        "server", help="picasso server workflow management system"
-    )
-
-    spinna_parser = subparsers.add_parser(
-        "spinna",
-        help=(
-            "picasso single protein investigation via nearest neighbor "
-            "analysis"
-        ),
-    )
-    spinna_parser.add_argument(
+    csv2hdf_parser.add_argument(
         "-p",
-        "--parameters",
-        type=str,
+        "--pixelsize",
+        help="camera pixel size in nm",
+        type=float,
+        required=True,
+    )
+
+    hdf2csv_parser = subparsers.add_parser(
+        "hdf2csv", help="convert hdf5 to csv format"
+    )
+    hdf2csv_parser.add_argument("files", help="one or multiple hdf5 files")
+
+    hdf2ts_parser = subparsers.add_parser(
+        "hdf2ts", help="convert hdf5 to ThunderSTORM csv format"
+    )
+    hdf2ts_parser.add_argument("files", help="one or multiple hdf5 files")
+
+    hdf2imagej_parser = subparsers.add_parser(
+        "hdf2imagej", help="convert hdf5 to ImageJ .txt format (frame, x, y)"
+    )
+    hdf2imagej_parser.add_argument("files", help="one or multiple hdf5 files")
+
+    hdf2nis_parser = subparsers.add_parser(
+        "hdf2nis", help="convert hdf5 to NIS .txt format"
+    )
+    hdf2nis_parser.add_argument("files", help="one or multiple hdf5 files")
+
+    hdf2chimera_parser = subparsers.add_parser(
+        "hdf2chimera", help="convert hdf5 to Chimera .xyz format"
+    )
+    hdf2chimera_parser.add_argument("files", help="one or multiple hdf5 files")
+
+    hdf2visp_parser = subparsers.add_parser(
+        "hdf2visp", help="convert hdf5 to visp format"
+    )
+    hdf2visp_parser.add_argument("files", help="one or multiple hdf5 files")
+
+    cluster_combine_parser = subparsers.add_parser(
+        "cluster_combine",
+        help="combine localization in each cluster of a group (to be deprecated in 1.0)",
+    )
+    cluster_combine_parser.add_argument(
+        "files",
         help=(
-            ".csv file containing the parameters for spinna batch analysis;"
-            " see the documentation for details explaining the .csv file"
-            " structure."
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
         ),
     )
-    spinna_parser.add_argument(
-        "-a",
-        "--asynch",
-        action="store_false",
-        help="do not perform fitting asynchronously (multiprocessing)",
+
+    cluster_combine_dist_parser = subparsers.add_parser(
+        "cluster_combine_dist",
+        help="calculate the nearest neighbor for each combined cluster (to be deprecated in 1.0)",
     )
-    spinna_parser.add_argument(
-        "-b",
-        "--bootstrap",
-        action="store_true",
-        help="perform bootstrapping",
-    )
-    spinna_parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="display progress bar for each row",
+    cluster_combine_dist_parser.add_argument(
+        "files",
+        help=(
+            "one or multiple hdf5 localization files"
+            " specified by a unix style path pattern"
+        ),
     )
 
     # Parse
@@ -2425,12 +2496,9 @@ def main():
 
                 render.main()
         elif args.command == "average":
-            if args.files:
-                _average(args)
-            else:
-                from .gui import average
+            from .gui import average
 
-                average.main()
+            average.main()
         elif args.command == "nanotron":
             from .gui import nanotron
 
@@ -2439,12 +2507,29 @@ def main():
             from .gui import average3
 
             average3.main()
+        elif args.command == "simulate":
+            from .gui import simulate
+
+            simulate.main()
+        elif args.command == "design":
+            from .gui import design
+
+            design.main()
+        elif args.command == "server":
+            _start_server()
+        elif args.command == "spinna":
+            if args.parameters:
+                _spinna_batch_analysis(
+                    args.parameters,
+                    args.asynch,
+                    args.bootstrap,
+                )
+            else:
+                from .gui import spinna
+
+                spinna.main()
         elif args.command == "link":
             _link(args.files, args.distance, args.tolerance)
-        elif args.command == "cluster_combine":
-            _cluster_combine(args.files)
-        elif args.command == "cluster_combine_dist":
-            _cluster_combine_dist(args.files)
         elif args.command == "clusterfilter":
             _clusterfilter(
                 args.files,
@@ -2454,7 +2539,7 @@ def main():
                 args.maxval,
             )
         elif args.command == "undrift":
-            _undrift(
+            _undrift_rcc(
                 args.files,
                 args.segmentation,
                 args.nodisplay,
@@ -2467,6 +2552,8 @@ def main():
                 args.intersectdist,
                 args.roiradius,
             )
+        elif args.command == "undrift_fiducials":
+            _undrift_fiducials(args.files)
         elif args.command == "density":
             _density(args.files, args.radius)
         elif args.command == "dbscan":
@@ -2499,33 +2586,24 @@ def main():
             _groupprops(args.files)
         elif args.command == "pc":
             _pair_correlation(args.files, args.binsize, args.rmax)
-        elif args.command == "simulate":
-            from .gui import simulate
-
-            simulate.main()
-        elif args.command == "design":
-            from .gui import design
-
-            design.main()
-        elif args.command == "hdf2visp":
-            _hdf2visp(args.files, args.pixelsize)
         elif args.command == "csv2hdf":
             _csv2hdf(args.files, args.pixelsize)
         elif args.command == "hdf2csv":
             _hdf2csv(args.files)
-        elif args.command == "server":
-            _start_server()
-        elif args.command == "spinna":
-            if args.parameters:
-                _spinna_batch_analysis(
-                    args.parameters,
-                    args.asynch,
-                    args.bootstrap,
-                )
-            else:
-                from .gui import spinna
-
-                spinna.main()
+        elif args.command == "hdf2ts":
+            _hdf2ts(args.files)
+        elif args.command == "hdf2imagej":
+            _hdf2imagej(args.files)
+        elif args.command == "hdf2nis":
+            _hdf2nis(args.files)
+        elif args.command == "hdf2chimera":
+            _hdf2chimera(args.files)
+        elif args.command == "hdf2visp":
+            _hdf2visp(args.files)
+        elif args.command == "cluster_combine":
+            _cluster_combine(args.files)
+        elif args.command == "cluster_combine_dist":
+            _cluster_combine_dist(args.files)
     else:
         parser.print_help()
 

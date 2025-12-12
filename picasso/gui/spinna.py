@@ -2777,7 +2777,9 @@ class SimulationsTab(QtWidgets.QDialog):
             self.window.pwd = os.path.dirname(path)
             # load the data
             locs, info = io.load_locs(path)
-            pixelsize = lib.get_from_metadata(info, "Pixelsize", 130)
+            pixelsize = lib.get_from_metadata(
+                info, "Pixelsize", raise_error=True
+            )
             pick_area = lib.get_from_metadata(info, "Area (um^2)")
             if pick_area is not None:
                 idx = self.targets.index(target)
@@ -2804,6 +2806,10 @@ class SimulationsTab(QtWidgets.QDialog):
             if self.check_exp_loaded():
                 self.plot_exp_nnds()
 
+            # reset search space
+            self.granularity = None
+            self.n_sim_fit = None
+
     def load_mask(self, name: str) -> None:
         """Load mask for the given molecular target species."""
         target = name[4:]
@@ -2826,6 +2832,10 @@ class SimulationsTab(QtWidgets.QDialog):
                     button.setStyleSheet("background-color : lightgreen")
                     button.setText(f"{target} loaded")
                     break
+
+            # reset search space
+            self.granularity = None
+            self.n_sim_fit = None
 
     def on_dim_changed(self, index: int) -> None:
         """Update widgets for 2D/3D simulation."""
@@ -2887,10 +2897,17 @@ class SimulationsTab(QtWidgets.QDialog):
             target_spin.setDecimals(2)
             target_spin.setSingleStep(0.5)
             target_spin.setValue(100.00)
+            target_spin.valueChanged.connect(self.on_density_changed)
             self.densities_box.content_layout.addRow(
                 QtWidgets.QLabel(f"{target}:"), target_spin
             )
             self.densities_spins.append(target_spin)
+
+    def on_density_changed(self, *args, **kwargs):
+        """Helper function to reset search space when densities
+        change."""
+        self.granularity = None
+        self.n_sim_fit = None
 
     def load_exp_data_widgets(self) -> None:
         """Load the widgets to the load experimental data box."""
@@ -4186,7 +4203,6 @@ class Window(QtWidgets.QMainWindow):
         self.tabs.setCurrentIndex(0)
 
         # menu bar
-        self.menuBar().setAutoFillBackground(True)
         file_menu = self.menuBar().addMenu("File")
         sounds_menu = file_menu.addMenu("Sound notifications")
         sounds_actiongroup = QtWidgets.QActionGroup(self.menuBar())

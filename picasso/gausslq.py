@@ -19,11 +19,12 @@ import pandas as pd
 from scipy import optimize
 from tqdm import tqdm
 
-from . import postprocess
-
 try:
     from pygpufit import gpufit as gf
+
+    gpufit_installed = True
 except ImportError:
+    gpufit_installed = False
     pass
 
 
