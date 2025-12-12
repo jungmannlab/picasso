@@ -23,35 +23,6 @@ def picasso_logo():
     print("                                          ")
 
 
-def _average(args: argparse.Namespace) -> None:
-    """Run Picasso: Average.
-
-    Parameters
-    ----------
-    iterations : int
-        Number of iterations for the averaging algorithm.
-    oversampling : int
-        Number of super-resolution pixels per camera pixel.
-    file : list of str
-        List of file paths to the localization files to be averaged.
-    """
-    from glob import glob
-    from .io import load_locs, NoMetadataFileError
-    from picasso.gui import average
-
-    kwargs = {"iterations": args.iterations, "oversampling": args.oversampling}
-    paths = glob(args.file)
-    if paths:
-        for path in paths:
-            print("Averaging {}".format(path))
-            try:
-                locs, info = load_locs(path)
-            except NoMetadataFileError:
-                continue
-            kwargs["path_basename"] = os.path.splitext(path)[0] + "_avg"
-            average(locs, info, **kwargs)
-
-
 def _hdf2visp(path: str, pixel_size: float) -> None:
     """Convert HDF5 localization files to VISP format.
 
@@ -2327,22 +2298,6 @@ def main():
         "average",
         help="particle averaging",
     )
-    average_parser.add_argument(
-        "-o",
-        "--oversampling",
-        type=float,
-        default=10,
-        help=(
-            "oversampling of the super-resolution images"
-            " for alignment evaluation"
-        ),
-    )
-    average_parser.add_argument("-i", "--iterations", type=int, default=20)
-    average_parser.add_argument(
-        "files",
-        nargs="?",
-        help="a localization file with grouped localizations",
-    )
 
     subparsers.add_parser(
         "average3", help="three-dimensional particle averaging"
@@ -2425,12 +2380,9 @@ def main():
 
                 render.main()
         elif args.command == "average":
-            if args.files:
-                _average(args)
-            else:
-                from .gui import average
+            from .gui import average
 
-                average.main()
+            average.main()
         elif args.command == "nanotron":
             from .gui import nanotron
 
