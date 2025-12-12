@@ -5,16 +5,16 @@ CMD
    :scale: 50 %
    :alt: UML Picasso cmd
 
-Here is a list of command-line commands that can be used with picasso.
+Here is a list of command-line commands that can be used with picasso. Each command can be run by typing ``picasso command args`` in a terminal or command prompt, where ``command`` is one of the commands listed below and ``args`` are the respective arguments for that command. For more 
+information, type ``picasso -h`` or ``picasso command -h`` for specific commands.
 
 localize
 --------
-Reconstructing images via command line is possible. Type: ``python -m picasso localize args`` within an environment or ``picasso localize args`` if Picasso is installed.
+Reconstructing images via command line is possible. Type: ``picasso localize args`` within an environment or ``picasso localize args`` if Picasso is installed.
 
 Batch process a folder
 ~~~~~~~~~~~~~~~~~~~~~~
-To batch process a folder simply type the folder name (or drag in drop into the console), e.g. ``python -m picasso localize foldername``. Picasso will analyze the folder and process all *.ome.tif in files in the folder. If the files have consecutive names (e.g., File.ome.tif, File_1.ome.tif, File_2.ome.tif), they will be treated as one. 
-
+To batch process a folder simply type the folder name (or drag in drop into the console), e.g. ``picasso localize foldername``. Picasso will analyze the folder and process all *.ome.tif in files in the folder. If the files have consecutive names (e.g., File.ome.tif, File_1.ome.tif, File_2.ome.tif), they will be treated as one. 
 If you want to analyze *.raw files, Picasso will check whether a *.raw file has a corresponding *.yaml file. If none is found, you can enter the specifications for each raw file. It is possible to use the same specifications for all *.raw files in that run. 
 
 Adding additional arguments
@@ -45,30 +45,77 @@ Example
 ^^^^^^^
 This example shows the batch process of a folder, with movie ome.tifs that are supposed to be reconstructed and drift corrected with the ``lq``-Algorithm and a gradient of 4000.
 
-``python -m picasso localize foldername -a lq -g 4000`` or
 ``picasso localize foldername -a lq -g 4000``
+
+render
+------
+Start the render module or render from command line.
+
+filter
+------
+Start the filter module.
+
+design
+------
+Start the design module.
+
+simulate
+--------
+Start the simulation module.
+
+average
+-------
+Start the 2D averaging module.
+
+server
+------
+Start the Picasso server.
+
+spinna
+------
+Start the SPINNA module or run batch analysis from command line.
+
+average3
+--------
+Start the 3D averaging module (to be deprecated in 1.0).
 
 csv2hdf
 -------
-Convert csv files (thunderSTORM) to hdf. Type ``python -m picasso csv2hdf filepath pixelsize``. Note that the following columns need to be present:
+Convert csv files (ThunderSTORM) to ``.hdf5``. Type ``picasso csv2hdf filepath pixelsize``. Note that the following columns need to be present:
 ``frame, x_nm, y_nm, sigma_nm, intensity_photon, offset_photon, uncertainty_xy_nm`` for 2D files
 ``frame, x_nm, y_nm, z_nm, sigma1_nm, sigma2_nm, intensity_photon, offset_photon, uncertainty_xy_nm`` for 3D files
 
+hdf2csv
+-------
+Convert hdf5 files to ``.csv`` files (keeps columns names).
+
+hdf2ts
+------
+Convert hdf5 files to ThunderSTORM ``.csv`` files (adapts column names).
+
+hdf2imagej
+----------
+Convert hdf5 files to ImageJ ``.txt`` files.
+
+hdf2nis
+-------
+Convert hdf5 files to NIS Elements ``.txt`` files.
+
+hdf2chimera
+------------
+Convert hdf5 files to Chimera ``.xyz`` files.
+
+hdf2visp
+--------
+Convert hdf5 files to ViSP ``.3d`` files.
+
 join
 ----
-Combine two hdf5 localization files. Type ``python -m picasso join file1 file2``. A new joined file will be created. Note that the frame information is preserved, i.e., frame 1 now can contain localizations from file 1 and file 2. Therefore, do not perform kinetic analysis and drift correction on joined files.
+Combine two hdf5 localization files. Type ``picasso join file1 file2``. A new joined file will be created. Note that the frame information is preserved, i.e., frame 1 now can contain localizations from file 1 and file 2. Therefore, do not perform kinetic analysis and drift correction on joined files.
 
 link
 ----
 Link localizations in consecutive frames.
-
-cluster_combine
----------------
-Combines the localizations in each cluster of a group.
-
-cluster_combine_dist
---------------------
-Calculate the nearest neighbor for each combined cluster
 
 clusterfilter
 -------------
@@ -79,7 +126,7 @@ undrift
 Correct localization coordinates for drift with RCC.
 
 aim
--------
+---
 Correct localization coordinates for drift with AIM.
 
 undrift_fiducials
@@ -125,26 +172,10 @@ nneighbor
 ---------
 Calculate the nearest neighbor within a clustered dataset
 
-render
-------
-Start the render module
+cluster_combine
+---------------
+Combines the localizations in each cluster of a group (to be deprecated in 1.0).
 
-design
-------
-Start the design module.
-
-simulate
---------
-Start the simulation module.
-
-average
--------
-Start the 2D averaging module
-
-average3
---------
-Start the 3D averaging module
-
-
-
-
+cluster_combine_dist
+--------------------
+Calculate the nearest neighbor for each combined cluster (to be deprecated in 1.0).
