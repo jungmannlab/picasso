@@ -157,31 +157,31 @@ class MockProgress:
     """Class to mock a progress bar or dialog, allowing for calling
     the same methods but not displaying anything."""
 
-    def __init__(self, *args):
+    def __init__(self, *args, **kwargs):
         pass
 
-    def init(self):
+    def init(self, *args, **kwargs):
         pass
 
-    def set_value(self, value):
+    def set_value(self, *args, **kwargs):
         pass
 
-    def update(self, value):
+    def update(self, *args, **kwargs):
         pass
 
-    def closeEvent(self, event):
+    def closeEvent(self, *args, **kwargs):
         pass
 
-    def zero_progress(self, description=None):
+    def zero_progress(self, *args, **kwargs):
         pass
 
-    def close(self):
+    def close(self, *args, **kwargs):
         pass
 
-    def setLabelText(self, text):
+    def setLabelText(self, *args, **kwargs):
         pass
 
-    def play_sound_notification(self):
+    def play_sound_notification(self, *args, **kwargs):
         pass
 
 
@@ -391,7 +391,13 @@ def adjust_widget_size(
         widget.resize(widget.width(), screen_height - 100)
 
 
-def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
+def get_from_metadata(
+    info: list[dict] | dict,
+    key: Any,
+    default=None,
+    *,
+    raise_error: bool = False,
+) -> Any:
     """Get a value from the localization metadata (list of dictionaries
     or a dictionary). Returns default if the key is not found.
 
@@ -401,6 +407,11 @@ def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
         Localization metadata.
     key : Any
         Key to be searched in the metadata.
+    default : Any, optional
+        Value to be returned if the key is not found. Default is None.
+    raise_error : bool, optional
+        If True, raises a KeyError if the key is not found. Default is
+        False.
 
     Returns
     -------
@@ -409,11 +420,15 @@ def get_from_metadata(info: list[dict] | dict, key: Any, default=None) -> Any:
         not found, default is returned.
     """
     if isinstance(info, dict):
+        if raise_error and key not in info:
+            raise KeyError(f"Key '{key}' not found in metadata.")
         return info.get(key, default)
     elif isinstance(info, list):
-        for inf in info:
+        for inf in info[::-1]:
             if val := inf.get(key):
                 return val
+        if raise_error:
+            raise KeyError(f"Key '{key}' not found in metadata.")
         return default
     else:
         raise ValueError("info must be a dict or a list of dicts.")

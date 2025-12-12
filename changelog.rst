@@ -1,10 +1,36 @@
 Changelog
 =========
 
-Last change: 01-DEC-2025 CEST
+Last change: 12-DEC-2025 CEST
 
-0.9.0
+0.9.2
 -----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- Improved and updated `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
+- Render: FRC resolution implementation, see DOI: `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__. It is calculated for a currently loaded FOV and only one repeat is done. *The exact implementation may change in the future versions.*
+
+*Small improvements:*
++++++++++++++++++++++
+- ``picasso.lib.get_from_metadata`` function now has an option to raise a KeyError if the key is not found
+- CMD: added undrift by fiducials (``picasso undrift_fiducials``)
+- CMD: cleaned up .hdf5 conversion functions (``picasso hdf2csv``, ``picasso csv2hdf`` and `more <https://picassosr.readthedocs.io/en/latest/cmd.html>`__)
+- The above functions were moved to ``picasso.io`` module (previously only in ``picasso.gui.render``)
+- Picasso: Average CMD was removed since no functionality was implemented
+
+*Bug fixes:*
+++++++++++++
+- AIM (``picasso.aim.aim``) copies localizations to avoid modifying the input DataFrame.
+- AIM: fixed progress bar when no progress object is provided
+- Localize: fixed CMD with GPUFit
+- Simulate: fixed repetead axes tick labels
+- SPINNA: fixed NND plot showing bins/lines outside of xlim
+- SPINNA: extract the picked area based on the last .yaml file entry, not the first one (fixes the issue of incorrect densities extracted for localizations that were picked multiple times)
+- SPINNA: enforce repeated generation of the search space when exp. data/densities/masks change
+- CMD: pair correlation fixed (#588)
+
+0.9.0-1
+-------
 Important updates:
 ^^^^^^^^^^^^^^^^^^
 

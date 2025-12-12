@@ -23,8 +23,8 @@ Picasso
 A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
-Picasso 0.9.0
--------------
+Picasso 0.9
+-----------
 In this version, localizations (and other ``.hdf5`` files) are read using ``pandas.read_hdf`` rather than converting an ``h5py.File`` object to a numpy recarray. Thus, rather than ``numpy.recarray``, localizations are now ``pandas.DataFrame`` objects. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
 
 Changelog
@@ -96,14 +96,15 @@ Besides using the GUI, you can use picasso like any other Python module. Conside
 
   path = 'testdata_locs.hdf5'
   locs, info = io.load_locs(path)
+  
   # Link localizations and calcualte dark times
   linked_locs = postprocess.link(picked_locs, info, r_max=0.05, max_dark_time=1)
   linked_locs_dark = postprocess.compute_dark_times(linked_locs)
 
-  print('Average bright time {:.2f} frames'.format(np.mean(linked_locs_dark.n)))
-  print('Average dark time {:.2f} frames'.format(np.mean(linked_locs_dark.dark)))
+  print(f"Average bright time {linked_locs_dark['n'].mean():.2f} frames")
+  print(f"Average dark time {linked_locs_dark['dark'].mean():.2f} frames")
 
-This codeblock loads data from testdata_locs and uses the postprocess functions programmatically. For more examples, visit the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
+For more examples, visit the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
 
 Jupyter Notebooks
 -----------------
@@ -134,6 +135,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 | If you use some of the functionalities provided by Picasso, please also cite the respective publications:
 
 - NeNA. DOI: `10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
+- FRC. DOI: `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
 - Theoretical localization precision (Gauss LQ and MLE). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
 - MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
 - RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__ 

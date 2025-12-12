@@ -1872,7 +1872,7 @@ class LinkDialog(QtWidgets.QDialog):
         self.max_distance.setValue(1)
         grid.addWidget(self.max_distance, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Max. transient dark frames:"), 1, 0)
-        self.max_dark_time = QtWidgets.QDoubleSpinBox()
+        self.max_dark_time = QtWidgets.QSpinBox()
         self.max_dark_time.setRange(0, 1e9)
         self.max_dark_time.setValue(1)
         grid.addWidget(self.max_dark_time, 1, 1)
@@ -2867,6 +2867,11 @@ class InfoDialog(QtWidgets.QDialog):
         Shows the std dark time (frames) in all picks.
     fit_precision : QLabel
         Shows median fit precision of the first channel (camera pixels).
+    frc_plot_window : FRCPlotWindow(QDialog)
+        Window displaying the FRC curve.
+    frc_result : dict
+        Summary of FRC calculation (FRC curve, frequencies and
+        resolution).
     influx_rate : FloatEdit(QLineEdit)
         Contains the calculated or input influx rate (1/frames).
     locs_label : QLabel
@@ -2923,7 +2928,8 @@ class InfoDialog(QtWidgets.QDialog):
         self.setWindowTitle("Info")
         self.setModal(False)
         self.lp = None
-        self.nena_calculated = False
+        self.nena_result = {}
+        self.frc_result = {}
         self.change_fov = ChangeFOV(self.window)
 
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -2967,11 +2973,31 @@ class InfoDialog(QtWidgets.QDialog):
         self.fit_precision = QtWidgets.QLabel("-")
         self.movie_grid.addWidget(self.fit_precision, 0, 1)
         self.movie_grid.addWidget(QtWidgets.QLabel("NeNA precision:"), 1, 0)
-        self.nena_button = QtWidgets.QPushButton("Calculate")
+        self.nena_label = QtWidgets.QLabel("-")
+        self.movie_grid.addWidget(self.nena_label, 1, 1)
+        self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
         self.nena_button.clicked.connect(self.calculate_nena_lp)
         self.nena_button.setDefault(False)
         self.nena_button.setAutoDefault(False)
-        self.movie_grid.addWidget(self.nena_button, 1, 1)
+        self.movie_grid.addWidget(self.nena_button, 2, 0)
+        show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
+        show_nena_plot_button.clicked.connect(self.show_nena_plot)
+        self.movie_grid.addWidget(show_nena_plot_button, 2, 1)
+
+        # FRC
+        frc_groupbox = QtWidgets.QGroupBox("FRC (uses current FOV)")
+        vbox.addWidget(frc_groupbox)
+        self.frc_grid = QtWidgets.QGridLayout(frc_groupbox)
+        self.frc_grid.addWidget(QtWidgets.QLabel("FRC resolution (nm):"), 0, 0)
+        self.frc_resolution = QtWidgets.QLabel("-")
+        self.frc_grid.addWidget(self.frc_resolution, 0, 1)
+        calculate_frc_button = QtWidgets.QPushButton("Calculate FRC")
+        calculate_frc_button.clicked.connect(self.calculate_frc_resolution)
+        self.frc_grid.addWidget(calculate_frc_button, 1, 0)
+        show_frc_button = QtWidgets.QPushButton("Show FRC plot")
+        show_frc_button.clicked.connect(self.show_frc_plot)
+        self.frc_grid.addWidget(show_frc_button, 1, 1)
+
         # FOV
         fov_groupbox = QtWidgets.QGroupBox("Field of view")
         vbox.addWidget(fov_groupbox)
@@ -3076,8 +3102,44 @@ class InfoDialog(QtWidgets.QDialog):
         hint = self.container.sizeHint()
         lib.adjust_widget_size(self, hint, 70, 45)
 
+    def calculate_frc_resolution(self) -> None:
+        """Calculate FRC resolution in a given channel."""
+        channel = self.window.view.get_channel("Calculate FRC resolution")
+        if channel is not None:
+            locs = self.window.view.locs[channel]
+            info = self.window.view.infos[channel]
+
+            # make sure the viewport is not too large
+            median_lp = self.window.view.median_lp
+            max_size = 2000 * (median_lp / 2)
+            height, width = self.window.view.viewport_size()
+            if height > max_size or width > max_size:
+                text = (
+                    "The current FOV is large and will likely lead to a long "
+                    "computation time (current FOV leads to an image of size "
+                    f"{int(width/median_lp/2):,} x {int(height/median_lp/2):,}"
+                    " pixels).\n\nPlease consider reducing the FOV size before"
+                    " calculating the FRC resolution.\n\nDo you want to "
+                    "proceed?"
+                )
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Viewport too large",
+                    text,
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                )
+                if not reply == QtWidgets.QMessageBox.Yes:
+                    return
+
+            # calculate frc
+            self.frc_result = postprocess.frc(
+                locs.copy(), info, self.window.view.viewport
+            )
+            res_nm = self.frc_result["resolution"]
+            self.frc_resolution.setText(f"{res_nm:.2f} nm")
+
     def calculate_nena_lp(self) -> None:
-        """Calculate and plot NeNA precision in a given channel."""
+        """Calculate NeNA precision in a given channel."""
         channel = self.window.view.get_channel("Calculate NeNA precision")
         if channel is not None:
             locs = self.window.view.locs[channel]
@@ -3087,42 +3149,11 @@ class InfoDialog(QtWidgets.QDialog):
             progress = lib.ProgressDialog(
                 "Calculating NeNA precision", 0, 100, self
             )
-            result_lp = postprocess.nena(locs.copy(), info, progress.set_value)
-
-            # modify the movie grid
-            if not self.nena_calculated:  # if nena calculated first time
-                self.nena_button.setParent(None)
-                self.movie_grid.removeWidget(self.nena_button)
-            else:
-                self.movie_grid.removeWidget(self.nena_label)
-                self.movie_grid.removeWidget(self.show_plot_button)
-
-            self.nena_label = QtWidgets.QLabel()
-            self.movie_grid.addWidget(self.nena_label, 1, 1)
-            self.nena_result, self.lp = result_lp
+            self.nena_result, self.lp = postprocess.nena(
+                locs.copy(), info, progress.set_value
+            )
             self.lp *= self.window.display_settings_dlg.pixelsize.value()
-            self.nena_label.setText("{:.3} nm".format(self.lp))
-
-            # Nena plot
-            self.nena_window = NenaPlotWindow(self)
-            self.nena_window.plot(self.nena_result)
-
-            self.show_plot_button = QtWidgets.QPushButton("Show plot")
-            self.show_plot_button.clicked.connect(self.nena_window.show)
-            self.movie_grid.addWidget(self.show_plot_button, 0, 2)
-
-            if not self.nena_calculated:
-                # add recalculate nena
-                recalculate_nena = QtWidgets.QPushButton("Recalculate NeNA")
-                recalculate_nena.clicked.connect(self.calculate_nena_lp)
-                recalculate_nena.setDefault(False)
-                recalculate_nena.setAutoDefault(False)
-                self.movie_grid.addWidget(recalculate_nena, 1, 2)
-
-            self.nena_calculated = True
-
-            hint = self.container.sizeHint()
-            lib.adjust_widget_size(self, hint, 85, 50)
+            self.nena_label.setText(f"{self.lp:.3} nm")
 
     def calibrate_influx(self) -> None:
         """Calculate influx rate (1/frames)."""
@@ -3136,6 +3167,33 @@ class InfoDialog(QtWidgets.QDialog):
         """Calculate number of units in each pick."""
         influx = self.influx_rate.value()
         return 1 / (influx * dark)
+
+    def show_frc_plot(self) -> None:
+        """Show FRC plot window."""
+        if not self.frc_result:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "FRC not calculated",
+                "Please calculate FRC resolution first.",
+            )
+            return
+        self.frc_window = FRCPlotWindow(self)
+        self.frc_window.plot(self.frc_result)
+        self.frc_window.show()
+
+    def show_nena_plot(self) -> None:
+        """Show NeNA plot window."""
+        if not self.nena_result:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "NeNA not calculated",
+                "Please calculate NeNA precision first.",
+            )
+            return
+        # keep a reference to the window to prevent garbage collection
+        self.nena_window = NenaPlotWindow(self)
+        self.nena_window.plot(self.nena_result)
+        self.nena_window.show()
 
     def update_n_units(self) -> None:
         """Display the mean and std number of units in the Dialog."""
@@ -3174,6 +3232,48 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
         ax.set_xlabel("Distance (nm)")
         ax.set_ylabel("Counts")
         ax.legend(loc="best")
+        self.canvas.draw()
+
+
+class FRCPlotWindow(QtWidgets.QTabWidget):
+    """Plot FRC resolution."""
+
+    def __init__(self, info_dialog: InfoDialog) -> None:
+        super().__init__()
+        self.info_dialog = info_dialog
+        self.setWindowTitle("FRC Plot")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "render.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+        self.resize(1000, 500)
+        self.figure = plt.Figure()
+        self.canvas = FigureCanvas(self.figure)
+        vbox = QtWidgets.QVBoxLayout()
+        self.setLayout(vbox)
+        vbox.addWidget(self.canvas)
+        vbox.addWidget((NavigationToolbar2QT(self.canvas, self)))
+
+    def plot(self, frc_result: dict) -> None:
+        self.figure.clear()
+        q = frc_result["frequencies"]
+        frc_curve = frc_result["frc_curve"]
+        frc_curve_smooth = frc_result["frc_curve_smooth"]
+        res = frc_result["resolution"]
+        ax = self.figure.add_subplot(111)
+        ax.plot(q, frc_curve, color="gray", alpha=0.5, label="FRC curve")
+        ax.plot(q, frc_curve_smooth, label="Smoothed")
+        ax.axhline(
+            1 / 7,
+            color="black",
+            linewidth=1.0,
+            linestyle="--",
+            label="1/7 threshold",
+        )
+        ax.set_xlabel("Spatial frequency (nm\u207b\u00b9)")
+        ax.set_ylabel("FRC")
+        ax.set_title(f"FIRE resolution: {res:.2f} nm")
+        ax.legend()
         self.canvas.draw()
 
 
@@ -10774,171 +10874,14 @@ class Window(QtWidgets.QMainWindow):
         if ok:
             self.view.export_grayscale(suffix)
 
-    def export_txt(self) -> None:
-        """Export localizations as .txt for ImageJ. Save frames, x and
-        y."""
-        channel = self.view.get_channel(
-            "Save localizations as txt (frames,x,y)"
-        )
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".frc.txt"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save localizations as txt (frames,x,y)",
-                out_path,
-                filter="*.frc.txt",
-            )
-            if path:
-                locs = self.view.all_locs[channel]
-                loctxt = locs[["frame", "x", "y"]].copy()
-                np.savetxt(
-                    path,
-                    loctxt,
-                    fmt=["%.1i", "%.5f", "%.5f"],
-                    newline="\r\n",
-                    delimiter="   ",
-                )
-
-    def export_txt_nis(self) -> None:
-        """Export localizations as .txt for NIS."""
-        channel = self.view.get_channel(
-            (
-                "Save localizations as txt for NIS "
-                "(x,y,z,channel,width,bg,length,area,frame)"
-            )
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        columns_z = [
-            "X",
-            "Y",
-            "Z",
-            "Channel",
-            "Width",
-            "BG",
-            "Length",
-            "Area",
-            "Frame",
-        ]
-        columns = [
-            "X",
-            "Y",
-            "Channel",
-            "Width",
-            "BG",
-            "Length",
-            "Area",
-            "Frame",
-        ]
-
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".nis.txt"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                (
-                    "Save localizations as txt for NIS "
-                    "(x,y,z,channel,width,bg,length,area,frame)"
-                ),
-                out_path,
-                filter="*.nis.txt",
-            )
-            if path:
-                locs = self.view.all_locs[channel]
-                columns_original = [
-                    "x",
-                    "y",
-                    "z",
-                    "sx",
-                    "bg",
-                    "photons",
-                    "frame",
-                ]
-                if not hasattr(locs, "z"):
-                    columns_original.remove("z")
-                loctxt = locs[columns_original].copy()
-                loctxt["frame"] += 1
-                loctxt[["x", "y", "sx"]] *= pixelsize
-                loctxt["Channel"] = 1
-                loctxt["Length"] = 1
-                loctxt["bg"] = loctxt["bg"].round().astype(int)
-                loctxt["photons"] = loctxt["photons"].round().astype(int)
-                column_mapper = {
-                    "x": "X",
-                    "y": "Y",
-                    "sx": "Width",
-                    "bg": "BG",
-                    "photons": "Area",
-                    "frame": "Frame",
-                }
-                if hasattr(locs, "z"):
-                    column_mapper["z"] = "Z"
-                loctxt.rename(columns=column_mapper, inplace=True)
-                if hasattr(locs, "z"):
-                    loctxt = loctxt[columns_z]
-                else:
-                    loctxt = loctxt[columns]
-                loctxt.to_csv(path, sep="\t", index=False)
-
-    def export_xyz_chimera(self) -> None:
-        """Export localizations as .xyz for CHIMERA. The file contains
-        only x, y, z. Show a warning if no z coordinate found."""
-        channel = self.view.get_channel(
-            "Save localizations as xyz for chimera (molecule,x,y,z)"
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".chi.xyz"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save localizations as xyz for chimera (molecule,x,y,z)",
-                out_path,
-            )
-            if path:
-                locs = self.view.all_locs[channel]
-                if hasattr(locs, "z"):
-                    loctxt = locs[["x", "y", "z"]].copy()
-                    loctxt["molecule"] = 1
-                    loctxt[["x", "y"]] *= pixelsize
-                    loctxt = loctxt[["molecule", "x", "y", "z"]]
-                    loctxt.to_csv(path, sep="\t", index=False, header=False)
-                else:
-                    QtWidgets.QMessageBox.information(
-                        self, "Dataset error", "Data has no z. Export skipped."
-                    )
-
-    def export_3d_visp(self) -> None:
-        """Export localizations as .3d for ViSP. Show a warning if no z
-        coordinate found."""
-        channel = self.view.get_channel(
-            "Save localizations for 3D ViSP (x, y, z, photons, frame)"
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".visp.3d"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save localizations for 3D ViSP (x, y, z, photons, frame)",
-                out_path,
-            )
-            if path:
-                locs = self.view.all_locs[channel].copy()
-                if hasattr(locs, "z"):
-                    loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
-                    loctxt[["x", "y"]] *= pixelsize
-                    loctxt["frame"] = loctxt["frame"].astype(int)
-                    loctxt.to_csv(path, sep=" ", index=False, header=False)
-                else:
-                    QtWidgets.QMessageBox.information(
-                        self, "Dataset error", "Data has no z. Export skipped."
-                    )
-
     def export_multi(self):
         """Ask the user to choose a type of export."""
+        channel = self.view.get_channel("Select channel to export")
+        locs = self.view.all_locs[channel]
+        info = self.view.infos[channel]
+        base, ext = os.path.splitext(self.view.locs_paths[channel])
         items = [
-            ".txt for FRC (ImageJ)",
+            ".txt for ImageJ",
             ".txt for NIS",
             ".xyz for Chimera",
             ".3d for ViSP",
@@ -10947,100 +10890,51 @@ class Window(QtWidgets.QMainWindow):
         item, ok = QtWidgets.QInputDialog.getItem(
             self, "Select Export", "Formats", items, 0, False
         )
-        if ok and item:
-            if item == ".txt for FRC (ImageJ)":
-                self.export_txt()
-            elif item == ".txt for NIS":
-                self.export_txt_nis()
-            elif item == ".xyz for Chimera":
-                self.export_xyz_chimera()
-            elif item == ".3d for ViSP":
-                self.export_3d_visp()
-            elif item == ".csv for ThunderSTORM":
-                self.export_ts()
-
-    def export_ts(self) -> None:
-        """Export localizations as .csv for ThunderSTORM."""
-        channel = self.view.get_channel(
-            "Save localizations as csv for ThunderSTORM"
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".csv"
+        if not ok or not item:
+            return
+        if item == ".txt for ImageJ":
             path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save csv to", out_path, filter="*.csv"
+                self,
+                "Save localizations as txt (frames,x,y)",
+                base + ".txt",
+                filter="*.txt",
             )
             if path:
-                columns_original = [
-                    "frame",
-                    "x",
-                    "y",
-                    "sx",
-                    "sy",
-                    "photons",
-                    "bg",
-                    "lpx",
-                    "lpy",
-                ]
-                if hasattr(self.view.all_locs[channel], "z"):
-                    columns_original.append("z")
-                if hasattr(self.view.all_locs[channel], "len"):
-                    columns_original.append("len")
-                loctxt = self.view.all_locs[channel][columns_original].copy()
-
-                # add the columns
-                loctxt["photons"] = loctxt["photons"].astype(np.int32)
-                loctxt["bg"] = loctxt["bg"].astype(np.int32)
-                loctxt["id"] = np.arange(len(loctxt), dtype=np.int32)
-                loctxt[["x", "y", "sx", "sy"]] *= pixelsize
-                loctxt["bkgstd [photon]"] = 0
-                loctxt["uncertainty_xy [nm]"] = (
-                    (loctxt["lpx"] + loctxt["lpy"]) / 2 * pixelsize
-                )
-                column_mapper = {
-                    "x": "x [nm]",
-                    "y": "y [nm]",
-                    "sx": "sigma1 [nm]",
-                    "sy": "sigma2 [nm]",
-                    "photons": "intensity [photon]",
-                    "bg": "offset [photon]",
-                }
-                if hasattr(loctxt, "z"):
-                    column_mapper["z"] = "z [nm]"
-                if hasattr(loctxt, "len"):
-                    loctxt.rename(columns={"len": "detections"}, inplace=True)
-                loctxt.rename(columns=column_mapper, inplace=True)
-                loctxt.drop(columns=["lpx", "lpy"], inplace=True)
-                # change the order of columns
-                columns_final = [
-                    "id",
-                    "frame",
-                    "x [nm]",
-                    "y [nm]",
-                    "z [nm]",
-                    "sigma1 [nm]",
-                    "sigma2 [nm]",
-                    "intensity [photon]",
-                    "offset [photon]",
-                    "bkgstd [photon]",
-                    "uncertainty_xy [nm]",
-                    "detections",
-                ]
-                if not hasattr(loctxt, "z [nm]"):
-                    columns_final.remove("z [nm]")
-                    columns_final.remove("sigma2 [nm]")
-                    columns_final[4] = "sigma [nm]"
-                    loctxt.rename(
-                        columns={"sigma1 [nm]": "sigma [nm]"},
-                        inplace=True,
-                    )
-                    loctxt.drop(columns=["sigma2 [nm]"], inplace=True)
-                if not hasattr(loctxt, "detections"):
-                    columns_final.remove("detections")
-                loctxt = loctxt[columns_final]
-                # save
-                loctxt.to_csv(path, index=False)
+                io.export_txt_imagej(path, locs, info)
+        elif item == ".txt for NIS":
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                (
+                    "Save localizations as txt for NIS "
+                    "(x,y,z,channel,width,bg,length,area,frame)"
+                ),
+                base + ".nis.txt",
+                filter="*.nis.txt",
+            )
+            if path:
+                io.export_txt_nis(path, locs, info)
+        elif item == ".xyz for Chimera":
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save localizations as xyz for chimera (molecule,x,y,z)",
+                base + ".chi.xyz",
+            )
+            if path:
+                io.export_xyz_chimera(path, locs, info)
+        elif item == ".3d for ViSP":
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save localizations for 3D ViSP (x, y, z, photons, frame)",
+                base + ".visp.3d",
+            )
+            if path:
+                io.export_3d_visp(path, locs, info)
+        elif item == ".csv for ThunderSTORM":
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Save csv to", base + ".csv", filter="*.csv"
+            )
+            if path:
+                io.export_thunderstorm(path, locs, info)
 
     def export_fov_ims(self) -> None:
         """Exports current FOV to .ims"""
