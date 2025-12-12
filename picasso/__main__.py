@@ -2384,6 +2384,85 @@ def main():
         default=None,
     )
 
+    g5m_parser = subparsers.add_parser(
+        "g5m",
+        help=(
+            "Gaussian Mixture Modeling with Modifications for Molecular Mapping"
+            "\nFor more details see: https://doi.org"  # TODO: add link
+        ),
+    )
+    g5m_parser.add_argument(
+        "files",
+        nargs="?",
+        help=(
+            "path clustered localization file(s) (.hdf5) specified by a unix "
+            "style path pattern or a path to the folder in which all .hdf5 "
+            "files will be analyzed"
+        ),
+    )
+    g5m_parser.add_argument(
+        "-ml",
+        "--min-locs",
+        type=int,
+        default=10,
+        help="min. number of locs per molecule",
+    )
+    g5m_parser.add_argument(
+        "-lph",
+        "--loc-prec-handle",
+        type=str,
+        default="local",
+        help="loc. precision handle, either 'local' or 'abs'",
+    )
+    g5m_parser.add_argument(
+        "--min-sigma",
+        type=float,
+        default=0.8,
+        help="minimum sigma factor/value",
+    )
+    g5m_parser.add_argument(
+        "--max-sigma",
+        type=float,
+        default=1.5,
+        help="maximum sigma factor/value",
+    )
+    g5m_parser.add_argument(
+        "--max-rounds",
+        type=int,
+        default=3,
+        help="max. rounds without BIC improvement to terminate",
+    )
+    g5m_parser.add_argument(
+        "--bootstrap-sem",
+        action="store_true",
+        help="bootstrap to get SEM of mol. positions; 0 to disable",
+    )
+    g5m_parser.add_argument(
+        "-c",
+        "--calibration",
+        type=str,
+        default="",
+        help="path to calibration file, used only for 3D data",
+    )
+    g5m_parser.add_argument(
+        "-p",
+        "--postprocess",
+        action="store_false",
+        help="do not postprocess results to remove sticking events and low-quality fits",
+    )
+    g5m_parser.add_argument(
+        "--max-locs",
+        type=int,
+        default=100000,
+        help="maximum number of localizations to process per cluster; useful for excluding fiducials",
+    )
+    g5m_parser.add_argument(
+        "-a",
+        "--asynch",
+        action="store_false",
+        help="do not perform fitting asynchronously (multiprocessing)",
+    )
+
     # Dark time
     dark_parser = subparsers.add_parser(
         "dark", help="compute the dark time for grouped localizations"
@@ -2531,85 +2610,6 @@ def main():
             "one or multiple hdf5 localization files"
             " specified by a unix style path pattern"
         ),
-    )
-
-    g5m_parser = subparsers.add_parser(
-        "g5m",
-        help=(
-            "Gaussian Mixture Modeling with Modifications for Molecular Mapping"
-            "\nFor more details see: https://doi.org"  # TODO: add link
-        ),
-    )
-    g5m_parser.add_argument(
-        "files",
-        nargs="?",
-        help=(
-            "path clustered localization file(s) (.hdf5) specified by a unix "
-            "style path pattern or a path to the folder in which all .hdf5 "
-            "files will be analyzed"
-        ),
-    )
-    g5m_parser.add_argument(
-        "-ml",
-        "--min-locs",
-        type=int,
-        default=10,
-        help="min. number of locs per molecule",
-    )
-    g5m_parser.add_argument(
-        "-lph",
-        "--loc-prec-handle",
-        type=str,
-        default="local",
-        help="loc. precision handle, either 'local' or 'abs'",
-    )
-    g5m_parser.add_argument(
-        "--min-sigma",
-        type=float,
-        default=0.8,
-        help="minimum sigma factor/value",
-    )
-    g5m_parser.add_argument(
-        "--max-sigma",
-        type=float,
-        default=1.5,
-        help="maximum sigma factor/value",
-    )
-    g5m_parser.add_argument(
-        "--max-rounds",
-        type=int,
-        default=3,
-        help="max. rounds without BIC improvement to terminate",
-    )
-    g5m_parser.add_argument(
-        "--bootstrap-sem",
-        action="store_true",
-        help="bootstrap to get SEM of mol. positions; 0 to disable",
-    )
-    g5m_parser.add_argument(
-        "-c",
-        "--calibration",
-        type=str,
-        default="",
-        help="path to calibration file, used only for 3D data",
-    )
-    g5m_parser.add_argument(
-        "-p",
-        "--postprocess",
-        action="store_false",
-        help="do not postprocess results to remove sticking events and low-quality fits",
-    )
-    g5m_parser.add_argument(
-        "--max-locs",
-        type=int,
-        default=100000,
-        help="maximum number of localizations to process per cluster; useful for excluding fiducials",
-    )
-    g5m_parser.add_argument(
-        "-a",
-        "--asynch",
-        action="store_false",
-        help="do not perform fitting asynchronously (multiprocessing)",
     )
 
     # Parse
