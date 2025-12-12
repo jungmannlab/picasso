@@ -1919,10 +1919,10 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     lpx = data["uncertainty_xy [nm]"] / pixelsize
     lpy = data["uncertainty_xy [nm]"] / pixelsize
 
-    if "z_nm" in list(data):
-        z = data["z_nm"]
-        sx = data["sigma1_nm"] / pixelsize
-        sy = data["sigma2_nm"] / pixelsize
+    if "z [nm]" in data.columns:
+        z = data["z [nm]"]
+        sx = data["sigma1 [nm]"] / pixelsize
+        sy = data["sigma2 [nm]"] / pixelsize
         locs = pd.DataFrame(
             {
                 "frame": frames.astype(np.uint32),
