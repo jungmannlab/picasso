@@ -111,7 +111,7 @@ Compute the dark time for grouped localizations.
 align
 -----
 Align one localization file to antoher via RCC.
-Type ``python -m picasso align file1 file2``
+Type ``picasso align file1 file2``
 
 groupprops
 ----------

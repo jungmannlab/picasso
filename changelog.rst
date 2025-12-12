@@ -14,6 +14,8 @@ Important updates:
 +++++++++++++++++++++
 - ``picasso.lib.get_from_metadata`` function now has an option to raise a KeyError if the key is not found
 - CMD: added undrift by fiducials (``picasso undrift_fiducials``)
+- CMD: cleaned up .hdf5 conversion functions (``picasso hdf2csv``, ``picasso csv2hdf`` and `more <https://picassosr.readthedocs.io/en/latest/cmd.html>`__)
+- The above functions were moved to ``picasso.io`` module (previously only in ``picasso.gui.render``)
 - Picasso: Average CMD was removed since no functionality was implemented
 
 *Bug fixes:*

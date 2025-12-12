@@ -17,6 +17,7 @@ import struct
 import json
 import os
 import threading
+import warnings
 from typing import Callable
 
 import yaml
@@ -1638,3 +1639,251 @@ def load_filter(
             locs = pd.read_hdf(path, key="clusters")
             info = []
     return locs, info
+
+
+def export_txt_imagej(
+    path: str, locs: pd.DataFrame, info: list[dict] | None = None
+) -> None:
+    """Export localizations to a text file compatible with ImageJ.
+
+    Parameters
+    ----------
+    path : str
+        The path where the text file will be saved.
+    locs : pd.DataFrame
+        The localization data to be exported.
+    info : list of dicts, optional
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
+    """
+    loctxt = locs[["frame", "x", "y"]].copy()
+    np.savetxt(
+        path,
+        loctxt.to_records(index=False),
+        fmt=["%.1i", "%.5f", "%.5f"],
+        newline="\r\n",
+        delimiter="   ",
+    )
+
+
+def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
+    """Export localizations as .txt for NIS.
+
+    Parameters
+    ----------
+    path : str
+        The path where the text file will be saved.
+    locs : pd.DataFrame
+        The localization data to be exported.
+    info : list of dicts
+        Metadata dictionaries.
+    """
+    z_header = b"X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+    fmt_z = [
+        "%.2f",
+        "%.2f",
+        "%.2f",
+        "%.i",
+        "%.2f",
+        "%.i",
+        "%.i",
+        "%.i",
+        "%.i",
+    ]
+    header = b"X\tY\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
+    fmt = [
+        "%.2f",
+        "%.2f",
+        "%.i",
+        "%.2f",
+        "%.i",
+        "%.i",
+        "%.i",
+        "%.i",
+    ]
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    columns_original = [
+        "x",
+        "y",
+        "z",
+        "sx",
+        "bg",
+        "photons",
+        "frame",
+    ]
+    if not hasattr(locs, "z"):
+        columns_original.remove("z")
+    loctxt = locs[columns_original].copy()
+    loctxt["frame"] += 1
+    loctxt[["x", "y", "sx"]] *= pixelsize
+    loctxt["Channel"] = 1
+    loctxt["Length"] = 1
+    loctxt["bg"] = loctxt["bg"].round().astype(int)
+    loctxt["photons"] = loctxt["photons"].round().astype(int)
+    if hasattr(locs, "z"):
+        header = z_header
+        fmt = fmt_z
+    with open(path, "wb") as f:
+        f.write(header)
+        np.savetxt(
+            f,
+            loctxt.values,
+            fmt=fmt,
+            newline="\r\n",
+            delimiter="\t",
+        )
+
+
+def export_xyz_chimera(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> None:
+    """Export localizations as .xyz for CHIMERA. The file contains
+    only x, y, z. Raise a warning if no z coordinate found.
+
+    Parameters
+    ----------
+    path : str
+        The path where the xyz file will be saved.
+    locs : pd.DataFrame
+        The localization data to be exported.
+    info : list of dicts
+        Metadata dictionaries.
+    """
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    if hasattr(locs, "z"):
+        loctxt = locs[["x", "y", "z"]].copy()
+        loctxt["molecule"] = 1
+        loctxt[["x", "y"]] *= pixelsize
+        loctxt = loctxt[["molecule", "x", "y", "z"]]
+        with open(path, "wb") as f:
+            f.write(b"Molecule export\r\n")
+            np.savetxt(
+                f,
+                loctxt.values,
+                fmt=["%i", "%.5f", "%.5f", "%.5f"],
+                newline="\r\n",
+                delimiter="\t",
+            )
+    else:
+        warnings.warn(
+            "No z coordinate found in localizations; cannot export to .xyz "
+            "for CHIMERA."
+        )
+
+
+def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
+    """Export localizations as .3d for ViSP. Show a warning if no z
+    coordinate found.
+
+    Parameters
+    ----------
+    path : str
+        The path where the 3d file will be saved.
+    locs : pd.DataFrame
+        The localization data to be exported.
+    info : list of dicts
+        Metadata dictionaries.
+    """
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    if hasattr(locs, "z"):
+        loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
+        loctxt[["x", "y"]] *= pixelsize
+        loctxt["frame"] = loctxt["frame"].astype(int)
+        with open(path, "wb") as f:
+            np.savetxt(
+                f,
+                loctxt.to_records(index=False),
+                fmt=["%.1f", "%.1f", "%.1f", "%.1f", "%d"],
+                newline="\r\n",
+            )
+    else:
+        warnings.warn(
+            "No z coordinate found in localizations; cannot export to .3d "
+            "for ViSP."
+        )
+
+
+def export_thunderstorm(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> None:
+    """Export localizations as .csv for ThunderSTORM.
+
+    Parameters
+    ----------
+    path : str
+        The path where the csv file will be saved.
+    locs : pd.DataFrame
+        The localization data to be exported.
+    info : list of dicts
+        Metadata dictionaries.
+    """
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    columns_original = [
+        "frame",
+        "x",
+        "y",
+        "sx",
+        "sy",
+        "photons",
+        "bg",
+        "lpx",
+        "lpy",
+    ]
+    if hasattr(locs, "z"):
+        columns_original.append("z")
+    if hasattr(locs, "len"):
+        columns_original.append("len")
+    loctxt = locs[columns_original].copy()
+
+    # add the columns
+    loctxt["photons"] = loctxt["photons"].astype(np.int32)
+    loctxt["bg"] = loctxt["bg"].astype(np.int32)
+    loctxt["id"] = np.arange(len(loctxt), dtype=np.int32)
+    loctxt[["x", "y", "sx", "sy"]] *= pixelsize
+    loctxt["bkgstd [photon]"] = 0
+    loctxt["uncertainty_xy [nm]"] = (
+        (loctxt["lpx"] + loctxt["lpy"]) / 2 * pixelsize
+    )
+    column_mapper = {
+        "x": "x [nm]",
+        "y": "y [nm]",
+        "sx": "sigma1 [nm]",
+        "sy": "sigma2 [nm]",
+        "photons": "intensity [photon]",
+        "bg": "offset [photon]",
+    }
+    if hasattr(loctxt, "z"):
+        column_mapper["z"] = "z [nm]"
+    if hasattr(loctxt, "len"):
+        loctxt.rename(columns={"len": "detections"}, inplace=True)
+    loctxt.rename(columns=column_mapper, inplace=True)
+    loctxt.drop(columns=["lpx", "lpy"], inplace=True)
+    # change the order of columns
+    columns_final = [
+        "id",
+        "frame",
+        "x [nm]",
+        "y [nm]",
+        "z [nm]",
+        "sigma1 [nm]",
+        "sigma2 [nm]",
+        "intensity [photon]",
+        "offset [photon]",
+        "bkgstd [photon]",
+        "uncertainty_xy [nm]",
+        "detections",
+    ]
+    if not hasattr(loctxt, "z [nm]"):
+        columns_final.remove("z [nm]")
+        columns_final.remove("sigma2 [nm]")
+        columns_final[4] = "sigma [nm]"
+        loctxt.rename(
+            columns={"sigma1 [nm]": "sigma [nm]"},
+            inplace=True,
+        )
+        loctxt.drop(columns=["sigma2 [nm]"], inplace=True)
+    if not hasattr(loctxt, "detections"):
+        columns_final.remove("detections")
+    loctxt = loctxt[columns_final]
+    # save
+    loctxt.to_csv(path, index=False)
