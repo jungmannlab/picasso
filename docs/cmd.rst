@@ -82,6 +82,10 @@ aim
 -------
 Correct localization coordinates for drift with AIM.
 
+undrift_fiducials
+-----------------
+Correct localization coordinates for drift using fiducial markers (automatically picked).
+
 density
 -------
 Compute the local density of localizations

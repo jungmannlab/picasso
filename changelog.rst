@@ -13,6 +13,7 @@ Important updates:
 *Small improvements:*
 +++++++++++++++++++++
 - ``picasso.lib.get_from_metadata`` function now has an option to raise a KeyError if the key is not found
+- CMD: added undrift by fiducials (``picasso undrift_fiducials``)
 - Picasso: Average CMD was removed since no functionality was implemented
 
 *Bug fixes:*
