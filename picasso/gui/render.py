@@ -1881,7 +1881,7 @@ class LinkDialog(QtWidgets.QDialog):
         self.max_distance.setValue(1)
         grid.addWidget(self.max_distance, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Max. transient dark frames:"), 1, 0)
-        self.max_dark_time = QtWidgets.QDoubleSpinBox()
+        self.max_dark_time = QtWidgets.QSpinBox()
         self.max_dark_time.setRange(0, 1e9)
         self.max_dark_time.setValue(1)
         grid.addWidget(self.max_dark_time, 1, 1)
@@ -11334,169 +11334,12 @@ class Window(QtWidgets.QMainWindow):
         if ok:
             self.view.export_grayscale(suffix)
 
-    def export_txt(self) -> None:
-        """Export localizations as .txt for ImageJ. Save frames, x and
-        y."""
-        channel = self.view.get_channel(
-            "Save localizations as txt (frames,x,y)"
-        )
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".txt"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save localizations as txt (frames,x,y)",
-                out_path,
-                filter="*.txt",
-            )
-            if path:
-                locs = self.view.all_locs[channel]
-                loctxt = locs[["frame", "x", "y"]].copy()
-                np.savetxt(
-                    path,
-                    loctxt,
-                    fmt=["%.1i", "%.5f", "%.5f"],
-                    newline="\r\n",
-                    delimiter="   ",
-                )
-
-    def export_txt_nis(self) -> None:
-        """Export localizations as .txt for NIS."""
-        channel = self.view.get_channel(
-            (
-                "Save localizations as txt for NIS "
-                "(x,y,z,channel,width,bg,length,area,frame)"
-            )
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        columns_z = [
-            "X",
-            "Y",
-            "Z",
-            "Channel",
-            "Width",
-            "BG",
-            "Length",
-            "Area",
-            "Frame",
-        ]
-        columns = [
-            "X",
-            "Y",
-            "Channel",
-            "Width",
-            "BG",
-            "Length",
-            "Area",
-            "Frame",
-        ]
-
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".nis.txt"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                (
-                    "Save localizations as txt for NIS "
-                    "(x,y,z,channel,width,bg,length,area,frame)"
-                ),
-                out_path,
-                filter="*.nis.txt",
-            )
-            if path:
-                locs = self.view.all_locs[channel]
-                columns_original = [
-                    "x",
-                    "y",
-                    "z",
-                    "sx",
-                    "bg",
-                    "photons",
-                    "frame",
-                ]
-                if not hasattr(locs, "z"):
-                    columns_original.remove("z")
-                loctxt = locs[columns_original].copy()
-                loctxt["frame"] += 1
-                loctxt[["x", "y", "sx"]] *= pixelsize
-                loctxt["Channel"] = 1
-                loctxt["Length"] = 1
-                loctxt["bg"] = loctxt["bg"].round().astype(int)
-                loctxt["photons"] = loctxt["photons"].round().astype(int)
-                column_mapper = {
-                    "x": "X",
-                    "y": "Y",
-                    "sx": "Width",
-                    "bg": "BG",
-                    "photons": "Area",
-                    "frame": "Frame",
-                }
-                if hasattr(locs, "z"):
-                    column_mapper["z"] = "Z"
-                loctxt.rename(columns=column_mapper, inplace=True)
-                if hasattr(locs, "z"):
-                    loctxt = loctxt[columns_z]
-                else:
-                    loctxt = loctxt[columns]
-                loctxt.to_csv(path, sep="\t", index=False)
-
-    def export_xyz_chimera(self) -> None:
-        """Export localizations as .xyz for CHIMERA. The file contains
-        only x, y, z. Show a warning if no z coordinate found."""
-        channel = self.view.get_channel(
-            "Save localizations as xyz for chimera (molecule,x,y,z)"
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".chi.xyz"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save localizations as xyz for chimera (molecule,x,y,z)",
-                out_path,
-            )
-            if path:
-                locs = self.view.all_locs[channel]
-                if hasattr(locs, "z"):
-                    loctxt = locs[["x", "y", "z"]].copy()
-                    loctxt["molecule"] = 1
-                    loctxt[["x", "y"]] *= pixelsize
-                    loctxt = loctxt[["molecule", "x", "y", "z"]]
-                    loctxt.to_csv(path, sep="\t", index=False, header=False)
-                else:
-                    QtWidgets.QMessageBox.information(
-                        self, "Dataset error", "Data has no z. Export skipped."
-                    )
-
-    def export_3d_visp(self) -> None:
-        """Export localizations as .3d for ViSP. Show a warning if no z
-        coordinate found."""
-        channel = self.view.get_channel(
-            "Save localizations for 3D ViSP (x, y, z, photons, frame)"
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".visp.3d"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save localizations for 3D ViSP (x, y, z, photons, frame)",
-                out_path,
-            )
-            if path:
-                locs = self.view.all_locs[channel].copy()
-                if hasattr(locs, "z"):
-                    loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
-                    loctxt[["x", "y"]] *= pixelsize
-                    loctxt["frame"] = loctxt["frame"].astype(int)
-                    loctxt.to_csv(path, sep=" ", index=False, header=False)
-                else:
-                    QtWidgets.QMessageBox.information(
-                        self, "Dataset error", "Data has no z. Export skipped."
-                    )
-
     def export_multi(self):
         """Ask the user to choose a type of export."""
+        channel = self.view.get_channel("Select channel to export")
+        locs = self.view.all_locs[channel]
+        info = self.view.infos[channel]
+        base, ext = os.path.splitext(self.view.locs_paths[channel])
         items = [
             ".txt for ImageJ",
             ".txt for NIS",
@@ -11507,100 +11350,51 @@ class Window(QtWidgets.QMainWindow):
         item, ok = QtWidgets.QInputDialog.getItem(
             self, "Select Export", "Formats", items, 0, False
         )
-        if ok and item:
-            if item == ".txt for ImageJ":
-                self.export_txt()
-            elif item == ".txt for NIS":
-                self.export_txt_nis()
-            elif item == ".xyz for Chimera":
-                self.export_xyz_chimera()
-            elif item == ".3d for ViSP":
-                self.export_3d_visp()
-            elif item == ".csv for ThunderSTORM":
-                self.export_ts()
-
-    def export_ts(self) -> None:
-        """Export localizations as .csv for ThunderSTORM."""
-        channel = self.view.get_channel(
-            "Save localizations as csv for ThunderSTORM"
-        )
-        pixelsize = self.display_settings_dlg.pixelsize.value()
-        if channel is not None:
-            base, ext = os.path.splitext(self.view.locs_paths[channel])
-            out_path = base + ".csv"
+        if not ok or not item:
+            return
+        if item == ".txt for ImageJ":
             path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save csv to", out_path, filter="*.csv"
+                self,
+                "Save localizations as txt (frames,x,y)",
+                base + ".txt",
+                filter="*.txt",
             )
             if path:
-                columns_original = [
-                    "frame",
-                    "x",
-                    "y",
-                    "sx",
-                    "sy",
-                    "photons",
-                    "bg",
-                    "lpx",
-                    "lpy",
-                ]
-                if hasattr(self.view.all_locs[channel], "z"):
-                    columns_original.append("z")
-                if hasattr(self.view.all_locs[channel], "len"):
-                    columns_original.append("len")
-                loctxt = self.view.all_locs[channel][columns_original].copy()
-
-                # add the columns
-                loctxt["photons"] = loctxt["photons"].astype(np.int32)
-                loctxt["bg"] = loctxt["bg"].astype(np.int32)
-                loctxt["id"] = np.arange(len(loctxt), dtype=np.int32)
-                loctxt[["x", "y", "sx", "sy"]] *= pixelsize
-                loctxt["bkgstd [photon]"] = 0
-                loctxt["uncertainty_xy [nm]"] = (
-                    (loctxt["lpx"] + loctxt["lpy"]) / 2 * pixelsize
-                )
-                column_mapper = {
-                    "x": "x [nm]",
-                    "y": "y [nm]",
-                    "sx": "sigma1 [nm]",
-                    "sy": "sigma2 [nm]",
-                    "photons": "intensity [photon]",
-                    "bg": "offset [photon]",
-                }
-                if hasattr(loctxt, "z"):
-                    column_mapper["z"] = "z [nm]"
-                if hasattr(loctxt, "len"):
-                    loctxt.rename(columns={"len": "detections"}, inplace=True)
-                loctxt.rename(columns=column_mapper, inplace=True)
-                loctxt.drop(columns=["lpx", "lpy"], inplace=True)
-                # change the order of columns
-                columns_final = [
-                    "id",
-                    "frame",
-                    "x [nm]",
-                    "y [nm]",
-                    "z [nm]",
-                    "sigma1 [nm]",
-                    "sigma2 [nm]",
-                    "intensity [photon]",
-                    "offset [photon]",
-                    "bkgstd [photon]",
-                    "uncertainty_xy [nm]",
-                    "detections",
-                ]
-                if not hasattr(loctxt, "z [nm]"):
-                    columns_final.remove("z [nm]")
-                    columns_final.remove("sigma2 [nm]")
-                    columns_final[4] = "sigma [nm]"
-                    loctxt.rename(
-                        columns={"sigma1 [nm]": "sigma [nm]"},
-                        inplace=True,
-                    )
-                    loctxt.drop(columns=["sigma2 [nm]"], inplace=True)
-                if not hasattr(loctxt, "detections"):
-                    columns_final.remove("detections")
-                loctxt = loctxt[columns_final]
-                # save
-                loctxt.to_csv(path, index=False)
+                io.export_txt_imagej(path, locs, info)
+        elif item == ".txt for NIS":
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                (
+                    "Save localizations as txt for NIS "
+                    "(x,y,z,channel,width,bg,length,area,frame)"
+                ),
+                base + ".nis.txt",
+                filter="*.nis.txt",
+            )
+            if path:
+                io.export_txt_nis(path, locs, info)
+        elif item == ".xyz for Chimera":
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save localizations as xyz for chimera (molecule,x,y,z)",
+                base + ".chi.xyz",
+            )
+            if path:
+                io.export_xyz_chimera(path, locs, info)
+        elif item == ".3d for ViSP":
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save localizations for 3D ViSP (x, y, z, photons, frame)",
+                base + ".visp.3d",
+            )
+            if path:
+                io.export_3d_visp(path, locs, info)
+        elif item == ".csv for ThunderSTORM":
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self, "Save csv to", base + ".csv", filter="*.csv"
+            )
+            if path:
+                io.export_thunderstorm(path, locs, info)
 
     def export_fov_ims(self) -> None:
         """Exports current FOV to .ims"""
