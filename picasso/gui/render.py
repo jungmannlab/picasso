@@ -7074,6 +7074,8 @@ class View(QtWidgets.QLabel):
                 )
         if "Scalebar length (nm)" in file:
             disp_dlg.scalebar.setValue(file["Scalebar length (nm)"])
+        elif "Scale bar length (nm)" in file:
+            disp_dlg.scalebar.setValue(file["Scale bar length (nm)"])
 
     def subtract_picks(self, path: str) -> None:
         """Clear selected picks that cover the picks loaded from path.
@@ -10833,7 +10835,7 @@ class Window(QtWidgets.QMainWindow):
             "Max. density": d.maximum.value(),
             "Colormap": d.colormap.currentText(),
             "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
-            "Scalebar length (nm)": d.scalebar.value(),
+            "Scale bar length (nm)": d.scalebar.value(),
             "Localizations loaded": self.view.locs_paths,
             "Colors": colors,
             "Min. blur (cam. px)": d.min_blur_width.value(),

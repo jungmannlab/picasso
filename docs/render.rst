@@ -125,7 +125,7 @@ Select the pixel size of the camera. This will be automatically set to a default
 
 Scale Bar
 ^^^^^^^^^
-Activate scalebar. The length of the scale bar is calculated with the Pixel Size set in the Camera dialog. Activate  ``Print scale bar length`` to additionally print the length.
+Activate scale bar. The length of the scale bar is calculated with the Pixel Size set in the Camera dialog. Activate  ``Print scale bar length`` to additionally print the length.
 
 Render properties
 ^^^^^^^^^^^^^^^^^

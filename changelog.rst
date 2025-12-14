@@ -1,7 +1,21 @@
 Changelog
 =========
 
-Last change: 12-DEC-2025 CEST
+Last change: 14-DEC-2025 CEST
+
+0.9.3
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- All GUI modules show the explanations of parameters when hovering over them with the mouse cursor
+
+*Small improvements:*
++++++++++++++++++++++
+- 
+
+*Bug fixes:*
+++++++++++++
+-
 
 0.9.2
 -----
@@ -239,12 +253,12 @@ Important updates:
 
 0.6.1
 -----
-- **Measuring in the 3D window (Measure and Scalebar) fixed (previous versions did not convert the value correctly)**
+- **Measuring in the 3D window (Measure and scale bar) fixed (previous versions did not convert the value correctly)**
 - Localize GUI allows for numerical ROI input in the Parameters Dialog
 - Allow loading individual .tif files as in Picasso v0.4.11``
 - RESI localizations have the new column ``cluster_id``
 - Building animation shows progress (Render 3D)
-- Export current view in Render saves metadata; An extra image is saved with a scalebar if the user did not set it
+- Export current view in Render saves metadata; An extra image is saved with a scale bar if the user did not set it
 - (**Not applicable in 0.6.2**) Clustering in command window requires camera pixel size to be input (instead of inserting one after calling the function)
 - Bug fixes
 
