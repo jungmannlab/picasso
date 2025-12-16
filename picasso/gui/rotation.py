@@ -1619,7 +1619,7 @@ class ViewRotation(QtWidgets.QLabel):
             "Max. density": d.maximum.value(),
             "Colormap": d.colormap.currentText(),
             "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
-            "Scalebar length (nm)": d.scalebar.value(),
+            "Scale bar length (nm)": d.scalebar.value(),
             "Min. blur (cam. px)": d.min_blur_width.value(),
             "Localizations loaded": self.paths,
             "Colors": colors,

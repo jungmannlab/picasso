@@ -535,13 +535,13 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         preview_grid.addWidget(self.preview, 0, 0, 1, 3)
 
         # scalebar
-        self.scalebar_check = QtWidgets.QCheckBox("Show scalebar")
+        self.scalebar_check = QtWidgets.QCheckBox("Show scale bar")
         self.scalebar_check.setChecked(False)
         self.scalebar_check.setEnabled(False)
         self.scalebar_check.stateChanged.connect(self.preview.render_image)
         preview_grid.addWidget(self.scalebar_check, 1, 0)
 
-        label = QtWidgets.QLabel("Scalebar length (nm):")
+        label = QtWidgets.QLabel("Scale bar length (nm):")
         label.setAlignment(QtCore.Qt.AlignRight)
         preview_grid.addWidget(label, 1, 1)
         self.scalebar_length = ignoreArrowsSpinBox()
@@ -559,6 +559,9 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         # load molecules
         self.load_locs_button = QtWidgets.QPushButton("Load molecules")
+        self.load_locs_button.setToolTip(
+            "Load localizations/molecules for mask generation."
+        )
         self.load_locs_button.released.connect(self.load_locs)
         mask_layout.addWidget(self.load_locs_button, 0, 0, 1, 2)
 
@@ -585,7 +588,12 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         mask_layout.addWidget(self.mask_ndim, 3, 1)
 
         # mask type (binary, loc density)
-        mask_layout.addWidget(QtWidgets.QLabel("Mask type:"), 4, 0)
+        label = QtWidgets.QLabel("Mask type:")
+        label.setToolTip(
+            "Choose between a density (heterogeneous) mask or a binary mask."
+        )
+        mask_layout.addWidget(label, 4, 0)
+
         self.mask_type = QtWidgets.QComboBox()
         self.mask_type.addItems(["Density map", "Binary"])
         self.mask_type.currentIndexChanged.connect(self.on_mask_type_changed)
@@ -593,6 +601,9 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         # generate mask
         self.generate_mask_button = QtWidgets.QPushButton("Generate mask")
+        self.generate_mask_button.setToolTip(
+            "Generate mask based on loaded molecules and parameters."
+        )
         self.generate_mask_button.released.connect(self.generate_mask)
         self.generate_mask_button.setEnabled(False)
         mask_layout.addWidget(self.generate_mask_button, 5, 0, 1, 2)
@@ -606,6 +617,9 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         threshold_widget.setLayout(thresholding_layout)
 
         self.thresholding_check = QtWidgets.QCheckBox("Apply threshold")
+        self.thresholding_check.setToolTip(
+            "Set minimum probability cutoff in the mask?"
+        )
         self.thresholding_check.setChecked(False)
         self.thresholding_check.stateChanged.connect(self.apply_threshold)
         thresholding_layout.addWidget(self.thresholding_check)
@@ -629,6 +643,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         # Full FOV (reset)
         full_fov_button = QtWidgets.QPushButton("Full FOV")
+        full_fov_button.setToolTip("Reset to full field of view.")
         full_fov_button.released.connect(self.preview.on_mask_generated)
         navigation_layout.addWidget(full_fov_button, 0, 0, 1, 4)
 
@@ -642,28 +657,36 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         # Padding (move viewport)
         up_button = QtWidgets.QPushButton("Up")
+        up_button.setToolTip("Move current FOV up.")
         up_button.setShortcut("Up")
         up_button.released.connect(self.preview.up)
         navigation_layout.addWidget(up_button, 2, 0)
         down_button = QtWidgets.QPushButton("Down")
+        down_button.setToolTip("Move current FOV down.")
         down_button.setShortcut("Down")
         down_button.released.connect(self.preview.down)
         navigation_layout.addWidget(down_button, 2, 1)
         left_button = QtWidgets.QPushButton("Left")
+        left_button.setToolTip("Move current FOV left.")
         left_button.setShortcut("Left")
         left_button.released.connect(self.preview.left)
         navigation_layout.addWidget(left_button, 2, 2)
         right_button = QtWidgets.QPushButton("Right")
+        right_button.setToolTip("Move current FOV right.")
         right_button.setShortcut("Right")
         right_button.released.connect(self.preview.right)
         navigation_layout.addWidget(right_button, 2, 3)
 
         # Save current view
         save_view_button = QtWidgets.QPushButton("Save current view")
+        save_view_button.setToolTip(
+            "Save the current view as an image (.png or .tif)."
+        )
         save_view_button.released.connect(self.preview.save_current_view)
         navigation_layout.addWidget(save_view_button, 3, 0, 1, 4)
 
         self.legend = MaskGeneratorLegend(self)
+        self.legend.setToolTip("Probabilities per mask pixel/voxel.")
         navigation_layout.addWidget(self.legend, 4, 0, 1, 4)
 
         self.navigation_buttons = [
@@ -686,6 +709,11 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         mask_info_layout = QtWidgets.QHBoxLayout(mask_info_box)
         self.mask_info_display1 = QtWidgets.QLabel(
             "Area (\u03bcm\u00b2):\n" "Dimensions:\n" "Size memory:"
+        )
+        self.mask_info_display1.setToolTip(
+            "Mask area/volume above Otsu threshold;\n"
+            "Number of pixels/voxels per dimension;\n"
+            "Estimated memory size of the mask."
         )
         self.mask_info_display1.setAlignment(QtCore.Qt.AlignRight)
         # make sure that the dash symbols are aligned
@@ -1306,16 +1334,18 @@ class StructuresTab(QtWidgets.QDialog):
 
         # show legend and scalebar
         self.show_legend_check = QtWidgets.QCheckBox("Show legend")
+        self.show_legend_check.setToolTip("Show molecular targets' names?")
         self.show_legend_check.setChecked(True)
         self.show_legend_check.stateChanged.connect(self.update_preview)
         preview_layout.addWidget(self.show_legend_check, 1, 0)
 
-        self.show_scalebar_check = QtWidgets.QCheckBox("Show scalebar")
+        self.show_scalebar_check = QtWidgets.QCheckBox("Show scale bar")
         self.show_scalebar_check.setChecked(True)
         self.show_scalebar_check.stateChanged.connect(self.update_preview)
         preview_layout.addWidget(self.show_scalebar_check, 1, 1)
 
         length_label = QtWidgets.QLabel("Length (nm):")
+        length_label.setToolTip("Scale bar length.")
         length_label.setAlignment(QtCore.Qt.AlignRight)
         preview_layout.addWidget(length_label, 1, 2)
         self.scalebar_length = QtWidgets.QDoubleSpinBox()
@@ -1327,10 +1357,12 @@ class StructuresTab(QtWidgets.QDialog):
         preview_layout.addWidget(self.scalebar_length, 1, 3)
 
         reset_rot_button = QtWidgets.QPushButton("Reset rotation")
+        reset_rot_button.setToolTip("Reset rotation angles to 0.")
         reset_rot_button.released.connect(partial(self.update_preview, True))
         preview_layout.addWidget(reset_rot_button, 2, 0, 1, 2)
 
         save_view_button = QtWidgets.QPushButton("Save view")
+        save_view_button.setToolTip("Save current view as an image.")
         save_view_button.released.connect(self.save_preview)
         preview_layout.addWidget(save_view_button, 2, 2, 1, 2)
 
@@ -1340,6 +1372,7 @@ class StructuresTab(QtWidgets.QDialog):
         layout.addWidget(self.structures_box, 0, 1)
 
         add_structure_button = QtWidgets.QPushButton("Add a new structure")
+        add_structure_button.setToolTip("Create a new structure.")
         add_structure_button.released.connect(self.add_structure)
         self.structures_box.layout().addWidget(
             add_structure_button,
@@ -1350,10 +1383,16 @@ class StructuresTab(QtWidgets.QDialog):
         )
 
         save_structures_button = QtWidgets.QPushButton("Save all structures")
+        save_structures_button.setToolTip(
+            "Save all designed structures in a .yaml format."
+        )
         save_structures_button.released.connect(self.save_structures)
         self.structures_box.layout().addWidget(save_structures_button, 2, 0)
 
         load_structures_button = QtWidgets.QPushButton("Load structures")
+        load_structures_button.setToolTip(
+            "Load existing structures from a .yaml file."
+        )
         load_structures_button.released.connect(self.load_structures)
         self.structures_box.layout().addWidget(load_structures_button, 2, 1)
 
@@ -1362,13 +1401,26 @@ class StructuresTab(QtWidgets.QDialog):
         self.mol_tar_box.setFixedHeight(446)
         layout.addWidget(self.mol_tar_box, 1, 1)
 
-        self.mol_tar_box.add_widget(QtWidgets.QLabel("Mol. target"), 0, 0)
-        self.mol_tar_box.add_widget(QtWidgets.QLabel("x [nm]"), 0, 1)
-        self.mol_tar_box.add_widget(QtWidgets.QLabel("y [nm]"), 0, 2)
-        self.mol_tar_box.add_widget(QtWidgets.QLabel("z [nm]"), 0, 3)
-        self.mol_tar_box.add_widget(QtWidgets.QLabel("Delete"), 0, 4)
+        label1 = QtWidgets.QLabel("Mol. target")
+        label1.setToolTip("Name of each of the molecular target added.")
+        self.mol_tar_box.add_widget(label1, 0, 0)
+        label2 = QtWidgets.QLabel("x [nm]")
+        label2.setToolTip("x coordinate of each molecular target (nm).")
+        self.mol_tar_box.add_widget(label2, 0, 1)
+        label3 = QtWidgets.QLabel("y [nm]")
+        label3.setToolTip("y coordinate of each molecular target (nm).")
+        self.mol_tar_box.add_widget(label3, 0, 2)
+        label4 = QtWidgets.QLabel("z [nm]")
+        label4.setToolTip("z coordinate of each molecular target (nm).")
+        self.mol_tar_box.add_widget(label4, 0, 3)
+        label5 = QtWidgets.QLabel("Delete")
+        label5.setToolTip("Delete the molecular target.")
+        self.mol_tar_box.add_widget(label5, 0, 4)
 
         add_mol_tar_button = QtWidgets.QPushButton("Add a molecular target")
+        add_mol_tar_button.setToolTip(
+            "Add a new molecular target to the current structure."
+        )
         add_mol_tar_button.released.connect(self.add_molecular_target)
         self.mol_tar_box.layout().addWidget(add_mol_tar_button, 1, 0, 1, 2)
 
@@ -1745,7 +1797,9 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
             self.n_sim_spin.setValue(10)
         else:
             self.n_sim_spin.setValue(sim_tab.n_sim_fit)
-        layout.addRow(QtWidgets.QLabel("# simulations:"), self.n_sim_spin)
+        n_sim_label = QtWidgets.QLabel("# simulations:")
+        n_sim_label.setToolTip("Number of simulations per stoichiometry.")
+        layout.addRow(n_sim_label, self.n_sim_spin)
 
         self.granularity_spin = QtWidgets.QSpinBox()
         self.granularity_spin.setRange(0, 50_000)
@@ -1753,9 +1807,16 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
             self.granularity_spin.setValue(21)
         else:
             self.granularity_spin.setValue(sim_tab.granularity)
-        layout.addRow(QtWidgets.QLabel("Granularity:"), self.granularity_spin)
-
+        granularity_label = QtWidgets.QLabel("Granularity:")
+        granularity_label.setToolTip(
+            "Controls how many proportions combinations of structures are "
+            "tested. The higher the number the more combinations are tested."
+        )
+        layout.addRow(granularity_label, self.granularity_spin)
         self.save_check = QtWidgets.QCheckBox("Save as .csv")
+        self.save_check.setToolTip(
+            "Save the resulting search space as a .csv file?"
+        )
         self.save_check.setChecked(False)
         layout.addRow(self.save_check, QtWidgets.QLabel(" "))
 
@@ -1834,14 +1895,25 @@ class CompareModelsDialog(QtWidgets.QDialog):
         label_unc_layout = QtWidgets.QGridLayout()
         layout.addLayout(label_unc_layout)
         self.label_unc_checkbox = QtWidgets.QCheckBox("Label uncertainties")
+        self.label_unc_checkbox.setToolTip(
+            "Find best fitting label uncertainties?"
+        )
         self.label_unc_checkbox.setChecked(False)
         self.label_unc_checkbox.toggled.connect(self.on_label_unc_toggled)
         label_unc_layout.addWidget(self.label_unc_checkbox, 0, 0, 1, 6)
         # from, to, step
-        label_unc_layout.addWidget(QtWidgets.QLabel("Target"), 1, 0)
-        label_unc_layout.addWidget(QtWidgets.QLabel("From"), 1, 1)
-        label_unc_layout.addWidget(QtWidgets.QLabel("To"), 1, 2)
-        label_unc_layout.addWidget(QtWidgets.QLabel("Step"), 1, 3)
+        t_label = QtWidgets.QLabel("Target")
+        t_label.setToolTip("Name of the molecular target.")
+        label_unc_layout.addWidget(t_label, 1, 0)
+        f_label = QtWidgets.QLabel("From")
+        f_label.setToolTip("Lower bound of label uncertainty (nm).")
+        label_unc_layout.addWidget(f_label, 1, 1)
+        to_label = QtWidgets.QLabel("To")
+        to_label.setToolTip("Upper bound of label uncertainty (nm).")
+        label_unc_layout.addWidget(to_label, 1, 2)
+        s_label = QtWidgets.QLabel("Step")
+        s_label.setToolTip("Iteration step of label uncertainty (nm).")
+        label_unc_layout.addWidget(s_label, 1, 3)
         self.label_unc_from_spins = {}
         self.label_unc_to_spins = {}
         self.label_unc_step_spins = {}
@@ -1885,12 +1957,14 @@ class CompareModelsDialog(QtWidgets.QDialog):
         self.models_box.setMinimumHeight(250)
         layout.addWidget(self.models_box)
         add_model_button = QtWidgets.QPushButton("Add a model")
+        add_model_button.setToolTip("Add a new model (list of structures).")
         add_model_button.setStyleSheet("font-weight : bold")
         add_model_button.released.connect(self.on_add_model)
         self.models_box.add_widget(add_model_button, 0, 0)
 
         # save fit scores
         self.save_fit_scores = QtWidgets.QCheckBox("Save fit scores")
+        self.save_fit_scores.setToolTip("Save the fit scores for each model?")
         self.save_fit_scores.setChecked(False)
         layout.addWidget(self.save_fit_scores)
 
@@ -2023,6 +2097,9 @@ class OptionalSettingsDialog(QtWidgets.QDialog):
         # OPTIONAL SETTINGS
         # rotations mode
         self.rot_dim_widget = QtWidgets.QComboBox()
+        self.rot_dim_widget.setToolTip(
+            "Choose how to rotate simulated structures."
+        )
         self.rot_dim_widget.addItems(
             ["random 2D rotations", "random 3D rotations", "No rotations"]
         )
@@ -2031,12 +2108,19 @@ class OptionalSettingsDialog(QtWidgets.QDialog):
 
         # use multiprocessing (parallel processing)
         self.asynch_check = QtWidgets.QCheckBox("Use multiprocessing")
+        self.asynch_check.setToolTip(
+            "Run simulations in parallel using multiple CPU cores?"
+        )
         self.asynch_check.setChecked(True)
         layout.addWidget(self.asynch_check)
 
         # numbers of neighbors to consider at fitting
         self.auto_nn_check = QtWidgets.QCheckBox(
             "Auto set # of NNs for fitting"
+        )
+        self.auto_nn_check.setToolTip(
+            "Automatically set the numbers of nearest neighbors to"
+            " consider at fitting?"
         )
         self.auto_nn_check.stateChanged.connect(self.on_auto_nn_checked)
         self.auto_nn_check.setChecked(True)
@@ -2074,9 +2158,12 @@ class OptionalSettingsDialog(QtWidgets.QDialog):
                 spin = QtWidgets.QSpinBox(objectName=name)
                 spin.setRange(0, 10)
                 spin.setValue(1)
-                self.neighbors_layout.addRow(
-                    QtWidgets.QLabel(f"NN {t1} \u2192 {t2}:"), spin
+                nn_label = QtWidgets.QLabel(f"NN {t1} \u2192 {t2}:")
+                nn_label.setToolTip(
+                    "Number of nearest neighbors considered between a pair of"
+                    " molecular targets at fitting."
                 )
+                self.neighbors_layout.addRow(nn_label, spin)
                 self.nn_counts[name] = spin
                 if self.auto_nn_check.isChecked():
                     spin.setEnabled(False)
@@ -2130,10 +2217,14 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
 
         # update (run a simulation)
         update_button = QtWidgets.QPushButton("Update plot(s)")
+        update_button.setToolTip(
+            "Update the nearest neighbors distance plot(s)."
+        )
         update_button.released.connect(self.update_plots)
 
         # legend
         self.nnd_legend_check = QtWidgets.QCheckBox("Show legend")
+        self.nnd_legend_check.setToolTip("Show legend in the plots?")
         self.nnd_legend_check.setChecked(False)
         self.nnd_legend_check.stateChanged.connect(
             self.sim_tab.display_current_nnd_plot
@@ -2146,41 +2237,56 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.binsize_sim.setValue(4.0)
         self.binsize_sim.setDecimals(1)
         self.binsize_sim.setSingleStep(0.1)
-        const_layout.addRow(
-            QtWidgets.QLabel("Bin size sim (nm):"), self.binsize_sim
+        binsize_sim_label = QtWidgets.QLabel("Bin size sim (nm):")
+        binsize_sim_label.setToolTip(
+            "Histogram bin size for plotting the simulated nearest neighbors distances."
         )
+        const_layout.addRow(binsize_sim_label, self.binsize_sim)
+
         self.binsize_exp = QtWidgets.QDoubleSpinBox()
         self.binsize_exp.setRange(0.1, 100)
         self.binsize_exp.setValue(4.0)
         self.binsize_exp.setDecimals(1)
         self.binsize_exp.setSingleStep(0.1)
-        const_layout.addRow(
-            QtWidgets.QLabel("Bin size exp (nm):"), self.binsize_exp
+        binsize_exp_label = QtWidgets.QLabel("Bin size exp (nm):")
+        binsize_exp_label.setToolTip(
+            "Histogram bin size for plotting the experimental nearest neighbors distances."
         )
+        const_layout.addRow(binsize_exp_label, self.binsize_exp)
 
         # distance limits
         self.min_dist = QtWidgets.QSpinBox()
         self.min_dist.setRange(0, 99999)
         self.min_dist.setValue(0)
-        const_layout.addRow(QtWidgets.QLabel("Min dist (nm):"), self.min_dist)
+        mindist_label = QtWidgets.QLabel("Min dist (nm):")
+        mindist_label.setToolTip("Minimum distance to plot (nm).")
+        const_layout.addRow(mindist_label, self.min_dist)
 
         self.max_dist = QtWidgets.QSpinBox()
         self.max_dist.setRange(0, 99999)
         self.max_dist.setValue(200)
-        const_layout.addRow(QtWidgets.QLabel("Max dist (nm):"), self.max_dist)
+        maxdist_label = QtWidgets.QLabel("Max dist (nm):")
+        maxdist_label.setToolTip("Maximum distance to plot (nm).")
+        const_layout.addRow(maxdist_label, self.max_dist)
 
         # title
         self.title = QtWidgets.QLineEdit()
         self.title.setText("Nearest Neighbors Distances:")
-        const_layout.addRow(QtWidgets.QLabel("Title:"), self.title)
+        title_label = QtWidgets.QLabel("Title:")
+        title_label.setToolTip("Title of the plot.")
+        const_layout.addRow(title_label, self.title)
 
         # labels
         self.xlabel = QtWidgets.QLineEdit()
         self.xlabel.setText("Distance (nm)")
-        const_layout.addRow(QtWidgets.QLabel("X-axis label:"), self.xlabel)
+        xlabel_label = QtWidgets.QLabel("X-axis label:")
+        xlabel_label.setToolTip("Label for the X-axis.")
+        const_layout.addRow(xlabel_label, self.xlabel)
         self.ylabel = QtWidgets.QLineEdit()
         self.ylabel.setText("Norm. frequency")
-        const_layout.addRow(QtWidgets.QLabel("Y-axis label:"), self.ylabel)
+        ylabel_label = QtWidgets.QLabel("Y-axis label:")
+        ylabel_label.setToolTip("Label for the Y-axis.")
+        const_layout.addRow(ylabel_label, self.ylabel)
 
         # alpha (for histograms only)
         self.alpha = QtWidgets.QDoubleSpinBox()
@@ -2188,24 +2294,39 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.alpha.setValue(0.6)
         self.alpha.setDecimals(2)
         self.alpha.setSingleStep(0.01)
-        const_layout.addRow(
-            QtWidgets.QLabel("Transparency (bins):"), self.alpha
-        )
+        alpha_label = QtWidgets.QLabel("Transparency (bins):")
+        alpha_label.setToolTip("Transparency of the histogram bins.")
+        const_layout.addRow(alpha_label, self.alpha)
 
         # colors
-        const_layout.addRow(QtWidgets.QLabel("Colors:"), QtWidgets.QLabel(" "))
+        colors_label = QtWidgets.QLabel("Colors:")
+        colors_label.setToolTip(
+            "Colors for the nearest neighbors distance histograms. "
+            "Specify colors as named colors, hex strings, or RGB/RGBA "
+            "tuples."
+        )
+        const_layout.addRow(colors_label, QtWidgets.QLabel(" "))
         self.colors = []
         for prefix, i in zip(["1st", "2nd", "3rd", "4th"], range(4)):
             color = QtWidgets.QLineEdit()
             color.setText(spinna.NN_COLORS[i])
             color.editingFinished.connect(self.check_color_labels)
-            const_layout.addRow(QtWidgets.QLabel(f"{prefix} NN:"), color)
+            n_label = QtWidgets.QLabel(f"{prefix} NN:")
+            n_label.setToolTip(
+                f"Color for the {prefix.lower()} nearest neighbors "
+                "distance histogram."
+            )
+            const_layout.addRow(n_label, color)
             self.colors.append(color)
         for i in range(5, 11):
             color = QtWidgets.QLineEdit()
             color.setText("None")
             color.editingFinished.connect(self.check_color_labels)
-            const_layout.addRow(QtWidgets.QLabel(f"{i}th NN:"), color)
+            n_label = QtWidgets.QLabel(f"{i}th NN:")
+            n_label.setToolTip(
+                f"Color for the {i}th nearest neighbors distance " "histogram."
+            )
+            const_layout.addRow(n_label, color)
             self.colors.append(color)
 
         # numbers of neighbors (similar to OptionalSettingsDialog)
@@ -2527,10 +2648,14 @@ class SimulationsTab(QtWidgets.QDialog):
         basic_buttons_layout = QtWidgets.QVBoxLayout()
         load_data_layout.addLayout(basic_buttons_layout, 0, 0)
         self.load_structures_button = QtWidgets.QPushButton("Load structures")
+        self.load_structures_button.setToolTip(
+            "Load structure files from a .yaml file (see Structures)."
+        )
         self.load_structures_button.released.connect(self.load_structures)
         basic_buttons_layout.addWidget(self.load_structures_button)
 
         self.dim_widget = QtWidgets.QComboBox()
+        self.dim_widget.setToolTip("Choose between 2D and 3D simulations.")
         self.dim_widget.addItems(["2D simulation", "3D simulation"])
         self.dim_widget.setCurrentIndex(0)
         self.dim_widget.currentIndexChanged.connect(self.on_dim_changed)
@@ -2544,6 +2669,9 @@ class SimulationsTab(QtWidgets.QDialog):
         basic_buttons_layout.addWidget(self.depth_stack)
         self.depth_stack.addWidget(QtWidgets.QLabel("     "))
         self.depth_button = QtWidgets.QPushButton("Z range (nm)")
+        self.depth_button.setToolTip(
+            "Set the depth (nm) of the simulated volume."
+        )
         self.depth_button.released.connect(self.on_depth_button_clicked)
         self.depth_stack.addWidget(self.depth_button)
         self.depth_stack.setCurrentIndex(0)
@@ -2557,7 +2685,7 @@ class SimulationsTab(QtWidgets.QDialog):
         load_data_layout.addWidget(self.label_unc_box, 1, 0)
 
         self.le_box = lib.ScrollableGroupBox(
-            "labeling efficiency (%)", layout="form"
+            "Labeling efficiency (%)", layout="form"
         )
         load_data_layout.addWidget(self.le_box, 1, 1)
 
@@ -2601,25 +2729,43 @@ class SimulationsTab(QtWidgets.QDialog):
         nnd_buttons_layout = QtWidgets.QGridLayout()
         nnd_plot_layout.addLayout(nnd_buttons_layout)
 
-        left_nnd_button = QtWidgets.QPushButton("<---")
+        left_nnd_button = QtWidgets.QPushButton("\u2190")
+        left_nnd_button.setToolTip(
+            "Show previous NND plot (applies only if multiple molecular "
+            "targets are present in the loaded structures)."
+        )
+        left_nnd_button
         left_nnd_button.released.connect(self.on_left_nnd_clicked)
         nnd_buttons_layout.addWidget(left_nnd_button, 0, 0, 1, 2)
 
-        right_nnd_button = QtWidgets.QPushButton("--->")
+        right_nnd_button = QtWidgets.QPushButton("\u2192")
+        right_nnd_button.setToolTip(
+            "Show next NND plot (applies only if multiple molecular targets "
+            "are present in the loaded structures)."
+        )
         right_nnd_button.released.connect(self.on_right_nnd_clicked)
         nnd_buttons_layout.addWidget(right_nnd_button, 0, 2, 1, 2)
 
         save_nnd_png_button = QtWidgets.QPushButton("Save plots")
+        save_nnd_png_button.setToolTip(
+            "Save the currently displayed NND plot(s) as .png file(s)."
+        )
         save_nnd_png_button.released.connect(self.save_nnd_plots)
         nnd_buttons_layout.addWidget(save_nnd_png_button, 1, 0, 1, 2)
 
         save_nnd_csv_button = QtWidgets.QPushButton("Save values")
+        save_nnd_csv_button.setToolTip(
+            "Save the currently displayed NND values as .csv file(s)."
+        )
         save_nnd_csv_button.released.connect(self.save_nnd_values)
         nnd_buttons_layout.addWidget(save_nnd_csv_button, 1, 2, 1, 2)
 
-        nnd_buttons_layout.addWidget(
-            QtWidgets.QLabel("# simulations:"), 2, 0, 1, 1
+        n_sim_label = QtWidgets.QLabel("# simulations:")
+        n_sim_label.setToolTip(
+            "Number of simulations to run for plotting the NNDs."
         )
+        nnd_buttons_layout.addWidget(n_sim_label, 2, 0, 1, 1)
+
         self.n_sim_plot_spin = QtWidgets.QSpinBox()
         self.n_sim_plot_spin.setValue(1)
         self.n_sim_plot_spin.setRange(1, 1000)
@@ -2627,6 +2773,9 @@ class SimulationsTab(QtWidgets.QDialog):
         nnd_buttons_layout.addWidget(self.n_sim_plot_spin, 2, 1, 1, 1)
 
         plot_settings_button = QtWidgets.QPushButton("Plot settings")
+        plot_settings_button.setToolTip(
+            "Adjust settings for plotting the nearest neighbors distances."
+        )
         plot_settings_button.released.connect(
             self.nn_plot_settings_dialog.show
         )
@@ -2641,6 +2790,9 @@ class SimulationsTab(QtWidgets.QDialog):
         generate_search_space_button = QtWidgets.QPushButton(
             "Generate parameter\nsearch space"
         )
+        generate_search_space_button.setToolTip(
+            "Generate the tested stoichiometries of the model structures."
+        )
         generate_search_space_button.setFixedHeight(60)
         generate_search_space_button.released.connect(
             self.generate_search_space
@@ -2650,11 +2802,17 @@ class SimulationsTab(QtWidgets.QDialog):
         load_search_space_button = QtWidgets.QPushButton(
             "Load parameter\nsearch space"
         )
+        load_search_space_button.setToolTip(
+            "Load a previously generated search space from a .csv file."
+        )
         load_search_space_button.setFixedHeight(60)
         load_search_space_button.released.connect(self.load_search_space)
         fitting_layout.addWidget(load_search_space_button, 0, 1)
 
         compare_models_button = QtWidgets.QPushButton("Compare models")
+        compare_models_button.setToolTip(
+            "Choose from multiple models based on their best fitting scores."
+        )
         compare_models_button.setFixedHeight(60)
         compare_models_button.released.connect(self.compare_models)
         fitting_layout.addWidget(compare_models_button, 0, 2)
@@ -2662,14 +2820,24 @@ class SimulationsTab(QtWidgets.QDialog):
         self.save_fit_results_check = QtWidgets.QCheckBox(
             "Save fitting scores"
         )
+        self.save_fit_results_check.setToolTip(
+            "Save the fitting scores (KS test statistics) for all tested"
+            " stoichiometries in .csv format?"
+        )
         self.save_fit_results_check.setChecked(False)
         fitting_layout.addWidget(self.save_fit_results_check, 1, 0)
 
         self.bootstrap_check = QtWidgets.QCheckBox("Bootstrap")
+        self.bootstrap_check.setToolTip(
+            "Perform bootstrap analysis during fitting?"
+        )
         self.bootstrap_check.setChecked(False)
         fitting_layout.addWidget(self.bootstrap_check, 1, 1)
 
         self.le_fitting_check = QtWidgets.QCheckBox("Fit labeling efficiency")
+        self.le_fitting_check.setToolTip(
+            "Use the loaded structures to fit their labeling efficiencies?"
+        )
         self.le_fitting_check.setChecked(False)
         self.le_fitting_check.setVisible(False)
         self.le_fitting_check.toggled.connect(self.on_le_fitting_toggled)
@@ -2678,10 +2846,14 @@ class SimulationsTab(QtWidgets.QDialog):
         self.fit_button = QtWidgets.QPushButton(
             "Find best fitting stoichiometry"
         )
+        self.fit_button.setToolTip("Run SPINNA")
         self.fit_button.released.connect(self.fit_n_str)
         fitting_layout.addWidget(self.fit_button, 2, 0, 1, 3)
 
         self.fit_results_display = QtWidgets.QLabel("  ")
+        self.fit_results_display.setToolTip(
+            "SPINNA results (displayed only after fitting)."
+        )
         self.fit_results_display.setWordWrap(True)
         fitting_layout.addWidget(self.fit_results_display, 3, 0, 1, 3)
 
@@ -2694,20 +2866,35 @@ class SimulationsTab(QtWidgets.QDialog):
         self.prop_str_input = lib.ScrollableGroupBox(
             "Input proportions of structures (%)", layout="grid"
         )
+        self.prop_str_input.setToolTip(
+            "Set the proportions of structures to be simulated in a"
+            " single simulation."
+        )
         single_sim_layout.addWidget(self.prop_str_input, 0, 0, 1, 3)
 
         self.save_sim_result_check = QtWidgets.QCheckBox(
             "Save positions of\nsimulated molecules"
         )
+        self.save_sim_result_check.setToolTip(
+            "Save the positions of the molecules resulting from a"
+            " single simulation in .hdf5 format?\n"
+            "Such data can be opened in Picasso: Render."
+        )
         self.save_sim_result_check.setChecked(False)
         single_sim_layout.addWidget(self.save_sim_result_check, 1, 0)
 
         self.roi_button = QtWidgets.QPushButton("Area (\u03bcm\u00b2)")
+        self.roi_button.setToolTip(
+            "Set the area (2D) or volume (3D) of the simulation."
+        )
         self.roi_button.released.connect(self.on_roi_button_clicked)
         single_sim_layout.addWidget(self.roi_button, 1, 1)
 
         self.run_single_sim_button = QtWidgets.QPushButton(
             "Run single simulation"
+        )
+        self.run_single_sim_button.setToolTip(
+            "Run a single simulation with the specified parameters."
         )
         self.run_single_sim_button.released.connect(self.run_single_sim)
         single_sim_layout.addWidget(self.run_single_sim_button, 1, 2)
@@ -2898,6 +3085,8 @@ class SimulationsTab(QtWidgets.QDialog):
             target_spin.setSingleStep(0.5)
             target_spin.setValue(100.00)
             target_spin.valueChanged.connect(self.on_density_changed)
+            label = QtWidgets.QLabel(f"{target}:")
+            label.setToolTip("Observed density of the given molecular target")
             self.densities_box.content_layout.addRow(
                 QtWidgets.QLabel(f"{target}:"), target_spin
             )
@@ -2919,6 +3108,9 @@ class SimulationsTab(QtWidgets.QDialog):
         for target in self.targets:
             target_button = QtWidgets.QPushButton(
                 f"Load {target}", objectName=f"exp{target}"
+            )
+            target_button.setToolTip(
+                f"Load experimental molecular map for {target} (.hdf5 file)."
             )
             target_button.released.connect(
                 partial(self.load_exp_data, target_button.objectName())
@@ -2942,6 +3134,7 @@ class SimulationsTab(QtWidgets.QDialog):
             target_button = QtWidgets.QPushButton(
                 f"Load {target}", objectName=f"mask{target}"
             )
+            target_button.setToolTip(f"Load mask for {target} (.npy file).")
             target_button.released.connect(
                 partial(self.load_mask, target_button.objectName())
             )
@@ -2961,9 +3154,12 @@ class SimulationsTab(QtWidgets.QDialog):
             target_spin.setDecimals(2)
             target_spin.setSingleStep(0.5)
             target_spin.setValue(5.00)
-            self.label_unc_box.content_layout.addRow(
-                QtWidgets.QLabel(f"{target}:"), target_spin
+            label = QtWidgets.QLabel(f"{target}:")
+            label.setToolTip(
+                "St. dev. of the Gaussian used to perturb molecule positions "
+                "to simulate label uncertainty (nm)."
             )
+            self.label_unc_box.content_layout.addRow(label, target_spin)
             self.label_unc_spins.append(target_spin)
 
     def load_le_widgets(self) -> None:
@@ -2979,9 +3175,11 @@ class SimulationsTab(QtWidgets.QDialog):
             target_spin.setDecimals(2)
             target_spin.setSingleStep(0.5)
             target_spin.setValue(50.00)
-            self.le_box.content_layout.addRow(
-                QtWidgets.QLabel(f"{target}:"), target_spin
+            label = QtWidgets.QLabel(f"{target}:")
+            label.setToolTip(
+                "Labeling efficiency (%) for the given molecular target."
             )
+            self.le_box.content_layout.addRow(label, target_spin)
             self.le_spins.append(target_spin)
 
     @check_structures_loaded
