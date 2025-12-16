@@ -1873,7 +1873,7 @@ class LinkDialog(QtWidgets.QDialog):
         grid.addWidget(self.max_distance, 0, 1)
         grid.addWidget(QtWidgets.QLabel("Max. transient dark frames:"), 1, 0)
         self.max_dark_time = QtWidgets.QSpinBox()
-        self.max_dark_time.setRange(0, 1e9)
+        self.max_dark_time.setRange(0, int(1e9))
         self.max_dark_time.setValue(1)
         grid.addWidget(self.max_dark_time, 1, 1)
         vbox.addLayout(grid)
