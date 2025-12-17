@@ -270,11 +270,13 @@ class ParametersDialog(QtWidgets.QDialog):
 
     Attributes
     ----------
+    disp_px_size : QtWidgets.QDoubleSpinBox
+        Spin box for setting the display pixel size in nm. Determines
+        oversampling, see below.
     iterations : QtWidgets.QSpinBox
         Spin box for setting the number of iterations.
-    oversampling : QtWidgets.QDoubleSpinBox
-        Spin box for setting the number of display pixels per camera
-        pixel.
+    oversampling : float
+        Number of display pixels per camera pixel.
     window : QtWidgets.QMainWindow
         Main window instance.
     """
@@ -282,24 +284,43 @@ class ParametersDialog(QtWidgets.QDialog):
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
+        self.oversampling = 10.0  # just some value when starting the module
         self.setWindowTitle("Parameters")
         self.setModal(False)
         grid = QtWidgets.QGridLayout(self)
 
-        grid.addWidget(QtWidgets.QLabel("Oversampling:"), 0, 0)
-        self.oversampling = QtWidgets.QDoubleSpinBox()
-        self.oversampling.setRange(1, 1e7)
-        self.oversampling.setValue(10)
-        self.oversampling.setDecimals(1)
-        self.oversampling.setKeyboardTracking(False)
-        self.oversampling.valueChanged.connect(self.window.view.update_image)
-        grid.addWidget(self.oversampling, 0, 1)
+        disp_px_size_label = QtWidgets.QLabel("Display pixel size (nm):")
+        disp_px_size_label.setToolTip(
+            "Display pixel size in nm used in averaging."
+        )
+        grid.addWidget(disp_px_size_label, 0, 0)
+        self.disp_px_size = QtWidgets.QDoubleSpinBox()
+        self.disp_px_size.setRange(0.01, 1e4)
+        self.disp_px_size.setValue(10)
+        self.disp_px_size.setDecimals(2)
+        self.disp_px_size.setSingleStep(0.01)
+        self.disp_px_size.setKeyboardTracking(False)
+        self.disp_px_size.valueChanged.connect(self.on_disp_px_size_changed)
+        grid.addWidget(self.disp_px_size, 0, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Iterations:"), 1, 0)
+        iter_label = QtWidgets.QLabel("Iterations:")
+        iter_label.setToolTip("Number of averaging iterations.")
+        grid.addWidget(iter_label, 1, 0)
         self.iterations = QtWidgets.QSpinBox()
         self.iterations.setRange(0, int(1e7))
         self.iterations.setValue(10)
         grid.addWidget(self.iterations, 1, 1)
+
+    def on_disp_px_size_changed(self) -> None:
+        """Update oversampling (number of display pixels per camera
+        pixel) when display pixel size is changed."""
+        if not hasattr(self.window.view, "locs"):  # no file loaded yet
+            return
+        camera_px = lib.get_from_metadata(
+            self.window.view.info, "Pixelsize", raise_error=True
+        )
+        self.oversampling = camera_px / self.disp_px_size.value()
+        self.window.view.update_image()
 
 
 class View(QtWidgets.QLabel):
@@ -331,7 +352,7 @@ class View(QtWidgets.QLabel):
     def average(self):
         if not self.running:
             self.running = True
-            oversampling = self.window.parameters_dialog.oversampling.value()
+            oversampling = self.window.parameters_dialog.oversampling
             iterations = self.window.parameters_dialog.iterations.value()
             self.thread = Worker(
                 self.locs, self.r, self.group_index, oversampling, iterations
@@ -417,19 +438,24 @@ class View(QtWidgets.QLabel):
         progress.set_value(0)
         for i in range(n_groups):
             index = self.group_index[i, :].nonzero()[1]
-            self.locs.x[index] -= np.mean(self.locs.x[index])
-            self.locs.y[index] -= np.mean(self.locs.y[index])
+            self.locs.loc[index, "x"] -= np.mean(self.locs.loc[index, "x"])
+            self.locs.loc[index, "y"] -= np.mean(self.locs.loc[index, "y"])
             progress.set_value(i + 1)
-        self.r = 2 * np.sqrt(np.mean(self.locs.x**2 + self.locs.y**2))
+        self.r = 2 * np.sqrt(
+            (self.locs["x"] ** 2 + self.locs["y"] ** 2).mean()
+        )
+        # set oversampling and update image
+        self.window.parameters_dialog.on_disp_px_size_changed()
         self.update_image()
+
         status = lib.StatusDialog("Starting parallel pool...", self.window)
         global pool, x, y
         try:
             pool.close()
         except NameError:
             pass
-        x = sharedctypes.RawArray("f", self.locs.x)
-        y = sharedctypes.RawArray("f", self.locs.y)
+        x = sharedctypes.RawArray("f", self.locs["x"].values)
+        y = sharedctypes.RawArray("f", self.locs["y"].values)
         n_workers = min(
             60, max(1, int(0.75 * multiprocessing.cpu_count()))
         )  # Python crashes when using >64 cores
@@ -455,8 +481,8 @@ class View(QtWidgets.QLabel):
         """
         cx = self.info[0]["Width"] / 2
         cy = self.info[0]["Height"] / 2
-        self.locs.x += cx
-        self.locs.y += cy
+        self.locs["x"] += cx
+        self.locs["y"] += cy
         info = self.info + [
             {"Generated by": f"Picasso v{__version__} Average"}
         ]
@@ -499,7 +525,7 @@ class View(QtWidgets.QLabel):
     def update_image(self, *args) -> None:
         """Update the displayed image based on the changed display
         parameters."""
-        oversampling = self.window.parameters_dialog.oversampling.value()
+        oversampling = self.window.parameters_dialog.oversampling
         t_min = -self.r
         t_max = self.r
         N_avg, image_avg = render.render_hist(

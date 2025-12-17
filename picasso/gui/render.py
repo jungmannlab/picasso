@@ -3117,8 +3117,9 @@ class InfoDialog(QtWidgets.QDialog):
                 text = (
                     "The current FOV is large and will likely lead to a long "
                     "computation time (current FOV leads to an image of size "
-                    f"{int(width/median_lp/2):,} x {int(height/median_lp/2):,}"
-                    " pixels).\n\nPlease consider reducing the FOV size before"
+                    f"{int(width/(median_lp/2)):,} x "
+                    f"{int(height/(median_lp/2)):,} pixels).\n\n"
+                    "Please consider reducing the FOV size before"
                     " calculating the FRC resolution.\n\nDo you want to "
                     "proceed?"
                 )

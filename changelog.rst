@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 14-DEC-2025 CEST
+Last change: 16-DEC-2025 CEST
 
 0.9.3
 -----
@@ -15,7 +15,7 @@ Important updates:
 
 *Bug fixes:*
 ++++++++++++
--
+- Average: fix pandas warnings
 
 0.9.2
 -----
