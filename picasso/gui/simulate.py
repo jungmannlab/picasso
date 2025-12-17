@@ -280,10 +280,15 @@ class Window(QtWidgets.QMainWindow):
         cgrid = QtWidgets.QGridLayout(camera_groupbox)
 
         camerasize = QtWidgets.QLabel("Image size")
+        camerasize.setToolTip("Simulated ROI size in camera pixels.")
         integrationtime = QtWidgets.QLabel("Integration time")
+        integrationtime.setToolTip("Camera exposure time per frame (ms).")
         totaltime = QtWidgets.QLabel("Total acquisition time")
+        totaltime.setToolTip("Resulting total acquisition time (min).")
         frames = QtWidgets.QLabel("Frames")
-        pixelsize = QtWidgets.QLabel("Pixelsize")
+        frames.setToolTip("Number of frames to simulate.")
+        pixelsize = QtWidgets.QLabel("Camera pixel size")
+        pixelsize.setToolTip("Size of camera pixels in nm.")
 
         self.camerasizeEdit = QtWidgets.QSpinBox()
         self.camerasizeEdit.setRange(1, 512)
@@ -341,9 +346,16 @@ class Window(QtWidgets.QMainWindow):
         pgrid = QtWidgets.QGridLayout(paint_groupbox)
 
         kon = QtWidgets.QLabel("k<sub>On</sub>")
+        kon.setToolTip(
+            "Imager-docking strand hybridization rate constant "
+            "(M<sup>−1</sup>s<sup>−1</sup>)."
+        )
         imagerconcentration = QtWidgets.QLabel("Imager concentration")
+        imagerconcentration.setToolTip("Concentration of imager strands (nM).")
         taud = QtWidgets.QLabel("Dark time")
+        taud.setToolTip("Resulting mean dark time (ms).")
         taub = QtWidgets.QLabel("Bright time")
+        taub.setToolTip("Mean bright time (ms).")
 
         self.konEdit = QtWidgets.QDoubleSpinBox()
         self.konEdit.setRange(1, 10000000000)
@@ -390,15 +402,31 @@ class Window(QtWidgets.QMainWindow):
         igrid = QtWidgets.QGridLayout(imager_groupbox)
 
         laserpower = QtWidgets.QLabel("Power density")
+        laserpower.setToolTip("Laser power density at the objective (kW/cm²).")
         if ADVANCEDMODE:
             laserpower = QtWidgets.QLabel("Laserpower")
         psf = QtWidgets.QLabel("PSF")
+        psf.setToolTip(
+            "Point Spread Function (PSF) width (Gaussian \u03c3) in pixels."
+        )
         psf_fwhm = QtWidgets.QLabel("PSF(FWHM)")
+        psf_fwhm.setToolTip(
+            "Full Width at Half Maximum (FWHM) of the PSF in nm."
+        )
         photonrate = QtWidgets.QLabel("Photonrate")
         photonsframe = QtWidgets.QLabel("Photons (frame)")
+        photonsframe.setToolTip(
+            "Resulting mean number of photons per emitter per frame."
+        )
         photonratestd = QtWidgets.QLabel("Photonrate Std")
+        photonratestd.setToolTip(
+            "Resulting standard deviation of photons per emitter per frame."
+        )
         photonstdframe = QtWidgets.QLabel("Photons Std (frame)")
         photonbudget = QtWidgets.QLabel("Photonbudget")
+        photonbudget.setToolTip(
+            "Number of photons a molecule can emit before bleaching."
+        )
         photonslope = QtWidgets.QLabel("Photon detection rate")
         photonslopeStd = QtWidgets.QLabel("Photonrate Std ")
 
@@ -520,6 +548,9 @@ class Window(QtWidgets.QMainWindow):
 
         # Make a spinbox for adjusting the background level
         backgroundlevel = QtWidgets.QLabel("Background level")
+        backgroundlevel.setToolTip(
+            "Amount of background photons per pixel per frame (arb. units)."
+        )
 
         self.backgroundlevelEdit = QtWidgets.QSpinBox()
         self.backgroundlevelEdit.setRange(1, 100)
@@ -543,6 +574,9 @@ class Window(QtWidgets.QMainWindow):
         BgStdoffset = QtWidgets.QLabel("Background Std Offset")
 
         backgroundframe = QtWidgets.QLabel("Background (Frame)")
+        backgroundframe.setToolTip(
+            "Resulting mean number of background photons per frame per pixel."
+        )
         noiseLabel = QtWidgets.QLabel("Noise (Frame)")
 
         self.lasercEdit = QtWidgets.QDoubleSpinBox()
@@ -632,6 +666,9 @@ class Window(QtWidgets.QMainWindow):
 
         # HANDLE DEFINTIIONS
         structureIncorporation = QtWidgets.QLabel("Incorporation")
+        structureIncorporation.setToolTip(
+            "Probability that docking strands are incorporated (%)"
+        )
         self.structureIncorporationEdit = QtWidgets.QDoubleSpinBox()
         self.structureIncorporationEdit.setKeyboardTracking(False)
         self.structureIncorporationEdit.setRange(1, 100)
@@ -650,22 +687,29 @@ class Window(QtWidgets.QMainWindow):
         hgrid.addWidget(importHandlesButton, 1, 0, 1, 3)
 
         # 3D Settings
-        self.mode3DEdit = QtWidgets.QCheckBox()
+        self.mode3DEdit = QtWidgets.QCheckBox("Simulate 3D")
+        self.mode3DEdit.setToolTip("Simulate 3D data?")
         threed_groupbox = QtWidgets.QGroupBox("3D")
         tgrid = QtWidgets.QGridLayout(threed_groupbox)
         tgrid.addWidget(self.mode3DEdit, 0, 0)
-        tgrid.addWidget(QtWidgets.QLabel("3D"), 0, 1)
 
         load3dCalibrationButton = QtWidgets.QPushButton("Load 3D Calibration")
+        load3dCalibrationButton.setToolTip(
+            "Load 3D calibration coefficients from a .yaml file."
+        )
         load3dCalibrationButton.clicked.connect(self.load3dCalibration)
-        tgrid.addWidget(load3dCalibrationButton, 0, 2)
+        tgrid.addWidget(load3dCalibrationButton, 0, 1)
 
         # STRUCTURE DEFINITIONS
         structure_groupbox = QtWidgets.QGroupBox("Structure")
         sgrid = QtWidgets.QGridLayout(structure_groupbox)
 
         structureno = QtWidgets.QLabel("Number of structures")
+        structureno.setToolTip("Number of structures to simulate in the ROI.")
         structureframe = QtWidgets.QLabel("Frame")
+        structureframe.setToolTip(
+            "Frame size to leave around the edges of the ROI (pixels)."
+        )
 
         self.structure1 = QtWidgets.QLabel("Columns")
         self.structure2 = QtWidgets.QLabel("Rows")
@@ -673,11 +717,22 @@ class Window(QtWidgets.QMainWindow):
         self.structure3Label = QtWidgets.QLabel("nm")
 
         structurexx = QtWidgets.QLabel("Stucture X")
+        structurexx.setToolTip(
+            "X positions of docking strands in the structure in nm."
+        )
         structureyy = QtWidgets.QLabel("Structure Y")
+        structureyy.setToolTip(
+            "Y positions of docking strands in the structure in nm."
+        )
         structure3d = QtWidgets.QLabel("Structure 3D")
+        structure3d.setToolTip(
+            "Z positions of docking strands in the structure in nm."
+        )
         structureex = QtWidgets.QLabel("Exchange labels")
+        structureex.setToolTip("Exchange round IDs for docking strands.")
 
         structurecomboLabel = QtWidgets.QLabel("Type")
+        structurecomboLabel.setToolTip("Type of structure to simulate.")
 
         self.structurenoEdit = QtWidgets.QSpinBox()
         self.structurenoEdit.setRange(1, 1000)
@@ -720,11 +775,16 @@ class Window(QtWidgets.QMainWindow):
         self.structurenoEdit.valueChanged.connect(self.generatePositions)
         self.structureframeEdit.valueChanged.connect(self.generatePositions)
 
-        self.structurerandomOrientationEdit = QtWidgets.QCheckBox()
-        self.structurerandomEdit = QtWidgets.QCheckBox()
-
-        structurerandom = QtWidgets.QLabel("Random arrangement")
-        structurerandomOrientation = QtWidgets.QLabel("Random orientation")
+        self.structurerandomOrientationEdit = QtWidgets.QCheckBox(
+            "Random orientation"
+        )
+        self.structurerandomOrientationEdit.setToolTip(
+            "Randomly rotate the simulated structures?"
+        )
+        self.structurerandomEdit = QtWidgets.QCheckBox("Random arrangement")
+        self.structurerandomEdit.setToolTip(
+            "Randomly arrange the structures in the simulated ROI?"
+        )
 
         self.structurerandomEdit.stateChanged.connect(self.generatePositions)
         self.structurerandomOrientationEdit.stateChanged.connect(
@@ -770,20 +830,26 @@ class Window(QtWidgets.QMainWindow):
         sgrid.addWidget(self.structureexEdit, 9 + sindex, 1)
 
         sindex += -1
-        sgrid.addWidget(structurerandom, 11 + sindex, 1)
-        sgrid.addWidget(self.structurerandomEdit, 11 + sindex, 0)
-        sgrid.addWidget(structurerandomOrientation, 12 + sindex, 1)
-        sgrid.addWidget(self.structurerandomOrientationEdit, 12 + sindex, 0)
+        sgrid.addWidget(self.structurerandomEdit, 11 + sindex, 0, 1, 2)
+        sgrid.addWidget(
+            self.structurerandomOrientationEdit, 12 + sindex, 0, 1, 2
+        )
 
         sindex += -2
 
         importDesignButton = QtWidgets.QPushButton(
             "Import structure from Picasso: Design"
         )
+        importDesignButton.setToolTip(
+            "Load the .yaml file with the Picasso: Design structure."
+        )
         importDesignButton.clicked.connect(self.importDesign)
         sgrid.addWidget(importDesignButton, 15 + sindex, 0, 1, 3)
 
         generateButton = QtWidgets.QPushButton("Generate positions")
+        generateButton.setToolTip(
+            "Generate the structures and their orientations again."
+        )
         generateButton.clicked.connect(self.generatePositions)
         sgrid.addWidget(generateButton, 17 + sindex, 0, 1, 3)
         cgrid.addItem(
@@ -844,7 +910,9 @@ class Window(QtWidgets.QMainWindow):
         self.changePaint()
 
         pos_groupbox = QtWidgets.QGroupBox("Positions (px)")
+        pos_groupbox.setToolTip("Positions of docking strands across the ROI.")
         str_groupbox = QtWidgets.QGroupBox("Structure (nm)")
+        str_groupbox.setToolTip("Example structure preview.")
 
         posgrid = QtWidgets.QGridLayout(pos_groupbox)
         strgrid = QtWidgets.QGridLayout(str_groupbox)
