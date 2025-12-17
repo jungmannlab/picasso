@@ -670,11 +670,9 @@ class ParametersDialog(QtWidgets.QDialog):
         identification_grid = QtWidgets.QGridLayout(identification_groupbox)
 
         # Box Size
-        identification_label = QtWidgets.QLabel("Box side length:")
-        identification_label.setToolTip(
-            "Box size in pixels for identification"
-        )
-        identification_grid.addWidget(identification_label, 0, 0)
+        boxsize_label = QtWidgets.QLabel("Box side length:")
+        boxsize_label.setToolTip("Box size in pixels for identification.")
+        identification_grid.addWidget(boxsize_label, 0, 0)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
         self.box_spinbox.setValue(DEFAULT_PARAMETERS["Box Size"])
@@ -682,11 +680,11 @@ class ParametersDialog(QtWidgets.QDialog):
         identification_grid.addWidget(self.box_spinbox, 0, 1)
 
         # Min. Net Gradient
-        identification_grid.addWidget(
-            QtWidgets.QLabel("Min.  Net Gradient:"),
-            1,
-            0,
+        mng_label = QtWidgets.QLabel("Min.  Net Gradient:")
+        mng_label.setToolTip(
+            "Threshold (related to brightness) for spot identification."
         )
+        identification_grid.addWidget(mng_label, 1, 0)
         self.mng_spinbox = QtWidgets.QSpinBox()
         self.mng_spinbox.setRange(0, int(1e9))
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
@@ -696,6 +694,9 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Slider
         self.mng_slider = QtWidgets.QSlider()
+        self.mng_slider.setToolTip(
+            "Adjust the minimum net gradient for spot identification."
+        )
         self.mng_slider.setOrientation(QtCore.Qt.Horizontal)
         self.mng_slider.setRange(0, 10000)
         self.mng_slider.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
@@ -709,6 +710,9 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Min SpinBox
         self.mng_min_spinbox = QtWidgets.QSpinBox()
+        self.mng_min_spinbox.setToolTip(
+            "Minimum value for the minimum net gradient slider."
+        )
         self.mng_min_spinbox.setRange(0, 999999)
         self.mng_min_spinbox.setKeyboardTracking(False)
         self.mng_min_spinbox.setValue(0)
@@ -719,6 +723,9 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Max SpinBox
         self.mng_max_spinbox = QtWidgets.QSpinBox()
+        self.mng_max_spinbox.setToolTip(
+            "Maximum value for the minimum net gradient slider."
+        )
         self.mng_max_spinbox.setKeyboardTracking(False)
         self.mng_max_spinbox.setRange(0, 999999)
         self.mng_max_spinbox.setValue(10000)
@@ -729,6 +736,11 @@ class ParametersDialog(QtWidgets.QDialog):
         label = QtWidgets.QLabel(
             "ROI (y<sub>min</sub>,x<sub>min</sub>,"
             "y<sub>max</sub>,x<sub>max</sub>):"
+        )
+        label.setToolTip(
+            "Specify the ROI to be analyzed;\n"
+            "also available by dragging a rectangle in the preview.\n"
+            "Note that no spaces between the numbers and commas are allowed."
         )
         identification_grid.addWidget(
             label,
@@ -744,6 +756,9 @@ class ParametersDialog(QtWidgets.QDialog):
         identification_grid.addWidget(self.roi_edit, 5, 1)
 
         self.preview_checkbox = QtWidgets.QCheckBox("Preview")
+        self.preview_checkbox.setToolTip(
+            "Show identified spots in the current frame?"
+        )
         self.preview_checkbox.setTristate(False)
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
@@ -833,14 +848,20 @@ class ParametersDialog(QtWidgets.QDialog):
         photon_grid = QtWidgets.QGridLayout(photon_groupbox)
 
         # EM Gain
-        photon_grid.addWidget(QtWidgets.QLabel("EM Gain:"), 0, 0)
+        em_label = QtWidgets.QLabel("EM gain:")
+        em_label.setToolTip(
+            "Electron multiplying gain of a EMCCD camera (=1 for sCMOS)."
+        )
+        photon_grid.addWidget(em_label, 0, 0)
         self.gain = QtWidgets.QSpinBox()
         self.gain.setRange(1, int(1e6))
         self.gain.setValue(1)
         photon_grid.addWidget(self.gain, 0, 1)
 
         # Baseline
-        photon_grid.addWidget(QtWidgets.QLabel("Baseline:"), 1, 0)
+        baseline_label = QtWidgets.QLabel("Baseline:")
+        baseline_label.setToolTip("Mean pixel value in the absence of light.")
+        photon_grid.addWidget(baseline_label, 1, 0)
         self.baseline = QtWidgets.QDoubleSpinBox()
         self.baseline.setRange(0, 1e6)
         self.baseline.setValue(100.0)
@@ -849,7 +870,11 @@ class ParametersDialog(QtWidgets.QDialog):
         photon_grid.addWidget(self.baseline, 1, 1)
 
         # Sensitivity
-        photon_grid.addWidget(QtWidgets.QLabel("Sensitivity:"), 2, 0)
+        sensitivity_label = QtWidgets.QLabel("Sensitivity:")
+        sensitivity_label.setToolTip(
+            "Camera sensitivity in counts per photon (conversion factor)."
+        )
+        photon_grid.addWidget(sensitivity_label, 2, 0)
         self.sensitivity = QtWidgets.QDoubleSpinBox()
         self.sensitivity.setRange(0, 1e6)
         self.sensitivity.setValue(1.0)
@@ -858,7 +883,10 @@ class ParametersDialog(QtWidgets.QDialog):
         photon_grid.addWidget(self.sensitivity, 2, 1)
 
         # QE
-        qe_label = QtWidgets.QLabel("Quantum Efficiency:")
+        qe_label = QtWidgets.QLabel("Quantum efficiency:")
+        qe_label.setToolTip(
+            "To be deprecated in v1.0; not used in the analysis."
+        )
         photon_grid.addWidget(qe_label, 3, 0)
         self.qe = QtWidgets.QDoubleSpinBox()
         self.qe.setRange(0, 1)
@@ -868,7 +896,11 @@ class ParametersDialog(QtWidgets.QDialog):
         photon_grid.addWidget(self.qe, 3, 1)
 
         # Camera pixel size
-        photon_grid.addWidget(QtWidgets.QLabel("Pixelsize (nm):"), 4, 0)
+        px_label = QtWidgets.QLabel("Pixel size (nm):")
+        px_label.setToolTip(
+            "Effective camera pixel size in nm (after magnification)."
+        )
+        photon_grid.addWidget(px_label, 4, 0)
         self.pixelsize = QtWidgets.QSpinBox()
         self.pixelsize.setRange(0, 10000)
         self.pixelsize.setValue(130)
@@ -881,7 +913,9 @@ class ParametersDialog(QtWidgets.QDialog):
         vbox.addWidget(fit_groupbox)
         fit_grid = QtWidgets.QGridLayout(fit_groupbox)
 
-        fit_grid.addWidget(QtWidgets.QLabel("Method:"), 1, 0)
+        method_label = QtWidgets.QLabel("Method:")
+        method_label.setToolTip("Fitting method to use for localization.")
+        fit_grid.addWidget(method_label, 1, 0)
         self.fit_method = QtWidgets.QComboBox()
         self.fit_method.addItems(
             ["LQ, Gaussian", "MLE, integrated Gaussian", "Average of ROI"]
@@ -897,13 +931,17 @@ class ParametersDialog(QtWidgets.QDialog):
         mle_widget = QtWidgets.QWidget()
 
         mle_grid = QtWidgets.QGridLayout(mle_widget)
-        mle_grid.addWidget(QtWidgets.QLabel("Convergence criterion:"), 0, 0)
+        cc_label = QtWidgets.QLabel("Convergence criterion:")
+        cc_label.setToolTip("Tolerance for testing if fitting has converged.")
+        mle_grid.addWidget(cc_label, 0, 0)
         self.convergence_criterion = QtWidgets.QDoubleSpinBox()
         self.convergence_criterion.setRange(0, 1e6)
         self.convergence_criterion.setDecimals(6)
         self.convergence_criterion.setValue(0.001)
         mle_grid.addWidget(self.convergence_criterion, 0, 1)
-        mle_grid.addWidget(QtWidgets.QLabel("Max. iterations:"), 1, 0)
+        mi_label = QtWidgets.QLabel("Max. iterations:")
+        mi_label.setToolTip("Maximum number of iterations per spot.")
+        mle_grid.addWidget(mi_label, 1, 0)
         self.max_it = QtWidgets.QSpinBox()
         self.max_it.setRange(1, int(1e6))
         self.max_it.setValue(1000)
@@ -946,6 +984,12 @@ class ParametersDialog(QtWidgets.QDialog):
             2,
         )
         load_z_calib = QtWidgets.QPushButton("Load calibration")
+        load_z_calib.setToolTip(
+            "Load a 3D calibration file (.yaml).\n"
+            "Please visit the documentation:\n"
+            "https://picassosr.readthedocs.io/en/latest/\n"
+            "for instructions on how to obtain it."
+        )
         load_z_calib.setAutoDefault(False)
         load_z_calib.clicked.connect(self.load_z_calib)
         z_grid.addWidget(load_z_calib, 1, 1)
@@ -958,7 +1002,12 @@ class ParametersDialog(QtWidgets.QDialog):
             QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed
         )
         z_grid.addWidget(self.z_calib_label, 1, 0)
-        z_grid.addWidget(QtWidgets.QLabel("Magnification factor:"), 2, 0)
+        magnification_label = QtWidgets.QLabel("Magnification factor:")
+        magnification_label.setToolTip(
+            "Factor used to correct for z-position abberation due to\n"
+            "refractive index mismatch, see Huang B, et al. Science. 2008."
+        )
+        z_grid.addWidget(magnification_label, 2, 0)
         self.magnification_factor = QtWidgets.QDoubleSpinBox()
         self.magnification_factor.setRange(0, 1e6)
         self.magnification_factor.setDecimals(4)
@@ -978,6 +1027,7 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Sample quality
         quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
+        quality_groupbox.setToolTip("Estimate drift, bright time and NeNA.")
         vbox.addWidget(quality_groupbox)
         quality_grid = QtWidgets.QGridLayout(quality_groupbox)
         self.quality_check = QtWidgets.QPushButton(
@@ -988,10 +1038,10 @@ class ParametersDialog(QtWidgets.QDialog):
         self.quality_check.clicked.connect(self.check_quality)
 
         self.quality_grid_labels = [
-            QtWidgets.QLabel("Locs/Frame"),
+            QtWidgets.QLabel("Locs/frame"),
             QtWidgets.QLabel("NeNA"),
-            QtWidgets.QLabel("Mean Drift"),
-            QtWidgets.QLabel("Bright Time (Frames)"),
+            QtWidgets.QLabel("Mean drift"),
+            QtWidgets.QLabel("Bright time (frames)"),
         ]
         for idx, _ in enumerate(self.quality_grid_labels):
             quality_grid.addWidget(_, idx + 1, 1)
@@ -1272,6 +1322,7 @@ class ContrastDialog(QtWidgets.QDialog):
         self.setModal(False)
         grid = QtWidgets.QGridLayout(self)
         black_label = QtWidgets.QLabel("Black:")
+        black_label.setToolTip("Min. intensity rendered")
         grid.addWidget(black_label, 0, 0)
         self.black_spinbox = QtWidgets.QSpinBox()
         self.black_spinbox.setKeyboardTracking(False)
@@ -1279,6 +1330,7 @@ class ContrastDialog(QtWidgets.QDialog):
         self.black_spinbox.valueChanged.connect(self.on_contrast_changed)
         grid.addWidget(self.black_spinbox, 0, 1)
         white_label = QtWidgets.QLabel("White:")
+        white_label.setToolTip("Max. intensity rendered")
         grid.addWidget(white_label, 1, 0)
         self.white_spinbox = QtWidgets.QSpinBox()
         self.white_spinbox.setKeyboardTracking(False)
@@ -1286,6 +1338,9 @@ class ContrastDialog(QtWidgets.QDialog):
         self.white_spinbox.valueChanged.connect(self.on_contrast_changed)
         grid.addWidget(self.white_spinbox, 1, 1)
         self.auto_checkbox = QtWidgets.QCheckBox("Auto")
+        self.auto_checkbox.setToolTip(
+            "Set the range automatically for each frame?"
+        )
         self.auto_checkbox.setTristate(False)
         self.auto_checkbox.setChecked(True)
         self.auto_checkbox.stateChanged.connect(self.on_auto_changed)
