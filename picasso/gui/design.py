@@ -1745,13 +1745,21 @@ class MainWindow(QtWidgets.QWidget):
 
         # define buttons
         loadbtn = QtWidgets.QPushButton("Load")
+        loadbtn.setToolTip("Load a design from a .yaml file.")
         savebtn = QtWidgets.QPushButton("Save")
+        savebtn.setToolTip("Save the design to a .yaml file.")
         clearbtn = QtWidgets.QPushButton("Clear")
+        clearbtn.setToolTip("Clear the current design.")
         sshotbtn = QtWidgets.QPushButton("Screenshot")
+        sshotbtn.setToolTip("Take a screenshot of the current design.")
         seqbtn = QtWidgets.QPushButton("Extensions")
+        seqbtn.setToolTip("Set the docking strand extensions per color.")
         platebtn = QtWidgets.QPushButton("Get plates")
+        platebtn.setToolTip("Generate .csv files for ordering the DNA.")
         pipettbtn = QtWidgets.QPushButton("Pipetting scheme")
+        pipettbtn.setToolTip("Generate a pipetting scheme (.pdf) for mixing.")
         foldbtn = QtWidgets.QPushButton("Folding scheme")
+        foldbtn.setToolTip("Calculate concentrations and volumes for folding.")
 
         loadbtn.clicked.connect(self.window.openDialog)
         savebtn.clicked.connect(self.window.saveDialog)
