@@ -13,6 +13,7 @@ Important updates:
 +++++++++++++++++++++
 - General improvements in the GUI widget names displayed (for example, change "Scalebar" to "Scale bar")
 - Render: many input variables were switched from cam. pixels to nm in the GUI, for example, min. blur in the display settings dialog
+- Clustering algorithms copy the input localizations to avoid modifying the input DataFrame (for example, when using Picasso as a package)
 
 *Bug fixes:*
 ++++++++++++
