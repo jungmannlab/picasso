@@ -1,21 +1,22 @@
 Changelog
 =========
 
-Last change: 17-DEC-2025 CEST
+Last change: 18-DEC-2025 CEST
 
 0.9.3
 -----
 Important updates:
 ^^^^^^^^^^^^^^^^^^
-- All GUI modules show the explanations of parameters when hovering over them with the mouse cursor
+- All GUI modules show the explanations of parameters when hovering over them with the mouse cursor (tool tips)
 
 *Small improvements:*
 +++++++++++++++++++++
-- 
+- General improvements in the GUI widget names displayed (for example, change "Scalebar" to "Scale bar")
+- Render: many input variables were switched from cam. pixels to nm in the GUI, for example, min. blur in the display settings dialog
 
 *Bug fixes:*
 ++++++++++++
-- Average: fix pandas warnings
+- Average: fix ``pandas`` warnings
 
 0.9.2
 -----
