@@ -8,7 +8,7 @@ Last change: 19-DEC-2025 CEST
 Important updates:
 ^^^^^^^^^^^^^^^^^^
 - All GUI modules show the explanations of parameters when hovering over them with the mouse cursor (tool tips)
-- FRC: does not blur rendered localizations
+- FRC: does not blur rendered localizations, enabled saving rendered images
 
 *Small improvements:*
 +++++++++++++++++++++

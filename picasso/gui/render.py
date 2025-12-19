@@ -25,6 +25,7 @@ from math import ceil
 from collections import Counter
 from functools import partial
 from typing import Callable, Literal
+from PIL import Image
 
 import yaml
 import matplotlib
@@ -3177,16 +3178,21 @@ class InfoDialog(QtWidgets.QDialog):
         self.frc_grid.addWidget(frc_label, 0, 0)
         self.frc_resolution = QtWidgets.QLabel("-")
         self.frc_grid.addWidget(self.frc_resolution, 0, 1)
+        self.save_images_check = QtWidgets.QCheckBox("Save rendered images")
+        self.save_images_check.setToolTip(
+            "Save 2 rendered images as .tif files?"
+        )
+        self.frc_grid.addWidget(self.save_images_check, 1, 0, 1, 2)
         calculate_frc_button = QtWidgets.QPushButton("Calculate FRC")
         calculate_frc_button.setToolTip("Click to calculate FRC resolution.")
         calculate_frc_button.clicked.connect(self.calculate_frc_resolution)
-        self.frc_grid.addWidget(calculate_frc_button, 1, 0)
+        self.frc_grid.addWidget(calculate_frc_button, 2, 0)
         show_frc_button = QtWidgets.QPushButton("Show FRC plot")
         show_frc_button.setToolTip(
             "Show FRC plot (only after it was calculated)."
         )
         show_frc_button.clicked.connect(self.show_frc_plot)
-        self.frc_grid.addWidget(show_frc_button, 1, 1)
+        self.frc_grid.addWidget(show_frc_button, 2, 1)
 
         # FOV
         fov_groupbox = QtWidgets.QGroupBox("Field of view")
@@ -3350,7 +3356,7 @@ class InfoDialog(QtWidgets.QDialog):
             median_lp = self.window.view.median_lp
             max_size = 2000 * (median_lp / 2)
             height, width = self.window.view.viewport_size()
-            if height > max_size or width > max_size:
+            if height > max_size and width > max_size:
                 text = (
                     "The current FOV is large and will likely lead to a long "
                     "computation time (current FOV leads to an image of size "
@@ -3369,10 +3375,31 @@ class InfoDialog(QtWidgets.QDialog):
                 if not reply == QtWidgets.QMessageBox.Yes:
                     return
 
+            # get the name prefix for saving images
+            if self.save_images_check.isChecked():
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    self,
+                    "Save images",
+                    self.window.view.locs_paths[channel].replace(
+                        ".hdf5", "_frc_im.tif"
+                    ),
+                    filter="*.tif",
+                )
+                if not path:
+                    return
+            else:
+                path = None
+
             # calculate frc
             self.frc_result = postprocess.frc(
                 locs.copy(), info, self.window.view.viewport
             )
+            if path:  # save images
+                base, ext = os.path.splitext(path)
+                image1 = Image.fromarray(self.frc_result["images"][0])
+                image1.save(f"{base}_1{ext}")
+                image2 = Image.fromarray(self.frc_result["images"][1])
+                image2.save(f"{base}_2{ext}")
             res_nm = self.frc_result["resolution"]
             self.frc_resolution.setText(f"{res_nm:.2f} nm")
 
