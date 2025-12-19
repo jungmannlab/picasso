@@ -4037,6 +4037,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax = self.hist_window.figure.add_subplot(111)
         ax.set_title("Density of blurred image values")
         vals = self.H_blur.ravel()
+        vals = vals[vals > 0]  # exclude zeroes that skew the image
         bins = lib.calculate_optimal_bins(vals, max_n_bins=1000)
         hist, bins, _ = ax.hist(vals, bins=bins, label="Data", density=True)
         ax.axvline(

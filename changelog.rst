@@ -20,6 +20,7 @@ Important updates:
 *Bug fixes:*
 ++++++++++++
 - Average: fix ``pandas`` warnings
+- Render: show histogram in mask dialog ignores zero values
 
 0.9.2
 -----
