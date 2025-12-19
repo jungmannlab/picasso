@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 18-DEC-2025 CEST
+Last change: 19-DEC-2025 CEST
 
 0.9.3
 -----
@@ -13,6 +13,7 @@ Important updates:
 +++++++++++++++++++++
 - General improvements in the GUI widget names displayed (for example, change "Scalebar" to "Scale bar")
 - Render: many input variables were switched from cam. pixels to nm in the GUI, for example, min. blur in the display settings dialog
+- Render: slicer dialog automatically slices/unslices localizations when opening/closing the dialog
 - Clustering algorithms copy the input localizations to avoid modifying the input DataFrame (for example, when using Picasso as a package)
 
 *Bug fixes:*
@@ -341,4 +342,4 @@ Important updates:
 
 0.4.0
 -----
--  Added new module "Picasso Server"
+- Added new module "Picasso Server"

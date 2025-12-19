@@ -5262,6 +5262,7 @@ class SlicerDialog(QtWidgets.QDialog):
         """Called when the dialog is open, calculate the histograms and
         show the dialog."""
         self.calculate_histogram()
+        self.slicer_radio_button.setChecked(True)
         self.show()
 
     def calculate_histogram(self) -> None:
@@ -5427,6 +5428,15 @@ class SlicerDialog(QtWidgets.QDialog):
                         self.window.view.qimage.save(out_path)
                     progress.set_value(i)
                 progress.close()
+
+    def closeEvent(self, event: QtCore.QCloseEvent):
+        """Unslice data."""
+        self.slicer_radio_button.setChecked(False)
+        event.accept()
+
+    def reject(self, *args, **kwargs):
+        """Unslice data if the dialog is closed with the escape key."""
+        self.close()
 
 
 class View(QtWidgets.QLabel):
