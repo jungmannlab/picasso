@@ -1071,8 +1071,8 @@ def _frc(
     # render images
     binsize = lp / 2
     oversampling = 1 / binsize
-    im1 = render.render(locs1, None, oversampling, viewport, "gaussian")[1]
-    im2 = render.render(locs2, None, oversampling, viewport, "gaussian")[1]
+    im1 = render.render(locs1, None, oversampling, viewport, None)[1]
+    im2 = render.render(locs2, None, oversampling, viewport, None)[1]
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:
