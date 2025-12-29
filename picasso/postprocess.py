@@ -981,8 +981,9 @@ def frc(
     -------
     frc_result : dict
         Dictionary with keys "frc_curve", "frc_curve_smooth",
-        "frequencies" (for spatial frequencies probed (nm^-1)) and
-        "resolution" (estimated resolution in nm).
+        "frequencies" (for spatial frequencies probed (nm^-1)),
+        "resolution" (estimated resolution in nm) and "images"
+        (2 grayscale images rendered and masked).
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     lp = nena(locs, info)[1]
@@ -1013,7 +1014,7 @@ def frc(
     locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
     locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
     # run FRC
-    frc_curve, frc_curve_smooth, frequencies, resolution = _frc(
+    frc_curve, frc_curve_smooth, frequencies, resolution, images = _frc(
         locs1, locs2, pixelsize, lp, viewport
     )
     # smooth the FRC curve and summarize findings
@@ -1022,6 +1023,7 @@ def frc(
         "frc_curve_smooth": frc_curve_smooth,
         "frequencies": frequencies,
         "resolution": resolution,
+        "images": images,
     }
     return frc_result
 
@@ -1032,7 +1034,13 @@ def _frc(
     pixelsize: float,
     lp: float,
     viewport: tuple[tuple[float, float], tuple[float, float]],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, float | None]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    float | None,
+    tuple[np.ndarray, np.ndarray],
+]:
     """Calculate the Fourier Ring Correlation (FRC) resolution once.
 
     Generates images from the two sets of localizations and calculates
@@ -1067,12 +1075,14 @@ def _frc(
     resolution : float or None
         Estimated resolution in nm, given the 1/7 threshold. None if
         resolution could not be determined.
+    images : tuple of 2 np.ndarrays
+        2 grayscale images used for calculating FRC. Already masked.
     """
     # render images
     binsize = lp / 2
     oversampling = 1 / binsize
-    im1 = render.render(locs1, None, oversampling, viewport, "gaussian")[1]
-    im2 = render.render(locs2, None, oversampling, viewport, "gaussian")[1]
+    im1 = render.render(locs1, None, oversampling, viewport, None)[1]
+    im2 = render.render(locs2, None, oversampling, viewport, None)[1]
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:
@@ -1121,7 +1131,7 @@ def _frc(
             f_res = f1 + (threshold - r1) * (f2 - f1) / (r2 - r1)
             resolution = 1 / f_res  # in nm
             break
-    return frc_curve, frc_curve_smooth, frequencies, resolution
+    return frc_curve, frc_curve_smooth, frequencies, resolution, (im1, im2)
 
 
 def pair_correlation(

@@ -52,7 +52,6 @@ def _hdf2csv(path: str) -> None:
     """Convert HDF5 localization files to CSV format (unchanged
     columns)."""
     from glob import glob
-    from tqdm import tqdm as _tqdm
     from os.path import isdir
 
     if isdir(path):
@@ -63,7 +62,7 @@ def _hdf2csv(path: str) -> None:
         import os.path
         from .io import load_locs
 
-        for path in _tqdm(paths, desc="Converting to CSV"):
+        for path in paths:
             base, ext = os.path.splitext(path)
             if ext == ".hdf5":
                 print(f"Converting {path}")
@@ -77,7 +76,6 @@ def _hdf2csv(path: str) -> None:
 def _hdf2ts(path: str) -> None:
     """Convert HDF5 localization files to ThunderSTORM CSV format."""
     from glob import glob
-    from tqdm import tqdm as _tqdm
     from os.path import isdir
 
     if isdir(path):
@@ -88,7 +86,7 @@ def _hdf2ts(path: str) -> None:
         import os.path
         from .io import load_locs, export_thunderstorm
 
-        for path in _tqdm(paths, desc="Converting to ThunderSTORM"):
+        for path in paths:
             base, ext = os.path.splitext(path)
             if ext == ".hdf5":
                 print(f"Converting {path}")
@@ -101,7 +99,6 @@ def _hdf2ts(path: str) -> None:
 def _hdf2imagej(path: str) -> None:
     """Convert HDF5 localization files to ImageJ txt format."""
     from glob import glob
-    from tqdm import tqdm as _tqdm
     from os.path import isdir
 
     if isdir(path):
@@ -112,7 +109,7 @@ def _hdf2imagej(path: str) -> None:
         import os.path
         from .io import load_locs, export_txt_imagej
 
-        for path in _tqdm(paths, desc="Converting to ImageJ"):
+        for path in paths:
             base, ext = os.path.splitext(path)
             if ext == ".hdf5":
                 print(f"Converting {path}")
@@ -125,7 +122,6 @@ def _hdf2imagej(path: str) -> None:
 def _hdf2nis(path: str) -> None:
     """Convert HDF5 localization files to NIS txt format."""
     from glob import glob
-    from tqdm import tqdm as _tqdm
     from os.path import isdir
 
     if isdir(path):
@@ -136,7 +132,7 @@ def _hdf2nis(path: str) -> None:
         import os.path
         from .io import load_locs, export_txt_nis
 
-        for path in _tqdm(paths, desc="Converting to ImageJ"):
+        for path in paths:
             base, ext = os.path.splitext(path)
             if ext == ".hdf5":
                 print(f"Converting {path}")
@@ -149,7 +145,6 @@ def _hdf2nis(path: str) -> None:
 def _hdf2chimera(path: str) -> None:
     """Convert HDF5 localization files to NIS txt format."""
     from glob import glob
-    from tqdm import tqdm as _tqdm
     from os.path import isdir
 
     if isdir(path):
@@ -160,7 +155,7 @@ def _hdf2chimera(path: str) -> None:
         import os.path
         from .io import load_locs, export_xyz_chimera
 
-        for path in _tqdm(paths, desc="Converting to Chimera"):
+        for path in paths:
             base, ext = os.path.splitext(path)
             if ext == ".hdf5":
                 print(f"Converting {path}")
@@ -170,10 +165,9 @@ def _hdf2chimera(path: str) -> None:
     print("Complete.")
 
 
-def _hdf2visp(path: str, pixel_size: float) -> None:
+def _hdf2visp(path: str) -> None:
     """Convert HDF5 localization files to VISP format."""
     from glob import glob
-    from tqdm import tqdm as _tqdm
     from os.path import isdir
 
     if isdir(path):
@@ -184,7 +178,7 @@ def _hdf2visp(path: str, pixel_size: float) -> None:
         import os.path
         from .io import load_locs, export_3d_visp
 
-        for path in _tqdm(paths, desc="Converting to VISP"):
+        for path in paths:
             base, ext = os.path.splitext(path)
             if ext == ".hdf5":
                 print(f"Converting {path}")
@@ -2555,7 +2549,11 @@ def main():
     )
     csv2hdf_parser.add_argument("files")
     csv2hdf_parser.add_argument(
-        "-p", "--pixelsize", help="camera pixel size in nm", type=float
+        "-p",
+        "--pixelsize",
+        help="camera pixel size in nm",
+        type=float,
+        required=True,
     )
 
     hdf2csv_parser = subparsers.add_parser(

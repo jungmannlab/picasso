@@ -52,7 +52,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         Defines at which number of localizations per super-resolution
         pixel the maximum color of the colormap should be applied.
     min_blur_width : QDoubleSpinBox
-        Contains the minimum blur for each localization (camera pixels).
+        Contains the minimum blur for each localization (nm).
     minimum : QDoubleSpinBox
         Defines at which number of localizations per super-resolution
         pixel the minimum color of the colormap should be applied.
@@ -80,9 +80,9 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         general_groupbox = QtWidgets.QGroupBox("General")
         vbox.addWidget(general_groupbox)
         general_grid = QtWidgets.QGridLayout(general_groupbox)
-        general_grid.addWidget(
-            QtWidgets.QLabel("Display pixel size [nm]:"), 1, 0
-        )
+        disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
+        disp_px_label.setToolTip("Size of the pixels in the rendered image.")
+        general_grid.addWidget(disp_px_label, 1, 0)
         self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.00001, 100000)
@@ -101,7 +101,11 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         contrast_groupbox = QtWidgets.QGroupBox("Contrast")
         vbox.addWidget(contrast_groupbox)
         contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
-        minimum_label = QtWidgets.QLabel("Min. Density:")
+        minimum_label = QtWidgets.QLabel("Min. density:")
+        minimum_label.setToolTip(
+            "Minimum density (localizations per super-resolution pixel)"
+            " rendered."
+        )
         contrast_grid.addWidget(minimum_label, 0, 0)
         self.minimum = QtWidgets.QDoubleSpinBox()
         self.minimum.setRange(0, 999999)
@@ -111,7 +115,11 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.minimum.setKeyboardTracking(False)
         self.minimum.valueChanged.connect(self.render_scene)
         contrast_grid.addWidget(self.minimum, 0, 1)
-        maximum_label = QtWidgets.QLabel("Max. Density:")
+        maximum_label = QtWidgets.QLabel("Max. density:")
+        maximum_label.setToolTip(
+            "Maximum density (localizations per super-resolution pixel)"
+            " rendered."
+        )
         contrast_grid.addWidget(maximum_label, 1, 0)
         self.maximum = QtWidgets.QDoubleSpinBox()
         self.maximum.setRange(0, 999999)
@@ -121,7 +129,9 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.render_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
-        contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
+        c_label = QtWidgets.QLabel("Colormap:")
+        c_label.setToolTip("Colormap used to render localizations.")
+        contrast_grid.addWidget(c_label, 2, 0)
         self.colormap = QtWidgets.QComboBox()
         self.colormap.addItems(plt.colormaps())
         contrast_grid.addWidget(self.colormap, 2, 1)
@@ -132,19 +142,38 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         blur_grid = QtWidgets.QGridLayout(blur_groupbox)
         self.blur_buttongroup = QtWidgets.QButtonGroup()
         points_button = QtWidgets.QRadioButton("None")
+        points_button.setToolTip(
+            "No blur applied; each localization is rendered as a point."
+        )
         self.blur_buttongroup.addButton(points_button)
-        smooth_button = QtWidgets.QRadioButton("One-Pixel-Blur")
+        smooth_button = QtWidgets.QRadioButton("One-pixel blur")
+        smooth_button.setToolTip(
+            "Each localization is Gaussian blurred with a \u03c3 of one "
+            "rendered pixel."
+        )
         self.blur_buttongroup.addButton(smooth_button)
         convolve_button = QtWidgets.QRadioButton(
-            "Global Localization Precision"
+            "Global localization precision"
+        )
+        convolve_button.setToolTip(
+            "Each localization is Gaussian blurred with a \u03c3 equal to\n"
+            "the median localization precision of the dataset."
         )
         self.blur_buttongroup.addButton(convolve_button)
         gaussian_button = QtWidgets.QRadioButton(
-            "Individual Localization Precision"
+            "Individual localization precision"
+        )
+        gaussian_button.setToolTip(
+            "Each localization is Gaussian blurred with a \u03c3 equal to\n"
+            "its individual localization precision."
         )
         self.blur_buttongroup.addButton(gaussian_button)
         gaussian_iso_button = QtWidgets.QRadioButton(
-            "Individual Localization Precision, iso"
+            "Individual localization precision, iso"
+        )
+        gaussian_iso_button.setToolTip(
+            "Each localization is Gaussian blurred with a \u03c3 equal to\n"
+            "its individual localization precision, isotropic in xy."
         )
         self.blur_buttongroup.addButton(gaussian_iso_button)
 
@@ -155,14 +184,16 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         blur_grid.addWidget(gaussian_iso_button, 4, 0, 1, 2)
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene)
-        blur_grid.addWidget(
-            QtWidgets.QLabel("Min.  Blur (cam.  pixel):"), 5, 0, 1, 1
+        min_blur_label = QtWidgets.QLabel("Min. Blur (nm):")
+        min_blur_label.setToolTip(
+            "Minimum blur applied to all localizations in nm."
         )
+        blur_grid.addWidget(min_blur_label, 5, 0, 1, 1)
         self.min_blur_width = QtWidgets.QDoubleSpinBox()
         self.min_blur_width.setRange(0, 999999)
-        self.min_blur_width.setSingleStep(0.01)
+        self.min_blur_width.setSingleStep(0.1)
         self.min_blur_width.setValue(0)
-        self.min_blur_width.setDecimals(3)
+        self.min_blur_width.setDecimals(1)
         self.min_blur_width.setKeyboardTracking(False)
         self.min_blur_width.valueChanged.connect(self.render_scene)
         blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
@@ -177,15 +208,15 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         }
 
         # scalebar
-        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
+        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.render_scene)
         vbox.addWidget(self.scalebar_groupbox)
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
-        scalebar_grid.addWidget(
-            QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
-        )
+        scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
+        scalebar_length_label.setToolTip("Set the length of the scale bar.")
+        scalebar_grid.addWidget(scalebar_length_label, 0, 0)
         self.scalebar = QtWidgets.QSpinBox()
         self.scalebar.setRange(1, 100000)
         self.scalebar.setValue(500)
@@ -193,6 +224,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.scalebar.valueChanged.connect(self.render_scene)
         scalebar_grid.addWidget(self.scalebar, 0, 1)
         self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
+        self.scalebar_text.setToolTip("Display the length of the scale bar?")
         self.scalebar_text.stateChanged.connect(self.render_scene)
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
 
@@ -298,7 +330,9 @@ class AnimationDialog(QtWidgets.QDialog):
         self.durations = []
         self.show_positions = []
         self.count = 0
-        self.layout.addWidget(QtWidgets.QLabel("Current position: "), 0, 0)
+        cp_label = QtWidgets.QLabel("Current position:")
+        cp_label.setToolTip("Current rotation angles in x, y, z (deg).")
+        self.layout.addWidget(cp_label, 0, 0)
         angx = np.round(self.window.view_rot.angx * 180 / np.pi, 1)
         angy = np.round(self.window.view_rot.angy * 180 / np.pi, 1)
         angz = np.round(self.window.view_rot.angz * 180 / np.pi, 1)
@@ -308,11 +342,14 @@ class AnimationDialog(QtWidgets.QDialog):
         self.layout.addWidget(self.current_pos, 0, 1)
 
         for i in range(1, 11):
-            self.layout.addWidget(
-                QtWidgets.QLabel("- Position {}: ".format(i)), i, 0
+            p_label = QtWidgets.QLabel(f"- Position {i}: ")
+            p_label.setToolTip(
+                f"Rotation angles in x, y, z (deg) for position {i}."
             )
+            self.layout.addWidget(p_label, i, 0)
 
             show_position = QtWidgets.QPushButton("Show position")
+            show_position.setToolTip("Move to this position.")
             show_position.setFocusPolicy(QtCore.Qt.NoFocus)
             show_position.clicked.connect(
                 partial(self.retrieve_position, i - 1)
@@ -320,7 +357,11 @@ class AnimationDialog(QtWidgets.QDialog):
             self.show_positions.append(show_position)
             self.layout.addWidget(show_position, i, 2)
             if i > 1:
-                self.layout.addWidget(QtWidgets.QLabel("Duration [s]: "), i, 3)
+                d_label = QtWidgets.QLabel("Duration (s): ")
+                d_label.setToolTip(
+                    "Duration of the transition to this position."
+                )
+                self.layout.addWidget(d_label, i, 3)
                 duration = QtWidgets.QDoubleSpinBox()
                 duration.setRange(0.01, 10)
                 duration.setValue(1)
@@ -328,37 +369,49 @@ class AnimationDialog(QtWidgets.QDialog):
                 self.durations.append(duration)
                 self.layout.addWidget(duration, i, 4)
 
-        self.layout.addWidget(QtWidgets.QLabel("FPS: "), 11, 0)
+        fps_label = QtWidgets.QLabel("FPS: ")
+        fps_label.setToolTip("Frames per second used in the animation.")
+        self.layout.addWidget(fps_label, 11, 0)
         self.fps = QtWidgets.QSpinBox()
         self.fps.setValue(30)
         self.fps.setRange(1, 60)
         self.layout.addWidget(self.fps, 12, 0)
 
-        self.layout.addWidget(
-            QtWidgets.QLabel("Rotation speed [deg/s]: "), 11, 1
+        rs_label = QtWidgets.QLabel("Rotation speed (deg/s): ")
+        rs_label.setToolTip(
+            "Speed of rotation between positions in the animation."
         )
+        self.layout.addWidget(rs_label, 11, 1)
         self.rot_speed = QtWidgets.QDoubleSpinBox()
         self.rot_speed.setValue(90)
         self.rot_speed.setDecimals(1)
         self.rot_speed.setRange(0.1, 1000)
         self.layout.addWidget(self.rot_speed, 12, 1)
 
-        self.add = QtWidgets.QPushButton("+")
+        self.add = QtWidgets.QPushButton("Add this position")
+        self.add.setToolTip(
+            "Add the current rotation/view to the animation sequence."
+        )
         self.add.setFocusPolicy(QtCore.Qt.NoFocus)
         self.add.clicked.connect(self.add_position)
         self.layout.addWidget(self.add, 11, 2)
 
-        self.delete = QtWidgets.QPushButton("-")
+        self.delete = QtWidgets.QPushButton("Remove last position")
+        self.delete.setToolTip(
+            "Remove the last position from the animation sequence."
+        )
         self.delete.setFocusPolicy(QtCore.Qt.NoFocus)
         self.delete.clicked.connect(self.delete_position)
         self.layout.addWidget(self.delete, 12, 2)
 
         self.build = QtWidgets.QPushButton("Build\nanimation")
+        self.build.setToolTip("Create the animation as an .mp4 file.")
         self.build.setFocusPolicy(QtCore.Qt.NoFocus)
         self.build.clicked.connect(self.build_animation)
         self.layout.addWidget(self.build, 11, 3)
 
         self.stay = QtWidgets.QPushButton("Stay in the\n position")
+        self.stay.setToolTip("Add the current position again (no movement).")
         self.stay.setFocusPolicy(QtCore.Qt.NoFocus)
         self.stay.clicked.connect(partial(self.add_position, True))
         self.layout.addWidget(self.stay, 12, 3)
@@ -1606,6 +1659,7 @@ class ViewRotation(QtWidgets.QLabel):
         colors = [
             _.currentText() for _ in self.window.dataset_dialog.colorselection
         ]
+        pixelsize = d.pixelsize.value()
         rot_angles = [
             int(self.angx * 180 / np.pi),
             int(self.angy * 180 / np.pi),
@@ -1619,8 +1673,8 @@ class ViewRotation(QtWidgets.QLabel):
             "Max. density": d.maximum.value(),
             "Colormap": d.colormap.currentText(),
             "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
-            "Scalebar length (nm)": d.scalebar.value(),
-            "Min. blur (cam. px)": d.min_blur_width.value(),
+            "Scale bar length (nm)": d.scalebar.value(),
+            "Min. blur (nm)": d.min_blur_width.value() / pixelsize,
             "Localizations loaded": self.paths,
             "Colors": colors,
         }
@@ -1857,7 +1911,9 @@ class ViewRotation(QtWidgets.QLabel):
             "oversampling": oversampling,
             "viewport": viewport,
             "blur_method": disp_dlg.blur_methods[blur_button],
-            "min_blur_width": float(disp_dlg.min_blur_width.value()),
+            "min_blur_width": float(
+                disp_dlg.min_blur_width.value() / pixelsize
+            ),
         }
         return kwargs
 
