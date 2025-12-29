@@ -132,7 +132,7 @@ def fit_cum_exp(data: np.ndarray) -> dict:
     result = {
         "best_values": {"a": popt[0], "t": popt[1], "c": popt[2]},
         "data": data,
-        "best_fit": lib.cumulative_exponential(y, *popt),
+        "best_fit": lib.cumulative_exponential(data, *popt),
     }
     return result
 
@@ -224,7 +224,7 @@ class FloatEdit(QtWidgets.QLineEdit):
 
 
 class PickHistWindow(QtWidgets.QTabWidget):
-    """Class to display binding kinetics plots (qPAINT)."""
+    """Class to display binding kinetics plots."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -234,7 +234,10 @@ class PickHistWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.plotted = False
+        self.figure = plt.Figure(constrained_layout=True)
+        self.axes1 = self.figure.add_subplot(121)
+        self.axes2 = self.figure.add_subplot(122)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -261,48 +264,55 @@ class PickHistWindow(QtWidgets.QTabWidget):
             Cumulative exponential fit results for dark times, see
             ``fit_cum_exp``.
         """
-        self.figure.clear()
+        self.axes1.clear()
+        self.axes2.clear()
+        self.figure.suptitle("Binding kinetics per pick")
 
-        # Length
-        axes = self.figure.add_subplot(121)
-
+        # Bright
         a = fit_result_len["best_values"]["a"]
         t = fit_result_len["best_values"]["t"]
         c = fit_result_len["best_values"]["c"]
 
-        axes.set_title(
-            "Length (cumulative) \n"
-            r"$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$".format(a, t, c)
+        self.axes1.set_title(
+            "Bright time (cumulative) \n"
+            r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(a, t, c)
         )
         data = pooled_locs["len"].copy()
         data.sort_values(inplace=True)
         y = np.arange(1, len(data) + 1)
-        axes.semilogx(data, y, label="data")
-        axes.semilogx(data, fit_result_len["best_fit"], label="fit")
-        axes.legend(loc="best")
-        axes.set_xlabel("Duration (frames)")
-        axes.set_ylabel("Frequency")
+        self.axes1.semilogx(data, y, label="data")
+        self.axes1.semilogx(
+            data,
+            fit_result_len["best_fit"],
+            label=f"fit ($\\bar \\tau_B = {t:.2f}$)",
+        )
+        self.axes1.legend(loc="best")
+        self.axes1.set_xlabel("Duration (frames)")
+        self.axes1.set_ylabel("Counts")
 
         # Dark
-        axes = self.figure.add_subplot(122)
-
         a = fit_result_dark["best_values"]["a"]
         t = fit_result_dark["best_values"]["t"]
         c = fit_result_dark["best_values"]["c"]
 
-        axes.set_title(
+        self.axes2.set_title(
             "Dark time (cumulative) \n"
-            r"$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$".format(a, t, c)
+            r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(a, t, c)
         )
         data = pooled_locs["dark"].copy()
         data.sort_values(inplace=True)
         y = np.arange(1, len(data) + 1)
-        axes.semilogx(data, y, label="data")
-        axes.semilogx(data, fit_result_dark["best_fit"], label="fit")
-        axes.legend(loc="best")
-        axes.set_xlabel("Duration (frames)")
-        axes.set_ylabel("Frequency")
+        self.axes2.semilogx(data, y, label="data")
+        self.axes2.semilogx(
+            data,
+            fit_result_dark["best_fit"],
+            label=f"fit ($\\bar \\tau_D = {t:.2f}$)",
+        )
+        self.axes2.legend(loc="best")
+        self.axes2.set_xlabel("Duration (frames)")
+        self.axes2.set_ylabel("Counts")
         self.canvas.draw()
+        self.plotted = True
 
 
 class ApplyDialog(QtWidgets.QDialog):
@@ -3276,7 +3286,7 @@ class InfoDialog(QtWidgets.QDialog):
         row = self.picks_grid.rowCount()
         length_label = QtWidgets.QLabel("Bright time (frames):")
         length_label.setToolTip(
-            "Bright time (frames) per pick (mean and std)."
+            "Bright time (frames) per pick (arithmetic mean and std)."
         )
         self.picks_grid.addWidget(length_label, row, 0)
         self.length_mean = QtWidgets.QLabel()
@@ -3285,7 +3295,9 @@ class InfoDialog(QtWidgets.QDialog):
         self.picks_grid.addWidget(self.length_std, row, 2)
         row = self.picks_grid.rowCount()
         dark_label = QtWidgets.QLabel("Dark time (frames):")
-        dark_label.setToolTip("Dark time (frames) per pick (mean and std).")
+        dark_label.setToolTip(
+            "Dark time (frames) per pick (arithmetic mean and std)."
+        )
         self.picks_grid.addWidget(dark_label, row, 0)
         self.dark_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_mean, row, 1)
@@ -3332,11 +3344,11 @@ class InfoDialog(QtWidgets.QDialog):
         self.n_units_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_units_std, row, 2)
         self.pick_hist_window = PickHistWindow()
-        pick_hists = QtWidgets.QPushButton("Histograms")
+        pick_hists = QtWidgets.QPushButton("Show fitted binding kinetics")
         pick_hists.setToolTip(
-            "Show histograms with fitted mean bright and dark times."
+            "Show histograms with fitted mean bright and dark times per pick."
         )
-        pick_hists.clicked.connect(self.pick_hist_window.show)
+        pick_hists.clicked.connect(self.open_pick_hist)
         self.picks_grid.addWidget(
             pick_hists, self.picks_grid.rowCount(), 0, 1, 3
         )
@@ -3465,6 +3477,20 @@ class InfoDialog(QtWidgets.QDialog):
         n_units = self.calculate_n_units(self.pick_info["dark"])
         self.n_units_mean.setText("{:,.2f}".format(np.mean(n_units)))
         self.n_units_std.setText("{:,.2f}".format(np.std(n_units)))
+
+    def open_pick_hist(self) -> None:
+        """Open pick histograms window with binding kinetics histograms
+        and fits."""
+        if self.pick_hist_window.plotted:
+            self.pick_hist_window.show()
+        else:
+            message = (
+                "Pick info not calculated.\n"
+                "Please select circular picks and run 'Calculate info below' "
+                "first."
+            )
+            QtWidgets.QMessageBox.warning(self, "No pick info", message)
+            return
 
 
 class NenaPlotWindow(QtWidgets.QTabWidget):

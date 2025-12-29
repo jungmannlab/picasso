@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 19-DEC-2025 CEST
+Last change: 29-DEC-2025 CEST
 
 0.9.3
 -----
@@ -21,6 +21,7 @@ Important updates:
 ++++++++++++
 - Average: fix ``pandas`` warnings
 - Render: show histogram in mask dialog ignores zero values
+- Render: qPAINT histograms in the info dialog fixed and improved
 
 0.9.2
 -----
