@@ -1,7 +1,11 @@
 """Test picasso.localize functions as well as the associated functions
-in picasso.gausslq, picasso.gaussmle, etc."""
+in picasso.gausslq, picasso.gaussmle, picasso.zfit
 
-# TODO: add identifying more data types? like .tif, .nd2?
+:author: Rafal Kowalewski, 2025
+:copyright: Copyright (c) 2025 Jungmann Lab, MPI of Biochemistry
+"""
+
+# TODO: add identifying more data types? like .tif, .nd2? this can go to test_io.py though
 
 import numpy as np
 import pytest

@@ -9,6 +9,7 @@ Important updates:
 ^^^^^^^^^^^^^^^^^^
 - All GUI modules show the explanations of parameters when hovering over them with the mouse cursor (tool tips)
 - FRC: does not blur rendered localizations, enabled saving rendered images
+- Automatic testing at pull requests extended to most Picasso functions
 
 *Small improvements:*
 +++++++++++++++++++++
