@@ -20,6 +20,7 @@ Important updates:
 *Bug fixes:*
 ++++++++++++
 - Average: fix ``pandas`` warnings
+- Localize: picasso.localize.identify accepts roi as input argument
 - Render: show histogram in mask dialog ignores zero values
 - Render: qPAINT histograms in the info dialog fixed and improved
 
