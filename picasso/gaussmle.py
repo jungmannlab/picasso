@@ -364,7 +364,7 @@ def gaussmle(
     spots: np.ndarray,
     eps: float,
     max_it: int,
-    method: Literal["sigma", "sigmaxy"] = "sigma",
+    method: Literal["sigma", "sigmaxy"] = "sigmaxy",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Fits Gaussians using Maximum Likelihood Estimation (MLE) to the
     extracted spots.
@@ -417,7 +417,7 @@ def gaussmle_async(
     spots: np.ndarray,
     eps: float,
     max_it: int,
-    method: Literal["sigma", "sigmaxy"] = "sigma",
+    method: Literal["sigma", "sigmaxy"] = "sigmaxy",
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Runs ``gaussmle`` asynchronously (multiprocessing) to fit
     Gaussians using Maximum Likelihood Estimation (MLE) to the

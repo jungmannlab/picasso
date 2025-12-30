@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 29-DEC-2025 CEST
+Last change: 30-DEC-2025 CEST
 
 0.9.3
 -----
@@ -16,6 +16,7 @@ Important updates:
 - Render: many input variables were switched from cam. pixels to nm in the GUI, for example, min. blur in the display settings dialog
 - Render: slicer dialog automatically slices/unslices localizations when opening/closing the dialog
 - Clustering algorithms copy the input localizations to avoid modifying the input DataFrame (for example, when using Picasso as a package)
+- MLE Gauss fitting: default method is now ``sigmaxy``, i.e., sigma can vary between x and y, like in the least-squares fitting
 
 *Bug fixes:*
 ++++++++++++
