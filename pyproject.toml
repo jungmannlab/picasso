@@ -92,9 +92,3 @@ exclude = '''
   | dist
 )
 '''
-
-[tool.pytest.ini_options]
-filterwarnings = [
-    "ignore:Conversion of an array with ndim > 0 to a scalar is deprecated:DeprecationWarning",
-    "ignore::DeprecationWarning:sklearn.*"
-]
