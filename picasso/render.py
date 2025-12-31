@@ -975,7 +975,7 @@ def _fftconvolve(
     kernel = np.outer(kernel_y, kernel_x)
     kernel /= kernel.sum()
     image = signal.fftconvolve(image, kernel, mode="same")
-    return image
+    return image.astype(np.float32)
 
 
 def rotation_matrix(angx: float, angy: float, angz: float) -> Rotation:
