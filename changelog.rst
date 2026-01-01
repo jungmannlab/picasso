@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 29-DEC-2025 CEST
+Last change: 01-JAN-2026 CEST
 
 0.9.3
 -----
@@ -9,6 +9,7 @@ Important updates:
 ^^^^^^^^^^^^^^^^^^
 - All GUI modules show the explanations of parameters when hovering over them with the mouse cursor (tool tips)
 - FRC: does not blur rendered localizations, enabled saving rendered images
+- Automatic testing at pull requests extended to most Picasso functions
 
 *Small improvements:*
 +++++++++++++++++++++
@@ -16,12 +17,16 @@ Important updates:
 - Render: many input variables were switched from cam. pixels to nm in the GUI, for example, min. blur in the display settings dialog
 - Render: slicer dialog automatically slices/unslices localizations when opening/closing the dialog
 - Clustering algorithms copy the input localizations to avoid modifying the input DataFrame (for example, when using Picasso as a package)
+- MLE Gauss fitting: default method is now ``sigmaxy``, i.e., sigma can vary between x and y, like in the least-squares fitting
+- Upgrade PyPI release action to release/v1 (security reasons)
 
 *Bug fixes:*
 ++++++++++++
 - Average: fix ``pandas`` warnings
+- Localize: picasso.localize.identify accepts roi as input argument
 - Render: show histogram in mask dialog ignores zero values
 - Render: qPAINT histograms in the info dialog fixed and improved
+- Fixed ``picasso.postprocess.compute_local_density``
 
 G5M
 ---

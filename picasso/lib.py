@@ -166,6 +166,9 @@ class MockProgress:
     def set_value(self, *args, **kwargs):
         pass
 
+    def setMaximum(self, *args, **kwargs):
+        pass
+
     def update(self, *args, **kwargs):
         pass
 
