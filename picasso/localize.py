@@ -308,10 +308,11 @@ def identify_by_frame_number(
         where the first tuple contains the start coordinates
         (y_start, x_start) and the second tuple contains the end
         coordinates (y_end, x_end). If None, the entire frame is used.
+        Default is None.
     lock : threading.Lock, optional
         If provided, this lock will be used to ensure thread safety when
         accessing the movie data. This is useful in a multithreaded
-        environment.
+        environment. Default is None.
 
     Returns
     -------
@@ -460,6 +461,7 @@ def identify(
     movie: np.ndarray,
     minimum_ng: float,
     box: int,
+    roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
     threaded: bool = True,
 ) -> pd.DataFrame:
     """Identify local maxima in a movie and calculate the net
@@ -474,8 +476,15 @@ def identify(
         The minimum net gradient for a spot to be considered.
     box : int
         The size of the box to extract around each spot.
-    threaded : bool
-        Whether to use threading for the identification process.
+    roi : tuple, optional
+        Region of interest (ROI) defined as a tuple of two tuples,
+        where the first tuple contains the start coordinates
+        (y_start, x_start) and the second tuple contains the end
+        coordinates (y_end, x_end). If None, the entire frame is used.
+        Default is None.
+    threaded : bool, optional
+        Whether to use threading for the identification process. Default
+        is True.
 
     Returns
     -------
@@ -484,15 +493,15 @@ def identify(
         `frame`, `x`, `y`, and `net_gradient`.
     """
     if threaded:
-        current, futures = identify_async(movie, minimum_ng, box)
-        identifications = [_.result() for _ in futures]
-        identifications = [np.hstack(_) for _ in identifications]
+        current, futures = identify_async(movie, minimum_ng, box, roi)
+        ids = identifications_from_futures(futures)
     else:
         identifications = [
-            identify_by_frame_number(movie, minimum_ng, box, i)
+            identify_by_frame_number(movie, minimum_ng, box, i, roi)
             for i in range(len(movie))
         ]
-    ids = pd.concat(identifications, ignore_index=True)
+        ids = pd.concat(identifications, ignore_index=True)
+        ids.sort_values(by="frame", kind="mergesort", inplace=True)
     return ids
 
 

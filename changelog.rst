@@ -1,7 +1,32 @@
 Changelog
 =========
 
-Last change: 12-DEC-2025 CEST
+Last change: 01-JAN-2026 CEST
+
+0.9.3
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- All GUI modules show the explanations of parameters when hovering over them with the mouse cursor (tool tips)
+- FRC: does not blur rendered localizations, enabled saving rendered images
+- Automatic testing at pull requests extended to most Picasso functions
+
+*Small improvements:*
++++++++++++++++++++++
+- General improvements in the GUI widget names displayed (for example, change "Scalebar" to "Scale bar")
+- Render: many input variables were switched from cam. pixels to nm in the GUI, for example, min. blur in the display settings dialog
+- Render: slicer dialog automatically slices/unslices localizations when opening/closing the dialog
+- Clustering algorithms copy the input localizations to avoid modifying the input DataFrame (for example, when using Picasso as a package)
+- MLE Gauss fitting: default method is now ``sigmaxy``, i.e., sigma can vary between x and y, like in the least-squares fitting
+- Upgrade PyPI release action to release/v1 (security reasons)
+
+*Bug fixes:*
+++++++++++++
+- Average: fix ``pandas`` warnings
+- Localize: picasso.localize.identify accepts roi as input argument
+- Render: show histogram in mask dialog ignores zero values
+- Render: qPAINT histograms in the info dialog fixed and improved
+- Fixed ``picasso.postprocess.compute_local_density``
 
 0.9.2
 -----
@@ -239,12 +264,12 @@ Important updates:
 
 0.6.1
 -----
-- **Measuring in the 3D window (Measure and Scalebar) fixed (previous versions did not convert the value correctly)**
+- **Measuring in the 3D window (Measure and scale bar) fixed (previous versions did not convert the value correctly)**
 - Localize GUI allows for numerical ROI input in the Parameters Dialog
 - Allow loading individual .tif files as in Picasso v0.4.11``
 - RESI localizations have the new column ``cluster_id``
 - Building animation shows progress (Render 3D)
-- Export current view in Render saves metadata; An extra image is saved with a scalebar if the user did not set it
+- Export current view in Render saves metadata; An extra image is saved with a scale bar if the user did not set it
 - (**Not applicable in 0.6.2**) Clustering in command window requires camera pixel size to be input (instead of inserting one after calling the function)
 - Bug fixes
 
@@ -325,4 +350,4 @@ Important updates:
 
 0.4.0
 -----
--  Added new module "Picasso Server"
+- Added new module "Picasso Server"

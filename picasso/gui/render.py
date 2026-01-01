@@ -25,6 +25,7 @@ from math import ceil
 from collections import Counter
 from functools import partial
 from typing import Callable, Literal
+from PIL import Image
 
 import yaml
 import matplotlib
@@ -131,13 +132,13 @@ def fit_cum_exp(data: np.ndarray) -> dict:
     result = {
         "best_values": {"a": popt[0], "t": popt[1], "c": popt[2]},
         "data": data,
-        "best_fit": lib.cumulative_exponential(y, *popt),
+        "best_fit": lib.cumulative_exponential(data, *popt),
     }
     return result
 
 
 def estimate_kinetic_rate(data: np.ndarray) -> float:
-    """Find the mean dark/bright time by fitting a cumulative
+    """Find the mean dark/bright time by fitting to a cumulative
     exponential function.
 
     Parameters
@@ -233,7 +234,10 @@ class PickHistWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.plotted = False
+        self.figure = plt.Figure(constrained_layout=True)
+        self.axes1 = self.figure.add_subplot(121)
+        self.axes2 = self.figure.add_subplot(122)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -260,48 +264,55 @@ class PickHistWindow(QtWidgets.QTabWidget):
             Cumulative exponential fit results for dark times, see
             ``fit_cum_exp``.
         """
-        self.figure.clear()
+        self.axes1.clear()
+        self.axes2.clear()
+        self.figure.suptitle("Binding kinetics per pick")
 
-        # Length
-        axes = self.figure.add_subplot(121)
-
+        # Bright
         a = fit_result_len["best_values"]["a"]
         t = fit_result_len["best_values"]["t"]
         c = fit_result_len["best_values"]["c"]
 
-        axes.set_title(
-            "Length (cumulative) \n"
-            r"$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$".format(a, t, c)
+        self.axes1.set_title(
+            "Bright time (cumulative) \n"
+            r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(a, t, c)
         )
         data = pooled_locs["len"].copy()
         data.sort_values(inplace=True)
         y = np.arange(1, len(data) + 1)
-        axes.semilogx(data, y, label="data")
-        axes.semilogx(data, fit_result_len["best_fit"], label="fit")
-        axes.legend(loc="best")
-        axes.set_xlabel("Duration (frames)")
-        axes.set_ylabel("Frequency")
+        self.axes1.semilogx(data, y, label="data")
+        self.axes1.semilogx(
+            data,
+            fit_result_len["best_fit"],
+            label=f"fit ($\\bar \\tau_B = {t:.2f}$)",
+        )
+        self.axes1.legend(loc="best")
+        self.axes1.set_xlabel("Duration (frames)")
+        self.axes1.set_ylabel("Counts")
 
         # Dark
-        axes = self.figure.add_subplot(122)
-
         a = fit_result_dark["best_values"]["a"]
         t = fit_result_dark["best_values"]["t"]
         c = fit_result_dark["best_values"]["c"]
 
-        axes.set_title(
+        self.axes2.set_title(
             "Dark time (cumulative) \n"
-            r"$Fit: {:.2f}\cdot(1-exp(x/{:.2f}))+{:.2f}$".format(a, t, c)
+            r"$Fit: {:.2f}\cdot(1-exp(-t/{:.2f}))+{:.2f}$".format(a, t, c)
         )
         data = pooled_locs["dark"].copy()
         data.sort_values(inplace=True)
         y = np.arange(1, len(data) + 1)
-        axes.semilogx(data, y, label="data")
-        axes.semilogx(data, fit_result_dark["best_fit"], label="fit")
-        axes.legend(loc="best")
-        axes.set_xlabel("Duration (frames)")
-        axes.set_ylabel("Frequency")
+        self.axes2.semilogx(data, y, label="data")
+        self.axes2.semilogx(
+            data,
+            fit_result_dark["best_fit"],
+            label=f"fit ($\\bar \\tau_D = {t:.2f}$)",
+        )
+        self.axes2.legend(loc="best")
+        self.axes2.set_xlabel("Duration (frames)")
+        self.axes2.set_ylabel("Counts")
         self.canvas.draw()
+        self.plotted = True
 
 
 class ApplyDialog(QtWidgets.QDialog):
@@ -342,16 +353,31 @@ class ApplyDialog(QtWidgets.QDialog):
         vbox = QtWidgets.QVBoxLayout(self)
         layout = QtWidgets.QGridLayout()
         vbox.addLayout(layout)
-        layout.addWidget(QtWidgets.QLabel("Channel:"), 0, 0)
+        channel_label = QtWidgets.QLabel("Channel:")
+        channel_label.setToolTip(
+            "Select the channel to which an expression will be applied."
+        )
+        layout.addWidget(channel_label, 0, 0)
         self.channel = QtWidgets.QComboBox()
         self.channel.addItems(self.window.view.locs_paths)
         layout.addWidget(self.channel, 0, 1)
         self.channel.currentIndexChanged.connect(self.update_vars)
-        layout.addWidget(QtWidgets.QLabel("Pre-defined variables:"), 1, 0)
+        vars_label = QtWidgets.QLabel("Variables:")
+        vars_label.setToolTip(
+            "List of columns that can be manipulated using expressions."
+        )
+        layout.addWidget(vars_label, 1, 0)
         self.label = QtWidgets.QLabel()
         layout.addWidget(self.label, 1, 1)
         self.update_vars(0)
-        layout.addWidget(QtWidgets.QLabel("Expression:"), 2, 0)
+        exp_label = QtWidgets.QLabel("Expression:")
+        exp_label.setToolTip(
+            "Enter the expression here.\n"
+            "For example, 'x += 10' to move x coordinates of the\n"
+            "localizations in the selected channel 10 camera pixels to the"
+            " right."
+        )
+        layout.addWidget(exp_label, 2, 0)
         self.cmd = QtWidgets.QLineEdit()
         layout.addWidget(self.cmd, 2, 1)
         hbox = QtWidgets.QHBoxLayout()
@@ -447,27 +473,42 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # add non-scrollable elements - left side
         self.legend = QtWidgets.QCheckBox("Show legend")
+        self.legend.setToolTip("Display the legend in the main window?")
         self.legend.stateChanged.connect(self.update_viewport)
         layout.addWidget(self.legend, 0, 0)
-        self.wbackground = QtWidgets.QCheckBox(
-            "Invert colors / white background"
-        )
-        self.wbackground.stateChanged.connect(self.update_viewport)
-        layout.addWidget(self.wbackground, 2, 0)
         self.auto_display = QtWidgets.QCheckBox("Automatic display update")
+        self.auto_display.setToolTip(
+            "Automatically update the display after each change below?"
+        )
         self.auto_display.setChecked(True)
         self.auto_display.stateChanged.connect(self.update_viewport)
         layout.addWidget(self.auto_display, 1, 0)
+        self.wbackground = QtWidgets.QCheckBox(
+            "Invert colors / white background"
+        )
+        self.wbackground.setToolTip(
+            "Invert the colormap (single channel loaded)\n"
+            "or set white background (multiple channels loaded)?"
+        )
+        self.wbackground.stateChanged.connect(self.update_viewport)
+        layout.addWidget(self.wbackground, 2, 0)
         self.auto_colors = QtWidgets.QCheckBox("Automatic coloring")
+        self.auto_colors.setToolTip(
+            "Automatically assign colors to each channel (using hsv colormap)?"
+        )
         self.auto_colors.stateChanged.connect(self.update_colors)
         layout.addWidget(self.auto_colors, 3, 0)
 
         # add buttons to save/load colors - right side
         save_button = QtWidgets.QPushButton("Save colors")
+        save_button.setToolTip(
+            "Save the current list of colors to a .txt file."
+        )
         layout.addWidget(save_button, 0, 2)
         save_button.setFocusPolicy(QtCore.Qt.NoFocus)
         save_button.clicked.connect(self.save_colors)
         load_button = QtWidgets.QPushButton("Load colors")
+        load_button.setToolTip("Load a list of colors from a .txt file.")
         layout.addWidget(load_button, 1, 2)
         load_button.setFocusPolicy(QtCore.Qt.NoFocus)
         load_button.clicked.connect(self.load_colors)
@@ -488,12 +529,24 @@ class DatasetDialog(QtWidgets.QDialog):
         self.colorselection = []
         self.colordisp_all = []
         self.intensitysettings = []
-        self.scroll_area.addWidget(QtWidgets.QLabel("Files"), 0, 0)
-        self.scroll_area.addWidget(QtWidgets.QLabel("Change title"), 0, 1)
-        self.scroll_area.addWidget(QtWidgets.QLabel("Color"), 0, 2)
+        files_label = QtWidgets.QLabel("Files")
+        files_label.setToolTip("Names of the loaded datasets.")
+        self.scroll_area.addWidget(files_label, 0, 0)
+        title_label = QtWidgets.QLabel("Change title")
+        title_label.setToolTip("Change the displayed name of each dataset.")
+        self.scroll_area.addWidget(title_label, 0, 1)
+        color_label = QtWidgets.QLabel("Color")
+        color_label.setToolTip("Select the color for each dataset.")
+        self.scroll_area.addWidget(color_label, 0, 2)
         self.scroll_area.addWidget(QtWidgets.QLabel(""), 0, 3)
-        self.scroll_area.addWidget(QtWidgets.QLabel("Rel. Intensity"), 0, 4)
-        self.scroll_area.addWidget(QtWidgets.QLabel("Close"), 0, 5)
+        intensity_label = QtWidgets.QLabel("Rel. Intensity")
+        intensity_label.setToolTip(
+            "Set the relative intensity for each dataset."
+        )
+        self.scroll_area.addWidget(intensity_label, 0, 4)
+        close_label = QtWidgets.QLabel("Close")
+        close_label.setToolTip("Close the datasets.")
+        self.scroll_area.addWidget(close_label, 0, 5)
 
         self.default_colors = [
             "red",
@@ -537,10 +590,16 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # Create 3 buttons for checking, naming and closing the channel
         c = QtWidgets.QCheckBox(path)
+        c.setToolTip(
+            "Tick/untick to show/hide the dataset\n"
+            "(only works if multiple datasets are loaded)."
+        )
         currentline = self.scroll_area.rowCount()
         t = QtWidgets.QPushButton("#")
+        t.setToolTip("Change the displayed name of this dataset.")
         t.setObjectName(str(currentline))
         p = QtWidgets.QPushButton("x")
+        p.setToolTip("Close this dataset.")
         p.setObjectName(str(currentline))
 
         # Append and setup the buttons
@@ -562,6 +621,10 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # create the self.colorselection widget
         colordrop = QtWidgets.QComboBox(self)
+        colordrop.setToolTip(
+            "Choose the color for this dataset.\n"
+            "You can also enter a hexadecimal color code (e.g., #FF5733)."
+        )
         colordrop.setEditable(True)
         colordrop.lineEdit().setMaxLength(12)
         for color in self.default_colors:
@@ -576,6 +639,7 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # create the label widget to show current color
         colordisp = QtWidgets.QLabel("      ")
+        colordisp.setToolTip("Current color for this dataset.")
         palette = colordisp.palette()
         if self.auto_colors.isChecked():
             colors = lib.get_colors(len(self.checks) + 1)
@@ -594,6 +658,7 @@ class DatasetDialog(QtWidgets.QDialog):
 
         # create the relative intensity widget
         intensity = QtWidgets.QDoubleSpinBox(self)
+        intensity.setToolTip("Set the relative intensity for this dataset.")
         intensity.setKeyboardTracking(False)
         intensity.setDecimals(2)
         intensity.setValue(1.00)
@@ -1618,12 +1683,19 @@ class AIMDialog(QtWidgets.QDialog):
         self.setWindowTitle("AIM undrifting")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(QtWidgets.QLabel("Segmentation:"), 0, 0)
+        seg_label = QtWidgets.QLabel("Segmentation:")
+        seg_label.setToolTip("Length of temporal segments in frames.")
+        grid.addWidget(seg_label, 0, 0)
         self.segmentation = QtWidgets.QSpinBox()
         self.segmentation.setRange(1, int(1e5))
         self.segmentation.setValue(100)
         grid.addWidget(self.segmentation, 0, 1)
-        grid.addWidget(QtWidgets.QLabel("Intersection distance (nm):"), 1, 0)
+        intersect_label = QtWidgets.QLabel("Intersection distance (nm):")
+        intersect_label.setToolTip(
+            "Distance between localizations in the consecutive segments "
+            "to be considered as overlapping."
+        )
+        grid.addWidget(intersect_label, 1, 0)
         self.intersect_d = QtWidgets.QDoubleSpinBox()
         self.intersect_d.setRange(0.1, 1e6)
         try:
@@ -1634,7 +1706,11 @@ class AIMDialog(QtWidgets.QDialog):
         self.intersect_d.setDecimals(1)
         self.intersect_d.setSingleStep(1)
         grid.addWidget(self.intersect_d, 1, 1)
-        grid.addWidget(QtWidgets.QLabel("Max. drift in segment (nm):"), 2, 0)
+        maxdrift_label = QtWidgets.QLabel("Max. drift in segment (nm):")
+        maxdrift_label.setToolTip(
+            "Maximum drift inspected between consecutive segments."
+        )
+        grid.addWidget(maxdrift_label, 2, 0)
         self.max_drift = QtWidgets.QDoubleSpinBox()
         self.max_drift.setRange(0.1, 1e6)
         self.max_drift.setValue(60.0)
@@ -1695,19 +1771,34 @@ class DbscanDialog(QtWidgets.QDialog):
         self.setWindowTitle("Enter parameters")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(QtWidgets.QLabel("Radius (nm):"), 0, 0)
+        radius_label = QtWidgets.QLabel("Radius (nm):")
+        radius_label.setToolTip(
+            "DBSCAN epsilon; max. distance between two samples for one to be\n"
+            "considered as in the same neighborhood."
+        )
+        grid.addWidget(radius_label, 0, 0)
         self.radius = QtWidgets.QDoubleSpinBox()
         self.radius.setRange(0.01, 1e6)
         self.radius.setValue(10)
         self.radius.setDecimals(2)
         self.radius.setSingleStep(0.1)
         grid.addWidget(self.radius, 0, 1)
-        grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
+        min_samples_label = QtWidgets.QLabel("Min. samples:")
+        min_samples_label.setToolTip(
+            "Minimum number of samples in a neighborhood for a point to be\n"
+            "considered a core point."
+        )
+        grid.addWidget(min_samples_label, 1, 0)
         self.density = QtWidgets.QSpinBox()
         self.density.setRange(1, int(1e6))
         self.density.setValue(4)
         grid.addWidget(self.density, 1, 1)
-        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 2, 0)
+        minlocs_label = QtWidgets.QLabel("Min. no. of locs:")
+        minlocs_label.setToolTip(
+            "Minimum number of localizations required to consider a\n"
+            "cluster valid."
+        )
+        grid.addWidget(minlocs_label, 2, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setRange(0, int(1e6))
         self.min_locs.setValue(0)
@@ -1717,10 +1808,16 @@ class DbscanDialog(QtWidgets.QDialog):
         vbox.addLayout(hbox)
         # save cluster centers
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setToolTip(
+            "Save an extra .hdf5 file containing the cluster centers?"
+        )
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
         # save cluster areas
         self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setToolTip(
+            "Save an extra .csv file containing the cluster areas?"
+        )
         self.save_areas.setChecked(False)
         grid.addWidget(self.save_areas, 4, 0, 1, 2)
 
@@ -1759,7 +1856,7 @@ class HdbscanDialog(QtWidgets.QDialog):
     Attributes
     ----------
     cluster_eps : QDoubleSpinBox
-        Contains cluster_selection_epsilon (camera pixels).
+        Contains cluster_selection_epsilon (nm).
     min_cluster : QSpinBox
         Contains the minimum number of locs in a cluster.
     min_samples : QSpinBox
@@ -1777,21 +1874,32 @@ class HdbscanDialog(QtWidgets.QDialog):
         self.setWindowTitle("Enter parameters")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(QtWidgets.QLabel("Min. cluster size:"), 0, 0)
+        min_cluster_label = QtWidgets.QLabel("Min. cluster size:")
+        min_cluster_label.setToolTip(
+            "Minimum number of localizations required to consider a\n"
+            "cluster valid."
+        )
+        grid.addWidget(min_cluster_label, 0, 0)
         self.min_cluster = QtWidgets.QSpinBox()
         self.min_cluster.setRange(1, int(1e6))
         self.min_cluster.setValue(10)
         grid.addWidget(self.min_cluster, 0, 1)
-        grid.addWidget(QtWidgets.QLabel("Min. samples:"), 1, 0)
+        minsamples_label = QtWidgets.QLabel("Min. samples:")
+        minsamples_label.setToolTip(
+            "The number of samples in a neighborhood for a point to be\n"
+            "considered a core point."
+        )
+        grid.addWidget(minsamples_label, 1, 0)
         self.min_samples = QtWidgets.QSpinBox()
         self.min_samples.setRange(1, int(1e6))
         self.min_samples.setValue(10)
         grid.addWidget(self.min_samples, 1, 1)
-        grid.addWidget(
-            QtWidgets.QLabel("Intercluster max.\ndistance (camera pixels):"),
-            2,
-            0,
+        dist_label = QtWidgets.QLabel("Intercluster max. distance (nm):")
+        dist_label.setToolTip(
+            "The distance between clusters to be considered as separate\n"
+            "clusters."
         )
+        grid.addWidget(dist_label, 2, 0)
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
@@ -1803,10 +1911,16 @@ class HdbscanDialog(QtWidgets.QDialog):
         vbox.addLayout(hbox)
         # save cluster centers
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setToolTip(
+            "Save an extra .hdf5 file containing the cluster centers?"
+        )
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, 3, 0, 1, 2)
         # save cluster areas
         self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setToolTip(
+            "Save an extra .csv file containing the cluster areas?"
+        )
         self.save_areas.setChecked(False)
         grid.addWidget(self.save_areas, 4, 0, 1, 2)
 
@@ -1852,28 +1966,35 @@ class LinkDialog(QtWidgets.QDialog):
         Contains the maximum gap between localizations (frames) to be
         considered as belonging to the same group of linked locs.
     max_distance : QDoubleSpinBox
-        Contains the maximum distance (camera pixels) between locs to be
+        Contains the maximum distance (nm) between locs to be
         considered as belonging to the same group of linked locs.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        print(f"parent of the link dialog: {window}")
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Enter parameters")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
-        grid.addWidget(
-            QtWidgets.QLabel("Max. distance (camera pixels):"),
-            0,
-            0,
+        dist_label = QtWidgets.QLabel("Max. distance (nm):")
+        dist_label.setToolTip(
+            "Maximum distance between localizations to be considered\n"
+            "as belonging to the same binding event."
         )
+        grid.addWidget(dist_label, 0, 0)
         self.max_distance = QtWidgets.QDoubleSpinBox()
         self.max_distance.setRange(0, 1e6)
         self.max_distance.setValue(1)
         grid.addWidget(self.max_distance, 0, 1)
-        grid.addWidget(QtWidgets.QLabel("Max. transient dark frames:"), 1, 0)
+        dark_label = QtWidgets.QLabel("Max. transient dark frames:")
+        dark_label.setToolTip(
+            "Maximum number of frames between localizations to be\n"
+            "considered as belonging to the same binding event."
+        )
+        grid.addWidget(dark_label, 1, 0)
         self.max_dark_time = QtWidgets.QSpinBox()
-        self.max_dark_time.setRange(0, 1e9)
+        self.max_dark_time.setRange(0, int(1e9))
         self.max_dark_time.setValue(1)
         grid.addWidget(self.max_dark_time, 1, 1)
         vbox.addLayout(grid)
@@ -1933,7 +2054,7 @@ class SMLMDialog(QtWidgets.QDialog):
     ) -> None:
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Enter parameters (2D)")
+        self.setWindowTitle(f"Enter parameters ({'3D' if flag_3D else '2D'})")
         vbox = QtWidgets.QVBoxLayout(self)
         grid = QtWidgets.QGridLayout()
         # clustering radius
@@ -1941,7 +2062,12 @@ class SMLMDialog(QtWidgets.QDialog):
             local_radius = "Cluster radius (nm):"
         else:
             local_radius = "Cluster radius xy (nm):"
-        grid.addWidget(QtWidgets.QLabel(local_radius), grid.rowCount(), 0)
+        local_radius_label = QtWidgets.QLabel(local_radius)
+        local_radius_label.setToolTip(
+            "Radius in which localizations are considered part of the\n"
+            "same cluster."
+        )
+        grid.addWidget(local_radius_label, grid.rowCount(), 0)
         self.radius_xy = QtWidgets.QDoubleSpinBox()
         self.radius_xy.setRange(0.01, 1e6)
         self.radius_xy.setDecimals(2)
@@ -1954,13 +2080,21 @@ class SMLMDialog(QtWidgets.QDialog):
         self.radius_z.setSingleStep(0.1)
         self.radius_z.setValue(25)
         if flag_3D:
-            grid.addWidget(
-                QtWidgets.QLabel("Cluster radius z (nm):"), grid.rowCount(), 0
+            radius_z_label = QtWidgets.QLabel("Cluster radius z (nm):")
+            radius_z_label.setToolTip(
+                "Radius in z direction in which localizations are\n"
+                "considered part of the same cluster."
             )
+            grid.addWidget(radius_z_label, grid.rowCount(), 0)
             grid.addWidget(self.radius_z, grid.rowCount() - 1, 1)
 
         # min no. locs
-        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), grid.rowCount(), 0)
+        min_locs_label = QtWidgets.QLabel("Min. no. of locs:")
+        min_locs_label.setToolTip(
+            "Minimum number of localizations required to consider a\n"
+            "cluster valid."
+        )
+        grid.addWidget(min_locs_label, grid.rowCount(), 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setRange(1, int(1e6))
         self.min_locs.setValue(10)
@@ -1969,14 +2103,23 @@ class SMLMDialog(QtWidgets.QDialog):
         self.frame_analysis = QtWidgets.QCheckBox(
             "Perform basic frame analysis"
         )
+        self.frame_analysis.setToolTip(
+            "Run a simple test to discard sticking events?"
+        )
         self.frame_analysis.setChecked(True)
         grid.addWidget(self.frame_analysis, grid.rowCount(), 0, 1, 2)
         # save cluster centers
         self.save_centers = QtWidgets.QCheckBox("Save cluster centers")
+        self.save_centers.setToolTip(
+            "Save an extra .hdf5 file containing the cluster centers?"
+        )
         self.save_centers.setChecked(False)
         grid.addWidget(self.save_centers, grid.rowCount(), 0, 1, 2)
         # save cluster areas
         self.save_areas = QtWidgets.QCheckBox("Save cluster areas (.csv)")
+        self.save_areas.setToolTip(
+            "Save an extra .csv file containing the cluster areas?"
+        )
         self.save_areas.setChecked(False)
         grid.addWidget(self.save_areas, grid.rowCount(), 0, 1, 2)
 
@@ -2051,7 +2194,7 @@ class TestClustererDialog(QtWidgets.QDialog):
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
-        self.setWindowTitle("Test Clusterer")
+        self.setWindowTitle("Test Clustering")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
         icon = QtGui.QIcon(icon_path)
@@ -2342,7 +2485,7 @@ class TestDBSCANParams(QtWidgets.QWidget):
         grid.addWidget(self.min_samples, 1, 1)
         grid.setRowStretch(2, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Min. no. locs:"), 2, 0)
+        grid.addWidget(QtWidgets.QLabel("Min. no. of locs:"), 2, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setValue(0)
         self.min_locs.setRange(0, int(1e6))
@@ -2409,7 +2552,7 @@ class TestSMLMParams(QtWidgets.QWidget):
         self.radius_z.setDecimals(2)
         grid.addWidget(self.radius_z, 1, 1)
 
-        grid.addWidget(QtWidgets.QLabel("Min. no. locs"), 2, 0)
+        grid.addWidget(QtWidgets.QLabel("Min. no. of locs"), 2, 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setValue(10)
         self.min_locs.setRange(1, int(1e6))
@@ -2538,7 +2681,7 @@ class TestClustererView(QtWidgets.QLabel):
             "oversampling": self.get_optimal_oversampling(),
             "viewport": self.viewport,
             "blur_method": blur_method,
-            "min_blur_width": 0,
+            "min_blur_width": 0.0,
             "ang": self.ang,
         }
 
@@ -2772,33 +2915,48 @@ class ChangeFOV(QtWidgets.QDialog):
         self.setModal(False)
         self.layout = QtWidgets.QGridLayout()
         self.setLayout(self.layout)
-        self.layout.addWidget(QtWidgets.QLabel("X:"), 0, 0)
+        xlabel = QtWidgets.QLabel("X:")
+        xlabel.setToolTip(
+            "X coordinate of the top-left corner (display pixels)."
+        )
+        self.layout.addWidget(xlabel, 0, 0)
         self.x_box = QtWidgets.QDoubleSpinBox()
         self.x_box.setKeyboardTracking(False)
         self.x_box.setRange(-100, 1e6)
         self.layout.addWidget(self.x_box, 0, 1)
-        self.layout.addWidget(QtWidgets.QLabel("Y:"), 1, 0)
+        ylabel = QtWidgets.QLabel("Y:")
+        ylabel.setToolTip(
+            "Y coordinate of the top-left corner (display pixels)."
+        )
+        self.layout.addWidget(ylabel, 1, 0)
         self.y_box = QtWidgets.QDoubleSpinBox()
         self.y_box.setKeyboardTracking(False)
         self.y_box.setRange(-100, 1e6)
         self.layout.addWidget(self.y_box, 1, 1)
-        self.layout.addWidget(QtWidgets.QLabel("Width:"), 2, 0)
+        w_label = QtWidgets.QLabel("Width:")
+        w_label.setToolTip("Width of the FOV (display pixels).")
+        self.layout.addWidget(w_label, 2, 0)
         self.w_box = QtWidgets.QDoubleSpinBox()
         self.w_box.setKeyboardTracking(False)
         self.w_box.setRange(0, 1e3)
         self.layout.addWidget(self.w_box, 2, 1)
-        self.layout.addWidget(QtWidgets.QLabel("Height:"), 3, 0)
+        h_label = QtWidgets.QLabel("Height:")
+        h_label.setToolTip("Height of the FOV (display pixels).")
+        self.layout.addWidget(h_label, 3, 0)
         self.h_box = QtWidgets.QDoubleSpinBox()
         self.h_box.setKeyboardTracking(False)
         self.h_box.setRange(0, 1e3)
         self.layout.addWidget(self.h_box, 3, 1)
         self.apply = QtWidgets.QPushButton("Apply")
+        self.apply.setToolTip("Apply new FOV.")
         self.layout.addWidget(self.apply, 4, 0)
         self.apply.clicked.connect(self.update_scene)
         self.savefov = QtWidgets.QPushButton("Save FOV")
+        self.savefov.setToolTip("Save current FOV as a .txt file.")
         self.layout.addWidget(self.savefov, 5, 0)
         self.savefov.clicked.connect(self.save_fov)
         self.loadfov = QtWidgets.QPushButton("Load FOV")
+        self.loadfov.setToolTip("Load FOV from a .txt file.")
         self.layout.addWidget(self.loadfov, 6, 0)
         self.loadfov.clicked.connect(self.load_fov)
 
@@ -2898,6 +3056,11 @@ class InfoDialog(QtWidgets.QDialog):
         Shows the calculated std number of binding sites in all picks.
     picks_grid : QGridLayout
         Contains all the info about the picks.
+    pick_info: dict
+        Summary of pick information (see self.udpate_pick_info_long).
+        Contains keys: "pooled dark" (mean dark time), "length" (list
+        of bright times per pick), and "dark" (list of dark times per
+        pick).
     rmsd_mean : QLabel
         Shows the mean root mean square displacement in all picks in
         x and y axes.
@@ -2944,22 +3107,39 @@ class InfoDialog(QtWidgets.QDialog):
         display_groupbox = QtWidgets.QGroupBox("Display")
         vbox.addWidget(display_groupbox)
         display_grid = QtWidgets.QGridLayout(display_groupbox)
-        display_grid.addWidget(QtWidgets.QLabel("Image width:"), 0, 0)
+        width_label = QtWidgets.QLabel("Image width:")
+        width_label.setToolTip("Width of the current FOV (display pixels).")
+        display_grid.addWidget(width_label, 0, 0)
         self.width_label = QtWidgets.QLabel()
         display_grid.addWidget(self.width_label, 0, 1)
-        display_grid.addWidget(QtWidgets.QLabel("Image height:"), 1, 0)
+        height_label = QtWidgets.QLabel("Image height:")
+        height_label.setToolTip("Height of the current FOV (display pixels).")
+        display_grid.addWidget(height_label, 1, 0)
         self.height_label = QtWidgets.QLabel()
         display_grid.addWidget(self.height_label, 1, 1)
 
-        display_grid.addWidget(QtWidgets.QLabel("View X / Y:"), 2, 0)
+        view_xy_label = QtWidgets.QLabel("View X / Y:")
+        view_xy_label.setToolTip(
+            "XY coordinates of the current FOV's top-left corner "
+            "(display pixels)."
+        )
+        display_grid.addWidget(view_xy_label, 2, 0)
         self.xy_label = QtWidgets.QLabel()
         display_grid.addWidget(self.xy_label, 2, 1)
 
-        display_grid.addWidget(QtWidgets.QLabel("View width / height:"), 3, 0)
+        view_wh_label = QtWidgets.QLabel("View width / height:")
+        view_wh_label.setToolTip(
+            "Width and height of the current FOV (display pixels)."
+        )
+        display_grid.addWidget(view_wh_label, 3, 0)
         self.wh_label = QtWidgets.QLabel()
         display_grid.addWidget(self.wh_label, 3, 1)
 
         self.change_display = QtWidgets.QPushButton("Change field of view")
+        self.change_display.setToolTip(
+            "Manually change the field of view by specifying\n"
+            "the top-left corner coordinates and the width and height."
+        )
         display_grid.addWidget(self.change_display, 4, 0)
         self.change_display.clicked.connect(self.change_fov.show)
 
@@ -2967,20 +3147,31 @@ class InfoDialog(QtWidgets.QDialog):
         movie_groupbox = QtWidgets.QGroupBox("Movie")
         vbox.addWidget(movie_groupbox)
         self.movie_grid = QtWidgets.QGridLayout(movie_groupbox)
-        self.movie_grid.addWidget(
-            QtWidgets.QLabel("Median fit precision:"), 0, 0
+        med_lp_label = QtWidgets.QLabel("Median localization precision:")
+        med_lp_label.setToolTip(
+            "Median localization precision of the first channel."
         )
+        self.movie_grid.addWidget(med_lp_label, 0, 0)
         self.fit_precision = QtWidgets.QLabel("-")
         self.movie_grid.addWidget(self.fit_precision, 0, 1)
-        self.movie_grid.addWidget(QtWidgets.QLabel("NeNA precision:"), 1, 0)
+        nena_label = QtWidgets.QLabel("NeNA precision:")
+        nena_label.setToolTip(
+            "Experimental estimate of the average localization precision.\n"
+            "See Endesfelder et al. Histochemistry and cell biology, 2014."
+        )
+        self.movie_grid.addWidget(nena_label, 1, 0)
         self.nena_label = QtWidgets.QLabel("-")
         self.movie_grid.addWidget(self.nena_label, 1, 1)
         self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
+        self.nena_button.setToolTip("Click to calculate NeNA precision.")
         self.nena_button.clicked.connect(self.calculate_nena_lp)
         self.nena_button.setDefault(False)
         self.nena_button.setAutoDefault(False)
         self.movie_grid.addWidget(self.nena_button, 2, 0)
         show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
+        show_nena_plot_button.setToolTip(
+            "Show NeNA plot (only after it was calculated)."
+        )
         show_nena_plot_button.clicked.connect(self.show_nena_plot)
         self.movie_grid.addWidget(show_nena_plot_button, 2, 1)
 
@@ -2988,33 +3179,58 @@ class InfoDialog(QtWidgets.QDialog):
         frc_groupbox = QtWidgets.QGroupBox("FRC (uses current FOV)")
         vbox.addWidget(frc_groupbox)
         self.frc_grid = QtWidgets.QGridLayout(frc_groupbox)
-        self.frc_grid.addWidget(QtWidgets.QLabel("FRC resolution (nm):"), 0, 0)
+        frc_label = QtWidgets.QLabel("FRC resolution (nm):")
+        frc_label.setToolTip(
+            "Experimental resolution estimate using Fourier Ring "
+            "Correlation.\n"
+            "See Nieuwenhuizen et al. Nature Methods, 2013."
+        )
+        self.frc_grid.addWidget(frc_label, 0, 0)
         self.frc_resolution = QtWidgets.QLabel("-")
         self.frc_grid.addWidget(self.frc_resolution, 0, 1)
+        self.save_images_check = QtWidgets.QCheckBox("Save rendered images")
+        self.save_images_check.setToolTip(
+            "Save 2 rendered images as .tif files?"
+        )
+        self.frc_grid.addWidget(self.save_images_check, 1, 0, 1, 2)
         calculate_frc_button = QtWidgets.QPushButton("Calculate FRC")
+        calculate_frc_button.setToolTip("Click to calculate FRC resolution.")
         calculate_frc_button.clicked.connect(self.calculate_frc_resolution)
-        self.frc_grid.addWidget(calculate_frc_button, 1, 0)
+        self.frc_grid.addWidget(calculate_frc_button, 2, 0)
         show_frc_button = QtWidgets.QPushButton("Show FRC plot")
+        show_frc_button.setToolTip(
+            "Show FRC plot (only after it was calculated)."
+        )
         show_frc_button.clicked.connect(self.show_frc_plot)
-        self.frc_grid.addWidget(show_frc_button, 1, 1)
+        self.frc_grid.addWidget(show_frc_button, 2, 1)
 
         # FOV
         fov_groupbox = QtWidgets.QGroupBox("Field of view")
         vbox.addWidget(fov_groupbox)
         fov_grid = QtWidgets.QGridLayout(fov_groupbox)
-        fov_grid.addWidget(QtWidgets.QLabel("# Localizations:"), 0, 0)
+        nlocs_label = QtWidgets.QLabel("No. of localizations in FOV:")
+        nlocs_label.setToolTip(
+            "Number of localizations currently displayed\n"
+            "in the field of view."
+        )
+        fov_grid.addWidget(nlocs_label, 0, 0)
         self.locs_label = QtWidgets.QLabel()
         fov_grid.addWidget(self.locs_label, 0, 1)
 
         # Picks
-        picks_groupbox = QtWidgets.QGroupBox("Picks")
+        picks_groupbox = QtWidgets.QGroupBox("Picks, kinetics and qPAINT")
         vbox.addWidget(picks_groupbox)
         self.picks_grid = QtWidgets.QGridLayout(picks_groupbox)
-        self.picks_grid.addWidget(QtWidgets.QLabel("# Picks:"), 0, 0)
+        npicks_label = QtWidgets.QLabel("Number of picks:")
+        npicks_label.setToolTip("Number of picks loaded.")
+        self.picks_grid.addWidget(npicks_label, 0, 0)
         self.n_picks = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_picks, 0, 1)
         compute_pick_info_button = QtWidgets.QPushButton(
             "Calculate info below"
+        )
+        compute_pick_info_button.setToolTip(
+            "Calculate pick statistics, see the properties below."
         )
         compute_pick_info_button.clicked.connect(
             self.window.view.update_pick_info_long
@@ -3023,77 +3239,116 @@ class InfoDialog(QtWidgets.QDialog):
         self.picks_grid.addWidget(QtWidgets.QLabel("<b>Mean</b"), 2, 1)
         self.picks_grid.addWidget(QtWidgets.QLabel("<b>Std</b>"), 2, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("# Localizations:"), row, 0)
+        nlocspick_label = QtWidgets.QLabel("No. of localizations:")
+        nlocspick_label.setToolTip(
+            "Number of localizations per pick (mean and std)."
+        )
+        self.picks_grid.addWidget(nlocspick_label, row, 0)
         self.n_localizations_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_localizations_mean, row, 1)
         self.n_localizations_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_localizations_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(
-            QtWidgets.QLabel("RMSD to COM (nm):"),
-            row,
-            0,
+        rmsd_label = QtWidgets.QLabel("RMSD to COM (nm):")
+        rmsd_label.setToolTip(
+            "Root mean square displacement to the center of mass "
+            "per pick (mean and std)."
         )
+        self.picks_grid.addWidget(rmsd_label, row, 0)
         self.rmsd_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_mean, row, 1)
         self.rmsd_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("RMSD in z:"), row, 0)
+        rmsdz_label = QtWidgets.QLabel("RMSD in z (nm):")
+        rmsdz_label.setToolTip(
+            "Root mean square displacement in the z direction "
+            "per pick (mean and std)."
+        )
+        self.picks_grid.addWidget(rmsdz_label, row, 0)
         self.rmsd_z_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_z_mean, row, 1)
         self.rmsd_z_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_z_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(
-            QtWidgets.QLabel("Ignore dark times <="), row, 0
+        ignore_dark_label = QtWidgets.QLabel("Ignore dark times <=")
+        ignore_dark_label.setToolTip(
+            "Maximum dark time (frames) between localizations to be\n"
+            "considered as belonging to the same group of linked "
+            "localizations.\nUsed in all qPAINT calculations\n"
+            "(below and pick/group properties in the File menu)."
         )
+        self.picks_grid.addWidget(ignore_dark_label, row, 0)
         self.max_dark_time = QtWidgets.QSpinBox()
         self.max_dark_time.setRange(0, int(1e9))
         self.max_dark_time.setValue(1)
         self.picks_grid.addWidget(self.max_dark_time, row, 1, 1, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("Length:"), row, 0)
+        length_label = QtWidgets.QLabel("Bright time (frames):")
+        length_label.setToolTip(
+            "Bright time (frames) per pick (arithmetic mean and std)."
+        )
+        self.picks_grid.addWidget(length_label, row, 0)
         self.length_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.length_mean, row, 1)
         self.length_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.length_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("Dark time:"), row, 0)
+        dark_label = QtWidgets.QLabel("Dark time (frames):")
+        dark_label.setToolTip(
+            "Dark time (frames) per pick (arithmetic mean and std)."
+        )
+        self.picks_grid.addWidget(dark_label, row, 0)
         self.dark_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_mean, row, 1)
         self.dark_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_std, row, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(
-            QtWidgets.QLabel("# Units per pick:"), row, 0
-        )
+        nunits_label = QtWidgets.QLabel("No. of units per pick:")
+        nunits_label.setToolTip("Input the number of binding sites per pick.")
+        self.picks_grid.addWidget(nunits_label, row, 0)
         self.units_per_pick = QtWidgets.QSpinBox()
         self.units_per_pick.setRange(1, int(1e6))
         self.units_per_pick.setValue(1)
         self.picks_grid.addWidget(self.units_per_pick, row, 1, 1, 2)
         calculate_influx_button = QtWidgets.QPushButton("Calibrate influx")
+        calculate_influx_button.setToolTip(
+            "Calculate influx rate (qPAINT index of a single binding site)\n"
+            "in units of (1/frames), based on the number of binding sites\n"
+            "per pick (Number of units per pick above) and the mean dark time."
+        )
         calculate_influx_button.clicked.connect(self.calibrate_influx)
         self.picks_grid.addWidget(
             calculate_influx_button, self.picks_grid.rowCount(), 0, 1, 3
         )
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(
-            QtWidgets.QLabel("Influx rate (1/frames):"), row, 0
+        influx_label = QtWidgets.QLabel("Influx rate (1/frames):")
+        influx_label.setToolTip(
+            "Calculated or input influx rate (qPAINT index of a single\n"
+            "binding site) in units of (1/frames)."
         )
+        self.picks_grid.addWidget(influx_label, row, 0)
         self.influx_rate = FloatEdit()
         self.influx_rate.setValue(0.03)
         self.influx_rate.valueChanged.connect(self.update_n_units)
         self.picks_grid.addWidget(self.influx_rate, row, 1, 1, 2)
         row = self.picks_grid.rowCount()
-        self.picks_grid.addWidget(QtWidgets.QLabel("# Units:"), row, 0)
+        qpaint_label = QtWidgets.QLabel("Number of units:")
+        qpaint_label.setToolTip(
+            "Calculated number of binding sites per pick using qPAINT "
+            "(mean and std)."
+        )
+        self.picks_grid.addWidget(qpaint_label, row, 0)
         self.n_units_mean = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_units_mean, row, 1)
         self.n_units_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_units_std, row, 2)
         self.pick_hist_window = PickHistWindow()
-        pick_hists = QtWidgets.QPushButton("Histograms")
-        pick_hists.clicked.connect(self.pick_hist_window.show)
+        pick_hists = QtWidgets.QPushButton("Show fitted binding kinetics")
+        pick_hists.setToolTip(
+            "Show histograms with fitted mean bright and dark times per pick."
+        )
+        pick_hists.clicked.connect(self.open_pick_hist)
         self.picks_grid.addWidget(
             pick_hists, self.picks_grid.rowCount(), 0, 1, 3
         )
@@ -3113,12 +3368,13 @@ class InfoDialog(QtWidgets.QDialog):
             median_lp = self.window.view.median_lp
             max_size = 2000 * (median_lp / 2)
             height, width = self.window.view.viewport_size()
-            if height > max_size or width > max_size:
+            if height > max_size and width > max_size:
                 text = (
                     "The current FOV is large and will likely lead to a long "
                     "computation time (current FOV leads to an image of size "
-                    f"{int(width/median_lp/2):,} x {int(height/median_lp/2):,}"
-                    " pixels).\n\nPlease consider reducing the FOV size before"
+                    f"{int(width/(median_lp/2)):,} x "
+                    f"{int(height/(median_lp/2)):,} pixels).\n\n"
+                    "Please consider reducing the FOV size before"
                     " calculating the FRC resolution.\n\nDo you want to "
                     "proceed?"
                 )
@@ -3131,10 +3387,31 @@ class InfoDialog(QtWidgets.QDialog):
                 if not reply == QtWidgets.QMessageBox.Yes:
                     return
 
+            # get the name prefix for saving images
+            if self.save_images_check.isChecked():
+                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    self,
+                    "Save images",
+                    self.window.view.locs_paths[channel].replace(
+                        ".hdf5", "_frc_im.tif"
+                    ),
+                    filter="*.tif",
+                )
+                if not path:
+                    return
+            else:
+                path = None
+
             # calculate frc
             self.frc_result = postprocess.frc(
                 locs.copy(), info, self.window.view.viewport
             )
+            if path:  # save images
+                base, ext = os.path.splitext(path)
+                image1 = Image.fromarray(self.frc_result["images"][0])
+                image1.save(f"{base}_1{ext}")
+                image2 = Image.fromarray(self.frc_result["images"][1])
+                image2.save(f"{base}_2{ext}")
             res_nm = self.frc_result["resolution"]
             self.frc_resolution.setText(f"{res_nm:.2f} nm")
 
@@ -3200,6 +3477,20 @@ class InfoDialog(QtWidgets.QDialog):
         n_units = self.calculate_n_units(self.pick_info["dark"])
         self.n_units_mean.setText("{:,.2f}".format(np.mean(n_units)))
         self.n_units_std.setText("{:,.2f}".format(np.std(n_units)))
+
+    def open_pick_hist(self) -> None:
+        """Open pick histograms window with binding kinetics histograms
+        and fits."""
+        if self.pick_hist_window.plotted:
+            self.pick_hist_window.show()
+        else:
+            message = (
+                "Pick info not calculated.\n"
+                "Please select circular picks and run 'Calculate info below' "
+                "first."
+            )
+            QtWidgets.QMessageBox.warning(self, "No pick info", message)
+            return
 
 
 class NenaPlotWindow(QtWidgets.QTabWidget):
@@ -3327,7 +3618,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
     pixelsize : float
         Camera pixel size (nm).
     plots : list of QLabel
-        Used for displaying the 4 plots (original, blurred, mask,
+        Used for displaying the 4 plots (histogram, blurred, mask,
         masked).
     save_all : QCheckBox
         If checked, all channels loaded are masked; otherwise only
@@ -3363,11 +3654,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         vbox.addWidget(settings_groupbox)
         settings_grid = QtWidgets.QGridLayout(settings_groupbox)
 
-        settings_grid.addWidget(
-            QtWidgets.QLabel("Display pixel size (nm)"),
-            0,
-            0,
-        )
+        disp_label = QtWidgets.QLabel("Display pixel size (nm):")
+        disp_label.setToolTip("Mask pixel size in nm.")
+        settings_grid.addWidget(disp_label, 0, 0)
         self.disp_px_size = QtWidgets.QSpinBox()
         self.disp_px_size.setRange(10, 99999)
         self.disp_px_size.setValue(300)
@@ -3376,7 +3665,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.disp_px_size.valueChanged.connect(self.update_plots)
         settings_grid.addWidget(self.disp_px_size, 0, 1)
 
-        settings_grid.addWidget(QtWidgets.QLabel("Blur (nm)"), 0, 2)
+        blur_label = QtWidgets.QLabel("Blur (nm):")
+        blur_label.setToolTip("Gaussian \u03c3 for blurring the image.")
+        settings_grid.addWidget(blur_label, 0, 2)
         self.mask_blur = QtWidgets.QSpinBox()
         self.mask_blur.setRange(1, 999999)
         self.mask_blur.setValue(500)
@@ -3387,7 +3678,14 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
         threshold_layout = QtWidgets.QHBoxLayout()
         settings_grid.addLayout(threshold_layout, 1, 0, 1, 4)
-        threshold_layout.addWidget(QtWidgets.QLabel("Threshold"))
+        thresh_label = QtWidgets.QLabel("Threshold:")
+        thresh_label.setToolTip(
+            "Select threshold for the binary mask.\n'Custom' uses the "
+            "manually specified value; other methods are automatic.\n"
+            "Threshold ranges from 0 to 1 and is based on the blurred "
+            "image."
+        )
+        threshold_layout.addWidget(thresh_label)
         self.mask_thresh = QtWidgets.QDoubleSpinBox()
         self.mask_thresh.setRange(0, 1)
         self.mask_thresh.setValue(0.5)
@@ -3415,6 +3713,9 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.thresh_method.activated.connect(self.update_plots)
         threshold_layout.addWidget(self.thresh_method)
         show_hist_button = QtWidgets.QPushButton("Show histogram")
+        show_hist_button.setToolTip(
+            "Show histogram of the pixel values in the blurred image"
+        )
         show_hist_button.setFocusPolicy(QtCore.Qt.NoFocus)
         show_hist_button.clicked.connect(self.show_hist)
         threshold_layout.addWidget(show_hist_button)
@@ -3432,32 +3733,47 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         vbox.addWidget(mask_groupbox)
         mask_grid = QtWidgets.QGridLayout(mask_groupbox)
         self.save_all = QtWidgets.QCheckBox("Mask all channels")
+        self.save_all.setToolTip("Mask all loaded channels?")
         self.save_all.setChecked(False)
         mask_grid.addWidget(self.save_all, 0, 0)
 
         load_mask_button = QtWidgets.QPushButton("Load Mask")
+        load_mask_button.setToolTip(
+            "Load a previously saved mask (.npy file)."
+        )
         load_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
         load_mask_button.clicked.connect(self.load_mask)
         mask_grid.addWidget(load_mask_button, 1, 0)
 
         self.save_mask_button = QtWidgets.QPushButton("Save Mask")
+        self.save_mask_button.setToolTip(
+            "Save the current mask as a .npy file.\n"
+            "Additionally an image file is saved as .png."
+        )
         self.save_mask_button.setEnabled(False)
         self.save_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_mask_button.clicked.connect(self.save_mask)
         mask_grid.addWidget(self.save_mask_button, 1, 1)
 
         self.save_blur_button = QtWidgets.QPushButton("Save Blurred")
+        self.save_blur_button.setToolTip(
+            "Save the blurred image as a .png file."
+        )
         self.save_blur_button.setEnabled(False)
         self.save_blur_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_blur_button.clicked.connect(self.save_blur)
         mask_grid.addWidget(self.save_blur_button, 1, 2)
 
         mask_button = QtWidgets.QPushButton("Mask")
+        mask_button.setToolTip("Apply the mask to the localizations.")
         mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
         mask_button.clicked.connect(self.mask_locs)
         mask_grid.addWidget(mask_button, 2, 0)
 
         self.save_button = QtWidgets.QPushButton("Save localizations")
+        self.save_button.setToolTip(
+            "Save localization inside and outside the mask."
+        )
         self.save_button.setEnabled(False)
         self.save_button.setFocusPolicy(QtCore.Qt.NoFocus)
         self.save_button.clicked.connect(self.save_locs)
@@ -3501,7 +3817,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         )
         self.H = H / H.max()
         self.plots[0].setPixmap(
-            self.render_to_pixmap(self.H, title="Original")
+            self.render_to_pixmap(self.H, title="Histogramed localizations")
         )
 
     def blur_image(self) -> None:
@@ -3747,6 +4063,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         ax = self.hist_window.figure.add_subplot(111)
         ax.set_title("Density of blurred image values")
         vals = self.H_blur.ravel()
+        vals = vals[vals > 0]  # exclude zeroes that skew the image
         bins = lib.calculate_optimal_bins(vals, max_n_bins=1000)
         hist, bins, _ = ax.hist(vals, bins=bins, label="Data", density=True)
         ax.axvline(
@@ -3830,7 +4147,9 @@ class PickToolCircleSettings(QtWidgets.QWidget):
         super().__init__()
         self.grid = QtWidgets.QGridLayout(self)
         self.window = window
-        self.grid.addWidget(QtWidgets.QLabel("Diameter (nm):"), 0, 0)
+        diameter_label = QtWidgets.QLabel("Diameter (nm):")
+        diameter_label.setToolTip("Diameter of the circular pick.")
+        self.grid.addWidget(diameter_label, 0, 0)
         self.pick_diameter = QtWidgets.QDoubleSpinBox()
         self.pick_diameter.setRange(0.1, 99999999)
         self.pick_diameter.setValue(100.0)
@@ -3841,9 +4160,14 @@ class PickToolCircleSettings(QtWidgets.QWidget):
             tools_settings_dialog.on_pick_dimension_changed
         )
         self.grid.addWidget(self.pick_diameter, 0, 1)
-        self.grid.addWidget(
-            QtWidgets.QLabel("Pick similar +/- range (std)"), 1, 0
+        range_label = QtWidgets.QLabel("Pick similar +/- range (std):")
+        range_label.setToolTip(
+            "Range for picking similar picks in standard deviations.\n"
+            "Pick similar uses the mean and standard deviation of the "
+            "number of localizations and their RMSD per pick to select "
+            "similar picks."
         )
+        self.grid.addWidget(range_label, 1, 0)
         self.pick_similar_range = QtWidgets.QDoubleSpinBox()
         self.pick_similar_range.setRange(0, 100000)
         self.pick_similar_range.setValue(2)
@@ -3863,7 +4187,9 @@ class PickToolRectangleSettings(QtWidgets.QWidget):
         super().__init__()
         self.window = window
         self.grid = QtWidgets.QGridLayout(self)
-        self.grid.addWidget(QtWidgets.QLabel("Width (nm):"), 0, 0)
+        width_label = QtWidgets.QLabel("Width (nm):")
+        width_label.setToolTip("Width of the rectangular pick.")
+        self.grid.addWidget(width_label, 0, 0)
         self.pick_width = QtWidgets.QDoubleSpinBox()
         self.pick_width.setRange(0.1, 99999999.0)
         self.pick_width.setValue(100.0)
@@ -3888,7 +4214,9 @@ class PickToolSquareSettings(QtWidgets.QWidget):
         super().__init__()
         self.window = window
         self.grid = QtWidgets.QGridLayout(self)
-        self.grid.addWidget(QtWidgets.QLabel("Side length (nm):"), 0, 0)
+        side_label = QtWidgets.QLabel("Side length (nm):")
+        side_label.setToolTip("Side lengths of the square pick.")
+        self.grid.addWidget(side_label, 0, 0)
         self.pick_side_length = QtWidgets.QDoubleSpinBox()
         self.pick_side_length.setRange(0.1, 99999999.0)
         self.pick_side_length.setValue(100.0)
@@ -3934,7 +4262,9 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
         self.vbox.addWidget(self.pick_groupbox)
         pick_grid = QtWidgets.QGridLayout(self.pick_groupbox)
 
-        pick_grid.addWidget(QtWidgets.QLabel("Shape:"), 1, 0)
+        shape_label = QtWidgets.QLabel("Shape:")
+        shape_label.setToolTip("Select the shape of the pick tool.")
+        pick_grid.addWidget(shape_label, 1, 0)
         self.pick_shape = QtWidgets.QComboBox()
         self.pick_shape.addItems(["Circle", "Rectangle", "Polygon", "Square"])
         pick_grid.addWidget(self.pick_shape, 1, 1)
@@ -3963,12 +4293,16 @@ class ToolsSettingsDialog(QtWidgets.QDialog):
         self.pick_side_length = self.pick_square_settings.pick_side_length
 
         self.pick_annotation = QtWidgets.QCheckBox("Annotate picks")
+        self.pick_annotation.setToolTip(
+            "Display pick indices in the main window?"
+        )
         self.pick_annotation.stateChanged.connect(self.update_scene_with_cache)
         pick_grid.addWidget(self.pick_annotation, 3, 0)
 
         self.point_picks = QtWidgets.QCheckBox(
             "Display circular picks as points"
         )
+        self.point_picks.setToolTip("Display circular picks as points?")
         self.point_picks.stateChanged.connect(self.update_scene_with_cache)
         pick_grid.addWidget(self.point_picks, 4, 0)
 
@@ -4318,7 +4652,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
     maximum_render : QDoubleSpinBox
         Contains the maximum value of the parameter to be rendered.
     min_blur_width : QDoubleSpinBox
-        Contains the minimum blur for each localization (camera pixels).
+        Contains the minimum blur for each localization (nm).
     minimap : QCheckBox
         Tick to display minimap showing current FOV.
     minimum : QDoubleSpinBox
@@ -4365,15 +4699,17 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         general_groupbox = QtWidgets.QGroupBox("General")
         vbox.addWidget(general_groupbox)
         general_grid = QtWidgets.QGridLayout(general_groupbox)
-        general_grid.addWidget(QtWidgets.QLabel("Zoom:"), 0, 0)
+        zoom_label = QtWidgets.QLabel("Zoom:")
+        zoom_label.setToolTip("Zoom factor for display.")
+        general_grid.addWidget(zoom_label, 0, 0)
         self.zoom = QtWidgets.QDoubleSpinBox()
         self.zoom.setKeyboardTracking(False)
         self.zoom.setRange(10 ** (-self.zoom.decimals()), 1e6)
         self.zoom.valueChanged.connect(self.on_zoom_changed)
         general_grid.addWidget(self.zoom, 0, 1)
-        general_grid.addWidget(
-            QtWidgets.QLabel("Display pixel size (nm):"), 1, 0
-        )
+        disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
+        disp_px_label.setToolTip("Size of the pixels in the rendered image.")
+        general_grid.addWidget(disp_px_label, 1, 0)
         self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.00001, 100000)
@@ -4396,6 +4732,10 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         vbox.addWidget(contrast_groupbox)
         contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
         minimum_label = QtWidgets.QLabel("Min. Density:")
+        minimum_label.setToolTip(
+            "Minimum density (localizations per super-resolution pixel)"
+            " rendered."
+        )
         contrast_grid.addWidget(minimum_label, 0, 0)
         self.minimum = QtWidgets.QDoubleSpinBox()
         self.minimum.setRange(0, 999999)
@@ -4406,6 +4746,10 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.minimum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.minimum, 0, 1)
         maximum_label = QtWidgets.QLabel("Max. Density:")
+        maximum_label.setToolTip(
+            "Maximum density (localizations per super-resolution pixel)"
+            " rendered."
+        )
         contrast_grid.addWidget(maximum_label, 1, 0)
         self.maximum = QtWidgets.QDoubleSpinBox()
         self.maximum.setRange(0, 999999)
@@ -4415,7 +4759,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.maximum.setKeyboardTracking(False)
         self.maximum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
-        contrast_grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
+        c_label = QtWidgets.QLabel("Colormap:")
+        c_label.setToolTip("Colormap used for rendering.")
+        contrast_grid.addWidget(c_label, 2, 0)
         self.colormap = QtWidgets.QComboBox()
         self.colormap.addItems(plt.colormaps())
         self.colormap.addItem("Custom")
@@ -4427,19 +4773,38 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         blur_grid = QtWidgets.QGridLayout(blur_groupbox)
         self.blur_buttongroup = QtWidgets.QButtonGroup()
         points_button = QtWidgets.QRadioButton("None")
+        points_button.setToolTip(
+            "No blur applied; each localization is rendered as a point."
+        )
         self.blur_buttongroup.addButton(points_button)
         smooth_button = QtWidgets.QRadioButton("One-Pixel-Blur")
+        smooth_button.setToolTip(
+            "Each localization is Gaussian blurred with a \u03c3 of one "
+            "rendered pixel."
+        )
         self.blur_buttongroup.addButton(smooth_button)
         convolve_button = QtWidgets.QRadioButton(
             "Global Localization Precision"
+        )
+        convolve_button.setToolTip(
+            "Each localization is Gaussian blurred with a \u03c3 equal to\n"
+            "the median localization precision of the dataset."
         )
         self.blur_buttongroup.addButton(convolve_button)
         gaussian_button = QtWidgets.QRadioButton(
             "Individual Localization Precision"
         )
+        gaussian_button.setToolTip(
+            "Each localization is Gaussian blurred with a \u03c3 equal to\n"
+            "its individual localization precision."
+        )
         self.blur_buttongroup.addButton(gaussian_button)
         gaussian_iso_button = QtWidgets.QRadioButton(
             "Individual Localization Precision, iso"
+        )
+        gaussian_iso_button.setToolTip(
+            "Each localization is Gaussian blurred with a \u03c3 equal to\n"
+            "its individual localization precision, isotropic in xy."
         )
         self.blur_buttongroup.addButton(gaussian_iso_button)
 
@@ -4450,14 +4815,16 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         blur_grid.addWidget(gaussian_iso_button, 4, 0, 1, 2)
         convolve_button.setChecked(True)
         self.blur_buttongroup.buttonReleased.connect(self.render_scene)
-        blur_grid.addWidget(
-            QtWidgets.QLabel("Min. Blur (cam. pixel):"), 5, 0, 1, 1
+        min_blur_label = QtWidgets.QLabel("Min. blur (nm):")
+        min_blur_label.setToolTip(
+            "Minimum blur applied to each localization (in nm)."
         )
+        blur_grid.addWidget(min_blur_label, 5, 0, 1, 1)
         self.min_blur_width = QtWidgets.QDoubleSpinBox()
         self.min_blur_width.setRange(0, 999999)
-        self.min_blur_width.setSingleStep(0.01)
+        self.min_blur_width.setSingleStep(0.1)
         self.min_blur_width.setValue(0)
-        self.min_blur_width.setDecimals(3)
+        self.min_blur_width.setDecimals(1)
         self.min_blur_width.setKeyboardTracking(False)
         self.min_blur_width.valueChanged.connect(self.render_scene)
         blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
@@ -4474,7 +4841,11 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         # Camera_parameters
         camera_groupbox = QtWidgets.QGroupBox("Camera")
         self.camera_grid = QtWidgets.QGridLayout(camera_groupbox)
-        self.camera_grid.addWidget(QtWidgets.QLabel("Pixel Size (nm):"), 0, 0)
+        pixelsize_label = QtWidgets.QLabel("Camera pixel size (nm):")
+        pixelsize_label.setToolTip(
+            "Effective camera pixel size in nm (after magnification)."
+        )
+        self.camera_grid.addWidget(pixelsize_label, 0, 0)
         self.pixelsize = QtWidgets.QDoubleSpinBox()
         self.pixelsize.setRange(1, 100000)
         self.pixelsize.setValue(130)
@@ -4484,15 +4855,15 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         vbox.addWidget(camera_groupbox)
 
         # Scalebar
-        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale Bar")
+        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
         scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
-        scalebar_grid.addWidget(
-            QtWidgets.QLabel("Scale Bar Length (nm):"), 0, 0
-        )
+        scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
+        scalebar_length_label.setToolTip("Set the length of the scale bar.")
+        scalebar_grid.addWidget(scalebar_length_label, 0, 0)
         self.scalebar = QtWidgets.QSpinBox()
         self.scalebar.setRange(1, 100000)
         self.scalebar.setValue(500)
@@ -4500,6 +4871,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.scalebar.valueChanged.connect(self.update_scene)
         scalebar_grid.addWidget(self.scalebar, 0, 1)
         self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
+        self.scalebar_text.setToolTip("Display the length of the scale bar?")
         self.scalebar_text.stateChanged.connect(self.update_scene)
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
         self._silent_disp_px_update = False
@@ -4511,12 +4883,19 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         vbox.addWidget(self.render_groupbox)
         render_grid = QtWidgets.QGridLayout(self.render_groupbox)
-        render_grid.addWidget(QtWidgets.QLabel("Parameter:"), 0, 0)
+        param_label = QtWidgets.QLabel("Parameter:")
+        param_label.setToolTip(
+            "Color-coded property, e.g. localization precision."
+        )
+        render_grid.addWidget(param_label, 0, 0)
         self.parameter = QtWidgets.QComboBox()
         render_grid.addWidget(self.parameter, 0, 1)
         self.parameter.activated.connect(self.window.view.set_property)
 
         minimum_label_render = QtWidgets.QLabel("Min.:")
+        minimum_label_render.setToolTip(
+            "Minimum value of the rendered property."
+        )
         render_grid.addWidget(minimum_label_render, 1, 0)
         self.minimum_render = QtWidgets.QDoubleSpinBox()
         self.minimum_render.setRange(-999999, 999999)
@@ -4530,6 +4909,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         )
         render_grid.addWidget(self.minimum_render, 1, 1)
         maximum_label_render = QtWidgets.QLabel("Max.:")
+        maximum_label_render.setToolTip(
+            "Maximum value of the rendered property."
+        )
         render_grid.addWidget(maximum_label_render, 2, 0)
         self.maximum_render = QtWidgets.QDoubleSpinBox()
         self.maximum_render.setRange(-999999, 999999)
@@ -4543,6 +4925,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         )
         render_grid.addWidget(self.maximum_render, 2, 1)
         color_step_label = QtWidgets.QLabel("Colors:")
+        color_step_label.setToolTip("Number of colors used in the colormap.")
         render_grid.addWidget(color_step_label, 3, 0)
         self.color_step = QtWidgets.QSpinBox()
         self.color_step.setRange(1, 256)
@@ -4562,10 +4945,15 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.colormap_prop.activated.connect(
             self.window.view.activate_render_property
         )
-        render_grid.addWidget(QtWidgets.QLabel("Colormap:"), 4, 0)
+        cmap_label = QtWidgets.QLabel("Colormap:")
+        cmap_label.setToolTip("Colormap used for rendering the property.")
+        render_grid.addWidget(cmap_label, 4, 0)
         render_grid.addWidget(self.colormap_prop, 4, 1)
 
         self.render_check = QtWidgets.QCheckBox("Render")
+        self.render_check.setToolTip(
+            "Activate rendering of the selected property?"
+        )
         self.render_check.stateChanged.connect(
             self.window.view.activate_render_property
         )
@@ -4573,6 +4961,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         render_grid.addWidget(self.render_check, 5, 0)
 
         self.show_legend = QtWidgets.QPushButton("Show legend")
+        self.show_legend.setToolTip(
+            "Display the legend for the rendered property."
+        )
         render_grid.addWidget(self.show_legend, 5, 1)
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
@@ -4863,7 +5254,11 @@ class SlicerDialog(QtWidgets.QDialog):
 
         vbox.addWidget(slicer_groupbox)
         slicer_grid = QtWidgets.QGridLayout(slicer_groupbox)
-        slicer_grid.addWidget(QtWidgets.QLabel("Slice Thickness [nm]:"), 0, 0)
+        thickness_label = QtWidgets.QLabel("Slice thickness (nm):")
+        thickness_label.setToolTip(
+            "Select the thickness of each z slice in nm."
+        )
+        slicer_grid.addWidget(thickness_label, 0, 0)
         self.pick_slice = QtWidgets.QDoubleSpinBox()
         self.pick_slice.setRange(0.01, 99999)
         self.pick_slice.setValue(50)
@@ -4874,6 +5269,7 @@ class SlicerDialog(QtWidgets.QDialog):
         slicer_grid.addWidget(self.pick_slice, 0, 1)
 
         self.sl = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sl.setToolTip("Select the z slice to be displayed.")
         self.sl.setMinimum(0)
         self.sl.setMaximum(50)
         self.sl.setValue(25)
@@ -4882,19 +5278,34 @@ class SlicerDialog(QtWidgets.QDialog):
         self.sl.valueChanged.connect(self.on_slice_position_changed)
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
 
-        self.figure, self.ax = plt.subplots(1, figsize=(3, 3))
+        self.figure, self.ax = plt.subplots(
+            1, figsize=(3, 3), constrained_layout=True
+        )
         self.canvas = FigureCanvas(self.figure)
         slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
 
         self.slicer_radio_button = QtWidgets.QCheckBox("Slice Dataset")
+        self.slicer_radio_button.setToolTip(
+            "Render the selected z slice in the main window?"
+        )
         self.slicer_radio_button.stateChanged.connect(self.toggle_slicer)
         slicer_grid.addWidget(self.slicer_radio_button, 3, 0)
 
         self.separate_check = QtWidgets.QCheckBox("Export channels separate")
+        self.separate_check.setToolTip(
+            "Save each channel separately when exporting slices?"
+        )
         slicer_grid.addWidget(self.separate_check, 4, 0)
         self.full_check = QtWidgets.QCheckBox("Export full image")
+        self.full_check.setToolTip(
+            "Save the full field of view when exporting slices,\n"
+            "otherwise only the current viewport is saved."
+        )
         slicer_grid.addWidget(self.full_check, 5, 0)
         self.export_button = QtWidgets.QPushButton("Export Slices")
+        self.export_button.setToolTip(
+            "Save all z slices as .tif files in the selected folder."
+        )
         self.export_button.setAutoDefault(False)
         self.export_button.clicked.connect(self.export_stack)
         slicer_grid.addWidget(self.export_button, 6, 0)
@@ -4905,6 +5316,7 @@ class SlicerDialog(QtWidgets.QDialog):
         """Called when the dialog is open, calculate the histograms and
         show the dialog."""
         self.calculate_histogram()
+        self.slicer_radio_button.setChecked(True)
         self.show()
 
     def calculate_histogram(self) -> None:
@@ -4945,9 +5357,9 @@ class SlicerDialog(QtWidgets.QDialog):
             )
             self.patches.append(patches)
 
-        self.ax.set_xlabel("z-coordinate [nm]")
+        self.ax.set_xlabel("Z position (nm)")
         self.ax.set_ylabel("Rel. frequency")
-        self.ax.set_title(r"$\mathrm{Histogram\ of\ Z:}$")
+        self.ax.set_title("No. of localizations per z slice")
         self.canvas.draw()
         self.sl.setMaximum(int(len(self.bins)) - 2)
         self.sl.setValue(int(len(self.bins) / 2))
@@ -5070,6 +5482,15 @@ class SlicerDialog(QtWidgets.QDialog):
                         self.window.view.qimage.save(out_path)
                     progress.set_value(i)
                 progress.close()
+
+    def closeEvent(self, event: QtCore.QCloseEvent):
+        """Unslice data."""
+        self.slicer_radio_button.setChecked(False)
+        event.accept()
+
+    def reject(self, *args, **kwargs):
+        """Unslice data if the dialog is closed with the escape key."""
+        self.close()
 
 
 class View(QtWidgets.QLabel):
@@ -5598,6 +6019,8 @@ class View(QtWidgets.QLabel):
             return
         else:
             r_max, max_dark, ok = LinkDialog.getParams()
+            # nm to pixels
+            r_max /= self.window.display_settings_dlg.pixelsize.value()
             if ok:
                 status = lib.StatusDialog("Linking localizations...", self)
                 self.all_locs[channel] = postprocess.link(
@@ -5741,6 +6164,9 @@ class View(QtWidgets.QLabel):
 
         # get HDBSCAN parameters
         params, ok = HdbscanDialog.getParams()
+        params[
+            "cluster_eps"
+        ] /= self.window.display_settings_dlg.pixelsize.value()
         if ok:
             if channel == len(self.locs_paths):  # apply to all channels
                 # get saving name suffix
@@ -6931,6 +7357,7 @@ class View(QtWidgets.QLabel):
         """
         # blur method
         disp_dlg = self.window.display_settings_dlg
+        pixelsize = disp_dlg.pixelsize.value()
         if self._pan:  # no blur when panning
             blur_method = None
         else:  # selected method
@@ -6971,7 +7398,9 @@ class View(QtWidgets.QLabel):
             "oversampling": oversampling,
             "viewport": viewport,
             "blur_method": blur_method,
-            "min_blur_width": float(disp_dlg.min_blur_width.value()),
+            "min_blur_width": float(
+                disp_dlg.min_blur_width.value() / pixelsize
+            ),
         }
         return kwargs
 
@@ -6988,11 +7417,9 @@ class View(QtWidgets.QLabel):
             if w > 0 and h > 0:
                 viewport = [(y, x), (y + h, x + w)]
                 self.update_scene(viewport=viewport)
-                self.window.info_dialog.xy_label.setText(
-                    "{:.2f} / {:.2f} ".format(x, y)
-                )
+                self.window.info_dialog.xy_label.setText(f"{x:.2f} / {y:.2f} ")
                 self.window.info_dialog.wh_label.setText(
-                    "{:.2f} / {:.2f} pixel".format(w, h)
+                    f"{w:.2f} / {h:.2f} pixels"
                 )
 
     def load_picks(self, path: str) -> None:
@@ -7066,7 +7493,11 @@ class View(QtWidgets.QLabel):
                     button.setChecked(True)
                     break
         if "Min. blur (cam. px)" in file:
-            disp_dlg.min_blur_width.setValue(file["Min. blur (cam. px)"])
+            disp_dlg.min_blur_width.setValue(
+                file["Min. blur (cam. px)"] * disp_dlg.pixelsize.value()
+            )
+        elif "Min. blur (nm)" in file:
+            disp_dlg.min_blur_width.setValue(file["Min. blur (nm)"])
         if "Colors" in file and len(file["Colors"]) == len(self.locs):
             for i, color in enumerate(file["Colors"]):
                 self.window.dataset_dialog.colorselection[i].setCurrentText(
@@ -7074,6 +7505,8 @@ class View(QtWidgets.QLabel):
                 )
         if "Scalebar length (nm)" in file:
             disp_dlg.scalebar.setValue(file["Scalebar length (nm)"])
+        elif "Scale bar length (nm)" in file:
+            disp_dlg.scalebar.setValue(file["Scale bar length (nm)"])
 
     def subtract_picks(self, path: str) -> None:
         """Clear selected picks that cover the picks loaded from path.
@@ -9959,10 +10392,10 @@ class View(QtWidgets.QLabel):
 
         channel = self.get_channel("Calculate pick info")
         if channel is not None:
-            d = self.window.tools_settings_dialog.pick_diameter.value()
-            d /= self.window.display_settings_dlg.pixelsize.value()
-            t = self.window.info_dialog.max_dark_time.value()
             pixelsize = self.window.display_settings_dlg.pixelsize.value()
+            d = self.window.tools_settings_dialog.pick_diameter.value()
+            d /= pixelsize
+            t = self.window.info_dialog.max_dark_time.value()
             r_max = min(d, 1)
             info = self.infos[channel]
             picked_locs = self.picked_locs(channel)
@@ -10686,7 +11119,9 @@ class Window(QtWidgets.QMainWindow):
         unfold_action_square.triggered.connect(self.view.unfold_groups_square)
 
         postprocess_menu.addSeparator()
-        link_action = postprocess_menu.addAction("Link localizations")
+        link_action = postprocess_menu.addAction(
+            "Link localizations (binding events)"
+        )
         link_action.triggered.connect(self.view.link)
         align_action = postprocess_menu.addAction(
             "Align channels (RCC or from picked)"
@@ -10833,10 +11268,10 @@ class Window(QtWidgets.QMainWindow):
             "Max. density": d.maximum.value(),
             "Colormap": d.colormap.currentText(),
             "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
-            "Scalebar length (nm)": d.scalebar.value(),
+            "Scale bar length (nm)": d.scalebar.value(),
             "Localizations loaded": self.view.locs_paths,
             "Colors": colors,
-            "Min. blur (cam. px)": d.min_blur_width.value(),
+            "Min. blur (nm)": d.min_blur_width.value(),
         }
         if path is not None:
             path, ext = os.path.splitext(path)
@@ -11549,12 +11984,8 @@ class Window(QtWidgets.QMainWindow):
     def update_info(self) -> None:
         """Update Window's size and median localization precision in
         ``InfoDialog``."""
-        self.info_dialog.width_label.setText(
-            "{} pixel".format((self.view.width()))
-        )
-        self.info_dialog.height_label.setText(
-            "{} pixel".format((self.view.height()))
-        )
+        self.info_dialog.width_label.setText(f"{self.view.width()} pixels")
+        self.info_dialog.height_label.setText(f"{self.view.height()} pixels")
         self.info_dialog.locs_label.setText("{:,}".format(self.view.n_locs))
         try:
             self.info_dialog.xy_label.setText(
@@ -11563,9 +11994,8 @@ class Window(QtWidgets.QMainWindow):
                 )
             )
             self.info_dialog.wh_label.setText(
-                "{:.2f} / {:.2f} pixel".format(
-                    self.view.viewport_width(), self.view.viewport_height()
-                )
+                f"{self.view.viewport_width():.2f} / "
+                f"{self.view.viewport_height():.2f} pixels"
             )
         except AttributeError:
             pass
@@ -11585,12 +12015,11 @@ class Window(QtWidgets.QMainWindow):
         except AttributeError:
             pass
         try:
-            self.info_dialog.fit_precision.setText(
-                "{:.3} nm".format(
-                    self.view.median_lp
-                    * self.display_settings_dlg.pixelsize.value()
-                )
+            lp = (
+                self.view.median_lp
+                * self.display_settings_dlg.pixelsize.value()
             )
+            self.info_dialog.fit_precision.setText(f"{lp:.2f} nm")
         except AttributeError:
             pass
 
