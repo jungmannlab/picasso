@@ -185,7 +185,7 @@ def test_localize_mle(identifications, spots):
     # then the tests can be added here as well.
 
 
-def test_localize_3d(info, identifications, spots, locs_lq):
+def test_localize_3d(info, locs_lq):
     """Test 3D localization of identified spots."""
     locs_3d = zfit.fit_z(locs_lq, info, CALIB_3D, 0.79)
     locs_3d_multi = zfit.fit_z_parallel(
