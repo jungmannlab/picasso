@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 31-DEC-2025 CEST
+Last change: 01-JAN-2026 CEST
 
 0.9.3
 -----
@@ -18,6 +18,7 @@ Important updates:
 - Render: slicer dialog automatically slices/unslices localizations when opening/closing the dialog
 - Clustering algorithms copy the input localizations to avoid modifying the input DataFrame (for example, when using Picasso as a package)
 - MLE Gauss fitting: default method is now ``sigmaxy``, i.e., sigma can vary between x and y, like in the least-squares fitting
+- Upgrade PyPI release action to release/v1 (security reasons)
 
 *Bug fixes:*
 ++++++++++++
