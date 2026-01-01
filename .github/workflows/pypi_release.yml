@@ -60,4 +60,3 @@ jobs:
         run: |
           cd release/pypi
           . ./install_pypi_wheel.sh
-          picasso render
