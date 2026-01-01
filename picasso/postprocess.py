@@ -46,14 +46,14 @@ def get_index_blocks(
     info : list of dicts
         Metadata of the localizations list.
     size : float
-        Size of the blocks.
+        Size of the blocks in camera pixels.
 
     Returns
     -------
     locs : pd.DataFrame
         Localizations in the specified blocks.
     size : float
-        Size of the blocks.
+        Size of the blocks in camera pixels.
     x_index : np.ndarray
         x indices of the localizations in the blocks.
     y_index : np.ndarray
@@ -759,7 +759,7 @@ def distance_histogram(
     bin_size : float
         Size of the bins for the histogram.
     r_max : float
-        Maximum distance for the histogram.
+        Maximum distance probed in the histogram.
 
     Returns
     -------
@@ -836,7 +836,7 @@ def nena(
         )
         return p_single + p_short
 
-    area = np.trapz(dnfl, bin_centers)
+    area = np.trapezoid(dnfl, bin_centers)
     median_lp = np.mean([np.median(locs["lpx"]), np.median(locs["lpy"])])
     p0 = [0.8 * area, median_lp, 0.1 * area, 2 * median_lp, median_lp]
     bounds = ([0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf])
@@ -981,8 +981,9 @@ def frc(
     -------
     frc_result : dict
         Dictionary with keys "frc_curve", "frc_curve_smooth",
-        "frequencies" (for spatial frequencies probed (nm^-1)) and
-        "resolution" (estimated resolution in nm).
+        "frequencies" (for spatial frequencies probed (nm^-1)),
+        "resolution" (estimated resolution in nm) and "images"
+        (2 grayscale images rendered and masked).
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     lp = nena(locs, info)[1]
@@ -1013,7 +1014,7 @@ def frc(
     locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
     locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
     # run FRC
-    frc_curve, frc_curve_smooth, frequencies, resolution = _frc(
+    frc_curve, frc_curve_smooth, frequencies, resolution, images = _frc(
         locs1, locs2, pixelsize, lp, viewport
     )
     # smooth the FRC curve and summarize findings
@@ -1022,6 +1023,7 @@ def frc(
         "frc_curve_smooth": frc_curve_smooth,
         "frequencies": frequencies,
         "resolution": resolution,
+        "images": images,
     }
     return frc_result
 
@@ -1032,7 +1034,13 @@ def _frc(
     pixelsize: float,
     lp: float,
     viewport: tuple[tuple[float, float], tuple[float, float]],
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, float | None]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    float | None,
+    tuple[np.ndarray, np.ndarray],
+]:
     """Calculate the Fourier Ring Correlation (FRC) resolution once.
 
     Generates images from the two sets of localizations and calculates
@@ -1067,12 +1075,14 @@ def _frc(
     resolution : float or None
         Estimated resolution in nm, given the 1/7 threshold. None if
         resolution could not be determined.
+    images : tuple of 2 np.ndarrays
+        2 grayscale images used for calculating FRC. Already masked.
     """
     # render images
     binsize = lp / 2
     oversampling = 1 / binsize
-    im1 = render.render(locs1, None, oversampling, viewport, "gaussian")[1]
-    im2 = render.render(locs2, None, oversampling, viewport, "gaussian")[1]
+    im1 = render.render(locs1, None, oversampling, viewport, None)[1]
+    im2 = render.render(locs2, None, oversampling, viewport, None)[1]
 
     # ensure the images are odd-sized and mask them (tukey)
     if im1.shape[0] % 2 == 0:
@@ -1121,7 +1131,7 @@ def _frc(
             f_res = f1 + (threshold - r1) * (f2 - f1) / (r2 - r1)
             resolution = 1 / f_res  # in nm
             break
-    return frc_curve, frc_curve_smooth, frequencies, resolution
+    return frc_curve, frc_curve_smooth, frequencies, resolution, (im1, im2)
 
 
 def pair_correlation(
@@ -1148,7 +1158,7 @@ def pair_correlation(
     -------
     bins_lower : np.ndarray
         Lower bounds of the bins for the histogram.
-    dh : np.ndarray
+    pc : np.ndarray
         Pair correlation function.
     """
     dh = distance_histogram(locs, info, bin_size, r_max)
@@ -1158,12 +1168,14 @@ def pair_correlation(
     if bins_lower.shape[0] > dh.shape[0]:
         bins_lower = bins_lower[:-1]
     area = np.pi * bin_size * (2 * bins_lower + bin_size)
-    return bins_lower, dh / area
+    pc = dh / area
+    return bins_lower, pc
 
 
 @numba.jit(nopython=True, nogil=True)
 def _local_density(
-    locs: pd.DataFrame,
+    x: np.ndarray,
+    y: np.ndarray,
     radius: float,
     x_index: np.ndarray,
     y_index: np.ndarray,
@@ -1173,8 +1185,6 @@ def _local_density(
     chunk: int,
 ) -> np.ndarray:
     """Calculate densities in blocks around each localization."""
-    x = locs["x"].values
-    y = locs["y"].values
     N = len(x)
     r2 = radius**2
     end = min(start + chunk, N)
@@ -1223,8 +1233,8 @@ def compute_local_density(
     locs : pd.DataFrame
         Localizations with added 'density' field/column.
     """
-    locs, x_index, y_index, block_starts, block_ends, K, L = get_index_blocks(
-        locs, info, radius
+    locs, size, x_index, y_index, block_starts, block_ends, K, L = (
+        get_index_blocks(locs, info, radius)
     )
     N = len(locs)
     n_threads = min(
@@ -1234,7 +1244,8 @@ def compute_local_density(
     starts = range(0, N, chunk)
     args = [
         (
-            locs,
+            locs["x"].values,
+            locs["y"].values,
             radius,
             x_index,
             y_index,
@@ -2324,8 +2335,6 @@ def align(
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
     using RCC.
-
-    TODO: does it work now with data frames?
 
     Parameters
     ----------

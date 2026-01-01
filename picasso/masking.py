@@ -133,7 +133,7 @@ def mask_image(
     if not isinstance(method, str):
         threshold = float(method)
         mask = binary_mask(image, threshold)
-        return mask
+        return mask, threshold
     threshold_functions = {
         "isodata": threshold_isodata,
         "li": threshold_li,
