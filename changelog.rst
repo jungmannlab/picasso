@@ -3,6 +3,20 @@ Changelog
 
 Last change: 01-JAN-2026 CEST
 
+0.9.4
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- 
+
+*Small improvements:*
++++++++++++++++++++++
+- 
+
+*Bug fixes:*
+++++++++++++
+- 
+
 0.9.3
 -----
 Important updates:

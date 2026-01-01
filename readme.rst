@@ -106,11 +106,6 @@ Besides using the GUI, you can use picasso like any other Python module. Conside
 
 For more examples, visit the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
 
-Jupyter Notebooks
------------------
-
-Check the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__ that show how to interact with the Picasso codebase.
-
 Contributing
 ------------
 
