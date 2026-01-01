@@ -25,6 +25,7 @@ Important updates:
 - Localize: picasso.localize.identify accepts roi as input argument
 - Render: show histogram in mask dialog ignores zero values
 - Render: qPAINT histograms in the info dialog fixed and improved
+- Fixed ``picasso.postprocess.compute_local_density``
 
 0.9.2
 -----

@@ -46,14 +46,14 @@ def get_index_blocks(
     info : list of dicts
         Metadata of the localizations list.
     size : float
-        Size of the blocks.
+        Size of the blocks in camera pixels.
 
     Returns
     -------
     locs : pd.DataFrame
         Localizations in the specified blocks.
     size : float
-        Size of the blocks.
+        Size of the blocks in camera pixels.
     x_index : np.ndarray
         x indices of the localizations in the blocks.
     y_index : np.ndarray
@@ -759,7 +759,7 @@ def distance_histogram(
     bin_size : float
         Size of the bins for the histogram.
     r_max : float
-        Maximum distance for the histogram.
+        Maximum distance probed in the histogram.
 
     Returns
     -------
@@ -836,7 +836,7 @@ def nena(
         )
         return p_single + p_short
 
-    area = np.trapz(dnfl, bin_centers)
+    area = np.trapezoid(dnfl, bin_centers)
     median_lp = np.mean([np.median(locs["lpx"]), np.median(locs["lpy"])])
     p0 = [0.8 * area, median_lp, 0.1 * area, 2 * median_lp, median_lp]
     bounds = ([0, 0, 0, 0, 0], [np.inf, np.inf, np.inf, np.inf, np.inf])
@@ -1158,7 +1158,7 @@ def pair_correlation(
     -------
     bins_lower : np.ndarray
         Lower bounds of the bins for the histogram.
-    dh : np.ndarray
+    pc : np.ndarray
         Pair correlation function.
     """
     dh = distance_histogram(locs, info, bin_size, r_max)
@@ -1168,12 +1168,14 @@ def pair_correlation(
     if bins_lower.shape[0] > dh.shape[0]:
         bins_lower = bins_lower[:-1]
     area = np.pi * bin_size * (2 * bins_lower + bin_size)
-    return bins_lower, dh / area
+    pc = dh / area
+    return bins_lower, pc
 
 
 @numba.jit(nopython=True, nogil=True)
 def _local_density(
-    locs: pd.DataFrame,
+    x: np.ndarray,
+    y: np.ndarray,
     radius: float,
     x_index: np.ndarray,
     y_index: np.ndarray,
@@ -1183,8 +1185,6 @@ def _local_density(
     chunk: int,
 ) -> np.ndarray:
     """Calculate densities in blocks around each localization."""
-    x = locs["x"].values
-    y = locs["y"].values
     N = len(x)
     r2 = radius**2
     end = min(start + chunk, N)
@@ -1233,8 +1233,8 @@ def compute_local_density(
     locs : pd.DataFrame
         Localizations with added 'density' field/column.
     """
-    locs, x_index, y_index, block_starts, block_ends, K, L = get_index_blocks(
-        locs, info, radius
+    locs, size, x_index, y_index, block_starts, block_ends, K, L = (
+        get_index_blocks(locs, info, radius)
     )
     N = len(locs)
     n_threads = min(
@@ -1244,7 +1244,8 @@ def compute_local_density(
     starts = range(0, N, chunk)
     args = [
         (
-            locs,
+            locs["x"].values,
+            locs["y"].values,
             radius,
             x_index,
             y_index,
@@ -2334,8 +2335,6 @@ def align(
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
     using RCC.
-
-    TODO: does it work now with data frames?
 
     Parameters
     ----------
