@@ -1,13 +1,13 @@
 Changelog
 =========
 
-Last change: 01-JAN-2026 CEST
+Last change: 05-JAN-2026 CEST
 
 0.9.4
 -----
 Important updates:
 ^^^^^^^^^^^^^^^^^^
-- 
+- Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*.
 
 *Small improvements:*
 +++++++++++++++++++++

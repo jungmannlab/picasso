@@ -33,35 +33,30 @@ plt.style.use("ggplot")
 
 
 MAX_LOCS = int(1e6)
-LOCS_DTYPE = [
-    ("frame", "u4"),
-    ("x", "f4"),
-    ("y", "f4"),
-    ("photons", "f4"),
-    ("sx", "f4"),
-    ("sy", "f4"),
-    ("bg", "f4"),
-    ("lpx", "f4"),
-    ("lpy", "f4"),
-    ("net_gradient", "f4"),
-    ("likelihood", "f4"),
-    ("iterations", "i4"),
-]
-MEAN_COLS = [
-    "frame",
-    "x",
-    "y",
-    "photons",
-    "sx",
-    "sy",
-    "bg",
-    "lpx",
-    "lpy",
-    "ellipticity",
-    "net_gradient",
-    "z",
-    "d_zcalib",
-]
+# The columns under base are always available and the keys such as "3D
+# only" will be displayed in the save columns dialog in the GUI for
+# clarity
+LOCALIZATION_COLUMNS = {
+    "Base": [
+        "frame",
+        "x",
+        "y",
+        "photons",
+        "sx",
+        "sy",
+        "bg",
+        "lpx",
+        "lpy",
+        "ellipticity",
+        "net_gradient",
+    ],
+    "3D only": ["z", "d_zcalib"],  # "lpz"],
+    "Picked spots only": ["n_id"],
+    "MLE only": ["log_likelihood", "iterations"],
+}
+# Columns that are required for further use with Picasso
+REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy"]  # "lpz"]
+MEAN_COLS = LOCALIZATION_COLUMNS["Base"] + LOCALIZATION_COLUMNS["3D only"]
 SET_COLS = [
     "Frames",
     "Height",

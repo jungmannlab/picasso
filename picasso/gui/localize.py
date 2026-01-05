@@ -671,7 +671,9 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Box Size
         boxsize_label = QtWidgets.QLabel("Box side length:")
-        boxsize_label.setToolTip("Box size in pixels for identification.")
+        boxsize_label.setToolTip(
+            "Box size in camera pixels for identification."
+        )
         identification_grid.addWidget(boxsize_label, 0, 0)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
@@ -762,7 +764,6 @@ class ParametersDialog(QtWidgets.QDialog):
         self.preview_checkbox.setTristate(False)
         self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
         identification_grid.addWidget(self.preview_checkbox, 4, 0)
-        # identification_grid.addWidget(self.preview_checkbox, 5, 0)
 
         # Camera:
         if "Cameras" in CONFIG:
@@ -938,13 +939,14 @@ class ParametersDialog(QtWidgets.QDialog):
         self.convergence_criterion.setRange(0, 1e6)
         self.convergence_criterion.setDecimals(6)
         self.convergence_criterion.setValue(0.001)
+        self.convergence_criterion.setSingleStep(0.0001)
         mle_grid.addWidget(self.convergence_criterion, 0, 1)
         mi_label = QtWidgets.QLabel("Max. iterations:")
         mi_label.setToolTip("Maximum number of iterations per spot.")
         mle_grid.addWidget(mi_label, 1, 0)
         self.max_it = QtWidgets.QSpinBox()
         self.max_it.setRange(1, int(1e6))
-        self.max_it.setValue(1000)
+        self.max_it.setValue(100)
         mle_grid.addWidget(self.max_it, 1, 1)
 
         # LQ
@@ -1368,6 +1370,53 @@ class ContrastDialog(QtWidgets.QDialog):
             self.window.draw_frame()
 
 
+class LocColumnSelectionDialog(QtWidgets.QDialog):
+    """Dialog for selecting which columns to save in the localization
+    file."""
+
+    def __init__(self, parent: QtWidgets.QMainWindow) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Select columns to save")
+        self.setMinimumWidth(250)
+        self.setModal(True)
+        vbox = QtWidgets.QVBoxLayout(self)
+
+        # add checkboxes
+        self.column_checkboxes = {}
+        for column in localize.LOCALIZATION_COLUMNS["Base"]:
+            checkbox = QtWidgets.QCheckBox(column)
+            checkbox.setChecked(True)
+            self.column_checkboxes[column] = checkbox
+            vbox.addWidget(checkbox)
+            if column in localize.REQUIRED_COLUMNS:
+                checkbox.setDisabled(True)
+        for key, column in localize.LOCALIZATION_COLUMNS.items():
+            if key == "Base":
+                continue
+            for col in column:
+                checkbox = QtWidgets.QCheckBox(f"{col} ({key})")
+                checkbox.setChecked(True)
+                self.column_checkboxes[col] = checkbox
+                vbox.addWidget(checkbox)
+                if col in localize.REQUIRED_COLUMNS:
+                    checkbox.setDisabled(True)
+
+        self.load_user_settings()
+
+    def load_user_settings(self) -> None:
+        """Reads the columns to save from user settings."""
+        settings = io.load_user_settings()
+        columns = settings["Localize"].get("Columns to save", None)
+        if columns is None:
+            columns = {}
+            for subcols in localize.LOCALIZATION_COLUMNS.values():
+                for col in subcols:
+                    columns[col] = True
+        for column, checkbox in self.column_checkboxes.items():
+            is_checked = columns[column]
+            checkbox.setChecked(is_checked)
+
+
 class Window(QtWidgets.QMainWindow):
     """The main window.
 
@@ -1412,6 +1461,7 @@ class Window(QtWidgets.QMainWindow):
         self.resize(768, 768)
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
+        self.columns_dialog = LocColumnSelectionDialog(self)
         self.init_menu_bar()
         self.view = View(self)
         self.setCentralWidget(self.view)
@@ -1467,6 +1517,10 @@ class Window(QtWidgets.QMainWindow):
             settings["Localize"][
                 "gradient"
             ] = self.parameters_dialog.mng_slider.value()
+        settings["Localize"]["Columns to save"] = {
+            column: checkbox.isChecked()
+            for column, checkbox in self.columns_dialog.column_checkboxes.items()
+        }
         io.save_user_settings(settings)
         QtWidgets.qApp.closeAllWindows()
 
@@ -1494,6 +1548,9 @@ class Window(QtWidgets.QMainWindow):
         save_spots_action.setShortcut("Ctrl+Shift+S")
         save_spots_action.triggered.connect(self.save_spots_dialog)
         file_menu.addAction(save_spots_action)
+        select_columns_action = file_menu.addAction("Select columns to save")
+        select_columns_action.triggered.connect(self.columns_dialog.show)
+        file_menu.addAction(select_columns_action)
         file_menu.addSeparator()
         export_current_action = file_menu.addAction("Export current view")
         export_current_action.setShortcut("Ctrl+E")
@@ -2416,7 +2473,7 @@ class Window(QtWidgets.QMainWindow):
                 self.parameters_dialog.z_calibration
             )
         info = self.info + [localize_info | self.camera_info]
-
+        self.select_locs_columns()  # save only selected columns
         io.save_locs(path, self.locs, info)
 
     def save_locs_dialog(self) -> None:
@@ -2444,6 +2501,15 @@ class Window(QtWidgets.QMainWindow):
             self.fit(calibrate_z=calibrate_z)
         else:
             self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
+
+    def select_locs_columns(self) -> None:
+        """Select only the columns that are checked in the corresponding
+        dialog."""
+        to_keep = []
+        for column, checkbox in self.columns_dialog.column_checkboxes.items():
+            if checkbox.isChecked() and column in self.locs.columns:
+                to_keep.append(column)
+        self.locs = self.locs[to_keep]
 
 
 class IdentificationWorker(QtCore.QThread):
