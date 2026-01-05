@@ -7,11 +7,11 @@ Last change: 05-JAN-2026 CEST
 -----
 Important updates:
 ^^^^^^^^^^^^^^^^^^
-- Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*.
+- Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*
 
 *Small improvements:*
 +++++++++++++++++++++
-- 
+- Picasso applies constrained layout to all matplotlib figures
 
 *Bug fixes:*
 ++++++++++++

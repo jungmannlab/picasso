@@ -2185,7 +2185,7 @@ def undrift(
     drift_ = (drift_x_pol(t_inter), drift_y_pol(t_inter))
     drift = pd.DataFrame({"x": drift_[0], "y": drift_[1]})
     if display:
-        fig1 = plt.figure(figsize=(17, 6))
+        fig1 = plt.figure(figsize=(10, 6), constrained_layout=True)
         plt.suptitle("Estimated drift")
         plt.subplot(1, 2, 1)
         plt.plot(drift["x"].values, label="x interpolated")
@@ -2223,7 +2223,7 @@ def undrift(
         plt.axis("equal")
         plt.xlabel("x")
         plt.ylabel("y")
-        fig1.show()
+        plt.show()
     locs["x"] -= drift["x"][locs["frame"]].values
     locs["y"] -= drift["y"][locs["frame"]].values
     return drift, locs

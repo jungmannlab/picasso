@@ -246,7 +246,7 @@ class GenericPlotWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)

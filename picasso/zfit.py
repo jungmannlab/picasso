@@ -140,7 +140,7 @@ def calibrate_z(
     locs = fit_z(locs, info, calibration, magnification_factor)
     locs["z"] /= magnification_factor
 
-    plt.figure(figsize=(18, 10))
+    plt.figure(figsize=(18, 10), constrained_layout=True)
 
     plt.subplot(231)
     plt.plot(z_range, mean_sx, ".-", label="x")

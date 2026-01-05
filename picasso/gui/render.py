@@ -904,7 +904,7 @@ class PlotDialog(QtWidgets.QDialog):
         self.setWindowTitle("Structure")
         layout_grid = QtWidgets.QGridLayout(self)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
@@ -1042,7 +1042,7 @@ class PlotDialogIso(QtWidgets.QDialog):
         self.setWindowTitle("Structure")
         layout_grid = QtWidgets.QGridLayout(self)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
@@ -1274,7 +1274,7 @@ class ClsDlg3D(QtWidgets.QDialog):
         self.showMaximized()
         self.layout_grid = QtWidgets.QGridLayout(self)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
@@ -1481,7 +1481,7 @@ class ClsDlg2D(QtWidgets.QDialog):
         self.setWindowTitle("Structure")
         self.layout_grid = QtWidgets.QGridLayout(self)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
@@ -2813,7 +2813,7 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -3505,7 +3505,7 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -3538,7 +3538,7 @@ class FRCPlotWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -5948,7 +5948,7 @@ class View(QtWidgets.QLabel):
 
             # Plot shift
             if display:
-                fig1 = plt.figure(figsize=(8, 8))
+                fig1 = plt.figure(figsize=(8, 8), constrained_layout=True)
                 plt.suptitle("Shift")
                 plt.subplot(1, 1, 1)
                 plt.plot(shift_x, "o-", label="x shift")
@@ -8085,7 +8085,9 @@ class View(QtWidgets.QLabel):
                     params["t0"] = time.time()
                     i = 0
                     while i < len(self._picks):
-                        fig = plt.figure(figsize=(5, 5))
+                        fig = plt.figure(
+                            figsize=(5, 5), constrained_layout=True
+                        )
                         fig.canvas.manager.set_window_title(
                             "Scatterplot of Pick"
                         )
@@ -8168,7 +8170,9 @@ class View(QtWidgets.QLabel):
                     i = 0
                     while i < len(self._picks):
                         pick = self._picks[i]
-                        fig = plt.figure(figsize=(5, 5))
+                        fig = plt.figure(
+                            figsize=(5, 5), constrained_layout=True
+                        )
                         fig.canvas.manager.set_window_title(
                             "Scatterplot of Pick"
                         )
@@ -8558,7 +8562,7 @@ class View(QtWidgets.QLabel):
                 progress.close()
 
                 # plot histogram with n_locs in picks
-                fig = plt.figure()
+                fig = plt.figure(constrained_layout=True)
                 fig.canvas.manager.set_window_title("Localizations in Picks")
                 ax = fig.add_subplot(111)
                 ax.set_title("Localizations in Picks ")
@@ -9664,7 +9668,7 @@ class View(QtWidgets.QLabel):
             self.window.display_settings_dlg.colormap_prop.currentText(),
         )
 
-        fig1 = plt.figure(figsize=(5, 1))
+        fig1 = plt.figure(figsize=(5, 1), constrained_layout=True)
 
         ax1 = fig1.add_subplot(111, aspect="equal")
 

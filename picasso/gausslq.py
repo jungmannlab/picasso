@@ -217,16 +217,6 @@ def fit_spot(spot: np.ndarray) -> np.ndarray:
     result = optimize.leastsq(
         _compute_residuals, theta0, args=args, ftol=1e-2, xtol=1e-2
     )  # leastsq is much faster than least_squares
-    """
-    model = compute_model(result[0], grid, size, model_x, model_y, model)
-    plt.figure()
-    plt.subplot(121)
-    plt.imshow(spot, interpolation='none')
-    plt.subplot(122)
-    plt.imshow(model, interpolation='none')
-    plt.colorbar()
-    plt.show()
-    """
     result_ = result[0]
     return result_
 
