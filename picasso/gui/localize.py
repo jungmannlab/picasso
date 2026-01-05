@@ -734,6 +734,15 @@ class ParametersDialog(QtWidgets.QDialog):
         self.mng_max_spinbox.valueChanged.connect(self.on_mng_max_changed)
         hbox.addWidget(self.mng_max_spinbox)
 
+        # preview identifications
+        self.preview_checkbox = QtWidgets.QCheckBox("Preview")
+        self.preview_checkbox.setToolTip(
+            "Show identified spots in the current frame?"
+        )
+        self.preview_checkbox.setTristate(False)
+        self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
+        identification_grid.addWidget(self.preview_checkbox, 4, 0)
+
         # ROI
         label = QtWidgets.QLabel(
             "ROI (y<sub>min</sub>,x<sub>min</sub>,"
@@ -744,11 +753,7 @@ class ParametersDialog(QtWidgets.QDialog):
             "also available by dragging a rectangle in the preview.\n"
             "Note that no spaces between the numbers and commas are allowed."
         )
-        identification_grid.addWidget(
-            label,
-            5,
-            0,
-        )
+        identification_grid.addWidget(label, 5, 0)
         self.roi_edit = QtWidgets.QLineEdit()
         regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
         validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
@@ -757,13 +762,21 @@ class ParametersDialog(QtWidgets.QDialog):
         self.roi_edit.textChanged.connect(self.on_roi_edit_changed)
         identification_grid.addWidget(self.roi_edit, 5, 1)
 
-        self.preview_checkbox = QtWidgets.QCheckBox("Preview")
-        self.preview_checkbox.setToolTip(
-            "Show identified spots in the current frame?"
+        # min/max frames
+        label = QtWidgets.QLabel("Frames (min,max):")
+        label.setToolTip(
+            "Specify the first and last frame (inclusive) to be analyzed;\n"
+            "by default, all frames are analyzed.\n"
+            "Note that no spaces between the numbers and comma are allowed."
         )
-        self.preview_checkbox.setTristate(False)
-        self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
-        identification_grid.addWidget(self.preview_checkbox, 4, 0)
+        identification_grid.addWidget(label, 6, 0)
+        self.frames_edit = QtWidgets.QLineEdit()
+        regex = r"\d+,\d+"  # regex for 2 integers separated by a comma
+        validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
+        self.frames_edit.setValidator(validator)
+        self.frames_edit.editingFinished.connect(self.on_frames_edit_finished)
+        self.frames_edit.textChanged.connect(self.on_frames_edit_changed)
+        identification_grid.addWidget(self.frames_edit, 6, 1)
 
         # Camera:
         if "Cameras" in CONFIG:
@@ -1118,6 +1131,24 @@ class ParametersDialog(QtWidgets.QDialog):
         else:
             self.gpufit_checkbox.setChecked(False)
             self.gpufit_checkbox.setDisabled(True)
+
+    def on_frames_edit_changed(self) -> None:
+        """Handle changes when text is deleted."""
+        if self.frames_edit.text() == "":
+            self.window.frame_range = None
+
+    def on_frames_edit_finished(self) -> None:
+        """Handle the completion of frames editing."""
+        if not self.window.movie or self.frames_edit.text() == "":
+            return
+        text = self.frames_edit.text().split(",")
+        min_frame, max_frame = [int(_) for _ in text]
+        frame_range = [
+            max(1, min_frame),
+            min(len(self.window.movie), max_frame),
+        ]
+        self.window.frame_range = [frame_range[0] - 1, frame_range[1] - 1]
+        self.frames_edit.setText(f"{frame_range[0]},{frame_range[1]}")
 
     def load_z_calib(self) -> None:
         """Load the 3D calibration from a user-selected YAML file."""
@@ -1481,6 +1512,7 @@ class Window(QtWidgets.QMainWindow):
         self.ready_for_fit = False
         self.locs = None
         self.movie_path = []
+        self.frame_range = None  # analyze all frames by default
 
         self.load_user_settings()
 
@@ -2033,7 +2065,8 @@ class Window(QtWidgets.QMainWindow):
                         self.parameters["Min. Net Gradient"],
                         self.parameters["Box Size"],
                         self.curr_frame_number,
-                        self.view.roi,
+                        roi=self.view.roi,
+                        frame_bounds=self.frame_range,
                     )
                     box = self.parameters["Box Size"]
                     self.status_bar.showMessage(
@@ -2214,6 +2247,7 @@ class Window(QtWidgets.QMainWindow):
             self.locs = None
             self.last_identification_info = parameters.copy()
             self.last_identification_info["ROI"] = roi
+            self.last_identification_info["Frame bounds"] = self.frame_range
             n_identifications = len(identifications)
             box = parameters["Box Size"]
             mng = parameters["Min. Net Gradient"]
@@ -2531,6 +2565,7 @@ class IdentificationWorker(QtCore.QThread):
         self.window = window
         self.movie = window.movie
         self.roi = window.view.roi
+        self.frame_range = window.frame_range
         self.parameters = window.parameters
         self.fit_afterwards = fit_afterwards
         self.calibrate_z = calibrate_z
@@ -2542,7 +2577,8 @@ class IdentificationWorker(QtCore.QThread):
             self.movie,
             self.parameters["Min. Net Gradient"],
             self.parameters["Box Size"],
-            self.roi,
+            roi=self.roi,
+            frame_bounds=self.frame_range,
         )
         while curr[0] < N:
             self.progressMade.emit(curr[0], self.parameters)
