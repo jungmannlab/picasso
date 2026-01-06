@@ -183,7 +183,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         blur_grid.addWidget(gaussian_button, 3, 0, 1, 2)
         blur_grid.addWidget(gaussian_iso_button, 4, 0, 1, 2)
         convolve_button.setChecked(True)
-        self.blur_buttongroup.buttonReleased.connect(self.render_scene)
+        self.blur_buttongroup.buttonReleased.connect(self.render_scene_nocache)
         min_blur_label = QtWidgets.QLabel("Min. Blur (nm):")
         min_blur_label.setToolTip(
             "Minimum blur applied to all localizations in nm."
@@ -195,7 +195,7 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.min_blur_width.setValue(0)
         self.min_blur_width.setDecimals(1)
         self.min_blur_width.setKeyboardTracking(False)
-        self.min_blur_width.valueChanged.connect(self.render_scene)
+        self.min_blur_width.valueChanged.connect(self.render_scene_nocache)
         blur_grid.addWidget(self.min_blur_width, 5, 1, 1, 1)
 
         vbox.addWidget(blur_groupbox)
@@ -261,7 +261,11 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
 
     def render_scene(self, *args, **kwargs):
         """Update scene in the rotation window."""
-        self.window.view_rot.update_scene()
+        self.window.view_rot.update_scene(use_cache=True)
+
+    def render_scene_nocache(self, *args, **kwargs):
+        """Update scene in the rotation window without using cache."""
+        self.window.view_rot.update_scene(use_cache=False)
 
     def set_dynamic_disp_px(self, state: bool) -> None:
         """Update scene if dynamic display pixel size is checked."""
@@ -743,6 +747,7 @@ class ViewRotation(QtWidgets.QLabel):
         animation: bool = False,
         autoscale: bool = False,
         use_cache: bool = False,
+        cache: bool = True,
     ) -> QtGui.QImage:
         """Render QImage of localizations.
 
@@ -760,6 +765,8 @@ class ViewRotation(QtWidgets.QLabel):
             If True, optimally adjust contrast.
         use_cache : bool, optional
             If True, use cached image.
+        cache : bool, optional
+            If True, cache rendered image.
 
         Returns
         -------
@@ -772,11 +779,19 @@ class ViewRotation(QtWidgets.QLabel):
         n_channels = len(self.locs)
         if n_channels == 1:
             self.render_single_channel(
-                kwargs, ang=ang, autoscale=autoscale, use_cache=use_cache
+                kwargs,
+                ang=ang,
+                autoscale=autoscale,
+                use_cache=use_cache,
+                cache=cache,
             )
         else:
             self.render_multi_channel(
-                kwargs, ang=ang, autoscale=autoscale, use_cache=use_cache
+                kwargs,
+                ang=ang,
+                autoscale=autoscale,
+                use_cache=use_cache,
+                cache=cache,
             )
         # add alpha channel (no transparency)
         self._bgra[:, :, 3].fill(255)
@@ -792,6 +807,7 @@ class ViewRotation(QtWidgets.QLabel):
         ang: tuple[float, float, float] | None = None,
         autoscale: bool = False,
         use_cache: bool = False,
+        cache: bool = True,
     ) -> np.ndarray:
         """Render multichannel localizations. Also used for multi-color
         data (clustered or picked locs).
@@ -809,6 +825,8 @@ class ViewRotation(QtWidgets.QLabel):
             If True, optimally adjust contrast.
         use_cache : bool
             If True, use cached image.
+        cache : bool
+            If True, cache rendered image.
 
         Returns
         -------
@@ -847,6 +865,7 @@ class ViewRotation(QtWidgets.QLabel):
                 ]
             n_locs = sum([_[0] for _ in renderings])
             image = np.array([_[1] for _ in renderings])
+        if cache:
             self.n_locs = n_locs
             self.image = image
 
@@ -921,6 +940,7 @@ class ViewRotation(QtWidgets.QLabel):
         ang: tuple[float, float, float] | None = None,
         autoscale: bool = False,
         use_cache: bool = False,
+        cache: bool = True,
     ) -> np.ndarray:
         """Render single channel localizations.
 
@@ -938,6 +958,8 @@ class ViewRotation(QtWidgets.QLabel):
             True if optimally adjust contrast.
         use_cache : bool, optional
             True if the rendered scene should be taken from cache.
+        cache : bool, optional
+            True if the rendered scene should be cached.
 
         Returns
         -------
@@ -950,7 +972,12 @@ class ViewRotation(QtWidgets.QLabel):
         if hasattr(locs, "group"):
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
-                kwargs, locs=locs, ang=ang, autoscale=autoscale
+                kwargs,
+                locs=locs,
+                ang=ang,
+                autoscale=autoscale,
+                use_cache=use_cache,
+                cache=cache,
             )
 
         if use_cache:
@@ -971,6 +998,7 @@ class ViewRotation(QtWidgets.QLabel):
                     info=self.infos[0],
                     ang=ang,
                 )
+        if cache:
             self.n_locs = n_locs
             self.image = image
 
@@ -1021,7 +1049,7 @@ class ViewRotation(QtWidgets.QLabel):
         angy = np.round(self.angy * 180 / np.pi, 1)
         angz = np.round(self.angz * 180 / np.pi, 1)
         self.window.animation_dialog.current_pos.setText(
-            "{}, {}, {}".format(angx, angy, angz)
+            f"{angx}, {angy}, {angz}"
         )
 
     def draw_scene(

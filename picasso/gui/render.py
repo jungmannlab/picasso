@@ -10515,8 +10515,6 @@ class View(QtWidgets.QLabel):
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
             True if use stored image. Default is False.
-        cache : bool, optional
-            True if save image. Default is False.
         picks_only : bool, optional
             True if only picks and points are to be rendered. Default is
             False.
@@ -10557,8 +10555,6 @@ class View(QtWidgets.QLabel):
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
             True if use stored image. Default is False.
-        cache : bool, optional
-            True if save image. Default is False.
         picks_only : bool, optional
             True if only picks and points are to be rendered. Default is
             False.

@@ -17,6 +17,7 @@ Important updates:
 *Bug fixes:*
 ++++++++++++
 - Render GUI takes camera pixel size using ``lib.get_from_metadata`` (#602)
+- Render 3D scale bar manual adjustment fixed
 
 0.9.3
 -----
