@@ -4901,7 +4901,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.minimum_render.setRange(-999999, 999999)
         self.minimum_render.setSingleStep(5)
         self.minimum_render.setValue(0)
-        self.minimum_render.setDecimals(2)
+        self.minimum_render.setDecimals(5)
         self.minimum_render.setKeyboardTracking(False)
         self.minimum_render.setEnabled(False)
         self.minimum_render.valueChanged.connect(
@@ -4917,7 +4917,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.maximum_render.setRange(-999999, 999999)
         self.maximum_render.setSingleStep(5)
         self.maximum_render.setValue(100)
-        self.maximum_render.setDecimals(2)
+        self.maximum_render.setDecimals(5)
         self.maximum_render.setKeyboardTracking(False)
         self.maximum_render.setEnabled(False)
         self.maximum_render.valueChanged.connect(
@@ -4965,6 +4965,24 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
             "Display the legend for the rendered property."
         )
         render_grid.addWidget(self.show_legend, 5, 1)
+
+        fw, fh, dpi = (2, 1, 150)
+        self.figure_prop = plt.figure(
+            figsize=(fw, fh), dpi=dpi, constrained_layout=True
+        )
+        self.ax_prop = self.figure_prop.add_subplot(111)
+        # adjust the size of ticks and labels
+        self.ax_prop.tick_params(
+            axis="both", which="both", labelsize=4, length=2, width=0.5, pad=1
+        )
+
+        self.canvas_prop = FigureCanvas(self.figure_prop)
+        self.canvas_prop.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        self.canvas_prop.setMinimumSize(QtCore.QSize(fw * dpi, fh * dpi))
+        render_grid.addWidget(self.canvas_prop, 6, 0, 6, 2)
+
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
@@ -5047,6 +5065,41 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         """Update scene if dynamic display pixel size is checked."""
         if state:
             self.window.view.update_scene()
+
+    def update_histogram(self) -> None:
+        """Update histogram of the rendered property based on the
+        current min/max values and colors."""
+        self.ax_prop.cla()
+
+        # array of values for the rendered property
+        data = self.window.view.locs[0][self.parameter.currentText()].values
+        # other parameters
+        min_val = self.minimum_render.value()
+        max_val = self.maximum_render.value()
+        if max_val == min_val:
+            max_val += 1e-6  # avoid zero division
+        n_colors = self.color_step.value()
+        colors = get_render_properties_colors(
+            n_colors, self.colormap_prop.currentText()
+        )
+
+        # plot
+        n_bins = lib.calculate_optimal_bins(data, max_n_bins=100)
+        counts, bins, patches = self.ax_prop.hist(
+            data, bins=n_bins, range=(min_val, max_val)
+        )
+        for patch, bin_left in zip(patches, bins):
+            color_idx = int(
+                (n_colors - 1) * (bin_left - min_val) / (max_val - min_val)
+            )
+            color_idx = np.clip(color_idx, 0, n_colors - 1)
+            patch.set_facecolor(colors[color_idx])
+        self.ax_prop.set_xlim(min_val, max_val)
+        self.ax_prop.set_xlabel("")
+        self.ax_prop.set_ylabel("")
+        self.ax_prop.set_yticks([])
+        self.ax_prop.xaxis.offsetText.set_fontsize(4)  # scientific notation
+        self.canvas_prop.draw()
 
     def update_scene(self, *args, **kwargs) -> None:
         """Update scene with cache."""
@@ -9751,6 +9804,7 @@ class View(QtWidgets.QLabel):
 
             self.x_locs = x_locs
             self.window.display_settings_dlg.show_legend.setEnabled(True)
+            self.window.display_settings_dlg.update_histogram()
         else:
             self.x_render_state = False
         self.update_scene()
@@ -9802,6 +9856,10 @@ class View(QtWidgets.QLabel):
 
         self.window.display_settings_dlg.render_check.setEnabled(True)
         self.window.display_settings_dlg.render_check.setCheckState(False)
+
+        # clean up the histogram plot
+        self.window.display_settings_dlg.ax_prop.cla()
+        self.window.display_settings_dlg.canvas_prop.draw()
 
         self.activate_render_property()
 

@@ -9,6 +9,7 @@ Important updates:
 ^^^^^^^^^^^^^^^^^^
 - Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*
 - Localize accepts frame bounds to analyze only a subset of frames
+- Render by property (GUI) shows histogram of the selected property
 
 *Small improvements:*
 +++++++++++++++++++++
