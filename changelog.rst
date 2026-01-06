@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 05-JAN-2026 CEST
+Last change: 06-JAN-2026 CEST
 
 0.9.4
 -----
@@ -16,7 +16,7 @@ Important updates:
 
 *Bug fixes:*
 ++++++++++++
-- 
+- Render GUI takes camera pixel size using ``lib.get_from_metadata`` (#602)
 
 0.9.3
 -----

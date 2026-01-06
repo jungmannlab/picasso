@@ -402,7 +402,9 @@ def get_from_metadata(
     raise_error: bool = False,
 ) -> Any:
     """Get a value from the localization metadata (list of dictionaries
-    or a dictionary). Returns default if the key is not found.
+    or a dictionary). Runs the search from the last to the first element
+    of the input list. Returns default or raises an error if the key is
+    not found.
 
     Parameters
     ----------
