@@ -448,6 +448,9 @@ def plot_NN(
     title: str = "Nearest neighbor distances",
     xlabel: str = "Distances (nm)",
     ylabel: str = "Norm. frequency",
+    fontsize_ticks: int = 10,
+    fontsize_labels: int = 12,
+    fontsize_title: int = 12,
     show_legend: bool = True,
     alpha: float = 0.6,
     edgecolor: str = "black",
@@ -505,30 +508,6 @@ def plot_NN(
         of strings is given, several paths can be specified (with
         different extensions).
     """
-
-    def remove_patches_and_data(ax, xmax):
-        # remove the bins above the xlim if given (downstream they
-        # will be displayed by PyQt somehow)
-        for patch in ax.patches:
-            left = patch.get_x()
-            right = left + patch.get_width()
-            if right > xmax:
-                #     new_patches.append(patch)
-                # else:
-                patch.remove()
-        # same for lines
-        for line in ax.lines:
-            xdata = line.get_xdata()
-            ydata = line.get_ydata()
-            new_xdata = []
-            new_ydata = []
-            for x, y in zip(xdata, ydata):
-                if x <= xmax:
-                    new_xdata.append(x)
-                    new_ydata.append(y)
-            line.set_xdata(new_xdata)
-            line.set_ydata(new_ydata)
-
     # initiate figure and axis
     if fig is None or ax is None:
         fig, ax = plt.subplots(
@@ -579,8 +558,6 @@ def plot_NN(
                 alpha=alpha,
                 label=f"sim {i+1}th NN",
             )
-    if xlim is not None:
-        remove_patches_and_data(ax, xlim[1])
 
     # display parameters
     if show_legend:
@@ -591,9 +568,10 @@ def plot_NN(
     if ylim is not None:
         ax.set_ylim(ylim)
 
-    ax.set_title(title, fontsize=12)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=fontsize_title)
+    ax.set_xlabel(xlabel, fontsize=fontsize_labels)
+    ax.set_ylabel(ylabel, fontsize=fontsize_labels)
+    ax.tick_params(axis="both", which="major", labelsize=fontsize_ticks)
 
     # save figure(s)
     if savefig:

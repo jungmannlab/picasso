@@ -32,9 +32,9 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.spatial.transform import Rotation
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtSvg import QSvgRenderer
 
 from .. import io, lib, spinna, __version__
 
@@ -61,7 +61,8 @@ STRUCTURE_PREVIEW_COLORS = [
     [23, 190, 207],
 ]
 
-NND_PLOT_SIZE = 470
+NND_DPI = 150
+NND_FIGSIZE = (470 / NND_DPI, 352.5 / NND_DPI)  # width, height in inches
 FIT_RESULT_LIM = 100
 
 
@@ -2436,41 +2437,6 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         return params
 
 
-class SimulationsPlotWindow(QtWidgets.QLabel):
-    """Label used for displaying NND plots."""
-
-    def __init__(self, sim_tab):
-        super().__init__(sim_tab)
-        self.setFixedHeight(int(NND_PLOT_SIZE / 1.3333))
-        self.setFixedWidth(NND_PLOT_SIZE)
-
-    def display(self, fig):
-        """Display fig - plt.Figure. Uses a somewhat unsual method to
-        draw the canvas by saving the .svg format of the figure and
-        then creating the QImage isntance. This way, downsampling of
-        the image is avoided after drawing on the canvas."""
-        # render the figure as .svg
-        buffer = python_io.BytesIO()
-        fig.savefig(buffer, format="svg")
-        buffer.seek(0)
-        svg_data = buffer.getvalue().decode()
-
-        # load the data into pyqt5's svg renderer
-        svg_renderer = QSvgRenderer()
-        svg_renderer.load(svg_data.encode())
-
-        # create the qimage and set pixmap
-        qimage = QtGui.QImage(
-            QtCore.QSize(NND_PLOT_SIZE, int(NND_PLOT_SIZE / 1.3333)),
-            QtGui.QImage.Format_ARGB32_Premultiplied,
-        )
-        qimage.fill(QtCore.Qt.transparent)
-        painter = QtGui.QPainter(qimage)
-        svg_renderer.render(painter)
-        painter.end()
-        self.setPixmap(QtGui.QPixmap.fromImage(qimage))
-
-
 class SimulationsTab(QtWidgets.QDialog):
     """Tab for running simulations and finding the proportions of
     structure in the experimental data.
@@ -2546,10 +2512,11 @@ class SimulationsTab(QtWidgets.QDialog):
     N_structures_fit : dict
         Number of structures to be simulated for each target when
         fitting.
-    nnd_plot_box : SimulationsPlotWindow
-        Widget for displaying NN distances.
-    nnd_plots : list of SimulationsPlotWindow
-        Labels for displaying NND plots.
+    nnd_canvas : FigureCanvas
+        Figure canvas for displaying the nearest neighbors distances.
+        histograms.
+    nnd_plots : list of plt.Figures
+        Instances of pyplot's Figure for each NND plot.
     nnd_plots_settings_dialog : NNPlotSettingsDialog
         Dialog for adjusting settings of the nearest neighbors plots.
     n_sim_fit : int
@@ -2723,8 +2690,19 @@ class SimulationsTab(QtWidgets.QDialog):
         nnd_plot_layout = QtWidgets.QVBoxLayout(nnd_plot_box)
         nnd_plot_layout.setSpacing(8)
 
-        self.nnd_plot_box = SimulationsPlotWindow(self)
-        nnd_plot_layout.addWidget(self.nnd_plot_box)
+        nnd_fig = plt.figure(
+            figsize=NND_FIGSIZE, dpi=NND_DPI, constrained_layout=True
+        )
+        self.nnd_canvas = FigureCanvas(nnd_fig)
+        self.nnd_canvas.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        self.nnd_canvas.setMinimumSize(
+            QtCore.QSize(
+                int(NND_FIGSIZE[0] * NND_DPI), int(NND_FIGSIZE[1] * NND_DPI)
+            )
+        )
+        nnd_plot_layout.addWidget(self.nnd_canvas)
 
         nnd_buttons_layout = QtWidgets.QGridLayout()
         nnd_plot_layout.addLayout(nnd_buttons_layout)
@@ -3866,7 +3844,10 @@ class SimulationsTab(QtWidgets.QDialog):
                 binsize=plot_params["binsize_sim"],
                 xlim=(plot_params["min_dist"], plot_params["max_dist"]),
                 return_fig=True,
-                figsize=(4.947, 3.71),
+                figsize=NND_FIGSIZE,
+                fontsize_labels=8,
+                fontsize_ticks=6,
+                fontsize_title=8,
                 alpha=1.0,
                 title=f"{plot_params['title']}{t1} \u2192 {t2}",
                 xlabel=plot_params["xlabel"],
@@ -3889,6 +3870,9 @@ class SimulationsTab(QtWidgets.QDialog):
                     show_legend=False,
                     fig=fig,
                     ax=ax,
+                    fontsize_labels=8,
+                    fontsize_ticks=6,
+                    fontsize_title=8,
                     mode="hist",
                     binsize=plot_params["binsize_exp"],
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
@@ -3930,7 +3914,10 @@ class SimulationsTab(QtWidgets.QDialog):
                     n_neighbors=plot_params["nn_counts"][f"{t1}-{t2}"].value(),
                     show_legend=False,
                     mode="hist",
-                    figsize=(4.947, 3.71),
+                    figsize=NND_FIGSIZE,
+                    fontsize_labels=8,
+                    fontsize_ticks=6,
+                    fontsize_title=8,
                     binsize=plot_params["binsize_exp"],
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
                     return_fig=True,
@@ -4236,7 +4223,8 @@ class SimulationsTab(QtWidgets.QDialog):
         else:
             if fig.axes[0].legend_:
                 fig.axes[0].legend_.remove()
-        self.nnd_plot_box.display(fig)
+        self.nnd_canvas.figure = fig
+        self.nnd_canvas.draw()
 
     def on_left_nnd_clicked(self) -> None:
         """Display the previous NND plot."""
