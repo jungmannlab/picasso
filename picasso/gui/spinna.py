@@ -18,7 +18,6 @@ import traceback
 import re
 import importlib
 import pkgutil
-import io as python_io
 from functools import partial
 from multiprocessing import cpu_count
 from datetime import datetime
@@ -32,9 +31,9 @@ import numpy as np
 import pandas as pd
 import matplotlib
 import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.spatial.transform import Rotation
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtSvg import QSvgRenderer
 
 from .. import io, lib, spinna, __version__
 
@@ -61,7 +60,13 @@ STRUCTURE_PREVIEW_COLORS = [
     [23, 190, 207],
 ]
 
-NND_PLOT_SIZE = 470
+NND_DPI = 150
+NND_FIGSIZE = (470 / NND_DPI, 352.5 / NND_DPI)  # width, height in inches
+MASK_LEGEND_DPI = 100
+MASK_LEGEND_FIGSIZE = (
+    290 / MASK_LEGEND_DPI,
+    70 / MASK_LEGEND_DPI,
+)  # width, height in inches
 FIT_RESULT_LIM = 100
 
 
@@ -171,72 +176,6 @@ class ignoreArrowsDoubleSpinBox(QtWidgets.QDoubleSpinBox):
             super().keyPressEvent(event)
 
 
-class MaskGeneratorLegend(QtWidgets.QLabel):
-    """Legend for the mask generator preview, found in the navigation
-    box."""
-
-    def __init__(self, mask_tab):
-        super().__init__(" ")
-        self.mask_tab = mask_tab
-        # self.setFixedWidth(314)
-        # self.setFixedHeight(35)
-        self.fig = None
-
-    def on_preview_updated(self, image: np.ndarray) -> None:
-        """Update the legend according to the current field of view.
-
-        Parameters
-        ----------
-        image : np.ndarray
-            Currently shown image of the mask. Values give the
-            probability mass function for finding a molecule in the
-            pixel/voxel.
-        """
-
-        self.plot_legend(image.max())
-        buffer = python_io.BytesIO()
-        self.fig.savefig(buffer, format="svg")
-        buffer.seek(0)
-        svg_data = buffer.getvalue().decode()
-
-        # load the data into pyqt5's svg renderer
-        svg_renderer = QSvgRenderer()
-        svg_renderer.load(svg_data.encode())
-
-        # create the qimage and set pixmap
-        qimage = QtGui.QImage(
-            QtCore.QSize(290, 70),
-            QtGui.QImage.Format_ARGB32_Premultiplied,
-        )
-        qimage.fill(QtCore.Qt.transparent)
-        painter = QtGui.QPainter(qimage)
-        svg_renderer.render(painter)
-        painter.end()
-        self.setPixmap(QtGui.QPixmap.fromImage(qimage))
-
-    def plot_legend(self, max_value: float) -> None:
-        """Plot the legend with the given max value."""
-
-        if self.fig:
-            plt.close(self.fig)
-        gradient = np.linspace(0, 1, 16)
-        gradient = np.vstack((gradient, gradient))
-        self.fig, ax = plt.subplots(
-            1, figsize=(3, 0.7), constrained_layout=True
-        )
-        self.fig.patch.set_alpha(0)  # set transparent background
-        ax.imshow(gradient, cmap="magma")
-        ax.set_yticks([])
-        ax.set_xticks(np.linspace(0, 15, 5))
-        ax.set_xticklabels(
-            ["0.00E+0"]
-            + [
-                f"{Decimal(str(_)):.2E}"
-                for _ in np.linspace(0, max_value, 5)[1:]
-            ]
-        )
-
-
 class MaskPreview(QtWidgets.QLabel):
     """Rendering window for masking.
 
@@ -265,7 +204,7 @@ class MaskPreview(QtWidgets.QLabel):
 
     def render_image(self) -> None:
         """Render image in the preview."""
-        self.mask_tab.legend.on_preview_updated(self.image)
+        self.mask_tab.on_preview_updated(self.image)
         img = self.image
         img = self.to_2D(img)
         img = self.to_8bit(img)
@@ -472,7 +411,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
     ----------
     generate_mask_button : QtWidgets.QPushButton
         Button that generates the mask.
-    legend : QtWidgets.QLabel
+    legend : FigureCanvas
         Displays the legend for the mask.
     load_locs_button : QtWidgets.QPushButton
         Button that loads the molecules.
@@ -527,6 +466,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.locs = None
         self.mask = None
         self.mask_generator = None
+        self.fig = None
 
         # PREVIEW
         preview_box = QtWidgets.QGroupBox("Preview")
@@ -685,8 +625,24 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         save_view_button.released.connect(self.preview.save_current_view)
         navigation_layout.addWidget(save_view_button, 3, 0, 1, 4)
 
-        self.legend = MaskGeneratorLegend(self)
-        self.legend.setToolTip("Probabilities per mask pixel/voxel.")
+        self.legend = FigureCanvas(
+            plt.Figure(
+                figsize=MASK_LEGEND_FIGSIZE,
+                dpi=MASK_LEGEND_DPI,
+                constrained_layout=True,
+            )
+        )  # TODO: this and NND plot look bad
+        self.legend.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        self.legend.setMinimumSize(
+            QtCore.QSize(
+                int(MASK_LEGEND_FIGSIZE[0] * MASK_LEGEND_DPI),
+                int(MASK_LEGEND_FIGSIZE[1] * MASK_LEGEND_DPI),
+            )
+        )
+        self.legend.setToolTip("Displays probabilities per mask pixel/voxel.")
+
         navigation_layout.addWidget(self.legend, 4, 0, 1, 4)
 
         self.navigation_buttons = [
@@ -867,6 +823,41 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             self.thresholding_stack.setCurrentIndex(0)
         elif self.mask_type.currentIndex() == 1:
             self.thresholding_stack.setCurrentIndex(1)
+
+    def on_preview_updated(self, image: np.ndarray) -> None:
+        """Update the legend according to the current field of view.
+
+        Parameters
+        ----------
+        image : np.ndarray
+            Currently shown image of the mask. Values give the
+            probability mass function for finding a molecule in the
+            pixel/voxel.
+        """
+        max_value = image.max()
+        if self.fig:
+            plt.close(self.fig)
+        gradient = np.linspace(0, 1, 16)
+        gradient = np.vstack((gradient, gradient))
+        self.fig, ax = plt.subplots(
+            1,
+            figsize=MASK_LEGEND_FIGSIZE,
+            constrained_layout=True,
+            dpi=MASK_LEGEND_DPI,
+        )
+        self.fig.patch.set_alpha(0)  # set transparent background
+        ax.imshow(gradient, cmap="magma")
+        ax.set_yticks([])
+        ax.set_xticks(np.linspace(0, 15, 5))
+        ax.set_xticklabels(
+            ["0.00E+0"]
+            + [
+                f"{Decimal(str(_)):.2E}"
+                for _ in np.linspace(0, max_value, 5)[1:]
+            ]
+        )
+        self.legend.figure = self.fig
+        self.legend.draw()
 
 
 class StructurePreview(QtWidgets.QLabel):
@@ -2436,41 +2427,6 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         return params
 
 
-class SimulationsPlotWindow(QtWidgets.QLabel):
-    """Label used for displaying NND plots."""
-
-    def __init__(self, sim_tab):
-        super().__init__(sim_tab)
-        self.setFixedHeight(int(NND_PLOT_SIZE / 1.3333))
-        self.setFixedWidth(NND_PLOT_SIZE)
-
-    def display(self, fig):
-        """Display fig - plt.Figure. Uses a somewhat unsual method to
-        draw the canvas by saving the .svg format of the figure and
-        then creating the QImage isntance. This way, downsampling of
-        the image is avoided after drawing on the canvas."""
-        # render the figure as .svg
-        buffer = python_io.BytesIO()
-        fig.savefig(buffer, format="svg")
-        buffer.seek(0)
-        svg_data = buffer.getvalue().decode()
-
-        # load the data into pyqt5's svg renderer
-        svg_renderer = QSvgRenderer()
-        svg_renderer.load(svg_data.encode())
-
-        # create the qimage and set pixmap
-        qimage = QtGui.QImage(
-            QtCore.QSize(NND_PLOT_SIZE, int(NND_PLOT_SIZE / 1.3333)),
-            QtGui.QImage.Format_ARGB32_Premultiplied,
-        )
-        qimage.fill(QtCore.Qt.transparent)
-        painter = QtGui.QPainter(qimage)
-        svg_renderer.render(painter)
-        painter.end()
-        self.setPixmap(QtGui.QPixmap.fromImage(qimage))
-
-
 class SimulationsTab(QtWidgets.QDialog):
     """Tab for running simulations and finding the proportions of
     structure in the experimental data.
@@ -2546,10 +2502,11 @@ class SimulationsTab(QtWidgets.QDialog):
     N_structures_fit : dict
         Number of structures to be simulated for each target when
         fitting.
-    nnd_plot_box : SimulationsPlotWindow
-        Widget for displaying NN distances.
-    nnd_plots : list of SimulationsPlotWindow
-        Labels for displaying NND plots.
+    nnd_canvas : FigureCanvas
+        Figure canvas for displaying the nearest neighbors distances.
+        histograms.
+    nnd_plots : list of plt.Figures
+        Instances of pyplot's Figure for each NND plot.
     nnd_plots_settings_dialog : NNPlotSettingsDialog
         Dialog for adjusting settings of the nearest neighbors plots.
     n_sim_fit : int
@@ -2723,8 +2680,22 @@ class SimulationsTab(QtWidgets.QDialog):
         nnd_plot_layout = QtWidgets.QVBoxLayout(nnd_plot_box)
         nnd_plot_layout.setSpacing(8)
 
-        self.nnd_plot_box = SimulationsPlotWindow(self)
-        nnd_plot_layout.addWidget(self.nnd_plot_box)
+        nnd_fig = plt.figure(
+            figsize=NND_FIGSIZE, dpi=NND_DPI, constrained_layout=True
+        )
+        self.nnd_canvas = FigureCanvas(nnd_fig)
+        self.nnd_canvas.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        self.nnd_canvas.setMinimumSize(
+            QtCore.QSize(
+                int(NND_FIGSIZE[0] * NND_DPI), int(NND_FIGSIZE[1] * NND_DPI)
+            )
+        )
+        self.nnd_canvas.setToolTip(
+            "Displays nearest neighbors distance plots."
+        )
+        nnd_plot_layout.addWidget(self.nnd_canvas)
 
         nnd_buttons_layout = QtWidgets.QGridLayout()
         nnd_plot_layout.addLayout(nnd_buttons_layout)
@@ -3866,7 +3837,11 @@ class SimulationsTab(QtWidgets.QDialog):
                 binsize=plot_params["binsize_sim"],
                 xlim=(plot_params["min_dist"], plot_params["max_dist"]),
                 return_fig=True,
-                figsize=(4.947, 3.71),
+                figsize=NND_FIGSIZE,
+                fontsize_labels=8,
+                fontsize_ticks=6,
+                fontsize_title=8,
+                dpi=NND_DPI,
                 alpha=1.0,
                 title=f"{plot_params['title']}{t1} \u2192 {t2}",
                 xlabel=plot_params["xlabel"],
@@ -3889,6 +3864,9 @@ class SimulationsTab(QtWidgets.QDialog):
                     show_legend=False,
                     fig=fig,
                     ax=ax,
+                    fontsize_labels=8,
+                    fontsize_ticks=6,
+                    fontsize_title=8,
                     mode="hist",
                     binsize=plot_params["binsize_exp"],
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
@@ -3930,7 +3908,11 @@ class SimulationsTab(QtWidgets.QDialog):
                     n_neighbors=plot_params["nn_counts"][f"{t1}-{t2}"].value(),
                     show_legend=False,
                     mode="hist",
-                    figsize=(4.947, 3.71),
+                    figsize=NND_FIGSIZE,
+                    fontsize_labels=8,
+                    fontsize_ticks=6,
+                    fontsize_title=8,
+                    dpi=NND_DPI,
                     binsize=plot_params["binsize_exp"],
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
                     return_fig=True,
@@ -3940,7 +3922,6 @@ class SimulationsTab(QtWidgets.QDialog):
                     alpha=plot_params["alpha"],
                     colors=plot_params["colors"],
                 )
-
                 self.nnd_plots.append(fig)
 
         # display the first plot
@@ -4236,7 +4217,8 @@ class SimulationsTab(QtWidgets.QDialog):
         else:
             if fig.axes[0].legend_:
                 fig.axes[0].legend_.remove()
-        self.nnd_plot_box.display(fig)
+        self.nnd_canvas.figure = fig
+        self.nnd_canvas.draw()
 
     def on_left_nnd_clicked(self) -> None:
         """Display the previous NND plot."""
@@ -4323,39 +4305,49 @@ class SimulationsTab(QtWidgets.QDialog):
         for t1, t2, n in self.mixer.get_neighbor_idx(duplicate=True):
             if not n:
                 continue
-            # extract plotted line (simulation) and histogram (exp, if
-            # present) values from each figure
+            # extract plotted line (simulation) and histogram (exp) (if
+            # available)
             fig = self.nnd_plots[i]
             ax = fig.axes[0]
-            data_sim = {}
-            data_sim["bins_sim"] = ax.lines[0].get_xdata()
+            if len(ax.lines):
+                data_sim = {}
+                bin_size = self.nn_plot_settings_dialog.binsize_sim.value()
+                mindist = self.nn_plot_settings_dialog.min_dist.value()
+                maxdist = self.nn_plot_settings_dialog.max_dist.value()
+                bins = np.arange(mindist, maxdist + bin_size, bin_size)
+                bin_centers = (bins[1:] + bins[:-1]) / 2.0
+                n_bins = len(bin_centers)
+                data_sim["bins_sim"] = bin_centers
 
-            # extract simulation data
-            for ll, line in enumerate(ax.lines):
-                data_sim[f"NN{ll+1}_values_sim"] = line.get_ydata()
-            # save simulation data
-            outpath_sim = path.replace(".csv", f"_{t1}_{t2}_sim.csv")
-            df = pd.DataFrame(data_sim)
-            df.to_csv(outpath_sim, index=False)
+                # extract simulation data
+                for ll, line in enumerate(ax.lines):
+                    data_sim[f"NN{ll+1}_values_sim"] = line.get_ydata()[
+                        :n_bins
+                    ]
+                # save simulation data
+                outpath_sim = path.replace(".csv", f"_{t1}_{t2}_sim.csv")
+                df = pd.DataFrame(data_sim)
+                df.to_csv(outpath_sim, index=False)
 
             # extract experimental data (if available)
             if ax.patches:
                 data_exp = {}
                 # extract bin centers from experimental data
-                n_bins = int(len(ax.patches) / n)
+                bin_size = self.nn_plot_settings_dialog.binsize_exp.value()
                 mindist = self.nn_plot_settings_dialog.min_dist.value()
                 maxdist = self.nn_plot_settings_dialog.max_dist.value()
-                bin_edges = np.linspace(mindist, maxdist, n_bins + 1)
-                bin_centers = (bin_edges[1:] + bin_edges[:-1]) / 2.0
+                bins = np.arange(0, 1000, bin_size)
+                bin_centers = (bins[1:] + bins[:-1]) / 2.0
+                n_bins = len(bin_centers)
                 data_exp["bins_exp"] = bin_centers
                 patches = [
                     ax.patches[ii : ii + n_bins]
                     for ii in range(0, len(ax.patches), n_bins)
                 ]
                 for p, patch in enumerate(patches):
-                    data_exp[f"NN{p+1}_values_exp"] = [
-                        patch_.get_height() for patch_ in patch
-                    ]
+                    data_exp[f"NN{p+1}_values_exp"] = np.array(
+                        [patch_.get_height() for patch_ in patch]
+                    )
                 # save the values
                 outpath_exp = path.replace(".csv", f"_{t1}_{t2}_exp.csv")
                 df = pd.DataFrame(data_exp)
@@ -4429,6 +4421,10 @@ class Window(QtWidgets.QMainWindow):
 
 
 def main():
+    QtWidgets.QApplication.setAttribute(
+        QtCore.Qt.AA_EnableHighDpiScaling, True
+    )
+    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
 
