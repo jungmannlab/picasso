@@ -448,6 +448,9 @@ def plot_NN(
     title: str = "Nearest neighbor distances",
     xlabel: str = "Distances (nm)",
     ylabel: str = "Norm. frequency",
+    fontsize_ticks: int = 10,
+    fontsize_labels: int = 12,
+    fontsize_title: int = 12,
     show_legend: bool = True,
     alpha: float = 0.6,
     edgecolor: str = "black",
@@ -591,9 +594,10 @@ def plot_NN(
     if ylim is not None:
         ax.set_ylim(ylim)
 
-    ax.set_title(title, fontsize=12)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=fontsize_title)
+    ax.set_xlabel(xlabel, fontsize=fontsize_labels)
+    ax.set_ylabel(ylabel, fontsize=fontsize_labels)
+    ax.tick_params(axis="both", which="major", labelsize=fontsize_ticks)
 
     # save figure(s)
     if savefig:

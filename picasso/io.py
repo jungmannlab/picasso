@@ -1185,7 +1185,7 @@ class TiffMap:
         # We only want to deal with little endian byte order downstream:
         if self._tif_byte_order == ">":
             frame.byteswap(True)
-            frame = frame.newbyteorder("<")
+            frame = frame.view(frame.dtype.newbyteorder("<"))
         return frame
 
     def read(self, type: str, count: int = 1) -> bytes | float | None:

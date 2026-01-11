@@ -62,7 +62,7 @@ def plotPlate(
     rowsStr = ["A", "B", "C", "D", "E", "F", "G", "H"]
     rowsStr = rowsStr[::-1]
 
-    fig = plt.figure(frameon=False)
+    fig = plt.figure(constrained_layout=True, frameon=False)
     fig.set_size_inches(5, 8)
     ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
     ax.set_axis_off()

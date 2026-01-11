@@ -1,7 +1,25 @@
 Changelog
 =========
 
-Last change: 01-JAN-2026 CEST
+Last change: 11-JAN-2026 CEST
+
+0.9.4
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*
+- Localize accepts frame bounds to analyze only a subset of frames
+- Render by property (GUI) shows histogram of the selected property
+
+*Small improvements:*
++++++++++++++++++++++
+- Picasso applies constrained layout to all matplotlib figures
+
+*Bug fixes:*
+++++++++++++
+- Render GUI takes camera pixel size using ``lib.get_from_metadata`` (#602)
+- Render 3D scale bar manual adjustment fixed
+- .tif IO bug fix related to the numpy deprecation of ``arr.newbyteorder``
 
 0.9.3
 -----

@@ -184,7 +184,7 @@ class PlotWindow(QtWidgets.QWidget):
         super().__init__()
         self.main_window = main_window
         self.locs = locs
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.plot()
         vbox = QtWidgets.QVBoxLayout()

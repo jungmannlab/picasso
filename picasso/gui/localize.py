@@ -671,7 +671,9 @@ class ParametersDialog(QtWidgets.QDialog):
 
         # Box Size
         boxsize_label = QtWidgets.QLabel("Box side length:")
-        boxsize_label.setToolTip("Box size in pixels for identification.")
+        boxsize_label.setToolTip(
+            "Box size in camera pixels for identification."
+        )
         identification_grid.addWidget(boxsize_label, 0, 0)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
@@ -732,6 +734,15 @@ class ParametersDialog(QtWidgets.QDialog):
         self.mng_max_spinbox.valueChanged.connect(self.on_mng_max_changed)
         hbox.addWidget(self.mng_max_spinbox)
 
+        # preview identifications
+        self.preview_checkbox = QtWidgets.QCheckBox("Preview")
+        self.preview_checkbox.setToolTip(
+            "Show identified spots in the current frame?"
+        )
+        self.preview_checkbox.setTristate(False)
+        self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
+        identification_grid.addWidget(self.preview_checkbox, 4, 0)
+
         # ROI
         label = QtWidgets.QLabel(
             "ROI (y<sub>min</sub>,x<sub>min</sub>,"
@@ -742,11 +753,7 @@ class ParametersDialog(QtWidgets.QDialog):
             "also available by dragging a rectangle in the preview.\n"
             "Note that no spaces between the numbers and commas are allowed."
         )
-        identification_grid.addWidget(
-            label,
-            5,
-            0,
-        )
+        identification_grid.addWidget(label, 5, 0)
         self.roi_edit = QtWidgets.QLineEdit()
         regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
         validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
@@ -755,14 +762,21 @@ class ParametersDialog(QtWidgets.QDialog):
         self.roi_edit.textChanged.connect(self.on_roi_edit_changed)
         identification_grid.addWidget(self.roi_edit, 5, 1)
 
-        self.preview_checkbox = QtWidgets.QCheckBox("Preview")
-        self.preview_checkbox.setToolTip(
-            "Show identified spots in the current frame?"
+        # min/max frames
+        label = QtWidgets.QLabel("Frames (min,max):")
+        label.setToolTip(
+            "Specify the first and last frame (inclusive) to be analyzed;\n"
+            "by default, all frames are analyzed.\n"
+            "Note that no spaces between the numbers and comma are allowed."
         )
-        self.preview_checkbox.setTristate(False)
-        self.preview_checkbox.stateChanged.connect(self.on_preview_changed)
-        identification_grid.addWidget(self.preview_checkbox, 4, 0)
-        # identification_grid.addWidget(self.preview_checkbox, 5, 0)
+        identification_grid.addWidget(label, 6, 0)
+        self.frames_edit = QtWidgets.QLineEdit()
+        regex = r"\d+,\d+"  # regex for 2 integers separated by a comma
+        validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
+        self.frames_edit.setValidator(validator)
+        self.frames_edit.editingFinished.connect(self.on_frames_edit_finished)
+        self.frames_edit.textChanged.connect(self.on_frames_edit_changed)
+        identification_grid.addWidget(self.frames_edit, 6, 1)
 
         # Camera:
         if "Cameras" in CONFIG:
@@ -938,13 +952,14 @@ class ParametersDialog(QtWidgets.QDialog):
         self.convergence_criterion.setRange(0, 1e6)
         self.convergence_criterion.setDecimals(6)
         self.convergence_criterion.setValue(0.001)
+        self.convergence_criterion.setSingleStep(0.0001)
         mle_grid.addWidget(self.convergence_criterion, 0, 1)
         mi_label = QtWidgets.QLabel("Max. iterations:")
         mi_label.setToolTip("Maximum number of iterations per spot.")
         mle_grid.addWidget(mi_label, 1, 0)
         self.max_it = QtWidgets.QSpinBox()
         self.max_it.setRange(1, int(1e6))
-        self.max_it.setValue(1000)
+        self.max_it.setValue(100)
         mle_grid.addWidget(self.max_it, 1, 1)
 
         # LQ
@@ -1116,6 +1131,24 @@ class ParametersDialog(QtWidgets.QDialog):
         else:
             self.gpufit_checkbox.setChecked(False)
             self.gpufit_checkbox.setDisabled(True)
+
+    def on_frames_edit_changed(self) -> None:
+        """Handle changes when text is deleted."""
+        if self.frames_edit.text() == "":
+            self.window.frame_range = None
+
+    def on_frames_edit_finished(self) -> None:
+        """Handle the completion of frames editing."""
+        if not self.window.movie or self.frames_edit.text() == "":
+            return
+        text = self.frames_edit.text().split(",")
+        min_frame, max_frame = [int(_) for _ in text]
+        frame_range = [
+            max(1, min_frame),
+            min(len(self.window.movie), max_frame),
+        ]
+        self.window.frame_range = [frame_range[0] - 1, frame_range[1] - 1]
+        self.frames_edit.setText(f"{frame_range[0]},{frame_range[1]}")
 
     def load_z_calib(self) -> None:
         """Load the 3D calibration from a user-selected YAML file."""
@@ -1368,6 +1401,53 @@ class ContrastDialog(QtWidgets.QDialog):
             self.window.draw_frame()
 
 
+class LocColumnSelectionDialog(QtWidgets.QDialog):
+    """Dialog for selecting which columns to save in the localization
+    file."""
+
+    def __init__(self, parent: QtWidgets.QMainWindow) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Select columns to save")
+        self.setMinimumWidth(250)
+        self.setModal(True)
+        vbox = QtWidgets.QVBoxLayout(self)
+
+        # add checkboxes
+        self.column_checkboxes = {}
+        for column in localize.LOCALIZATION_COLUMNS["Base"]:
+            checkbox = QtWidgets.QCheckBox(column)
+            checkbox.setChecked(True)
+            self.column_checkboxes[column] = checkbox
+            vbox.addWidget(checkbox)
+            if column in localize.REQUIRED_COLUMNS:
+                checkbox.setDisabled(True)
+        for key, column in localize.LOCALIZATION_COLUMNS.items():
+            if key == "Base":
+                continue
+            for col in column:
+                checkbox = QtWidgets.QCheckBox(f"{col} ({key})")
+                checkbox.setChecked(True)
+                self.column_checkboxes[col] = checkbox
+                vbox.addWidget(checkbox)
+                if col in localize.REQUIRED_COLUMNS:
+                    checkbox.setDisabled(True)
+
+        self.load_user_settings()
+
+    def load_user_settings(self) -> None:
+        """Reads the columns to save from user settings."""
+        settings = io.load_user_settings()
+        columns = settings["Localize"].get("Columns to save", None)
+        if columns is None:
+            columns = {}
+            for subcols in localize.LOCALIZATION_COLUMNS.values():
+                for col in subcols:
+                    columns[col] = True
+        for column, checkbox in self.column_checkboxes.items():
+            is_checked = columns[column]
+            checkbox.setChecked(is_checked)
+
+
 class Window(QtWidgets.QMainWindow):
     """The main window.
 
@@ -1412,6 +1492,7 @@ class Window(QtWidgets.QMainWindow):
         self.resize(768, 768)
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
+        self.columns_dialog = LocColumnSelectionDialog(self)
         self.init_menu_bar()
         self.view = View(self)
         self.setCentralWidget(self.view)
@@ -1431,6 +1512,7 @@ class Window(QtWidgets.QMainWindow):
         self.ready_for_fit = False
         self.locs = None
         self.movie_path = []
+        self.frame_range = None  # analyze all frames by default
 
         self.load_user_settings()
 
@@ -1467,6 +1549,10 @@ class Window(QtWidgets.QMainWindow):
             settings["Localize"][
                 "gradient"
             ] = self.parameters_dialog.mng_slider.value()
+        settings["Localize"]["Columns to save"] = {
+            column: checkbox.isChecked()
+            for column, checkbox in self.columns_dialog.column_checkboxes.items()
+        }
         io.save_user_settings(settings)
         QtWidgets.qApp.closeAllWindows()
 
@@ -1494,6 +1580,9 @@ class Window(QtWidgets.QMainWindow):
         save_spots_action.setShortcut("Ctrl+Shift+S")
         save_spots_action.triggered.connect(self.save_spots_dialog)
         file_menu.addAction(save_spots_action)
+        select_columns_action = file_menu.addAction("Select columns to save")
+        select_columns_action.triggered.connect(self.columns_dialog.show)
+        file_menu.addAction(select_columns_action)
         file_menu.addSeparator()
         export_current_action = file_menu.addAction("Export current view")
         export_current_action.setShortcut("Ctrl+E")
@@ -1976,7 +2065,8 @@ class Window(QtWidgets.QMainWindow):
                         self.parameters["Min. Net Gradient"],
                         self.parameters["Box Size"],
                         self.curr_frame_number,
-                        self.view.roi,
+                        roi=self.view.roi,
+                        frame_bounds=self.frame_range,
                     )
                     box = self.parameters["Box Size"]
                     self.status_bar.showMessage(
@@ -2157,6 +2247,7 @@ class Window(QtWidgets.QMainWindow):
             self.locs = None
             self.last_identification_info = parameters.copy()
             self.last_identification_info["ROI"] = roi
+            self.last_identification_info["Frame bounds"] = self.frame_range
             n_identifications = len(identifications)
             box = parameters["Box Size"]
             mng = parameters["Min. Net Gradient"]
@@ -2416,7 +2507,7 @@ class Window(QtWidgets.QMainWindow):
                 self.parameters_dialog.z_calibration
             )
         info = self.info + [localize_info | self.camera_info]
-
+        self.select_locs_columns()  # save only selected columns
         io.save_locs(path, self.locs, info)
 
     def save_locs_dialog(self) -> None:
@@ -2445,6 +2536,15 @@ class Window(QtWidgets.QMainWindow):
         else:
             self.identify(fit_afterwards=True, calibrate_z=calibrate_z)
 
+    def select_locs_columns(self) -> None:
+        """Select only the columns that are checked in the corresponding
+        dialog."""
+        to_keep = []
+        for column, checkbox in self.columns_dialog.column_checkboxes.items():
+            if checkbox.isChecked() and column in self.locs.columns:
+                to_keep.append(column)
+        self.locs = self.locs[to_keep]
+
 
 class IdentificationWorker(QtCore.QThread):
     """Identify spots in the movie using multiprocessing.
@@ -2465,6 +2565,7 @@ class IdentificationWorker(QtCore.QThread):
         self.window = window
         self.movie = window.movie
         self.roi = window.view.roi
+        self.frame_range = window.frame_range
         self.parameters = window.parameters
         self.fit_afterwards = fit_afterwards
         self.calibrate_z = calibrate_z
@@ -2476,7 +2577,8 @@ class IdentificationWorker(QtCore.QThread):
             self.movie,
             self.parameters["Min. Net Gradient"],
             self.parameters["Box Size"],
-            self.roi,
+            roi=self.roi,
+            frame_bounds=self.frame_range,
         )
         while curr[0] < N:
             self.progressMade.emit(curr[0], self.parameters)
