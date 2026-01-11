@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 07-JAN-2026 CEST
+Last change: 11-JAN-2026 CEST
 
 0.9.4
 -----
@@ -14,7 +14,6 @@ Important updates:
 *Small improvements:*
 +++++++++++++++++++++
 - Picasso applies constrained layout to all matplotlib figures
-- SPINNA NND changed the way the plot is displayed
 
 *Bug fixes:*
 ++++++++++++
