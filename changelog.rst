@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 11-JAN-2026 CEST
+Last change: 12-JAN-2026 CEST
 
 0.9.4
 -----
@@ -14,6 +14,7 @@ Important updates:
 *Small improvements:*
 +++++++++++++++++++++
 - Picasso applies constrained layout to all matplotlib figures
+- 3D animation saves metadata
 
 *Bug fixes:*
 ++++++++++++
