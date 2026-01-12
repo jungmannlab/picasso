@@ -2167,12 +2167,12 @@ class SMLMDialog(QtWidgets.QDialog):
         )
 
 
-# GUI #
 class G5MDialog(QtWidgets.QDialog):
     """Extract parameters for G5M: ``min_locs``, ``min_sigma``,
     ``max_sigma``. For 3D, calibration is requested. The user can also
-    choose whether or not to use bootstraping for finding uncertainties
-    and to use multiprocessing."""
+    choose whether or not to use bootstrapping for finding
+    uncertainties, use multiprocessing, postprocess or save clustered
+    localizations."""
 
     def __init__(self, window, channel):
         super().__init__(window)
@@ -2246,7 +2246,7 @@ class G5MDialog(QtWidgets.QDialog):
         self.postprocess_check = QtWidgets.QCheckBox(
             "Filter invalid molecules"
         )
-        self.postprocess_check.setChecked(True)
+        # self.postprocess_check.setChecked(True)
         grid.addWidget(self.postprocess_check, grid.rowCount(), 0, 1, 2)
 
         # check for cluster areas/volumes?
