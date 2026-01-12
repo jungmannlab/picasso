@@ -1687,7 +1687,7 @@ class ViewRotation(QtWidgets.QLabel):
         colors = [
             _.currentText() for _ in self.window.dataset_dialog.colorselection
         ]
-        pixelsize = d.pixelsize.value()
+        pixelsize = d.window.window.display_settings_dlg.pixelsize.value()
         rot_angles = [
             int(self.angx * 180 / np.pi),
             int(self.angy * 180 / np.pi),

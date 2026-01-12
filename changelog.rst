@@ -19,6 +19,7 @@ Important updates:
 ++++++++++++
 - Render GUI takes camera pixel size using ``lib.get_from_metadata`` (#602)
 - Render 3D scale bar manual adjustment fixed
+- Render 3D screenshot .yaml fixed
 - .tif IO bug fix related to the numpy deprecation of ``arr.newbyteorder``
 
 0.9.3
