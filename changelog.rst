@@ -3,6 +3,12 @@ Changelog
 
 Last change: 11-JAN-2026 CEST
 
+G5M
+---
+- Added G5M
+- Axial localization precision
+- Subclustering test in picasso.clusterer and Filter and after g5m in render
+
 0.9.4
 -----
 Important updates:
@@ -45,12 +51,6 @@ Important updates:
 - Render: show histogram in mask dialog ignores zero values
 - Render: qPAINT histograms in the info dialog fixed and improved
 - Fixed ``picasso.postprocess.compute_local_density``
-
-G5M
----
-- Added G5M
-- Axial localization precision
-- Subclustering test in picasso.clusterer and Filter and after g5m in render
 
 0.9.2
 -----
