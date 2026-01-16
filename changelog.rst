@@ -1,21 +1,18 @@
 Changelog
 =========
 
-Last change: 12-JAN-2026 CEST
-
-G5M
----
-- Added G5M
-- Axial localization precision
-- Subclustering test in picasso.clusterer and Filter and after g5m in render
+Last change: 16-JAN-2026 CEST
 
 0.9.4
 -----
 Important updates:
 ^^^^^^^^^^^^^^^^^^
+- **Algorithm for molecular mapping introduced (G5M), see ADD DOI LINK HERE**
+- **Localize outputs axial localization precision for astigmatic imaging in 3D, see ADD DOI LINK HERE**
 - Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*
 - Localize accepts frame bounds to analyze only a subset of frames
 - Render by property (GUI) shows histogram of the selected property
+- Filter GUI has a new plot to test for subclustering based on the number of events per molecule (column ``n_events``); see the filter documentation for details
 
 *Small improvements:*
 +++++++++++++++++++++
