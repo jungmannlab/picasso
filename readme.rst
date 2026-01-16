@@ -72,7 +72,7 @@ Regardless of whether Picasso was installed via PyPI or by cloning the GitHub re
 
 - ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`__.
 - *(Windows only)* ``pip install PyImarisWriter==0.7.0`` to enable .ims files in Localize and Render. Note that ``PyImarisWriter`` has been tested only on Windows.
-- To enable ``GPU fitting``, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
+- *(Windows only)* To enable GPU least-squares fitting in Localize, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile from the `release page <https://github.com/gpufit/Gpufit/releases>`__ (non-cublas version, i.e., the lighter file) and installing the Python wheel (see instructions in the zipfile). Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
 Updating
 ^^^^^^^^

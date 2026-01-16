@@ -22,6 +22,7 @@ Important updates:
 - Render 3D scale bar manual adjustment fixed
 - Render 3D screenshot .yaml fixed
 - .tif IO bug fix related to the numpy deprecation of ``arr.newbyteorder``
+- Clarify GPU fit installation instructions and remove version printing (#604)
 
 0.9.3
 -----

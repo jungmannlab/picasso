@@ -39,7 +39,6 @@ from playsound3 import playsound
 try:
     from pygpufit import gpufit
 
-    print(f"pygpufit version: {gpufit.__version__}")
     GPUFIT_INSTALLED = True
 except ImportError:
     GPUFIT_INSTALLED = False
