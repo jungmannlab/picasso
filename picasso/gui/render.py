@@ -5072,22 +5072,23 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.ax_prop.cla()
 
         # array of values for the rendered property
-        data = self.window.view.locs[0][self.parameter.currentText()].values
+        data = self.window.view.locs[0][
+            self.parameter.currentText()
+        ].values.copy()
         # other parameters
         min_val = self.minimum_render.value()
         max_val = self.maximum_render.value()
         if max_val == min_val:
             max_val += 1e-6  # avoid zero division
+        data = data[(data >= min_val) & (data <= max_val)]
         n_colors = self.color_step.value()
         colors = get_render_properties_colors(
             n_colors, self.colormap_prop.currentText()
         )
 
         # plot
-        n_bins = lib.calculate_optimal_bins(data, max_n_bins=100)
-        counts, bins, patches = self.ax_prop.hist(
-            data, bins=n_bins, range=(min_val, max_val)
-        )
+        bins = lib.calculate_optimal_bins(data, max_n_bins=1000)
+        counts, bins, patches = self.ax_prop.hist(data, bins=bins)
         for patch, bin_left in zip(patches, bins):
             color_idx = int(
                 (n_colors - 1) * (bin_left - min_val) / (max_val - min_val)
