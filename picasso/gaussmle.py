@@ -871,3 +871,40 @@ def locs_from_fits(
     else:
         locs.sort_values(by=["frame"], kind="mergesort", inplace=True)
     return locs
+
+
+def sigma_uncertainty(
+    sigma: np.ndarray,
+    photons: np.ndarray,
+    bg: np.ndarray,
+) -> np.ndarray:
+    """Calculate standard error of fitted sigma based on the MLE 2D
+    Gaussian/Poisson noise model (picasso.gaussmle).
+
+    Based on the approximation by Rieger and Stallinga, ChemPhysChem,
+    2014.
+
+    TODO: this is likely slightly incorrect for astigmatic imaging
+    since spherical covariance Gaussian is assumed in Mortensen et
+    al., Nat Methods, 2010.
+
+    Parameters
+    ----------
+    sigma : np.ndarray
+        Fitted sigma values in camera pixels.
+    photons : np.ndarray
+        Number of photons.
+    bg : np.ndarray
+        Background photons per pixel.
+
+    Returns
+    -------
+    se_sigma : np.ndarray
+        Standard error of fitted sigma values in camera pixels.
+    """
+    sa2 = sigma**2 + 1 / 12
+    tau = (2 * np.pi * sa2 * bg) / (photons)
+    delta_sigma_sq = (sigma**2 / (4 * photons)) * (
+        1 + 8 * tau + np.sqrt((8 * tau) / (1 + 2 * tau))
+    )
+    return np.sqrt(delta_sigma_sq)

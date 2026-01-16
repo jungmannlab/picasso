@@ -509,6 +509,27 @@ def is_hexadecimal(text):
     return False
 
 
+@numba.njit
+def find_local_minima(arr: np.ndarray) -> np.ndarray:
+    """Find positions of the local minima in a 1D numpy array.
+
+    Parameters
+    ----------
+    arr : np.ndarray
+        1D array.
+
+    Returns
+    -------
+    local_minima_indices : np.ndarray
+        Indices of the local minima in the array.
+    """
+    # Compare each element with its neighbors
+    local_minima_mask = (arr[1:-1] < arr[:-2]) & (arr[1:-1] < arr[2:])
+    # Get the indices of local minima (adjust by +1 due to slicing)
+    local_minima_indices = np.where(local_minima_mask)[0] + 1
+    return local_minima_indices
+
+
 def cumulative_exponential(
     x: np.ndarray,
     a: float,
@@ -517,6 +538,49 @@ def cumulative_exponential(
 ) -> np.ndarray:
     """Used for binding kinetics estimation."""
     return a * (1 - np.exp(-(x / t))) + c
+
+
+def unpack_calibration(
+    calibration: dict,
+    pixelsize: float,
+) -> tuple[np.ndarray, np.ndarray, float]:
+    """Extract calibration file for 3D G5M. Return spot widths and
+    heights and the corresponding z values + magnification factor.
+
+    Parameters
+    ----------
+    calibration : dict
+        Calibration dictionary with x and y coefficients, z step
+        size and the number of frames.
+    pixelsize : float
+        Camera pixel size in nm.
+
+    Returns
+    -------
+    spot_size : (2,) np.ndarray
+        Spot width and height from the 3D calibration for each z
+        position.
+    z_range : np.ndarray
+        Z values (in camera pixels) corresponding to the spot ratios.
+    mag_factor : float
+        Magnification factor for the 3D calibration.
+    """
+    cx = calibration["X Coefficients"]
+    cy = calibration["Y Coefficients"]
+    z_step_size = calibration["Step size in nm"]
+    n_frames = calibration["Number of frames"]
+    mag_factor = calibration["Magnification factor"]
+
+    frame_range = np.arange(n_frames)
+    z_total_range = (n_frames - 1) * z_step_size
+    z_range = -(frame_range * z_step_size - z_total_range / 2)
+
+    spot_width = np.polyval(cx, z_range)
+    spot_height = np.polyval(cy, z_range)
+    spot_size = np.stack((spot_width, spot_height))
+
+    z_range /= pixelsize
+    return spot_size, z_range, mag_factor
 
 
 def calculate_optimal_bins(
@@ -1121,3 +1185,76 @@ def pick_areas_rectangle(
         (xs, ys), (xe, ye) = pick
         areas[i] = w * np.sqrt((xe - xs) ** 2 + (ye - ys) ** 2)
     return areas
+
+
+def plot_subclustering_check(
+    clustered_n_events: np.ndarray,
+    sparse_n_eveents: np.ndarray,
+    plot_path: str | list[str] = "",
+    return_fig: bool = False,
+) -> tuple[plt.Figure, plt.Axes] | tuple[None, None]:
+    """Plot the results of subclustering analysis, see
+    ``picasso.clusterer.test_subclustering``.
+
+    Parameters
+    ----------
+    clustered_n_events : np.ndarray
+        Number of events for clustered molecules.
+    sparse_n_eveents : np.ndarray
+        Number of events for sparse molecules.
+    plot_path : str or list of strs, optional
+        If provided, the plot is saved to this path. If a list of
+        strings is given, each is used to save a separate plot. Default
+        is "".
+    return_fig : bool, optional
+        If True, the figure and axes are returned. Default is False.
+
+    Returns
+    -------
+    fig, ax : (plt.Figure, plt.Axes) or (None, None)
+        Figure and axes if ``return_fig`` is True, otherwise
+        (None, None).
+    """
+    m_far = clustered_n_events.mean()
+    m_close = sparse_n_eveents.mean()
+    s_far = clustered_n_events.std()
+    s_close = sparse_n_eveents.std()
+
+    # create the plot
+    fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
+    min_bin, max_bin = np.percentile(clustered_n_events, [2.5, 97.5])
+    vals, counts = np.unique(clustered_n_events, return_counts=True)
+    ax1.bar(
+        vals,
+        counts,
+        width=0.8,
+        alpha=0.5,
+        label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
+        color="C0",
+    )
+    ax1.axvline(m_far, color="C0", linestyle="--")
+    vals, counts = np.unique(sparse_n_eveents, return_counts=True)
+    ax1.bar(
+        vals,
+        counts,
+        width=0.8,
+        alpha=0.5,
+        label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
+        color="C1",
+    )
+    ax1.axvline(m_close, color="C1", linestyle="--")
+    ax1.set_xlabel("Number of events")
+    ax1.set_ylabel("Counts")
+    ax1.set_xlim(min_bin - 1, max_bin + 1)
+    ax1.legend()
+    if len(plot_path):
+        if isinstance(plot_path, str):
+            plot_path = [plot_path]
+        for path in plot_path:
+            fig.savefig(path, dpi=300)
+
+    if return_fig:
+        return fig, ax1
+    else:
+        plt.close(fig)
+        return None, None

@@ -42,14 +42,15 @@ from sklearn.cluster import KMeans
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .. import (
+    aim,
+    clusterer,
+    g5m,
     imageprocess,
     io,
     lib,
+    masking,
     postprocess,
     render,
-    clusterer,
-    aim,
-    masking,
     __version__,
 )
 from .rotation import RotationWindow
@@ -74,6 +75,14 @@ ZOOM = 9 / 7
 N_GROUP_COLORS = 8
 N_Z_COLORS = 32
 POLYGON_POINTER_SIZE = 16  # must be even
+
+
+# G5M default params
+MIN_LOCS_G5M = 10
+MAX_ROUNDS_WITHOUT_BEST_BIC_G5M = 3
+MIN_SIGMA_FACTOR_G5M = 0.8
+MAX_SIGMA_FACTOR_G5M = 1.5
+N_COMPONENTS_MAX_G5M = 100
 
 
 def get_render_properties_colors(
@@ -2155,6 +2164,237 @@ class SMLMDialog(QtWidgets.QDialog):
                 "save_areas": dialog.save_areas.isChecked(),
             },
             result == QtWidgets.QDialog.Accepted,
+        )
+
+
+class G5MDialog(QtWidgets.QDialog):
+    """Extract parameters for G5M: ``min_locs``, ``min_sigma``,
+    ``max_sigma``. For 3D, calibration is requested. The user can also
+    choose whether or not to use bootstrapping for finding
+    uncertainties, use multiprocessing, postprocess or save clustered
+    localizations."""
+
+    def __init__(self, window, channel):
+        super().__init__(window)
+        self.window = window
+        self.nena = None
+        self.channel = channel
+        self.flag_3D = hasattr(self.window.view.locs[0], "z")
+        self.setWindowTitle("Molecular mapping (G5M) parameters")
+
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        self.calibration = None
+
+        # min locs per molecule
+        grid.addWidget(QtWidgets.QLabel("Min. locs:"), grid.rowCount(), 0)
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setSingleStep(1)
+        self.min_locs.setRange(2, 999)
+        self.min_locs.setValue(MIN_LOCS_G5M)
+        grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
+
+        # loc precision handling - local values or absolute sigma bounds
+        self.loc_prec_handling = QtWidgets.QComboBox()
+        self.loc_prec_handling.addItems(
+            [
+                "Local loc. precision",
+                "Custom \u03c3 bounds",
+            ]
+        )
+        self.loc_prec_handling.setCurrentIndex(0)
+        self.loc_prec_handling.currentIndexChanged.connect(
+            self.handle_loc_prec
+        )
+        grid.addWidget(self.loc_prec_handling, grid.rowCount(), 0, 1, 2)
+        # two associated input boxes - min and max values
+        self.min_sigma_label = QtWidgets.QLabel("Min. \u03c3 factor:")
+        grid.addWidget(self.min_sigma_label, grid.rowCount(), 0)
+        self.min_sigma = QtWidgets.QDoubleSpinBox()
+        self.min_sigma.setDecimals(2)
+        self.min_sigma.setSingleStep(0.01)
+        self.min_sigma.setValue(MIN_SIGMA_FACTOR_G5M)
+        self.min_sigma.setRange(0.00, 100.00)
+        grid.addWidget(self.min_sigma, grid.rowCount() - 1, 1)
+        self.max_sigma_label = QtWidgets.QLabel("Max. \u03c3 factor:")
+        grid.addWidget(self.max_sigma_label, grid.rowCount(), 0)
+        self.max_sigma = QtWidgets.QDoubleSpinBox()
+        self.max_sigma.setDecimals(2)
+        self.max_sigma.setSingleStep(0.01)
+        self.max_sigma.setValue(MAX_SIGMA_FACTOR_G5M)
+        self.max_sigma.setRange(0.0, 100.00)
+        grid.addWidget(self.max_sigma, grid.rowCount() - 1, 1)
+
+        # bootstrap for SEM?
+        self.bootstrap_check = QtWidgets.QCheckBox("Bootstrap SEM")
+        self.bootstrap_check.setChecked(False)
+        grid.addWidget(self.bootstrap_check, grid.rowCount(), 0, 1, 2)
+
+        # apply multiprocessing?
+        self.multiprocessing_check = QtWidgets.QCheckBox("Use multiprocessing")
+        self.multiprocessing_check.setChecked(True)
+        grid.addWidget(self.multiprocessing_check, grid.rowCount(), 0, 1, 2)
+
+        # save clustered localizations?
+        self.clustered_check = QtWidgets.QCheckBox(
+            "Save clustered localizations"
+        )
+        self.clustered_check.setChecked(False)
+        grid.addWidget(self.clustered_check, grid.rowCount(), 0, 1, 2)
+
+        # postprocess for sticky events?
+        self.postprocess_check = QtWidgets.QCheckBox(
+            "Filter invalid molecules"
+        )
+        # self.postprocess_check.setChecked(True)
+        grid.addWidget(self.postprocess_check, grid.rowCount(), 0, 1, 2)
+
+        # check for cluster areas/volumes?
+        self.cluster_size_button = QtWidgets.QPushButton("Check cluster sizes")
+        self.cluster_size_button.clicked.connect(self.check_cluster_sizes)
+        grid.addWidget(self.cluster_size_button, grid.rowCount(), 0, 1, 2)
+        self.cluster_size_label = QtWidgets.QLabel("")
+        grid.addWidget(self.cluster_size_label, grid.rowCount(), 0, 1, 2)
+
+        vbox.addLayout(grid)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        if self.flag_3D:  # 3d calibration
+            self.buttons.buttons()[0].setEnabled(False)
+            self.load_calib_button = QtWidgets.QPushButton(
+                "Load 3D calibration"
+            )
+            self.load_calib_button.clicked.connect(self.load_calibration)
+            grid.addWidget(self.load_calib_button, grid.rowCount(), 0, 1, 2)
+            self.automatic_load_calibration()
+
+        vbox.addWidget(self.buttons)  # these must be added at the end
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QWidget | None = None,
+        channel: int = 0,
+    ) -> tuple[dict, bool]:
+        """Get the parameters for G5M."""
+        dialog = G5MDialog(parent, channel)
+        result = dialog.exec_()
+        px = dialog.window.display_settings_dlg.pixelsize.value()
+        if dialog.loc_prec_handling.currentIndex() == 0:  # local sigma
+            loc_prec_handle = "local"
+            sigma_bounds = (dialog.min_sigma.value(), dialog.max_sigma.value())
+        else:  # custom bounds
+            loc_prec_handle = "abs"
+            sigma_bounds = (
+                dialog.min_sigma.value() / px,
+                dialog.max_sigma.value() / px,
+            )
+        params = {
+            "min_locs": dialog.min_locs.value(),
+            "loc_prec_handle": loc_prec_handle,
+            "sigma_bounds": sigma_bounds,
+            "bootstrap_check": dialog.bootstrap_check.isChecked(),
+            "multiprocessing_check": dialog.multiprocessing_check.isChecked(),
+            "clustered_locs": dialog.clustered_check.isChecked(),
+            "postprocess_check": dialog.postprocess_check.isChecked(),
+        }
+        if dialog.flag_3D:
+            params["calibration"] = dialog.calibration
+            params["pixelsize"] = px
+        return (
+            params,
+            result == QtWidgets.QDialog.Accepted,
+        )
+
+    def handle_loc_prec(self, idx: int) -> None:
+        if idx == 0:  # local loc precision
+            self.min_sigma_label.setText("Min. \u03c3 factor:")
+            self.max_sigma_label.setText("Max. \u03c3 factor:")
+            self.min_sigma.setValue(MIN_SIGMA_FACTOR_G5M)
+            self.max_sigma.setValue(MAX_SIGMA_FACTOR_G5M)
+        elif idx == 1:  # custom sigma bounds
+            self.min_sigma_label.setText("Min. \u03c3 (nm):")
+            self.max_sigma_label.setText("Max. \u03c3 (nm):")
+            self.min_sigma.setValue(5.0)
+            self.max_sigma.setValue(20.0)
+
+    def load_calibration(self) -> None:
+        """Load the calibration file selected by the user."""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open 3D calibration file", "", filter="*.yaml"
+        )
+        if not path:
+            return
+        self.load_calibration_(path)
+
+    def load_calibration_(self, path: str) -> None:
+        """Load calibration from the given path."""
+        # picasso.io takes in .hdf5 path
+        calib = io.load_info(path.replace(".yaml", ".hdf5"))
+
+        if len(calib) != 1 or "X Coefficients" not in calib[0].keys():
+            message = (
+                "Please load a 3D calibration .yaml file produced by"
+                " Picasso: Localize."
+            )
+            QtWidgets.QMessageBox.information(self.window, "Warning", message)
+            return
+
+        self.calibration = calib[0]
+        self.buttons.buttons()[0].setEnabled(True)
+        self.load_calib_button.setText("3D calibration loaded")
+
+    def automatic_load_calibration(self) -> None:
+        """Load the calibration file automatically when the dialog is
+        opened."""
+        ch = self.channel if self.channel != len(self.window.view.locs) else 0
+        infos = self.window.view.infos[ch]
+        calib_path = lib.get_from_metadata(infos, "Z Calibration Path")
+        if calib_path is not None:
+            try:
+                self.load_calibration_(calib_path)
+                return
+            except Exception:
+                pass
+
+    def check_cluster_sizes(self) -> None:
+        """Check and display the fraction of clusters with their area/
+        volume suggesting they contain more than 12 molecules."""
+        if self.channel == len(self.window.view.locs):
+            warning = "Please select a single channel to check cluster sizes."
+            QtWidgets.QMessageBox.information(self.window, "Warning", warning)
+            return
+
+        # get the path to the cluster areas file
+        path, ok = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open cluster areas/volumes file",
+            "",
+            filter="*.csv",
+        )
+        if not ok:
+            return
+        try:
+            cluster_sizes = pd.read_csv(path)
+            if hasattr(self.window.view.locs[self.channel], "z"):  # 3D
+                column = "Volume (LP^3)"
+                thresh = 12 * 4 / 3 * np.pi * 2.98**2 * (2.98 * 2.5)
+            else:  # 2D
+                column = "Area (LP^2)"
+                thresh = 12 * np.pi * 2.98**2
+            sizes = cluster_sizes[column].values
+        except Exception:
+            warning = "Could not read the cluster areas/volumes file."
+            QtWidgets.QMessageBox.information(self.window, "Warning", warning)
+            return
+        frac_large = np.round(100 * np.sum(sizes > thresh) / len(sizes), 1)
+        self.cluster_size_label.setText(
+            f"Fraction of large clusters: {frac_large}%"
         )
 
 
@@ -6480,6 +6720,222 @@ class View(QtWidgets.QLabel):
             path = path.replace(".hdf5", "_areas.csv")
             areas.to_csv(path, index=False)
             progress.close()
+
+    def g5m(self) -> None:
+        """Get the channel for G5M and ensures that the data has been
+        clustered."""
+        channel = self.window.view.get_channel_all_seq(
+            "G5M; make sure the data has been DBSCANed (or similar)."
+        )
+        if channel is None:
+            return
+
+        # get parameters
+        params, ok = G5MDialog.getParams(self.window, channel)
+        if not ok:
+            return
+
+        # ask the user to input n_frames, step_size and mag_factor of
+        # the calib file in the 3D case
+        if "calibration" in params.keys():
+            if "Step size in nm" not in params["calibration"].keys():
+                z_step_size, ok = QtWidgets.QInputDialog.getDouble(
+                    self.window,
+                    "Input Dialog",
+                    "Enter z step size in the calibration (nm)",
+                    5,
+                    1,
+                    999,
+                    1,
+                )
+                if not ok:
+                    return
+                params["calibration"]["Step size in nm"] = z_step_size
+
+            if "Number of frames" not in params["calibration"].keys():
+                n_frames, ok = QtWidgets.QInputDialog.getInt(
+                    self.window,
+                    "Input Dialog",
+                    "Enter number of frames in the calibration",
+                    200,
+                    1,
+                    99999,
+                    1,
+                )
+                if not ok:
+                    return
+                params["calibration"]["Number of frames"] = n_frames
+
+            if "Magnification factor" not in params["calibration"].keys():
+                mag_factor, ok = QtWidgets.QInputDialog.getDouble(
+                    self.window,
+                    "Input Dialog",
+                    "Enter magnification factor",
+                    0.79,
+                    0.1,
+                    10,
+                    2,
+                )
+                if not ok:
+                    return
+                params["calibration"]["Magnification factor"] = mag_factor
+
+        if channel == len(self.window.view.locs):  # apply to all
+            suffix_molecules, ok = QtWidgets.QInputDialog.getText(
+                self.window,
+                "Input Dialog",
+                "Enter suffix for saving molecules",
+                QtWidgets.QLineEdit.Normal,
+                "_molmap",
+            )
+            if not ok:
+                return
+
+            if params["clustered_locs"]:
+                suffix_clusters, ok = QtWidgets.QInputDialog.getText(
+                    self.window,
+                    "Input Dialog",
+                    "Enter suffix for saving clusters",
+                    QtWidgets.QLineEdit.Normal,
+                    "_molmap_clustered",
+                )
+                if not ok:
+                    return
+
+            for i in range(len(self.window.view.locs)):
+                if not self.check_group(i):
+                    return
+                g5m_centers, clustered_locs, info = self._g5m(i, params)
+                path = self.window.view.locs_paths[i].replace(
+                    ".hdf5", f"{suffix_molecules}.hdf5"
+                )  # add the suffix to the current path
+                if g5m_centers is not None:
+                    io.save_locs(path, g5m_centers, info)
+                if params["clustered_locs"]:
+                    path = self.window.view.locs_paths[i].replace(
+                        ".hdf5", f"{suffix_clusters}.hdf5"
+                    )
+                    if clustered_locs is not None:
+                        io.save_locs(path, clustered_locs, info)
+                # automatically save the subclustering check
+                clust_events, sparse_events = clusterer.test_subclustering(
+                    g5m_centers,
+                    info,
+                )
+                lib.plot_subclustering_check(
+                    clust_events,
+                    sparse_events,
+                    path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                )
+        else:
+            if not self.check_group(channel):
+                return
+            base, _ = os.path.splitext(self.window.view.locs_paths[channel])
+            out_path = base + "_molmap.hdf5"
+            path_molecules, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self.window, "Save molecules", out_path, filter="*.hdf5"
+            )
+            if not path_molecules:
+                return
+
+            if params["clustered_locs"]:
+                out_path = base + "_molmap_clustered.hdf5"
+                path_clusters, _ = QtWidgets.QFileDialog.getSaveFileName(
+                    self.window,
+                    "Save clustered localizations",
+                    out_path,
+                    filter="*.hdf5",
+                )
+                if not path_clusters:
+                    return
+
+            g5m_centers, clustered_locs, info = self._g5m(channel, params)
+            if g5m_centers is not None:
+                io.save_locs(path_molecules, g5m_centers, info)
+                if params["clustered_locs"]:
+                    if clustered_locs is not None:
+                        io.save_locs(path_clusters, clustered_locs, info)
+                # automatically save the subclustering check
+                clust_events, sparse_events = clusterer.test_subclustering(
+                    g5m_centers,
+                    info,
+                )
+                lib.plot_subclustering_check(
+                    clust_events,
+                    sparse_events,
+                    path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                )
+
+    def _g5m(
+        self,
+        channel: int,
+        params: dict,
+    ) -> (
+        tuple[pd.DataFrame, pd.DataFrame, list[dict]] | tuple[None, None, None]
+    ):
+        """Run G5M in channel given parameters."""
+        locs = self.window.view.locs[channel]
+        info = self.window.view.infos[channel]
+        if len(locs) < params["min_locs"]:
+            message = (
+                f"Channel #{channel+1} ("
+                f"{self.window.dataset_dialog.checks[channel].text()})"
+                " contains less localizations than the minimum number"
+                " required for G5M."
+            )
+            QtWidgets.QMessageBox.information(self.window, "Warning", message)
+            return None, None
+
+        # check for clusters that are likely fiducial markers or some
+        # impurities
+        max_locs_per_cluster = np.inf
+        n_frames = info[0]["Frames"]
+        max_locs = int(0.4 * n_frames)
+        cluster_ids, n_locs = np.unique(locs.group, return_counts=True)
+        if any(n_locs > max_locs):
+            qm = QtWidgets.QMessageBox()
+            message = (
+                f"Channel #{channel+1} ("
+                f"{self.window.dataset_dialog.checks[channel].text()})"
+                " contains clusters which likely represent fiducial"
+                " markers. These will likely extend the computation"
+                " time and possibly crash the process.\n\n"
+                "Would you like to remove such clusters?"
+            )
+            ret = qm.question(self.window, "Warning", message, qm.Yes | qm.No)
+            if ret == qm.Yes:
+                max_locs_per_cluster = max_locs
+
+        centers, clustered_locs, info = g5m.g5m(
+            locs=locs,
+            info=info,
+            min_locs=params["min_locs"],
+            loc_prec_handle=params["loc_prec_handle"],
+            sigma_bounds=params["sigma_bounds"],
+            bootstrap_check=params["bootstrap_check"],
+            calibration=params.get("calibration", None),
+            postprocess=params["postprocess_check"],
+            max_locs_per_cluster=max_locs_per_cluster,
+            asynch=params["multiprocessing_check"],
+            callback_parent=self.window,
+        )
+        return centers, clustered_locs, info
+
+    def check_group(self, channel: int) -> bool:
+        """Check whether the data has been grouped (clustered) in
+        channel i."""
+        locs = self.window.view.locs[channel]
+        if hasattr(locs, "group"):
+            return True
+        else:
+            message = (
+                f"Channel #{channel+1} ("
+                f"{self.window.dataset_dialog.checks[channel].text()})"
+                " does not contain group information. Please run DBSCAN (or"
+                " similar) to group the localizations first."
+            )
+            QtWidgets.QMessageBox.information(self.window, "Warning", message)
+            return False
 
     def shifts_from_picked_coordinate(
         self,
@@ -11212,6 +11668,10 @@ class Window(QtWidgets.QMainWindow):
         postprocess_menu.addSeparator()
         resi_action = postprocess_menu.addAction("RESI")
         resi_action.triggered.connect(self.open_resi_dialog)
+
+        postprocess_menu.addSeparator()
+        g5m_action = postprocess_menu.addAction("Molecular mapping (G5M)")
+        g5m_action.triggered.connect(self.view.g5m)
 
         self.load_user_settings()
 

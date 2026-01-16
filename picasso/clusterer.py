@@ -942,3 +942,73 @@ def cluster_areas(
         if progress is not None:
             progress(idx + 1)
     return pd.DataFrame(areas)
+
+
+def test_subclustering(
+    mols: pd.DataFrame,
+    info: list[dict],
+    clustering_dist: float = 25,
+    sparse_dist: float = 80,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Extract number of events from molecular maps based on their
+    numbers of binding events assinged.
+
+    The reasoning is that 'subclustered' molecules will tend to have
+    fewer binding events assigned to them since multiple molecules
+    are assigned to a real single molecule. Thus, we can compare the
+    distribution of the number of events for the populations of
+    molecules that have close neighbors (clustered) and those that
+    do not (sparse). If subclustering occurs, the clustered molecules
+    should have a lower number of events on average.
+
+    DOI: g5m TODO
+
+    Parameters
+    ----------
+    mols : pd.DataFrame
+        List of molecules, must contain n_events.
+    info : list of dict
+        Molecules metadata.
+    clustering_dist : float, optional
+        Maximum distance between molecules (nm) to consider them as
+        clustered. Default is 25.
+    sparse_dist : float, optional
+        Minimum distance between molecules (nm) to consider them as sparse.
+        Default is 80.
+
+    Returns
+    -------
+    clustered_nevents : np.ndarray
+        Number of events for clustered molecules.
+    sparse_nevents : np.ndarray
+        Number of events for sparse molecules.
+    """
+    assert hasattr(
+        mols, "n_events"
+    ), "The input molecules must have n_events attribute."
+    assert sparse_dist > clustering_dist, (
+        "The sparse distance must be larger than the clustering " "distance."
+    )
+    pixelsize = lib.get_from_metadata(info, "Pixelsize")
+    if pixelsize is None:
+        raise ValueError("Pixelsize not found in metadata.")
+
+    # get 1st nearest neighbor distances
+    if hasattr(mols, "z"):
+        coords = mols[["x", "y", "z"]].to_numpy()
+        coords[:, 2] /= pixelsize
+    else:
+        coords = mols[["x", "y"]].to_numpy()
+    tree = KDTree(coords)
+    distances, indices = tree.query(coords, k=2)
+    nnd1 = distances[:, 1]
+    idx1 = indices[:, 1]
+
+    # split molecules into clustered and monomeric
+    close_nnd_idx = idx1[np.where(nnd1 < clustering_dist / pixelsize)[0]]
+    far_nnd_idx = idx1[np.where(nnd1 >= sparse_dist / pixelsize)[0]]
+    close_mols = mols.iloc[close_nnd_idx]
+    far_mols = mols.iloc[far_nnd_idx]
+    clustered_nevents = close_mols["n_events"].values
+    sparse_nevents = far_mols["n_events"].values
+    return clustered_nevents, sparse_nevents

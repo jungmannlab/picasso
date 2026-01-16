@@ -8,9 +8,12 @@ Fitting z coordinates using astigmatism.
 :copyright: Copyright (c) 2016 Jungmann Lab, MPI of Biochemistry
 """
 
+from __future__ import annotations
+
 import multiprocessing
 from concurrent import futures
 from concurrent.futures import ProcessPoolExecutor
+from typing import Literal
 
 import numba
 import yaml
@@ -20,7 +23,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from scipy.optimize import minimize_scalar
 
-from . import lib
+from . import lib, gausslq, gaussmle
 
 
 plt.style.use("ggplot")
@@ -461,3 +464,204 @@ def filter_z_fits(locs: pd.DataFrame, range: int) -> pd.DataFrame:
         rmsd = np.sqrt(np.nanmean(locs["d_zcalib"] ** 2))
         locs = locs[locs["d_zcalib"] <= range * rmsd]
     return locs
+
+
+def axial_localization_precision(
+    locs: np.recarray,
+    info: list[dict],
+    calibration: dict,
+    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
+    modality: Literal["astigmatic"] = "astigmatic",
+) -> np.ndarray:
+    """Calculate axial localization precision for given localizations
+    based on calibration.
+
+    Parameters
+    ----------
+    locs : np.recarray
+        Localizations.
+    info : list of dicts
+        Localizations metadata.
+    calibration : dict
+        Calibration dictionary with x and y coefficients, z step size
+        and the number of frames.
+    fitting_method : {"gausslq", "gaussmle"}, optional
+        Fitting method used to obtain 2D localization parameters (x, y,
+        sx, sy). Default is "gausslq".
+    modality : {"astigmatic"}, optional
+        3D imaging modality. Currently, only "astigmatic" is supported.
+        Default is "astigmatic".
+
+    Returns
+    -------
+    lpz: np.ndarray
+        Calculated lpz values for the given localizations in nm.
+    """
+    if modality != "astigmatic":
+        raise NotImplementedError(
+            "Currently, only 'astigmatic' modality is supported."
+        )
+    lpz = axial_localization_precision_astig(
+        locs, info, calibration, fitting_method
+    )
+    return lpz
+
+
+def axial_localization_precision_astig(
+    locs: np.recarray,
+    info: list[dict],
+    calibration: dict,
+    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
+) -> np.ndarray:
+    """Calculate axial localization precision for astigmatic 3D imaging
+    for given localizations based on calibration.
+
+    TODO: add G5M DOI!
+
+    Parameters
+    ----------
+    locs : np.recarray
+        Localizations.
+    info : list of dicts
+        Localizations metadata.
+    calibration : dict
+        Calibration dictionary with x and y coefficients, z step size
+        and the number of frames.
+    fitting_method : {"gausslq", "gaussmle"}, optional
+        Fitting method used to obtain 2D localization parameters (x, y,
+        sx, sy). Default is "gausslq".
+
+    Returns
+    -------
+    lpz: np.ndarray
+        Calculated lpz values for the given localizations in nm.
+    """
+    assert fitting_method in [
+        "gausslq",
+        "gaussmle",
+    ], "fitting_method must be 'gausslq' or 'gaussmle'."
+    assert (
+        "X Coefficients" in calibration
+        and "Y Coefficients" in calibration
+        and "Magnification factor" in calibration
+    ), "Calibration dictionary must contain 'X Coefficients', 'Y Coefficients', and 'Magnification factor'."
+
+    # get camera pixel size
+    pixelsize = lib.get_from_metadata(info, "Pixelsize")
+    if pixelsize is None:
+        raise ValueError("Pixelsize not found in info.")
+
+    photons = locs["photons"].values
+    sx = locs["sx"].values
+    sy = locs["sy"].values
+    bg = locs["bg"].values
+    mag_factor = calibration["Magnification factor"]
+    z = (
+        locs["z"].values / mag_factor
+    )  # to pinpoint what was the actual spot size during measurement
+    cx = np.array(calibration["X Coefficients"])
+    cy = np.array(calibration["Y Coefficients"])
+    lpz = (
+        _axial_localization_precision_astig(
+            photons, sx, sy, bg, z, cx, cy, pixelsize, fitting_method
+        )
+        * mag_factor
+    )
+    return lpz
+
+
+def _axial_localization_precision_astig(
+    photons: np.ndarray,
+    sx: np.ndarray,
+    sy: np.ndarray,
+    bg: np.ndarray,
+    z: np.ndarray,
+    cx: np.ndarray,
+    cy: np.ndarray,
+    pixelsize: float,
+    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
+) -> np.ndarray:
+    """Calculate axial localization precision for astigmatic 3D imaging
+    based on calibration coefficients and localization parameters.
+
+    Parameters
+    ----------
+    photons : np.ndarray
+        Number of photons.
+    sx : np.ndarray
+        Single-emitter images' fitted width in camera pixels.
+    sy : np.ndarray
+        Single-emitter images' fitted height in camera pixels.
+    bg : np.ndarray
+        Background photons per pixel.
+    z : np.ndarray
+        Z positions in nm.
+    cx : np.ndarray
+        3D calibration coefficients for x.
+    cy : np.ndarray
+        3D calibration coefficients for y.
+    pixelsize : float
+        Camera pixel size in nm.
+    fitting_method : {"gausslq", "gaussmle"}, optional
+        Fitting method used to obtain 2D localization parameters (x, y,
+        sx, sy). Default is "gausslq".
+
+    Returns
+    -------
+    lpz: np.ndarray
+        Calculated lpz values for the given localizations in nm.
+    """
+    if fitting_method == "gausslq":
+        sigma_uncertainty = gausslq.sigma_uncertainty
+    elif fitting_method == "gaussmle":
+        sigma_uncertainty = gaussmle.sigma_uncertainty
+    else:
+        raise ValueError("fitting_method must be 'gausslq' or 'gaussmle'.")
+
+    wx_calib = get_calib_size(cx, z) * pixelsize
+    wy_calib = get_calib_size(cy, z) * pixelsize
+    wx_calib_prime = get_prime_calib_size(cx, z) * pixelsize
+    wy_calib_prime = get_prime_calib_size(cy, z) * pixelsize
+    sqrt_wx_calib = np.sqrt(wx_calib)
+    sqrt_wx_calib_prime = wx_calib_prime / (2 * sqrt_wx_calib)
+    sqrt_wy_calib = np.sqrt(wy_calib)
+    sqrt_wy_calib_prime = wy_calib_prime / (2 * sqrt_wy_calib)
+    se_sx = sigma_uncertainty(sx, sy, photons, bg) * pixelsize
+    se_sy = sigma_uncertainty(sy, sx, photons, bg) * pixelsize
+    delta_sqrt_wx = (1 / (2 * np.sqrt(sx * pixelsize))) * se_sx
+    delta_sqrt_wy = (1 / (2 * np.sqrt(sy * pixelsize))) * se_sy
+    swxc2 = sqrt_wx_calib_prime**2
+    swyc2 = sqrt_wy_calib_prime**2
+    swx2 = delta_sqrt_wx**2
+    swy2 = delta_sqrt_wy**2
+    lpz = np.sqrt((swxc2 * swx2 + swyc2 * swy2) / (swxc2 + swyc2) ** 2)
+    return lpz
+
+
+def get_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
+    """Calculate calibration spot size at the given z position given
+    the calibration coefficients. Based on Huang et al., Science 2008."""
+    size = (
+        coeffs[0] * z**6
+        + coeffs[1] * z**5
+        + coeffs[2] * z**4
+        + coeffs[3] * z**3
+        + coeffs[4] * z**2
+        + coeffs[5] * z
+        + coeffs[6]
+    )
+    return size
+
+
+def get_prime_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
+    """Same as ``get_calib_size`` but for the derivative of the size
+    function."""
+    size_prime = (
+        6 * coeffs[0] * z**5
+        + 5 * coeffs[1] * z**4
+        + 4 * coeffs[2] * z**3
+        + 3 * coeffs[3] * z**2
+        + 2 * coeffs[4] * z
+        + coeffs[5]
+    )
+    return size_prime
