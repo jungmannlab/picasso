@@ -625,13 +625,14 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         save_view_button.released.connect(self.preview.save_current_view)
         navigation_layout.addWidget(save_view_button, 3, 0, 1, 4)
 
-        self.legend = FigureCanvas(
-            plt.Figure(
-                figsize=MASK_LEGEND_FIGSIZE,
-                dpi=MASK_LEGEND_DPI,
-                constrained_layout=True,
-            )
-        )  # TODO: this and NND plot look bad
+        self.fig = plt.Figure(
+            figsize=MASK_LEGEND_FIGSIZE,
+            dpi=MASK_LEGEND_DPI,
+            constrained_layout=True,
+        )
+        self.fig.patch.set_alpha(0)  # set transparent background
+        self.ax_mask_legend = self.fig.add_subplot(111)
+        self.legend = FigureCanvas(self.fig)
         self.legend.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
@@ -642,7 +643,6 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             )
         )
         self.legend.setToolTip("Displays probabilities per mask pixel/voxel.")
-
         navigation_layout.addWidget(self.legend, 4, 0, 1, 4)
 
         self.navigation_buttons = [
@@ -835,28 +835,19 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             pixel/voxel.
         """
         max_value = image.max()
-        if self.fig:
-            plt.close(self.fig)
         gradient = np.linspace(0, 1, 16)
         gradient = np.vstack((gradient, gradient))
-        self.fig, ax = plt.subplots(
-            1,
-            figsize=MASK_LEGEND_FIGSIZE,
-            constrained_layout=True,
-            dpi=MASK_LEGEND_DPI,
-        )
-        self.fig.patch.set_alpha(0)  # set transparent background
-        ax.imshow(gradient, cmap="magma")
-        ax.set_yticks([])
-        ax.set_xticks(np.linspace(0, 15, 5))
-        ax.set_xticklabels(
+        self.ax_mask_legend.cla()
+        self.ax_mask_legend.imshow(gradient, cmap="magma")
+        self.ax_mask_legend.set_yticks([])
+        self.ax_mask_legend.set_xticks(np.linspace(0, 15, 5))
+        self.ax_mask_legend.set_xticklabels(
             ["0.00E+0"]
             + [
                 f"{Decimal(str(_)):.2E}"
                 for _ in np.linspace(0, max_value, 5)[1:]
             ]
         )
-        self.legend.figure = self.fig
         self.legend.draw()
 
 
