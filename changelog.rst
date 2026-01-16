@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 12-JAN-2026 CEST
+Last change: 16-JAN-2026 CEST
 
 0.9.4
 -----
@@ -19,6 +19,7 @@ Important updates:
 *Bug fixes:*
 ++++++++++++
 - Render GUI takes camera pixel size using ``lib.get_from_metadata`` (#602)
+- Render by property is switched off if more than one channel is loaded
 - Render 3D scale bar manual adjustment fixed
 - Render 3D screenshot .yaml fixed
 - .tif IO bug fix related to the numpy deprecation of ``arr.newbyteorder``

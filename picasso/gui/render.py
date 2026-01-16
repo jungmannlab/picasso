@@ -5775,6 +5775,7 @@ class View(QtWidgets.QLabel):
             disp_sett_dlg.render_groupbox.setEnabled(True)
         else:
             disp_sett_dlg.render_groupbox.setEnabled(False)
+            self.x_render_state = False
 
         # render the loaded file
         if render:
@@ -9089,7 +9090,7 @@ class View(QtWidgets.QLabel):
                 inverted = tuple([1 - _ for _ in tempcolor])
                 colors[i] = inverted
 
-        # use the gist_rainbow colormap for rendering properties
+        # render properties
         if self.x_render_state:
             colors = get_render_properties_colors(
                 n_channels,
