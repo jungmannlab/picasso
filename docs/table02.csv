@@ -1,0 +1,24 @@
+﻿Column Name,Description,C Data Type
+frame,"Mean frame of the localizations around the molecule.",float
+std_frame,"St. dev. of frames of the localizations around the molecule.",float
+x/y/z,"Spatial coordinates of the molecule (camera pixels).",float
+std_x/std_y/std_z,"St. dev. of the localizations around the molecule in respective directions (camera pixels).",float
+photons,"Mean number of photons per localization around the molecule.",float
+sx,"Mean Point Spread Function width/height of localizations around the molecule (camera pixels).",float
+bg,"Mean background photons per pixel per localization around the molecule.",float
+lpx/lpy/lpz,"Molecule's position uncertainty in respective directions (camera pixels).",float
+ellipticity,"Mean ellipticity of localizations around the molecule.",float
+net_gradient,"Mean net gradient of localizations around the molecule.",float
+n/n_locs,"Number of localizations assigned to the molecule.",unsigned long
+n_events,"Number of binding events assigned to the molecule.",unsigned long
+group,"Cluster ID assigned to the molecule.",unsigned long
+group_input,"(Optional) Previous group ID of the localizations around the molecule, if they had a 'group' column.",unsigned long
+area/volume,"(Only SMLM clusterer) Area (2D) or volume (3D) of the ellipse/ellipsoid defined by std_x/y/z.",float
+convexhull,"(Only SMLM clusterer) Area (2D) or volume (3D) of the convex hull of the localizations assigned to the molecule.",float
+fitted_sigma,"(Only G5M, 2D) Fitted sigma of the Gaussian component representing the molecule (camera pixels).",float
+fitted_sigma_x/y/z,"(Only G5M, 3D) Fitted sigma of the Gaussian component representing the molecule in respective directions (camera pixels).",float
+rel_sigma,"(Only G5M, 2D) 'fitted_sigma' divided by the average localization precision around the molecule.",float
+rel_sigma_x/y/z,"(Only G5M, 3D) 'fitted_sigma_x/y/z' divided by the average localization precision in respective directions around the molecule.",float
+p_val,"(Only G5M) P-value of the molecule being a true positive detection according to the G5M model.",float
+mol_log_likelihood,"(Only G5M) Log-likelihood of the molecule according to the G5M model.",float
+group_log_likelihood,"(Only G5M) Log-likelihood of the GMM fitted to the preclustered localizations around the molecule.",float
