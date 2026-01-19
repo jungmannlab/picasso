@@ -2748,7 +2748,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
         save_nnd_png_button = QtWidgets.QPushButton("Save plots")
         save_nnd_png_button.setToolTip(
-            "Save the currently displayed NND plot(s) as .png file(s)."
+            "Save the currently displayed NND plot(s) as .png/.svg file(s)."
         )
         save_nnd_png_button.released.connect(self.save_nnd_plots)
         nnd_buttons_layout.addWidget(save_nnd_png_button, 1, 0, 1, 2)
