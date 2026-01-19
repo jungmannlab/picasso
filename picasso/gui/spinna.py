@@ -2177,6 +2177,12 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         Numbers of neighbors to plot for each pair of molecular targets.
     nnd_legend_check : QtWidgets.QCheckBox
         Checkbox for showing/hiding the legend.
+    rehist_exp : bool
+        Whether to rehistogram the experimental data when update plot(s) is
+        clicked.
+    rehist_sim : bool
+        Whether to rehistogram the simulated data when update plot(s) is
+        clicked.
     sim_tab : spinna.SimulationsTab
         The parent tab.
     title : QtWidgets.QLineEdit
@@ -2193,6 +2199,8 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Nearest neighbors plots")
         self.setModal(False)
         self.nn_counts = {}
+        self.rehist_exp = False
+        self.rehist_sim = False
         main_layout = QtWidgets.QVBoxLayout(self)
         const_layout = QtWidgets.QFormLayout()
         main_layout.addLayout(const_layout)
@@ -2219,9 +2227,11 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.binsize_sim.setValue(4.0)
         self.binsize_sim.setDecimals(1)
         self.binsize_sim.setSingleStep(0.1)
+        self.binsize_sim.valueChanged.connect(self.tick_rehist_sim)
         binsize_sim_label = QtWidgets.QLabel("Bin size sim (nm):")
         binsize_sim_label.setToolTip(
-            "Histogram bin size for plotting the simulated nearest neighbors distances."
+            "Histogram bin size for plotting the simulated nearest neighbors"
+            "distances."
         )
         const_layout.addRow(binsize_sim_label, self.binsize_sim)
 
@@ -2230,9 +2240,11 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         self.binsize_exp.setValue(4.0)
         self.binsize_exp.setDecimals(1)
         self.binsize_exp.setSingleStep(0.1)
+        self.binsize_exp.valueChanged.connect(self.tick_rehist_exp)
         binsize_exp_label = QtWidgets.QLabel("Bin size exp (nm):")
         binsize_exp_label.setToolTip(
-            "Histogram bin size for plotting the experimental nearest neighbors distances."
+            "Histogram bin size for plotting the experimental nearest neighbors"
+            "distances."
         )
         const_layout.addRow(binsize_exp_label, self.binsize_exp)
 
@@ -2330,6 +2342,8 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
                 spin = QtWidgets.QSpinBox(objectName=name)
                 spin.setRange(0, 10)
                 spin.setValue(2)
+                spin.valueChanged.connect(self.tick_rehist_exp)
+                spin.valueChanged.connect(self.tick_rehist_sim)
                 self.neighbors_layout.addRow(
                     QtWidgets.QLabel(f"NN {t1} \u2192 {t2}:"), spin
                 )
@@ -2341,6 +2355,8 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
                     spin = QtWidgets.QSpinBox(objectName=name)
                     spin.setRange(0, 10)
                     spin.setValue(2)
+                    spin.valueChanged.connect(self.tick_rehist_exp)
+                    spin.valueChanged.connect(self.tick_rehist_sim)
                     self.neighbors_layout.addRow(
                         QtWidgets.QLabel(f"NN {t2} \u2192 {t1}:"), spin
                     )
@@ -2362,14 +2378,21 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
                     "or type 'None'."
                 )
                 QtWidgets.QMessageBox.warning(self, "Warning", message)
+                return
+        self.sim_tab.display_current_nnd_plot()
 
     def update_plots(self) -> None:
         """Run a single simulation (if data loaded) or update the plots
         of the experimental NNDs only."""
-        if self.sim_tab.mixer is None:  # plot experimental data only
-            self.sim_tab.plot_exp_nnds()
-        else:  # simulation
+        plot = not (self.rehist_exp or self.rehist_sim)
+        if self.rehist_exp:
+            self.sim_tab.hist_and_plot_exp_nnds()
+        if self.rehist_sim:
             self.sim_tab.run_single_sim()
+        if plot:  # just plot without re-histogramming
+            self.sim_tab.display_current_nnd_plot()
+        self.rehist_exp = False
+        self.rehist_sim = False
 
     def extract_params(self) -> dict:
         """Extract the parameters from the dialog.
@@ -2385,6 +2408,7 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(
                 self, "Warning", "Max. distance is lower than min. distance."
             )
+            return {}
 
         binsize_sim = self.binsize_sim.value()
         binsize_exp = self.binsize_exp.value()
@@ -2392,6 +2416,7 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
             QtWidgets.QMessageBox.warning(
                 self, "Warning", "Bin size is larger than the distance range."
             )
+            return {}
 
         title = self.title.text()
         if not title.endswith(" "):
@@ -2416,6 +2441,14 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
             "nn_counts": self.nn_counts,
         }
         return params
+
+    def tick_rehist_exp(self) -> None:
+        """Tick that experimental data needs to be rehistogrammed."""
+        self.rehist_exp = True
+
+    def tick_rehist_sim(self) -> None:
+        """Tick that simulated data needs to be rehistogrammed."""
+        self.rehist_sim = True
 
 
 class SimulationsTab(QtWidgets.QDialog):
@@ -2493,11 +2526,13 @@ class SimulationsTab(QtWidgets.QDialog):
     N_structures_fit : dict
         Number of structures to be simulated for each target when
         fitting.
-    nnd_canvas : FigureCanvas
-        Figure canvas for displaying the nearest neighbors distances.
-        histograms.
-    nnd_plots : list of plt.Figures
-        Instances of pyplot's Figure for each NND plot.
+    nnd_ax, nnd_fig, nnd_canvas: matplotlib objects
+        Axes, Figure and FigureCanvas for displaying the nearest
+        neighbors distances histograms.
+    nnd_hist_data_exp, nnd_hist_data_sim : list of dicts
+        Histogram data for the nearest neighbors distances plots, one
+        element per target pair for experimental/simulated data. Each
+        dict contains keys 'bins' and 'counts'.
     nnd_plots_settings_dialog : NNPlotSettingsDialog
         Dialog for adjusting settings of the nearest neighbors plots.
     n_sim_fit : int
@@ -2567,6 +2602,8 @@ class SimulationsTab(QtWidgets.QDialog):
         self.mask_paths = {}
         self.N_structures_fit = {}
         self.n_total = {}
+        self.nnd_hist_data_exp = []
+        self.nnd_hist_data_sim = []
 
         self.load_mask_buttons = []
         self.load_exp_data_buttons = []
@@ -2574,7 +2611,6 @@ class SimulationsTab(QtWidgets.QDialog):
         self.label_unc_spins = []
         self.le_spins = []
         self.prop_str_input_spins = []
-        self.nnd_plots = []
 
         self.current_nnd_idx = 0
         self.depth = None
@@ -2671,10 +2707,15 @@ class SimulationsTab(QtWidgets.QDialog):
         nnd_plot_layout = QtWidgets.QVBoxLayout(nnd_plot_box)
         nnd_plot_layout.setSpacing(8)
 
-        nnd_fig = plt.figure(
+        self.nnd_fig = plt.figure(
             figsize=NND_FIGSIZE, dpi=NND_DPI, constrained_layout=True
         )
-        self.nnd_canvas = FigureCanvas(nnd_fig)
+        self.nnd_ax = self.nnd_fig.add_subplot(111)
+        self.nnd_ax.set_title("Nearest Neighbors Distances", fontsize=8)
+        self.nnd_ax.set_xlabel("Distance (nm)", fontsize=8)
+        self.nnd_ax.tick_params(axis="both", which="major", labelsize=6)
+        self.nnd_ax.set_xlim(0, 200)
+        self.nnd_canvas = FigureCanvas(self.nnd_fig)
         self.nnd_canvas.setSizePolicy(
             QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
         )
@@ -2732,6 +2773,9 @@ class SimulationsTab(QtWidgets.QDialog):
         self.n_sim_plot_spin.setValue(1)
         self.n_sim_plot_spin.setRange(1, 1000)
         self.n_sim_plot_spin.setSingleStep(1)
+        self.n_sim_plot_spin.valueChanged.connect(
+            self.nn_plot_settings_dialog.tick_rehist_sim
+        )
         nnd_buttons_layout.addWidget(self.n_sim_plot_spin, 2, 1, 1, 1)
 
         plot_settings_button = QtWidgets.QPushButton("Plot settings")
@@ -2881,6 +2925,8 @@ class SimulationsTab(QtWidgets.QDialog):
             self.mask_paths = {}
             self.N_structures_fit = {}
             self.n_total = {}
+            self.nnd_hist_data_exp = []
+            self.nnd_hist_data_sim = []
             self.granularity = None
             self.n_sim_fit = None
             self.mixer = None
@@ -2915,6 +2961,8 @@ class SimulationsTab(QtWidgets.QDialog):
     def load_exp_data(self, name: str) -> None:
         """Load experimental data for the specified molecular
         target species."""
+        self.nnd_hist_data_sim = []
+        self.nnd_hist_data_exp = []
         target = name[3:]
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -2953,7 +3001,7 @@ class SimulationsTab(QtWidgets.QDialog):
             # check if all channels have been loaded, if yes, plot NNDs
             # for experimental data only
             if self.check_exp_loaded():
-                self.plot_exp_nnds()
+                self.hist_and_plot_exp_nnds()
 
             # reset search space
             self.granularity = None
@@ -3003,6 +3051,10 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.roi_button.setText("Volume (\u03bcm\u00b3)")
             self.single_sim_mass = None
+        # replot exp data if loaded (distances dimensionality might have
+        # changed)
+        if len(self.nnd_hist_data_exp):
+            self.hist_and_plot_exp_nnds()
 
     def on_depth_button_clicked(self) -> None:
         """Ask the user to input the depth (nm) for a homogenous
@@ -3784,18 +3836,11 @@ class SimulationsTab(QtWidgets.QDialog):
     @check_structures_loaded
     def sim_and_plot_NND(self) -> None:
         """Simulate and plot nearest neighbor distances of simulated
-        molecules and optionally experimental data for comparison.
+        molecules.
 
         Takes the numbers of structures from the single simulation box.
         Number of simulations and plotting parameters are taken from
-        the NND plotting box.
-        """
-        # close figures in the NND plotting box
-        for fig in self.nnd_plots:
-            plt.close(fig)
-        self.nnd_plots = []
-        self.current_nnd_idx = 0
-
+        the NND plotting box."""
         n_sim = self.n_sim_plot_spin.value()
         prop_str = np.array([_.value() for _ in self.prop_str_input_spins])
         n_total = self.single_sim_n_total()
@@ -3803,131 +3848,108 @@ class SimulationsTab(QtWidgets.QDialog):
         plot_params = self.nn_plot_settings_dialog.extract_params()
         show_exp = self.check_exp_loaded()
 
-        # extract NNDs from simulations and experimetal data (if loaded)
+        # extract NNDs from simulated data
         dist_sim = spinna.get_NN_dist_simulated(
             n_str,
             n_sim,
             self.mixer,
             duplicate=True,
         )
-        if show_exp:
-            # get the simulation's fitting score:
+        if show_exp:  # get the simulation's fitting score:
             dist_exp = spinna.get_NN_dist_experimental(
                 self.exp_data, mixer=self.mixer, duplicate=True
             )
             self.current_score = spinna.NND_score(dist_exp, dist_sim)
+            if self.nn_plot_settings_dialog.rehist_exp:
+                self.hist_and_plot_exp_nnds()
 
+        # histogram simulated distances
+        self.nnd_hist_data_sim = []
         for i, (t1, t2, _) in enumerate(
             self.mixer.get_neighbor_idx(duplicate=True)
         ):
-            # plot simulated distances
-            fig, ax = spinna.plot_NN(
-                dist=dist_sim[i],
-                mode="plot",
-                show_legend=False,
-                binsize=plot_params["binsize_sim"],
-                xlim=(plot_params["min_dist"], plot_params["max_dist"]),
-                return_fig=True,
-                figsize=NND_FIGSIZE,
-                fontsize_labels=8,
-                fontsize_ticks=6,
-                fontsize_title=8,
-                dpi=NND_DPI,
-                alpha=1.0,
-                title=f"{plot_params['title']}{t1} \u2192 {t2}",
-                xlabel=plot_params["xlabel"],
-                ylabel=plot_params["ylabel"],
-                colors=plot_params["colors"],
-            )
-            if show_exp:  # plot exp. data if loaded
-                exp1 = self.exp_data[t1]
-                exp2 = self.exp_data[t2]
-                # if 2D simulation and 3D experimental data, project the
-                # experimental data to 2D
-                if self.dim_widget.currentIndex() == 0 and exp1.shape[1] == 3:
-                    exp1 = exp1[:, :2]
-                if self.dim_widget.currentIndex() == 0 and exp2.shape[1] == 3:
-                    exp2 = exp2[:, :2]
-                fig, ax = spinna.plot_NN(
-                    data1=exp1,
-                    data2=exp2,
-                    n_neighbors=plot_params["nn_counts"][f"{t1}-{t2}"].value(),
-                    show_legend=False,
-                    fig=fig,
-                    ax=ax,
-                    fontsize_labels=8,
-                    fontsize_ticks=6,
-                    fontsize_title=8,
-                    mode="hist",
-                    binsize=plot_params["binsize_exp"],
-                    xlim=(plot_params["min_dist"], plot_params["max_dist"]),
-                    return_fig=True,
-                    title=(
-                        f"{plot_params['title']}{t1} \u2192 {t2}\n"
-                        f"KS2: {self.current_score:.6f}"
-                    ),
-                    xlabel=plot_params["xlabel"],
-                    ylabel=plot_params["ylabel"],
-                    alpha=plot_params["alpha"],
-                    colors=plot_params["colors"],
+            current_hist_data = {"bins": [], "counts": []}
+            n_neighbors = dist_sim[i].shape[1]
+            for n in range(n_neighbors):
+                data = dist_sim[i][:, n]
+                counts, bins = np.histogram(
+                    data,
+                    bins=np.arange(0, 1000, plot_params["binsize_sim"]),
+                    density=True,
                 )
-
-            self.nnd_plots.append(fig)
+                current_hist_data["bins"].append(bins)
+                current_hist_data["counts"].append(counts)
+            self.nnd_hist_data_sim.append(current_hist_data)
 
         # display the first plot
         self.display_current_nnd_plot()
 
     @check_exp_data_loaded
-    def plot_exp_nnds(self) -> None:
-        """Plot NNDs of experimental data only, according to the
-        chosen plot settings."""
-        # close figures in the NND plotting box
-        for fig in self.nnd_plots:
-            plt.close(fig)
-        self.nnd_plots = []
-        self.current_nnd_idx = 0
-
-        # plot NNDs
+    def hist_and_plot_exp_nnds(self) -> None:
+        """Histogram NNDs of experimental data only, according to the
+        chosen plot settings and display the current NND plot."""
+        self.nnd_hist_data_exp = []
         plot_params = self.nn_plot_settings_dialog.extract_params()
         for i, t1 in enumerate(self.targets):
             for t2 in self.targets[i:]:
-                exp1 = self.exp_data[t1]
-                exp2 = self.exp_data[t2]
-                fig, ax = spinna.plot_NN(
-                    data1=exp1,
-                    data2=exp2,
-                    n_neighbors=plot_params["nn_counts"][f"{t1}-{t2}"].value(),
-                    show_legend=False,
-                    mode="hist",
-                    figsize=NND_FIGSIZE,
-                    fontsize_labels=8,
-                    fontsize_ticks=6,
-                    fontsize_title=8,
-                    dpi=NND_DPI,
-                    binsize=plot_params["binsize_exp"],
-                    xlim=(plot_params["min_dist"], plot_params["max_dist"]),
-                    return_fig=True,
-                    title=f"{plot_params['title']}{t1} \u2192 {t2}",
-                    xlabel=plot_params["xlabel"],
-                    ylabel=plot_params["ylabel"],
-                    alpha=plot_params["alpha"],
-                    colors=plot_params["colors"],
-                )
-                self.nnd_plots.append(fig)
-
-        # display the first plot
+                hist_data_t1t2 = self.hist_exp_nnds(t1, t2, plot_params)
+                self.nnd_hist_data_exp.append(hist_data_t1t2)
+                if t1 != t2:  # also do t2 -> t1
+                    hist_data_t2t1 = self.hist_exp_nnds(t2, t1, plot_params)
+                    self.nnd_hist_data_exp.append(hist_data_t2t1)
         self.display_current_nnd_plot()
 
+    def hist_exp_nnds(self, t1: str, t2: str, plot_params: dict) -> dict:
+        """Histogram experimental NNDs for a given target pair."""
+        current_hist_data = {"bins": [], "counts": []}
+        exp1 = self.exp_data[t1]
+        exp2 = self.exp_data[t2]
+        if self.dim_widget.currentIndex() == 0 and exp1.shape[1] == 3:
+            exp1 = exp1[:, :2]
+        if self.dim_widget.currentIndex() == 0 and exp2.shape[1] == 3:
+            exp2 = exp2[:, :2]
+        n_neighbors = plot_params["nn_counts"][f"{t1}-{t2}"].value()
+        dist = spinna.get_NN_dist(exp1, exp2, n_neighbors)
+        for n in range(n_neighbors):
+            data = dist[:, n]
+            counts, bins = np.histogram(
+                data,
+                bins=np.arange(0, 1000, plot_params["binsize_exp"]),
+                density=True,
+            )
+            current_hist_data["bins"].append(bins)
+            current_hist_data["counts"].append(counts)
+        return current_hist_data
+
     @check_structures_loaded
-    def setup_mixer(self, mode: Literal["fit", "single_sim"] = "fit") -> None:
+    def setup_mixer(
+        self, mode: Literal["fit", "single_sim", "dummy"] = "fit"
+    ) -> None:
         """Initialize the class used for simulations.
 
         Parameters
         ----------
-        mode : {'fit', 'single_sim'}
+        mode : {'fit', 'single_sim', 'dummy'}
             Specifies how to find the numbers of structures to be
-            considered.
+            considered. If 'dummy', no numbers of structures are
+            considered and the mixer is only initialized for basic
+            operations.
         """
+        assert mode in [
+            "fit",
+            "single_sim",
+            "dummy",
+        ], "mode must be 'fit', 'single_sim' or 'dummy'."
+        if mode == "dummy":
+            return spinna.StructureMixer(
+                structures=self.structures,
+                label_unc={"ALL": 0},
+                le={"ALL": 1.0},
+                width=10,
+                height=10,
+                depth=10,
+            )
+
         # extract label uncertainty and LE
         label_unc = {}
         le = {}
@@ -4134,11 +4156,8 @@ class SimulationsTab(QtWidgets.QDialog):
         tot_density = density / le
         n_mol = self.find_n_mol_from_target(target)
 
-        # obtain depth:
-        if self.dim_widget.currentIndex() == 0:  # 2D
-            depth = None
-        else:
-            depth = self.depth
+        # obtain depth (only 3D)
+        depth = None if self.dim_widget.currentIndex() == 0 else self.depth
 
         # find width and height - ROI is a square
         if depth is None:
@@ -4195,25 +4214,71 @@ class SimulationsTab(QtWidgets.QDialog):
 
     def display_current_nnd_plot(self) -> None:
         """Display currently indexed NND plot."""
-        if not self.nnd_plots:
+        if not (len(self.nnd_hist_data_exp) or len(self.nnd_hist_data_sim)):
             return
 
+        self.nnd_ax.cla()
         if self.nn_plot_settings_dialog.nnd_legend_check.isChecked():
             show_legend = True
         else:
             show_legend = False
-        fig = self.nnd_plots[self.current_nnd_idx]
-        if show_legend:
-            fig.axes[0].legend()
-        else:
-            if fig.axes[0].legend_:
-                fig.axes[0].legend_.remove()
-        self.nnd_canvas.figure = fig
+
+        plot_params = self.nn_plot_settings_dialog.extract_params()
+        mixer = (
+            self.setup_mixer(mode="dummy")
+            if self.mixer is None
+            else self.mixer
+        )
+        t1, t2, _ = mixer.get_neighbor_idx(duplicate=True)[
+            self.current_nnd_idx
+        ]
+
+        # set the title (with ks2 score if available)
+        title = f"{plot_params['title']}{t1} \u2192 {t2}"
+        if self.current_score:
+            title = f"{title}\nKS2: {self.current_score:.6f}"
+
+        if len(self.nnd_hist_data_exp):
+            spinna.plot_NN(
+                hist_data=self.nnd_hist_data_exp[self.current_nnd_idx],
+                mode="hist",
+                show_legend=show_legend,
+                fig=self.nnd_fig,
+                ax=self.nnd_ax,
+                xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                fontsize_labels=8,
+                fontsize_ticks=6,
+                fontsize_title=8,
+                title=title,
+                xlabel=plot_params["xlabel"],
+                ylabel=plot_params["ylabel"],
+                alpha=plot_params["alpha"],
+                colors=plot_params["colors"],
+            )
+
+        if len(self.nnd_hist_data_sim):
+            spinna.plot_NN(
+                hist_data=self.nnd_hist_data_sim[self.current_nnd_idx],
+                mode="plot",
+                show_legend=show_legend,
+                fig=self.nnd_fig,
+                ax=self.nnd_ax,
+                xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                fontsize_labels=8,
+                fontsize_ticks=6,
+                fontsize_title=8,
+                alpha=1.0,
+                title=title,
+                xlabel=plot_params["xlabel"],
+                ylabel=plot_params["ylabel"],
+                colors=plot_params["colors"],
+            )
+
         self.nnd_canvas.draw()
 
     def on_left_nnd_clicked(self) -> None:
         """Display the previous NND plot."""
-        N = len(self.nnd_plots)
+        N = max(len(self.nnd_hist_data_exp), len(self.nnd_hist_data_sim))
         if N == 1:
             self.display_current_nnd_plot()
             return
@@ -4226,7 +4291,7 @@ class SimulationsTab(QtWidgets.QDialog):
 
     def on_right_nnd_clicked(self) -> None:
         """Display the next NND plot."""
-        N = len(self.nnd_plots)
+        N = max(len(self.nnd_hist_data_exp), len(self.nnd_hist_data_sim))
         if N == 1:
             self.display_current_nnd_plot()
             return
@@ -4238,112 +4303,131 @@ class SimulationsTab(QtWidgets.QDialog):
         self.display_current_nnd_plot()
 
     def save_nnd_plots(self) -> None:
-        """Save all the loaded NND plots as .png/.svg files."""
-        if self.nnd_plots:
-            out_path = self.structures_path.replace(".yaml", "_NND_plots")
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save NND plots", out_path, filter="*.png;;*.svg"
-            )
-            if not path:
-                return
-            self.window.pwd = os.path.dirname(path)
-        else:
+        """Save the NNDs across all targets as .png/.svg files."""
+        if not (len(self.nnd_hist_data_exp) or len(self.nnd_hist_data_sim)):
             return
 
-        if self.mixer is None:
-            # set up a dummy mixer to get neighbor idx
-            self.mixer = spinna.StructureMixer(
-                structures=self.structures,
-                label_unc={"ALL": 0},
-                le={"ALL": 1.0},
-                width=10,
-                height=10,
-                depth=10,
+        out_path = self.structures_path.replace(".yaml", f"_NND")
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save NND plots", out_path, filter="*.png;;*.svg"
+        )
+        if not path:
+            return
+        self.window.pwd = os.path.dirname(path)
+
+        plot_params = self.nn_plot_settings_dialog.extract_params()
+        mixer = (
+            self.setup_mixer(mode="dummy")
+            if self.mixer is None
+            else self.mixer
+        )
+
+        for i, (t1, t2, _) in enumerate(
+            mixer.get_neighbor_idx(duplicate=True)
+        ):
+            fig, ax = plt.subplots(
+                figsize=NND_FIGSIZE, dpi=NND_DPI, constrained_layout=True
             )
-        i = 0
-        for t1, t2, _ in self.mixer.get_neighbor_idx(duplicate=True):
-            fig = self.nnd_plots[i]
-            outpath = path.replace(ext[1:], f"_{t1}_{t2}{ext[1:]}")
+            title = f"{plot_params['title']}{t1} \u2192 {t2}"
+            if self.current_score:
+                title = f"{title}\nKS2: {self.current_score:.6f}"
+            if len(self.nnd_hist_data_exp):
+                spinna.plot_NN(
+                    hist_data=self.nnd_hist_data_exp[i],
+                    mode="hist",
+                    show_legend=False,
+                    fig=fig,
+                    ax=ax,
+                    xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                    fontsize_labels=8,
+                    fontsize_ticks=6,
+                    fontsize_title=8,
+                    title=title,
+                    xlabel=plot_params["xlabel"],
+                    ylabel=plot_params["ylabel"],
+                    alpha=plot_params["alpha"],
+                    colors=plot_params["colors"],
+                )
+            if len(self.nnd_hist_data_sim):
+                spinna.plot_NN(
+                    hist_data=self.nnd_hist_data_sim[i],
+                    mode="plot",
+                    show_legend=False,
+                    fig=fig,
+                    ax=ax,
+                    xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                    fontsize_labels=8,
+                    fontsize_ticks=6,
+                    fontsize_title=8,
+                    alpha=1.0,
+                    title=title,
+                    xlabel=plot_params["xlabel"],
+                    ylabel=plot_params["ylabel"],
+                    colors=plot_params["colors"],
+                )
+            outpath = (
+                f"{os.path.splitext(path)[0]}_{t1}_{t2}{ext.replace('*', '')}"
+            )
             fig.savefig(outpath)
-            i += 1
+            plt.close(fig)
 
     def save_nnd_values(self) -> None:
         """Save all NND values (bin centers and bin heights) as .csv
         files."""
-        if self.nnd_plots:
-            out_path = self.structures_path.replace(".yaml", "_NND_values")
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save NND values", out_path, filter="*.csv"
-            )
-            if not path:
-                return
-            self.window.pwd = os.path.dirname(path)
-        else:
+        if not (len(self.nnd_hist_data_exp) or len(self.nnd_hist_data_sim)):
             return
 
-        # set up a dummy mixer to get neighbor idx
-        if self.mixer is None:
-            self.mixer = spinna.StructureMixer(
-                structures=self.structures,
-                label_unc={"ALL": 0},
-                le={"ALL": 1.0},
-                width=10,
-                height=10,
-                depth=10,
-            )
+        out_path = self.structures_path.replace(".yaml", "_NND_values")
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self, "Save NND values", out_path, filter="*.csv"
+        )
+        if not path:
+            return
+        self.window.pwd = os.path.dirname(path)
 
-        i = 0
-        for t1, t2, n in self.mixer.get_neighbor_idx(duplicate=True):
+        # set up a dummy mixer to get neighbor idx
+        mixer = (
+            self.setup_mixer(mode="dummy")
+            if self.mixer is None
+            else self.mixer
+        )
+
+        for i, (t1, t2, n) in enumerate(
+            mixer.get_neighbor_idx(duplicate=True)
+        ):
             if not n:
                 continue
-            # extract plotted line (simulation) and histogram (exp) (if
-            # available)
-            fig = self.nnd_plots[i]
-            ax = fig.axes[0]
-            if len(ax.lines):
+            # extract simulated data (if available)
+            if len(self.nnd_hist_data_sim):
                 data_sim = {}
-                bin_size = self.nn_plot_settings_dialog.binsize_sim.value()
-                mindist = self.nn_plot_settings_dialog.min_dist.value()
-                maxdist = self.nn_plot_settings_dialog.max_dist.value()
-                bins = np.arange(mindist, maxdist + bin_size, bin_size)
+                bins = self.nnd_hist_data_sim[i]["bins"][0]
                 bin_centers = (bins[1:] + bins[:-1]) / 2.0
-                n_bins = len(bin_centers)
                 data_sim["bins_sim"] = bin_centers
-
-                # extract simulation data
-                for ll, line in enumerate(ax.lines):
-                    data_sim[f"NN{ll+1}_values_sim"] = line.get_ydata()[
-                        :n_bins
-                    ]
+                n_neighbros = len(self.nnd_hist_data_sim[i]["counts"])
+                for nn in range(n_neighbros):
+                    data_sim[f"NN{nn+1}_values_sim"] = self.nnd_hist_data_sim[
+                        i
+                    ]["counts"][nn]
                 # save simulation data
                 outpath_sim = path.replace(".csv", f"_{t1}_{t2}_sim.csv")
                 df = pd.DataFrame(data_sim)
                 df.to_csv(outpath_sim, index=False)
 
             # extract experimental data (if available)
-            if ax.patches:
+            if len(self.nnd_hist_data_exp):
                 data_exp = {}
-                # extract bin centers from experimental data
-                bin_size = self.nn_plot_settings_dialog.binsize_exp.value()
-                mindist = self.nn_plot_settings_dialog.min_dist.value()
-                maxdist = self.nn_plot_settings_dialog.max_dist.value()
-                bins = np.arange(0, 1000, bin_size)
+                bins = self.nnd_hist_data_exp[i]["bins"][0]
                 bin_centers = (bins[1:] + bins[:-1]) / 2.0
-                n_bins = len(bin_centers)
                 data_exp["bins_exp"] = bin_centers
-                patches = [
-                    ax.patches[ii : ii + n_bins]
-                    for ii in range(0, len(ax.patches), n_bins)
-                ]
-                for p, patch in enumerate(patches):
-                    data_exp[f"NN{p+1}_values_exp"] = np.array(
-                        [patch_.get_height() for patch_ in patch]
-                    )
-                # save the values
+                n_neighbros = len(self.nnd_hist_data_exp[i]["counts"])
+                for nn in range(n_neighbros):
+                    data_exp[f"NN{nn+1}_values_exp"] = self.nnd_hist_data_exp[
+                        i
+                    ]["counts"][nn]
+                # save experimental data
                 outpath_exp = path.replace(".csv", f"_{t1}_{t2}_exp.csv")
                 df = pd.DataFrame(data_exp)
                 df.to_csv(outpath_exp, index=False)
-            i += 1
 
 
 class Window(QtWidgets.QMainWindow):
