@@ -17,6 +17,7 @@ Important updates:
 *Small improvements:*
 +++++++++++++++++++++
 - Picasso applies constrained layout to all matplotlib figures
+- SPINNA uses ``FigureCanvas`` instead of ``QSvgRenderer`` for displaying NND plots and mask legend
 - 3D animation saves metadata
 
 *Bug fixes:*
