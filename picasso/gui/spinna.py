@@ -2959,8 +2959,8 @@ class SimulationsTab(QtWidgets.QDialog):
                     self.targets.append(target)
 
     def load_exp_data(self, name: str) -> None:
-        """Load experimental data for the specified molecular
-        target species."""
+        """Load experimental data for the specified molecular target
+        species."""
         self.nnd_hist_data_sim = []
         self.nnd_hist_data_exp = []
         target = name[3:]
@@ -3473,7 +3473,9 @@ class SimulationsTab(QtWidgets.QDialog):
         # update spin boxes
         for i, ps in enumerate(prop_str):
             spin = self.prop_str_input_spins[i]
+            spin.blockSignals(True)
             spin.setValue(ps)
+            spin.blockSignals(False)
 
         # delete the restart button in the box if there is any
         button = [

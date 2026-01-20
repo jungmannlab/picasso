@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 19-JAN-2026 CEST
+Last change: 20-JAN-2026 CEST
 
 0.9.4
 -----
@@ -12,7 +12,7 @@ Important updates:
 - Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*
 - Localize accepts frame bounds to analyze only a subset of frames
 - Render by property (GUI) shows histogram of the selected property
-- Filter GUI has a new plot to test for subclustering based on the number of events per molecule (column ``n_events``); see the filter documentation for details
+- Filter GUI has a new plot to test for subclustering based on the number of events per molecule (column ``n_events``); see the `Filter documentation <https://picassosr.readthedocs.io/en/latest/filter.html>`__  for details
 
 *Small improvements:*
 +++++++++++++++++++++
@@ -27,8 +27,9 @@ Important updates:
 - Render by property is switched off if more than one channel is loaded
 - Render 3D scale bar manual adjustment fixed
 - Render 3D screenshot .yaml fixed
-- .tif IO bug fix related to the numpy deprecation of ``arr.newbyteorder``
+- .tif IO bug fix related to the numpy deprecation of ``arr.newbyteorder`` (#603)
 - Clarify GPU fit installation instructions and remove version printing (#604)
+- SPINNA fixed loading of the proportion spin boxes after rerunning SPINNA, such that they add up to 100% again
 
 0.9.3
 -----
