@@ -518,7 +518,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.mask_blur = ignoreArrowsSpinBox()
         self.mask_blur.setRange(0, 10_000)
         self.mask_blur.setSingleStep(1)
-        self.mask_blur.setValue(0)
+        self.mask_blur.setValue(500)
         mask_layout.addWidget(self.mask_blur, 2, 1)
 
         # ndimensions:
