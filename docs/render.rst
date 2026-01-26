@@ -100,6 +100,7 @@ The final postprocessing step is log-likelihood filtering (using the column ``p_
 As a final check for overfitting (i.e., too many assigned molecules), G5M automatically saves a bar plot of the number of binding events per molecule (``n_events`` column) for sparse (with neighbors within 25 nm) and clustered (without neighbors within 80 nm) molecules. While this is only a qualitative verification, it is a simple method to spot potential overfitting issues. If the clustered molecules show fewer binding events that the sparse molecules, overfitting likely occurred. See Fig. S15 of the publication for an example of well-behaved data.
 
 If the outcome of G5M seems unsatisfactory, please check the following:
+- Make sure that the loc. precision values (columns ``lpx``, ``lpy``, ``lpz``) are correct; the most common issue is a miscalibrated camera, leading to incorrect photon counts and thus incorrect loc. precisions;
 - Rerun the analysis without postprocessing (filtering) and redo it manually, since the step may be too stringent, especially for short acquisition times;
 - Adjust min./max. σ, especially too low max. σ may lead to high false positive error rates (i.e., overfitting);
 - Adjust min. locs;
