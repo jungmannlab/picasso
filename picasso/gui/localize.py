@@ -1123,6 +1123,14 @@ class ParametersDialog(QtWidgets.QDialog):
             self, "Load 3d calibration", directory=None, filter="*.yaml"
         )
         if path:
+            self.update_z_calib(path)
+
+    def update_z_calib(self, path) -> None:
+        """Load the 3D calibration from a YAML file."""
+        path, exe = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Load 3d calibration", directory=None, filter="*.yaml"
+        )
+        if path:
             with open(path, "r") as f:
                 self.z_calibration = yaml.full_load(f)
                 self.z_calibration_path = path
@@ -1178,6 +1186,15 @@ class ParametersDialog(QtWidgets.QDialog):
             self.pixelsize.setValue(cam_config["Pixelsize"])
         self.update_sensitivity()
         self.update_qe()
+
+        # load 3D calibration
+        fp_calib_lam = CONFIG["z-calibrations"].get(camera)
+        if fp_calib_lam is not None:
+            em_combo = self.emission_combos[camera]
+            wavelength = em_combo.currentText()
+            fp_calib = fp_calib_lam.get(wavelength)
+            if fp_calib is not None:
+                update_z_calib(fp_calib)
 
     def update_qe(self) -> None:
         """Update QE. Note that QE is not used in the analysis, the
