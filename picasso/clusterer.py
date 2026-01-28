@@ -327,6 +327,7 @@ def cluster(
         specifies cluster label for each localization. Noise (label -1)
         is removed.
     """
+    locs = locs.copy()
     if hasattr(locs, "z"):  # 3D
         if pixelsize is None or radius_z is None:
             raise ValueError(
@@ -428,6 +429,7 @@ def dbscan(
         specifies cluster label for each localization. Noise (label -1)
         is removed.
     """
+    locs = locs.copy()
     if hasattr(locs, "z"):
         if pixelsize is None:
             raise ValueError(
@@ -513,6 +515,7 @@ def hdbscan(
         specifies cluster label for each localization. Noise (label -1)
         is removed.
     """
+    locs = locs.copy()
     if hasattr(locs, "z"):
         if pixelsize is None:
             raise ValueError(
