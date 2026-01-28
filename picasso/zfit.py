@@ -99,10 +99,10 @@ def calibrate_z(
 
     keep_x = (
         (locs["sx"] - mean_sx[locs["frame"]]) ** 2 < var_sx[locs["frame"]]
-    ).values
+    ).to_numpy()
     keep_y = (
         (locs["sy"] - mean_sy[locs["frame"]]) ** 2 < var_sy[locs["frame"]]
-    ).values
+    ).to_numpy()
     keep = keep_x & keep_y
     locs = locs[keep]
 
@@ -313,8 +313,8 @@ def fit_z(
     cy = np.array(calibration["Y Coefficients"])
     z = np.zeros_like(locs["x"])
     square_d_zcalib = np.zeros_like(z)
-    sx = locs["sx"].values
-    sy = locs["sy"].values
+    sx = locs["sx"].to_numpy()
+    sy = locs["sy"].to_numpy()
     for i in range(len(z)):
         # set bounds to avoid potential gaps in the calibration curve,
         # credits to Loek Andriessen
@@ -551,13 +551,13 @@ def axial_localization_precision_astig(
     if pixelsize is None:
         raise ValueError("Pixelsize not found in info.")
 
-    photons = locs["photons"].values
-    sx = locs["sx"].values
-    sy = locs["sy"].values
-    bg = locs["bg"].values
+    photons = locs["photons"].to_numpy()
+    sx = locs["sx"].to_numpy()
+    sy = locs["sy"].to_numpy()
+    bg = locs["bg"].to_numpy()
     mag_factor = calibration["Magnification factor"]
     z = (
-        locs["z"].values / mag_factor
+        locs["z"].to_numpy() / mag_factor
     )  # to pinpoint what was the actual spot size during measurement
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])

@@ -55,12 +55,12 @@ def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     passed = 1
 
     # get mean frame
-    mean_frame = frame.values.mean()
+    mean_frame = frame.to_numpy().mean()
 
     # get maximum number of locs in a 1/20th of acquisition time
     n_locs = len(frame)
     locs_binned = np.histogram(
-        frame.values, bins=np.linspace(0, n_frames, 21)
+        frame.to_numpy(), bins=np.linspace(0, n_frames, 21)
     )[0]
     max_locs_bin = locs_binned.max()
 
@@ -104,7 +104,7 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
     true_cluster = frame_grouped.apply(_frame_analysis, frame.max() + 1)
 
     # cluster ids that did not pass frame analysis
-    discard = true_cluster.index[true_cluster == 0].values
+    discard = true_cluster.index[true_cluster == 0].to_numpy()
     # change labels of these clusters to -1
     labels[np.isin(labels, discard)] = -1
 
@@ -335,10 +335,10 @@ def cluster(
                 " specified for 3D clustering."
             )
         labels = cluster_3D(
-            locs["x"].values,
-            locs["y"].values,
-            locs["z"].values / pixelsize,  # convert from nm to px
-            locs["frame"].values,
+            locs["x"].to_numpy(),
+            locs["y"].to_numpy(),
+            locs["z"].to_numpy() / pixelsize,  # convert from nm to px
+            locs["frame"].to_numpy(),
             radius_xy,
             radius_z,
             min_locs,
@@ -346,9 +346,9 @@ def cluster(
         )
     else:
         labels = cluster_2D(
-            locs["x"].values,
-            locs["y"].values,
-            locs["frame"].values,
+            locs["x"].to_numpy(),
+            locs["y"].to_numpy(),
+            locs["frame"].to_numpy(),
             radius_xy,
             min_locs,
             frame_analysis,
@@ -436,11 +436,10 @@ def dbscan(
                 "Camera pixel size must be specified as an integer for 3D"
                 " clustering."
             )
-        X = np.vstack(
-            (locs["x"].values, locs["y"].values, locs["z"].values / pixelsize)
-        ).T
+        X = locs[["x", "y", "z"]].to_numpy()
+        X[:, 2] /= pixelsize
     else:
-        X = np.vstack((locs["x"].values, locs["y"].values)).T
+        X = locs[["x", "y"]].to_numpy()
     labels = _dbscan(X, radius, min_samples, min_locs)
     locs = extract_valid_labels(locs, labels)
     return locs
@@ -523,10 +522,14 @@ def hdbscan(
                 " clustering."
             )
         X = np.vstack(
-            (locs["x"].values, locs["y"].values, locs["z"].values / pixelsize)
+            (
+                locs["x"].to_numpy(),
+                locs["y"].to_numpy(),
+                locs["z"].to_numpy() / pixelsize,
+            )
         ).T
     else:
-        X = np.vstack((locs["x"].values, locs["y"].values)).T
+        X = np.vstack((locs["x"].to_numpy(), locs["y"].to_numpy())).T
     labels = _hdbscan(
         X, min_cluster_size, min_samples, cluster_eps=cluster_eps
     )
@@ -657,7 +660,7 @@ def find_cluster_centers(
                 "n_events": n_events.astype(np.int32),
                 "volume": volume.astype(np.float32),
                 "convexhull": convexhull.astype(np.float32),
-                "group": res.index.values.astype(np.int32),  # group id
+                "group": res.index.to_numpy().astype(np.int32),  # group id
             }
         )
     else:
@@ -683,7 +686,7 @@ def find_cluster_centers(
                 "n_events": n_events.astype(np.int32),
                 "area": area.astype(np.float32),
                 "convexhull": convexhull.astype(np.float32),
-                "group": res.index.values.astype(np.int32),  # group id
+                "group": res.index.to_numpy().astype(np.int32),  # group id
             }
         )
     if hasattr(locs, "group_input"):
@@ -758,7 +761,7 @@ def cluster_center(
     # number of binding events
     split_idx = np.where(np.diff(grouplocs.frame) > 3)[0] + 1  # split locs by
     # consecutive frames
-    x_events = np.split(grouplocs.x.values, split_idx)
+    x_events = np.split(grouplocs.x.to_numpy(), split_idx)
     n_events = len(x_events)  # number of binding events
     if hasattr(grouplocs, "z"):
         if pixelsize is None:
@@ -932,12 +935,12 @@ def cluster_areas(
         grouplocs = locs[locs["group"] == group_id]
         if not len(grouplocs):
             continue
-        lp = locs[["lpx", "lpy"]].values.mean(axis=1)
+        lp = locs[["lpx", "lpy"]].to_numpy().mean(axis=1)
         if hasattr(grouplocs, "z"):
-            X = grouplocs[["x", "y", "z"]].values
+            X = grouplocs[["x", "y", "z"]].to_numpy()
             X[:, 2] /= pixelsize  # convert z to pixels
         else:
-            X = grouplocs[["x", "y"]].values
+            X = grouplocs[["x", "y"]].to_numpy()
         areas[area_key][idx] = _cluster_area(X, lp)
         if progress is not None:
             progress(idx + 1)
@@ -1009,6 +1012,6 @@ def test_subclustering(
     far_nnd_idx = idx1[np.where(nnd1 >= sparse_dist / pixelsize)[0]]
     close_mols = mols.iloc[close_nnd_idx]
     far_mols = mols.iloc[far_nnd_idx]
-    clustered_nevents = close_mols["n_events"].values
-    sparse_nevents = far_mols["n_events"].values
+    clustered_nevents = close_mols["n_events"].to_numpy()
+    sparse_nevents = far_mols["n_events"].to_numpy()
     return clustered_nevents, sparse_nevents

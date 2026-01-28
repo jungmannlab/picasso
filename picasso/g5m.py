@@ -902,10 +902,10 @@ def run_g5m_group_2D(
         return None, None
 
     if loc_prec_handle == "local":
-        lp = locs_group[["lpx", "lpy"]].mean(axis=1).values
+        lp = locs_group[["lpx", "lpy"]].mean(axis=1).to_numpy()
     else:
         lp = np.ones(len(locs_group))  # dummy
-    X = locs_group[["x", "y"]].values.astype(np.float64)
+    X = locs_group[["x", "y"]].to_numpy().astype(np.float64)
 
     g5m = find_optimal_G5M_2D(
         X,
@@ -1420,10 +1420,10 @@ def run_g5m_group_3D(
     )
 
     if loc_prec_handle == "local":
-        lp = locs_group[["lpx", "lpy", "lpz"]].values
+        lp = locs_group[["lpx", "lpy", "lpz"]].to_numpy()
     else:
         lp = np.ones((len(locs_group), 3))  # dummy
-    X = locs_group[["x", "y", "z"]].values
+    X = locs_group[["x", "y", "z"]].to_numpy()
     X[:, 2] /= pixelsize  # convert z to camera pixels
     lp[:, 2] /= pixelsize  # convert lpz to camera pixels
 
@@ -1649,7 +1649,7 @@ def bootstrap_sem(
                 means_init=g5m.means,
                 mag_factor=g5m.mag_factor,
             )
-            lp = locs[["lpx", "lpy"]].values
+            lp = locs[["lpx", "lpy"]].to_numpy()
         else:
             g5m_boot = G5M_2D(
                 n_components=len(g5m.valid_idx),
@@ -1657,7 +1657,7 @@ def bootstrap_sem(
                 sigma_bounds=g5m.sigma_bounds,
                 means_init=g5m.means,
             )
-            lp = locs[["lpx", "lpy"]].mean(axis=1).values
+            lp = locs[["lpx", "lpy"]].mean(axis=1).to_numpy()
         g5m_boot.fit(X_boot, lp=lp, loc_prec_handle=g5m.loc_prec_handle)
         if hasattr(g5m_boot, "means_"):  # converged
             boot_means.append(g5m_boot.means_)
@@ -1705,11 +1705,11 @@ def convert_G5M_results(
     # find responsibilites which are used for weighted averaging of
     # properties per component
     if hasattr(locs_group, "z"):
-        X = locs_group[["x", "y", "z"]].values
+        X = locs_group[["x", "y", "z"]].to_numpy()
         X[:, 2] /= pixelsize  # convert z to camera pixels
         e_step = e_step_3D
     else:
-        X = locs_group[["x", "y"]].values
+        X = locs_group[["x", "y"]].to_numpy()
         e_step = e_step_2D
     log_prob = g5m.estimate_weighted_log_prob(X)
     sample_scores = logsumexp_axis1(log_prob, (X.shape[0],))
@@ -1769,13 +1769,13 @@ def convert_G5M_results(
         sigma_z = np.sqrt(covariances[:, 2]) * pixelsize
         lpz = sem[:, 2]
         weighted_lpx = (
-            (resp * locs_group["lpx"].values.reshape(-1, 1)).sum(0) / rsum
+            (resp * locs_group["lpx"].to_numpy().reshape(-1, 1)).sum(0) / rsum
         ).reshape(-1)
         weighted_lpy = (
-            (resp * locs_group["lpy"].values.reshape(-1, 1)).sum(0) / rsum
+            (resp * locs_group["lpy"].to_numpy().reshape(-1, 1)).sum(0) / rsum
         ).reshape(-1)
         weighted_lpz = (
-            (resp * locs_group["lpz"].values.reshape(-1, 1)).sum(0) / rsum
+            (resp * locs_group["lpz"].to_numpy().reshape(-1, 1)).sum(0) / rsum
         ).reshape(-1)
         rel_sigma_x = sigma_x / weighted_lpx / pixelsize
         rel_sigma_y = sigma_y / weighted_lpy / pixelsize
@@ -1783,12 +1783,12 @@ def convert_G5M_results(
     else:
         sigma = np.sqrt(covariances) * pixelsize
         # relative sigma
-        lp = locs_group[["lpx", "lpy"]].mean(axis=1).values
+        lp = locs_group[["lpx", "lpy"]].mean(axis=1).to_numpy()
         weighted_lp = ((resp * lp.reshape(-1, 1)).sum(0) / rsum).reshape(-1)
         rel_sigma = sigma / weighted_lp / pixelsize
 
     # extract frame info and group_input
-    frames_locs = np.reshape(locs_group["frame"].values, (-1, 1))
+    frames_locs = np.reshape(locs_group["frame"].to_numpy(), (-1, 1))
     # weighted average of the frame
     frame = (resp * frames_locs).sum(0) / rsum
     # weighted std of the frame
@@ -1811,16 +1811,16 @@ def convert_G5M_results(
 
     # photons, PSF size and background (weighted average)
     photons = (
-        (resp * locs_group["photons"].values.reshape(-1, 1)).sum(0) / rsum
+        (resp * locs_group["photons"].to_numpy().reshape(-1, 1)).sum(0) / rsum
     ).reshape(-1)
     sx = (
-        (resp * locs_group["sx"].values.reshape(-1, 1)).sum(0) / rsum
+        (resp * locs_group["sx"].to_numpy().reshape(-1, 1)).sum(0) / rsum
     ).reshape(-1)
     sy = (
-        (resp * locs_group["sy"].values.reshape(-1, 1)).sum(0) / rsum
+        (resp * locs_group["sy"].to_numpy().reshape(-1, 1)).sum(0) / rsum
     ).reshape(-1)
     bg = (
-        (resp * locs_group["bg"].values.reshape(-1, 1)).sum(0) / rsum
+        (resp * locs_group["bg"].to_numpy().reshape(-1, 1)).sum(0) / rsum
     ).reshape(-1)
 
     # extract the number of binding events, i.e., link localizations
@@ -1829,15 +1829,15 @@ def convert_G5M_results(
 
     # idx to split localizations into binding events, where up to 3
     # frames of no signal are allowed
-    split_idx = np.where(np.diff(locs_group["frame"].values) > 3)[0] + 1
+    split_idx = np.where(np.diff(locs_group["frame"].to_numpy()) > 3)[0] + 1
     # link localizations into binding events, we only need the center
     # of mass
-    x_events = np.split(locs_group["x"].values, split_idx)
+    x_events = np.split(locs_group["x"].to_numpy(), split_idx)
     x_events = [np.mean(_) for _ in x_events]
-    y_events = np.split(locs_group["y"].values, split_idx)
+    y_events = np.split(locs_group["y"].to_numpy(), split_idx)
     y_events = [np.mean(_) for _ in y_events]
     if hasattr(locs_group, "z"):
-        z_events = np.split(locs_group["z"].values, split_idx)
+        z_events = np.split(locs_group["z"].to_numpy(), split_idx)
         z_events = [np.mean(_) / pixelsize for _ in z_events]
         X_events = np.stack((x_events, y_events, z_events)).T
     else:

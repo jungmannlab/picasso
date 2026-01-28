@@ -740,8 +740,8 @@ def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
         Boolean array - True if a localization is within radius r
         of position (x, y).
     """
-    dx = locs["x"].values - x
-    dy = locs["y"].values - y
+    dx = locs["x"].to_numpy() - x
+    dy = locs["y"].to_numpy() - y
     r2 = r**2
     is_picked = dx**2 + dy**2 < r2
     return is_picked
@@ -836,7 +836,7 @@ def locs_in_polygon(
         Localizations in polygon.
     """
     is_in_polygon = check_if_in_polygon(
-        locs["x"].values, locs["y"].values, np.array(X), np.array(Y)
+        locs["x"].to_numpy(), locs["y"].to_numpy(), np.array(X), np.array(Y)
     )
     return locs[is_in_polygon]
 
@@ -914,7 +914,7 @@ def locs_in_rectangle(
         Localizations in rectangle.
     """
     is_in_rectangle = check_if_in_rectangle(
-        locs["x"].values, locs["y"].values, np.array(X), np.array(Y)
+        locs["x"].to_numpy(), locs["y"].to_numpy(), np.array(X), np.array(Y)
     )
     picked_locs = locs[is_in_rectangle]
     return picked_locs

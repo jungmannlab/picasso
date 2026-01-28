@@ -702,9 +702,9 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
     if isinstance(movie, np.ndarray):
         return _cut_spots_numba(
             movie,
-            ids["frame"].values,
-            ids["x"].values,
-            ids["y"].values,
+            ids["frame"].to_numpy(),
+            ids["x"].to_numpy(),
+            ids["y"].to_numpy(),
             box,
         )
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
@@ -715,9 +715,9 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
             "(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)",
             movie.data,
             np.array([len(movie)]),
-            ids["frame"].values,
-            ids["x"].values,
-            ids["y"].values,
+            ids["frame"].to_numpy(),
+            ids["x"].to_numpy(),
+            ids["y"].to_numpy(),
             box,
             spots,
             output_dtypes=[movie.dtype],
@@ -729,9 +729,9 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         spots = _cut_spots_framebyframe(
             movie,
-            ids["frame"].values,
-            ids["x"].values,
-            ids["y"].values,
+            ids["frame"].to_numpy(),
+            ids["x"].to_numpy(),
+            ids["y"].to_numpy(),
             box,
             spots,
         )
@@ -941,7 +941,7 @@ def locs_from_fits(
     lpx = np.sqrt(CRLBs[:, 1])
     locs = pd.DataFrame(
         {
-            "frame": identifications["frame"].values.astype(np.uint32),
+            "frame": identifications["frame"].to_numpy().astype(np.uint32),
             "x": x.astype(np.float32),
             "y": y.astype(np.float32),
             "photons": theta[:, 2].astype(np.float32),
@@ -951,7 +951,7 @@ def locs_from_fits(
             "lpx": lpx.astype(np.float32),
             "lpy": lpy.astype(np.float32),
             "net_gradient": (
-                identifications["net_gradient"].values.astype(np.float32)
+                identifications["net_gradient"].to_numpy().astype(np.float32)
             ),
             "likelihood": likelihoods.astype(np.float32),
             "iterations": iterations.astype(np.int32),

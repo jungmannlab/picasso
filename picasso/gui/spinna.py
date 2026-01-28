@@ -3358,7 +3358,7 @@ class SimulationsTab(QtWidgets.QDialog):
             ):  # check that all titles are present
                 self.N_structures_fit = {
                     structure_name: (
-                        df[f"N_{structure_name}"].values.astype(np.int32)
+                        df[f"N_{structure_name}"].to_numpy().astype(np.int32)
                     )
                     for structure_name in titles
                 }

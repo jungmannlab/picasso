@@ -562,12 +562,12 @@ def _undrift_fiducials(files: str) -> None:
         )
         fiducials_drift = postprocess.undrift_from_picked(picked_locs, info)
         frames = locs["frame"]
-        locs["x"] -= fiducials_drift["x"].iloc[frames].values
-        locs["y"] -= fiducials_drift["y"].iloc[frames].values
+        locs["x"] -= fiducials_drift["x"].iloc[frames].to_numpy()
+        locs["y"] -= fiducials_drift["y"].iloc[frames].to_numpy()
         drift["x"] += fiducials_drift["x"]
         drift["y"] += fiducials_drift["y"]
         if hasattr(locs, "z"):
-            locs["z"] -= fiducials_drift["z"].iloc[frames].values
+            locs["z"] -= fiducials_drift["z"].iloc[frames].to_numpy()
             drift["z"] += fiducials_drift["z"]
 
         undrift_info["Drift X"] = float(drift["x"].mean())

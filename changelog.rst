@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 26-JAN-2026 CEST
+Last change: 28-JAN-2026 CEST
 
 0.9.4
 -----
@@ -13,6 +13,7 @@ Important updates:
 - Localize accepts frame bounds to analyze only a subset of frames
 - Render by property (GUI) shows histogram of the selected property
 - Filter GUI has a new plot to test for subclustering based on the number of events per molecule (column ``n_events``); see the `Filter documentation <https://picassosr.readthedocs.io/en/latest/filter.html>`__  for details
+- Some improvements in how DataFrames are handled (Filter, change from ``.values`` to ``.to_numpy()``)
 
 *Small improvements:*
 +++++++++++++++++++++

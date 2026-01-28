@@ -262,10 +262,9 @@ class HistWindow(PlotWindow):
     def on_span_select(self, xmin: float, xmax: float) -> None:
         """Update the localization data based on the selected in the
         histogram plot."""
-        self.locs = self.locs[np.isfinite(self.locs[self.field])]
-        self.locs = self.locs[
-            (self.locs[self.field] > xmin) & (self.locs[self.field] < xmax)
-        ]
+        x = self.locs[self.field].to_numpy()
+        valid_idx = np.isfinite(x) & (x > xmin) & (x < xmax)
+        self.locs = self.locs[valid_idx]
         self.main_window.update_locs(self.locs)
         self.main_window.log_filter(self.field, xmin.item(), xmax.item())
         self.plot()
@@ -354,14 +353,13 @@ class Hist2DWindow(PlotWindow):
         xmax = max(x1, x2)
         ymin = min(y1, y2)
         ymax = max(y1, y2)
-        self.locs = self.locs[np.isfinite(self.locs[self.field_x])]
-        self.locs = self.locs[np.isfinite(self.locs[self.field_y])]
-        self.locs = self.locs[
-            (self.locs[self.field_x] > xmin) & (self.locs[self.field_x] < xmax)
-        ]
-        self.locs = self.locs[
-            (self.locs[self.field_y] > ymin) & (self.locs[self.field_y] < ymax)
-        ]
+        x = self.locs[self.field_x].to_numpy()
+        y = self.locs[self.field_y].to_numpy()
+        finite_idx = np.isfinite(x) & np.isfinite(y)
+        valid_idx = (
+            (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax) & finite_idx
+        )
+        self.locs = self.locs[valid_idx]
         self.main_window.update_locs(self.locs)
         self.main_window.log_filter(self.field_x, xmin.item(), xmax.item())
         self.main_window.log_filter(self.field_y, ymin.item(), ymax.item())

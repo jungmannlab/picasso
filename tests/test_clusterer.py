@@ -53,7 +53,9 @@ def db_locs(locs):
 def test_dbscan(db_locs):
     """Test dbscan."""
     assert "group" in db_locs.columns, "DBSCAN did not add 'group' column"
-    assert -1 not in db_locs["group"].values, "Invalid DBSCAN group ids found"
+    assert (
+        -1 not in db_locs["group"].to_numpy()
+    ), "Invalid DBSCAN group ids found"
 
 
 def test_hdbscan(locs):
@@ -68,7 +70,7 @@ def test_hdbscan(locs):
         "group" in clustered_locs.columns
     ), "HDBSCAN did not add 'group' column"
     assert (
-        -1 not in clustered_locs["group"].values
+        -1 not in clustered_locs["group"].to_numpy()
     ), "Invalid HDBSCAN group ids found"
 
 
@@ -82,7 +84,7 @@ def test_ga(locs):
     )
     assert "group" in clustered_locs.columns, "GA did not add 'group' column"
     assert (
-        -1 not in clustered_locs["group"].values
+        -1 not in clustered_locs["group"].to_numpy()
     ), "Invalid GA group ids found"
 
 
@@ -100,7 +102,7 @@ def test_ga_3d(locs):
     )
     assert "group" in clustered_locs.columns, "GA did not add 'group' column"
     assert (
-        -1 not in clustered_locs["group"].values
+        -1 not in clustered_locs["group"].to_numpy()
     ), "Invalid GA group ids found"
 
 

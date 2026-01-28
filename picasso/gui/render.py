@@ -1408,9 +1408,9 @@ class ClsDlg3D(QtWidgets.QDialog):
         scaled_locs = locs.copy()
         scaled_locs["x_scaled"] = locs["x"] * pixelsize
         scaled_locs["y_scaled"] = locs["y"] * pixelsize
-        X = scaled_locs["x_scaled"].values
-        Y = scaled_locs["y_scaled"].values
-        Z = scaled_locs["z"].values
+        X = scaled_locs["x_scaled"].to_numpy()
+        Y = scaled_locs["y_scaled"].to_numpy()
+        Z = scaled_locs["z"].to_numpy()
         est.fit(np.stack((X, Y, Z), axis=1))
         labels = est.labels_
         counts = list(Counter(labels).items())
@@ -1611,8 +1611,8 @@ class ClsDlg2D(QtWidgets.QDialog):
         scaled_locs = locs.copy()
         scaled_locs["x_scaled"] = locs["x"]
         scaled_locs["y_scaled"] = locs["y"]
-        X = scaled_locs["x_scaled"].values
-        Y = scaled_locs["y_scaled"].values
+        X = scaled_locs["x_scaled"].to_numpy()
+        Y = scaled_locs["y_scaled"].to_numpy()
         est.fit(np.stack((X, Y), axis=1))
         labels = est.labels_
         counts = list(Counter(labels).items())
@@ -2387,7 +2387,7 @@ class G5MDialog(QtWidgets.QDialog):
             else:  # 2D
                 column = "Area (LP^2)"
                 thresh = 12 * np.pi * 2.98**2
-            sizes = cluster_sizes[column].values
+            sizes = cluster_sizes[column].to_numpy()
         except Exception:
             warning = "Could not read the cluster areas/volumes file."
             QtWidgets.QMessageBox.information(self.window, "Warning", warning)
@@ -5312,9 +5312,11 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.ax_prop.cla()
 
         # array of values for the rendered property
-        data = self.window.view.locs[0][
-            self.parameter.currentText()
-        ].values.copy()
+        data = (
+            self.window.view.locs[0][self.parameter.currentText()]
+            .to_numpy()
+            .copy()
+        )
         # other parameters
         min_val = self.minimum_render.value()
         max_val = self.maximum_render.value()
@@ -5924,7 +5926,7 @@ class View(QtWidgets.QLabel):
         colors : np.ndarray
             Array with integer group color index for each localization.
         """
-        colors = locs["group"].values.astype(int) % N_GROUP_COLORS
+        colors = locs["group"].to_numpy().astype(int) % N_GROUP_COLORS
         return colors
 
     def add(self, path: str, render: bool = True) -> None:
@@ -10567,14 +10569,16 @@ class View(QtWidgets.QLabel):
             frames_ = self.locs[channel]["frame"]
 
             # Apply drift
-            self.all_locs[channel]["x"] -= drift["x"].iloc[frames].values
-            self.all_locs[channel]["y"] -= drift["y"].iloc[frames].values
-            self.locs[channel]["x"] -= drift["x"].iloc[frames_].values
-            self.locs[channel]["y"] -= drift["y"].iloc[frames_].values
+            self.all_locs[channel]["x"] -= drift["x"].iloc[frames].to_numpy()
+            self.all_locs[channel]["y"] -= drift["y"].iloc[frames].to_numpy()
+            self.locs[channel]["x"] -= drift["x"].iloc[frames_].to_numpy()
+            self.locs[channel]["y"] -= drift["y"].iloc[frames_].to_numpy()
             # If z coordinate exists, also apply drift there
             if all([hasattr(_, "z") for _ in picked_locs]):
-                self.all_locs[channel]["z"] -= drift["z"].iloc[frames].values
-                self.locs[channel]["z"] -= drift["z"].iloc[frames_].values
+                self.all_locs[channel]["z"] -= (
+                    drift["z"].iloc[frames].to_numpy()
+                )
+                self.locs[channel]["z"] -= drift["z"].iloc[frames_].to_numpy()
 
             # Cleanup
             self.index_blocks[channel] = None
@@ -10632,15 +10636,15 @@ class View(QtWidgets.QLabel):
         frames = self.all_locs[channel]["frame"]
         frames_ = self.locs[channel]["frame"]
 
-        self.all_locs[channel]["x"] -= drift["x"][frames].values
-        self.all_locs[channel]["y"] -= drift["y"][frames].values
-        self.locs[channel]["x"] -= drift["x"][frames_].values
-        self.locs[channel]["y"] -= drift["y"][frames_].values
+        self.all_locs[channel]["x"] -= drift["x"][frames].to_numpy()
+        self.all_locs[channel]["y"] -= drift["y"][frames].to_numpy()
+        self.locs[channel]["x"] -= drift["x"][frames_].to_numpy()
+        self.locs[channel]["y"] -= drift["y"][frames_].to_numpy()
 
         if hasattr(drift, "z"):
             drift["z"] = -drift["z"]
-            self.all_locs[channel]["z"] -= drift["z"][frames].values
-            self.locs[channel]["z"] -= drift["z"][frames_].values
+            self.all_locs[channel]["z"] -= drift["z"][frames].to_numpy()
+            self.locs[channel]["z"] -= drift["z"][frames_].to_numpy()
 
         self.add_drift(channel, drift)
         self.update_scene()
@@ -10700,27 +10704,37 @@ class View(QtWidgets.QLabel):
                         }
                     )
                     self.all_locs[channel]["x"] -= (
-                        drift["x"].iloc[all_frame].values
+                        drift["x"].iloc[all_frame].to_numpy()
                     )
                     self.all_locs[channel]["y"] -= (
-                        drift["y"].iloc[all_frame].values
+                        drift["y"].iloc[all_frame].to_numpy()
                     )
                     self.all_locs[channel]["z"] -= (
-                        drift["z"].iloc[all_frame].values
+                        drift["z"].iloc[all_frame].to_numpy()
                     )
-                    self.locs[channel]["x"] -= drift["x"].iloc[frame].values
-                    self.locs[channel]["y"] -= drift["y"].iloc[frame].values
-                    self.locs[channel]["z"] -= drift["z"].iloc[frame].values
+                    self.locs[channel]["x"] -= (
+                        drift["x"].iloc[frame].to_numpy()
+                    )
+                    self.locs[channel]["y"] -= (
+                        drift["y"].iloc[frame].to_numpy()
+                    )
+                    self.locs[channel]["z"] -= (
+                        drift["z"].iloc[frame].to_numpy()
+                    )
                 else:  # 2D drift
                     drift = pd.DataFrame({"x": drift[:, 0], "y": drift[:, 1]})
                     self.all_locs[channel]["x"] -= (
-                        drift["x"].iloc[all_frame].values
+                        drift["x"].iloc[all_frame].to_numpy()
                     )
                     self.all_locs[channel]["y"] -= (
-                        drift["y"].iloc[all_frame].values
+                        drift["y"].iloc[all_frame].to_numpy()
                     )
-                    self.locs[channel]["x"] -= drift["x"].iloc[frame].values
-                    self.locs[channel]["y"] -= drift["y"].iloc[frame].values
+                    self.locs[channel]["x"] -= (
+                        drift["x"].iloc[frame].to_numpy()
+                    )
+                    self.locs[channel]["y"] -= (
+                        drift["y"].iloc[frame].to_numpy()
+                    )
                 self._drift[channel] = drift
                 self._driftfiles[channel] = path
                 self.currentdrift[channel] = copy.copy(drift)
