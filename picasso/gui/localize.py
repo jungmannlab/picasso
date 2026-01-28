@@ -774,6 +774,12 @@ class ParametersDialog(QtWidgets.QDialog):
             self.camera = QtWidgets.QComboBox()
             exp_grid.addWidget(self.camera, 0, 1)
             cameras = sorted(list(CONFIG["Cameras"].keys()))
+            if cam_prio_list := CONFIG["CameraPriority"]:
+                # remove the prio cameras from the sorted list
+                for cam in cam_prio_list:
+                    if cam in cameras:
+                        cameras.remove(cam)
+                cameras = cam_prio_list + cameras
             self.camera.addItems(cameras)
             self.camera.currentIndexChanged.connect(self.on_camera_changed)
 
@@ -1135,24 +1141,15 @@ class ParametersDialog(QtWidgets.QDialog):
         selected camera and emission wavelength, from the config"""
         camera = self.camera.currentText()
         fp_calib_lam = CONFIG["z-calibrations"].get(camera)
-        print(f"fp calib lam: {fp_calib_lam}")
         if fp_calib_lam is not None:
             em_combo = self.emission_combos[camera]
-            print(f"em comob: {em_combo}")
             wavelength = int(em_combo.currentText())
-            print(f"wavelength: {wavelength}")
             fp_calib = fp_calib_lam.get(wavelength)
-            print(f"fp_calib: {fp_calib}")
             if fp_calib is not None:
                 self.update_z_calib(fp_calib)
 
     def update_z_calib(self, path: str) -> None:
         """Load the 3D calibration from a YAML file."""
-        print("updating z calib")
-        # path, exe = QtWidgets.QFileDialog.getOpenFileName(
-        #     self, "Load 3d calibration", directory=None, filter="*.yaml"
-        # )
-        print(f"yaml calibration file path: {path}")
         if path:
             with open(path, "r") as f:
                 self.z_calibration = yaml.full_load(f)
@@ -1211,7 +1208,6 @@ class ParametersDialog(QtWidgets.QDialog):
         self.update_qe()
 
         # load 3D calibration
-        print("camera changed: loading 3D calib")
         self.update_z_calib_with_config_path()
 
     def update_qe(self) -> None:
