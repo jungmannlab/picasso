@@ -240,9 +240,7 @@ def picked_locs(
                 block_locs = get_block_locs_at(x, y, index_blocks)
                 group_locs = lib.locs_at(x, y, block_locs, pick_size).copy()
                 if add_group:
-                    group_locs["group"] = i * np.ones(
-                        len(group_locs), dtype=np.int32
-                    )
+                    group_locs["group"] = i
                 group_locs.sort_values(
                     by="frame",
                     kind="mergesort",

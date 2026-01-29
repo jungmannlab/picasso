@@ -3,7 +3,8 @@ picasso.g5m
 ~~~~~~~~~~~
 
 Gaussian Mixture Modeling with Modifications for Molecular Mapping
-(G5M). Published in: TODO: add DOI
+(G5M). Published in: Kowalewski, Reinhardt, et al. *DOI will be added once
+available*.
 
 G5M is based on the sklearn implementation of Gaussian Mixture Modeling
 (GMM) with numba optimizations for fitting, as well as for kmeans++

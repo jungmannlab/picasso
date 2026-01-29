@@ -2398,7 +2398,7 @@ def main():
         "g5m",
         help=(
             "Gaussian Mixture Modeling with Modifications for Molecular Mapping"
-            "\nFor more details see: https://doi.org"  # TODO: add link
+            "\nFor more details see: *DOI will be added once available*"
         ),
     )
     g5m_parser.add_argument(

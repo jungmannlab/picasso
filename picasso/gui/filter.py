@@ -465,6 +465,13 @@ class SubclusterNum(QtWidgets.QDialog):
     ...
 
     Attributes
+    ----------
+    distance_clustered : QtWidgets.QDoubleSpinBox
+        Spin box for maximum distance between clustered molecules (nm).
+    distance_sparse : QtWidgets.QDoubleSpinBox
+        Spin box for minimum distance between sparse molecules (nm).
+    save_vals : QtWidgets.QCheckBox
+        Checkbox for saving histogram values.
 
     Parameters
     ----------

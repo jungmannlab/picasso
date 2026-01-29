@@ -516,7 +516,7 @@ def axial_localization_precision_astig(
     """Calculate axial localization precision for astigmatic 3D imaging
     for given localizations based on calibration.
 
-    TODO: add G5M DOI!
+    Based on Kowalewski, Reinhardt, et al. *DOI will be added once available*.
 
     Parameters
     ----------

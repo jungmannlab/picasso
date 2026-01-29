@@ -26,7 +26,7 @@ A comprehensive documentation can be found here: `Read the Docs <https://picasso
 
 Picasso 0.9.4
 -------------
-In this version, a new algorithm for molecular mapping (G5M) was introduced. Additionally, axial localization precision for astigmatic 3D imaging is now calculated and saved when using Picasso Localize. For more details, see **ADD DOI HERE**.
+In this version, a new algorithm for molecular mapping (G5M) was introduced. Additionally, axial localization precision for astigmatic 3D imaging is now calculated and saved when using Picasso Localize. *DOI will be added once available*.
 
 Picasso 0.9
 -----------
@@ -148,6 +148,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - Picasso: Server. DOI: `10.1038/s42003-022-03909-5 <https://doi.org/10.1038/s42003-022-03909-5>`__
 - SPINNA. DOI: `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
 - SPINNA for LE fitting. DOI: `10.1038/s41592-024-02242-5 <https://doi.org/10.1038/s41592-024-02242-5>`__
+- G5M. DOI: *DOI will be added once available*.
 
 Credits
 -------

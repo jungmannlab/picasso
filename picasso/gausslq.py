@@ -549,7 +549,7 @@ def sigma_uncertainty(
     """Calculate standard error of fitted sigma based on the 2D Gaussian
     least-squares fitting model with diagonal covariance matrix.
 
-    TODO: add DOI! g5m
+    Based on Kowalewski, Reinhardt, et al. *DOI will be added once available*.
 
     Parameters
     ----------
