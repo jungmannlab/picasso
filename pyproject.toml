@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "picassosr"
-version = "0.9.3"
+version = "0.9.4"
 authors = [
     {name = "Joerg Schnitzbauer", email = "joschnitzbauer@gmail.com"},
     {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
