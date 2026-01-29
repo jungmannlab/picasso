@@ -656,6 +656,8 @@ class ParametersDialog(QtWidgets.QDialog):
         self.setWindowTitle("Parameters")
         self.setModal(False)
 
+        self.z_calibration_path = None
+
         main_layout = QtWidgets.QVBoxLayout(self)
         scroll = QtWidgets.QScrollArea(self)
         scroll.setWidgetResizable(True)
@@ -787,7 +789,8 @@ class ParametersDialog(QtWidgets.QDialog):
             self.camera = QtWidgets.QComboBox()
             exp_grid.addWidget(self.camera, 0, 1)
             cameras = sorted(list(CONFIG["Cameras"].keys()))
-            if cam_prio_list := CONFIG["CameraPriority"]:
+            if "CameraPriority" in CONFIG:
+                cam_prio_list = CONFIG["CameraPriority"]
                 # remove the prio cameras from the sorted list
                 for cam in cam_prio_list:
                     if cam in cameras:
@@ -1162,8 +1165,10 @@ class ParametersDialog(QtWidgets.QDialog):
         else:
             dialog_directory = None
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Load 3d calibration", directory=dialog_directory,
-            filter="*.yaml"
+            self,
+            "Load 3d calibration",
+            directory=dialog_directory,
+            filter="*.yaml",
         )
         if path:
             self.update_z_calib(path)
@@ -1171,6 +1176,8 @@ class ParametersDialog(QtWidgets.QDialog):
     def update_z_calib_with_config_path(self):
         """Retrieve the z calibration path that corresponds to the
         selected camera and emission wavelength, from the config"""
+        if "z-calibrations" not in CONFIG:
+            return
         camera = self.camera.currentText()
         fp_calib_lam = CONFIG["z-calibrations"].get(camera)
         if fp_calib_lam is not None:
