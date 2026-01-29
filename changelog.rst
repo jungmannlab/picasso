@@ -7,8 +7,8 @@ Last change: 29-JAN-2026 CEST
 -----
 Important updates:
 ^^^^^^^^^^^^^^^^^^
-- **Algorithm for molecular mapping introduced (G5M), see ADD DOI LINK HERE**
-- **Localize outputs axial localization precision for astigmatic imaging in 3D, see ADD DOI LINK HERE**
+- **Algorithm for molecular mapping introduced (G5M)**, see documentation `here <https://picassosr.readthedocs.io/en/latest/render.html#g5m>`__ *DOI will be added once available*.
+- **Localize outputs axial localization precision for astigmatic imaging in 3D**,  *DOI will be added once available*. 
 - Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*
 - Localize accepts frame bounds to analyze only a subset of frames
 - Config file accepts z calibration .yaml paths so that they can be automatically loaded when changing between cameras
