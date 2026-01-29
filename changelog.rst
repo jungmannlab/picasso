@@ -3,8 +3,8 @@ Changelog
 
 Last change: 29-JAN-2026 CEST
 
-0.9.4
------
+0.9.4-5
+-------
 Important updates:
 ^^^^^^^^^^^^^^^^^^
 - **Algorithm for molecular mapping introduced (G5M)**, see documentation `here <https://picassosr.readthedocs.io/en/latest/render.html#g5m>`__ *DOI will be added once available*.
