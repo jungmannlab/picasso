@@ -50,12 +50,12 @@ LOCALIZATION_COLUMNS = {
         "ellipticity",
         "net_gradient",
     ],
-    "3D only": ["z", "d_zcalib"],  # "lpz"],
+    "3D only": ["z", "d_zcalib", "lpz"],
     "Picked spots only": ["n_id"],
     "MLE only": ["log_likelihood", "iterations"],
 }
 # Columns that are required for further use with Picasso
-REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy"]  # "lpz"]
+REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
 # For database:
 MEAN_COLS = LOCALIZATION_COLUMNS["Base"] + LOCALIZATION_COLUMNS["3D only"]
 SET_COLS = [

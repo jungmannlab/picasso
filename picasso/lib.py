@@ -715,7 +715,17 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     # other sanity checks:
     locs = locs[locs["x"] < info[0]["Width"]]
     locs = locs[locs["y"] < info[0]["Height"]]
-    for attr in ["x", "y", "lpx", "lpy", "photons", "ellipticity", "sx", "sy"]:
+    for attr in [
+        "x",
+        "y",
+        "lpx",
+        "lpy",
+        "lpz",
+        "photons",
+        "ellipticity",
+        "sx",
+        "sy",
+    ]:
         if attr in locs.columns:
             locs = locs[locs[attr] >= 0]
     return locs

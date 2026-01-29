@@ -140,7 +140,8 @@ def calibrate_z(
         with open(path, "w") as f:
             yaml.dump(calibration, f, default_flow_style=False)
 
-    locs = fit_z(locs, info, calibration, magnification_factor)
+    # pixelsize does not matter here anyway
+    locs = fit_z(locs, info, calibration, magnification_factor, pixelsize=130)
     locs["z"] /= magnification_factor
 
     plt.figure(figsize=(18, 10), constrained_layout=True)
@@ -277,6 +278,7 @@ def fit_z(
     info: list[dict],
     calibration: dict,
     magnification_factor: float,
+    pixelsize: float,
     filter: int = 2,
 ) -> pd.DataFrame:
     """Fit z coordinates to the localizations based on the calibration
@@ -297,6 +299,8 @@ def fit_z(
         Magnification factor of the microscope, i.e., the ratio between
         the actual z position of the calibration sample and the
         estimated z position from the localization data.
+    pixelsize : float
+        Camera pixel size in nm.
     filter : int, optional
         Filter for the z fits. If set to 0, no filtering is applied.
         If set to 2, the z fits are filtered based on the root mean
@@ -315,6 +319,9 @@ def fit_z(
     square_d_zcalib = np.zeros_like(z)
     sx = locs["sx"].to_numpy()
     sy = locs["sy"].to_numpy()
+    photons = locs["photons"].to_numpy()
+    bg = locs["bg"].to_numpy()
+    print(pixelsize)
     for i in range(len(z)):
         # set bounds to avoid potential gaps in the calibration curve,
         # credits to Loek Andriessen
@@ -326,6 +333,20 @@ def fit_z(
     z *= magnification_factor
     locs["z"] = z
     locs["d_zcalib"] = np.sqrt(square_d_zcalib)
+    locs["lpz"] = (
+        _axial_localization_precision_astig(
+            photons,
+            sx,
+            sy,
+            bg,
+            z,
+            cx,
+            cy,
+            pixelsize,
+            "gausslq",
+        )
+        * magnification_factor
+    )  # TODO: add fitting method, its actually a bad implementation, should use saxial_localization_precision
     locs = lib.ensure_sanity(locs, info)
     return filter_z_fits(locs, filter)
 
@@ -335,6 +356,7 @@ def fit_z_parallel(
     info: list[dict],
     calibration: dict,
     magnification_factor: float,
+    pixelsize: float,
     filter: int = 2,
     asynch: bool = False,
 ) -> pd.DataFrame | list[futures.Future]:
@@ -357,6 +379,8 @@ def fit_z_parallel(
         Magnification factor of the microscope, i.e., the ratio between
         the actual z position of the calibration sample and the
         estimated z position from the localization data.
+    pixelsize : float
+        Camera pixel size in nm.
     filter : int, optional
         Filter for the z fits. If set to 0, no filtering is applied.
         If set to 2, the z fits are filtered based on the root mean
@@ -399,6 +423,7 @@ def fit_z_parallel(
                 info,
                 calibration,
                 magnification_factor,
+                pixelsize,
                 filter=0,
             )
         )
@@ -460,6 +485,8 @@ def filter_z_fits(locs: pd.DataFrame, range: int) -> pd.DataFrame:
         DataFrame of localizations with the fitted z coordinates and
         their residuals (d_zcalib) after filtering.
     """
+    if "d_zcalib" not in locs.columns:
+        return locs
     if range > 0:
         rmsd = np.sqrt(np.nanmean(locs["d_zcalib"] ** 2))
         locs = locs[locs["d_zcalib"] <= range * rmsd]
