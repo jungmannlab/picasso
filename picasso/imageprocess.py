@@ -139,7 +139,7 @@ def get_image_shift(
         yc += Y_ + y_max_
 
         if display:
-            plt.figure(figsize=(17, 10))
+            plt.figure(figsize=(17, 10), constrained_layout=True)
             plt.subplot(1, 3, 1)
             plt.imshow(imageA, interpolation="none")
             plt.subplot(1, 3, 2)

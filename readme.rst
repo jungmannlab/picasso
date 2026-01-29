@@ -20,8 +20,13 @@ Picasso
    :height: 564
    :alt: UML Render view
 
-A collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
+Collection of tools for painting super-resolution images. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
+
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
+
+Picasso 0.9.4
+-------------
+In this version, a new algorithm for molecular mapping (G5M) was introduced. Additionally, axial localization precision for astigmatic 3D imaging is now calculated and saved when using Picasso Localize. *DOI will be added once available*.
 
 Picasso 0.9
 -----------
@@ -72,7 +77,7 @@ Regardless of whether Picasso was installed via PyPI or by cloning the GitHub re
 
 - ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`__.
 - *(Windows only)* ``pip install PyImarisWriter==0.7.0`` to enable .ims files in Localize and Render. Note that ``PyImarisWriter`` has been tested only on Windows.
-- To enable ``GPU fitting``, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile and installing the Python wheel. Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
+- *(Windows only)* To enable GPU least-squares fitting in Localize, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile from the `release page <https://github.com/gpufit/Gpufit/releases>`__ (non-cublas version, i.e., the lighter file) and installing the Python wheel (see instructions in the zipfile). Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
 Updating
 ^^^^^^^^
@@ -105,11 +110,6 @@ Besides using the GUI, you can use picasso like any other Python module. Conside
   print(f"Average dark time {linked_locs_dark['dark'].mean():.2f} frames")
 
 For more examples, visit the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__.
-
-Jupyter Notebooks
------------------
-
-Check the `sample notebooks <https://github.com/jungmannlab/picasso/tree/master/samples>`__ that show how to interact with the Picasso codebase.
 
 Contributing
 ------------
@@ -148,6 +148,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - Picasso: Server. DOI: `10.1038/s42003-022-03909-5 <https://doi.org/10.1038/s42003-022-03909-5>`__
 - SPINNA. DOI: `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
 - SPINNA for LE fitting. DOI: `10.1038/s41592-024-02242-5 <https://doi.org/10.1038/s41592-024-02242-5>`__
+- G5M. DOI: *DOI will be added once available*.
 
 Credits
 -------

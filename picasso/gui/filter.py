@@ -27,7 +27,7 @@ from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
 from PyQt5 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, __version__
+from .. import io, lib, clusterer, __version__
 
 plt.style.use("ggplot")
 
@@ -184,7 +184,7 @@ class PlotWindow(QtWidgets.QWidget):
         super().__init__()
         self.main_window = main_window
         self.locs = locs
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvasQTAgg(self.figure)
         self.plot()
         vbox = QtWidgets.QVBoxLayout()
@@ -202,6 +202,9 @@ class PlotWindow(QtWidgets.QWidget):
         self.locs = locs
         self.plot()
         self.update()
+
+    def plot(self) -> None:
+        pass
 
 
 class HistWindow(PlotWindow):
@@ -259,10 +262,9 @@ class HistWindow(PlotWindow):
     def on_span_select(self, xmin: float, xmax: float) -> None:
         """Update the localization data based on the selected in the
         histogram plot."""
-        self.locs = self.locs[np.isfinite(self.locs[self.field])]
-        self.locs = self.locs[
-            (self.locs[self.field] > xmin) & (self.locs[self.field] < xmax)
-        ]
+        x = self.locs[self.field].to_numpy()
+        valid_idx = np.isfinite(x) & (x > xmin) & (x < xmax)
+        self.locs = self.locs[valid_idx]
         self.main_window.update_locs(self.locs)
         self.main_window.log_filter(self.field, xmin.item(), xmax.item())
         self.plot()
@@ -351,14 +353,13 @@ class Hist2DWindow(PlotWindow):
         xmax = max(x1, x2)
         ymin = min(y1, y2)
         ymax = max(y1, y2)
-        self.locs = self.locs[np.isfinite(self.locs[self.field_x])]
-        self.locs = self.locs[np.isfinite(self.locs[self.field_y])]
-        self.locs = self.locs[
-            (self.locs[self.field_x] > xmin) & (self.locs[self.field_x] < xmax)
-        ]
-        self.locs = self.locs[
-            (self.locs[self.field_y] > ymin) & (self.locs[self.field_y] < ymax)
-        ]
+        x = self.locs[self.field_x].to_numpy()
+        y = self.locs[self.field_y].to_numpy()
+        finite_idx = np.isfinite(x) & np.isfinite(y)
+        valid_idx = (
+            (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax) & finite_idx
+        )
+        self.locs = self.locs[valid_idx]
         self.main_window.update_locs(self.locs)
         self.main_window.log_filter(self.field_x, xmin.item(), xmax.item())
         self.main_window.log_filter(self.field_y, ymin.item(), ymax.item())
@@ -457,6 +458,111 @@ class FilterNum(QtWidgets.QDialog):
             self.attributes.addItem(name)
 
 
+class SubclusterNum(QtWidgets.QDialog):
+    """Input dialog for specifying the distances used for testing
+    for subclustering.
+
+    ...
+
+    Attributes
+    ----------
+    distance_clustered : QtWidgets.QDoubleSpinBox
+        Spin box for maximum distance between clustered molecules (nm).
+    distance_sparse : QtWidgets.QDoubleSpinBox
+        Spin box for minimum distance between sparse molecules (nm).
+    save_vals : QtWidgets.QCheckBox
+        Checkbox for saving histogram values.
+
+    Parameters
+    ----------
+    window : QtWidgets.QMainWindow
+        Main window.
+    """
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Test subclustering")
+        this_directory = os.path.dirname(os.path.realpath(__file__))
+        icon_path = os.path.join(this_directory, "icons", "filter.ico")
+        icon = QtGui.QIcon(icon_path)
+        self.setWindowIcon(icon)
+
+        self.layout = QtWidgets.QFormLayout()
+        self.layout.setLabelAlignment(QtCore.Qt.AlignLeft)
+        self.setLayout(self.layout)
+
+        self.distance_clustered = QtWidgets.QDoubleSpinBox()
+        self.distance_clustered.setValue(25)
+        self.distance_clustered.setDecimals(2)
+        self.distance_clustered.setRange(0.01, 99999)
+        self.distance_clustered.setSingleStep(1)
+        self.distance_clustered.setKeyboardTracking(True)
+        self.layout.addRow(
+            "Max. dist. between clustered molecules (nm):",
+            self.distance_clustered,
+        )
+
+        self.distance_sparse = QtWidgets.QDoubleSpinBox()
+        self.distance_sparse.setValue(80)
+        self.distance_sparse.setDecimals(2)
+        self.distance_sparse.setRange(0.01, 99999)
+        self.distance_sparse.setSingleStep(1)
+        self.distance_sparse.setKeyboardTracking(True)
+        self.layout.addRow(
+            "Min. dist. between sparse molecules (nm):",
+            self.distance_sparse,
+        )
+
+        self.save_vals = QtWidgets.QCheckBox("Save histogram values")
+        self.save_vals.setChecked(False)
+        self.layout.addRow(self.save_vals)
+        test_button = QtWidgets.QPushButton("Test subclustering")
+        test_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        test_button.clicked.connect(self.plot)
+        self.layout.addRow(test_button)
+
+    def plot(self) -> None:
+        """Plot the subclustering test histogram. Optionally can save
+        the histogram values to a .csv file."""
+        if not hasattr(self.window.locs, "n_events"):
+            raise ValueError("Data must have the 'n_events' attribute.")
+        if self.save_vals.isChecked():
+            base, ext = os.path.splitext(self.window.locs_path)
+            out_path = base + "_subcluster_test.csv"
+            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                self,
+                "Save histogram values",
+                out_path,
+                filter="*.csv",
+            )
+            if not path:
+                return
+        else:
+            path = None
+
+        dist_clustered = self.distance_clustered.value()
+        dist_sparse = self.distance_sparse.value()
+        mols = self.window.locs
+        clustered_nevents, sparse_nevents = clusterer.test_subclustering(
+            mols, self.window.info, dist_clustered, dist_sparse
+        )
+        if path is not None:
+            len_max = max(len(clustered_nevents), len(sparse_nevents))
+            df = np.empty((len_max, 2))
+            df.fill(np.nan)
+            df[: len(clustered_nevents), 0] = clustered_nevents
+            df[: len(sparse_nevents), 1] = sparse_nevents
+            df = pd.DataFrame(
+                df, columns=["clustered_nevents", "sparse_nevents"]
+            )
+            df.to_csv(path, index=False)
+        fig, ax = lib.plot_subclustering_check(
+            clustered_nevents, sparse_nevents, return_fig=True
+        )
+        plt.show()
+
+
 class Window(QtWidgets.QMainWindow):
     """Main window for the application.
 
@@ -510,6 +616,8 @@ class Window(QtWidgets.QMainWindow):
         scatter_action = plot_menu.addAction("2D Histogram")
         scatter_action.setShortcut("Ctrl+D")
         scatter_action.triggered.connect(self.plot_hist2d)
+        test_subcluster_action = plot_menu.addAction("Test subclustering")
+        test_subcluster_action.triggered.connect(self.plot_subclustering)
         filter_menu = menu_bar.addMenu("Filter")
         filter_action = filter_menu.addAction("Filter")
         filter_action.setShortcut("Ctrl+F")
@@ -608,6 +716,10 @@ class Window(QtWidgets.QMainWindow):
                     self, self.locs, field_x, field_y
                 )
             self.hist2d_windows[field_x][field_y].show()
+
+    def plot_subclustering(self) -> None:
+        self.subcluster_num = SubclusterNum(self)
+        self.subcluster_num.show()
 
     def update_locs(self, locs: pd.DataFrame) -> None:
         self.locs = locs

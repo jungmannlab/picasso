@@ -436,6 +436,7 @@ def plot_NN(
     data2: np.ndarray | None = None,
     n_neighbors: int = 1,
     dist: np.ndarray | None = None,
+    hist_data: dict | None = None,
     mode: Literal["hist", "plot"] = "hist",
     fig: plt.Figure | None = None,
     ax: plt.axes | None = None,
@@ -448,6 +449,9 @@ def plot_NN(
     title: str = "Nearest neighbor distances",
     xlabel: str = "Distances (nm)",
     ylabel: str = "Norm. frequency",
+    fontsize_ticks: int = 10,
+    fontsize_labels: int = 12,
+    fontsize_title: int = 12,
     show_legend: bool = True,
     alpha: float = 0.6,
     edgecolor: str = "black",
@@ -467,16 +471,25 @@ def plot_NN(
         Contains the NN distances (obtained with get_NN_dist). If None,
         the distances are calculated from data1 and data2. Otherwise,
         the NND calculation is skipped.
-    mode : {'hist', 'plot'} (default='hist')
+    n_neighbors : int
+        Number of neighbors to consider. Only used if dist and
+        hist_data are None. Default is 1.
+    hist_data : dict (default=None)
+        Dictionary containing precomputed histogram data with keys
+        "bins" and "counts". If provided, dist, data1 and data2 are
+        ignored. Default is None.
+    mode : {'hist', 'plot'}
         Mode of plotting. If 'hist', histogram is plotted. If 'plot'
-        NNDs are histogramed and a line is plotted.
-    fig, ax : plt.Figure, plt.Axes (default=None,None)
+        NNDs are histogramed and a line is plotted. Default is 'hist'.
+    fig, ax : plt.Figure, plt.Axes
         Figure and Axes to be used for plotting. If None, new figure
-        and axes are created.
-    figsize : tuple of ints (default=(6,6))
-        Figure size, used when new fig and ax are created.
-    binsize : float (default=2.5)
-        Binsize used for histograming NNDs.
+        and axes are created. Default is None.
+    figsize : tuple of ints
+        Figure size, used when new fig and ax are created. Default is
+        (6, 6).
+    binsize : float
+        Binsize used for histograming NNDs. Only used when hist_data is
+        None. Default is 4.0.
     colors : list
         List specifying the colors of the histogram bins or plotted
         lines. If the number of neighbors is larger than the number of
@@ -488,112 +501,117 @@ def plot_NN(
     xlim, ylim : tuples of floats (default=None, None)
         Limits in which x and y axes are plotted. If None, the
         automatic limits are used.
-    alpha : float (default=0.6)
+    alpha : float
         Alpha (transparency) of histogram bins (not applied to
-        lineplot).
-    edgecolor : str (default='black')
-        Histogram bin edgecolor (not applied to lineplot).
-    show : bool (default=True)
-        If True, the plot is shown using plt.show()
-    show_legend : bool (default=True)
-        If True, legend is shown.
-    return_fig : bool (default=False)
+        lineplot). Default is 0.6.
+    edgecolor : str
+        Histogram bin edgecolor (not applied to lineplot). Default is
+        'black'.
+    show : bool
+        If True, the plot is shown using plt.show(). Default is False.
+    show_legend : bool
+        If True, legend is shown. Default is True.
+    return_fig : bool
         If True, fig and ax are returned and can be used for further
-        processing.
-    savefig : str or list of strs (default='')
+        processing. Default is False.
+    savefig : str or list of strs
         Path to save the plot. If '', the plot is not saved. If a list
         of strings is given, several paths can be specified (with
-        different extensions).
+        different extensions). Default is ''.
     """
-
-    def remove_patches_and_data(ax, xmax):
-        # remove the bins above the xlim if given (downstream they
-        # will be displayed by PyQt somehow)
-        for patch in ax.patches:
-            left = patch.get_x()
-            right = left + patch.get_width()
-            if right > xmax:
-                #     new_patches.append(patch)
-                # else:
-                patch.remove()
-        # same for lines
-        for line in ax.lines:
-            xdata = line.get_xdata()
-            ydata = line.get_ydata()
-            new_xdata = []
-            new_ydata = []
-            for x, y in zip(xdata, ydata):
-                if x <= xmax:
-                    new_xdata.append(x)
-                    new_ydata.append(y)
-            line.set_xdata(new_xdata)
-            line.set_ydata(new_ydata)
-
+    plt.style.use("default")
     # initiate figure and axis
     if fig is None or ax is None:
         fig, ax = plt.subplots(
             1, figsize=figsize, constrained_layout=True, dpi=dpi
         )
 
-    # calculate NNDs if not provided directly
-    if dist is None:
-        if data1 is None or data2 is None:
-            raise ValueError(
-                "If no NN distribution is given, please provide spatial"
-                " coordinates to calculate the NNDs."
-            )
+    # calculate NNDs if not provided directly (dist or hist_data)
+    if hist_data is None:
+        if dist is None:
+            if data1 is None or data2 is None:
+                raise ValueError(
+                    "If no NN distribution is given, please provide spatial"
+                    " coordinates to calculate the NNDs."
+                )
+            else:
+                dist = get_NN_dist(data1, data2, n_neighbors)
         else:
-            dist = get_NN_dist(data1, data2, n_neighbors)
+            n_neighbors = dist.shape[1] if dist.ndim == 2 else 0
     else:
-        n_neighbors = dist.shape[1] if dist.ndim == 2 else 0
+        assert "bins" in hist_data and "counts" in hist_data, (
+            "If hist_data is provided, it must contain 'bins' and"
+            " 'counts' keys."
+        )
+        assert len(hist_data["bins"]) == len(hist_data["counts"]), (
+            "'bins' and 'counts' in hist_data must have the same" " length."
+        )
+        n_neighbors = len(hist_data["bins"])
 
+    # repeat colors if needed
     if n_neighbors > len(colors):
         colors = colors * (n_neighbors // len(colors) + 1)
 
+    # histogram data manually if not provided (hist_data)
+    if hist_data is None:
+        hist_data = {"bins": [], "counts": []}
+        for i in range(n_neighbors):
+            data = dist[:, i]
+            counts, bins = np.histogram(
+                data,
+                bins=np.arange(0, 1000, binsize),  # normalize to infinity
+                density=True,
+            )
+            hist_data["bins"].append(bins)
+            hist_data["counts"].append(counts)
+
     # plot histogram / line
     for i in range(n_neighbors):
-        data = dist[:, i]
+        bins_ = hist_data["bins"][i]
+        counts_ = hist_data["counts"][i]
+        if i == 0:
+            label = f"1st NN"
+        elif i == 1:
+            label = f"2nd NN"
+        elif i == 2:
+            label = f"3rd NN"
+        else:
+            label = f"{i+1}th NN"
         if mode == "hist":
-            ax.hist(
-                data,
-                bins=np.arange(0, 1000, binsize),  # normalize to infinity
+            ax.bar(
+                (bins_[:-1] + bins_[1:]) / 2,
+                counts_,
+                width=np.diff(bins_),
                 edgecolor=edgecolor,
-                color=colors[i],
-                label=f"exp {i+1}th NN",
                 alpha=alpha,
-                linewidth=0.4,  # 0.1
-                density=True,
+                color=colors[i],
+                label=f"exp {label}",
             )
         elif mode == "plot":
-            counts, bin_edges = np.histogram(
-                data,
-                bins=np.arange(0, 1000, binsize),  # normalize to infinity
-                density=True,
-            )
-            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+            bin_centers = (bins_[:-1] + bins_[1:]) / 2
             ax.plot(
                 bin_centers,
-                counts,
+                counts_,
                 color=colors[i],
                 linewidth=0.9,  # 2
                 alpha=alpha,
-                label=f"sim {i+1}th NN",
+                label=f"sim {label}",
             )
-    if xlim is not None:
-        remove_patches_and_data(ax, xlim[1])
 
     # display parameters
     if show_legend:
-        ax.legend()
+        ax.legend(prop={"size": fontsize_ticks})
 
     if xlim is not None:
         ax.set_xlim(xlim)
     if ylim is not None:
         ax.set_ylim(ylim)
 
-    ax.set_title(title, fontsize=12)
-    ax.set_xlabel(xlabel)
-    ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=fontsize_title)
+    ax.set_xlabel(xlabel, fontsize=fontsize_labels)
+    ax.set_ylabel(ylabel, fontsize=fontsize_labels)
+    ax.tick_params(axis="both", which="major", labelsize=fontsize_ticks)
+    ax.grid(False)
 
     # save figure(s)
     if savefig:

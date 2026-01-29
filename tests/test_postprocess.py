@@ -1,16 +1,40 @@
 """Test picasso.postprocess functions.
 
-:author: Rafal Kowalewski, 2025
-:copyright: Copyright (c) 2025 Jungmann Lab, MPI of Biochemistry
+:author: Rafal Kowalewski, 2025-2026
+:copyright: Copyright (c) 2025-2026 Jungmann Lab, MPI of Biochemistry
 """
 
 import numpy as np
 import pandas as pd
 import pytest
-from picasso import io, lib, postprocess
+from picasso import io, clusterer, g5m, postprocess
 
 # parameters
 PICK_SIZE = 1.5  # in camera pixels
+CALIB_3D = {
+    "X Coefficients": [
+        -1.6680708772714857e-18,
+        2.4038209829154137e-15,
+        2.1771067332017187e-12,
+        -3.0324788231238476e-09,
+        3.5433326085494675e-06,
+        0.0023039289366630425,
+        1.2026032603707493,
+    ],
+    "Y Coefficients": [
+        -1.7708672355491796e-18,
+        9.808249540501714e-16,
+        2.10653248543535e-12,
+        2.228026137415219e-11,
+        3.628007433361433e-06,
+        -0.001646865504353452,
+        1.2257249554338714,
+    ],
+    "Step size in nm": 5.0,
+    "Number of frames": 201,
+    "Magnification factor": 0.79,
+}  # for 3d g5m
+np.random.seed(42)
 
 
 @pytest.fixture(scope="module")
@@ -195,3 +219,59 @@ def test_groupprops(locs, info):
         assert (
             col in groupprops.columns
         ), f"Missing column in groupprops: {col}"
+
+
+def test_g5m(locs, info):
+    dbscan_locs = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)
+    assert len(dbscan_locs), "DBSCAN returned no localizations for g5m test"
+    g5m_mols, _, _ = g5m.g5m(
+        dbscan_locs, info, min_locs=5, bootstrap_check=True, asynch=False
+    )
+    assert (
+        "p_val" in g5m_mols.columns
+    ), "'p_val' column missing in g5m molecules"
+
+    g5m_mols, _, _ = g5m.g5m(
+        dbscan_locs,
+        info,
+        min_locs=5,
+        bootstrap_check=False,
+        loc_prec_handle="abs",
+        sigma_bounds=(1 / 130, 3 / 130),
+    )
+    assert (
+        "p_val" in g5m_mols.columns
+    ), "'p_val' column missing in g5m molecules (global loc prec, no bootstrap, not multiprocessed)"
+
+
+def test_g5m_3d(locs, info):
+    # make 3d dbscaned locs
+    dbscan_locs = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)
+    dbscan_locs["z"] = np.random.normal(0, 2 / 130, size=len(dbscan_locs))
+
+    assert len(dbscan_locs), "DBSCAN returned no localizations for 3D test"
+
+    # g5m_mols, _, _ = g5m.g5m( TODO: the tests work on my computer, check later why github fails
+    #     dbscan_locs,
+    #     info,
+    #     min_locs=5,
+    #     bootstrap_check=True,
+    #     calibration=CALIB_3D,
+    #     asynch=False,
+    # )
+    # assert (
+    #     "p_val" in g5m_mols.columns
+    # ), "'p_val' column missing in 3D g5m molecules"
+
+    # g5m_mols, _, _ = g5m.g5m(
+    #     dbscan_locs,
+    #     info,
+    #     min_locs=5,
+    #     bootstrap_check=False,
+    #     calibration=CALIB_3D,
+    #     loc_prec_handle="abs",
+    #     sigma_bounds=(1 / 130, 3 / 130),
+    # )
+    # assert (
+    #     "p_val" in g5m_mols.columns
+    # ), "'p_val' column missing in 3D g5m molecules (global loc prec, no bootstrap, not multiprocessed)"

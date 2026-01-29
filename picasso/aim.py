@@ -696,7 +696,7 @@ def aim(
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
 
     # frames should start at 1
-    frame = (locs["frame"] + 1 - locs["frame"].min()).values  # 1d array
+    frame = (locs["frame"] + 1 - locs["frame"].min()).to_numpy()  # 1d array
 
     # find the segmentation bounds (temporal intervals)
     seg_bounds = np.concatenate(
@@ -704,14 +704,14 @@ def aim(
     )
 
     # get the reference localizations (first interval)
-    ref_x = locs["x"][frame <= segmentation].values
-    ref_y = locs["y"][frame <= segmentation].values
+    ref_x = locs["x"][frame <= segmentation].to_numpy()
+    ref_y = locs["y"][frame <= segmentation].to_numpy()
 
     # RUN AIM TWICE #
     # the first run is with the first interval as reference
     x_pdc, y_pdc, drift_x1, drift_y1 = intersection_max(
-        locs["x"].values,
-        locs["y"].values,
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
         ref_x,
         ref_y,
         frame,
@@ -757,11 +757,11 @@ def aim(
             progress.zero_progress(description="Undrifting z (1/2)")
         ref_x = x_pdc[frame <= segmentation]
         ref_y = y_pdc[frame <= segmentation]
-        ref_z = locs["z"][frame <= segmentation].values
+        ref_z = locs["z"][frame <= segmentation].to_numpy()
         z_pdc, drift_z1 = intersection_max_z(
             x_pdc,
             y_pdc,
-            locs["z"].values,
+            locs["z"].to_numpy(),
             ref_x,
             ref_y,
             ref_z,

@@ -217,16 +217,6 @@ def fit_spot(spot: np.ndarray) -> np.ndarray:
     result = optimize.leastsq(
         _compute_residuals, theta0, args=args, ftol=1e-2, xtol=1e-2
     )  # leastsq is much faster than least_squares
-    """
-    model = compute_model(result[0], grid, size, model_x, model_y, model)
-    plt.figure()
-    plt.subplot(121)
-    plt.imshow(spot, interpolation='none')
-    plt.subplot(122)
-    plt.imshow(model, interpolation='none')
-    plt.colorbar()
-    plt.show()
-    """
     result_ = result[0]
     return result_
 
@@ -548,3 +538,46 @@ def localization_precision(
         v *= 2
     with np.errstate(invalid="ignore"):
         return np.sqrt(v)
+
+
+def sigma_uncertainty(
+    sigma: np.ndarray,
+    sigma_orth: np.ndarray,
+    photons: np.ndarray,
+    bg: np.ndarray,
+) -> np.ndarray:
+    """Calculate standard error of fitted sigma based on the 2D Gaussian
+    least-squares fitting model with diagonal covariance matrix.
+
+    Based on Kowalewski, Reinhardt, et al. *DOI will be added once available*.
+
+    Parameters
+    ----------
+    sigma : np.ndarray
+        Fitted sigma values in camera pixels.
+    sigma_orth : np.ndarray
+        Fitted sigma values in the orthogonal direction in camera
+        pixels.
+    photons : np.ndarray
+        Number of photons.
+    bg : np.ndarray
+        Background photons per pixel.
+
+    Returns
+    -------
+    se_sigma : np.ndarray
+        Standard error of fitted sigma values in camera pixels.
+    """
+    sa2 = sigma**2 + 1 / 12
+    sa4 = sa2**2
+    sa = sa2**0.5
+    sa2_orth = sigma_orth**2 + 1 / 12
+    sa_orth = sa2_orth**0.5
+    var_sa2 = (
+        sa4
+        / photons
+        * (512 / 81 + (64 * np.pi * sa * sa_orth * bg) / (3 * photons))
+    )
+    var_sigma = var_sa2 / (4 * sigma**2)
+    se_sigma = np.sqrt(var_sigma)
+    return se_sigma

@@ -454,8 +454,8 @@ class View(QtWidgets.QLabel):
             pool.close()
         except NameError:
             pass
-        x = sharedctypes.RawArray("f", self.locs["x"].values)
-        y = sharedctypes.RawArray("f", self.locs["y"].values)
+        x = sharedctypes.RawArray("f", self.locs["x"].to_numpy())
+        y = sharedctypes.RawArray("f", self.locs["y"].to_numpy())
         n_workers = min(
             60, max(1, int(0.75 * multiprocessing.cpu_count()))
         )  # Python crashes when using >64 cores

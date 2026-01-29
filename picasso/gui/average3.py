@@ -539,7 +539,7 @@ class Window(QtWidgets.QMainWindow):
         else:
             locs = lib.ensure_sanity(locs, info)
             if not hasattr(locs, "z"):
-                locs["z"] = locs["x"].values.copy()
+                locs["z"] = locs["x"].to_numpy().copy()
                 self.pixelsize = 1
                 has_z = False
 

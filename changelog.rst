@@ -1,7 +1,37 @@
 Changelog
 =========
 
-Last change: 01-JAN-2026 CEST
+Last change: 29-JAN-2026 CEST
+
+0.9.4
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- **Algorithm for molecular mapping introduced (G5M)**, see documentation `here <https://picassosr.readthedocs.io/en/latest/render.html#g5m>`__ *DOI will be added once available*.
+- **Localize outputs axial localization precision for astigmatic imaging in 3D**,  *DOI will be added once available*. 
+- Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*
+- Localize accepts frame bounds to analyze only a subset of frames
+- Config file accepts z calibration .yaml paths so that they can be automatically loaded when changing between cameras
+- Render by property (GUI) shows histogram of the selected property
+- Filter GUI has a new plot to test for subclustering based on the number of events per molecule (column ``n_events``); see the `Filter documentation <https://picassosr.readthedocs.io/en/latest/filter.html>`__  for details
+
+*Small improvements:*
++++++++++++++++++++++
+- Picasso applies constrained layout to all matplotlib figures
+- SPINNA uses ``FigureCanvas`` instead of ``QSvgRenderer`` for displaying NND plots and mask legend
+- SPINNA default mask blur set to 500 nm
+- 3D animation saves metadata
+- Some improvements in how DataFrames are handled (Filter, change from ``.values`` to ``.to_numpy()``)
+
+*Bug fixes:*
+++++++++++++
+- Render GUI takes camera pixel size using ``lib.get_from_metadata`` (#602)
+- Render by property is switched off if more than one channel is loaded
+- Render 3D scale bar manual adjustment fixed
+- Render 3D screenshot .yaml fixed
+- .tif IO bug fix related to the numpy deprecation of ``arr.newbyteorder`` (#603)
+- Clarify GPU fit installation instructions and remove version printing (#604)
+- SPINNA fixed loading of the proportion spin boxes after rerunning SPINNA, such that they add up to 100% again
 
 0.9.3
 -----

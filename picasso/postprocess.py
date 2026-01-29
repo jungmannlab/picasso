@@ -69,8 +69,8 @@ def get_index_blocks(
     """
     locs = lib.ensure_sanity(locs, info)
     # Sort locs by indices
-    x_index = np.uint32(locs["x"].values / size)
-    y_index = np.uint32(locs["y"].values / size)
+    x_index = np.uint32(locs["x"].to_numpy() / size)
+    y_index = np.uint32(locs["y"].to_numpy() / size)
     sort_indices = np.lexsort([x_index, y_index])
     locs = locs.iloc[sort_indices]
     x_index = x_index[sort_indices]
@@ -240,9 +240,7 @@ def picked_locs(
                 block_locs = get_block_locs_at(x, y, index_blocks)
                 group_locs = lib.locs_at(x, y, block_locs, pick_size).copy()
                 if add_group:
-                    group_locs["group"] = i * np.ones(
-                        len(group_locs), dtype=np.int32
-                    )
+                    group_locs["group"] = i
                 group_locs.sort_values(
                     by="frame",
                     kind="mergesort",
@@ -272,8 +270,8 @@ def picked_locs(
                 group_locs = lib.locs_in_rectangle(group_locs, X, Y)
                 # store rotated coordinates in x_rot and y_rot
                 angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
-                x_shifted = group_locs["x"].values - xs
-                y_shifted = group_locs["y"].values - ys
+                x_shifted = group_locs["x"].to_numpy() - xs
+                y_shifted = group_locs["y"].to_numpy() - ys
                 x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(
                     angle
                 )
@@ -407,7 +405,7 @@ def pick_similar(
         block_locs = get_block_locs_at(x, y, index_blocks)
         pick_locs = lib.locs_at(x, y, block_locs, r)
         n_locs.append(len(pick_locs))
-        pick_locs_xy = pick_locs[["x", "y"]].values.T
+        pick_locs_xy = pick_locs[["x", "y"]].to_numpy().T
         rmsd.append(rmsd_at_com(pick_locs_xy))
 
     # calculate min and max n_locs and rmsd for picking similar
@@ -777,8 +775,8 @@ def distance_histogram(
     starts = range(0, N, chunk)
     args = [
         (
-            locs["x"].values,
-            locs["y"].values,
+            locs["x"].to_numpy(),
+            locs["y"].to_numpy(),
             bin_size,
             r_max,
             x_index,
@@ -878,11 +876,11 @@ def next_frame_neighbor_distance_histogram(
         Distance histogram of next frame neighbors.
     """
     locs.sort_values(kind="mergesort", by="frame", inplace=True)
-    frame = locs["frame"].values
-    x = locs["x"].values
-    y = locs["y"].values
+    frame = locs["frame"].to_numpy()
+    x = locs["x"].to_numpy()
+    y = locs["y"].to_numpy()
     if hasattr(locs, "group"):
-        group = locs["group"].values
+        group = locs["group"].to_numpy()
     else:
         group = np.zeros(len(locs), dtype=np.int32)
     bin_size = 0.001
@@ -1003,8 +1001,8 @@ def frc(
 
     # select the locs within the viewport
     (y_min, x_min), (y_max, x_max) = viewport
-    x = locs["x"].values
-    y = locs["y"].values
+    x = locs["x"].to_numpy()
+    y = locs["y"].to_numpy()
     in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
     locs = locs.iloc[in_view]
 
@@ -1244,8 +1242,8 @@ def compute_local_density(
     starts = range(0, N, chunk)
     args = [
         (
-            locs["x"].values,
-            locs["y"].values,
+            locs["x"].to_numpy(),
+            locs["y"].to_numpy(),
             radius,
             x_index,
             y_index,
@@ -1316,13 +1314,13 @@ def dark_times(
         is not followed by another binding event in the same group, the
         dark time is set to -1.
     """
-    last_frame = locs["frame"].values + locs["len"].values - 1
+    last_frame = locs["frame"].to_numpy() + locs["len"].to_numpy() - 1
     if group is None:
         if hasattr(locs, "group"):
-            group = locs["group"].values
+            group = locs["group"].to_numpy()
         else:
             group = np.zeros(len(locs))
-    dark = _dark_times(locs["frame"].values, group, last_frame)
+    dark = _dark_times(locs["frame"].to_numpy(), group, last_frame)
     return dark
 
 
@@ -1395,12 +1393,12 @@ def link(
     else:
         locs = locs.sort_values(kind="mergesort", by="frame")
         if hasattr(locs, "group"):
-            group = locs["group"].values
+            group = locs["group"].to_numpy()
         else:
             group = np.zeros(len(locs), dtype=np.int32)
-        frame = locs["frame"].values
-        x = locs["x"].values
-        y = locs["y"].values
+        frame = locs["frame"].to_numpy()
+        x = locs["x"].to_numpy()
+        y = locs["y"].to_numpy()
         link_group = get_link_groups(frame, x, y, r_max, max_dark_time, group)
         if combine_mode == "average":
             linked_locs = link_loc_groups(
@@ -1467,7 +1465,7 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
     if hasattr(locs, "z"):
         for group in tqdm(np.unique(locs["group"])):
             temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"].values)
+            cluster = np.unique(temp["cluster"].to_numpy())
             n_cluster = len(cluster)
             mean_frame = np.zeros(n_cluster)
             std_frame = np.zeros(n_cluster)
@@ -1483,16 +1481,16 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
                 cluster_locs = temp[temp["cluster"] == clusterval]
                 mean_frame[i] = cluster_locs["frame"].mean()
                 com_x[i] = np.average(
-                    cluster_locs["x"].values,
-                    weights=cluster_locs["photons"].values,
+                    cluster_locs["x"].to_numpy(),
+                    weights=cluster_locs["photons"].to_numpy(),
                 )
                 com_y[i] = np.average(
-                    cluster_locs["y"].values,
-                    weights=cluster_locs["photons"].values,
+                    cluster_locs["y"].to_numpy(),
+                    weights=cluster_locs["photons"].to_numpy(),
                 )
                 com_z[i] = np.average(
-                    cluster_locs["z"].values,
-                    weights=cluster_locs["photons"].values,
+                    cluster_locs["z"].to_numpy(),
+                    weights=cluster_locs["photons"].to_numpy(),
                 )
                 std_frame[i] = cluster_locs["frame"].std()
                 std_x[i] = cluster_locs["x"].std() / np.sqrt(len(cluster_locs))
@@ -1519,7 +1517,7 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
     else:
         for group in tqdm(np.unique(locs["group"])):
             temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"].values)
+            cluster = np.unique(temp["cluster"].to_numpy())
             n_cluster = len(cluster)
             mean_frame = np.zeros(n_cluster)
             std_frame = np.zeros(n_cluster)
@@ -1533,12 +1531,12 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
                 cluster_locs = temp[temp["cluster"] == clusterval]
                 mean_frame[i] = cluster_locs["frame"].mean()
                 com_x[i] = np.average(
-                    cluster_locs["x"].values,
-                    weights=cluster_locs["photons"].values,
+                    cluster_locs["x"].to_numpy(),
+                    weights=cluster_locs["photons"].to_numpy(),
                 )
                 com_y[i] = np.average(
-                    cluster_locs["y"].values,
-                    weights=cluster_locs["photons"].values,
+                    cluster_locs["y"].to_numpy(),
+                    weights=cluster_locs["photons"].to_numpy(),
                 )
                 std_frame[i] = cluster_locs["frame"].std()
                 std_x[i] = cluster_locs["x"].std() / np.sqrt(len(cluster_locs))
@@ -1591,16 +1589,16 @@ def cluster_combine_dist(
             temp = locs[locs["group"] == group]
             cluster = np.unique(temp["cluster"])
             n_cluster = len(cluster)
-            mean_frame = temp["mean_frame"].values
-            std_frame = temp["std_frame"].values
-            com_x = temp["x"].values
-            com_y = temp["y"].values
-            com_z = temp["z"].values
-            std_x = temp["lpx"].values
-            std_y = temp["lpy"].values
-            std_z = temp["lpz"].values
-            group_id = temp["group"].values
-            n = temp["n"].values
+            mean_frame = temp["mean_frame"].to_numpy()
+            std_frame = temp["std_frame"].to_numpy()
+            com_x = temp["x"].to_numpy()
+            com_y = temp["y"].to_numpy()
+            com_z = temp["z"].to_numpy()
+            std_x = temp["lpx"].to_numpy()
+            std_y = temp["lpy"].to_numpy()
+            std_z = temp["lpz"].to_numpy()
+            group_id = temp["group"].to_numpy()
+            n = temp["n"].to_numpy()
             min_dist = np.zeros(n_cluster)
             min_dist_xy = np.zeros(n_cluster)
             for i, clusterval in enumerate(cluster):
@@ -1609,16 +1607,16 @@ def cluster_combine_dist(
                 cluster_locs = temp[temp["cluster"] == clusterval]
                 ref_point = np.stack(
                     (
-                        cluster_locs["x"].values,
-                        cluster_locs["y"].values,
-                        cluster_locs["z"].values / pixelsize,
+                        cluster_locs["x"].to_numpy(),
+                        cluster_locs["y"].to_numpy(),
+                        cluster_locs["z"].to_numpy() / pixelsize,
                     )
                 )
                 all_points = np.stack(
                     (
-                        group_locs["x"].values,
-                        group_locs["y"].values,
-                        group_locs["z"].values / pixelsize,
+                        group_locs["x"].to_numpy(),
+                        group_locs["y"].to_numpy(),
+                        group_locs["z"].to_numpy() / pixelsize,
                     )
                 )
                 distances = distance.cdist(
@@ -1658,14 +1656,14 @@ def cluster_combine_dist(
             temp = locs[locs["group"] == group]
             cluster = np.unique(temp["cluster"])
             n_cluster = len(cluster)
-            mean_frame = temp["mean_frame"].values
-            std_frame = temp["std_frame"].values
-            com_x = temp["x"].values
-            com_y = temp["y"].values
-            std_x = temp["lpx"].values
-            std_y = temp["lpy"].values
-            group_id = temp["group"].values
-            n = temp["n"].values
+            mean_frame = temp["mean_frame"].to_numpy()
+            std_frame = temp["std_frame"].to_numpy()
+            com_x = temp["x"].to_numpy()
+            com_y = temp["y"].to_numpy()
+            std_x = temp["lpx"].to_numpy()
+            std_y = temp["lpy"].to_numpy()
+            group_id = temp["group"].to_numpy()
+            n = temp["n"].to_numpy()
             min_dist = np.zeros(n_cluster)
 
             for i, clusterval in enumerate(cluster):
@@ -1956,29 +1954,29 @@ def link_loc_groups(
     columns = OrderedDict()
     if hasattr(locs, "frame"):
         first_frame_, last_frame_ = _link_group_min_max(
-            locs["frame"].values, link_group, n_locs, n_groups
+            locs["frame"].to_numpy(), link_group, n_locs, n_groups
         )
         columns["frame"] = first_frame_
     if hasattr(locs, "x"):
-        weights_x = 1 / locs["lpx"].values ** 2
+        weights_x = 1 / locs["lpx"].to_numpy() ** 2
         columns["x"], sum_weights_x_ = _link_group_weighted_mean(
-            locs["x"].values, weights_x, link_group, n_locs, n_groups, n_
+            locs["x"].to_numpy(), weights_x, link_group, n_locs, n_groups, n_
         )
     if hasattr(locs, "y"):
-        weights_y = 1 / locs["lpy"].values ** 2
+        weights_y = 1 / locs["lpy"].to_numpy() ** 2
         columns["y"], sum_weights_y_ = _link_group_weighted_mean(
-            locs["y"].values, weights_y, link_group, n_locs, n_groups, n_
+            locs["y"].to_numpy(), weights_y, link_group, n_locs, n_groups, n_
         )
     if hasattr(locs, "photons"):
         columns["photons"] = _link_group_sum(
-            locs["photons"].values,
+            locs["photons"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
         )
     if hasattr(locs, "sx"):
         columns["sx"] = _link_group_mean(
-            locs["sx"].values,
+            locs["sx"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
@@ -1986,7 +1984,7 @@ def link_loc_groups(
         )
     if hasattr(locs, "sy"):
         columns["sy"] = _link_group_mean(
-            locs["sy"].values,
+            locs["sy"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
@@ -1994,7 +1992,7 @@ def link_loc_groups(
         )
     if hasattr(locs, "bg"):
         columns["bg"] = _link_group_sum(
-            locs["bg"].values,
+            locs["bg"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
@@ -2005,23 +2003,23 @@ def link_loc_groups(
         columns["lpy"] = np.sqrt(1 / sum_weights_y_)
     if hasattr(locs, "ellipticity"):
         columns["ellipticity"] = _link_group_mean(
-            locs["ellipticity"].values, link_group, n_locs, n_groups, n_
+            locs["ellipticity"].to_numpy(), link_group, n_locs, n_groups, n_
         )
     if hasattr(locs, "net_gradient"):
         columns["net_gradient"] = _link_group_mean(
-            locs["net_gradient"].values, link_group, n_locs, n_groups, n_
+            locs["net_gradient"].to_numpy(), link_group, n_locs, n_groups, n_
         )
     if hasattr(locs, "likelihood"):
         columns["likelihood"] = _link_group_mean(
-            locs["likelihood"].values, link_group, n_locs, n_groups, n_
+            locs["likelihood"].to_numpy(), link_group, n_locs, n_groups, n_
         )
     if hasattr(locs, "iterations"):
         columns["iterations"] = _link_group_mean(
-            locs["iterations"].values, link_group, n_locs, n_groups, n_
+            locs["iterations"].to_numpy(), link_group, n_locs, n_groups, n_
         )
     if hasattr(locs, "z"):
         columns["z"] = _link_group_mean(
-            locs["z"].values,
+            locs["z"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
@@ -2029,11 +2027,11 @@ def link_loc_groups(
         )
     if hasattr(locs, "d_zcalib"):
         columns["d_zcalib"] = _link_group_mean(
-            locs["d_zcalib"].values, link_group, n_locs, n_groups, n_
+            locs["d_zcalib"].to_numpy(), link_group, n_locs, n_groups, n_
         )
     if hasattr(locs, "group"):
         columns["group"] = _link_group_last(
-            locs["group"].values,
+            locs["group"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
@@ -2185,11 +2183,11 @@ def undrift(
     drift_ = (drift_x_pol(t_inter), drift_y_pol(t_inter))
     drift = pd.DataFrame({"x": drift_[0], "y": drift_[1]})
     if display:
-        fig1 = plt.figure(figsize=(17, 6))
+        fig1 = plt.figure(figsize=(10, 6), constrained_layout=True)
         plt.suptitle("Estimated drift")
         plt.subplot(1, 2, 1)
-        plt.plot(drift["x"].values, label="x interpolated")
-        plt.plot(drift["y"].values, label="y interpolated")
+        plt.plot(drift["x"].to_numpy(), label="x interpolated")
+        plt.plot(drift["y"].to_numpy(), label="y interpolated")
         t = (bounds[1:] + bounds[:-1]) / 2
         plt.plot(
             t,
@@ -2210,8 +2208,8 @@ def undrift(
         plt.ylabel("Drift (pixel)")
         plt.subplot(1, 2, 2)
         plt.plot(
-            drift["x"].values,
-            drift["y"].values,
+            drift["x"].to_numpy(),
+            drift["y"].to_numpy(),
             color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
         )
         plt.plot(
@@ -2223,9 +2221,9 @@ def undrift(
         plt.axis("equal")
         plt.xlabel("x")
         plt.ylabel("y")
-        fig1.show()
-    locs["x"] -= drift["x"][locs["frame"]].values
-    locs["y"] -= drift["y"][locs["frame"]].values
+        plt.show()
+    locs["x"] -= drift["x"][locs["frame"]].to_numpy()
+    locs["y"] -= drift["y"][locs["frame"]].to_numpy()
     return drift, locs
 
 
@@ -2300,8 +2298,8 @@ def _undrift_from_picked_coordinate(
 
     # Remove center of mass offset
     for i, locs in enumerate(picked_locs):
-        coordinates = locs[coordinate].values
-        drift[i, locs["frame"].values] = coordinates - np.mean(coordinates)
+        coordinates = locs[coordinate].to_numpy()
+        drift[i, locs["frame"].to_numpy()] = coordinates - np.mean(coordinates)
 
     # Mean drift over picks
     drift_mean = np.nanmean(drift, 0)

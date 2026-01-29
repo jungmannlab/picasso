@@ -1185,7 +1185,7 @@ class TiffMap:
         # We only want to deal with little endian byte order downstream:
         if self._tif_byte_order == ">":
             frame.byteswap(True)
-            frame = frame.newbyteorder("<")
+            frame = frame.view(frame.dtype.newbyteorder("<"))
         return frame
 
     def read(self, type: str, count: int = 1) -> bytes | float | None:
@@ -1727,7 +1727,7 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         f.write(header)
         np.savetxt(
             f,
-            loctxt.values,
+            loctxt.to_numpy(),
             fmt=fmt,
             newline="\r\n",
             delimiter="\t",
@@ -1759,7 +1759,7 @@ def export_xyz_chimera(
             f.write(b"Molecule export\r\n")
             np.savetxt(
                 f,
-                loctxt.values,
+                loctxt.to_numpy(),
                 fmt=["%i", "%.5f", "%.5f", "%.5f"],
                 newline="\r\n",
                 delimiter="\t",
