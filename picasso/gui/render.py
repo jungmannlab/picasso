@@ -6827,7 +6827,7 @@ class View(QtWidgets.QLabel):
                 lib.plot_subclustering_check(
                     clust_events,
                     sparse_events,
-                    path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                    path.replace(".hdf5", "_subcluster_check.png"),
                 )
         else:
             if not self.check_group(channel):
