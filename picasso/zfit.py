@@ -641,7 +641,6 @@ def _axial_localization_precision_astig(
 def get_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
     """Calculate calibration spot size at the given z position given
     the calibration coefficients. Based on Huang et al., Science 2008."""
-    coeffs = np.atleast_1d(coeffs)  # github tests were failing without this
     size = (
         coeffs[0] * z**6
         + coeffs[1] * z**5
@@ -657,7 +656,6 @@ def get_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
 def get_prime_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
     """Same as ``get_calib_size`` but for the derivative of the size
     function."""
-    coeffs = np.atleast_1d(coeffs)  # github tests were failing without this
     size_prime = (
         6 * coeffs[0] * z**5
         + 5 * coeffs[1] * z**4
