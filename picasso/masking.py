@@ -47,8 +47,12 @@ def mask_locs(
     locs_out : pd.DataFrame
         Localizations outside the mask.
     """
-    x_ind = (np.floor(locs["x"].values / width * mask.shape[0])).astype(int)
-    y_ind = (np.floor(locs["y"].values / height * mask.shape[1])).astype(int)
+    x_ind = (np.floor(locs["x"].to_numpy() / width * mask.shape[0])).astype(
+        int
+    )
+    y_ind = (np.floor(locs["y"].to_numpy() / height * mask.shape[1])).astype(
+        int
+    )
 
     index = mask[y_ind, x_ind].astype(bool)
     locs_in = locs.iloc[index].sort_values(by="frame", kind="mergesort")

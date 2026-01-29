@@ -33,35 +33,31 @@ plt.style.use("ggplot")
 
 
 MAX_LOCS = int(1e6)
-LOCS_DTYPE = [
-    ("frame", "u4"),
-    ("x", "f4"),
-    ("y", "f4"),
-    ("photons", "f4"),
-    ("sx", "f4"),
-    ("sy", "f4"),
-    ("bg", "f4"),
-    ("lpx", "f4"),
-    ("lpy", "f4"),
-    ("net_gradient", "f4"),
-    ("likelihood", "f4"),
-    ("iterations", "i4"),
-]
-MEAN_COLS = [
-    "frame",
-    "x",
-    "y",
-    "photons",
-    "sx",
-    "sy",
-    "bg",
-    "lpx",
-    "lpy",
-    "ellipticity",
-    "net_gradient",
-    "z",
-    "d_zcalib",
-]
+# The columns under base are always available and the keys such as "3D
+# only" will be displayed in the save columns dialog in the GUI for
+# clarity
+LOCALIZATION_COLUMNS = {
+    "Base": [
+        "frame",
+        "x",
+        "y",
+        "photons",
+        "sx",
+        "sy",
+        "bg",
+        "lpx",
+        "lpy",
+        "ellipticity",
+        "net_gradient",
+    ],
+    "3D only": ["z", "d_zcalib"],  # "lpz"],
+    "Picked spots only": ["n_id"],
+    "MLE only": ["log_likelihood", "iterations"],
+}
+# Columns that are required for further use with Picasso
+REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy"]  # "lpz"]
+# For database:
+MEAN_COLS = LOCALIZATION_COLUMNS["Base"] + LOCALIZATION_COLUMNS["3D only"]
 SET_COLS = [
     "Frames",
     "Height",
@@ -284,7 +280,9 @@ def identify_by_frame_number(
     minimum_ng: float,
     box: int,
     frame_number: int,
+    *,
     roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    frame_bounds: tuple[int, int] | None = None,
     lock: threading.Lock | None = None,
 ) -> pd.DataFrame:
     """Identify local maxima in a specific frame of a movie and
@@ -309,6 +307,12 @@ def identify_by_frame_number(
         (y_start, x_start) and the second tuple contains the end
         coordinates (y_end, x_end). If None, the entire frame is used.
         Default is None.
+    frame_bounds : tuple, optional
+        Minimum and maximum frame numbers to consider for the
+        identification. If None, all frames are used. If only min or max
+        is to be specified, the other is to be set to None, for example,
+        ``(5, None)`` sets minimum frame to 5 without maximum frame.
+        Default is None.
     lock : threading.Lock, optional
         If provided, this lock will be used to ensure thread safety when
         accessing the movie data. This is useful in a multithreaded
@@ -325,6 +329,23 @@ def identify_by_frame_number(
             frame = movie[frame_number]
     else:
         frame = movie[frame_number]
+    # check frame bounds
+    min_max = (0, len(movie))
+    if frame_bounds is not None:
+        if frame_bounds[0] is not None:
+            min_max = (max(frame_bounds[0], min_max[0]), min_max[1])
+        if frame_bounds[1] is not None:
+            min_max = (min_max[0], min(frame_bounds[1], min_max[1]))
+        if not (min_max[0] <= frame_number <= min_max[1]):
+            return pd.DataFrame(
+                {
+                    "frame": pd.Series(dtype=int),
+                    "x": pd.Series(dtype=int),
+                    "y": pd.Series(dtype=int),
+                    "net_gradient": pd.Series(dtype=np.float32),
+                }
+            )
+    # identify
     y, x, net_gradient = identify_in_frame(frame, minimum_ng, box, roi)
     frame = frame_number * np.ones(len(x))
     identifications = pd.DataFrame(
@@ -344,6 +365,7 @@ def _identify_worker(
     minimum_ng: float,
     box: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | None,
+    frame_bounds: tuple[int, int] | None,
     lock: threading.Lock | None,
 ) -> list[pd.DataFrame]:
     """Worker function for identifying local maxima in a movie. This
@@ -358,7 +380,15 @@ def _identify_worker(
                 return identifications
             current[0] += 1
         identifications.append(
-            identify_by_frame_number(movie, minimum_ng, box, index, roi, lock)
+            identify_by_frame_number(
+                movie,
+                minimum_ng,
+                box,
+                index,
+                roi=roi,
+                frame_bounds=frame_bounds,
+                lock=lock,
+            )
         )
 
 
@@ -391,7 +421,9 @@ def identify_async(
     movie: np.ndarray,
     minimum_ng: float,
     box: int,
+    *,
     roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    frame_bounds: tuple[int, int] | None = None,
 ) -> tuple[list[int], list[multiprocessing.pool.Future]]:
     """Asynchronously (i.e., using multithreading) identify local
     maxima in a movie using multiple threads. This function divides the
@@ -407,6 +439,12 @@ def identify_async(
         The size of the box to extract around each spot.
     roi : tuple[tuple[int, int], tuple[int, int]] | None
         The region of interest (ROI) for the analysis.
+    frame_bounds : tuple, optional
+        Minimum and maximum frame numbers to consider for the
+        identification. If None, all frames are used. If only min or max
+        is to be specified, the other is to be set to None, for example,
+        ``(5, None)`` sets minimum frame to 5 without maximum frame.
+        Default is None.
 
     Returns
     -------
@@ -449,6 +487,7 @@ def identify_async(
             minimum_ng,
             box,
             roi,
+            frame_bounds,
             lock,
         )
         for _ in range(n_workers)
@@ -461,7 +500,9 @@ def identify(
     movie: np.ndarray,
     minimum_ng: float,
     box: int,
+    *,
     roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+    frame_bounds: tuple[int, int] | None = None,
     threaded: bool = True,
 ) -> pd.DataFrame:
     """Identify local maxima in a movie and calculate the net
@@ -482,6 +523,12 @@ def identify(
         (y_start, x_start) and the second tuple contains the end
         coordinates (y_end, x_end). If None, the entire frame is used.
         Default is None.
+    frame_bounds : tuple, optional
+        Minimum and maximum frame numbers to consider for the
+        identification. If None, all frames are used. If only min or max
+        is to be specified, the other is to be set to None, for example,
+        ``(5, None)`` sets minimum frame to 5 without maximum frame.
+        Default is None.
     threaded : bool, optional
         Whether to use threading for the identification process. Default
         is True.
@@ -493,11 +540,15 @@ def identify(
         `frame`, `x`, `y`, and `net_gradient`.
     """
     if threaded:
-        current, futures = identify_async(movie, minimum_ng, box, roi)
+        current, futures = identify_async(
+            movie, minimum_ng, box, roi=roi, frame_bounds=frame_bounds
+        )
         ids = identifications_from_futures(futures)
     else:
         identifications = [
-            identify_by_frame_number(movie, minimum_ng, box, i, roi)
+            identify_by_frame_number(
+                movie, minimum_ng, box, i, roi=roi, frame_bounds=frame_bounds
+            )
             for i in range(len(movie))
         ]
         ids = pd.concat(identifications, ignore_index=True)
@@ -651,9 +702,9 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
     if isinstance(movie, np.ndarray):
         return _cut_spots_numba(
             movie,
-            ids["frame"].values,
-            ids["x"].values,
-            ids["y"].values,
+            ids["frame"].to_numpy(),
+            ids["x"].to_numpy(),
+            ids["y"].to_numpy(),
             box,
         )
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
@@ -664,9 +715,9 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
             "(p,n,m),(b),(k),(k),(k),(),(k,l,l)->(k,l,l)",
             movie.data,
             np.array([len(movie)]),
-            ids["frame"].values,
-            ids["x"].values,
-            ids["y"].values,
+            ids["frame"].to_numpy(),
+            ids["x"].to_numpy(),
+            ids["y"].to_numpy(),
             box,
             spots,
             output_dtypes=[movie.dtype],
@@ -678,9 +729,9 @@ def _cut_spots(movie: np.ndarray, ids: np.ndarray, box: int) -> np.ndarray:
         spots = np.zeros((N, box, box), dtype=movie.dtype)
         spots = _cut_spots_framebyframe(
             movie,
-            ids["frame"].values,
-            ids["x"].values,
-            ids["y"].values,
+            ids["frame"].to_numpy(),
+            ids["x"].to_numpy(),
+            ids["y"].to_numpy(),
             box,
             spots,
         )
@@ -890,7 +941,7 @@ def locs_from_fits(
     lpx = np.sqrt(CRLBs[:, 1])
     locs = pd.DataFrame(
         {
-            "frame": identifications["frame"].values.astype(np.uint32),
+            "frame": identifications["frame"].to_numpy().astype(np.uint32),
             "x": x.astype(np.float32),
             "y": y.astype(np.float32),
             "photons": theta[:, 2].astype(np.float32),
@@ -900,7 +951,7 @@ def locs_from_fits(
             "lpx": lpx.astype(np.float32),
             "lpy": lpy.astype(np.float32),
             "net_gradient": (
-                identifications["net_gradient"].values.astype(np.float32)
+                identifications["net_gradient"].to_numpy().astype(np.float32)
             ),
             "likelihood": likelihoods.astype(np.float32),
             "iterations": iterations.astype(np.int32),
@@ -943,7 +994,7 @@ def localize(
         `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
         `net_gradient`, `likelihood`, and `iterations`.
     """
-    identifications = identify(
+    identifications = identify(  # TODO: allow passing roi and frame_bounds
         movie,
         parameters["Min. Net Gradient"],
         parameters["Box Size"],

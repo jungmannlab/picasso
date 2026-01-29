@@ -572,8 +572,8 @@ def render_hist(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs["x"].values,
-        locs["y"].values,
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
         oversampling,
         y_min,
         x_min,
@@ -638,9 +638,9 @@ def render_hist3d(
     z_max = z_max / pixelsize
 
     image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(
-        locs["x"].values,
-        locs["y"].values,
-        locs["z"].values,
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
+        locs["z"].to_numpy(),
         oversampling,
         y_min,
         x_min,
@@ -692,8 +692,8 @@ def render_gaussian(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs["x"].values,
-        locs["y"].values,
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
         oversampling,
         y_min,
         x_min,
@@ -703,10 +703,10 @@ def render_gaussian(
 
     if not ang:  # not rotated
         blur_width = oversampling * np.maximum(
-            locs["lpx"].values, min_blur_width
+            locs["lpx"].to_numpy(), min_blur_width
         )
         blur_height = oversampling * np.maximum(
-            locs["lpy"].values, min_blur_width
+            locs["lpy"].to_numpy(), min_blur_width
         )
         sy = blur_height[in_view]
         sx = blur_width[in_view]
@@ -724,14 +724,14 @@ def render_gaussian(
             ang,
         )
         blur_width = oversampling * np.maximum(
-            locs["lpx"].values, min_blur_width
+            locs["lpx"].to_numpy(), min_blur_width
         )
         blur_height = oversampling * np.maximum(
-            locs["lpy"].values, min_blur_width
+            locs["lpy"].to_numpy(), min_blur_width
         )
         # if lpz not found, make it twice the mean of lpx and lpy
         if "lpz" in locs:
-            lpz = locs["lpz"].values
+            lpz = locs["lpz"].to_numpy()
         else:
             lpz = 2 * locs[["lpx", "lpy"]].to_numpy().mean(axis=1)
         blur_depth = oversampling * np.maximum(lpz, min_blur_width)
@@ -761,8 +761,8 @@ def render_gaussian_iso(
     """Same as ``render_gaussian``, but uses the same localization
     precision in x and y."""
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs["x"].values,
-        locs["y"].values,
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
         oversampling,
         y_min,
         x_min,
@@ -772,10 +772,10 @@ def render_gaussian_iso(
 
     if not ang:  # not rotated
         blur_width = oversampling * np.maximum(
-            locs["lpx"].values, min_blur_width
+            locs["lpx"].to_numpy(), min_blur_width
         )
         blur_height = oversampling * np.maximum(
-            locs["lpy"].values, min_blur_width
+            locs["lpy"].to_numpy(), min_blur_width
         )
         sy = (blur_height[in_view] + blur_width[in_view]) / 2
         sx = sy
@@ -793,14 +793,14 @@ def render_gaussian_iso(
             ang,
         )
         blur_width = oversampling * np.maximum(
-            locs["lpx"].values, min_blur_width
+            locs["lpx"].to_numpy(), min_blur_width
         )
         blur_height = oversampling * np.maximum(
-            locs["lpy"].values, min_blur_width
+            locs["lpy"].to_numpy(), min_blur_width
         )
-        # for now, let lpz be twice the mean of lpx and lpy (TODO):
+        # for now, let lpz be twice the mean of lpx and lpy
         if "lpz" in locs:
-            lpz = locs["lpz"].values  # NOTE: lpz must have same units as lpx
+            lpz = locs["lpz"].to_numpy()
         else:
             lpz = 2 * locs[["lpx", "lpy"]].to_numpy().mean(axis=1)
         blur_depth = oversampling * np.maximum(lpz, min_blur_width)
@@ -854,8 +854,8 @@ def render_convolve(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs["x"].values,
-        locs["y"].values,
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
         oversampling,
         y_min,
         x_min,
@@ -879,10 +879,10 @@ def render_convolve(
     else:
         _fill(image, x, y)
         blur_width = oversampling * max(
-            np.median(locs["lpx"].values[in_view]), min_blur_width
+            np.median(locs["lpx"].to_numpy()[in_view]), min_blur_width
         )
         blur_height = oversampling * max(
-            np.median(locs["lpy"].values[in_view]), min_blur_width
+            np.median(locs["lpy"].to_numpy()[in_view]), min_blur_width
         )
         return n, _fftconvolve(image, blur_width, blur_height)
 
@@ -921,8 +921,8 @@ def render_smooth(
         Rendered image.
     """
     image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup(
-        locs["x"].values,
-        locs["y"].values,
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
         oversampling,
         y_min,
         x_min,

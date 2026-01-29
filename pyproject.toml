@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "picassosr"
-version = "0.9.3"
+version = "0.9.4"
 authors = [
     {name = "Joerg Schnitzbauer", email = "joschnitzbauer@gmail.com"},
     {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
     {name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"},
 ]
 keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
-description = "A collection of tools for painting super-resolution images"
+description = "Collection of tools for painting super-resolution images"
 readme = "readme.rst"
 requires-python = ">=3.10,<3.11"
 classifiers = [

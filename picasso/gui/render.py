@@ -42,14 +42,15 @@ from sklearn.cluster import KMeans
 from PyQt5 import QtCore, QtGui, QtWidgets
 
 from .. import (
+    aim,
+    clusterer,
+    g5m,
     imageprocess,
     io,
     lib,
+    masking,
     postprocess,
     render,
-    clusterer,
-    aim,
-    masking,
     __version__,
 )
 from .rotation import RotationWindow
@@ -74,6 +75,14 @@ ZOOM = 9 / 7
 N_GROUP_COLORS = 8
 N_Z_COLORS = 32
 POLYGON_POINTER_SIZE = 16  # must be even
+
+
+# G5M default params
+MIN_LOCS_G5M = 10
+MAX_ROUNDS_WITHOUT_BEST_BIC_G5M = 3
+MIN_SIGMA_FACTOR_G5M = 0.8
+MAX_SIGMA_FACTOR_G5M = 1.5
+N_COMPONENTS_MAX_G5M = 100
 
 
 def get_render_properties_colors(
@@ -904,7 +913,7 @@ class PlotDialog(QtWidgets.QDialog):
         self.setWindowTitle("Structure")
         layout_grid = QtWidgets.QGridLayout(self)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
@@ -1042,7 +1051,7 @@ class PlotDialogIso(QtWidgets.QDialog):
         self.setWindowTitle("Structure")
         layout_grid = QtWidgets.QGridLayout(self)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
@@ -1274,7 +1283,7 @@ class ClsDlg3D(QtWidgets.QDialog):
         self.showMaximized()
         self.layout_grid = QtWidgets.QGridLayout(self)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
@@ -1399,9 +1408,9 @@ class ClsDlg3D(QtWidgets.QDialog):
         scaled_locs = locs.copy()
         scaled_locs["x_scaled"] = locs["x"] * pixelsize
         scaled_locs["y_scaled"] = locs["y"] * pixelsize
-        X = scaled_locs["x_scaled"].values
-        Y = scaled_locs["y_scaled"].values
-        Z = scaled_locs["z"].values
+        X = scaled_locs["x_scaled"].to_numpy()
+        Y = scaled_locs["y_scaled"].to_numpy()
+        Z = scaled_locs["z"].to_numpy()
         est.fit(np.stack((X, Y, Z), axis=1))
         labels = est.labels_
         counts = list(Counter(labels).items())
@@ -1481,7 +1490,7 @@ class ClsDlg2D(QtWidgets.QDialog):
         self.setWindowTitle("Structure")
         self.layout_grid = QtWidgets.QGridLayout(self)
 
-        self.figure = plt.figure()
+        self.figure = plt.figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         self.label = QtWidgets.QLabel()
 
@@ -1602,8 +1611,8 @@ class ClsDlg2D(QtWidgets.QDialog):
         scaled_locs = locs.copy()
         scaled_locs["x_scaled"] = locs["x"]
         scaled_locs["y_scaled"] = locs["y"]
-        X = scaled_locs["x_scaled"].values
-        Y = scaled_locs["y_scaled"].values
+        X = scaled_locs["x_scaled"].to_numpy()
+        Y = scaled_locs["y_scaled"].to_numpy()
         est.fit(np.stack((X, Y), axis=1))
         labels = est.labels_
         counts = list(Counter(labels).items())
@@ -2155,6 +2164,237 @@ class SMLMDialog(QtWidgets.QDialog):
                 "save_areas": dialog.save_areas.isChecked(),
             },
             result == QtWidgets.QDialog.Accepted,
+        )
+
+
+class G5MDialog(QtWidgets.QDialog):
+    """Extract parameters for G5M: ``min_locs``, ``min_sigma``,
+    ``max_sigma``. For 3D, calibration is requested. The user can also
+    choose whether or not to use bootstrapping for finding
+    uncertainties, use multiprocessing, postprocess or save clustered
+    localizations."""
+
+    def __init__(self, window, channel):
+        super().__init__(window)
+        self.window = window
+        self.nena = None
+        self.channel = channel
+        self.flag_3D = hasattr(self.window.view.locs[0], "z")
+        self.setWindowTitle("Molecular mapping (G5M) parameters")
+
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        self.calibration = None
+
+        # min locs per molecule
+        grid.addWidget(QtWidgets.QLabel("Min. locs:"), grid.rowCount(), 0)
+        self.min_locs = QtWidgets.QSpinBox()
+        self.min_locs.setSingleStep(1)
+        self.min_locs.setRange(2, 999)
+        self.min_locs.setValue(MIN_LOCS_G5M)
+        grid.addWidget(self.min_locs, grid.rowCount() - 1, 1)
+
+        # loc precision handling - local values or absolute sigma bounds
+        self.loc_prec_handling = QtWidgets.QComboBox()
+        self.loc_prec_handling.addItems(
+            [
+                "Local loc. precision",
+                "Custom \u03c3 bounds",
+            ]
+        )
+        self.loc_prec_handling.setCurrentIndex(0)
+        self.loc_prec_handling.currentIndexChanged.connect(
+            self.handle_loc_prec
+        )
+        grid.addWidget(self.loc_prec_handling, grid.rowCount(), 0, 1, 2)
+        # two associated input boxes - min and max values
+        self.min_sigma_label = QtWidgets.QLabel("Min. \u03c3 factor:")
+        grid.addWidget(self.min_sigma_label, grid.rowCount(), 0)
+        self.min_sigma = QtWidgets.QDoubleSpinBox()
+        self.min_sigma.setDecimals(2)
+        self.min_sigma.setSingleStep(0.01)
+        self.min_sigma.setValue(MIN_SIGMA_FACTOR_G5M)
+        self.min_sigma.setRange(0.00, 100.00)
+        grid.addWidget(self.min_sigma, grid.rowCount() - 1, 1)
+        self.max_sigma_label = QtWidgets.QLabel("Max. \u03c3 factor:")
+        grid.addWidget(self.max_sigma_label, grid.rowCount(), 0)
+        self.max_sigma = QtWidgets.QDoubleSpinBox()
+        self.max_sigma.setDecimals(2)
+        self.max_sigma.setSingleStep(0.01)
+        self.max_sigma.setValue(MAX_SIGMA_FACTOR_G5M)
+        self.max_sigma.setRange(0.0, 100.00)
+        grid.addWidget(self.max_sigma, grid.rowCount() - 1, 1)
+
+        # bootstrap for SEM?
+        self.bootstrap_check = QtWidgets.QCheckBox("Bootstrap SEM")
+        self.bootstrap_check.setChecked(False)
+        grid.addWidget(self.bootstrap_check, grid.rowCount(), 0, 1, 2)
+
+        # apply multiprocessing?
+        self.multiprocessing_check = QtWidgets.QCheckBox("Use multiprocessing")
+        self.multiprocessing_check.setChecked(True)
+        grid.addWidget(self.multiprocessing_check, grid.rowCount(), 0, 1, 2)
+
+        # save clustered localizations?
+        self.clustered_check = QtWidgets.QCheckBox(
+            "Save clustered localizations"
+        )
+        self.clustered_check.setChecked(False)
+        grid.addWidget(self.clustered_check, grid.rowCount(), 0, 1, 2)
+
+        # postprocess for sticky events?
+        self.postprocess_check = QtWidgets.QCheckBox(
+            "Filter invalid molecules"
+        )
+        # self.postprocess_check.setChecked(True)
+        grid.addWidget(self.postprocess_check, grid.rowCount(), 0, 1, 2)
+
+        # check for cluster areas/volumes?
+        self.cluster_size_button = QtWidgets.QPushButton("Check cluster sizes")
+        self.cluster_size_button.clicked.connect(self.check_cluster_sizes)
+        grid.addWidget(self.cluster_size_button, grid.rowCount(), 0, 1, 2)
+        self.cluster_size_label = QtWidgets.QLabel("")
+        grid.addWidget(self.cluster_size_label, grid.rowCount(), 0, 1, 2)
+
+        vbox.addLayout(grid)
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        if self.flag_3D:  # 3d calibration
+            self.buttons.buttons()[0].setEnabled(False)
+            self.load_calib_button = QtWidgets.QPushButton(
+                "Load 3D calibration"
+            )
+            self.load_calib_button.clicked.connect(self.load_calibration)
+            grid.addWidget(self.load_calib_button, grid.rowCount(), 0, 1, 2)
+            self.automatic_load_calibration()
+
+        vbox.addWidget(self.buttons)  # these must be added at the end
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QWidget | None = None,
+        channel: int = 0,
+    ) -> tuple[dict, bool]:
+        """Get the parameters for G5M."""
+        dialog = G5MDialog(parent, channel)
+        result = dialog.exec_()
+        px = dialog.window.display_settings_dlg.pixelsize.value()
+        if dialog.loc_prec_handling.currentIndex() == 0:  # local sigma
+            loc_prec_handle = "local"
+            sigma_bounds = (dialog.min_sigma.value(), dialog.max_sigma.value())
+        else:  # custom bounds
+            loc_prec_handle = "abs"
+            sigma_bounds = (
+                dialog.min_sigma.value() / px,
+                dialog.max_sigma.value() / px,
+            )
+        params = {
+            "min_locs": dialog.min_locs.value(),
+            "loc_prec_handle": loc_prec_handle,
+            "sigma_bounds": sigma_bounds,
+            "bootstrap_check": dialog.bootstrap_check.isChecked(),
+            "multiprocessing_check": dialog.multiprocessing_check.isChecked(),
+            "clustered_locs": dialog.clustered_check.isChecked(),
+            "postprocess_check": dialog.postprocess_check.isChecked(),
+        }
+        if dialog.flag_3D:
+            params["calibration"] = dialog.calibration
+            params["pixelsize"] = px
+        return (
+            params,
+            result == QtWidgets.QDialog.Accepted,
+        )
+
+    def handle_loc_prec(self, idx: int) -> None:
+        if idx == 0:  # local loc precision
+            self.min_sigma_label.setText("Min. \u03c3 factor:")
+            self.max_sigma_label.setText("Max. \u03c3 factor:")
+            self.min_sigma.setValue(MIN_SIGMA_FACTOR_G5M)
+            self.max_sigma.setValue(MAX_SIGMA_FACTOR_G5M)
+        elif idx == 1:  # custom sigma bounds
+            self.min_sigma_label.setText("Min. \u03c3 (nm):")
+            self.max_sigma_label.setText("Max. \u03c3 (nm):")
+            self.min_sigma.setValue(5.0)
+            self.max_sigma.setValue(20.0)
+
+    def load_calibration(self) -> None:
+        """Load the calibration file selected by the user."""
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Open 3D calibration file", "", filter="*.yaml"
+        )
+        if not path:
+            return
+        self.load_calibration_(path)
+
+    def load_calibration_(self, path: str) -> None:
+        """Load calibration from the given path."""
+        # picasso.io takes in .hdf5 path
+        calib = io.load_info(path.replace(".yaml", ".hdf5"))
+
+        if len(calib) != 1 or "X Coefficients" not in calib[0].keys():
+            message = (
+                "Please load a 3D calibration .yaml file produced by"
+                " Picasso: Localize."
+            )
+            QtWidgets.QMessageBox.information(self.window, "Warning", message)
+            return
+
+        self.calibration = calib[0]
+        self.buttons.buttons()[0].setEnabled(True)
+        self.load_calib_button.setText("3D calibration loaded")
+
+    def automatic_load_calibration(self) -> None:
+        """Load the calibration file automatically when the dialog is
+        opened."""
+        ch = self.channel if self.channel != len(self.window.view.locs) else 0
+        infos = self.window.view.infos[ch]
+        calib_path = lib.get_from_metadata(infos, "Z Calibration Path")
+        if calib_path is not None:
+            try:
+                self.load_calibration_(calib_path)
+                return
+            except Exception:
+                pass
+
+    def check_cluster_sizes(self) -> None:
+        """Check and display the fraction of clusters with their area/
+        volume suggesting they contain more than 12 molecules."""
+        if self.channel == len(self.window.view.locs):
+            warning = "Please select a single channel to check cluster sizes."
+            QtWidgets.QMessageBox.information(self.window, "Warning", warning)
+            return
+
+        # get the path to the cluster areas file
+        path, ok = QtWidgets.QFileDialog.getOpenFileName(
+            self,
+            "Open cluster areas/volumes file",
+            "",
+            filter="*.csv",
+        )
+        if not ok:
+            return
+        try:
+            cluster_sizes = pd.read_csv(path)
+            if hasattr(self.window.view.locs[self.channel], "z"):  # 3D
+                column = "Volume (LP^3)"
+                thresh = 12 * 4 / 3 * np.pi * 2.98**2 * (2.98 * 2.5)
+            else:  # 2D
+                column = "Area (LP^2)"
+                thresh = 12 * np.pi * 2.98**2
+            sizes = cluster_sizes[column].to_numpy()
+        except Exception:
+            warning = "Could not read the cluster areas/volumes file."
+            QtWidgets.QMessageBox.information(self.window, "Warning", warning)
+            return
+        frac_large = np.round(100 * np.sum(sizes > thresh) / len(sizes), 1)
+        self.cluster_size_label.setText(
+            f"Fraction of large clusters: {frac_large}%"
         )
 
 
@@ -2813,7 +3053,7 @@ class DriftPlotWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -3505,7 +3745,7 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -3538,7 +3778,7 @@ class FRCPlotWindow(QtWidgets.QTabWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(1000, 500)
-        self.figure = plt.Figure()
+        self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvas(self.figure)
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -4901,7 +5141,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.minimum_render.setRange(-999999, 999999)
         self.minimum_render.setSingleStep(5)
         self.minimum_render.setValue(0)
-        self.minimum_render.setDecimals(2)
+        self.minimum_render.setDecimals(5)
         self.minimum_render.setKeyboardTracking(False)
         self.minimum_render.setEnabled(False)
         self.minimum_render.valueChanged.connect(
@@ -4917,7 +5157,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.maximum_render.setRange(-999999, 999999)
         self.maximum_render.setSingleStep(5)
         self.maximum_render.setValue(100)
-        self.maximum_render.setDecimals(2)
+        self.maximum_render.setDecimals(5)
         self.maximum_render.setKeyboardTracking(False)
         self.maximum_render.setEnabled(False)
         self.maximum_render.valueChanged.connect(
@@ -4965,6 +5205,24 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
             "Display the legend for the rendered property."
         )
         render_grid.addWidget(self.show_legend, 5, 1)
+
+        fw, fh, dpi = (2, 1, 150)
+        self.figure_prop = plt.figure(
+            figsize=(fw, fh), dpi=dpi, constrained_layout=True
+        )
+        self.ax_prop = self.figure_prop.add_subplot(111)
+        # adjust the size of ticks and labels
+        self.ax_prop.tick_params(
+            axis="both", which="both", labelsize=4, length=2, width=0.5, pad=1
+        )
+
+        self.canvas_prop = FigureCanvas(self.figure_prop)
+        self.canvas_prop.setSizePolicy(
+            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+        )
+        self.canvas_prop.setMinimumSize(QtCore.QSize(fw * dpi, fh * dpi))
+        render_grid.addWidget(self.canvas_prop, 6, 0, 6, 2)
+
         self.show_legend.setEnabled(False)
         self.show_legend.setAutoDefault(False)
         self.show_legend.clicked.connect(self.window.view.show_legend)
@@ -5047,6 +5305,44 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         """Update scene if dynamic display pixel size is checked."""
         if state:
             self.window.view.update_scene()
+
+    def update_histogram(self) -> None:
+        """Update histogram of the rendered property based on the
+        current min/max values and colors."""
+        self.ax_prop.cla()
+
+        # array of values for the rendered property
+        data = (
+            self.window.view.locs[0][self.parameter.currentText()]
+            .to_numpy()
+            .copy()
+        )
+        # other parameters
+        min_val = self.minimum_render.value()
+        max_val = self.maximum_render.value()
+        if max_val == min_val:
+            max_val += 1e-6  # avoid zero division
+        data = data[(data >= min_val) & (data <= max_val)]
+        n_colors = self.color_step.value()
+        colors = get_render_properties_colors(
+            n_colors, self.colormap_prop.currentText()
+        )
+
+        # plot
+        bins = lib.calculate_optimal_bins(data, max_n_bins=1000)
+        counts, bins, patches = self.ax_prop.hist(data, bins=bins)
+        for patch, bin_left in zip(patches, bins):
+            color_idx = int(
+                (n_colors - 1) * (bin_left - min_val) / (max_val - min_val)
+            )
+            color_idx = np.clip(color_idx, 0, n_colors - 1)
+            patch.set_facecolor(colors[color_idx])
+        self.ax_prop.set_xlim(min_val, max_val)
+        self.ax_prop.set_xlabel("")
+        self.ax_prop.set_ylabel("")
+        self.ax_prop.set_yticks([])
+        self.ax_prop.xaxis.offsetText.set_fontsize(4)  # scientific notation
+        self.canvas_prop.draw()
 
     def update_scene(self, *args, **kwargs) -> None:
         """Update scene with cache."""
@@ -5630,7 +5926,7 @@ class View(QtWidgets.QLabel):
         colors : np.ndarray
             Array with integer group color index for each localization.
         """
-        colors = locs["group"].values.astype(int) % N_GROUP_COLORS
+        colors = locs["group"].to_numpy().astype(int) % N_GROUP_COLORS
         return colors
 
     def add(self, path: str, render: bool = True) -> None:
@@ -5652,16 +5948,13 @@ class View(QtWidgets.QLabel):
             return
         locs = lib.ensure_sanity(locs, info)
 
-        # update pixelsize
-        for element in info:
-            expression = r"Picasso( v\d+\.\d+\.\d+)? Localize"
-            if re.search(
-                expression, element.get("Generated by", ""), re.IGNORECASE
-            ):
-                if "Pixelsize" in element:
-                    self.window.display_settings_dlg.pixelsize.setValue(
-                        element["Pixelsize"]
-                    )
+        # update pixelsize (credits to Boyd Peters #602)
+        pixelsize = lib.get_from_metadata(
+            info,
+            "Pixelsize",
+            default=self.window.display_settings_dlg.pixelsize.value(),
+        )
+        self.window.display_settings_dlg.pixelsize.setValue(pixelsize)
 
         # append loaded data
         self.locs.append(locs)
@@ -5724,6 +6017,7 @@ class View(QtWidgets.QLabel):
             disp_sett_dlg.render_groupbox.setEnabled(True)
         else:
             disp_sett_dlg.render_groupbox.setEnabled(False)
+            self.x_render_state = False
 
         # render the loaded file
         if render:
@@ -5948,7 +6242,7 @@ class View(QtWidgets.QLabel):
 
             # Plot shift
             if display:
-                fig1 = plt.figure(figsize=(8, 8))
+                fig1 = plt.figure(figsize=(8, 8), constrained_layout=True)
                 plt.suptitle("Shift")
                 plt.subplot(1, 1, 1)
                 plt.plot(shift_x, "o-", label="x shift")
@@ -6428,6 +6722,222 @@ class View(QtWidgets.QLabel):
             path = path.replace(".hdf5", "_areas.csv")
             areas.to_csv(path, index=False)
             progress.close()
+
+    def g5m(self) -> None:
+        """Get the channel for G5M and ensures that the data has been
+        clustered."""
+        channel = self.window.view.get_channel_all_seq(
+            "G5M; make sure the data has been DBSCANed (or similar)."
+        )
+        if channel is None:
+            return
+
+        # get parameters
+        params, ok = G5MDialog.getParams(self.window, channel)
+        if not ok:
+            return
+
+        # ask the user to input n_frames, step_size and mag_factor of
+        # the calib file in the 3D case
+        if "calibration" in params.keys():
+            if "Step size in nm" not in params["calibration"].keys():
+                z_step_size, ok = QtWidgets.QInputDialog.getDouble(
+                    self.window,
+                    "Input Dialog",
+                    "Enter z step size in the calibration (nm)",
+                    5,
+                    1,
+                    999,
+                    1,
+                )
+                if not ok:
+                    return
+                params["calibration"]["Step size in nm"] = z_step_size
+
+            if "Number of frames" not in params["calibration"].keys():
+                n_frames, ok = QtWidgets.QInputDialog.getInt(
+                    self.window,
+                    "Input Dialog",
+                    "Enter number of frames in the calibration",
+                    200,
+                    1,
+                    99999,
+                    1,
+                )
+                if not ok:
+                    return
+                params["calibration"]["Number of frames"] = n_frames
+
+            if "Magnification factor" not in params["calibration"].keys():
+                mag_factor, ok = QtWidgets.QInputDialog.getDouble(
+                    self.window,
+                    "Input Dialog",
+                    "Enter magnification factor",
+                    0.79,
+                    0.1,
+                    10,
+                    2,
+                )
+                if not ok:
+                    return
+                params["calibration"]["Magnification factor"] = mag_factor
+
+        if channel == len(self.window.view.locs):  # apply to all
+            suffix_molecules, ok = QtWidgets.QInputDialog.getText(
+                self.window,
+                "Input Dialog",
+                "Enter suffix for saving molecules",
+                QtWidgets.QLineEdit.Normal,
+                "_molmap",
+            )
+            if not ok:
+                return
+
+            if params["clustered_locs"]:
+                suffix_clusters, ok = QtWidgets.QInputDialog.getText(
+                    self.window,
+                    "Input Dialog",
+                    "Enter suffix for saving clusters",
+                    QtWidgets.QLineEdit.Normal,
+                    "_molmap_clustered",
+                )
+                if not ok:
+                    return
+
+            for i in range(len(self.window.view.locs)):
+                if not self.check_group(i):
+                    return
+                g5m_centers, clustered_locs, info = self._g5m(i, params)
+                path = self.window.view.locs_paths[i].replace(
+                    ".hdf5", f"{suffix_molecules}.hdf5"
+                )  # add the suffix to the current path
+                if g5m_centers is not None:
+                    io.save_locs(path, g5m_centers, info)
+                if params["clustered_locs"]:
+                    path = self.window.view.locs_paths[i].replace(
+                        ".hdf5", f"{suffix_clusters}.hdf5"
+                    )
+                    if clustered_locs is not None:
+                        io.save_locs(path, clustered_locs, info)
+                # automatically save the subclustering check
+                clust_events, sparse_events = clusterer.test_subclustering(
+                    g5m_centers,
+                    info,
+                )
+                lib.plot_subclustering_check(
+                    clust_events,
+                    sparse_events,
+                    path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                )
+        else:
+            if not self.check_group(channel):
+                return
+            base, _ = os.path.splitext(self.window.view.locs_paths[channel])
+            out_path = base + "_molmap.hdf5"
+            path_molecules, _ = QtWidgets.QFileDialog.getSaveFileName(
+                self.window, "Save molecules", out_path, filter="*.hdf5"
+            )
+            if not path_molecules:
+                return
+
+            if params["clustered_locs"]:
+                out_path = base + "_molmap_clustered.hdf5"
+                path_clusters, _ = QtWidgets.QFileDialog.getSaveFileName(
+                    self.window,
+                    "Save clustered localizations",
+                    out_path,
+                    filter="*.hdf5",
+                )
+                if not path_clusters:
+                    return
+
+            g5m_centers, clustered_locs, info = self._g5m(channel, params)
+            if g5m_centers is not None:
+                io.save_locs(path_molecules, g5m_centers, info)
+                if params["clustered_locs"]:
+                    if clustered_locs is not None:
+                        io.save_locs(path_clusters, clustered_locs, info)
+                # automatically save the subclustering check
+                clust_events, sparse_events = clusterer.test_subclustering(
+                    g5m_centers,
+                    info,
+                )
+                lib.plot_subclustering_check(
+                    clust_events,
+                    sparse_events,
+                    path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                )
+
+    def _g5m(
+        self,
+        channel: int,
+        params: dict,
+    ) -> (
+        tuple[pd.DataFrame, pd.DataFrame, list[dict]] | tuple[None, None, None]
+    ):
+        """Run G5M in channel given parameters."""
+        locs = self.window.view.locs[channel]
+        info = self.window.view.infos[channel]
+        if len(locs) < params["min_locs"]:
+            message = (
+                f"Channel #{channel+1} ("
+                f"{self.window.dataset_dialog.checks[channel].text()})"
+                " contains less localizations than the minimum number"
+                " required for G5M."
+            )
+            QtWidgets.QMessageBox.information(self.window, "Warning", message)
+            return None, None
+
+        # check for clusters that are likely fiducial markers or some
+        # impurities
+        max_locs_per_cluster = np.inf
+        n_frames = info[0]["Frames"]
+        max_locs = int(0.4 * n_frames)
+        cluster_ids, n_locs = np.unique(locs.group, return_counts=True)
+        if any(n_locs > max_locs):
+            qm = QtWidgets.QMessageBox()
+            message = (
+                f"Channel #{channel+1} ("
+                f"{self.window.dataset_dialog.checks[channel].text()})"
+                " contains clusters which likely represent fiducial"
+                " markers. These will likely extend the computation"
+                " time and possibly crash the process.\n\n"
+                "Would you like to remove such clusters?"
+            )
+            ret = qm.question(self.window, "Warning", message, qm.Yes | qm.No)
+            if ret == qm.Yes:
+                max_locs_per_cluster = max_locs
+
+        centers, clustered_locs, info = g5m.g5m(
+            locs=locs,
+            info=info,
+            min_locs=params["min_locs"],
+            loc_prec_handle=params["loc_prec_handle"],
+            sigma_bounds=params["sigma_bounds"],
+            bootstrap_check=params["bootstrap_check"],
+            calibration=params.get("calibration", None),
+            postprocess=params["postprocess_check"],
+            max_locs_per_cluster=max_locs_per_cluster,
+            asynch=params["multiprocessing_check"],
+            callback_parent=self.window,
+        )
+        return centers, clustered_locs, info
+
+    def check_group(self, channel: int) -> bool:
+        """Check whether the data has been grouped (clustered) in
+        channel i."""
+        locs = self.window.view.locs[channel]
+        if hasattr(locs, "group"):
+            return True
+        else:
+            message = (
+                f"Channel #{channel+1} ("
+                f"{self.window.dataset_dialog.checks[channel].text()})"
+                " does not contain group information. Please run DBSCAN (or"
+                " similar) to group the localizations first."
+            )
+            QtWidgets.QMessageBox.information(self.window, "Warning", message)
+            return False
 
     def shifts_from_picked_coordinate(
         self,
@@ -8085,7 +8595,9 @@ class View(QtWidgets.QLabel):
                     params["t0"] = time.time()
                     i = 0
                     while i < len(self._picks):
-                        fig = plt.figure(figsize=(5, 5))
+                        fig = plt.figure(
+                            figsize=(5, 5), constrained_layout=True
+                        )
                         fig.canvas.manager.set_window_title(
                             "Scatterplot of Pick"
                         )
@@ -8168,7 +8680,9 @@ class View(QtWidgets.QLabel):
                     i = 0
                     while i < len(self._picks):
                         pick = self._picks[i]
-                        fig = plt.figure(figsize=(5, 5))
+                        fig = plt.figure(
+                            figsize=(5, 5), constrained_layout=True
+                        )
                         fig.canvas.manager.set_window_title(
                             "Scatterplot of Pick"
                         )
@@ -8558,7 +9072,7 @@ class View(QtWidgets.QLabel):
                 progress.close()
 
                 # plot histogram with n_locs in picks
-                fig = plt.figure()
+                fig = plt.figure(constrained_layout=True)
                 fig.canvas.manager.set_window_title("Localizations in Picks")
                 ax = fig.add_subplot(111)
                 ax.set_title("Localizations in Picks ")
@@ -9034,7 +9548,7 @@ class View(QtWidgets.QLabel):
                 inverted = tuple([1 - _ for _ in tempcolor])
                 colors[i] = inverted
 
-        # use the gist_rainbow colormap for rendering properties
+        # render properties
         if self.x_render_state:
             colors = get_render_properties_colors(
                 n_channels,
@@ -9664,7 +10178,7 @@ class View(QtWidgets.QLabel):
             self.window.display_settings_dlg.colormap_prop.currentText(),
         )
 
-        fig1 = plt.figure(figsize=(5, 1))
+        fig1 = plt.figure(figsize=(5, 1), constrained_layout=True)
 
         ax1 = fig1.add_subplot(111, aspect="equal")
 
@@ -9750,6 +10264,7 @@ class View(QtWidgets.QLabel):
 
             self.x_locs = x_locs
             self.window.display_settings_dlg.show_legend.setEnabled(True)
+            self.window.display_settings_dlg.update_histogram()
         else:
             self.x_render_state = False
         self.update_scene()
@@ -9801,6 +10316,10 @@ class View(QtWidgets.QLabel):
 
         self.window.display_settings_dlg.render_check.setEnabled(True)
         self.window.display_settings_dlg.render_check.setCheckState(False)
+
+        # clean up the histogram plot
+        self.window.display_settings_dlg.ax_prop.cla()
+        self.window.display_settings_dlg.canvas_prop.draw()
 
         self.activate_render_property()
 
@@ -10050,14 +10569,16 @@ class View(QtWidgets.QLabel):
             frames_ = self.locs[channel]["frame"]
 
             # Apply drift
-            self.all_locs[channel]["x"] -= drift["x"].iloc[frames].values
-            self.all_locs[channel]["y"] -= drift["y"].iloc[frames].values
-            self.locs[channel]["x"] -= drift["x"].iloc[frames_].values
-            self.locs[channel]["y"] -= drift["y"].iloc[frames_].values
+            self.all_locs[channel]["x"] -= drift["x"].iloc[frames].to_numpy()
+            self.all_locs[channel]["y"] -= drift["y"].iloc[frames].to_numpy()
+            self.locs[channel]["x"] -= drift["x"].iloc[frames_].to_numpy()
+            self.locs[channel]["y"] -= drift["y"].iloc[frames_].to_numpy()
             # If z coordinate exists, also apply drift there
             if all([hasattr(_, "z") for _ in picked_locs]):
-                self.all_locs[channel]["z"] -= drift["z"].iloc[frames].values
-                self.locs[channel]["z"] -= drift["z"].iloc[frames_].values
+                self.all_locs[channel]["z"] -= (
+                    drift["z"].iloc[frames].to_numpy()
+                )
+                self.locs[channel]["z"] -= drift["z"].iloc[frames_].to_numpy()
 
             # Cleanup
             self.index_blocks[channel] = None
@@ -10115,15 +10636,15 @@ class View(QtWidgets.QLabel):
         frames = self.all_locs[channel]["frame"]
         frames_ = self.locs[channel]["frame"]
 
-        self.all_locs[channel]["x"] -= drift["x"][frames].values
-        self.all_locs[channel]["y"] -= drift["y"][frames].values
-        self.locs[channel]["x"] -= drift["x"][frames_].values
-        self.locs[channel]["y"] -= drift["y"][frames_].values
+        self.all_locs[channel]["x"] -= drift["x"][frames].to_numpy()
+        self.all_locs[channel]["y"] -= drift["y"][frames].to_numpy()
+        self.locs[channel]["x"] -= drift["x"][frames_].to_numpy()
+        self.locs[channel]["y"] -= drift["y"][frames_].to_numpy()
 
         if hasattr(drift, "z"):
             drift["z"] = -drift["z"]
-            self.all_locs[channel]["z"] -= drift["z"][frames].values
-            self.locs[channel]["z"] -= drift["z"][frames_].values
+            self.all_locs[channel]["z"] -= drift["z"][frames].to_numpy()
+            self.locs[channel]["z"] -= drift["z"][frames_].to_numpy()
 
         self.add_drift(channel, drift)
         self.update_scene()
@@ -10183,27 +10704,37 @@ class View(QtWidgets.QLabel):
                         }
                     )
                     self.all_locs[channel]["x"] -= (
-                        drift["x"].iloc[all_frame].values
+                        drift["x"].iloc[all_frame].to_numpy()
                     )
                     self.all_locs[channel]["y"] -= (
-                        drift["y"].iloc[all_frame].values
+                        drift["y"].iloc[all_frame].to_numpy()
                     )
                     self.all_locs[channel]["z"] -= (
-                        drift["z"].iloc[all_frame].values
+                        drift["z"].iloc[all_frame].to_numpy()
                     )
-                    self.locs[channel]["x"] -= drift["x"].iloc[frame].values
-                    self.locs[channel]["y"] -= drift["y"].iloc[frame].values
-                    self.locs[channel]["z"] -= drift["z"].iloc[frame].values
+                    self.locs[channel]["x"] -= (
+                        drift["x"].iloc[frame].to_numpy()
+                    )
+                    self.locs[channel]["y"] -= (
+                        drift["y"].iloc[frame].to_numpy()
+                    )
+                    self.locs[channel]["z"] -= (
+                        drift["z"].iloc[frame].to_numpy()
+                    )
                 else:  # 2D drift
                     drift = pd.DataFrame({"x": drift[:, 0], "y": drift[:, 1]})
                     self.all_locs[channel]["x"] -= (
-                        drift["x"].iloc[all_frame].values
+                        drift["x"].iloc[all_frame].to_numpy()
                     )
                     self.all_locs[channel]["y"] -= (
-                        drift["y"].iloc[all_frame].values
+                        drift["y"].iloc[all_frame].to_numpy()
                     )
-                    self.locs[channel]["x"] -= drift["x"].iloc[frame].values
-                    self.locs[channel]["y"] -= drift["y"].iloc[frame].values
+                    self.locs[channel]["x"] -= (
+                        drift["x"].iloc[frame].to_numpy()
+                    )
+                    self.locs[channel]["y"] -= (
+                        drift["y"].iloc[frame].to_numpy()
+                    )
                 self._drift[channel] = drift
                 self._driftfiles[channel] = path
                 self.currentdrift[channel] = copy.copy(drift)
@@ -10514,8 +11045,6 @@ class View(QtWidgets.QLabel):
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
             True if use stored image. Default is False.
-        cache : bool, optional
-            True if save image. Default is False.
         picks_only : bool, optional
             True if only picks and points are to be rendered. Default is
             False.
@@ -10556,8 +11085,6 @@ class View(QtWidgets.QLabel):
             True if optimally adjust contrast. Default is False.
         use_cache : bool, optional
             True if use stored image. Default is False.
-        cache : bool, optional
-            True if save image. Default is False.
         picks_only : bool, optional
             True if only picks and points are to be rendered. Default is
             False.
@@ -11155,6 +11682,10 @@ class Window(QtWidgets.QMainWindow):
         postprocess_menu.addSeparator()
         resi_action = postprocess_menu.addAction("RESI")
         resi_action.triggered.connect(self.open_resi_dialog)
+
+        postprocess_menu.addSeparator()
+        g5m_action = postprocess_menu.addAction("Molecular mapping (G5M)")
+        g5m_action.triggered.connect(self.view.g5m)
 
         self.load_user_settings()
 

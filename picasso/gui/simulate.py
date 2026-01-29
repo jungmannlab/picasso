@@ -2098,7 +2098,7 @@ class Window(QtWidgets.QMainWindow):
 
         # Noise model working point
 
-        figure4 = plt.figure()
+        figure4 = plt.figure(constrained_layout=True)
 
         # Background
         bgmodel = fitFuncBg(x_3d, fitParamsBg[0], fitParamsBg[1])
@@ -2173,7 +2173,7 @@ class Window(QtWidgets.QMainWindow):
                     sigmay = self.sigmafilter(sigmay, nosigmas)
                     bg = self.sigmafilter(bg, nosigmas)
 
-                    figure3 = plt.figure()
+                    figure3 = plt.figure(constrained_layout=True)
 
                     # Photons
                     photonsmu, photonsstd = norm.fit(photons)

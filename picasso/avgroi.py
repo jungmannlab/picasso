@@ -108,7 +108,7 @@ def locs_from_fits(
     if hasattr(identifications, "n_id"):
         locs = pd.DataFrame(
             {
-                "frame": identifications["frame"].values.astype(np.uint32),
+                "frame": identifications["frame"].to_numpy().astype(np.uint32),
                 "x": x.astype(np.float32),
                 "y": y.astype(np.float32),
                 "photons": theta[:, 2].astype(np.float32),
@@ -119,16 +119,18 @@ def locs_from_fits(
                 "lpy": lpy.astype(np.float32),
                 "ellipticity": ellipticity.astype(np.float32),
                 "net_gradient": (
-                    identifications["net_gradient"].values.astype(np.float32)
+                    identifications["net_gradient"]
+                    .to_numpy()
+                    .astype(np.float32)
                 ),
-                "n_id": identifications["n_id"].values.astype(np.uint32),
+                "n_id": identifications["n_id"].to_numpy().astype(np.uint32),
             }
         )
         locs.sort_values(by="n_id", kind="mergesort", inplace=True)
     else:
         locs = pd.DataFrame(
             {
-                "frame": identifications["frame"].values.astype(np.uint32),
+                "frame": identifications["frame"].to_numpy().astype(np.uint32),
                 "x": x.astype(np.float32),
                 "y": y.astype(np.float32),
                 "photons": theta[:, 2].astype(np.float32),
@@ -139,7 +141,9 @@ def locs_from_fits(
                 "lpy": lpy.astype(np.float32),
                 "ellipticity": ellipticity.astype(np.float32),
                 "net_gradient": (
-                    identifications["net_gradient"].values.astype(np.float32)
+                    identifications["net_gradient"]
+                    .to_numpy()
+                    .astype(np.float32)
                 ),
             }
         )
