@@ -187,9 +187,9 @@ def test_localize_mle(identifications, spots):
 
 def test_localize_3d(info, locs_lq):
     """Test 3D localization of identified spots."""
-    locs_3d = zfit.fit_z(locs_lq, info, CALIB_3D, 0.79)
+    locs_3d = zfit.fit_z(locs_lq, info, CALIB_3D, 0.79, 130)
     locs_3d_multi = zfit.fit_z_parallel(
-        locs_lq, info, CALIB_3D, 0.79, asynch=False
+        locs_lq, info, CALIB_3D, 0.79, 130, asynch=False
     )
     assert len(locs_3d) == len(
         locs_lq

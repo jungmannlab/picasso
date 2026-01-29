@@ -24,8 +24,8 @@ Collection of tools for painting super-resolution images. The Picasso software i
 
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
-Picasso 0.9.4
--------------
+Picasso 0.9.5
+---------------
 In this version, a new algorithm for molecular mapping (G5M) was introduced. Additionally, axial localization precision for astigmatic 3D imaging is now calculated and saved when using Picasso Localize. *DOI will be added once available*.
 
 Picasso 0.9

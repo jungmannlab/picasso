@@ -1202,6 +1202,7 @@ def _localize(args: argparse.Namespace) -> None:
                     info,
                     z_calibration,
                     magnification_factor,
+                    px,
                     filter=0,
                     asynch=True,
                 )
