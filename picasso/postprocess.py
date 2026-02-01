@@ -235,10 +235,23 @@ def picked_locs(
 
         if pick_shape == "Circle":
             index_blocks = get_index_blocks(locs, info, pick_size)
+            locs_xy = locs[["x", "y"]].to_numpy().T
             for i, pick in enumerate(picks):
                 x, y = pick
-                block_locs = get_block_locs_at(x, y, index_blocks)
-                group_locs = lib.locs_at(x, y, block_locs, pick_size).copy()
+                x_, y_ = int(x / pick_size), int(y / pick_size)
+                block_locs_idx = _get_block_locs_at_numba(
+                    x_,
+                    y_,
+                    index_blocks[4],
+                    index_blocks[5],
+                    index_blocks[6],
+                    index_blocks[7],
+                )
+                block_locs = locs.iloc[block_locs_idx]
+                group_locs_idx = _locs_at_numba(
+                    x, y, locs_xy[:, block_locs_idx], pick_size
+                )
+                group_locs = block_locs.iloc[group_locs_idx].copy()
                 if add_group:
                     group_locs["group"] = i
                 group_locs.sort_values(
@@ -281,9 +294,7 @@ def picked_locs(
                 group_locs["x_pick_rot"] = x_pick_rot
                 group_locs["y_pick_rot"] = y_pick_rot
                 if add_group:
-                    group_locs["group"] = i * np.ones(
-                        len(group_locs), dtype=np.int32
-                    )
+                    group_locs["group"] = i
                 group_locs.sort_values(
                     by="frame", kind="mergesort", inplace=True
                 )
@@ -309,9 +320,7 @@ def picked_locs(
                 group_locs = group_locs[group_locs["y"] < max(Y)]
                 group_locs = lib.locs_in_polygon(group_locs, X, Y)
                 if add_group:
-                    group_locs["group"] = i * np.ones(
-                        len(group_locs), dtype=np.int32
-                    )
+                    group_locs["group"] = i
                 group_locs.sort_values(
                     by="frame", kind="mergesort", inplace=True
                 )
@@ -335,9 +344,7 @@ def picked_locs(
                 group_locs = group_locs[group_locs["y"] > y_min]
                 group_locs = group_locs[group_locs["y"] < y_max]
                 if add_group:
-                    group_locs["group"] = i * np.ones(
-                        len(group_locs), dtype=np.int32
-                    )
+                    group_locs["group"] = i
                 group_locs.sort_values(
                     by="frame", kind="mergesort", inplace=True
                 )
@@ -398,14 +405,33 @@ def pick_similar(
     d2 = d**2
     # extract n_locs and rmsd from current picks
     index_blocks = get_index_blocks(locs, info, r)
+    locs_xy = locs[["x", "y"]].to_numpy().T
     n_locs = []
     rmsd = []
     for i, pick in enumerate(picks):
+        # print(f"pick: {i+1} / {len(picks)}", end="\r")
         x, y = pick
-        block_locs = get_block_locs_at(x, y, index_blocks)
-        pick_locs = lib.locs_at(x, y, block_locs, r)
-        n_locs.append(len(pick_locs))
-        pick_locs_xy = pick_locs[["x", "y"]].to_numpy().T
+        # block_locs = get_block_locs_at(x, y, index_blocks)
+        # pick_locs = lib.locs_at(x, y, block_locs, r)
+        # n_locs.append(len(pick_locs))
+        # pick_locs_xy = pick_locs[["x", "y"]].to_numpy().T
+        # rmsd.append(rmsd_at_com(pick_locs_xy))
+
+        block_locs_xy = get_block_locs_at_numba(
+            int(x / r),
+            int(y / r),
+            locs_xy,
+            index_blocks[4],
+            index_blocks[5],
+            index_blocks[6],
+            index_blocks[7],
+        )
+        # plt.scatter(block_locs_xy[0], block_locs_xy[1])
+        # plt.axis("equal")
+        # plt.show()
+        pick_locs_xy = locs_at_numba(x, y, block_locs_xy, r)
+        # print(block_locs_xy.shape)
+        n_locs.append(pick_locs_xy.shape[1])
         rmsd.append(rmsd_at_com(pick_locs_xy))
 
     # calculate min and max n_locs and rmsd for picking similar
@@ -628,18 +654,16 @@ def n_block_locs_at(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def get_block_locs_at_numba(
+def _get_block_locs_at_numba(
     x_range: int,
     y_range: int,
-    locs_xy: np.ndarray,
     block_starts: np.ndarray,
     block_ends: np.ndarray,
     K: int,
     L: int,
 ) -> np.ndarray:
-    """Numba implementation of ``get_block_locs_at`` for
-    ``pick_similar``. Return the localizations in the blocks around the
-    given coordinates."""
+    """Numba implementation of ``get_block_locs_at``. Return the indices
+    of localizations in the blocks around the given coordinates."""
     step = 0
     for k in range(y_range - 1, y_range + 2):
         if 0 < k < K:
@@ -666,7 +690,47 @@ def get_block_locs_at_numba(
                                     ),
                                 )
                             )
+    return indices
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def get_block_locs_at_numba(
+    x_range: int,
+    y_range: int,
+    locs_xy: np.ndarray,
+    block_starts: np.ndarray,
+    block_ends: np.ndarray,
+    K: int,
+    L: int,
+) -> np.ndarray:
+    """Numba implementation of ``get_block_locs_at. Return the
+    localizations in the blocks around the given coordinates."""
+    indices = _get_block_locs_at_numba(
+        x_range,
+        y_range,
+        block_starts,
+        block_ends,
+        K,
+        L,
+    )
     return locs_xy[:, indices]
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _locs_at_numba(
+    x: float,
+    y: float,
+    locs_xy: np.ndarray,
+    r: float,
+) -> np.ndarray:
+    """Numba implementation of ``lib.locs_at``. Return the indices of
+    localizations at the given coordinates within radius ``r``."""
+    dx = locs_xy[0] - x
+    dy = locs_xy[1] - y
+    r2 = r**2
+    # print(x, y, r, dx, dy, )
+    is_picked = dx**2 + dy**2 < r2
+    return is_picked
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
@@ -676,13 +740,9 @@ def locs_at_numba(
     locs_xy: np.ndarray,
     r: float,
 ) -> np.ndarray:
-    """Numba implementation of ``lib.locs_at`` for ``pick_similar``.
-    Return the localizations at the given coordinates within radius
-    ``r``."""
-    dx = locs_xy[0] - x
-    dy = locs_xy[1] - y
-    r2 = r**2
-    is_picked = dx**2 + dy**2 < r2
+    """Numba implementation of ``lib.locs_at``. Return the localizations
+    at the given coordinates within radius ``r``."""
+    is_picked = _locs_at_numba(x, y, locs_xy, r)
     return locs_xy[:, is_picked]
 
 
