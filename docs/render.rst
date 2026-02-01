@@ -101,7 +101,8 @@ As a final check for overfitting (i.e., too many assigned molecules), G5M automa
 
 If the outcome of G5M seems unsatisfactory, please check the following:
 
-- Make sure that the loc. precision values (columns ``lpx``, ``lpy``, ``lpz``) are correct, comparing NeNA and median loc. precision is a reasonable proxy (without fiducial markers!); the most common issue is a miscalibrated camera, leading to incorrect photon counts and thus incorrect loc. precisions;
+- Make sure that the loc. precision values (columns ``lpx``, ``lpy``, ``lpz``) are correct, comparing NeNA and median loc. precision is a reasonable proxy (without fiducial markers); the most common issue is a miscalibrated camera, leading to incorrect photon counts and thus incorrect loc. precisions;
+- Inspect if the localizations were preprocessed as described above;
 - Rerun the analysis without postprocessing (filtering) and redo it manually, since the step may be too stringent, especially for short acquisition times;
 - Adjust min./max. σ, especially too low max. σ may lead to high false positive error rates (i.e., overfitting);
 - Adjust min. locs;
