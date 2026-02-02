@@ -1056,7 +1056,7 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
         The mean length of binding events in frames.
     """
     print("Linking.. ", end="")
-    locs = locs.iloc[0:MAX_LOCS].copy()
+    locs = locs.iloc[0:MAX_LOCS]
     locs = postprocess.link(locs, info=info)
     len_mean = locs.len.mean()
     print(f"Mean length {len_mean:.2f} frames.")

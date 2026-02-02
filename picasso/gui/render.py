@@ -3644,7 +3644,7 @@ class InfoDialog(QtWidgets.QDialog):
 
             # calculate frc
             self.frc_result = postprocess.frc(
-                locs.copy(), info, self.window.view.viewport
+                locs, info, self.window.view.viewport
             )
             if path:  # save images
                 base, ext = os.path.splitext(path)
@@ -3667,7 +3667,7 @@ class InfoDialog(QtWidgets.QDialog):
                 "Calculating NeNA precision", 0, 100, self
             )
             self.nena_result, self.lp = postprocess.nena(
-                locs.copy(), info, progress.set_value
+                locs, info, progress.set_value
             )
             self.lp *= self.window.display_settings_dlg.pixelsize.value()
             self.nena_label.setText(f"{self.lp:.3} nm")
@@ -5312,11 +5312,9 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.ax_prop.cla()
 
         # array of values for the rendered property
-        data = (
-            self.window.view.locs[0][self.parameter.currentText()]
-            .to_numpy()
-            .copy()
-        )
+        data = self.window.view.locs[0][
+            self.parameter.currentText()
+        ].to_numpy()
         # other parameters
         min_val = self.minimum_render.value()
         max_val = self.maximum_render.value()
@@ -7256,7 +7254,6 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn pick.
         """
-        image = image.copy()
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor("green"))
 
@@ -7300,7 +7297,6 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn points.
         """
-        image = image.copy()
         d = 20  # width of the drawn crosses (window pixels)
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor("yellow"))
@@ -7730,7 +7726,7 @@ class View(QtWidgets.QLabel):
             if not scalebar:
                 spath = path.replace(".png", "_scalebar.png")
                 scalebar_box.setChecked(True)
-                qimage_scale = self.draw_scalebar(qimage.copy())
+                qimage_scale = self.draw_scalebar(qimage)
                 qimage_scale.save(spath)
                 scalebar_box.setChecked(False)
 
@@ -9297,9 +9293,9 @@ class View(QtWidgets.QLabel):
 
             # extract localizations to pick from
             if fast_render:
-                locs = self.locs[channel].copy()
+                locs = self.locs[channel]
             else:
-                locs = self.all_locs[channel].copy()
+                locs = self.all_locs[channel]
 
             # find pick size (radius or width)
             px = self.window.display_settings_dlg.pixelsize.value()
@@ -9402,7 +9398,7 @@ class View(QtWidgets.QLabel):
         channel : int
             Index of the channel were localizations are removed.
         """
-        locs = self.all_locs[channel].copy()
+        locs = self.all_locs[channel]
         all_picked_locs = self.picked_locs(channel, add_group=False)
         idx = []  # store indices of picked locs
         for picked_locs in all_picked_locs:

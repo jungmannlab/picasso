@@ -1269,7 +1269,6 @@ class ViewRotation(QtWidgets.QLabel):
     def draw_rotation_angles(self, image: np.ndarray) -> np.ndarray:
         """Draw text displaying current rotation angles in degrees."""
         if self.window.angles_action.isChecked():
-            image = image.copy()
             [angx, angy, angz] = [
                 int(np.round(_ * 180 / np.pi, 0))
                 for _ in [self.angx, self.angy, self.angz]
@@ -1300,7 +1299,6 @@ class ViewRotation(QtWidgets.QLabel):
         image : QImage
             Image with the drawn points.
         """
-        image = image.copy()
         d = 20
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor("yellow"))

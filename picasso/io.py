@@ -1656,7 +1656,7 @@ def export_txt_imagej(
         Metadata dictionaries. Ignored but kept for compatibility with
         other export functions.
     """
-    loctxt = locs[["frame", "x", "y"]].copy()
+    loctxt = locs[["frame", "x", "y"]]
     np.savetxt(
         path,
         loctxt.to_records(index=False),
@@ -1713,7 +1713,7 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     ]
     if not hasattr(locs, "z"):
         columns_original.remove("z")
-    loctxt = locs[columns_original].copy()
+    loctxt = locs[columns_original]
     loctxt["frame"] += 1
     loctxt[["x", "y", "sx"]] *= pixelsize
     loctxt["Channel"] = 1
@@ -1751,7 +1751,7 @@ def export_xyz_chimera(
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if hasattr(locs, "z"):
-        loctxt = locs[["x", "y", "z"]].copy()
+        loctxt = locs[["x", "y", "z"]]
         loctxt["molecule"] = 1
         loctxt[["x", "y"]] *= pixelsize
         loctxt = loctxt[["molecule", "x", "y", "z"]]
@@ -1786,7 +1786,7 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if hasattr(locs, "z"):
-        loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
+        loctxt = locs[["x", "y", "z", "photons", "frame"]]
         loctxt[["x", "y"]] *= pixelsize
         loctxt["frame"] = loctxt["frame"].astype(int)
         with open(path, "wb") as f:
@@ -1833,7 +1833,7 @@ def export_thunderstorm(
         columns_original.append("z")
     if hasattr(locs, "len"):
         columns_original.append("len")
-    loctxt = locs[columns_original].copy()
+    loctxt = locs[columns_original]
 
     # add the columns
     loctxt["photons"] = loctxt["photons"].astype(np.int32)

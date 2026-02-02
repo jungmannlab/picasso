@@ -1116,7 +1116,6 @@ class MaskGenerator:
                 mask_ = np.sum(self.mask, axis=2)
                 mask_ /= mask_.max()  # normalize to save image
             else:
-                mask_ = self.mask.copy()
                 mask_ /= mask_.max()  # normalize to save image
             im = Image.fromarray(np.uint8(mask_ * 255))
             im.save(outpath)
