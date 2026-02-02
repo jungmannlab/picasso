@@ -406,18 +406,11 @@ def pick_similar(
     d2 = d**2
     # extract n_locs and rmsd from current picks
     index_blocks = get_index_blocks(locs, info, r)
-    locs_xy = locs[["x", "y"]].to_numpy().T
+    locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
     n_locs = []
     rmsd = []
     for i, pick in enumerate(picks):
-        # print(f"pick: {i+1} / {len(picks)}", end="\r")
         x, y = pick
-        # block_locs = get_block_locs_at(x, y, index_blocks)
-        # pick_locs = lib.locs_at(x, y, block_locs, r)
-        # n_locs.append(len(pick_locs))
-        # pick_locs_xy = pick_locs[["x", "y"]].to_numpy().T
-        # rmsd.append(rmsd_at_com(pick_locs_xy))
-
         block_locs_xy = get_block_locs_at_numba(
             int(x / r),
             int(y / r),
@@ -427,11 +420,7 @@ def pick_similar(
             index_blocks[6],
             index_blocks[7],
         )
-        # plt.scatter(block_locs_xy[0], block_locs_xy[1])
-        # plt.axis("equal")
-        # plt.show()
         pick_locs_xy = locs_at_numba(x, y, block_locs_xy, r)
-        # print(block_locs_xy.shape)
         n_locs.append(pick_locs_xy.shape[1])
         rmsd.append(rmsd_at_com(pick_locs_xy))
 
