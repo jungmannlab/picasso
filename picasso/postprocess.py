@@ -235,7 +235,7 @@ def picked_locs(
 
         if pick_shape == "Circle":
             index_blocks = get_index_blocks(locs, info, pick_size)
-            locs_xy = locs[["x", "y"]].to_numpy().T
+            locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
             for i, pick in enumerate(picks):
                 x, y = pick
                 x_, y_ = int(x / pick_size), int(y / pick_size)
@@ -247,11 +247,12 @@ def picked_locs(
                     index_blocks[6],
                     index_blocks[7],
                 )
-                block_locs = locs.iloc[block_locs_idx]
+                block_locs = index_blocks[0].iloc[block_locs_idx]
                 group_locs_idx = _locs_at_numba(
                     x, y, locs_xy[:, block_locs_idx], pick_size
                 )
                 group_locs = block_locs.iloc[group_locs_idx].copy()
+
                 if add_group:
                     group_locs["group"] = i
                 group_locs.sort_values(
@@ -655,8 +656,8 @@ def n_block_locs_at(
 
 @numba.jit(nopython=True, nogil=True, cache=True)
 def _get_block_locs_at_numba(
-    x_range: int,
-    y_range: int,
+    x_index: int,
+    y_index: int,
     block_starts: np.ndarray,
     block_ends: np.ndarray,
     K: int,
@@ -665,13 +666,14 @@ def _get_block_locs_at_numba(
     """Numba implementation of ``get_block_locs_at``. Return the indices
     of localizations in the blocks around the given coordinates."""
     step = 0
-    for k in range(y_range - 1, y_range + 2):
+    for k in range(y_index - 1, y_index + 2):
         if 0 < k < K:
-            for ll in range(x_range - 1, x_range + 2):
+            for ll in range(x_index - 1, x_index + 2):
                 if 0 < ll < L:
                     if block_ends[k, ll] - block_starts[k, ll] > 0:
-                        # numba does not work if you attach arange to an
-                        # empty list so the first step is different
+                        # numba does not work if you attach concatenate
+                        # to an empty list so the first step is
+                        # different
                         if step == 0:
                             indices = np.arange(
                                 float(block_starts[k, ll]),
@@ -695,8 +697,8 @@ def _get_block_locs_at_numba(
 
 @numba.jit(nopython=True, nogil=True, cache=True)
 def get_block_locs_at_numba(
-    x_range: int,
-    y_range: int,
+    x_index: int,
+    y_index: int,
     locs_xy: np.ndarray,
     block_starts: np.ndarray,
     block_ends: np.ndarray,
@@ -706,8 +708,8 @@ def get_block_locs_at_numba(
     """Numba implementation of ``get_block_locs_at. Return the
     localizations in the blocks around the given coordinates."""
     indices = _get_block_locs_at_numba(
-        x_range,
-        y_range,
+        x_index,
+        y_index,
         block_starts,
         block_ends,
         K,
