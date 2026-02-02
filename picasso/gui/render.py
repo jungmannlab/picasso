@@ -4853,7 +4853,7 @@ class RESIDialog(QtWidgets.QDialog):
             # change the group name in all_resi
             all_resi["cluster_id"] = all_resi["group"]
             all_resi.drop(columns=["group"], inplace=True)
-            all_resi.sort_values(kind="mergesort", by="frame", inplace=True)
+            all_resi.sort_values(kind="quicksort", by="frame", inplace=True)
 
             # save resi cluster centers
             io.save_locs(resi_path, all_resi, resi_info)
@@ -12313,7 +12313,7 @@ class Window(QtWidgets.QMainWindow):
                     # combine locs from all channels
                     all_locs = pd.concat(self.view.all_locs, ignore_index=True)
                     all_locs.sort_values(
-                        kind="mergesort",
+                        kind="quicksort",
                         by="frame",
                         inplace=True,
                     )

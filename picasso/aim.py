@@ -49,7 +49,7 @@ def intersect1d(
         Indices of common elements in b.
     """
     aux = np.concatenate((a, b))
-    aux_sort_indices = np.argsort(aux, kind="mergesort")
+    aux_sort_indices = np.argsort(aux, kind="quicksort")
     aux = aux[aux_sort_indices]
 
     mask = aux[1:] == aux[:-1]

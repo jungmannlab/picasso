@@ -413,7 +413,7 @@ def identifications_from_futures(
     ids_list_of_lists = [_.result() for _ in futures]
     ids_list = list(chain(*ids_list_of_lists))
     ids = pd.concat(ids_list, ignore_index=True)
-    ids.sort_values(by="frame", kind="mergesort", inplace=True)
+    ids.sort_values(by="frame", kind="quicksort", inplace=True)
     return ids
 
 
@@ -552,7 +552,7 @@ def identify(
             for i in range(len(movie))
         ]
         ids = pd.concat(identifications, ignore_index=True)
-        ids.sort_values(by="frame", kind="mergesort", inplace=True)
+        ids.sort_values(by="frame", kind="quicksort", inplace=True)
     return ids
 
 
@@ -957,7 +957,7 @@ def locs_from_fits(
             "iterations": iterations.astype(np.int32),
         }
     )
-    locs.sort_values(by="frame", kind="mergesort", inplace=True)
+    locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
 
 

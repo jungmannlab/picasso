@@ -375,7 +375,7 @@ def _clusterfilter(
                     }
                     info.append(clusterfilter_info)
                     all_locs.sort_values(
-                        kind="mergesort",
+                        kind="quicksort",
                         by="frame",
                         inplace=True,
                     )
@@ -407,7 +407,7 @@ def _clusterfilter(
                     }
                     info.append(clusterfilter_info)
                     all_locs.sort_values(
-                        kind="mergesort",
+                        kind="quicksort",
                         by="frame",
                         inplace=True,
                     )
@@ -818,7 +818,7 @@ def _join(files: list[str], keep_index: bool = True) -> None:
     info.append(join_info)
     if not keep_index:
         info[0]["Frames"] = total_frames
-    locs.sort_values(kind="mergesort", by="frame", inplace=True)
+    locs.sort_values(kind="quicksort", by="frame", inplace=True)
     save_locs(base + "_join.hdf5", locs, info)
 
 

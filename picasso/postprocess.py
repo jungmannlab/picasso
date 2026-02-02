@@ -257,7 +257,7 @@ def picked_locs(
                     group_locs["group"] = i
                 group_locs.sort_values(
                     by="frame",
-                    kind="mergesort",
+                    kind="quicksort",
                     inplace=True,
                 )
                 picked_locs.append(group_locs)
@@ -297,7 +297,7 @@ def picked_locs(
                 if add_group:
                     group_locs["group"] = i
                 group_locs.sort_values(
-                    by="frame", kind="mergesort", inplace=True
+                    by="frame", kind="quicksort", inplace=True
                 )
                 picked_locs.append(group_locs)
 
@@ -323,7 +323,7 @@ def picked_locs(
                 if add_group:
                     group_locs["group"] = i
                 group_locs.sort_values(
-                    by="frame", kind="mergesort", inplace=True
+                    by="frame", kind="quicksort", inplace=True
                 )
                 picked_locs.append(group_locs)
 
@@ -347,7 +347,7 @@ def picked_locs(
                 if add_group:
                     group_locs["group"] = i
                 group_locs.sort_values(
-                    by="frame", kind="mergesort", inplace=True
+                    by="frame", kind="quicksort", inplace=True
                 )
                 picked_locs.append(group_locs)
 
@@ -926,7 +926,7 @@ def next_frame_neighbor_distance_histogram(
     dnfl : np.ndarray
         Distance histogram of next frame neighbors.
     """
-    locs.sort_values(kind="mergesort", by="frame", inplace=True)
+    locs.sort_values(kind="quicksort", by="frame", inplace=True)
     frame = locs["frame"].to_numpy()
     x = locs["x"].to_numpy()
     y = locs["y"].to_numpy()
@@ -1447,7 +1447,7 @@ def link(
         if hasattr(locs, "photons"):
             linked_locs["photon_rate"] = np.array([], dtype=np.float32)
     else:
-        locs = locs.sort_values(kind="mergesort", by="frame")
+        locs = locs.sort_values(kind="quicksort", by="frame")
         if hasattr(locs, "group"):
             group = locs["group"].to_numpy()
         else:

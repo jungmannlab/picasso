@@ -867,9 +867,9 @@ def locs_from_fits(
     )
     if hasattr(identifications, "n_id"):
         locs["n_id"] = identifications.n_id.astype(np.uint32)
-        locs.sort_values(by=["n_id"], kind="mergesort", inplace=True)
+        locs.sort_values(by=["n_id"], kind="quicksort", inplace=True)
     else:
-        locs.sort_values(by=["frame"], kind="mergesort", inplace=True)
+        locs.sort_values(by=["frame"], kind="quicksort", inplace=True)
     return locs
 
 

@@ -2286,7 +2286,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                         ignore_index=True,
                     )
                     all_locs.sort_values(
-                        kind="mergesort",
+                        kind="quicksort",
                         by="frame",
                         inplace=True,
                     )

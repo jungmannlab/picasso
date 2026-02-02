@@ -126,7 +126,7 @@ def locs_from_fits(
                 "n_id": identifications["n_id"].to_numpy().astype(np.uint32),
             }
         )
-        locs.sort_values(by="n_id", kind="mergesort", inplace=True)
+        locs.sort_values(by="n_id", kind="quicksort", inplace=True)
     else:
         locs = pd.DataFrame(
             {
@@ -147,5 +147,5 @@ def locs_from_fits(
                 ),
             }
         )
-        locs.sort_values(by="frame", kind="mergesort", inplace=True)
+        locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs

@@ -1851,7 +1851,7 @@ class Window(QtWidgets.QMainWindow):
             self.identifications.sort_values(
                 by="frame",
                 inplace=True,
-                kind="mergesort",
+                kind="quicksort",
             )
 
             # remove all identifications that are oob
@@ -1955,7 +1955,7 @@ class Window(QtWidgets.QMainWindow):
             self.identifications.sort_values(
                 by="frame",
                 inplace=True,
-                kind="mergesort",
+                kind="quicksort",
             )
 
             # remove all identifications that are oob

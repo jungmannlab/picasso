@@ -6,6 +6,8 @@ Last change: 02-FEB-2026 CEST
 0.9.6
 -----
 - Render: increase the speed of picking circular locs, picking similar and filter by number of localizations (numba implementation)
+- Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
+- Moved from merge sort to quick sort (often faster due to lower memory usage)
 
 0.9.4-5
 -------
