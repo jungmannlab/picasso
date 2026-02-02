@@ -9059,15 +9059,23 @@ class View(QtWidgets.QLabel):
                 )
                 progress.set_value(0)
                 progress.show()
+                locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
                 for i, pick in enumerate(self._picks):
                     x, y = pick
-                    # extract locs at a given region
-                    block_locs = postprocess.get_block_locs_at(
-                        x, y, index_blocks
+                    # extract locs at a given region - numba version
+                    block_locs_xy = postprocess.get_block_locs_at_numba(
+                        int(x / r),
+                        int(y / r),
+                        locs_xy,
+                        index_blocks[4],
+                        index_blocks[5],
+                        index_blocks[6],
+                        index_blocks[7],
                     )
-                    # extract the locs around the pick
-                    locs = lib.locs_at(x, y, block_locs, r)
-                    loccount.append(len(locs))
+                    pick_locs_xy = postprocess.locs_at_numba(
+                        x, y, block_locs_xy, r
+                    )
+                    loccount.append(pick_locs_xy.shape[1])
                     progress.set_value(i)
                 progress.close()
 

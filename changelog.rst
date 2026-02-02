@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 29-JAN-2026 CEST
+Last change: 02-FEB-2026 CEST
+
+0.9.6
+-----
+- Render: increase the speed of picking circular locs, picking similar and filter by number of localizations (numba implementation)
 
 0.9.4-5
 -------
