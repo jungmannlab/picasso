@@ -942,7 +942,7 @@ class MaskGenerator:
 
         # open localizations
         locs, info = io.load_locs(self.locs_path)
-        if hasattr(locs, "z"):
+        if "z" in locs.columns:
             self.locs = locs[["x", "y", "z"]]
         else:
             self.locs = locs[["x", "y"]]
@@ -989,12 +989,12 @@ class MaskGenerator:
             raise TypeError("Sigma must be a number.")
         # ndim
         if self.ndim is not None:
-            if hasattr(self.locs, "z") and self.ndim not in [2, 3]:
+            if "z" in self.locs.columns and self.ndim not in [2, 3]:
                 raise ValueError(
                     "Dimensionality of the mask must be either 2 or 3 for 3D"
                     " localizations."
                 )
-            elif not hasattr(self.locs, "z") and self.ndim != 2:
+            elif "z" not in self.locs.columns and self.ndim != 2:
                 raise ValueError(
                     "Dimensionality of the mask must be 2 for 2D"
                     " localizations."
@@ -1012,7 +1012,7 @@ class MaskGenerator:
         self.y_max = self.roi[1] / self.pixelsize
 
         # 2D image
-        if self.ndim == 2 or not hasattr(self.locs, "z"):
+        if self.ndim == 2 or "z" not in self.locs.columns:
             _, image = render.render_hist(
                 self.locs,
                 oversampling,

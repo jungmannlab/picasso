@@ -696,7 +696,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             self.window.pwd = os.path.dirname(self.locs_path)
             self.mask_generator = spinna.MaskGenerator(self.locs_path)
             self.mask_ndim.clear()
-            if hasattr(self.mask_generator.locs, "z"):
+            if "z" in self.mask_generator.locs.columns:
                 self.mask_ndim.addItems(["2D", "3D"])
             else:
                 self.mask_ndim.addItems(["2D"])
@@ -2982,7 +2982,7 @@ class SimulationsTab(QtWidgets.QDialog):
                 idx = self.targets.index(target)
                 self.densities_spins[idx].setValue(len(locs) / pick_area)
 
-            if hasattr(locs, "z"):
+            if "z" in locs.columns:
                 coords = np.stack(
                     (locs.x * pixelsize, locs.y * pixelsize, locs.z)
                 ).T

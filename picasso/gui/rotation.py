@@ -752,7 +752,7 @@ class ViewRotation(QtWidgets.QLabel):
 
         # assign self.group_color if single channel and group info
         # present
-        if len(self.locs) == 1 and hasattr(self.locs[0], "group"):
+        if len(self.locs) == 1 and "group" in self.locs[0].columns:
             self.group_color = self.window.window.view.get_group_color(
                 self.locs[0]
             )
@@ -988,7 +988,7 @@ class ViewRotation(QtWidgets.QLabel):
         locs = self.locs[0]
 
         # if clustered or picked locs
-        if hasattr(locs, "group"):
+        if "group" in locs.columns:
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
                 kwargs,

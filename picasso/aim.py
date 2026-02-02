@@ -752,7 +752,7 @@ def aim(
     y_pdc += shift_y
 
     # 3D undrifting
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         if progress is not None:
             progress.zero_progress(description="Undrifting z (1/2)")
         ref_x = x_pdc[frame <= segmentation]
@@ -809,7 +809,7 @@ def aim(
     # apply the drift to localizations
     locs["x"] = x_pdc
     locs["y"] = y_pdc
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         locs["z"] = z_pdc
 
     new_info = {

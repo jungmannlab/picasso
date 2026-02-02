@@ -525,7 +525,7 @@ class Window(QtWidgets.QMainWindow):
         if len(self.locs) == 0:
             self.pixelsize = 0
 
-        if not hasattr(locs, "group"):
+        if "group" not in locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
             msgBox.setWindowTitle("Error")
             msgBox.setText(
@@ -538,7 +538,7 @@ class Window(QtWidgets.QMainWindow):
 
         else:
             locs = lib.ensure_sanity(locs, info)
-            if not hasattr(locs, "z"):
+            if "z" not in locs.columns:
                 locs["z"] = locs["x"].to_numpy().copy()
                 self.pixelsize = 1
                 has_z = False
@@ -578,7 +578,7 @@ class Window(QtWidgets.QMainWindow):
                 self.median_lp = np.mean(
                     [np.median(locs.lpx), np.median(locs.lpy)]
                 )
-                if hasattr(locs, "group"):
+                if "group" in locs.columns:
                     groups = np.unique(locs.group)
                     groupcopy = locs.group.copy()
                     for i in range(len(groups)):
@@ -619,7 +619,7 @@ class Window(QtWidgets.QMainWindow):
                 )
 
             # CREATE GROUP INDEX
-            if hasattr(locs, "group"):
+            if "group" in locs.columns:
                 groups = np.unique(locs.group)
                 n_groups = len(groups)
                 n_locs = len(locs)
@@ -2022,7 +2022,7 @@ class Window(QtWidgets.QMainWindow):
         self, kwargs, autoscale=False, use_cache=False, cache=True
     ):
         locs = self.locs[0]
-        if hasattr(locs, "group"):
+        if "group" in locs.columns:
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
                 kwargs, autoscale=autoscale, locs=locs, use_cache=use_cache

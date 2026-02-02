@@ -335,7 +335,7 @@ def cluster(
         is removed.
     """
     locs = locs.copy()
-    if hasattr(locs, "z"):  # 3D
+    if "z" in locs.columns:  # 3D
         if pixelsize is None or radius_z is None:
             raise ValueError(
                 "Camera pixel size and clustering radius in z must be"
@@ -357,7 +357,7 @@ def cluster(
             frame_analysis,
         )
     locs = extract_valid_labels(locs, labels)
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         locs["z"] *= pixelsize  # convert back to nm
     return locs
 
@@ -435,7 +435,7 @@ def dbscan(
         is removed.
     """
     locs = locs.copy()
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         if pixelsize is None:
             raise ValueError(
                 "Camera pixel size must be specified as an integer for 3D"
@@ -520,7 +520,7 @@ def hdbscan(
         is removed.
     """
     locs = locs.copy()
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         if pixelsize is None:
             raise ValueError(
                 "Camera pixel size (nm) must be specified as an integer for 3D"
@@ -633,7 +633,7 @@ def find_cluster_centers(
     n = np.array([_[14] for _ in centers_])
     n_events = np.array([_[15] for _ in centers_])  # number of locs in cluster
 
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         z = np.array([_[16] for _ in centers_])
         std_z = np.array([_[17] for _ in centers_])
         volume = np.array([_[18] for _ in centers_])
@@ -689,7 +689,7 @@ def find_cluster_centers(
                 "group": res.index.astype(np.int32),  # group id
             }
         )
-    if hasattr(locs, "group_input"):
+    if "group_input" in locs.columns:
         group_input = np.array([_[-1] for _ in centers_])
         centers["group_input"] = group_input.astype(np.int32)
 
@@ -763,7 +763,7 @@ def cluster_center(
     # consecutive frames
     x_events = np.split(grouplocs.x.to_numpy(), split_idx)
     n_events = len(x_events)  # number of binding events
-    if hasattr(grouplocs, "z"):
+    if "z" in grouplocs.columns:
         if pixelsize is None:
             raise ValueError(
                 "Camera pixel size must be specified as an integer for 3D"
@@ -839,7 +839,7 @@ def cluster_center(
             convexhull,
         ]
 
-    if hasattr(grouplocs, "group_input"):
+    if "group_input" in grouplocs.columns:
         # assumes only one group input!
         result.append(np.unique(grouplocs.group_input)[0])
     return result
@@ -914,13 +914,15 @@ def cluster_areas(
     areas : pd.DataFrame
         Cluster areas/volumes for each cluster.
     """
-    assert hasattr(locs, "group"), "Localizations must contain 'group' column."
+    assert (
+        "group" in locs.columns
+    ), "Localizations must contain 'group' column."
 
     # get pixel size from info
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
 
     groups = np.unique(locs["group"])
-    area_key = "Area (LP^2)" if not hasattr(locs, "z") else "Volume (LP^3)"
+    area_key = "Area (LP^2)" if "z" not in locs.columns else "Volume (LP^3)"
     areas = {
         "group": groups.astype(np.int32),
         area_key: np.zeros(len(groups), dtype=np.float32),
@@ -936,7 +938,7 @@ def cluster_areas(
         grouplocs = locs[locs["group"] == group_id]
         if not len(grouplocs):
             continue
-        if hasattr(grouplocs, "z"):
+        if "z" in grouplocs.columns:
             X = grouplocs[["x", "y", "z"]].to_numpy()
             X[:, 2] /= pixelsize  # convert z to pixels
         else:
@@ -986,8 +988,8 @@ def test_subclustering(
     sparse_nevents : np.ndarray
         Number of events for sparse molecules.
     """
-    assert hasattr(
-        mols, "n_events"
+    assert (
+        "n_events" in mols.columns
     ), "The input molecules must have n_events attribute."
     assert sparse_dist > clustering_dist, (
         "The sparse distance must be larger than the clustering " "distance."
@@ -997,7 +999,7 @@ def test_subclustering(
         raise ValueError("Pixelsize not found in metadata.")
 
     # get 1st nearest neighbor distances
-    if hasattr(mols, "z"):
+    if "z" in mols.columns:
         coords = mols[["x", "y", "z"]].to_numpy()
         coords[:, 2] /= pixelsize
     else:

@@ -393,7 +393,7 @@ def locs_from_fits(
     b = np.minimum(theta[:, 4], theta[:, 5])
     ellipticity = (a - b) / a
 
-    if hasattr(identifications, "n_id"):
+    if "n_id" in identifications.columns:
         locs = pd.DataFrame(
             {
                 "frame": identifications["frame"].astype(np.uint32),

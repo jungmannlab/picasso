@@ -930,7 +930,7 @@ def next_frame_neighbor_distance_histogram(
     frame = locs["frame"].to_numpy()
     x = locs["x"].to_numpy()
     y = locs["y"].to_numpy()
-    if hasattr(locs, "group"):
+    if "group" in locs.columns:
         group = locs["group"].to_numpy()
     else:
         group = np.zeros(len(locs), dtype=np.int32)
@@ -1372,7 +1372,7 @@ def dark_times(
     lens = locs["len"].to_numpy()
     last_frame = frame + lens - 1
     if group is None:
-        if hasattr(locs, "group"):
+        if "group" in locs.columns:
             group = locs["group"].to_numpy()
         else:
             group = np.zeros(len(locs))
@@ -1441,14 +1441,14 @@ def link(
     """
     if len(locs) == 0:  # special case of an empty localization list
         linked_locs = locs.copy()
-        if hasattr(locs, "frame"):
+        if "frame" in locs.columns:
             linked_locs["len"] = np.array([], dtype=np.int32)
             linked_locs["n"] = np.array([], dtype=np.int32)
-        if hasattr(locs, "photons"):
+        if "photons" in locs.columns:
             linked_locs["photon_rate"] = np.array([], dtype=np.float32)
     else:
         locs = locs.sort_values(kind="quicksort", by="frame")
-        if hasattr(locs, "group"):
+        if "group" in locs.columns:
             group = locs["group"].to_numpy()
         else:
             group = np.zeros(len(locs), dtype=np.int32)
@@ -1518,7 +1518,7 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
         cluster.
     """
     combined_locs = []
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         for group in tqdm(np.unique(locs["group"])):
             temp = locs[locs["group"] == group]
             cluster = np.unique(temp["cluster"].to_numpy())
@@ -1638,7 +1638,7 @@ def cluster_combine_dist(
         Combined localizations with calculated properties for each
         cluster, including distances to nearest neighbors.
     """
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         pixelsize = 130 if pixelsize is None else pixelsize
         combined_locs = []
         for group in tqdm(np.unique(locs["group"])):
@@ -2008,29 +2008,29 @@ def link_loc_groups(
     n_groups = link_group.max() + 1
     n_ = _link_group_count(link_group, n_locs, n_groups)
     columns = OrderedDict()
-    if hasattr(locs, "frame"):
+    if "frame" in locs.columns:
         first_frame_, last_frame_ = _link_group_min_max(
             locs["frame"].to_numpy(), link_group, n_locs, n_groups
         )
         columns["frame"] = first_frame_
-    if hasattr(locs, "x"):
+    if "x" in locs.columns:
         weights_x = 1 / locs["lpx"].to_numpy() ** 2
         columns["x"], sum_weights_x_ = _link_group_weighted_mean(
             locs["x"].to_numpy(), weights_x, link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "y"):
+    if "y" in locs.columns:
         weights_y = 1 / locs["lpy"].to_numpy() ** 2
         columns["y"], sum_weights_y_ = _link_group_weighted_mean(
             locs["y"].to_numpy(), weights_y, link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "photons"):
+    if "photons" in locs.columns:
         columns["photons"] = _link_group_sum(
             locs["photons"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
         )
-    if hasattr(locs, "sx"):
+    if "sx" in locs.columns:
         columns["sx"] = _link_group_mean(
             locs["sx"].to_numpy(),
             link_group,
@@ -2038,7 +2038,7 @@ def link_loc_groups(
             n_groups,
             n_,
         )
-    if hasattr(locs, "sy"):
+    if "sy" in locs.columns:
         columns["sy"] = _link_group_mean(
             locs["sy"].to_numpy(),
             link_group,
@@ -2046,34 +2046,34 @@ def link_loc_groups(
             n_groups,
             n_,
         )
-    if hasattr(locs, "bg"):
+    if "bg" in locs.columns:
         columns["bg"] = _link_group_sum(
             locs["bg"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
         )
-    if hasattr(locs, "x"):
+    if "x" in locs.columns:
         columns["lpx"] = np.sqrt(1 / sum_weights_x_)
-    if hasattr(locs, "y"):
+    if "y" in locs.columns:
         columns["lpy"] = np.sqrt(1 / sum_weights_y_)
-    if hasattr(locs, "ellipticity"):
+    if "ellipticity" in locs.columns:
         columns["ellipticity"] = _link_group_mean(
             locs["ellipticity"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "net_gradient"):
+    if "net_gradient" in locs.columns:
         columns["net_gradient"] = _link_group_mean(
             locs["net_gradient"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "likelihood"):
+    if "likelihood" in locs.columns:
         columns["likelihood"] = _link_group_mean(
             locs["likelihood"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "iterations"):
+    if "iterations" in locs.columns:
         columns["iterations"] = _link_group_mean(
             locs["iterations"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         columns["z"] = _link_group_mean(
             locs["z"].to_numpy(),
             link_group,
@@ -2081,21 +2081,21 @@ def link_loc_groups(
             n_groups,
             n_,
         )
-    if hasattr(locs, "d_zcalib"):
+    if "d_zcalib" in locs.columns:
         columns["d_zcalib"] = _link_group_mean(
             locs["d_zcalib"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "group"):
+    if "group" in locs.columns:
         columns["group"] = _link_group_last(
             locs["group"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
         )
-    if hasattr(locs, "frame"):
+    if "frame" in locs.columns:
         columns["len"] = last_frame_ - first_frame_ + 1
     columns["n"] = n_
-    if hasattr(locs, "photons"):
+    if "photons" in locs.columns:
         columns["photon_rate"] = np.float32(columns["photons"] / n_)
     linked_locs = pd.DataFrame(columns)
     if remove_ambiguous_lengths:
@@ -2313,7 +2313,7 @@ def undrift_from_picked(
     # A data frame to store the applied drift
     drift = pd.DataFrame({"x": drift_x, "y": drift_y})
     # If z coordinate exists, also apply drift there
-    if all([hasattr(_, "z") for _ in picked_locs]):
+    if all(["z" in _.columns for _ in picked_locs]):
         drift_z = _undrift_from_picked_coordinate(picked_locs, info, "z")
         drift["z"] = drift_z
     return drift
@@ -2344,7 +2344,6 @@ def _undrift_from_picked_coordinate(
     drift_mean : np.ndarray
         Average drift across picks for all frames
     """
-
     n_picks = len(picked_locs)
     n_frames = info[0]["Frames"]
 
@@ -2475,7 +2474,7 @@ def groupprops(
         }
     )
     # add qpaint idx
-    if hasattr(groups, "dark_mean"):
+    if "dark_mean" in groups.columns:
         groups["qpaint_idx"] = 1 / groups["dark_mean"]
     return groups
 

@@ -566,7 +566,7 @@ def _undrift_fiducials(files: str) -> None:
         locs["y"] -= fiducials_drift["y"].iloc[frames].to_numpy()
         drift["x"] += fiducials_drift["x"]
         drift["y"] += fiducials_drift["y"]
-        if hasattr(locs, "z"):
+        if "z" in locs.columns:
             locs["z"] -= fiducials_drift["z"].iloc[frames].to_numpy()
             drift["z"] += fiducials_drift["z"]
 
@@ -1572,7 +1572,7 @@ def _spinna_batch_analysis(
                     if "Pixelsize" in element:
                         pixelsize = element["Pixelsize"]
                         break
-            if hasattr(locs, "z"):
+            if "z" in locs.columns:
                 exp_data[target] = np.stack(
                     (locs.x * pixelsize, locs.y * pixelsize, locs.z)
                 ).T
@@ -1854,7 +1854,7 @@ def _g5m(
         print("------------------------------------------")
         print(f"Processing {path}")
         locs, info = load_locs(path)
-        if hasattr(locs, "z"):
+        if "z" in locs.columns:
             if calibration != "":
                 with open(calibration, "r") as f:
                     calib = yaml.full_load(f)

@@ -525,7 +525,7 @@ class SubclusterNum(QtWidgets.QDialog):
     def plot(self) -> None:
         """Plot the subclustering test histogram. Optionally can save
         the histogram values to a .csv file."""
-        if not hasattr(self.window.locs, "n_events"):
+        if "n_events" not in self.window.locs.columns:
             raise ValueError("Data must have the 'n_events' attribute.")
         if self.save_vals.isChecked():
             base, ext = os.path.splitext(self.window.locs_path)

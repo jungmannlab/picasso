@@ -1711,7 +1711,7 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         "photons",
         "frame",
     ]
-    if not hasattr(locs, "z"):
+    if "z" not in locs.columns:
         columns_original.remove("z")
     loctxt = locs[columns_original].copy()
     loctxt["frame"] += 1
@@ -1720,7 +1720,7 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     loctxt["Length"] = 1
     loctxt["bg"] = loctxt["bg"].round().astype(int)
     loctxt["photons"] = loctxt["photons"].round().astype(int)
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         header = z_header
         fmt = fmt_z
     with open(path, "wb") as f:
@@ -1750,7 +1750,7 @@ def export_xyz_chimera(
         Metadata dictionaries.
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         loctxt = locs[["x", "y", "z"]].copy()
         loctxt["molecule"] = 1
         loctxt[["x", "y"]] *= pixelsize
@@ -1785,7 +1785,7 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         Metadata dictionaries.
     """
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
         loctxt[["x", "y"]] *= pixelsize
         loctxt["frame"] = loctxt["frame"].astype(int)
@@ -1829,9 +1829,9 @@ def export_thunderstorm(
         "lpx",
         "lpy",
     ]
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         columns_original.append("z")
-    if hasattr(locs, "len"):
+    if "len" in locs.columns:
         columns_original.append("len")
     loctxt = locs[columns_original].copy()
 
@@ -1852,9 +1852,9 @@ def export_thunderstorm(
         "photons": "intensity [photon]",
         "bg": "offset [photon]",
     }
-    if hasattr(loctxt, "z"):
+    if "z" in loctxt.columns:
         column_mapper["z"] = "z [nm]"
-    if hasattr(loctxt, "len"):
+    if "len" in loctxt.columns:
         loctxt.rename(columns={"len": "detections"}, inplace=True)
     loctxt.rename(columns=column_mapper, inplace=True)
     loctxt.drop(columns=["lpx", "lpy"], inplace=True)
@@ -1873,7 +1873,7 @@ def export_thunderstorm(
         "uncertainty_xy [nm]",
         "detections",
     ]
-    if not hasattr(loctxt, "z [nm]"):
+    if "z [nm]" not in loctxt.columns:
         columns_final.remove("z [nm]")
         columns_final.remove("sigma2 [nm]")
         columns_final[4] = "sigma [nm]"
@@ -1882,7 +1882,7 @@ def export_thunderstorm(
             inplace=True,
         )
         loctxt.drop(columns=["sigma2 [nm]"], inplace=True)
-    if not hasattr(loctxt, "detections"):
+    if "detections" not in loctxt.columns:
         columns_final.remove("detections")
     loctxt = loctxt[columns_final]
     # save
