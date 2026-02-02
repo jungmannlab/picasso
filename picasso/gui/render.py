@@ -1408,10 +1408,7 @@ class ClsDlg3D(QtWidgets.QDialog):
         scaled_locs = locs.copy()
         scaled_locs["x_scaled"] = locs["x"] * pixelsize
         scaled_locs["y_scaled"] = locs["y"] * pixelsize
-        X = scaled_locs["x_scaled"].to_numpy()
-        Y = scaled_locs["y_scaled"].to_numpy()
-        Z = scaled_locs["z"].to_numpy()
-        est.fit(np.stack((X, Y, Z), axis=1))
+        est.fit(scaled_locs[["x_scaled", "y_scaled", "z"]])
         labels = est.labels_
         counts = list(Counter(labels).items())
 
@@ -1611,9 +1608,7 @@ class ClsDlg2D(QtWidgets.QDialog):
         scaled_locs = locs.copy()
         scaled_locs["x_scaled"] = locs["x"]
         scaled_locs["y_scaled"] = locs["y"]
-        X = scaled_locs["x_scaled"].to_numpy()
-        Y = scaled_locs["y_scaled"].to_numpy()
-        est.fit(np.stack((X, Y), axis=1))
+        est.fit(scaled_locs[["x_scaled", "y_scaled"]])
         labels = est.labels_
         counts = list(Counter(labels).items())
 
@@ -2387,7 +2382,7 @@ class G5MDialog(QtWidgets.QDialog):
             else:  # 2D
                 column = "Area (LP^2)"
                 thresh = 12 * np.pi * 2.98**2
-            sizes = cluster_sizes[column].to_numpy()
+            sizes = cluster_sizes[column]
         except Exception:
             warning = "Could not read the cluster areas/volumes file."
             QtWidgets.QMessageBox.information(self.window, "Warning", warning)
@@ -5312,9 +5307,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.ax_prop.cla()
 
         # array of values for the rendered property
-        data = self.window.view.locs[0][
-            self.parameter.currentText()
-        ].to_numpy()
+        data = self.window.view.locs[0][self.parameter.currentText()]
         # other parameters
         min_val = self.minimum_render.value()
         max_val = self.maximum_render.value()
@@ -9400,10 +9393,8 @@ class View(QtWidgets.QLabel):
         """
         locs = self.all_locs[channel]
         all_picked_locs = self.picked_locs(channel, add_group=False)
-        idx = []  # store indices of picked locs
-        for picked_locs in all_picked_locs:
-            idx.append(picked_locs.index.to_numpy())
-        idx = np.concatenate(idx)
+        # store indices of picked locs
+        idx = np.concatenate([_.index for _ in all_picked_locs])
         locs.drop(index=idx, inplace=True)
         self.all_locs[channel] = locs
         self.locs[channel] = locs.copy()
@@ -10640,15 +10631,15 @@ class View(QtWidgets.QLabel):
         frames = self.all_locs[channel]["frame"]
         frames_ = self.locs[channel]["frame"]
 
-        self.all_locs[channel]["x"] -= drift["x"][frames].to_numpy()
-        self.all_locs[channel]["y"] -= drift["y"][frames].to_numpy()
-        self.locs[channel]["x"] -= drift["x"][frames_].to_numpy()
-        self.locs[channel]["y"] -= drift["y"][frames_].to_numpy()
+        self.all_locs[channel]["x"] -= drift["x"].iloc[frames].to_numpy()
+        self.all_locs[channel]["y"] -= drift["y"].iloc[frames].to_numpy()
+        self.locs[channel]["x"] -= drift["x"].iloc[frames_].to_numpy()
+        self.locs[channel]["y"] -= drift["y"].iloc[frames_].to_numpy()
 
         if hasattr(drift, "z"):
             drift["z"] = -drift["z"]
-            self.all_locs[channel]["z"] -= drift["z"][frames].to_numpy()
-            self.locs[channel]["z"] -= drift["z"][frames_].to_numpy()
+            self.all_locs[channel]["z"] -= drift["z"].iloc[frames].to_numpy()
+            self.locs[channel]["z"] -= drift["z"].iloc[frames_].to_numpy()
 
         self.add_drift(channel, drift)
         self.update_scene()

@@ -3357,9 +3357,7 @@ class SimulationsTab(QtWidgets.QDialog):
                 [f"N_{t}" in loaded for t in titles]
             ):  # check that all titles are present
                 self.N_structures_fit = {
-                    structure_name: (
-                        df[f"N_{structure_name}"].to_numpy().astype(np.int32)
-                    )
+                    structure_name: np.int32(df[f"N_{structure_name}"])
                     for structure_name in titles
                 }
                 # get granularity and n_sim_fit from the user

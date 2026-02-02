@@ -262,7 +262,7 @@ class HistWindow(PlotWindow):
     def on_span_select(self, xmin: float, xmax: float) -> None:
         """Update the localization data based on the selected in the
         histogram plot."""
-        x = self.locs[self.field].to_numpy()
+        x = self.locs[self.field]
         valid_idx = np.isfinite(x) & (x > xmin) & (x < xmax)
         self.locs = self.locs[valid_idx]
         self.main_window.update_locs(self.locs)
@@ -353,8 +353,8 @@ class Hist2DWindow(PlotWindow):
         xmax = max(x1, x2)
         ymin = min(y1, y2)
         ymax = max(y1, y2)
-        x = self.locs[self.field_x].to_numpy()
-        y = self.locs[self.field_y].to_numpy()
+        x = self.locs[self.field_x]
+        y = self.locs[self.field_y]
         finite_idx = np.isfinite(x) & np.isfinite(y)
         valid_idx = (
             (x > xmin) & (x < xmax) & (y > ymin) & (y < ymax) & finite_idx

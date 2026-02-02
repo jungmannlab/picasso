@@ -55,13 +55,11 @@ def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     passed = 1
 
     # get mean frame
-    mean_frame = frame.to_numpy().mean()
+    mean_frame = frame.mean()
 
     # get maximum number of locs in a 1/20th of acquisition time
     n_locs = len(frame)
-    locs_binned = np.histogram(
-        frame.to_numpy(), bins=np.linspace(0, n_frames, 21)
-    )[0]
+    locs_binned = np.histogram(frame, bins=np.linspace(0, n_frames, 21))[0]
     max_locs_bin = locs_binned.max()
 
     # test if frame analysis passed
@@ -75,7 +73,9 @@ def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     return passed
 
 
-def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
+def frame_analysis(
+    labels: np.ndarray, frame: pd.Series | np.ndarray
+) -> np.ndarray:
     """Perform basic frame analysis on clustered localizations. Reject
     clusters whose mean frame is outside of the [20, 80] % (max frame)
     range or any 1/20th of measurement's time contains more than 80 % of
@@ -87,7 +87,7 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
     ----------
     labels : np.ndarray
         Cluster labels (-1 means no cluster assigned).
-    frame : np.ndarray
+    frame : pd.Series or np.ndarray
         Frame number for each localization.
 
     Returns
@@ -104,7 +104,7 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
     true_cluster = frame_grouped.apply(_frame_analysis, frame.max() + 1)
 
     # cluster ids that did not pass frame analysis
-    discard = true_cluster.index[true_cluster == 0].to_numpy()
+    discard = true_cluster.index[true_cluster == 0]
     # change labels of these clusters to -1
     labels[np.isin(labels, discard)] = -1
 
@@ -201,9 +201,7 @@ def _cluster(
 
 
 def cluster_2D(
-    x: np.ndarray,
-    y: np.ndarray,
-    frame: np.ndarray,
+    locs: pd.DataFrame,
     radius: float,
     min_locs: int,
     fa: bool,
@@ -212,10 +210,8 @@ def cluster_2D(
 
     Parameters
     ----------
-    x, y : np.ndarray
-        x and y coordinates to be clustered.
-    frame : np.ndarray
-        Frame number for each localization.
+    locs : pd.DataFrame
+        Localizations to be clustered.
     radius : float
         Clustering radius.
     min_locs : int
@@ -229,17 +225,25 @@ def cluster_2D(
         Cluster labels for each localization (-1 means no cluster
         assigned).
     """
-    X = np.stack((x, y)).T
+    X = locs[["x", "y"]].to_numpy()
 
     if not fa:
         frame = None
+    else:
+        frame = locs["frame"]
 
     labels = _cluster(X, radius, min_locs, frame)
 
     return labels
 
 
-def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
+def cluster_3D(
+    locs: pd.DataFrame,
+    radius_xy: float,
+    radius_z: float,
+    min_locs: int,
+    fa: bool,
+):
     """Prepare 3D input to be used by ``_cluster``.
 
     Scales z coordinates by radius_xy / radius_z
@@ -266,10 +270,13 @@ def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
         assigned).
     """
     radius = radius_xy
-    X = np.stack((x, y, z * radius_xy / radius_z)).T
+    X = locs[["x", "y", "z"]].to_numpy()
+    X[:, 2] *= radius_xy / radius_z
 
     if not fa:
         frame = None
+    else:
+        frame = locs["frame"]
 
     labels = _cluster(X, radius, min_locs, frame)
 
@@ -334,11 +341,9 @@ def cluster(
                 "Camera pixel size and clustering radius in z must be"
                 " specified for 3D clustering."
             )
+        locs["z"] /= pixelsize  # convert from nm to px
         labels = cluster_3D(
-            locs["x"].to_numpy(),
-            locs["y"].to_numpy(),
-            locs["z"].to_numpy() / pixelsize,  # convert from nm to px
-            locs["frame"].to_numpy(),
+            locs,
             radius_xy,
             radius_z,
             min_locs,
@@ -346,14 +351,14 @@ def cluster(
         )
     else:
         labels = cluster_2D(
-            locs["x"].to_numpy(),
-            locs["y"].to_numpy(),
-            locs["frame"].to_numpy(),
+            locs,
             radius_xy,
             min_locs,
             frame_analysis,
         )
     locs = extract_valid_labels(locs, labels)
+    if hasattr(locs, "z"):
+        locs["z"] *= pixelsize  # convert back to nm
     return locs
 
 
@@ -521,15 +526,10 @@ def hdbscan(
                 "Camera pixel size (nm) must be specified as an integer for 3D"
                 " clustering."
             )
-        X = np.vstack(
-            (
-                locs["x"].to_numpy(),
-                locs["y"].to_numpy(),
-                locs["z"].to_numpy() / pixelsize,
-            )
-        ).T
+        X = locs[["x", "y", "z"]].to_numpy()
+        X[:, 2] /= pixelsize
     else:
-        X = np.vstack((locs["x"].to_numpy(), locs["y"].to_numpy())).T
+        X = locs[["x", "y"]].to_numpy()
     labels = _hdbscan(
         X, min_cluster_size, min_samples, cluster_eps=cluster_eps
     )
@@ -660,7 +660,7 @@ def find_cluster_centers(
                 "n_events": n_events.astype(np.int32),
                 "volume": volume.astype(np.float32),
                 "convexhull": convexhull.astype(np.float32),
-                "group": res.index.to_numpy().astype(np.int32),  # group id
+                "group": res.index.astype(np.int32),  # group id
             }
         )
     else:
@@ -686,7 +686,7 @@ def find_cluster_centers(
                 "n_events": n_events.astype(np.int32),
                 "area": area.astype(np.float32),
                 "convexhull": convexhull.astype(np.float32),
-                "group": res.index.to_numpy().astype(np.int32),  # group id
+                "group": res.index.astype(np.int32),  # group id
             }
         )
     if hasattr(locs, "group_input"):
@@ -845,7 +845,7 @@ def cluster_center(
     return result
 
 
-def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
+def _cluster_area(X: np.ndarray, lp: float) -> float:
     """Calculate cluster area (2D) or volume (3D). Uses Otsu
     thresholding of the images of the clusters to find areas/volumes.
 
@@ -853,9 +853,9 @@ def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
     ----------
     X : np.ndarray
         Array of points of shape (n_points, n_dim).
-    lp : np.ndarray
-        Localization precision in x and y of the cluster. The median
-        is taken to define the pixel size for image rendering
+    lp : float
+        Median localization precision in x and y of the dataset. Used to
+        define the pixel size for image rendering
 
     Returns
     -------
@@ -863,7 +863,7 @@ def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
         Cluster area (2D) or volume (3D) in units of LP.
     """
     # get image
-    bin_size = np.median(lp) / 2  # pixel size for rendering
+    bin_size = lp / 2  # pixel size for rendering
     if X.shape[1] == 3:  # 3D
         bin_size_z = bin_size * 2.5  # just a rough estimate
         edges = [
@@ -930,12 +930,12 @@ def cluster_areas(
     else:
         iterator = range(len(groups))
 
+    lp = np.median(locs[["lpx", "lpy"]].mean(axis=1))
     for idx in iterator:
         group_id = groups[idx]
         grouplocs = locs[locs["group"] == group_id]
         if not len(grouplocs):
             continue
-        lp = locs[["lpx", "lpy"]].to_numpy().mean(axis=1)
         if hasattr(grouplocs, "z"):
             X = grouplocs[["x", "y", "z"]].to_numpy()
             X[:, 2] /= pixelsize  # convert z to pixels

@@ -284,8 +284,8 @@ def picked_locs(
                 group_locs = lib.locs_in_rectangle(group_locs, X, Y)
                 # store rotated coordinates in x_rot and y_rot
                 angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
-                x_shifted = group_locs["x"].to_numpy() - xs
-                y_shifted = group_locs["y"].to_numpy() - ys
+                x_shifted = group_locs["x"] - xs
+                y_shifted = group_locs["y"] - ys
                 x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(
                     angle
                 )
@@ -1052,10 +1052,13 @@ def frc(
 
     # select the locs within the viewport
     (y_min, x_min), (y_max, x_max) = viewport
-    x = locs["x"].to_numpy()
-    y = locs["y"].to_numpy()
-    in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
-    locs = locs.iloc[in_view]
+    in_view = (
+        (locs["x"] > x_min)
+        & (locs["y"] > y_min)
+        & (locs["x"] < x_max)
+        & (locs["y"] < y_max)
+    )
+    locs = locs.loc[in_view]
 
     np.random.seed(random_seed)
     # split locs randomly into two halves
@@ -1365,13 +1368,15 @@ def dark_times(
         is not followed by another binding event in the same group, the
         dark time is set to -1.
     """
-    last_frame = locs["frame"].to_numpy() + locs["len"].to_numpy() - 1
+    frame = locs["frame"].to_numpy()
+    lens = locs["len"].to_numpy()
+    last_frame = frame + lens - 1
     if group is None:
         if hasattr(locs, "group"):
             group = locs["group"].to_numpy()
         else:
             group = np.zeros(len(locs))
-    dark = _dark_times(locs["frame"].to_numpy(), group, last_frame)
+    dark = _dark_times(frame, group, last_frame)
     return dark
 
 
@@ -2237,8 +2242,8 @@ def undrift(
         fig1 = plt.figure(figsize=(10, 6), constrained_layout=True)
         plt.suptitle("Estimated drift")
         plt.subplot(1, 2, 1)
-        plt.plot(drift["x"].to_numpy(), label="x interpolated")
-        plt.plot(drift["y"].to_numpy(), label="y interpolated")
+        plt.plot(drift["x"], label="x interpolated")
+        plt.plot(drift["y"], label="y interpolated")
         t = (bounds[1:] + bounds[:-1]) / 2
         plt.plot(
             t,
@@ -2259,8 +2264,8 @@ def undrift(
         plt.ylabel("Drift (pixel)")
         plt.subplot(1, 2, 2)
         plt.plot(
-            drift["x"].to_numpy(),
-            drift["y"].to_numpy(),
+            drift["x"],
+            drift["y"],
             color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
         )
         plt.plot(

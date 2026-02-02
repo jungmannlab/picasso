@@ -941,7 +941,7 @@ def locs_from_fits(
     lpx = np.sqrt(CRLBs[:, 1])
     locs = pd.DataFrame(
         {
-            "frame": identifications["frame"].to_numpy().astype(np.uint32),
+            "frame": identifications["frame"].astype(np.uint32),
             "x": x.astype(np.float32),
             "y": y.astype(np.float32),
             "photons": theta[:, 2].astype(np.float32),
@@ -951,7 +951,7 @@ def locs_from_fits(
             "lpx": lpx.astype(np.float32),
             "lpy": lpy.astype(np.float32),
             "net_gradient": (
-                identifications["net_gradient"].to_numpy().astype(np.float32)
+                identifications["net_gradient"].astype(np.float32)
             ),
             "likelihood": likelihoods.astype(np.float32),
             "iterations": iterations.astype(np.int32),

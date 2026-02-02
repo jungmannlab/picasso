@@ -97,12 +97,8 @@ def calibrate_z(
         [locs["sy"][locs["frame"] == _].var() for _ in frame_range]
     )
 
-    keep_x = (
-        (locs["sx"] - mean_sx[locs["frame"]]) ** 2 < var_sx[locs["frame"]]
-    ).to_numpy()
-    keep_y = (
-        (locs["sy"] - mean_sy[locs["frame"]]) ** 2 < var_sy[locs["frame"]]
-    ).to_numpy()
+    keep_x = (locs["sx"] - mean_sx[locs["frame"]]) ** 2 < var_sx[locs["frame"]]
+    keep_y = (locs["sy"] - mean_sy[locs["frame"]]) ** 2 < var_sy[locs["frame"]]
     keep = keep_x & keep_y
     locs = locs[keep]
 
