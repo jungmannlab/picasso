@@ -98,7 +98,18 @@ Several Cameras
      Camera2:
      Camera3:
 
-Once there are several cameras present, Picasso will select the camera who's name matches the Micro-Manager Metadata. If no camera is found, the first one is automatically selected.
+Once there are several cameras present, Picasso will select the camera who's name matches the Micro-Manager Metadata. If no camera is found, the first one is automatically selected. In the dropdown menu, the configured cameras are displayed in alphabetical order.
+
+Camera Priorities
+^^^^^^^^^^^^^^^^^
+
+::
+
+   CameraPriority:
+      - Camera3
+      - Camera1
+
+If many cameras are configured, the dropdown can become cluttered. For that reason, the config can additionally include a "CameraPriority" field. It describes a list of camera names which must match names in the "Cameras" field. The listed cameras are then displayed on top of the dropdown menu while the non-listed cameras are shown below in alphabetical order.
 
 3D-Calibration
 --------------
@@ -124,3 +135,17 @@ Fitting z
 
 For each localization, sigma_x and sigma_y is determined. Similar to the Science paper, the following equation is used to minimize the Distance D:  ``D = (sx0.5 - wx0.5)^2 + (sy0.5 - wy0.5)^2`` with w being ``c[6]z0 +
 c[5]z1 .. + c[0]z6``.
+
+Incorporating calibrations in config file
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The calibration depends on the microscope, camera, and emission wavelength used. It can become tedious to navigate to and select the correct calibration yaml file. Therefore, the config file can include a field to map camera and emission wavelength to path of the z calibration yaml file:
+
+::
+
+   z-calibrations:
+      Camera1:
+         525: /path/to/Camera1-GFP-zcalibration.yaml
+         595: /path/to/Camera1-Cy3B-zcalibration.yaml
+
+If the camera names and emission wavelengths match the settings in Micromanager, the correct z-calibration is automatically loaded. In any case an alternative calibration yaml file can be loaded by button.
