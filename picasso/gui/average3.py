@@ -795,7 +795,11 @@ class Window(QtWidgets.QMainWindow):
             if self.dataset_dialog.checks[i].isChecked():
                 renderings.append(
                     render.render_hist3d(
-                        locs[i],
+                        locs[i]["x"].to_numpy(),
+                        locs[i]["y"].to_numpy(),
+                        locs[i]["z"]
+                        .to_numpy()
+                        .copy(),  # do not remove the copy!
                         oversampling,
                         self.t_min,
                         self.t_min,
@@ -871,7 +875,9 @@ class Window(QtWidgets.QMainWindow):
     def translate(self, translateaxis):
         renderings = [
             render.render_hist3d(
-                _,
+                _["x"].to_numpy(),
+                _["y"].to_numpy(),
+                _["z"].to_numpy().copy(),  # do not remove the copy!
                 self.oversampling,
                 self.t_min,
                 self.t_min,
@@ -1146,7 +1152,9 @@ class Window(QtWidgets.QMainWindow):
 
         renderings = [
             render.render_hist3d(
-                _,
+                _["x"].to_numpy(),
+                _["y"].to_numpy(),
+                _["z"].to_numpy().copy(),  # do not remove the copy!
                 self.oversampling,
                 self.t_min,
                 self.t_min,
@@ -1283,7 +1291,9 @@ class Window(QtWidgets.QMainWindow):
 
         renderings = [
             render.render_hist3d(
-                _,
+                _["x"].to_numpy(),
+                _["y"].to_numpy(),
+                _["z"].to_numpy().copy(),  # do not remove the copy!
                 self.oversampling,
                 self.t_min,
                 self.t_min,
@@ -1497,7 +1507,9 @@ class Window(QtWidgets.QMainWindow):
 
         renderings = [
             render.render_hist3d(
-                _,
+                _["x"].to_numpy(),
+                _["y"].to_numpy(),
+                _["z"].to_numpy().copy(),  # do not remove the copy!
                 self.oversampling,
                 self.t_min,
                 self.t_min,

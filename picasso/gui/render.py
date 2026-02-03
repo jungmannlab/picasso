@@ -12004,7 +12004,9 @@ class Window(QtWidgets.QMainWindow):
                 locs = self.view.locs[channel]
                 if has_z:
                     n, image = render.render_hist3d(
-                        locs,
+                        locs["x"].to_numpy(),
+                        locs["y"].to_numpy(),
+                        locs["z"].to_numpy().copy(),  # do not remove the copy!
                         oversampling,
                         y_min,
                         x_min,

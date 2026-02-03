@@ -1026,7 +1026,9 @@ class MaskGenerator:
             self.z_min = self.locs.z.min()
             self.z_max = self.locs.z.max()
             _, image = render.render_hist3d(
-                self.locs,
+                self.locs["x"].to_numpy(),
+                self.locs["y"].to_numpy(),
+                self.locs["z"].to_numpy().copy(),  # do not remove the copy!
                 oversampling,
                 self.y_min,
                 self.x_min,

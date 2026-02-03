@@ -597,7 +597,9 @@ def render_hist(
 
 @numba.jit(nopython=True, nogil=True)
 def render_hist3d(
-    locs: pd.DataFrame,
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
     oversampling: float,
     y_min: float,
     x_min: float,
@@ -638,9 +640,9 @@ def render_hist3d(
     z_max = z_max / pixelsize
 
     image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(
-        locs["x"].to_numpy(),
-        locs["y"].to_numpy(),
-        locs["z"].to_numpy(),
+        x,
+        y,
+        z,
         oversampling,
         y_min,
         x_min,
@@ -652,6 +654,7 @@ def render_hist3d(
     )
     _fill3d(image, x, y, z)
     n = len(x)
+    z *= pixelsize  # convert back to nm
     return n, image
 
 
