@@ -2351,7 +2351,7 @@ class Window(QtWidgets.QMainWindow):
             "LQ, Gaussian": "gausslq",
             "MLE, integrated Gaussian": "gaussmle",
             "Average of ROI": "gausslq",
-        }
+        }[self.parameters_dialog.fit_method.currentText()]
         self.fit_z_worker = FitZWorker(
             self.locs,
             self.info,
