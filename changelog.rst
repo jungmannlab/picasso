@@ -1,7 +1,11 @@
 Changelog
 =========
 
-Last change: 29-JAN-2026 CEST
+Last change: 03-FEB-2026 CEST
+
+0.9.6
+-----
+- Correct axial localization precision in Localize (magnification factor)
 
 0.9.4-5
 -------

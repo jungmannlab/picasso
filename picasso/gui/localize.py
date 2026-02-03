@@ -2346,12 +2346,19 @@ class Window(QtWidgets.QMainWindow):
         """Fit z coordinates of the fitted localizations based on the
         calibration data."""
         self.status_bar.showMessage("Fitting z position...")
+        # avgroi won't really work but kept for compatibility
+        fitting_method = {
+            "LQ, Gaussian": "gausslq",
+            "MLE, integrated Gaussian": "gaussmle",
+            "Average of ROI": "gausslq",
+        }
         self.fit_z_worker = FitZWorker(
             self.locs,
             self.info,
             self.parameters_dialog.z_calibration,
             self.parameters_dialog.magnification_factor.value(),
             self.parameters_dialog.pixelsize.value(),
+            fitting_method,
         )
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
@@ -2751,6 +2758,7 @@ class FitZWorker(QtCore.QThread):
         calibration: dict,
         magnification_factor: float,
         pixelsize: float,
+        fitting_method: Literal["gausslq", "gaussmle"],
     ) -> None:
         super().__init__()
         self.locs = locs
@@ -2758,6 +2766,7 @@ class FitZWorker(QtCore.QThread):
         self.calibration = calibration
         self.magnification_factor = magnification_factor
         self.pixelsize = pixelsize
+        self.fitting_method = fitting_method
 
     def run(self) -> None:
         t0 = time.time()
@@ -2768,6 +2777,7 @@ class FitZWorker(QtCore.QThread):
             self.calibration,
             self.magnification_factor,
             self.pixelsize,
+            fitting_method=self.fitting_method,
             filter=0,
             asynch=True,
         )

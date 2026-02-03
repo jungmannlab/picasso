@@ -232,12 +232,12 @@ def calibrate_z(
 
 @numba.jit(nopython=True, nogil=True)
 def _fit_z_target(
-    z: np.array,
-    sx: np.array,
-    sy: np.array,
-    cx: np.array,
-    cy: np.array,
-) -> np.array:
+    z: float,
+    sx: float,
+    sy: float,
+    cx: np.ndarray,
+    cy: np.ndarray,
+) -> float:
     """Target function that's to be minimized for fitting the z
     coordinates given the single-emitter image width and height as well
     as the calibration curve coefficients. It calculates the difference
@@ -267,10 +267,7 @@ def _fit_z_target(
         + cy[5] * z
         + cy[6]
     )
-    return (sx**0.5 - wx**0.5) ** 2 + (
-        sy**0.5 - wy**0.5
-    ) ** 2  # Apparently this results in slightly more accurate z coordinates
-    # (Huang et al. '08)
+    return (sx**0.5 - wx**0.5) ** 2 + (sy**0.5 - wy**0.5) ** 2
 
 
 def fit_z(
@@ -279,6 +276,7 @@ def fit_z(
     calibration: dict,
     magnification_factor: float,
     pixelsize: float,
+    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
 ) -> pd.DataFrame:
     """Fit z coordinates to the localizations based on the calibration
@@ -301,6 +299,9 @@ def fit_z(
         estimated z position from the localization data.
     pixelsize : float
         Camera pixel size in nm.
+    fitting_method : {"gausslq", "gaussmle"}, optional
+        Fitting method used to obtain 2D localization parameters (x, y,
+        sx, sy). Default is "gausslq".
     filter : int, optional
         Filter for the z fits. If set to 0, no filtering is applied.
         If set to 2, the z fits are filtered based on the root mean
@@ -317,36 +318,27 @@ def fit_z(
     cy = np.array(calibration["Y Coefficients"])
     z = np.zeros_like(locs["x"])
     square_d_zcalib = np.zeros_like(z)
-    sx = locs["sx"].to_numpy()
-    sy = locs["sy"].to_numpy()
-    photons = locs["photons"].to_numpy()
-    bg = locs["bg"].to_numpy()
-    print(pixelsize)
     for i in range(len(z)):
         # set bounds to avoid potential gaps in the calibration curve,
         # credits to Loek Andriessen
         result = minimize_scalar(
-            _fit_z_target, bounds=[-1000, 1000], args=(sx[i], sy[i], cx, cy)
+            _fit_z_target,
+            bounds=[-1000, 1000],
+            args=(locs["sx"][i], locs["sy"][i], cx, cy),
         )
         z[i] = result.x
         square_d_zcalib[i] = result.fun
-    z *= magnification_factor
-    locs["z"] = z
+    locs["z"] = z * magnification_factor
     locs["d_zcalib"] = np.sqrt(square_d_zcalib)
-    locs["lpz"] = (
-        _axial_localization_precision_astig(
-            photons,
-            sx,
-            sy,
-            bg,
-            z,
-            cx,
-            cy,
-            pixelsize,
-            "gausslq",
-        )
-        * magnification_factor
-    )  # TODO: add fitting method, its actually a bad implementation, should use saxial_localization_precision
+    lpz = _axial_localization_precision_astig(
+        locs,
+        cx,
+        cy,
+        magnification_factor,
+        pixelsize,
+        fitting_method,
+    )
+    locs["lpz"] = lpz
     locs = lib.ensure_sanity(locs, info)
     return filter_z_fits(locs, filter)
 
@@ -357,6 +349,7 @@ def fit_z_parallel(
     calibration: dict,
     magnification_factor: float,
     pixelsize: float,
+    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
     asynch: bool = False,
 ) -> pd.DataFrame | list[futures.Future]:
@@ -381,6 +374,9 @@ def fit_z_parallel(
         estimated z position from the localization data.
     pixelsize : float
         Camera pixel size in nm.
+    fitting_method : {"gausslq", "gaussmle"}, optional
+        Fitting method used to obtain 2D localization parameters (x, y,
+        sx, sy). Default is "gausslq".
     filter : int, optional
         Filter for the z fits. If set to 0, no filtering is applied.
         If set to 2, the z fits are filtered based on the root mean
@@ -424,6 +420,7 @@ def fit_z_parallel(
                 calibration,
                 magnification_factor,
                 pixelsize,
+                fitting_method=fitting_method,
                 filter=0,
             )
         )
@@ -526,7 +523,7 @@ def axial_localization_precision(
     """
     if modality != "astigmatic":
         raise NotImplementedError(
-            "Currently, only 'astigmatic' modality is supported."
+            "Currently only 'astigmatic' modality is supported."
         )
     lpz = axial_localization_precision_astig(
         locs, info, calibration, fitting_method
@@ -578,51 +575,33 @@ def axial_localization_precision_astig(
     if pixelsize is None:
         raise ValueError("Pixelsize not found in info.")
 
-    photons = locs["photons"].to_numpy()
-    sx = locs["sx"].to_numpy()
-    sy = locs["sy"].to_numpy()
-    bg = locs["bg"].to_numpy()
     mag_factor = calibration["Magnification factor"]
-    z = (
-        locs["z"].to_numpy() / mag_factor
-    )  # to pinpoint what was the actual spot size during measurement
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
-    lpz = (
-        _axial_localization_precision_astig(
-            photons, sx, sy, bg, z, cx, cy, pixelsize, fitting_method
-        )
-        * mag_factor
+    lpz = _axial_localization_precision_astig(
+        locs, cx, cy, mag_factor, pixelsize, fitting_method
     )
     return lpz
 
 
 def _axial_localization_precision_astig(
-    photons: np.ndarray,
-    sx: np.ndarray,
-    sy: np.ndarray,
-    bg: np.ndarray,
-    z: np.ndarray,
+    locs: pd.DataFrame,
     cx: np.ndarray,
     cy: np.ndarray,
+    magnification_factor: float,
     pixelsize: float,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
 ) -> np.ndarray:
     """Calculate axial localization precision for astigmatic 3D imaging
-    based on calibration coefficients and localization parameters.
+    for given localizations based on calibration.
+
+    Based on Kowalewski, Reinhardt, et al. *DOI will be added once available*.
 
     Parameters
     ----------
-    photons : np.ndarray
-        Number of photons.
-    sx : np.ndarray
-        Single-emitter images' fitted width in camera pixels.
-    sy : np.ndarray
-        Single-emitter images' fitted height in camera pixels.
-    bg : np.ndarray
-        Background photons per pixel.
-    z : np.ndarray
-        Z positions in nm.
+    locs : pd.DataFrame
+        Localizations. Must include columns 'photons', 'sx', 'sy', 'bg',
+        and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#localization-hdf5-files
     cx : np.ndarray
         3D calibration coefficients for x.
     cy : np.ndarray
@@ -645,6 +624,8 @@ def _axial_localization_precision_astig(
     else:
         raise ValueError("fitting_method must be 'gausslq' or 'gaussmle'.")
 
+    # to pinpoint what was the actual spot size during measurement
+    z = locs["z"] / magnification_factor
     wx_calib = get_calib_size(cx, z) * pixelsize
     wy_calib = get_calib_size(cy, z) * pixelsize
     wx_calib_prime = get_prime_calib_size(cx, z) * pixelsize
@@ -653,16 +634,22 @@ def _axial_localization_precision_astig(
     sqrt_wx_calib_prime = wx_calib_prime / (2 * sqrt_wx_calib)
     sqrt_wy_calib = np.sqrt(wy_calib)
     sqrt_wy_calib_prime = wy_calib_prime / (2 * sqrt_wy_calib)
-    se_sx = sigma_uncertainty(sx, sy, photons, bg) * pixelsize
-    se_sy = sigma_uncertainty(sy, sx, photons, bg) * pixelsize
-    delta_sqrt_wx = (1 / (2 * np.sqrt(sx * pixelsize))) * se_sx
-    delta_sqrt_wy = (1 / (2 * np.sqrt(sy * pixelsize))) * se_sy
+    se_sx = (
+        sigma_uncertainty(locs["sx"], locs["sy"], locs["photons"], locs["bg"])
+        * pixelsize
+    )
+    se_sy = (
+        sigma_uncertainty(locs["sy"], locs["sx"], locs["photons"], locs["bg"])
+        * pixelsize
+    )
+    delta_sqrt_wx = (1 / (2 * np.sqrt(locs["sx"] * pixelsize))) * se_sx
+    delta_sqrt_wy = (1 / (2 * np.sqrt(locs["sy"] * pixelsize))) * se_sy
     swxc2 = sqrt_wx_calib_prime**2
     swyc2 = sqrt_wy_calib_prime**2
     swx2 = delta_sqrt_wx**2
     swy2 = delta_sqrt_wy**2
     lpz = np.sqrt((swxc2 * swx2 + swyc2 * swy2) / (swxc2 + swyc2) ** 2)
-    return lpz
+    return lpz * magnification_factor
 
 
 def get_calib_size(coeffs: np.ndarray, z: np.ndarray) -> np.ndarray:
