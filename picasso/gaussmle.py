@@ -874,9 +874,10 @@ def locs_from_fits(
 
 
 def sigma_uncertainty(
-    sigma: np.ndarray,
-    photons: np.ndarray,
-    bg: np.ndarray,
+    sigma: pd.Series | np.ndarray,
+    sigma_orth: pd.Series | np.ndarray,
+    photons: pd.Series | np.ndarray,
+    bg: pd.Series | np.ndarray,
 ) -> np.ndarray:
     """Calculate standard error of fitted sigma based on the MLE 2D
     Gaussian/Poisson noise model (picasso.gaussmle).
@@ -890,11 +891,14 @@ def sigma_uncertainty(
 
     Parameters
     ----------
-    sigma : np.ndarray
+    sigma : pd.Series | np.ndarray
         Fitted sigma values in camera pixels.
-    photons : np.ndarray
+    sigma_orth : pd.Series | np.ndarray
+        Fitted sigma values in the orthogonal direction in camera
+        pixels.
+    photons : pd.Series | np.ndarray
         Number of photons.
-    bg : np.ndarray
+    bg : pd.Series | np.ndarray
         Background photons per pixel.
 
     Returns

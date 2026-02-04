@@ -541,10 +541,10 @@ def localization_precision(
 
 
 def sigma_uncertainty(
-    sigma: np.ndarray,
-    sigma_orth: np.ndarray,
-    photons: np.ndarray,
-    bg: np.ndarray,
+    sigma: pd.Series | np.ndarray,
+    sigma_orth: pd.Series | np.ndarray,
+    photons: pd.Series | np.ndarray,
+    bg: pd.Series | np.ndarray,
 ) -> np.ndarray:
     """Calculate standard error of fitted sigma based on the 2D Gaussian
     least-squares fitting model with diagonal covariance matrix.
@@ -553,14 +553,14 @@ def sigma_uncertainty(
 
     Parameters
     ----------
-    sigma : np.ndarray
+    sigma : pd.Series | np.ndarray
         Fitted sigma values in camera pixels.
-    sigma_orth : np.ndarray
+    sigma_orth : pd.Series | np.ndarray
         Fitted sigma values in the orthogonal direction in camera
         pixels.
-    photons : np.ndarray
+    photons : pd.Series | np.ndarray
         Number of photons.
-    bg : np.ndarray
+    bg : pd.Series | np.ndarray
         Background photons per pixel.
 
     Returns
