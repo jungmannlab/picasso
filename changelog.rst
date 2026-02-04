@@ -15,6 +15,7 @@ Small improvements:
 Bug fixes:
 ++++++++++
 - SPINNA 3D mask generation fixed (and ``picasso.render.render_hist3d``)
+- Remove backward incompatible camera pixel size reading in SPINNA's mask generation (related to #602)
 
 0.9.4-5
 -------

@@ -12,7 +12,6 @@ Graphical user interface for rendering localization images.
 from __future__ import annotations
 
 import os
-import re
 import sys
 import traceback
 import warnings
