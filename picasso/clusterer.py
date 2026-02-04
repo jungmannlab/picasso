@@ -1008,8 +1008,8 @@ def test_subclustering(
     idx1 = indices[:, 1]
 
     # split molecules into clustered and monomeric
-    close_nnd_idx = idx1[np.where(nnd1 < clustering_dist / pixelsize)[0]]
-    far_nnd_idx = idx1[np.where(nnd1 >= sparse_dist / pixelsize)[0]]
+    close_nnd_idx = np.where(nnd1 < clustering_dist / pixelsize)[0]
+    far_nnd_idx = np.where(nnd1 >= sparse_dist / pixelsize)[0]
     close_mols = mols.iloc[close_nnd_idx]
     far_mols = mols.iloc[far_nnd_idx]
     clustered_nevents = close_mols["n_events"].to_numpy()
