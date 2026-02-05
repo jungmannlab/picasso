@@ -15,6 +15,7 @@ Small improvements:
 - Render: increase the speed of picking circular locs, picking similar and filter by number of localizations (numba implementation)
 - Render property histogram shown before rendering is activated
 - Render property - removed legend
+- Localize zooms in and out centered at the current view
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - Use ``"col" in df.columns`` instead of ``hasattr(df, "col")`` to check for columns in DataFrames (better readability)
 

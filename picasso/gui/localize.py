@@ -2493,7 +2493,18 @@ class Window(QtWidgets.QMainWindow):
             if visible_scene_rect.width() / factor > self.movie.shape[2]:
                 self.fit_in_view()
                 return
+        # get the center of the current visible viewport in scene coordinates
+        viewport_rect = self.view.viewport().rect()
+        viewport_center = QtCore.QPointF(
+            viewport_rect.x() + viewport_rect.width() / 2.0,
+            viewport_rect.y() + viewport_rect.height() / 2.0,
+        )
+        scene_center = self.view.mapToScene(viewport_center.toPoint())
+        # apply the zoom
         self.view.scale(factor, factor)
+        # re-center the view on the same scene point
+        self.view.centerOn(scene_center)
+
         self.draw_frame()
 
     def save_spots(self, path: str) -> None:
