@@ -14,6 +14,7 @@ Small improvements:
 - Moved from merge sort to quick sort (often faster due to lower memory usage)
 - Render: increase the speed of picking circular locs, picking similar and filter by number of localizations (numba implementation)
 - Render property histogram shown before rendering is activated
+- Render property - removed legend
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - Use ``"col" in df.columns`` instead of ``hasattr(df, "col")`` to check for columns in DataFrames (better readability)
 

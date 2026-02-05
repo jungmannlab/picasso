@@ -4906,8 +4906,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
         Tick to display scale bar's length (nm).
-    show_legend : QPushButton
-        Click to display parameter rendering's legend.
     _silent_disp_px_update : bool
         True if update display pixel size in background.
     zoom : QDoubleSpinBox
@@ -5194,12 +5192,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.render_check.setEnabled(False)
         render_grid.addWidget(self.render_check, 5, 0)
 
-        self.show_legend = QtWidgets.QPushButton("Show legend")
-        self.show_legend.setToolTip(
-            "Display the legend for the rendered property."
-        )
-        render_grid.addWidget(self.show_legend, 5, 1)
-
         fw, fh, dpi = (2, 1, 150)
         self.figure_prop = plt.figure(
             figsize=(fw, fh), dpi=dpi, constrained_layout=True
@@ -5217,9 +5209,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.canvas_prop.setMinimumSize(QtCore.QSize(fw * dpi, fh * dpi))
         render_grid.addWidget(self.canvas_prop, 6, 0, 6, 2)
 
-        self.show_legend.setEnabled(False)
-        self.show_legend.setAutoDefault(False)
-        self.show_legend.clicked.connect(self.window.view.show_legend)
         self.render_groupbox.setEnabled(False)
 
         # adjust the size of the dialog to fit its contents
@@ -10162,40 +10151,6 @@ class View(QtWidgets.QLabel):
         image = np.maximum(image, 0.0)
         return image
 
-    def show_legend(self) -> None:
-        """Display legend for rendering by property."""
-        parameter = self.window.display_settings_dlg.parameter.currentText()
-        n_colors = self.window.display_settings_dlg.color_step.value()
-        min_val = self.window.display_settings_dlg.minimum_render.value()
-        max_val = self.window.display_settings_dlg.maximum_render.value()
-
-        colors = get_render_properties_colors(
-            n_colors,
-            self.window.display_settings_dlg.colormap_prop.currentText(),
-        )
-
-        fig1 = plt.figure(figsize=(5, 1), constrained_layout=True)
-
-        ax1 = fig1.add_subplot(111, aspect="equal")
-
-        color_spacing = 10 / len(colors)
-        xpos = 0
-        for i in range(len(colors)):
-            ax1.add_patch(
-                patches.Rectangle((xpos, 0), color_spacing, 1, color=colors[i])
-            )
-            xpos += color_spacing
-
-        x = np.arange(0, 11, 2.5)
-        ax1.set_xlim([0, 10])
-        ax1.get_yaxis().set_visible(False)
-
-        labels = np.linspace(min_val, max_val, 5).round(2)
-        plt.xticks(x, labels)
-
-        plt.title(parameter)
-        fig1.show()
-
     def activate_render_property(self) -> None:
         """Assign localizations by color to render a chosen property."""
         self.deactivate_property_menu()  # blocks changing render parameters
@@ -10259,7 +10214,6 @@ class View(QtWidgets.QLabel):
                     del self.x_render_cache[-1]
 
             self.x_locs = x_locs
-            self.window.display_settings_dlg.show_legend.setEnabled(True)
         else:
             self.x_render_state = False
         self.update_scene()
