@@ -393,7 +393,7 @@ def locs_from_fits(
     b = np.minimum(theta[:, 4], theta[:, 5])
     ellipticity = (a - b) / a
 
-    if hasattr(identifications, "n_id"):
+    if "n_id" in identifications.columns:
         locs = pd.DataFrame(
             {
                 "frame": identifications["frame"].astype(np.uint32),
@@ -412,7 +412,7 @@ def locs_from_fits(
                 "n_id": identifications["n_id"].astype(np.uint32),
             }
         )
-        locs.sort_values(by="n_id", kind="mergesort", inplace=True)
+        locs.sort_values(by="n_id", kind="quicksort", inplace=True)
     else:
         locs = pd.DataFrame(
             {
@@ -431,7 +431,7 @@ def locs_from_fits(
                 ),
             }
         )
-        locs.sort_values(by="frame", kind="mergesort", inplace=True)
+        locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
 
 
@@ -491,7 +491,7 @@ def locs_from_fits_gpufit(
             "net_gradient": identifications["net_gradient"].astype(np.float32),
         }
     )
-    locs.sort_values(by="frame", kind="mergesort", inplace=True)
+    locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
 
 

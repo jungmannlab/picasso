@@ -709,7 +709,6 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
         Localizations that pass the sanity checks.
     """
     # no inf and nan:
-    locs = locs.copy()
     locs.replace([np.inf, -np.inf], np.nan, inplace=True)
     locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:
@@ -750,11 +749,11 @@ def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
         Boolean array - True if a localization is within radius r
         of position (x, y).
     """
-    dx = locs["x"].to_numpy() - x
-    dy = locs["y"].to_numpy() - y
+    dx = locs["x"] - x
+    dy = locs["y"] - y
     r2 = r**2
     is_picked = dx**2 + dy**2 < r2
-    return is_picked
+    return is_picked.to_numpy()
 
 
 def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:

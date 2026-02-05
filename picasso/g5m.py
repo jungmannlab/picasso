@@ -1406,7 +1406,7 @@ def run_g5m_group_3D(
         len(sigma_bounds) == 2
     ), "sigma_bounds must be a tuple of two values."
     # make sure lpz is available (assume gauss least-squares used for localization)
-    if not hasattr(locs_group, "lpz"):
+    if "lpz" not in locs_group.columns:
         locs_group = locs_group.copy()
         locs_group["lpz"] = zfit.axial_localization_precision(
             locs_group, [{"Pixelsize": pixelsize}], calibration, "gausslq"
@@ -1606,7 +1606,7 @@ def approximate_sem(g5m: G5M, locs: pd.DataFrame) -> np.ndarray:
     weights = g5m.weights
     covariances = g5m.covariances
 
-    if not hasattr(locs, "z"):
+    if "z" not in locs.columns:
         covariances = np.repeat(covariances, 2).reshape(-1, 2)
     N = len(locs) * weights.reshape(len(weights), -1)
     sem = np.sqrt(covariances / N)
@@ -1640,7 +1640,7 @@ def bootstrap_sem(
     boot_means = []
     for i in range(n_bootstraps):
         X_boot = g5m.sample(len(locs))[0]
-        if hasattr(locs, "z"):
+        if "z" in locs.columns:
             g5m_boot = G5M_3D(
                 n_components=len(g5m.valid_idx),
                 min_locs=g5m.min_locs,
@@ -1699,13 +1699,13 @@ def convert_G5M_results(
         Localizations with assigned cluster labels, based on the G5M
         components.
     """
-    locs_group = locs_group.copy()
+    # locs_group = locs_group.copy()
     means = g5m.means
     covariances = g5m.covariances
     weights = g5m.weights
     # find responsibilites which are used for weighted averaging of
     # properties per component
-    if hasattr(locs_group, "z"):
+    if "z" in locs_group.columns:
         X = locs_group[["x", "y", "z"]].to_numpy()
         X[:, 2] /= pixelsize  # convert z to camera pixels
         e_step = e_step_3D
@@ -1763,7 +1763,7 @@ def convert_G5M_results(
     lpx = sem[:, 0]
     lpy = sem[:, 1]
 
-    if hasattr(locs_group, "z"):
+    if "z" in locs_group.columns:
         z = means[:, 2] * pixelsize
         sigma_x = np.sqrt(covariances[:, 0]) * pixelsize
         sigma_y = np.sqrt(covariances[:, 1]) * pixelsize
@@ -1837,7 +1837,7 @@ def convert_G5M_results(
     x_events = [np.mean(_) for _ in x_events]
     y_events = np.split(locs_group["y"].to_numpy(), split_idx)
     y_events = [np.mean(_) for _ in y_events]
-    if hasattr(locs_group, "z"):
+    if "z" in locs_group.columns:
         z_events = np.split(locs_group["z"].to_numpy(), split_idx)
         z_events = [np.mean(_) / pixelsize for _ in z_events]
         X_events = np.stack((x_events, y_events, z_events)).T
@@ -1853,7 +1853,7 @@ def convert_G5M_results(
     n_events = np.array([count_dict.get(_, 0) for _ in expected_labels])
 
     # convert to DataFrame
-    if hasattr(locs_group, "z"):
+    if "z" in locs_group.columns:
         centers = pd.DataFrame(
             {
                 "frame": frame.astype(np.float32),
@@ -2162,7 +2162,7 @@ def run_g5m_in_clusters(
     centers = []
     clustered_locs = []
     for group in np.unique(locs.group)[i : i + n_groups_task]:
-        if hasattr(locs, "z"):
+        if "z" in locs.columns:
             centers_, clustered_locs_ = run_g5m_group_3D(
                 locs_group=locs[locs["group"] == group],
                 calibration=calibration,
@@ -2337,8 +2337,8 @@ def g5m(
     assert (
         sigma_bounds[0] <= sigma_bounds[1]
     ), "sigma_bounds[0] must not be larger than sigma_bounds[1]."
-    assert hasattr(
-        locs, "group"
+    assert (
+        "group" in locs.columns
     ), "Localizations must be grouped. Use DBSCAN or similar."
 
     pixelsize = lib.get_from_metadata(info, "Pixelsize")
@@ -2346,7 +2346,7 @@ def g5m(
         raise ValueError("Camera pixel size must be provided in info.")
 
     # check that calibration is provided for 3D data
-    if hasattr(locs, "z") and calibration is None:
+    if "z" in locs.columns and calibration is None:
         raise ValueError(
             "Calibration dictionary must be provided for 3D data."
         )
@@ -2397,7 +2397,7 @@ def g5m(
         centers = []
         clustered_locs = []
         for i, group in enumerate(np.unique(locs["group"])):
-            if hasattr(locs, "z"):
+            if "z" in locs.columns:
                 centers_, clustered_locs_ = run_g5m_group_3D(
                     locs[locs["group"] == group],
                     calibration=calibration,
@@ -2465,7 +2465,7 @@ def g5m(
             sigma_bounds[1] * pixelsize,
         ]
         new_info["Sigma bounds method"] = "Abs"
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         new_info["X Coefficients"] = calibration["X Coefficients"]
         new_info["Y Coefficients"] = calibration["Y Coefficients"]
         new_info["Calibration z Step size in nm"] = calibration[

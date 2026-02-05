@@ -235,15 +235,29 @@ def picked_locs(
 
         if pick_shape == "Circle":
             index_blocks = get_index_blocks(locs, info, pick_size)
+            locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
             for i, pick in enumerate(picks):
                 x, y = pick
-                block_locs = get_block_locs_at(x, y, index_blocks)
-                group_locs = lib.locs_at(x, y, block_locs, pick_size).copy()
+                x_, y_ = int(x / pick_size), int(y / pick_size)
+                block_locs_idx = _get_block_locs_at_numba(
+                    x_,
+                    y_,
+                    index_blocks[4],
+                    index_blocks[5],
+                    index_blocks[6],
+                    index_blocks[7],
+                )
+                block_locs = index_blocks[0].iloc[block_locs_idx]
+                group_locs_idx = _locs_at_numba(
+                    x, y, locs_xy[:, block_locs_idx], pick_size
+                )
+                group_locs = block_locs.iloc[group_locs_idx].copy()
+
                 if add_group:
                     group_locs["group"] = i
                 group_locs.sort_values(
                     by="frame",
-                    kind="mergesort",
+                    kind="quicksort",
                     inplace=True,
                 )
                 picked_locs.append(group_locs)
@@ -270,8 +284,8 @@ def picked_locs(
                 group_locs = lib.locs_in_rectangle(group_locs, X, Y)
                 # store rotated coordinates in x_rot and y_rot
                 angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
-                x_shifted = group_locs["x"].to_numpy() - xs
-                y_shifted = group_locs["y"].to_numpy() - ys
+                x_shifted = group_locs["x"] - xs
+                y_shifted = group_locs["y"] - ys
                 x_pick_rot = x_shifted * np.cos(angle) - y_shifted * np.sin(
                     angle
                 )
@@ -281,11 +295,9 @@ def picked_locs(
                 group_locs["x_pick_rot"] = x_pick_rot
                 group_locs["y_pick_rot"] = y_pick_rot
                 if add_group:
-                    group_locs["group"] = i * np.ones(
-                        len(group_locs), dtype=np.int32
-                    )
+                    group_locs["group"] = i
                 group_locs.sort_values(
-                    by="frame", kind="mergesort", inplace=True
+                    by="frame", kind="quicksort", inplace=True
                 )
                 picked_locs.append(group_locs)
 
@@ -309,11 +321,9 @@ def picked_locs(
                 group_locs = group_locs[group_locs["y"] < max(Y)]
                 group_locs = lib.locs_in_polygon(group_locs, X, Y)
                 if add_group:
-                    group_locs["group"] = i * np.ones(
-                        len(group_locs), dtype=np.int32
-                    )
+                    group_locs["group"] = i
                 group_locs.sort_values(
-                    by="frame", kind="mergesort", inplace=True
+                    by="frame", kind="quicksort", inplace=True
                 )
                 picked_locs.append(group_locs)
 
@@ -335,11 +345,9 @@ def picked_locs(
                 group_locs = group_locs[group_locs["y"] > y_min]
                 group_locs = group_locs[group_locs["y"] < y_max]
                 if add_group:
-                    group_locs["group"] = i * np.ones(
-                        len(group_locs), dtype=np.int32
-                    )
+                    group_locs["group"] = i
                 group_locs.sort_values(
-                    by="frame", kind="mergesort", inplace=True
+                    by="frame", kind="quicksort", inplace=True
                 )
                 picked_locs.append(group_locs)
 
@@ -398,14 +406,22 @@ def pick_similar(
     d2 = d**2
     # extract n_locs and rmsd from current picks
     index_blocks = get_index_blocks(locs, info, r)
+    locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
     n_locs = []
     rmsd = []
     for i, pick in enumerate(picks):
         x, y = pick
-        block_locs = get_block_locs_at(x, y, index_blocks)
-        pick_locs = lib.locs_at(x, y, block_locs, r)
-        n_locs.append(len(pick_locs))
-        pick_locs_xy = pick_locs[["x", "y"]].to_numpy().T
+        block_locs_xy = get_block_locs_at_numba(
+            int(x / r),
+            int(y / r),
+            locs_xy,
+            index_blocks[4],
+            index_blocks[5],
+            index_blocks[6],
+            index_blocks[7],
+        )
+        pick_locs_xy = locs_at_numba(x, y, block_locs_xy, r)
+        n_locs.append(pick_locs_xy.shape[1])
         rmsd.append(rmsd_at_com(pick_locs_xy))
 
     # calculate min and max n_locs and rmsd for picking similar
@@ -628,26 +644,25 @@ def n_block_locs_at(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def get_block_locs_at_numba(
-    x_range: int,
-    y_range: int,
-    locs_xy: np.ndarray,
+def _get_block_locs_at_numba(
+    x_index: int,
+    y_index: int,
     block_starts: np.ndarray,
     block_ends: np.ndarray,
     K: int,
     L: int,
 ) -> np.ndarray:
-    """Numba implementation of ``get_block_locs_at`` for
-    ``pick_similar``. Return the localizations in the blocks around the
-    given coordinates."""
+    """Numba implementation of ``get_block_locs_at``. Return the indices
+    of localizations in the blocks around the given coordinates."""
     step = 0
-    for k in range(y_range - 1, y_range + 2):
+    for k in range(y_index - 1, y_index + 2):
         if 0 < k < K:
-            for ll in range(x_range - 1, x_range + 2):
+            for ll in range(x_index - 1, x_index + 2):
                 if 0 < ll < L:
                     if block_ends[k, ll] - block_starts[k, ll] > 0:
-                        # numba does not work if you attach arange to an
-                        # empty list so the first step is different
+                        # numba does not work if you attach concatenate
+                        # to an empty list so the first step is
+                        # different
                         if step == 0:
                             indices = np.arange(
                                 float(block_starts[k, ll]),
@@ -666,7 +681,47 @@ def get_block_locs_at_numba(
                                     ),
                                 )
                             )
+    return indices
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def get_block_locs_at_numba(
+    x_index: int,
+    y_index: int,
+    locs_xy: np.ndarray,
+    block_starts: np.ndarray,
+    block_ends: np.ndarray,
+    K: int,
+    L: int,
+) -> np.ndarray:
+    """Numba implementation of ``get_block_locs_at. Return the
+    localizations in the blocks around the given coordinates."""
+    indices = _get_block_locs_at_numba(
+        x_index,
+        y_index,
+        block_starts,
+        block_ends,
+        K,
+        L,
+    )
     return locs_xy[:, indices]
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _locs_at_numba(
+    x: float,
+    y: float,
+    locs_xy: np.ndarray,
+    r: float,
+) -> np.ndarray:
+    """Numba implementation of ``lib.locs_at``. Return the indices of
+    localizations at the given coordinates within radius ``r``."""
+    dx = locs_xy[0] - x
+    dy = locs_xy[1] - y
+    r2 = r**2
+    # print(x, y, r, dx, dy, )
+    is_picked = dx**2 + dy**2 < r2
+    return is_picked
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
@@ -676,13 +731,9 @@ def locs_at_numba(
     locs_xy: np.ndarray,
     r: float,
 ) -> np.ndarray:
-    """Numba implementation of ``lib.locs_at`` for ``pick_similar``.
-    Return the localizations at the given coordinates within radius
-    ``r``."""
-    dx = locs_xy[0] - x
-    dy = locs_xy[1] - y
-    r2 = r**2
-    is_picked = dx**2 + dy**2 < r2
+    """Numba implementation of ``lib.locs_at``. Return the localizations
+    at the given coordinates within radius ``r``."""
+    is_picked = _locs_at_numba(x, y, locs_xy, r)
     return locs_xy[:, is_picked]
 
 
@@ -875,11 +926,11 @@ def next_frame_neighbor_distance_histogram(
     dnfl : np.ndarray
         Distance histogram of next frame neighbors.
     """
-    locs.sort_values(kind="mergesort", by="frame", inplace=True)
+    locs.sort_values(kind="quicksort", by="frame", inplace=True)
     frame = locs["frame"].to_numpy()
     x = locs["x"].to_numpy()
     y = locs["y"].to_numpy()
-    if hasattr(locs, "group"):
+    if "group" in locs.columns:
         group = locs["group"].to_numpy()
     else:
         group = np.zeros(len(locs), dtype=np.int32)
@@ -1001,10 +1052,13 @@ def frc(
 
     # select the locs within the viewport
     (y_min, x_min), (y_max, x_max) = viewport
-    x = locs["x"].to_numpy()
-    y = locs["y"].to_numpy()
-    in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
-    locs = locs.iloc[in_view]
+    in_view = (
+        (locs["x"] > x_min)
+        & (locs["y"] > y_min)
+        & (locs["x"] < x_max)
+        & (locs["y"] < y_max)
+    )
+    locs = locs.loc[in_view]
 
     np.random.seed(random_seed)
     # split locs randomly into two halves
@@ -1314,13 +1368,15 @@ def dark_times(
         is not followed by another binding event in the same group, the
         dark time is set to -1.
     """
-    last_frame = locs["frame"].to_numpy() + locs["len"].to_numpy() - 1
+    frame = locs["frame"].to_numpy()
+    lens = locs["len"].to_numpy()
+    last_frame = frame + lens - 1
     if group is None:
-        if hasattr(locs, "group"):
+        if "group" in locs.columns:
             group = locs["group"].to_numpy()
         else:
             group = np.zeros(len(locs))
-    dark = _dark_times(locs["frame"].to_numpy(), group, last_frame)
+    dark = _dark_times(frame, group, last_frame)
     return dark
 
 
@@ -1385,14 +1441,14 @@ def link(
     """
     if len(locs) == 0:  # special case of an empty localization list
         linked_locs = locs.copy()
-        if hasattr(locs, "frame"):
+        if "frame" in locs.columns:
             linked_locs["len"] = np.array([], dtype=np.int32)
             linked_locs["n"] = np.array([], dtype=np.int32)
-        if hasattr(locs, "photons"):
+        if "photons" in locs.columns:
             linked_locs["photon_rate"] = np.array([], dtype=np.float32)
     else:
-        locs = locs.sort_values(kind="mergesort", by="frame")
-        if hasattr(locs, "group"):
+        locs = locs.sort_values(kind="quicksort", by="frame")
+        if "group" in locs.columns:
             group = locs["group"].to_numpy()
         else:
             group = np.zeros(len(locs), dtype=np.int32)
@@ -1462,7 +1518,7 @@ def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
         cluster.
     """
     combined_locs = []
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         for group in tqdm(np.unique(locs["group"])):
             temp = locs[locs["group"] == group]
             cluster = np.unique(temp["cluster"].to_numpy())
@@ -1582,7 +1638,7 @@ def cluster_combine_dist(
         Combined localizations with calculated properties for each
         cluster, including distances to nearest neighbors.
     """
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         pixelsize = 130 if pixelsize is None else pixelsize
         combined_locs = []
         for group in tqdm(np.unique(locs["group"])):
@@ -1952,29 +2008,29 @@ def link_loc_groups(
     n_groups = link_group.max() + 1
     n_ = _link_group_count(link_group, n_locs, n_groups)
     columns = OrderedDict()
-    if hasattr(locs, "frame"):
+    if "frame" in locs.columns:
         first_frame_, last_frame_ = _link_group_min_max(
             locs["frame"].to_numpy(), link_group, n_locs, n_groups
         )
         columns["frame"] = first_frame_
-    if hasattr(locs, "x"):
+    if "x" in locs.columns:
         weights_x = 1 / locs["lpx"].to_numpy() ** 2
         columns["x"], sum_weights_x_ = _link_group_weighted_mean(
             locs["x"].to_numpy(), weights_x, link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "y"):
+    if "y" in locs.columns:
         weights_y = 1 / locs["lpy"].to_numpy() ** 2
         columns["y"], sum_weights_y_ = _link_group_weighted_mean(
             locs["y"].to_numpy(), weights_y, link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "photons"):
+    if "photons" in locs.columns:
         columns["photons"] = _link_group_sum(
             locs["photons"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
         )
-    if hasattr(locs, "sx"):
+    if "sx" in locs.columns:
         columns["sx"] = _link_group_mean(
             locs["sx"].to_numpy(),
             link_group,
@@ -1982,7 +2038,7 @@ def link_loc_groups(
             n_groups,
             n_,
         )
-    if hasattr(locs, "sy"):
+    if "sy" in locs.columns:
         columns["sy"] = _link_group_mean(
             locs["sy"].to_numpy(),
             link_group,
@@ -1990,34 +2046,34 @@ def link_loc_groups(
             n_groups,
             n_,
         )
-    if hasattr(locs, "bg"):
+    if "bg" in locs.columns:
         columns["bg"] = _link_group_sum(
             locs["bg"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
         )
-    if hasattr(locs, "x"):
+    if "x" in locs.columns:
         columns["lpx"] = np.sqrt(1 / sum_weights_x_)
-    if hasattr(locs, "y"):
+    if "y" in locs.columns:
         columns["lpy"] = np.sqrt(1 / sum_weights_y_)
-    if hasattr(locs, "ellipticity"):
+    if "ellipticity" in locs.columns:
         columns["ellipticity"] = _link_group_mean(
             locs["ellipticity"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "net_gradient"):
+    if "net_gradient" in locs.columns:
         columns["net_gradient"] = _link_group_mean(
             locs["net_gradient"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "likelihood"):
+    if "likelihood" in locs.columns:
         columns["likelihood"] = _link_group_mean(
             locs["likelihood"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "iterations"):
+    if "iterations" in locs.columns:
         columns["iterations"] = _link_group_mean(
             locs["iterations"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         columns["z"] = _link_group_mean(
             locs["z"].to_numpy(),
             link_group,
@@ -2025,21 +2081,21 @@ def link_loc_groups(
             n_groups,
             n_,
         )
-    if hasattr(locs, "d_zcalib"):
+    if "d_zcalib" in locs.columns:
         columns["d_zcalib"] = _link_group_mean(
             locs["d_zcalib"].to_numpy(), link_group, n_locs, n_groups, n_
         )
-    if hasattr(locs, "group"):
+    if "group" in locs.columns:
         columns["group"] = _link_group_last(
             locs["group"].to_numpy(),
             link_group,
             n_locs,
             n_groups,
         )
-    if hasattr(locs, "frame"):
+    if "frame" in locs.columns:
         columns["len"] = last_frame_ - first_frame_ + 1
     columns["n"] = n_
-    if hasattr(locs, "photons"):
+    if "photons" in locs.columns:
         columns["photon_rate"] = np.float32(columns["photons"] / n_)
     linked_locs = pd.DataFrame(columns)
     if remove_ambiguous_lengths:
@@ -2186,8 +2242,8 @@ def undrift(
         fig1 = plt.figure(figsize=(10, 6), constrained_layout=True)
         plt.suptitle("Estimated drift")
         plt.subplot(1, 2, 1)
-        plt.plot(drift["x"].to_numpy(), label="x interpolated")
-        plt.plot(drift["y"].to_numpy(), label="y interpolated")
+        plt.plot(drift["x"], label="x interpolated")
+        plt.plot(drift["y"], label="y interpolated")
         t = (bounds[1:] + bounds[:-1]) / 2
         plt.plot(
             t,
@@ -2208,8 +2264,8 @@ def undrift(
         plt.ylabel("Drift (pixel)")
         plt.subplot(1, 2, 2)
         plt.plot(
-            drift["x"].to_numpy(),
-            drift["y"].to_numpy(),
+            drift["x"],
+            drift["y"],
             color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
         )
         plt.plot(
@@ -2257,7 +2313,7 @@ def undrift_from_picked(
     # A data frame to store the applied drift
     drift = pd.DataFrame({"x": drift_x, "y": drift_y})
     # If z coordinate exists, also apply drift there
-    if all([hasattr(_, "z") for _ in picked_locs]):
+    if all(["z" in _.columns for _ in picked_locs]):
         drift_z = _undrift_from_picked_coordinate(picked_locs, info, "z")
         drift["z"] = drift_z
     return drift
@@ -2288,7 +2344,6 @@ def _undrift_from_picked_coordinate(
     drift_mean : np.ndarray
         Average drift across picks for all frames
     """
-
     n_picks = len(picked_locs)
     n_frames = info[0]["Frames"]
 
@@ -2419,7 +2474,7 @@ def groupprops(
         }
     )
     # add qpaint idx
-    if hasattr(groups, "dark_mean"):
+    if "dark_mean" in groups.columns:
         groups["qpaint_idx"] = 1 / groups["dark_mean"]
     return groups
 

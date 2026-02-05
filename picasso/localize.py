@@ -413,7 +413,7 @@ def identifications_from_futures(
     ids_list_of_lists = [_.result() for _ in futures]
     ids_list = list(chain(*ids_list_of_lists))
     ids = pd.concat(ids_list, ignore_index=True)
-    ids.sort_values(by="frame", kind="mergesort", inplace=True)
+    ids.sort_values(by="frame", kind="quicksort", inplace=True)
     return ids
 
 
@@ -552,7 +552,7 @@ def identify(
             for i in range(len(movie))
         ]
         ids = pd.concat(identifications, ignore_index=True)
-        ids.sort_values(by="frame", kind="mergesort", inplace=True)
+        ids.sort_values(by="frame", kind="quicksort", inplace=True)
     return ids
 
 
@@ -941,7 +941,7 @@ def locs_from_fits(
     lpx = np.sqrt(CRLBs[:, 1])
     locs = pd.DataFrame(
         {
-            "frame": identifications["frame"].to_numpy().astype(np.uint32),
+            "frame": identifications["frame"].astype(np.uint32),
             "x": x.astype(np.float32),
             "y": y.astype(np.float32),
             "photons": theta[:, 2].astype(np.float32),
@@ -951,13 +951,13 @@ def locs_from_fits(
             "lpx": lpx.astype(np.float32),
             "lpy": lpy.astype(np.float32),
             "net_gradient": (
-                identifications["net_gradient"].to_numpy().astype(np.float32)
+                identifications["net_gradient"].astype(np.float32)
             ),
             "likelihood": likelihoods.astype(np.float32),
             "iterations": iterations.astype(np.int32),
         }
     )
-    locs.sort_values(by="frame", kind="mergesort", inplace=True)
+    locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
 
 
@@ -1056,7 +1056,7 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
         The mean length of binding events in frames.
     """
     print("Linking.. ", end="")
-    locs = locs.iloc[0:MAX_LOCS].copy()
+    locs = locs.iloc[0:MAX_LOCS]
     locs = postprocess.link(locs, info=info)
     len_mean = locs.len.mean()
     print(f"Mean length {len_mean:.2f} frames.")
