@@ -10260,11 +10260,11 @@ class View(QtWidgets.QLabel):
 
             self.x_locs = x_locs
             self.window.display_settings_dlg.show_legend.setEnabled(True)
-            self.window.display_settings_dlg.update_histogram()
         else:
             self.x_render_state = False
         self.update_scene()
         self.activate_property_menu()  # allows changing render parameters
+        self.window.display_settings_dlg.update_histogram()
 
     def activate_property_menu(self) -> None:
         """Allow changing render parameters."""
@@ -10300,23 +10300,14 @@ class View(QtWidgets.QLabel):
 
         self.window.display_settings_dlg.maximum_render.blockSignals(True)
         self.window.display_settings_dlg.minimum_render.blockSignals(True)
-
         self.window.display_settings_dlg.maximum_render.setRange(lower, upper)
         self.window.display_settings_dlg.maximum_render.setValue(max_val)
         self.window.display_settings_dlg.minimum_render.setValue(min_val)
-
         self.window.display_settings_dlg.maximum_render.blockSignals(False)
         self.window.display_settings_dlg.minimum_render.blockSignals(False)
-
         self.activate_property_menu()
-
         self.window.display_settings_dlg.render_check.setEnabled(True)
         self.window.display_settings_dlg.render_check.setCheckState(False)
-
-        # clean up the histogram plot
-        self.window.display_settings_dlg.ax_prop.cla()
-        self.window.display_settings_dlg.canvas_prop.draw()
-
         self.activate_render_property()
 
     def set_mode(self, action: QtWidgets.QAction) -> None:
