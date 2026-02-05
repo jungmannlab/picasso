@@ -47,10 +47,10 @@ def mask_locs(
     locs_out : pd.DataFrame
         Localizations outside the mask.
     """
-    x_ind = (np.floor(locs["x"].to_numpy() / width * mask.shape[0])).astype(
+    x_ind = (np.floor(locs["x"].to_numpy() / width * mask.shape[1])).astype(
         int
     )
-    y_ind = (np.floor(locs["y"].to_numpy() / height * mask.shape[1])).astype(
+    y_ind = (np.floor(locs["y"].to_numpy() / height * mask.shape[0])).astype(
         int
     )
 
