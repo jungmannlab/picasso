@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 04-FEB-2026 CEST
+Last change: 05-FEB-2026 CEST
 
 0.9.6 (*will be released soon*)
 -------------------------------
@@ -22,6 +22,8 @@ Bug fixes:
 - Test subcluster fix indexing
 - Remove backward incompatible camera pixel size reading in SPINNA's mask generation (related to #602)
 - Fix localization masking for non-square mask (``picasso.masking.mask_locs``)
+Last change: 03-FEB-2026 CEST
+- Correct axial localization precision in Localize (magnification factor)
 
 0.9.4-5
 -------
