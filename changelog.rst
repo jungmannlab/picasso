@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 03-FEB-2026 CEST
+Last change: 04-FEB-2026 CEST
 
 0.9.6 (*will be released soon*)
 -------------------------------
@@ -15,6 +15,7 @@ Small improvements:
 Bug fixes:
 ++++++++++
 - SPINNA 3D mask generation fixed (and ``picasso.render.render_hist3d``)
+- Test subcluster fix indexing
 - Remove backward incompatible camera pixel size reading in SPINNA's mask generation (related to #602)
 - Fix localization masking for non-square mask (``picasso.masking.mask_locs``)
 
