@@ -19,6 +19,7 @@ Small improvements:
 - Localize zooms in and out centered at the current view
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - Use ``"col" in df.columns`` instead of ``hasattr(df, "col")`` to check for columns in DataFrames (better readability)
+- ``picasso.postprocess`` functions ``picked_locs`` and ``pick_similar`` accept precomputed index blocks to speed up the picking of circular regions
 
 Bug fixes:
 ++++++++++
@@ -26,7 +27,6 @@ Bug fixes:
 - Test subcluster fix indexing
 - Remove backward incompatible camera pixel size reading in SPINNA's mask generation (related to #602)
 - Fix localization masking for non-square mask (``picasso.masking.mask_locs``)
-Last change: 03-FEB-2026 CEST
 - Correct axial localization precision in Localize (magnification factor)
 
 0.9.4-5
