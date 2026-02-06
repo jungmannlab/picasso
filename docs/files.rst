@@ -19,7 +19,7 @@ Generally, several datasets can be stored within an HDF5 file. These datasets ar
 
 An HDF5 file can be opened with various software packages. In Picasso, we use ``pandas`` for this purpose. For example, to open localizations, ``pandas.read_hdf(PATH_TO_LOCALIZATIONS, key="locs")`` is used. The ``key`` argument can be adjusted for other datasets. The available keys can be verified using ``pandas.HDFStore(PATH_TO_FILE).keys()``.
 
-**Note:** Picasso HDF5 files are accompanied by YAML metadata files which are read together using ``locs, info = picasso.io.load_locs``. See ``YAML Metadata Files`` below for more details.
+**Note:** Picasso HDF5 files are accompanied by YAML metadata files which are read together using ``locs, info = picasso.io.load_locs``. **See sections "Localization HDF5 Files" and  "YAML Metadata Files" below for more details on the minimum requirements to process HDF5 files in Picasso.**
 
 
 Importing HDF5 files in MATLAB and Origin
@@ -38,6 +38,8 @@ Picasso's localization HDF5 files are accompanied by a YAML metadata file with t
    :file: table01.csv
    :widths: 20, 20, 20
    :header-rows: 1
+
+The minimum required columns are: ``x``, ``y``, ``frame``, ``lpx`` and ``lpy``. For 3D data, the column ``z`` is also required. Since v0.9.5, Picasso supports the ``lpz`` column but it is not necessary for rendering (although recommended for accurate rendering in 3D).
 
 Molecular maps (cluster centers) HDF5 Files
 -------------------------------------------
@@ -70,5 +72,7 @@ YAML Metadata Files
 
 YAML files are document-oriented text files that can be opened and changed with any text editor. In Picasso, YAML files are used to store metadata of movie or localization files.
 Each localization HDF5 file must always be accompanied with a YAML file of the same filename, except for the extension, which is ``.yaml``. **Deleting this YAML metadata file will result in failure of the Picasso software!**
+
+The metadata file must contain the keys: ``Width``, ``Height`` (size of the field of view in camera pixels), ``Frames`` (number of frames in the movie), and ``Pixelsize`` (camera pixel size in nm). Example files can be found `here <https://github.com/jungmannlab/picasso/tree/master/samples/data>`_
 
 Raw binary files (i.e., with extension ``.raw``) may be accompanied by a YAML metadata file to store data about the movie dimensions, etc. While the metadata file, in this case, is not required, it reduces the effort of typing in this metadata each time the movie is loaded with ``Picasso: Localize``. To generate such a YAML metadata file, load the raw movie into ``Picasso: Localize``, then enter all required information in the appearing dialog. Check the checkbox ``Save info to yaml file`` and click ok. The movie will be loaded and the metadata saved in a YAML file. This file will be detected the next time this raw movie is loaded, and the metadata does not need to be entered again.

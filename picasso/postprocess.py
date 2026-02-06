@@ -215,7 +215,6 @@ def picked_locs(
         Used only for circular picks. Precomputed index blocks for
         localizations, see  ``get_index_blocks``.If None, they will be
         calculated internally. Default is None.
-
     callback : function or "console" or None, optional
         Function to display progress. If "console", tqdm is used to
         display the progress. If None, no progress is displayed. Default

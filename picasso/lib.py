@@ -696,6 +696,10 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     """Ensure that localizations are within the image dimensions
     and have positive localization precisions and other parameters.
 
+    v0.9.6: check that the info metadata contains the necessary
+    information for processing: Width, Height, Pixelsize and Frames.
+    Raises a KeyError if any of the required keys is missing.
+
     Parameters
     ----------
     locs : pd.DataFrame
@@ -712,6 +716,12 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     locs.replace([np.inf, -np.inf], np.nan, inplace=True)
     locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:
+    required_keys = ["Width", "Height", "Pixelsize", "Frames"]
+    for key in required_keys:
+        value = get_from_metadata(info, key)
+        if value is None:
+            raise KeyError(f"Metadata is missing required key: '{key}'")
+
     locs = locs[locs["x"] < info[0]["Width"]]
     locs = locs[locs["y"] < info[0]["Height"]]
     for attr in [

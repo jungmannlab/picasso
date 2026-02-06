@@ -3,8 +3,8 @@ Changelog
 
 Last change: 06-FEB-2026 CEST
 
-0.9.6 (*will be released soon*)
--------------------------------
+0.9.6
+-----
 Important updates:
 ^^^^^^^^^^^^^^^^^^
 - Change of API in ``picasso.postprocess.nn_analysis``: new inputs cause backward compatibility issues. The function now returns only the nearest neighbor distances, not the indices of the nearest neighbors.
@@ -18,6 +18,8 @@ Small improvements:
 - Render Nearest Neighbor Analysis - saves nearest neighbors distances in the localizations .hdf5 file
 - Localize zooms in and out centered at the current view
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
+- ``picasso.io.load_locs`` and ``save_locs`` ensure that the saved metadata contains the required keys
+- Updated documentation on filetypes and minimum requirements for HDF5 files and accompanying YAML metadata files in Picasso
 - Use ``"col" in df.columns`` instead of ``hasattr(df, "col")`` to check for columns in DataFrames (better readability)
 - ``picasso.postprocess`` functions ``picked_locs`` and ``pick_similar`` accept precomputed index blocks to speed up the picking of circular regions
 

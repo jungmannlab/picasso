@@ -1581,6 +1581,7 @@ def load_locs(
     """
     locs = pd.read_hdf(path, key="locs")
     info = load_info(path, qt_parent=qt_parent)
+    locs = lib.ensure_sanity(locs, info)
     return locs, info
 
 

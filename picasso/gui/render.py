@@ -5926,7 +5926,6 @@ class View(QtWidgets.QLabel):
             locs, info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
-        locs = lib.ensure_sanity(locs, info)
 
         # update pixelsize (credits to Boyd Peters #602)
         pixelsize = lib.get_from_metadata(
@@ -6042,8 +6041,12 @@ class View(QtWidgets.QLabel):
             for i, path in enumerate(paths):
                 try:
                     self.add(path, render=False)
-                except Exception:
-                    pass
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Error",
+                        f"An error occurred while loading {os.path.basename(path)}:\n{str(e)}",
+                    )
                 pd.set_value(i + 1)
             if len(self.locs):  # if loading was successful
                 if fit_in_view:
