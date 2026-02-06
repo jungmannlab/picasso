@@ -481,4 +481,4 @@ Opens a dialog where different clustering parameters can be checked on the loade
 
 Nearest Neighbor Analysis
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-Calculates distances to the ``k``-th nearest neighbors between two channels (can be the same channel). ``k`` is defined by the user. The distances are stored in nm as a .csv file.
+Calculates distances to the ``k``-th nearest neighbors between two channels (can be the same channel). ``k`` is defined by the user. The distances are stored in nm as a .hdf5 localizations file with new columns ``nnd_1``, ``nnd_2``, ..., ``nnd_k`` for each localization in channel 1. The distances are calculated in 3D if both datasets have z information.

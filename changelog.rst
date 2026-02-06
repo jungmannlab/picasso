@@ -1,13 +1,13 @@
 Changelog
 =========
 
-Last change: 05-FEB-2026 CEST
+Last change: 06-FEB-2026 CEST
 
 0.9.6 (*will be released soon*)
 -------------------------------
 Important updates:
 ^^^^^^^^^^^^^^^^^^
-- 
+- Change of API in ``picasso.postprocess.nn_analysis``: new inputs cause backward compatibility issues. The function now returns only the nearest neighbor distances, not the indices of the nearest neighbors.
 
 Small improvements:
 +++++++++++++++++++
@@ -15,6 +15,7 @@ Small improvements:
 - Render: increase the speed of picking circular locs, picking similar and filter by number of localizations (numba implementation)
 - Render property histogram shown before rendering is activated
 - Render property - removed legend
+- Render Nearest Neighbor Analysis - saves nearest neighbors distances in the localizations .hdf5 file
 - Localize zooms in and out centered at the current view
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - Use ``"col" in df.columns`` instead of ``hasattr(df, "col")`` to check for columns in DataFrames (better readability)

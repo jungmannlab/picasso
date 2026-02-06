@@ -24,9 +24,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import interpolate
 from scipy.optimize import curve_fit
-from scipy.spatial import distance
+from scipy.spatial import distance, KDTree
 from tqdm import tqdm, trange
-from sklearn.neighbors import NearestNeighbors as NN
 
 from . import lib, render, imageprocess, masking
 
@@ -2532,56 +2531,38 @@ def calculate_fret(
 
 
 def nn_analysis(
-    x1: np.ndarray,
-    x2: np.ndarray,
-    y1: np.ndarray,
-    y2: np.ndarray,
-    z1: np.ndarray,
-    z2: np.ndarray,
+    X1: np.ndarray,
+    X2: np.ndarray,
     nn_count: int,
-    same_channel: bool = True,
 ) -> np.ndarray:
     """Find the nearest neighbors between two sets of localizations.
 
     Parameters
     ----------
-    x1, y1, z1 : np.ndarray
-        Coordinates of the first set of localizations.
-    x2, y2, z2 : np.ndarray
-        Coordinates of the second set of localizations.
+    X1, X2 : np.ndarray
+        Arrays of shape (N, D) and (M, D) representing the coordinates
+        of the two sets of localizations, where N and M are the number
+        of localizations in each set, and D is the number of spatial
+        dimensions (2 or 3).
     nn_count : int
         Number of nearest neighbors to find for each localization in
         the second set.
-    same_channel : bool, optional
-        If True, the first set of localizations is considered to be
-        from the same channel as the second set, and the nearest
-        neighbor with zero distance is ignored. If False, all nearest
-        neighbors are considered, including the zero distance one.
-        Default is True.
 
     Returns
     -------
-    nn : np.ndarray
-        Array of nearest neighbors, where each row corresponds to a
-        localization in the second set and contains the indices of its
-        nearest neighbors in the first set. The number of columns is
-        `nn_count` if `same_channel` is True, or `nn_count + 1` if
-        `same_channel` is False. Each column contains the index of a
-        nearest neighbor in the first set.
+    nnd : np.ndarray
+        Array of nearest neighbors distances, where each row corresponds
+        to a localization in the first set and contains the distances to
+        its nearest neighbors in the second set.
     """
-    # coordinates are in nm
-    if z1 is not None:  # 3D
-        input1 = np.stack((x1, y1, z1)).T
-        input2 = np.stack((x2, y2, z2)).T
-    else:  # 2D
-        input1 = np.stack((x1, y1)).T
-        input2 = np.stack((x2, y2)).T
-    if same_channel:
-        model = NN(n_neighbors=nn_count + 1)
+    if X1.shape[1] != X2.shape[1]:
+        raise ValueError("X1 and X2 must have the same number of dimensions.")
+    tree = KDTree(X2)
+    if np.array_equal(X1, X2):
+        distances, indices = tree.query(X1, k=nn_count + 1)
+        nn = distances[:, 1:]
     else:
-        model = NN(n_neighbors=nn_count)
-    model.fit(input1)
-    nn, _ = model.kneighbors(input2)
-    if same_channel:
-        nn = nn[:, 1:]  # ignore the zero distance
+        distances, indices = tree.query(X1, k=nn_count)
+        nn = distances
+    nn.reshape(-1, nn_count)  # ensure the shape is (N, nn_count)
     return nn
