@@ -189,6 +189,7 @@ def picked_locs(
     pick_shape: Literal["Circle", "Rectangle", "Polygon", "Square"],
     pick_size: float = None,
     add_group: bool = True,
+    index_blocks: tuple = None,
     callback: Callable[[int], None] | Literal["console"] | None = None,
 ) -> list[pd.DataFrame]:
     """Find picked localizations, i.e., localizations within the given
@@ -204,15 +205,21 @@ def picked_locs(
         List of picks.
     pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square'}
         Shape of the pick.
-    pick_size : float (default=None)
+    pick_size : float, optional
         Size of the pick. Radius for the circles, width for the
-        rectangles, None for the polygons.
-    add_group : boolean (default=True)
+        rectangles, None for the polygons. Default is None.
+    add_group : boolean, optional
         True if group id should be added to locs. Each pick will be
-        assigned a different id.
-    callback : function (default=None)
+        assigned a different id. Default is True.
+    index_blocks : tuple, optional
+        Used only for circular picks. Precomputed index blocks for
+        localizations, see  ``get_index_blocks``.If None, they will be
+        calculated internally. Default is None.
+
+    callback : function or "console" or None, optional
         Function to display progress. If "console", tqdm is used to
-        display the progress. If None, no progress is displayed.
+        display the progress. If None, no progress is displayed. Default
+        is None.
 
     Returns
     -------
@@ -233,7 +240,8 @@ def picked_locs(
             )
 
         if pick_shape == "Circle":
-            index_blocks = get_index_blocks(locs, info, pick_size)
+            if index_blocks is None:
+                index_blocks = get_index_blocks(locs, info, pick_size)
             locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
             for i, pick in enumerate(picks):
                 x, y = pick
@@ -364,6 +372,7 @@ def pick_similar(
     picks: list[tuple],
     d: float,
     std_range: float = 2.0,
+    index_blocks: tuple = None,
 ) -> list[tuple]:
     """Find similar picks based on the number of localizations and
     RMSD. Only implemented for circular picks.
@@ -393,8 +402,13 @@ def pick_similar(
         List of picks (x, y) coordinates.
     d : float
         Pick diameter (in camera pixels).
-    std_range : float
+    std_range : float, optional
         Standard deviation range for picking similar localizations.
+        Default is 2.0.
+    index_blocks : tuple, optional
+        Precomputed index blocks for localizations, see
+        ``get_index_blocks``. If None, they will be calculated
+        internally. Default is None.
 
     Returns
     -------
@@ -404,7 +418,8 @@ def pick_similar(
     r = d / 2
     d2 = d**2
     # extract n_locs and rmsd from current picks
-    index_blocks = get_index_blocks(locs, info, r)
+    if index_blocks is None:
+        index_blocks = get_index_blocks(locs, info, r)
     locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
     n_locs = []
     rmsd = []

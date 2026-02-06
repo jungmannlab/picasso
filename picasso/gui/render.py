@@ -9238,6 +9238,7 @@ class View(QtWidgets.QLabel):
             std_range = (
                 self.window.tools_settings_dialog.pick_similar_range.value()
             )
+            index_blocks = self.get_index_blocks(channel)
             status = lib.StatusDialog("Picking similar...", self.window)
             new_picks = postprocess.pick_similar(
                 locs=self.all_locs[channel],
@@ -9245,6 +9246,7 @@ class View(QtWidgets.QLabel):
                 picks=self._picks,
                 d=d,
                 std_range=std_range,
+                index_blocks=index_blocks,
             )
             # add picks
             self._picks = []
@@ -9292,9 +9294,13 @@ class View(QtWidgets.QLabel):
 
             # find pick size (radius or width)
             px = self.window.display_settings_dlg.pixelsize.value()
+            index_blocks = None  # used for circular picks only
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
                 pick_size = d / 2 / px
+                index_blocks = self.get_index_blocks(
+                    channel, fast_render=fast_render
+                )
             elif self._pick_shape == "Rectangle":
                 pick_size = (
                     self.window.tools_settings_dialog.pick_width.value() / px
@@ -9315,6 +9321,7 @@ class View(QtWidgets.QLabel):
                 self._pick_shape,
                 pick_size=pick_size,
                 add_group=add_group,
+                index_blocks=index_blocks,
                 callback=progress.set_value,
             )
             return picked_locs

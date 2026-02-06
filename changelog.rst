@@ -19,6 +19,7 @@ Small improvements:
 - Localize zooms in and out centered at the current view
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - Use ``"col" in df.columns`` instead of ``hasattr(df, "col")`` to check for columns in DataFrames (better readability)
+- ``picasso.postprocess`` functions ``picked_locs`` and ``pick_similar`` accept precomputed index blocks to speed up the picking of circular regions
 
 Bug fixes:
 ++++++++++
