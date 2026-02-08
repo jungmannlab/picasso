@@ -507,7 +507,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         # MASK PARAMETERS AND LOADING
         mask_box = QtWidgets.QGroupBox("Parameters")
-        mask_box.setFixedHeight(340)
+        mask_box.setFixedHeight(360)
         layout.addWidget(mask_box, 0, 1)
         mask_layout = QtWidgets.QGridLayout(mask_box)
 
@@ -586,14 +586,15 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.thresholding_stack.addWidget(QtWidgets.QLabel("          "))
 
         # z slicing of a 3D mask
-        hbox = QtWidgets.QHBoxLayout()
-        mask_layout.addLayout(hbox, 7, 0, 1, 2)
+        # hbox = QtWidgets.QHBoxLayout()
+        # mask_layout.addLayout(hbox, 7, 0, 1, 2)
         self.zslice_check = QtWidgets.QCheckBox("Show z-slice")
         self.zslice_check.setToolTip("Display a z-slice of the 3D mask?")
         self.zslice_check.setChecked(False)
         self.zslice_check.stateChanged.connect(self.apply_zslice)
         self.zslice_check.setVisible(False)
-        hbox.addWidget(self.zslice_check, 1)
+        mask_layout.addWidget(self.zslice_check, 7, 0)
+        # hbox.addWidget(self.zslice_check, 1)
 
         self.zslice_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.zslice_slider.setToolTip("Choose the z-slice to be displayed.")
@@ -601,7 +602,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.zslice_slider.setValue(0)
         self.zslice_slider.valueChanged.connect(self.apply_zslice)
         self.zslice_slider.setVisible(False)
-        hbox.addWidget(self.zslice_slider, 7)
+        mask_layout.addWidget(self.zslice_slider, 7, 1)
+        # hbox.addWidget(self.zslice_slider, 7)
 
         # save mask
         self.save_mask_button = QtWidgets.QPushButton("Save mask")
@@ -693,16 +695,15 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         # MASK INFORMATION
         mask_info_box = QtWidgets.QGroupBox("Mask information")
-        mask_info_box.setFixedHeight(100)
+        mask_info_box.setFixedHeight(80)
         layout.addWidget(mask_info_box, 2, 1)
         mask_info_layout = QtWidgets.QHBoxLayout(mask_info_box)
         self.mask_info_display1 = QtWidgets.QLabel(
-            "Area (\u03bcm\u00b2):\n" "Dimensions:\n" "Size memory:"
+            "Area (\u03bcm\u00b2):\n" "Dimensions:"
         )
         self.mask_info_display1.setToolTip(
             "Mask area/volume above Otsu threshold;\n"
-            "Number of pixels/voxels per dimension;\n"
-            "Estimated memory size of the mask."
+            "Number of pixels/voxels per dimension"
         )
         self.mask_info_display1.setAlignment(QtCore.Qt.AlignRight)
         # make sure that the dash symbols are aligned
@@ -711,7 +712,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                 f"{' '*MASK_INFO_OFFSET}Volume (\u03bcm\u00b3):"
             )
         )
-        self.mask_info_display2 = QtWidgets.QLabel("-\n-\n-")
+        self.mask_info_display2 = QtWidgets.QLabel("-\n-")
         self.mask_info_display2.setAlignment(QtCore.Qt.AlignLeft)
         mask_info_layout.addWidget(self.mask_info_display1)
         mask_info_layout.addWidget(self.mask_info_display2)
@@ -828,12 +829,9 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         area_str, area = self.get_mask_area()
         dimensions = self.get_mask_dimensions()
-        size = self.get_mask_size()
 
-        self.mask_info_display1.setText(
-            f"{area_str}\n Dimensions:\nSize memory:"
-        )
-        self.mask_info_display2.setText(f"{area}\n{dimensions}\n{size}")
+        self.mask_info_display1.setText(f"{area_str}\n Dimensions:")
+        self.mask_info_display2.setText(f"{area}\n{dimensions}")
 
     def get_mask_area(self) -> tuple[str, float]:
         """Find the string with mask area/volume."""
@@ -864,17 +862,6 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             else:
                 dimensions = f"{dims[0]}x{dims[1]}x{dims[2]}"
         return dimensions
-
-    def get_mask_size(self) -> str:
-        """Find the string with mask size in MB/GB."""
-        if self.mask is None:
-            size = "-"
-        size_mb = self.mask.nbytes / (1024**2)
-        if size_mb > 1024:
-            size = f"{np.round(size_mb / 1024, 2)} GB"
-        else:
-            size = f"{np.round(size_mb, 2)} MB"
-        return size
 
     def on_mask_ndim_changed(self, index: int) -> None:
         """Show/hide the z-slicing options for 3D masks."""
