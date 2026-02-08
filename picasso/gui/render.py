@@ -1974,7 +1974,6 @@ class LinkDialog(QtWidgets.QDialog):
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
-        print(f"parent of the link dialog: {window}")
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Enter parameters")
@@ -1988,7 +1987,7 @@ class LinkDialog(QtWidgets.QDialog):
         grid.addWidget(dist_label, 0, 0)
         self.max_distance = QtWidgets.QDoubleSpinBox()
         self.max_distance.setRange(0, 1e6)
-        self.max_distance.setValue(1)
+        self.max_distance.setValue(10)
         grid.addWidget(self.max_distance, 0, 1)
         dark_label = QtWidgets.QLabel("Max. transient dark frames:")
         dark_label.setToolTip(
