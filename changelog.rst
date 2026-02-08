@@ -17,6 +17,7 @@ Small improvements:
 - Render property - removed legend
 - Render Nearest Neighbor Analysis - saves nearest neighbors distances in the localizations .hdf5 file
 - Localize zooms in and out centered at the current view
+- SPINNA 3D masking: z slicing added for visual inspection
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - ``picasso.io.load_locs`` and ``save_locs`` ensure that the saved metadata contains the required keys
 - Updated documentation on filetypes and minimum requirements for HDF5 files and accompanying YAML metadata files in Picasso

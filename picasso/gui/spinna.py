@@ -25,6 +25,7 @@ from copy import deepcopy
 from decimal import Decimal
 from math import isclose
 from typing import Callable, Literal
+from PIL import Image
 
 import yaml
 import numpy as np
@@ -224,6 +225,11 @@ class MaskPreview(QtWidgets.QLabel):
                 (self.image.shape[1], self.image.shape[0]),
             )
         else:
+            if self.viewport is None:
+                self.viewport = (
+                    (0, 0),
+                    (self.mask_tab.mask.shape[0], self.mask_tab.mask.shape[1]),
+                )
             (y_min, x_min), (y_max, x_max) = self.viewport
             self.image = self.mask_tab.mask.copy()[y_min:y_max, x_min:x_max]
         self.render_image()
@@ -231,7 +237,15 @@ class MaskPreview(QtWidgets.QLabel):
     def to_2D(self, image: np.ndarray) -> np.ndarray:
         """Convert mask to 2D that can be displayed (viewed from +z)."""
         if image.ndim == 3:
-            image = np.sum(image, axis=2)
+            z_idx = (
+                self.mask_tab.zslice_slider.value()
+                if self.mask_tab.zslice_check.isChecked()
+                else None
+            )
+            if z_idx is None:
+                image = np.sum(image, axis=2)
+            else:
+                image = image[:, :, z_idx]
         elif image.ndim != 2:
             raise IndexError("Image is neither 3D or 2D.")
         image /= image.max()
@@ -525,6 +539,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         mask_layout.addWidget(QtWidgets.QLabel("Mask dimensionality:"), 3, 0)
         self.mask_ndim = QtWidgets.QComboBox()
         self.mask_ndim.addItems(["2D", "3D"])
+        self.mask_ndim.currentIndexChanged.connect(self.on_mask_ndim_changed)
         mask_layout.addWidget(self.mask_ndim, 3, 1)
 
         # mask type (binary, loc density)
@@ -570,11 +585,29 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         thresholding_layout.addWidget(self.thresholding_value)
         self.thresholding_stack.addWidget(QtWidgets.QLabel("          "))
 
+        # z slicing of a 3D mask
+        hbox = QtWidgets.QHBoxLayout()
+        mask_layout.addLayout(hbox, 7, 0, 1, 2)
+        self.zslice_check = QtWidgets.QCheckBox("Show z-slice")
+        self.zslice_check.setToolTip("Display a z-slice of the 3D mask?")
+        self.zslice_check.setChecked(False)
+        self.zslice_check.stateChanged.connect(self.apply_zslice)
+        self.zslice_check.setVisible(False)
+        hbox.addWidget(self.zslice_check, 1)
+
+        self.zslice_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.zslice_slider.setToolTip("Choose the z-slice to be displayed.")
+        self.zslice_slider.setRange(0, 10)
+        self.zslice_slider.setValue(0)
+        self.zslice_slider.valueChanged.connect(self.apply_zslice)
+        self.zslice_slider.setVisible(False)
+        hbox.addWidget(self.zslice_slider, 7)
+
         # save mask
         self.save_mask_button = QtWidgets.QPushButton("Save mask")
         self.save_mask_button.released.connect(self.save_mask)
         self.save_mask_button.setEnabled(False)
-        mask_layout.addWidget(self.save_mask_button, 7, 0, 1, 2)
+        mask_layout.addWidget(self.save_mask_button, 8, 0, 1, 2)
 
         # PREVIEW NAVIGATION
         navigation_box = QtWidgets.QGroupBox("Navigation")
@@ -720,6 +753,11 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             self.mask_generator.generate_mask(apply_thresh=False, mode=mode)
             status.close()
             self.mask = deepcopy(self.mask_generator.mask)
+            # if 3D mask, set z-slice slider range
+            if self.mask.ndim == 3:
+                self.zslice_slider.setRange(0, self.mask.shape[2] - 1)
+                self.zslice_slider.setValue(self.mask.shape[2] // 2)
+            # show the mask
             self.preview.on_mask_generated()
             self.update_mask_info()
             # set threshold to otsu threhold
@@ -743,6 +781,13 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.preview.on_mask_generated(full_fov=False)
         self.update_mask_info()
 
+    def apply_zslice(self) -> None:
+        """Apply z-slicing to the 3D mask."""
+        if self.mask is None or self.mask.ndim != 3:
+            return
+
+        self.preview.on_mask_generated(full_fov=False)
+
     def save_mask(self) -> None:
         """Save the generated mask."""
         if self.mask is not None:
@@ -760,6 +805,21 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                         self.thresholding_value.value()
                     )
                 self.mask_generator.save_mask(path)
+                if self.zslice_check.isChecked():
+                    question = "Save all z-slices of the mask?"
+                    reply = QtWidgets.QMessageBox.question(
+                        self,
+                        "Save all z-slices?",
+                        question,
+                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    )
+                    if reply == QtWidgets.QMessageBox.Yes:
+                        for z in range(self.mask.shape[2]):
+                            image = self.mask[:, :, z]
+                            image /= image.max()
+                            Image.fromarray(
+                                np.round(255 * image).astype("uint8")
+                            ).save(path.replace(".npy", f"_z{z}.png"))
 
     def update_mask_info(self) -> None:
         """Update the mask info (area, dimensions, size)."""
@@ -815,6 +875,17 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         else:
             size = f"{np.round(size_mb, 2)} MB"
         return size
+
+    def on_mask_ndim_changed(self, index: int) -> None:
+        """Show/hide the z-slicing options for 3D masks."""
+        if index == 0:  # 2D
+            self.zslice_check.setVisible(False)
+            self.zslice_check.setChecked(False)
+            self.zslice_slider.setVisible(False)
+            self.zslice_slider.setValue(0)
+        elif index == 1:  # 3D
+            self.zslice_check.setVisible(True)
+            self.zslice_slider.setVisible(True)
 
     def on_mask_type_changed(self) -> None:
         """Show/hide the thresholding options for the density map mask

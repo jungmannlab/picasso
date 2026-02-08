@@ -19,6 +19,7 @@ from multiprocessing import cpu_count
 from itertools import product as it_prod
 from copy import deepcopy
 from numbers import Number
+from PIL import Image
 
 import yaml
 import numpy as np
@@ -1101,14 +1102,10 @@ class MaskGenerator:
         self.save_mask_info(path)
 
         if save_png:
-            from PIL import Image
-
             outpath = path.replace(".npy", ".png")
             if self.mask.ndim == 3:
                 mask_ = np.sum(self.mask, axis=2)
-                mask_ /= mask_.max()  # normalize to save image
-            else:
-                mask_ /= mask_.max()  # normalize to save image
+            mask_ /= mask_.max()  # normalize to save image
             im = Image.fromarray(np.uint8(mask_ * 255))
             im.save(outpath)
 
