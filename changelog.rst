@@ -29,8 +29,9 @@ Bug fixes:
 - SPINNA 3D mask generation fixed (and ``picasso.render.render_hist3d``)
 - Test subcluster fix indexing
 - Remove backward incompatible camera pixel size reading in SPINNA's mask generation (related to #602)
-- Fix localization masking for non-square mask (``picasso.masking.mask_locs``)
+- Fixed localization masking for non-square mask (``picasso.masking.mask_locs``)
 - Correct axial localization precision in Localize (magnification factor)
+- Render Test Clustering: fixed the full FOV button
 
 0.9.4-5
 -------

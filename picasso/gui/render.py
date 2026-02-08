@@ -3024,13 +3024,16 @@ class TestClustererView(QtWidgets.QLabel):
         return images
 
     def get_full_fov(self) -> list[tuple[float, float]] | None:
-        """Get viewport that contains all localizations."""
+        """Get viewport that contains all localizations as defined
+        by the pick."""
         if not len(self.locs):
             return
-        x_min = np.min(self.locs.x) - 1
-        x_max = np.max(self.locs.x) + 1
-        y_min = np.min(self.locs.y) - 1
-        y_max = np.max(self.locs.y) + 1
+        # all picked locs
+        locs = self.view.picked_locs(self.dialog.channel)[0]
+        x_min = locs["x"].min() - 1
+        x_max = locs["x"].max() + 1
+        y_min = locs["y"].min() - 1
+        y_max = locs["y"].max() + 1
         return ([y_min, x_min], [y_max, x_max])
 
 
