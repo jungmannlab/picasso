@@ -950,7 +950,7 @@ class MaskGenerator:
             self.ensure_correct_inputs()
 
         # camera pixel size
-        pixelsize = lib.get_from_metadata(info, "Pixelsize", default=130)
+        self.pixelsize = lib.get_from_metadata(info, "Pixelsize", default=130)
 
         # deduce roi from localizations metadata
         self.roi = [
