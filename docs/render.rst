@@ -103,6 +103,7 @@ If the outcome of G5M seems unsatisfactory, please check the following:
 
 - Make sure that ``group`` column is present in the localization file and contains the correct information (i.e., from DBSCAN clustering, not from picking localizations);
 - Make sure that the loc. precision values (columns ``lpx``, ``lpy``, ``lpz``) are correct, comparing NeNA and median loc. precision is a reasonable proxy (without fiducial markers); the most common issue is a miscalibrated camera, leading to incorrect photon counts and thus incorrect loc. precisions;
+- Another reason why the loc. precision values can be off is due to the small box size in the localization step; especially in 3D astigmatic imaging, single-emitter images can be quite large, potentially exceeding the user-defined box size; in such cases, we recommend increasing the box size in the localization step and rerunning the analysis;
 - Inspect if the localizations were preprocessed as described above;
 - Rerun the analysis without postprocessing (filtering) and redo it manually, since the step may be too stringent, especially for short acquisition times;
 - Adjust min./max. σ, especially too low max. σ may lead to high false positive error rates (i.e., overfitting);
