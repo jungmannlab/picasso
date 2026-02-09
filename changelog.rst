@@ -16,6 +16,7 @@ Small improvements:
 - Render property histogram shown before rendering is activated
 - Render property - removed legend
 - Render Nearest Neighbor Analysis - saves nearest neighbors distances in the localizations .hdf5 file
+- Render G5M dialog - adjusted the frame analysis checkbox
 - Localize zooms in and out centered at the current view
 - Config file changes from 0.9.5 were `documented <https://picassosr.readthedocs.io/en/latest/localize.html>`__ and `config template <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ was updated
 - SPINNA 3D masking: z slicing added for visual inspection

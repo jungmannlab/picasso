@@ -2237,7 +2237,7 @@ class G5MDialog(QtWidgets.QDialog):
 
         # postprocess for sticky events?
         self.postprocess_check = QtWidgets.QCheckBox(
-            "Filter invalid molecules"
+            "Filter invalid molecules\nand frame analysis"
         )
         # self.postprocess_check.setChecked(True)
         grid.addWidget(self.postprocess_check, grid.rowCount(), 0, 1, 2)
