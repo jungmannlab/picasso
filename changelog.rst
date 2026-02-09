@@ -31,6 +31,7 @@ Bug fixes:
 - Remove backward incompatible camera pixel size reading in SPINNA's mask generation (related to #602)
 - Fixed localization masking for non-square mask (``picasso.masking.mask_locs``)
 - Correct axial localization precision in Localize (magnification factor)
+- Localize does not raise an error if QE is not found in the config file
 - Render Test Clustering: fixed the full FOV button
 
 0.9.4-5

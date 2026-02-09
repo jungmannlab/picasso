@@ -1357,13 +1357,13 @@ class ParametersDialog(QtWidgets.QDialog):
                                     if em_combo.itemText(index) == wavelength:
                                         em_combo.setCurrentIndex(index)
                                         break
-                                else:
-                                    raise ValueError(
-                                        (
-                                            "No quantum efficiency found"
-                                            " for wavelength " + wavelength
-                                        )
-                                    )
+                                # else:
+                                #     raise ValueError(
+                                #         (
+                                #             "No quantum efficiency found"
+                                #             " for wavelength " + wavelength
+                                #         )
+                                #     )
 
     def update_sensitivity(self) -> None:
         """Update the sensitivity settings for the current camera."""
