@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 08-FEB-2026 CEST
+Last change: 09-FEB-2026 CEST
 
 0.9.6
 -----
@@ -34,6 +34,7 @@ Bug fixes:
 - Fixed localization masking for non-square mask (``picasso.masking.mask_locs``)
 - Correct axial localization precision in Localize (magnification factor)
 - Localize does not raise an error if QE is not found in the config file
+- Localize does not automatically fit z coordinates if a 3D calibration file is loaded from the config file
 - Render Test Clustering: fixed the full FOV button
 
 0.9.4-5

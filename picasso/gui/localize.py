@@ -1186,6 +1186,10 @@ class ParametersDialog(QtWidgets.QDialog):
             fp_calib = fp_calib_lam.get(wavelength)
             if fp_calib is not None:
                 self.update_z_calib(fp_calib)
+                # To avoid the situation where the user runs a 3D localization
+                # just because the calib file was loaded, uncheck the "Fit Z"
+                # checkbox;
+                self.fit_z_checkbox.setChecked(False)
 
     def update_z_calib(self, path: str) -> None:
         """Load the 3D calibration from a YAML file."""
