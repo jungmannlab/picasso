@@ -17,6 +17,7 @@ Small improvements:
 - Render property - removed legend
 - Render Nearest Neighbor Analysis - saves nearest neighbors distances in the localizations .hdf5 file
 - Localize zooms in and out centered at the current view
+- Config file changes from 0.9.5 were `documented <https://picassosr.readthedocs.io/en/latest/localize.html>`__ and `config template <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ was updated
 - SPINNA 3D masking: z slicing added for visual inspection
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - ``picasso.io.load_locs`` and ``save_locs`` ensure that the saved metadata contains the required keys
