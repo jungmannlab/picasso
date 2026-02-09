@@ -806,7 +806,7 @@ class train_dialog(QtWidgets.QDialog):
             except io.NoMetadataFileError:
                 return
 
-        if not hasattr(locs, "group"):
+        if "group" not in locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
             msgBox.setIcon(QtWidgets.QMessageBox.Warning)
             msgBox.setWindowTitle("Warning")
@@ -1207,7 +1207,7 @@ class Window(QtWidgets.QMainWindow):
 
         if self.predicting is False:
 
-            if not hasattr(self.locs, "score"):
+            if "score" not in self.locs.columns:
                 msgBox = QtWidgets.QMessageBox(self)
                 msgBox.setIcon(QtWidgets.QMessageBox.Information)
                 msgBox.setWindowTitle("Information")
@@ -1277,7 +1277,7 @@ class Window(QtWidgets.QMainWindow):
         except io.NoMetadataFileError:
             return
 
-        if not hasattr(self.locs, "group"):
+        if "group" not in self.locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
             msgBox.setIcon(QtWidgets.QMessageBox.Warning)
             msgBox.setWindowTitle("Warning")
@@ -1388,7 +1388,7 @@ class Window(QtWidgets.QMainWindow):
 
     def export(self):
 
-        if not hasattr(self.locs, "prediction"):
+        if "prediction" not in self.locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
             msgBox.setIcon(QtWidgets.QMessageBox.Information)
             msgBox.setWindowTitle("Information")

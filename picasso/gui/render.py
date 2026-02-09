@@ -12,7 +12,6 @@ Graphical user interface for rendering localization images.
 from __future__ import annotations
 
 import os
-import re
 import sys
 import traceback
 import warnings
@@ -769,7 +768,7 @@ class DatasetDialog(QtWidgets.QDialog):
 
             # adjust group color if needed
             if len(self.window.view.locs) == 1:
-                if hasattr(self.window.view.locs[0], "group"):
+                if "group" in self.window.view.locs[0].columns:
                     self.window.view.group_color = (
                         self.window.view.get_group_color(
                             self.window.view.locs[0]
@@ -1408,10 +1407,7 @@ class ClsDlg3D(QtWidgets.QDialog):
         scaled_locs = locs.copy()
         scaled_locs["x_scaled"] = locs["x"] * pixelsize
         scaled_locs["y_scaled"] = locs["y"] * pixelsize
-        X = scaled_locs["x_scaled"].to_numpy()
-        Y = scaled_locs["y_scaled"].to_numpy()
-        Z = scaled_locs["z"].to_numpy()
-        est.fit(np.stack((X, Y, Z), axis=1))
+        est.fit(scaled_locs[["x_scaled", "y_scaled", "z"]])
         labels = est.labels_
         counts = list(Counter(labels).items())
 
@@ -1611,9 +1607,7 @@ class ClsDlg2D(QtWidgets.QDialog):
         scaled_locs = locs.copy()
         scaled_locs["x_scaled"] = locs["x"]
         scaled_locs["y_scaled"] = locs["y"]
-        X = scaled_locs["x_scaled"].to_numpy()
-        Y = scaled_locs["y_scaled"].to_numpy()
-        est.fit(np.stack((X, Y), axis=1))
+        est.fit(scaled_locs[["x_scaled", "y_scaled"]])
         labels = est.labels_
         counts = list(Counter(labels).items())
 
@@ -1980,7 +1974,6 @@ class LinkDialog(QtWidgets.QDialog):
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
-        print(f"parent of the link dialog: {window}")
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Enter parameters")
@@ -1994,7 +1987,7 @@ class LinkDialog(QtWidgets.QDialog):
         grid.addWidget(dist_label, 0, 0)
         self.max_distance = QtWidgets.QDoubleSpinBox()
         self.max_distance.setRange(0, 1e6)
-        self.max_distance.setValue(1)
+        self.max_distance.setValue(10)
         grid.addWidget(self.max_distance, 0, 1)
         dark_label = QtWidgets.QLabel("Max. transient dark frames:")
         dark_label.setToolTip(
@@ -2179,7 +2172,7 @@ class G5MDialog(QtWidgets.QDialog):
         self.window = window
         self.nena = None
         self.channel = channel
-        self.flag_3D = hasattr(self.window.view.locs[0], "z")
+        self.flag_3D = "z" in self.window.view.locs[0].columns
         self.setWindowTitle("Molecular mapping (G5M) parameters")
 
         vbox = QtWidgets.QVBoxLayout(self)
@@ -2381,13 +2374,13 @@ class G5MDialog(QtWidgets.QDialog):
             return
         try:
             cluster_sizes = pd.read_csv(path)
-            if hasattr(self.window.view.locs[self.channel], "z"):  # 3D
+            if "z" in self.window.view.locs[self.channel].columns:  # 3D
                 column = "Volume (LP^3)"
                 thresh = 12 * 4 / 3 * np.pi * 2.98**2 * (2.98 * 2.5)
             else:  # 2D
                 column = "Area (LP^2)"
                 thresh = 12 * np.pi * 2.98**2
-            sizes = cluster_sizes[column].to_numpy()
+            sizes = cluster_sizes[column]
         except Exception:
             warning = "Could not read the cluster areas/volumes file."
             QtWidgets.QMessageBox.information(self.window, "Warning", warning)
@@ -2567,14 +2560,14 @@ class TestClustererDialog(QtWidgets.QDialog):
         self.view.update_scene()
 
     def on_xz_proj(self) -> None:
-        if self.view.locs is not None and hasattr(self.view.locs, "z"):
+        if self.view.locs is not None and "z" in self.view.locs.columns:
             self.view.ang = [1.5708, 0, 0]  # 90 deg rotation
         else:
             self.view.ang = None
         self.view.update_scene()
 
     def on_yz_proj(self) -> None:
-        if self.view.locs is not None and hasattr(self.view.locs, "z"):
+        if self.view.locs is not None and "z" in self.view.locs.columns:
             self.view.ang = [0, 1.5708, 0]  # 90 deg rotation
         else:
             self.view.ang = None
@@ -2611,7 +2604,7 @@ class TestClustererDialog(QtWidgets.QDialog):
             self.view.group_color = self.window.view.get_group_color(locs)
 
         # scale z axis if applicable
-        if hasattr(locs, "z"):
+        if "z" in locs.columns:
             locs.z /= pixelsize
         return locs
 
@@ -2958,7 +2951,7 @@ class TestClustererView(QtWidgets.QLabel):
         ):  # two channels, all locs and clustered locs
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
-            if hasattr(all_locs, "z"):
+            if "z" in all_locs.columns:
                 all_locs.z /= (
                     self.dialog.window.display_settings_dlg.pixelsize.value()
                 )
@@ -2980,7 +2973,7 @@ class TestClustererView(QtWidgets.QLabel):
         ):  # three channels, all locs, clustered locs and cluster centers
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
-            if hasattr(all_locs, "z"):
+            if "z" in all_locs.columns:
                 all_locs.z /= (
                     self.dialog.window.display_settings_dlg.pixelsize.value()
                 )
@@ -3031,13 +3024,16 @@ class TestClustererView(QtWidgets.QLabel):
         return images
 
     def get_full_fov(self) -> list[tuple[float, float]] | None:
-        """Get viewport that contains all localizations."""
+        """Get viewport that contains all localizations as defined
+        by the pick."""
         if not len(self.locs):
             return
-        x_min = np.min(self.locs.x) - 1
-        x_max = np.max(self.locs.x) + 1
-        y_min = np.min(self.locs.y) - 1
-        y_max = np.max(self.locs.y) + 1
+        # all picked locs
+        locs = self.view.picked_locs(self.dialog.channel)[0]
+        x_min = locs["x"].min() - 1
+        x_max = locs["x"].max() + 1
+        y_min = locs["y"].min() - 1
+        y_max = locs["y"].max() + 1
         return ([y_min, x_min], [y_max, x_max])
 
 
@@ -3644,7 +3640,7 @@ class InfoDialog(QtWidgets.QDialog):
 
             # calculate frc
             self.frc_result = postprocess.frc(
-                locs.copy(), info, self.window.view.viewport
+                locs, info, self.window.view.viewport
             )
             if path:  # save images
                 base, ext = os.path.splitext(path)
@@ -3667,7 +3663,7 @@ class InfoDialog(QtWidgets.QDialog):
                 "Calculating NeNA precision", 0, 100, self
             )
             self.nena_result, self.lp = postprocess.nena(
-                locs.copy(), info, progress.set_value
+                locs, info, progress.set_value
             )
             self.lp *= self.window.display_settings_dlg.pixelsize.value()
             self.nena_label.setText(f"{self.lp:.3} nm")
@@ -4616,7 +4612,7 @@ class RESIDialog(QtWidgets.QDialog):
         self.n_channels = len(self.locs)
         self.paths = window.view.locs_paths
         self.ndim = 2
-        if all([hasattr(_, "z") for _ in self.locs]):
+        if all(["z" in _.columns for _ in self.locs]):
             self.ndim = 3
 
         self.radius_xy = []
@@ -4858,7 +4854,7 @@ class RESIDialog(QtWidgets.QDialog):
             # change the group name in all_resi
             all_resi["cluster_id"] = all_resi["group"]
             all_resi.drop(columns=["group"], inplace=True)
-            all_resi.sort_values(kind="mergesort", by="frame", inplace=True)
+            all_resi.sort_values(kind="quicksort", by="frame", inplace=True)
 
             # save resi cluster centers
             io.save_locs(resi_path, all_resi, resi_info)
@@ -4912,8 +4908,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
         Tick to display scale bar's length (nm).
-    show_legend : QPushButton
-        Click to display parameter rendering's legend.
     _silent_disp_px_update : bool
         True if update display pixel size in background.
     zoom : QDoubleSpinBox
@@ -5200,12 +5194,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.render_check.setEnabled(False)
         render_grid.addWidget(self.render_check, 5, 0)
 
-        self.show_legend = QtWidgets.QPushButton("Show legend")
-        self.show_legend.setToolTip(
-            "Display the legend for the rendered property."
-        )
-        render_grid.addWidget(self.show_legend, 5, 1)
-
         fw, fh, dpi = (2, 1, 150)
         self.figure_prop = plt.figure(
             figsize=(fw, fh), dpi=dpi, constrained_layout=True
@@ -5223,9 +5211,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.canvas_prop.setMinimumSize(QtCore.QSize(fw * dpi, fh * dpi))
         render_grid.addWidget(self.canvas_prop, 6, 0, 6, 2)
 
-        self.show_legend.setEnabled(False)
-        self.show_legend.setAutoDefault(False)
-        self.show_legend.clicked.connect(self.window.view.show_legend)
         self.render_groupbox.setEnabled(False)
 
         # adjust the size of the dialog to fit its contents
@@ -5312,11 +5297,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.ax_prop.cla()
 
         # array of values for the rendered property
-        data = (
-            self.window.view.locs[0][self.parameter.currentText()]
-            .to_numpy()
-            .copy()
-        )
+        data = self.window.view.locs[0][self.parameter.currentText()]
         # other parameters
         min_val = self.minimum_render.value()
         max_val = self.maximum_render.value()
@@ -5482,8 +5463,9 @@ class FastRenderDialog(QtWidgets.QDialog):
                 factors.append(new_disp_nlocs / old_disp_nlocs)
             factor = np.mean(factors)  # to adjust contrast
         #  update view.group_color if needed:
-        if len(self.fractions) == 2 and hasattr(
-            self.window.view.locs[0], "group"
+        if (
+            len(self.fractions) == 2
+            and "group" in self.window.view.locs[0].columns
         ):
             self.window.view.group_color = self.window.view.get_group_color(
                 self.window.view.locs[0]
@@ -5946,7 +5928,6 @@ class View(QtWidgets.QLabel):
             locs, info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
-        locs = lib.ensure_sanity(locs, info)
 
         # update pixelsize (credits to Boyd Peters #602)
         pixelsize = lib.get_from_metadata(
@@ -6009,7 +5990,7 @@ class View(QtWidgets.QLabel):
             self.median_lp = np.mean(
                 [np.median(locs.lpx), np.median(locs.lpy)]
             )
-            if hasattr(locs, "group"):
+            if "group" in locs.columns:
                 if len(self.group_color) == 0 and locs.group.size:
                     self.group_color = self.get_group_color(self.locs[0])
             disp_sett_dlg.parameter.clear()
@@ -6024,7 +6005,7 @@ class View(QtWidgets.QLabel):
             self.fit_in_view(autoscale=True)
             self.update_scene()
 
-        if hasattr(locs, "z"):
+        if "z" in locs.columns:
             # append z coordinates for slicing
             self.window.slicer_dialog.zcoord.append(locs.z)
             # unlock 3D settings
@@ -6062,8 +6043,12 @@ class View(QtWidgets.QLabel):
             for i, path in enumerate(paths):
                 try:
                     self.add(path, render=False)
-                except Exception:
-                    pass
+                except Exception as e:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Error",
+                        f"An error occurred while loading {os.path.basename(path)}:\n{str(e)}",
+                    )
                 pd.set_value(i + 1)
             if len(self.locs):  # if loading was successful
                 if fit_in_view:
@@ -6290,7 +6275,7 @@ class View(QtWidgets.QLabel):
         self.all_locs[channel] = pd.concat(out_locs, ignore_index=True)
         self.locs[channel] = copy.copy(self.all_locs[channel])
 
-        if hasattr(self.all_locs[channel], "group"):
+        if "group" in self.all_locs[channel].columns:
             groups = np.unique(self.all_locs[channel].group)
             # In case a group is missing
             groups = np.arange(np.max(groups) + 1)
@@ -6306,7 +6291,7 @@ class View(QtWidgets.QLabel):
 
         See ``picasso.postprocess.link`` for more details."""
         channel = self.get_channel()
-        if hasattr(self.all_locs[channel], "len"):
+        if "len" in self.all_locs[channel].columns:
             QtWidgets.QMessageBox.information(
                 self, "Link", "Localizations are already linked. Aborting..."
             )
@@ -6324,7 +6309,7 @@ class View(QtWidgets.QLabel):
                     max_dark_time=max_dark,
                 )
                 status.close()
-                if hasattr(self.all_locs[channel], "group"):
+                if "group" in self.all_locs[channel].columns:
                     groups = np.unique(self.all_locs[channel].group)
                     groups = np.arange(np.max(groups) + 1)
                     np.random.shuffle(groups)
@@ -6402,7 +6387,7 @@ class View(QtWidgets.QLabel):
             "Applying DBSCAN. This may take a while.", self
         )
         # keep group info if already present
-        if hasattr(self.all_locs[channel], "group"):
+        if "group" in self.all_locs[channel].columns:
             locs = self.all_locs[channel].copy()
             locs["group_input"] = self.all_locs[channel].group
         else:
@@ -6529,7 +6514,7 @@ class View(QtWidgets.QLabel):
             "Applying HDBSCAN. This may take a while.", self
         )
         # keep group info if already present
-        if hasattr(self.all_locs[channel], "group"):
+        if "group" in self.all_locs[channel].columns:
             locs = self.all_locs[channel].copy()
             locs["group_input"] = self.all_locs[channel].group
         else:
@@ -6586,7 +6571,7 @@ class View(QtWidgets.QLabel):
 
         # get clustering parameters
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
-        if any([hasattr(_, "z") for _ in self.all_locs]):
+        if any(["z" in _.columns for _ in self.all_locs]):
             flag_3D = True
         else:
             flag_3D = False
@@ -6664,7 +6649,7 @@ class View(QtWidgets.QLabel):
         status = lib.StatusDialog("Clustering localizations", self)
 
         # keep group info if already present
-        if hasattr(self.all_locs[channel], "group"):
+        if "group" in self.all_locs[channel].columns:
             locs = self.all_locs[channel].copy()
             locs["group_input"] = self.all_locs[channel].group
         else:
@@ -6692,7 +6677,7 @@ class View(QtWidgets.QLabel):
             "Performed basic frame analysis": frame_analysis,
             "Fraction of rejected locs (%)": rejected,
         }
-        if hasattr(self.all_locs[channel], "z"):
+        if "z" in self.all_locs[channel].columns:
             new_info["Clustering radius xy (nm)"] = radius_xy * pixelsize
             new_info["Clustering radius z (nm)"] = radius_z * pixelsize
         else:
@@ -6927,7 +6912,7 @@ class View(QtWidgets.QLabel):
         """Check whether the data has been grouped (clustered) in
         channel i."""
         locs = self.window.view.locs[channel]
-        if hasattr(locs, "group"):
+        if "group" in locs.columns:
             return True
         else:
             message = (
@@ -6996,7 +6981,7 @@ class View(QtWidgets.QLabel):
         locs = [self.picked_locs(_) for _ in range(n_channels)]
         dy = self.shifts_from_picked_coordinate(locs, "y")
         dx = self.shifts_from_picked_coordinate(locs, "x")
-        if all([hasattr(_[0], "z") for _ in locs]):
+        if all(["z" in _[0].columns for _ in locs]):
             dz = self.shifts_from_picked_coordinate(locs, "z")
         else:
             dz = None
@@ -7256,7 +7241,6 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn pick.
         """
-        image = image.copy()
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor("green"))
 
@@ -7300,7 +7284,6 @@ class View(QtWidgets.QLabel):
         image : QImage
             Image with the drawn points.
         """
-        image = image.copy()
         d = 20  # width of the drawn crosses (window pixels)
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor("yellow"))
@@ -7730,7 +7713,7 @@ class View(QtWidgets.QLabel):
             if not scalebar:
                 spath = path.replace(".png", "_scalebar.png")
                 scalebar_box.setChecked(True)
-                qimage_scale = self.draw_scalebar(qimage.copy())
+                qimage_scale = self.draw_scalebar(qimage)
                 qimage_scale.save(spath)
                 scalebar_box.setChecked(False)
 
@@ -8244,57 +8227,68 @@ class View(QtWidgets.QLabel):
 
     def nearest_neighbor(self) -> tuple[int, int]:
         """Gets channels for nearest neighbor analysis."""
-        channel1 = self.get_channel("Nearest Neighbor Analysis")
-        channel2 = self.get_channel("Nearest Neighbor Analysis")
-        self._nearest_neighbor(channel1, channel2)
-
-    def _nearest_neighbor(self, channel1: int, channel2: int) -> None:
-        """Calculate and save distances of the nearest neighbors between
-        localizations in channels 1 and 2.
-
-        NN distances are saved in .csv format."""
+        # get the two channels
+        channel1 = self.get_channel("NND from channel:")
+        if channel1 is None:
+            return
+        channel2 = self.get_channel("NND to channel:")
+        if channel2 is None:
+            return
         # ask how many nearest neighbors
         nn_count, ok = QtWidgets.QInputDialog.getInt(
             self, "Input Dialog", "Number of nearest neighbors: ", 0, 1, 100
         )
-        if ok:
-            pixelsize = self.window.display_settings_dlg.pixelsize.value()
-            # extract x, y and z from both channels
-            x1 = self.locs[channel1].x * pixelsize
-            x2 = self.locs[channel2].x * pixelsize
-            y1 = self.locs[channel1].y * pixelsize
-            y2 = self.locs[channel2].y * pixelsize
-            if hasattr(self.locs[channel1], "z") and hasattr(
-                self.locs[channel2], "z"
-            ):
-                z1 = self.locs[channel1].z
-                z2 = self.locs[channel2].z
-            else:
-                z1 = None
-                z2 = None
+        if not ok:
+            return
+        # get saved file name
+        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            "Save nearest neighbor distances",
+            self.locs_paths[channel1].replace(".hdf5", "_nn.hdf5"),
+            filter="*.hdf5",
+        )
+        if not path:
+            return
+        status = lib.StatusDialog(
+            "Calculating nearest neighbor distances...", self
+        )
+        self._nearest_neighbor(path, channel1, channel2, nn_count)
+        status.close()
 
-            # used for avoiding zero distances (to self)
-            same_channel = channel1 == channel2
+    def _nearest_neighbor(
+        self, path: str, channel1: int, channel2: int, nn_count: int
+    ) -> None:
+        """Calculate and save distances of the nearest neighbors between
+        localizations in channels 1 and 2. Save as localizations .hdf5
+        file of channel 1."""
+        pixelsize = self.window.display_settings_dlg.pixelsize.value()
+        # extract x, y and z from both channels
+        if "z" in self.locs[channel1].columns:
+            X1 = self.locs[channel1][["x", "y", "z"]].to_numpy()
+        else:
+            X1 = self.locs[channel1][["x", "y"]].to_numpy()
+        if "z" in self.locs[channel2].columns:
+            X2 = self.locs[channel2][["x", "y", "z"]].to_numpy()
+        else:
+            X2 = self.locs[channel2][["x", "y"]].to_numpy()
+        X1[:, :2] *= pixelsize  # convert x and y to nm
+        X2[:, :2] *= pixelsize
 
-            # get saved file name
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self,
-                "Save nearest neighbor distances",
-                self.locs_paths[channel1].replace(".hdf5", "_nn.csv"),
-                filter="*.csv",
-            )
-            nn = postprocess.nn_analysis(
-                x1,
-                x2,
-                y1,
-                y2,
-                z1,
-                z2,
-                nn_count,
-                same_channel,
-            )
-            # save as .csv
-            np.savetxt(path, nn, delimiter=",")
+        # get nnd and append to locs to save
+        nn = postprocess.nn_analysis(X1, X2, nn_count)
+        new_locs = self.locs[channel1].copy()
+        for i in range(nn_count):
+            new_locs[f"nnd_{i+1}"] = nn[:, i]
+
+        # save new locs
+        new_info = {
+            "Generated by": "Picasso Render Nearest Neighbor Analysis",
+            "Pixelsize (nm)": pixelsize,
+            "Nearest neighbors": nn_count,
+            "Channel 1": self.locs_paths[channel1],
+            "Channel 2": self.locs_paths[channel2],
+        }
+        io.save_locs(path, new_locs, self.infos[channel1] + [new_info])
 
     def display_pixels_per_viewport_pixels(self) -> float:
         """Return optimal oversampling given viewport size."""
@@ -8893,7 +8887,7 @@ class View(QtWidgets.QLabel):
                 if self._picks:
                     for i, pick in enumerate(self._picks):
                         # 3D
-                        if hasattr(all_picked_locs[0], "z"):
+                        if "z" in all_picked_locs[0].columns:
                             # k-means clustering
                             reply = ClsDlg3D.getParams(
                                 all_picked_locs,
@@ -8935,7 +8929,7 @@ class View(QtWidgets.QLabel):
                         reply = 3
                         while reply == 3:
                             # 3D
-                            if hasattr(all_picked_locs[0], "z"):
+                            if "z" in all_picked_locs[0].columns:
                                 # k-means clustering
                                 reply, nc, l_locs, c_locs = ClsDlg3D.getParams(
                                     all_picked_locs,
@@ -9004,7 +8998,7 @@ class View(QtWidgets.QLabel):
             dark = np.empty(len(clustered_locs))
 
             for i, pick_locs in enumerate(clustered_locs):
-                if not hasattr(pick_locs, "len"):
+                if "len" not in pick_locs.columns:
                     pick_locs = postprocess.link(
                         pick_locs,
                         self.infos[channel],
@@ -9059,15 +9053,23 @@ class View(QtWidgets.QLabel):
                 )
                 progress.set_value(0)
                 progress.show()
+                locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
                 for i, pick in enumerate(self._picks):
                     x, y = pick
-                    # extract locs at a given region
-                    block_locs = postprocess.get_block_locs_at(
-                        x, y, index_blocks
+                    # extract locs at a given region - numba version
+                    block_locs_xy = postprocess.get_block_locs_at_numba(
+                        int(x / r),
+                        int(y / r),
+                        locs_xy,
+                        index_blocks[4],
+                        index_blocks[5],
+                        index_blocks[6],
+                        index_blocks[7],
                     )
-                    # extract the locs around the pick
-                    locs = lib.locs_at(x, y, block_locs, r)
-                    loccount.append(len(locs))
+                    pick_locs_xy = postprocess.locs_at_numba(
+                        x, y, block_locs_xy, r
+                    )
+                    loccount.append(pick_locs_xy.shape[1])
                     progress.set_value(i)
                 progress.close()
 
@@ -9241,6 +9243,7 @@ class View(QtWidgets.QLabel):
             std_range = (
                 self.window.tools_settings_dialog.pick_similar_range.value()
             )
+            index_blocks = self.get_index_blocks(channel)
             status = lib.StatusDialog("Picking similar...", self.window)
             new_picks = postprocess.pick_similar(
                 locs=self.all_locs[channel],
@@ -9248,6 +9251,7 @@ class View(QtWidgets.QLabel):
                 picks=self._picks,
                 d=d,
                 std_range=std_range,
+                index_blocks=index_blocks,
             )
             # add picks
             self._picks = []
@@ -9289,15 +9293,19 @@ class View(QtWidgets.QLabel):
 
             # extract localizations to pick from
             if fast_render:
-                locs = self.locs[channel].copy()
+                locs = self.locs[channel]
             else:
-                locs = self.all_locs[channel].copy()
+                locs = self.all_locs[channel]
 
             # find pick size (radius or width)
             px = self.window.display_settings_dlg.pixelsize.value()
+            index_blocks = None  # used for circular picks only
             if self._pick_shape == "Circle":
                 d = self.window.tools_settings_dialog.pick_diameter.value()
                 pick_size = d / 2 / px
+                index_blocks = self.get_index_blocks(
+                    channel, fast_render=fast_render
+                )
             elif self._pick_shape == "Rectangle":
                 pick_size = (
                     self.window.tools_settings_dialog.pick_width.value() / px
@@ -9318,6 +9326,7 @@ class View(QtWidgets.QLabel):
                 self._pick_shape,
                 pick_size=pick_size,
                 add_group=add_group,
+                index_blocks=index_blocks,
                 callback=progress.set_value,
             )
             return picked_locs
@@ -9394,12 +9403,10 @@ class View(QtWidgets.QLabel):
         channel : int
             Index of the channel were localizations are removed.
         """
-        locs = self.all_locs[channel].copy()
+        locs = self.all_locs[channel]
         all_picked_locs = self.picked_locs(channel, add_group=False)
-        idx = []  # store indices of picked locs
-        for picked_locs in all_picked_locs:
-            idx.append(picked_locs.index.to_numpy())
-        idx = np.concatenate(idx)
+        # store indices of picked locs
+        idx = np.concatenate([_.index for _ in all_picked_locs])
         locs.drop(index=idx, inplace=True)
         self.all_locs[channel] = locs
         self.locs[channel] = locs.copy()
@@ -9600,7 +9607,7 @@ class View(QtWidgets.QLabel):
 
         # if slicing, show only current slice from every channel
         for i in range(len(locs)):
-            if hasattr(locs[i], "z"):
+            if "z" in locs[i].columns:
                 if self.window.slicer_dialog.slicer_radio_button.isChecked():
                     z_min = self.window.slicer_dialog.slicermin
                     z_max = self.window.slicer_dialog.slicermax
@@ -9702,13 +9709,13 @@ class View(QtWidgets.QLabel):
             )
 
         # if locs have group identity (e.g. clusters)
-        if hasattr(locs, "group") and locs.group.size:
+        if "group" in locs.columns and locs.group.size:
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
                 kwargs, locs=locs, autoscale=autoscale, use_cache=use_cache
             )
         # if slicing, show only the current slice
-        if hasattr(locs, "z"):
+        if "z" in locs.columns:
             if self.window.slicer_dialog.slicer_radio_button.isChecked():
                 z_min = self.window.slicer_dialog.slicermin
                 z_max = self.window.slicer_dialog.slicermax
@@ -9977,7 +9984,7 @@ class View(QtWidgets.QLabel):
         # allow running even if no picks are present but group info is
         if len(self._picks) == 0:
             locs = self.all_locs[channel]
-            if not hasattr(locs, "group"):
+            if "group" not in locs.columns:
                 message = (
                     "No picks found. Please create picks or assign group "
                     "identity to localizations before calculating pick "
@@ -10008,7 +10015,7 @@ class View(QtWidgets.QLabel):
             progress.set_value(i + 1)
             if not len(pick_locs):
                 continue
-            if not hasattr(pick_locs, "len"):
+            if "len" not in pick_locs.columns:
                 pick_locs = postprocess.link(
                     pick_locs,
                     self.infos[channel],
@@ -10166,40 +10173,6 @@ class View(QtWidgets.QLabel):
         image = np.maximum(image, 0.0)
         return image
 
-    def show_legend(self) -> None:
-        """Display legend for rendering by property."""
-        parameter = self.window.display_settings_dlg.parameter.currentText()
-        n_colors = self.window.display_settings_dlg.color_step.value()
-        min_val = self.window.display_settings_dlg.minimum_render.value()
-        max_val = self.window.display_settings_dlg.maximum_render.value()
-
-        colors = get_render_properties_colors(
-            n_colors,
-            self.window.display_settings_dlg.colormap_prop.currentText(),
-        )
-
-        fig1 = plt.figure(figsize=(5, 1), constrained_layout=True)
-
-        ax1 = fig1.add_subplot(111, aspect="equal")
-
-        color_spacing = 10 / len(colors)
-        xpos = 0
-        for i in range(len(colors)):
-            ax1.add_patch(
-                patches.Rectangle((xpos, 0), color_spacing, 1, color=colors[i])
-            )
-            xpos += color_spacing
-
-        x = np.arange(0, 11, 2.5)
-        ax1.set_xlim([0, 10])
-        ax1.get_yaxis().set_visible(False)
-
-        labels = np.linspace(min_val, max_val, 5).round(2)
-        plt.xticks(x, labels)
-
-        plt.title(parameter)
-        fig1.show()
-
     def activate_render_property(self) -> None:
         """Assign localizations by color to render a chosen property."""
         self.deactivate_property_menu()  # blocks changing render parameters
@@ -10263,12 +10236,11 @@ class View(QtWidgets.QLabel):
                     del self.x_render_cache[-1]
 
             self.x_locs = x_locs
-            self.window.display_settings_dlg.show_legend.setEnabled(True)
-            self.window.display_settings_dlg.update_histogram()
         else:
             self.x_render_state = False
         self.update_scene()
         self.activate_property_menu()  # allows changing render parameters
+        self.window.display_settings_dlg.update_histogram()
 
     def activate_property_menu(self) -> None:
         """Allow changing render parameters."""
@@ -10304,23 +10276,14 @@ class View(QtWidgets.QLabel):
 
         self.window.display_settings_dlg.maximum_render.blockSignals(True)
         self.window.display_settings_dlg.minimum_render.blockSignals(True)
-
         self.window.display_settings_dlg.maximum_render.setRange(lower, upper)
         self.window.display_settings_dlg.maximum_render.setValue(max_val)
         self.window.display_settings_dlg.minimum_render.setValue(min_val)
-
         self.window.display_settings_dlg.maximum_render.blockSignals(False)
         self.window.display_settings_dlg.minimum_render.blockSignals(False)
-
         self.activate_property_menu()
-
         self.window.display_settings_dlg.render_check.setEnabled(True)
         self.window.display_settings_dlg.render_check.setCheckState(False)
-
-        # clean up the histogram plot
-        self.window.display_settings_dlg.ax_prop.cla()
-        self.window.display_settings_dlg.canvas_prop.draw()
-
         self.activate_render_property()
 
     def set_mode(self, action: QtWidgets.QAction) -> None:
@@ -10452,7 +10415,7 @@ class View(QtWidgets.QLabel):
                 )
             else:
                 self.plot_window = DriftPlotWindow(self)
-                if hasattr(self._drift[channel], "z"):
+                if "z" in self._drift[channel].columns:
                     self.plot_window.plot_3d(drift)
 
                 else:
@@ -10574,7 +10537,7 @@ class View(QtWidgets.QLabel):
             self.locs[channel]["x"] -= drift["x"].iloc[frames_].to_numpy()
             self.locs[channel]["y"] -= drift["y"].iloc[frames_].to_numpy()
             # If z coordinate exists, also apply drift there
-            if all([hasattr(_, "z") for _ in picked_locs]):
+            if all(["z" in _.columns for _ in picked_locs]):
                 self.all_locs[channel]["z"] -= (
                     drift["z"].iloc[frames].to_numpy()
                 )
@@ -10636,15 +10599,15 @@ class View(QtWidgets.QLabel):
         frames = self.all_locs[channel]["frame"]
         frames_ = self.locs[channel]["frame"]
 
-        self.all_locs[channel]["x"] -= drift["x"][frames].to_numpy()
-        self.all_locs[channel]["y"] -= drift["y"][frames].to_numpy()
-        self.locs[channel]["x"] -= drift["x"][frames_].to_numpy()
-        self.locs[channel]["y"] -= drift["y"][frames_].to_numpy()
+        self.all_locs[channel]["x"] -= drift["x"].iloc[frames].to_numpy()
+        self.all_locs[channel]["y"] -= drift["y"].iloc[frames].to_numpy()
+        self.locs[channel]["x"] -= drift["x"].iloc[frames_].to_numpy()
+        self.locs[channel]["y"] -= drift["y"].iloc[frames_].to_numpy()
 
-        if hasattr(drift, "z"):
+        if "z" in drift.columns:
             drift["z"] = -drift["z"]
-            self.all_locs[channel]["z"] -= drift["z"][frames].to_numpy()
-            self.locs[channel]["z"] -= drift["z"][frames_].to_numpy()
+            self.all_locs[channel]["z"] -= drift["z"].iloc[frames].to_numpy()
+            self.locs[channel]["z"] -= drift["z"].iloc[frames_].to_numpy()
 
         self.add_drift(channel, drift)
         self.update_scene()
@@ -10670,8 +10633,8 @@ class View(QtWidgets.QLabel):
             self._drift[channel]["x"] += drift["x"]
             self._drift[channel]["y"] += drift["y"]
 
-            if hasattr(drift, "z"):
-                if hasattr(self._drift[channel], "z"):
+            if "z" in drift.columns:
+                if "z" in self._drift[channel].columns:
                     self._drift[channel]["z"] += drift["z"]
                 else:
                     self._drift[channel]["z"] = drift["z"]
@@ -10756,7 +10719,7 @@ class View(QtWidgets.QLabel):
 
         # automatically assign the group if circular picks are present
         if (
-            not hasattr(self.all_locs[0], "group")
+            "group" not in self.all_locs[0].columns
             and len(self._picks)
             and self._pick_shape == "Circle"
         ):
@@ -10764,7 +10727,7 @@ class View(QtWidgets.QLabel):
             locs = pd.concat(locs, ignore_index=True)
             self.all_locs[0] = locs
             remove_group = True
-        elif hasattr(self.all_locs[0], "group"):
+        elif "group" in self.all_locs[0].columns:
             remove_group = False
         else:
             QtWidgets.QMessageBox.information(
@@ -10935,7 +10898,7 @@ class View(QtWidgets.QLabel):
             rmsd = np.empty(n_picks)  # rmsd in each pick
             length = np.empty(n_picks)  # estimated mean bright time
             dark = np.empty(n_picks)  # estimated mean dark time
-            has_z = hasattr(picked_locs[0], "z")
+            has_z = "z" in picked_locs[0].columns
             if has_z:
                 rmsd_z = np.empty(n_picks)
             new_locs = []  # linked locs in each pick
@@ -10961,7 +10924,7 @@ class View(QtWidgets.QLabel):
                         rmsd_z[i] = np.sqrt(
                             np.mean((locs.z - np.mean(locs.z)) ** 2)
                         )
-                    if not hasattr(locs, "len"):
+                    if "len" not in locs.columns:
                         locs = postprocess.link(
                             locs, info, r_max=r_max, max_dark_time=t
                         )
@@ -11977,7 +11940,7 @@ class Window(QtWidgets.QMainWindow):
                         info,
                     )
 
-                    if hasattr(locs, "z"):
+                    if "z" in locs.columns:
                         z_min = locs["z"][in_view].min()
                         z_max = locs["z"][in_view].max()
                         z_mins.append(z_min)
@@ -12004,7 +11967,9 @@ class Window(QtWidgets.QMainWindow):
                 locs = self.view.locs[channel]
                 if has_z:
                     n, image = render.render_hist3d(
-                        locs,
+                        locs["x"].to_numpy(),
+                        locs["y"].to_numpy(),
+                        locs["z"].to_numpy().copy(),  # do not remove the copy!
                         oversampling,
                         y_min,
                         x_min,
@@ -12318,7 +12283,7 @@ class Window(QtWidgets.QMainWindow):
                     # combine locs from all channels
                     all_locs = pd.concat(self.view.all_locs, ignore_index=True)
                     all_locs.sort_values(
-                        kind="mergesort",
+                        kind="quicksort",
                         by="frame",
                         inplace=True,
                     )

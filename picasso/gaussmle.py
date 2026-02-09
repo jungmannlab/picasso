@@ -865,18 +865,19 @@ def locs_from_fits(
             "iterations": iterations.astype(np.uint32),
         }
     )
-    if hasattr(identifications, "n_id"):
+    if "n_id" in identifications.columns:
         locs["n_id"] = identifications.n_id.astype(np.uint32)
-        locs.sort_values(by=["n_id"], kind="mergesort", inplace=True)
+        locs.sort_values(by=["n_id"], kind="quicksort", inplace=True)
     else:
-        locs.sort_values(by=["frame"], kind="mergesort", inplace=True)
+        locs.sort_values(by=["frame"], kind="quicksort", inplace=True)
     return locs
 
 
 def sigma_uncertainty(
-    sigma: np.ndarray,
-    photons: np.ndarray,
-    bg: np.ndarray,
+    sigma: pd.Series | np.ndarray,
+    sigma_orth: pd.Series | np.ndarray,
+    photons: pd.Series | np.ndarray,
+    bg: pd.Series | np.ndarray,
 ) -> np.ndarray:
     """Calculate standard error of fitted sigma based on the MLE 2D
     Gaussian/Poisson noise model (picasso.gaussmle).
@@ -890,11 +891,14 @@ def sigma_uncertainty(
 
     Parameters
     ----------
-    sigma : np.ndarray
+    sigma : pd.Series | np.ndarray
         Fitted sigma values in camera pixels.
-    photons : np.ndarray
+    sigma_orth : pd.Series | np.ndarray
+        Fitted sigma values in the orthogonal direction in camera
+        pixels.
+    photons : pd.Series | np.ndarray
         Number of photons.
-    bg : np.ndarray
+    bg : pd.Series | np.ndarray
         Background photons per pixel.
 
     Returns

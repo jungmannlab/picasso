@@ -752,7 +752,7 @@ class ViewRotation(QtWidgets.QLabel):
 
         # assign self.group_color if single channel and group info
         # present
-        if len(self.locs) == 1 and hasattr(self.locs[0], "group"):
+        if len(self.locs) == 1 and "group" in self.locs[0].columns:
             self.group_color = self.window.window.view.get_group_color(
                 self.locs[0]
             )
@@ -988,7 +988,7 @@ class ViewRotation(QtWidgets.QLabel):
         locs = self.locs[0]
 
         # if clustered or picked locs
-        if hasattr(locs, "group"):
+        if "group" in locs.columns:
             locs = [locs[self.group_color == _] for _ in range(N_GROUP_COLORS)]
             return self.render_multi_channel(
                 kwargs,
@@ -1269,7 +1269,6 @@ class ViewRotation(QtWidgets.QLabel):
     def draw_rotation_angles(self, image: np.ndarray) -> np.ndarray:
         """Draw text displaying current rotation angles in degrees."""
         if self.window.angles_action.isChecked():
-            image = image.copy()
             [angx, angy, angz] = [
                 int(np.round(_ * 180 / np.pi, 0))
                 for _ in [self.angx, self.angy, self.angz]
@@ -1300,7 +1299,6 @@ class ViewRotation(QtWidgets.QLabel):
         image : QImage
             Image with the drawn points.
         """
-        image = image.copy()
         d = 20
         painter = QtGui.QPainter(image)
         painter.setPen(QtGui.QColor("yellow"))
@@ -2288,7 +2286,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                         ignore_index=True,
                     )
                     all_locs.sort_values(
-                        kind="mergesort",
+                        kind="quicksort",
                         by="frame",
                         inplace=True,
                     )

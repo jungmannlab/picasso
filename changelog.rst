@@ -1,7 +1,38 @@
 Changelog
 =========
 
-Last change: 29-JAN-2026 CEST
+Last change: 08-FEB-2026 CEST
+
+0.9.6
+-----
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- Change of API in ``picasso.postprocess.nn_analysis``: new inputs cause backward compatibility issues. The function now returns only the nearest neighbor distances, not the indices of the nearest neighbors.
+
+Small improvements:
++++++++++++++++++++
+- Moved from merge sort to quick sort (often faster due to lower memory usage)
+- Render: increase the speed of picking circular locs, picking similar and filter by number of localizations (numba implementation)
+- Render property histogram shown before rendering is activated
+- Render property - removed legend
+- Render Nearest Neighbor Analysis - saves nearest neighbors distances in the localizations .hdf5 file
+- Localize zooms in and out centered at the current view
+- SPINNA 3D masking: z slicing added for visual inspection
+- Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
+- ``picasso.io.load_locs`` and ``save_locs`` ensure that the saved metadata contains the required keys
+- Updated documentation on filetypes and minimum requirements for HDF5 files and accompanying YAML metadata files in Picasso
+- Use ``"col" in df.columns`` instead of ``hasattr(df, "col")`` to check for columns in DataFrames (better readability)
+- ``picasso.postprocess`` functions ``picked_locs`` and ``pick_similar`` accept precomputed index blocks to speed up the picking of circular regions
+
+Bug fixes:
+++++++++++
+- SPINNA 3D mask generation fixed (and ``picasso.render.render_hist3d``)
+- Test subcluster fix indexing
+- Remove backward incompatible camera pixel size reading in SPINNA's mask generation (related to #602)
+- Fixed localization masking for non-square mask (``picasso.masking.mask_locs``)
+- Correct axial localization precision in Localize (magnification factor)
+- Localize does not raise an error if QE is not found in the config file
+- Render Test Clustering: fixed the full FOV button
 
 0.9.4-5
 -------

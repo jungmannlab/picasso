@@ -109,7 +109,7 @@ def roi_to_img(
     else:
         x, y = picks
         pick_locs = lib.locs_at(x, y, locs, radius)
-        pick_locs.sort_values(by="frame", kind="mergesort", inplace=True)
+        pick_locs.sort_values(by="frame", kind="quicksort", inplace=True)
     # dirty method to avoid floating point errors with render
     radius -= 0.001
 

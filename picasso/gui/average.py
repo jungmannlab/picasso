@@ -407,7 +407,7 @@ class View(QtWidgets.QLabel):
             self.locs, self.info = io.load_locs(path, qt_parent=self)
         except io.NoMetadataFileError:
             return
-        if not hasattr(self.locs, "group"):
+        if "group" not in self.locs.columns:
             message = (
                 "Loaded file contains no group information. Please load"
                 " localizations that were picked."

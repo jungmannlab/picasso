@@ -696,6 +696,10 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     """Ensure that localizations are within the image dimensions
     and have positive localization precisions and other parameters.
 
+    v0.9.6: check that the info metadata contains the necessary
+    information for processing: Width, Height, Pixelsize and Frames.
+    Raises a KeyError if any of the required keys is missing.
+
     Parameters
     ----------
     locs : pd.DataFrame
@@ -709,10 +713,15 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
         Localizations that pass the sanity checks.
     """
     # no inf and nan:
-    locs = locs.copy()
     locs.replace([np.inf, -np.inf], np.nan, inplace=True)
     locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:
+    required_keys = ["Width", "Height", "Pixelsize", "Frames"]
+    for key in required_keys:
+        value = get_from_metadata(info, key)
+        if value is None:
+            raise KeyError(f"Metadata is missing required key: '{key}'")
+
     locs = locs[locs["x"] < info[0]["Width"]]
     locs = locs[locs["y"] < info[0]["Height"]]
     for attr in [
@@ -750,11 +759,11 @@ def is_loc_at(x: float, y: float, locs: pd.DataFrame, r: float) -> np.ndarray:
         Boolean array - True if a localization is within radius r
         of position (x, y).
     """
-    dx = locs["x"].to_numpy() - x
-    dy = locs["y"].to_numpy() - y
+    dx = locs["x"] - x
+    dy = locs["y"] - y
     r2 = r**2
     is_picked = dx**2 + dy**2 < r2
-    return is_picked
+    return is_picked.to_numpy()
 
 
 def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:
