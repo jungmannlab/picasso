@@ -3038,14 +3038,18 @@ class SimulationsTab(QtWidgets.QDialog):
             pick_area = lib.get_from_metadata(info, "Area (um^2)")
             if pick_area is not None:
                 idx = self.targets.index(target)
+                # if 3D, take z range into account for density calculation
+                if "z" in locs.columns and self.dim_widget.currentIndex() == 1:
+                    if self.depth is not None:
+                        # this is clearly pick volume, not area
+                        pick_area *= self.depth / 1000  # convert nm to um
                 self.densities_spins[idx].setValue(len(locs) / pick_area)
 
             if "z" in locs.columns:
-                coords = np.stack(
-                    (locs.x * pixelsize, locs.y * pixelsize, locs.z)
-                ).T
+                coords = locs[["x", "y", "z"]].to_numpy()
             else:
-                coords = np.stack((locs.x * pixelsize, locs.y * pixelsize)).T
+                coords = locs[["x", "y"]].to_numpy()
+            coords[:, :2] *= pixelsize
 
             self.exp_data[target] = coords
             self.exp_data_paths[target] = path
@@ -3132,6 +3136,7 @@ class SimulationsTab(QtWidgets.QDialog):
         if ok:
             self.depth = depth
             self.depth_button.setText(f"Z range: {depth} nm")
+            # if
 
     def on_le_fitting_toggled(self, state: bool) -> None:
         """If LE fitting box is checked, freeze LE values, else unfreeze
