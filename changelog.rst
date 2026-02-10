@@ -7,6 +7,7 @@ Last change: 09-FEB-2026 CEST
 -----
 Important updates:
 ^^^^^^^^^^^^^^^^^^
+- Test subclustering plot (saved after G5M, can be plotted in Filter): fixed the labels of the plots
 - Change of API in ``picasso.postprocess.nn_analysis``: new inputs cause backward compatibility issues. The function now returns only the nearest neighbor distances, not the indices of the nearest neighbors.
 
 Small improvements:
