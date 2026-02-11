@@ -2436,7 +2436,10 @@ def g5m(
         progress.update(1)
 
     # stack centers to form a pd.DataFrame in the format of localizations
-    centers = pd.concat(centers, ignore_index=True)
+    if len(centers):
+        centers = pd.concat(centers, ignore_index=True)
+    else:  # no molecules found, return None
+        return None, None, info
     # assing group ids to the clustered localizations
     max_label = 0
     for i, clustered_locs_ in enumerate(clustered_locs):

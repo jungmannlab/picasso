@@ -18,6 +18,8 @@ Small improvements:
 - Render property - removed legend
 - Render Nearest Neighbor Analysis - saves nearest neighbors distances in the localizations .hdf5 file
 - Render G5M dialog - adjusted the frame analysis checkbox
+- Render G5M: removed the check for min. locs
+- Render G5M: moved the check for too large clusters (or if any are present) before applying G5M to all channels (all channels analysis)
 - G5M documentation has been updated to include more troubleshooting tips and common issues, see `here <https://picassosr.readthedocs.io/en/latest/render.html#g5m>`__
 - Localize zooms in and out centered at the current view
 - Config file changes from 0.9.5 were `documented <https://picassosr.readthedocs.io/en/latest/localize.html>`__ and `config template <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ was updated
