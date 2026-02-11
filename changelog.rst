@@ -22,6 +22,7 @@ Small improvements:
 - Localize zooms in and out centered at the current view
 - Config file changes from 0.9.5 were `documented <https://picassosr.readthedocs.io/en/latest/localize.html>`__ and `config template <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ was updated
 - SPINNA 3D masking: z slicing added for visual inspection
+- SPINNA 3D homogeneous simulations automatically adjusts the observed density based on the z range set by the user and the xy area of the pick (if provided)
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - ``picasso.io.load_locs`` and ``save_locs`` ensure that the saved metadata contains the required keys
 - Updated documentation on filetypes and minimum requirements for HDF5 files and accompanying YAML metadata files in Picasso

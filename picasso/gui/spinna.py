@@ -3039,7 +3039,7 @@ class SimulationsTab(QtWidgets.QDialog):
             if pick_area is not None:
                 idx = self.targets.index(target)
                 # if 3D, take z range into account for density calculation
-                if "z" in locs.columns and self.dim_widget.currentIndex() == 1:
+                if self.dim_widget.currentIndex() == 1:
                     if self.depth is not None:
                         # this is clearly pick volume, not area
                         pick_area *= self.depth / 1000  # convert nm to um
@@ -3105,6 +3105,13 @@ class SimulationsTab(QtWidgets.QDialog):
             self.depth_stack.setCurrentIndex(0)
             self.roi_button.setText("Area (\u03bcm\u00b2)")
             self.single_sim_mass = None
+            # adjust the observed densities if data is already available
+            # and depth was specified previously
+            if self.check_exp_loaded() and self.depth is not None:
+                for idx, target in enumerate(self.targets):
+                    old_density = self.densities_spins[idx].value()
+                    new_density = old_density * (self.depth / 1000)
+                    self.densities_spins[idx].setValue(new_density)
         elif index == 1:  # 3D
             if self.mask_den_stack.currentIndex() == 1:
                 self.depth_stack.setCurrentIndex(1)
@@ -3113,6 +3120,13 @@ class SimulationsTab(QtWidgets.QDialog):
             )
             self.roi_button.setText("Volume (\u03bcm\u00b3)")
             self.single_sim_mass = None
+            # adjust the observed densities if data is already available
+            # and depth was specified previously
+            if self.check_exp_loaded() and self.depth is not None:
+                for idx, target in enumerate(self.targets):
+                    old_density = self.densities_spins[idx].value()
+                    new_density = old_density / (self.depth / 1000)
+                    self.densities_spins[idx].setValue(new_density)
         # replot exp data if loaded (distances dimensionality might have
         # changed)
         if len(self.nnd_hist_data_exp):
@@ -3123,7 +3137,7 @@ class SimulationsTab(QtWidgets.QDialog):
         distribution simulation."""
         if self.mask_den_stack.currentIndex() == 0:
             return
-
+        old_depth = self.depth
         depth, ok = QtWidgets.QInputDialog.getInt(
             self,
             "",
@@ -3136,7 +3150,20 @@ class SimulationsTab(QtWidgets.QDialog):
         if ok:
             self.depth = depth
             self.depth_button.setText(f"Z range: {depth} nm")
-            # if
+            # if data is already available, adjust the observed densities,
+            # assuming that only z range changes, not the xy area
+            if self.check_exp_loaded() and self.dim_widget.currentIndex() == 1:
+                for idx, target in enumerate(self.targets):
+                    old_density = self.densities_spins[idx].value()
+                    if old_depth is None:  # previously was 2D, now 3D
+                        new_density = old_density / (self.depth / 1000)
+                    else:  # previously was 3D, now 3D with different depth
+                        new_density = (
+                            old_density
+                            / (self.depth / 1000)
+                            * (old_depth / 1000)
+                        )
+                    self.densities_spins[idx].setValue(new_density)
 
     def on_le_fitting_toggled(self, state: bool) -> None:
         """If LE fitting box is checked, freeze LE values, else unfreeze

@@ -1248,7 +1248,6 @@ def plot_subclustering_check(
         counts,
         width=0.8,
         alpha=0.5,
-        # label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
         label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
         color="C0",
     )
@@ -1259,7 +1258,6 @@ def plot_subclustering_check(
         counts,
         width=0.8,
         alpha=0.5,
-        # label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
         label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
         color="C1",
     )
