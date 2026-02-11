@@ -4274,7 +4274,11 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         mask_in = "in" if locs_in else "out"
         mask_pixelsize = self.disp_px_size.value()
         area_in = float(np.sum(self.mask)) * (mask_pixelsize * 1e-3) ** 2
-        area_total = float(self.mask.size * (mask_pixelsize * 1e-3) ** 2)
+        picked_area = lib.get_from_metadata(self.infos[channel], "Area (um^2)")
+        if picked_area is not None:
+            area_total = picked_area
+        else:
+            area_total = float(self.mask.size * (mask_pixelsize * 1e-3) ** 2)
         area = area_in if locs_in else area_total - area_in
         info = self.infos[channel] + [
             {
