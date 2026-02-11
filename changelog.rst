@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 09-FEB-2026 CEST
+Last change: 11-FEB-2026 CEST
 
 0.9.6
 -----
@@ -26,6 +26,8 @@ Small improvements:
 - Config file changes from 0.9.5 were `documented <https://picassosr.readthedocs.io/en/latest/localize.html>`__ and `config template <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ was updated
 - SPINNA 3D masking: z slicing added for visual inspection
 - SPINNA 3D homogeneous simulations automatically adjusts the observed density based on the z range set by the user and the xy area of the pick (if provided)
+- SPINNA allows for different mask bin size and blur in each dimension
+- SPINNA default mask blur of 500 nm in the API (previously 65 nm)
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - ``picasso.io.load_locs`` and ``save_locs`` ensure that the saved metadata contains the required keys
 - Updated documentation on filetypes and minimum requirements for HDF5 files and accompanying YAML metadata files in Picasso
@@ -59,7 +61,7 @@ Important updates:
 +++++++++++++++++++++
 - Picasso applies constrained layout to all matplotlib figures
 - SPINNA uses ``FigureCanvas`` instead of ``QSvgRenderer`` for displaying NND plots and mask legend
-- SPINNA default mask blur set to 500 nm
+- SPINNA default mask blur set to 500 nm (GUI)
 - 3D animation saves metadata
 - Some improvements in how DataFrames are handled (Filter, change from ``.values`` to ``.to_numpy()``)
 

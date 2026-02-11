@@ -861,8 +861,9 @@ class MaskGenerator:
 
     Attributes
     ----------
-    binsize : float
-        Binsize used for histograming localizations (nm).
+    binsize : tuple of floats
+        Binsize used for histograming localizations (nm), one value
+        for each dimension.
     locs : pd.DataFrame
         Localizations list used for creating the mask.
     locs_path : str
@@ -879,8 +880,13 @@ class MaskGenerator:
         Camera pixel size (nm).
     roi : float
         ROI width/height (nm). Calculated from localizations' metadata.
-    sigma : float
-        Sigma used in gaussian filtering in nm
+    sigma : float or tuple of floats
+        Sigma used in gaussian filtering in nm. If a single float is
+        given, the same sigma is used for all dimensions. If a tuple of
+        floats is given, 2/3 values must be given for 2D/3D mask,
+        respectively, and the sigma for each dimension is specified
+        separately. If a 2D mask is to be generated, the potential third
+        value in the tuple is ignored.
     thresh : float
         Otsu threshold (see, scikit-image) used for masking and
         area/volume calculation.
@@ -903,11 +909,20 @@ class MaskGenerator:
     ----------
     locs_path : str
         Path to the .hdf5 file with localizations/molecules.
-    binsize : int, optional
-        Binsize used for histograming localizations (nm). Default is
-        130.
-    sigma : int, optional
-        Sigma used for gaussian filtering (nm). Default is 65.
+    binsize : int or tuple of ints, optional
+        Binsize used for histograming localizations (nm). If a single
+        float is given, the same binsize is used for all dimensions. If
+        a tuple of floats is given, 2/3 values must be given for 2D/3D
+        mask, respectively, and the binsize for each dimension is
+        specified separately. If a 2D mask is to be generated, the
+        potential third value in the tuple is ignored. Default is 130 nm.
+    sigma : int or tuple of ints, optional
+        Sigma used for gaussian filtering (nm). If a single float is
+        given, the same sigma is used for all dimensions. If a tuple of
+        floats is given, 2/3 values must be given for 2D/3D mask,
+        respectively, and the sigma for each dimension is specified
+        separately. If a 2D mask is to be generated, the potential third
+        value in the tuple is ignored. Default is 500 nm.
     ndim : int, optional
         Dimensionality of the mask (2 or 3). If None, the dimensionality
         is taken from the loaded localizations/molecules. Default is
@@ -920,26 +935,11 @@ class MaskGenerator:
     def __init__(
         self,
         locs_path: str,
-        binsize: int = 130,
-        sigma: int = 65,
+        binsize: int | tuple = 130,
+        sigma: int | tuple = 500,
         ndim: int | None = None,
         run_checks: bool = False,
     ) -> None:
-        self.locs_path = locs_path
-        self.binsize = binsize
-        self.sigma = sigma
-        self.ndim = ndim
-
-        self.mask = None
-        self.thresh = None
-
-        self.x_min = None
-        self.y_min = None
-        self.x_max = None
-        self.y_max = None
-        self.z_min = None
-        self.z_max = None
-
         # open localizations
         locs, info = io.load_locs(self.locs_path)
         if "z" in locs.columns:
@@ -947,11 +947,36 @@ class MaskGenerator:
         else:
             self.locs = locs[["x", "y"]]
 
+        self.locs_path = locs_path
+        self.ndim = (
+            min(ndim, self.locs.shape[1])
+            if ndim is not None
+            else self.locs.shape[1]
+        )
+        # if a single value is given for binsize/sigma, convert it to a tuple
+        if isinstance(binsize, float) or isinstance(binsize, int):
+            binsize = (binsize,) * self.ndim
+        if isinstance(sigma, float) or isinstance(sigma, int):
+            sigma = (sigma,) * self.ndim
+        self.binsize = binsize
+        self.sigma = sigma
+
+        self.mask = None
+        self.thresh = None
+        self.x_min = None
+        self.y_min = None
+        self.x_max = None
+        self.y_max = None
+        self.z_min = None
+        self.z_max = None
+
         if run_checks:
             self.ensure_correct_inputs()
 
         # camera pixel size
-        self.pixelsize = lib.get_from_metadata(info, "Pixelsize", default=130)
+        self.pixelsize = lib.get_from_metadata(
+            info, "Pixelsize", raise_error=True
+        )
 
         # deduce roi from localizations metadata
         self.roi = [
@@ -972,12 +997,20 @@ class MaskGenerator:
             )
         # binsize
         if not (
-            isinstance(self.binsize, float) or isinstance(self.binsize, int)
-        ):
-            raise TypeError("Binsize must be a number.")
+            isinstance(self.binsize, tuple) or isinstance(self.binsize, list)
+        ):  # already converted to tuple if a single value is given
+            raise ValueError(
+                "Binsize must be a single number or a tuple of 2"
+                " numbers for 2D mask."
+            )
         # sigma
-        if not (isinstance(self.sigma, float) or isinstance(self.sigma, int)):
-            raise TypeError("Sigma must be a number.")
+        if not (
+            isinstance(self.sigma, tuple) or isinstance(self.sigma, list)
+        ):  # already converted to tuple if a single value is given
+            raise ValueError(
+                "Sigma must be a single number or a tuple of 2"
+                " numbers for 2D mask."
+            )
         # ndim
         if self.ndim is not None:
             if "z" in self.locs.columns and self.ndim not in [2, 3]:
@@ -996,7 +1029,7 @@ class MaskGenerator:
 
         Uses ``picasso.render`` after preparing inputs."""
         # prepare inputs for picasso.render
-        oversampling = self.pixelsize / self.binsize
+        oversampling = [self.pixelsize / _ for _ in self.binsize]
         self.x_min = 0
         self.x_max = self.roi[0] / self.pixelsize
         self.y_min = 0
@@ -1004,9 +1037,10 @@ class MaskGenerator:
 
         # 2D image
         if self.ndim == 2 or "z" not in self.locs.columns:
-            _, image = render.render_hist(
+            _, image = render.render_hist_anisotropic(
                 self.locs,
-                oversampling,
+                oversampling[0],
+                oversampling[1],
                 self.y_min,
                 self.x_min,
                 self.y_max,
@@ -1016,11 +1050,13 @@ class MaskGenerator:
         else:
             self.z_min = self.locs.z.min()
             self.z_max = self.locs.z.max()
-            _, image = render.render_hist3d(
+            _, image = render.render_hist3d_anisotropic(
                 self.locs["x"].to_numpy(),
                 self.locs["y"].to_numpy(),
                 self.locs["z"].to_numpy().copy(),  # do not remove the copy!
-                oversampling,
+                oversampling[0],
+                oversampling[1],
+                oversampling[2],
                 self.y_min,
                 self.x_min,
                 self.y_max,
@@ -1063,7 +1099,7 @@ class MaskGenerator:
         if verbose:
             print("Applying gaussian filter... (2/3)")
         if self.sigma > 0:
-            sigma = self.sigma / self.binsize
+            sigma = [self.sigma[i] / self.binsize[i] for i in range(self.ndim)]
             image = gaussian_filter(image, sigma=sigma, mode="constant")
         if verbose:
             print("Thresholding... (3/3)")
@@ -1122,9 +1158,9 @@ class MaskGenerator:
             "Generated by": f"Picasso v{__version__} SPINNA",
             "Size (GB)": self.mask.nbytes / (1024**3),
             "File": path,
-            "Binsize (nm)": self.binsize,
+            "Binsize x/y/(z) (nm)": [float(_) for _ in self.binsize],
             "Generated from": self.locs_path,
-            "Gaussian blur (nm)": self.sigma,
+            "Gaussian blur (nm)": [float(_) for _ in self.sigma],
             "Camera pixelsize (nm)": self.pixelsize,
             "x_min": self.x_min,
             "x_max": self.x_max,
@@ -1138,11 +1174,11 @@ class MaskGenerator:
             info["z_min"] = float(self.z_min)
             info["z_max"] = float(self.z_max)
             info["Volume (um^3)"] = float(
-                1e-9 * self.binsize**3 * (self.mask > self.thresh).sum()
+                1e-9 * np.prod(self.binsize) * (self.mask > self.thresh).sum()
             )
         else:  # 2D mask
             info["Area (um^2)"] = float(
-                1e-6 * self.binsize**2 * (self.mask > self.thresh).sum()
+                1e-6 * np.prod(self.binsize) * (self.mask > self.thresh).sum()
             )
 
         # save
@@ -1568,6 +1604,8 @@ class StructureSimulator:
         mask pixel."""
         # Get mask pixel size #
         binsize = self.mask_info["Binsize (nm)"]
+        if isinstance(binsize, float) or isinstance(binsize, int):
+            binsize = [binsize, binsize]
 
         # Draw from multinomial distribution #
         rng = np.random.default_rng()
@@ -1583,8 +1621,8 @@ class StructureSimulator:
         # when counting number of locs per mask pixel/voxel;
         # Lastly, let us consider the 'low' argument at first, since
         # creating high will be trivial, see below.
-        bins_x_left = np.arange(self.x_min, self.x_max, binsize)
-        bins_y_left = np.arange(self.y_min, self.y_max, binsize)
+        bins_x_left = np.arange(self.x_min, self.x_max, binsize[0])
+        bins_y_left = np.arange(self.y_min, self.y_max, binsize[1])
         bins_x_left, bins_y_left = np.meshgrid(bins_x_left, bins_y_left)
 
         # Then, 'low' argument is found by copying left bins edges
@@ -1593,8 +1631,8 @@ class StructureSimulator:
         lows_y = np.repeat(bins_y_left.ravel(), counts)
 
         # 'high' is simply shifted by binsize in nm
-        highs_x = lows_x + binsize
-        highs_y = lows_y + binsize
+        highs_x = lows_x + binsize[0]
+        highs_y = lows_y + binsize[1]
 
         # generate random positions within mask pixels
         x = np.random.uniform(lows_x, highs_x)
@@ -1610,20 +1648,22 @@ class StructureSimulator:
         Similar to 2D; see comments in self.simulate_centers_mask_2D
         for code explanation."""
         binsize = self.mask_info["Binsize (nm)"]
+        if isinstance(binsize, float) or isinstance(binsize, int):
+            binsize = [binsize, binsize, binsize]
         rng = np.random.default_rng()
         counts = rng.multinomial(self.N, pvals=self.mask.ravel())
 
-        bins_x_left = np.arange(self.x_min, self.x_max, binsize)
-        bins_y_left = np.arange(self.y_min, self.y_max, binsize)
-        bins_z_left = np.arange(self.z_min, self.z_max, binsize)
+        bins_x_left = np.arange(self.x_min, self.x_max, binsize[0])
+        bins_y_left = np.arange(self.y_min, self.y_max, binsize[1])
+        bins_z_left = np.arange(self.z_min, self.z_max, binsize[2])
         bxl, byl, bzl = np.meshgrid(bins_x_left, bins_y_left, bins_z_left)
 
         lows_x = np.repeat(bxl.ravel(), counts.ravel())
         lows_y = np.repeat(byl.ravel(), counts.ravel())
         lows_z = np.repeat(bzl.ravel(), counts.ravel())
-        highs_x = lows_x + binsize
-        highs_y = lows_y + binsize
-        highs_z = lows_z + binsize
+        highs_x = lows_x + binsize[0]
+        highs_y = lows_y + binsize[1]
+        highs_z = lows_z + binsize[2]
 
         x = np.random.uniform(lows_x, highs_x)
         y = np.random.uniform(lows_y, highs_y)
@@ -2453,8 +2493,10 @@ class StructureMixer:
 
         if self.mask is not None:
             binsize = list(self.mask_info.values())[0]["Binsize (nm)"]
-            height = list(self.mask.values())[0].shape[1] * binsize
-            width = list(self.mask.values())[0].shape[0] * binsize
+            if isinstance(binsize, float) or isinstance(binsize, int):
+                binsize = [binsize, binsize, binsize]
+            height = list(self.mask.values())[0].shape[1] * binsize[1]
+            width = list(self.mask.values())[0].shape[0] * binsize[0]
         else:
             width, height, _ = self.roi
 

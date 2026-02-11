@@ -191,6 +191,58 @@ def _render_setup(
 
 
 @numba.njit
+def _render_setup_anisotropic(
+    x: np.ndarray,
+    y: np.ndarray,
+    oversampling_x: float,
+    oversampling_y: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+) -> tuple[np.ndarray, int, int, np.ndarray, np.ndarray, np.ndarray]:
+    """Find coordinates to be rendered and sets up an empty image
+    array. Allows for different pixel sizes in x and y (oversampling).
+
+    Parameters
+    ----------
+    x, y : np.ndarray
+        x and y coordinates of the localizations to be rendered (1D
+        arrays).
+    oversampling_x, oversampling_y : float
+        Number of super-resolution pixels per camera pixel in x and y.
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (camera pixels).
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (camera pixels).
+
+    Returns
+    -------
+    image : np.ndarray
+        Empty image array.
+    n_pixel_y : int
+        Number of pixels in y.
+    n_pixel_x : int
+        Number of pixels in x.
+    x : np.ndarray
+        x coordinates to be rendered.
+    y : np.ndarray
+        y coordinates to be rendered.
+    in_view : np.ndarray
+        Indeces of the localizations to be rendered.
+    """
+    n_pixel_y = int(np.ceil(oversampling_y * (y_max - y_min)))
+    n_pixel_x = int(np.ceil(oversampling_x * (x_max - x_min)))
+    in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
+    x = x[in_view]
+    y = y[in_view]
+    x = oversampling_x * (x - x_min)
+    y = oversampling_y * (y - y_min)
+    image = np.zeros((n_pixel_y, n_pixel_x), dtype=np.float32)
+    return image, n_pixel_y, n_pixel_x, x, y, in_view
+
+
+@numba.njit
 def _render_setup3d(
     x: np.ndarray,
     y: np.ndarray,
@@ -263,6 +315,86 @@ def _render_setup3d(
     x = oversampling * (x - x_min)
     y = oversampling * (y - y_min)
     z = oversampling * (z - z_min)
+    image = np.zeros((n_pixel_y, n_pixel_x, n_pixel_z), dtype=np.float32)
+    return image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view
+
+
+@numba.njit
+def _render_setup3d_anisotropic(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    oversampling_x: float,
+    oversampling_y: float,
+    oversampling_z: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+    z_min: float,
+    z_max: float,
+    pixelsize: float,
+) -> tuple[
+    np.ndarray,
+    int,
+    int,
+    int,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    """Find coordinates to be rendered in 3D and sets up an empty image
+    array. Allows for different pixel sizes in x, y and z
+    (oversampling).
+
+    Parameters
+    ----------
+    x, y, z : np.ndarray
+        x, y and z coordinates of the localizations to be rendered (1D
+        arrays).
+    oversampling : float
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinate to be rendered (camera pixels).
+    y_max, x_max : float
+        Maximum y and x coordinate to be rendered (camera pixels).
+    z_min : float
+        Minimum z coordinate to be rendered (nm).
+    z_max : float
+        Maximum z coordinate to be rendered (nm).
+    pixelsize : float
+        Camera pixel size, used for converting z coordinates.
+
+    Returns
+    -------
+    image : np.ndarray
+        Empty image array.
+    n_pixel_y, n_pixel_x, n_pixel_z : int
+        Number of pixels in y, x, and z.
+    x, y, z : np.ndarray
+        x, y, z coordinates to be rendered.
+    in_view : np.ndarray
+        Indeces of the localizations to be rendered.
+    """
+    n_pixel_y = int(np.ceil(oversampling_y * (y_max - y_min)))
+    n_pixel_x = int(np.ceil(oversampling_x * (x_max - x_min)))
+    n_pixel_z = int(np.ceil(oversampling_z * (z_max - z_min)))
+    z /= pixelsize
+    in_view = (
+        (x > x_min)
+        & (y > y_min)
+        & (z > z_min)
+        & (x < x_max)
+        & (y < y_max)
+        & (z < z_max)
+    )
+    x = x[in_view]
+    y = y[in_view]
+    z = z[in_view]
+    x = oversampling_x * (x - x_min)
+    y = oversampling_y * (y - y_min)
+    z = oversampling_z * (z - z_min)
     image = np.zeros((n_pixel_y, n_pixel_x, n_pixel_z), dtype=np.float32)
     return image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view
 
@@ -595,6 +727,51 @@ def render_hist(
     return n, image
 
 
+def render_hist_anisotropic(
+    locs: pd.DataFrame,
+    oversampling_x: float,
+    oversampling_y: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+) -> tuple[int, np.ndarray]:
+    """Render localizations with no blur by assigning them to pixels.
+    Allows for different pixel sizes in x and y (oversampling).
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations to be rendered.
+    oversampling_x, oversampling_y : float
+        Number of super-resolution pixels per camera pixel.
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (camera pixels)
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (camera pixels)
+
+    Returns
+    -------
+    n : int
+        Number of localizations rendered.
+    image : np.ndarray
+        Rendered image.
+    """
+    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup_anisotropic(
+        locs["x"].to_numpy(),
+        locs["y"].to_numpy(),
+        oversampling_x,
+        oversampling_y,
+        y_min,
+        x_min,
+        y_max,
+        x_max,
+    )
+    _fill(image, x, y)
+    n = len(x)
+    return n, image
+
+
 @numba.jit(nopython=True, nogil=True)
 def render_hist3d(
     x: np.ndarray,
@@ -651,6 +828,77 @@ def render_hist3d(
         z_min,
         z_max,
         pixelsize,
+    )
+    _fill3d(image, x, y, z)
+    n = len(x)
+    z *= pixelsize  # convert back to nm
+    return n, image
+
+
+@numba.jit(nopython=True, nogil=True)
+def render_hist3d_anisotropic(
+    x: np.ndarray,
+    y: np.ndarray,
+    z: np.ndarray,
+    oversampling_x: float,
+    oversampling_y: float,
+    oversampling_z: float,
+    y_min: float,
+    x_min: float,
+    y_max: float,
+    x_max: float,
+    z_min: float,
+    z_max: float,
+    pixelsize: float,
+) -> tuple[int, np.ndarray]:
+    """Render localizations in 3D with no blur by assigning them to
+    pixels. Allows for different pixel sizes in x, y and z
+    (oversampling).
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations to be rendered.
+    oversampling_x, oversampling_y, oversampling_z : float (default=1)
+        Number of super-resolution pixels per camera pixel in x, y, and
+        z directions.
+    y_min, x_min : float
+        Minimum y and x coordinates to be rendered (camera pixels).
+    y_max, x_max : float
+        Maximum y and x coordinates to be rendered (camera pixels).
+    z_min : float
+        Minimum z coordinate to be rendered (nm).
+    z_max : float
+        Maximum z coordinate to be rendered (nm).
+    pixelsize : float
+        Camera pixel size in nm, used for converting z coordinates.
+
+    Returns
+    -------
+    n : int
+        Number of localizations rendered.
+    image : np.ndarray
+        Rendered 3D image.
+    """
+    z_min = z_min / pixelsize
+    z_max = z_max / pixelsize
+
+    image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = (
+        _render_setup3d_anisotropic(
+            x,
+            y,
+            z,
+            oversampling_x,
+            oversampling_y,
+            oversampling_z,
+            y_min,
+            x_min,
+            y_max,
+            x_max,
+            z_min,
+            z_max,
+            pixelsize,
+        )
     )
     _fill3d(image, x, y, z)
     n = len(x)
