@@ -266,7 +266,7 @@ def _render_setup3d(
     np.ndarray,
 ]:
     """Find coordinates to be rendered in 3D and sets up an empty image
-    array. Used by Picasso: Average3.
+    array.
 
     Parameters
     ----------
@@ -421,7 +421,6 @@ def _fill3d(
     image: np.ndarray, x: np.ndarray, y: np.ndarray, z: np.ndarray
 ) -> None:
     """Fill image with x, y and z coordinates. Image is not blurred.
-    Used by ``Picasso: Average3``.
 
     Parameters
     ----------
@@ -787,7 +786,7 @@ def render_hist3d(
     pixelsize: float,
 ) -> tuple[int, np.ndarray]:
     """Render localizations in 3D with no blur by assigning them to
-    pixels. Used by ``Picasso: Average3``.
+    pixels.
 
     Parameters
     ----------

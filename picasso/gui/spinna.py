@@ -797,8 +797,12 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         sigma_z = self.mask_blur_z.value()
         ndim = int(self.mask_ndim.currentText()[0])
         if self.mask_generator is not None:
-            self.mask_generator.binsize = (binsize_x, binsize_y, binsize_z)
-            self.mask_generator.sigma = (sigma_x, sigma_y, sigma_z)
+            if ndim == 2:
+                self.mask_generator.binsize = (binsize_x, binsize_y)
+                self.mask_generator.sigma = (sigma_x, sigma_y)
+            else:
+                self.mask_generator.binsize = (binsize_x, binsize_y, binsize_z)
+                self.mask_generator.sigma = (sigma_x, sigma_y, sigma_z)
             self.mask_generator.ndim = ndim
             mode = ["loc_den", "binary"][self.mask_type.currentIndex()]
             status = lib.StatusDialog("Generating mask...", self.preview)
