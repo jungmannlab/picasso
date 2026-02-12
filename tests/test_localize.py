@@ -6,6 +6,7 @@ in picasso.gausslq, picasso.gaussmle, picasso.zfit
 """
 
 # TODO: add identifying more data types? like .tif, .nd2? this can go to test_io.py though
+# TODO: add calibration tests
 
 import numpy as np
 import pytest
@@ -188,6 +189,8 @@ def test_localize_mle(identifications, spots):
 def test_localize_3d(info, locs_lq):
     """Test 3D localization of identified spots."""
     locs_3d = zfit.fit_z(locs_lq, info, CALIB_3D, 0.79, 130)
+    assert "z" in locs_3d.columns, "3D localization results missing 'z' column"
+    assert len(locs_3d), "No 3D localized spots were returned"
     locs_3d_multi = zfit.fit_z_parallel(
         locs_lq, info, CALIB_3D, 0.79, 130, asynch=False
     )

@@ -2569,7 +2569,8 @@ class Window(QtWidgets.QMainWindow):
             )
         info = self.info + [localize_info | self.camera_info]
         self.select_locs_columns()  # save only selected columns
-        io.save_locs(path, self.locs, info)
+        # copy to avoid pandas warning:
+        io.save_locs(path, self.locs.copy(), info)
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""

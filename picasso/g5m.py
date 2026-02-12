@@ -1699,7 +1699,7 @@ def convert_G5M_results(
         Localizations with assigned cluster labels, based on the G5M
         components.
     """
-    # locs_group = locs_group.copy()
+    locs_group = locs_group.copy()  # to avoid SettingWithCopyWarning
     means = g5m.means
     covariances = g5m.covariances
     weights = g5m.weights

@@ -716,14 +716,14 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     locs.replace([np.inf, -np.inf], np.nan, inplace=True)
     locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:
-    required_keys = ["Width", "Height", "Pixelsize", "Frames"]
+    required_keys = ["Width", "Height", "Frames"]
     for key in required_keys:
         value = get_from_metadata(info, key)
         if value is None:
             raise KeyError(f"Metadata is missing required key: '{key}'")
 
-    locs = locs[locs["x"] < info[0]["Width"]]
-    locs = locs[locs["y"] < info[0]["Height"]]
+    locs = locs[locs["x"] < get_from_metadata(info, "Width")]
+    locs = locs[locs["y"] < get_from_metadata(info, "Height")]
     for attr in [
         "x",
         "y",

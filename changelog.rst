@@ -44,6 +44,7 @@ Bug fixes:
 - Localize does not raise an error if QE is not found in the config file
 - Localize does not automatically fit z coordinates if a 3D calibration file is loaded from the config file
 - Render Test Clustering: fixed the full FOV button
+- Fixed CLI ``picasso join``
 
 0.9.4-5
 -------
