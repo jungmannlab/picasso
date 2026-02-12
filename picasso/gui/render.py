@@ -2237,7 +2237,7 @@ class G5MDialog(QtWidgets.QDialog):
 
         # postprocess for sticky events?
         self.postprocess_check = QtWidgets.QCheckBox(
-            "Filter invalid molecules"
+            "Filter invalid molecules\nand frame analysis"
         )
         # self.postprocess_check.setChecked(True)
         grid.addWidget(self.postprocess_check, grid.rowCount(), 0, 1, 2)
@@ -4274,7 +4274,11 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         mask_in = "in" if locs_in else "out"
         mask_pixelsize = self.disp_px_size.value()
         area_in = float(np.sum(self.mask)) * (mask_pixelsize * 1e-3) ** 2
-        area_total = float(self.mask.size * (mask_pixelsize * 1e-3) ** 2)
+        picked_area = lib.get_from_metadata(self.infos[channel], "Area (um^2)")
+        if picked_area is not None:
+            area_total = picked_area
+        else:
+            area_total = float(self.mask.size * (mask_pixelsize * 1e-3) ** 2)
         area = area_in if locs_in else area_total - area_in
         info = self.infos[channel] + [
             {
@@ -6767,6 +6771,13 @@ class View(QtWidgets.QLabel):
                     return
                 params["calibration"]["Magnification factor"] = mag_factor
 
+        max_locs_per_channel = []
+        for i in range(len(self.window.view.locs)):
+            if not self.check_group(i):
+                return
+            max_locs_per_channel.append(self.check_max_locs(i))
+        params["max_locs_per_cluster"] = max_locs_per_channel
+
         if channel == len(self.window.view.locs):  # apply to all
             suffix_molecules, ok = QtWidgets.QInputDialog.getText(
                 self.window,
@@ -6790,33 +6801,29 @@ class View(QtWidgets.QLabel):
                     return
 
             for i in range(len(self.window.view.locs)):
-                if not self.check_group(i):
-                    return
                 g5m_centers, clustered_locs, info = self._g5m(i, params)
                 path = self.window.view.locs_paths[i].replace(
                     ".hdf5", f"{suffix_molecules}.hdf5"
                 )  # add the suffix to the current path
                 if g5m_centers is not None:
                     io.save_locs(path, g5m_centers, info)
+                    # automatically save the subclustering check
+                    clust_events, sparse_events = clusterer.test_subclustering(
+                        g5m_centers,
+                        info,
+                    )
+                    lib.plot_subclustering_check(
+                        clust_events,
+                        sparse_events,
+                        path.replace(".hdf5", "_subcluster_check.png"),
+                    )
                 if params["clustered_locs"]:
                     path = self.window.view.locs_paths[i].replace(
                         ".hdf5", f"{suffix_clusters}.hdf5"
                     )
                     if clustered_locs is not None:
                         io.save_locs(path, clustered_locs, info)
-                # automatically save the subclustering check
-                clust_events, sparse_events = clusterer.test_subclustering(
-                    g5m_centers,
-                    info,
-                )
-                lib.plot_subclustering_check(
-                    clust_events,
-                    sparse_events,
-                    path.replace(".hdf5", "_subcluster_check.png"),
-                )
         else:
-            if not self.check_group(channel):
-                return
             base, _ = os.path.splitext(self.window.view.locs_paths[channel])
             out_path = base + "_molmap.hdf5"
             path_molecules, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -6839,9 +6846,6 @@ class View(QtWidgets.QLabel):
             g5m_centers, clustered_locs, info = self._g5m(channel, params)
             if g5m_centers is not None:
                 io.save_locs(path_molecules, g5m_centers, info)
-                if params["clustered_locs"]:
-                    if clustered_locs is not None:
-                        io.save_locs(path_clusters, clustered_locs, info)
                 # automatically save the subclustering check
                 clust_events, sparse_events = clusterer.test_subclustering(
                     g5m_centers,
@@ -6852,6 +6856,9 @@ class View(QtWidgets.QLabel):
                     sparse_events,
                     path_molecules.replace(".hdf5", "_subcluster_check.png"),
                 )
+                if params["clustered_locs"]:
+                    if clustered_locs is not None:
+                        io.save_locs(path_clusters, clustered_locs, info)
 
     def _g5m(
         self,
@@ -6863,35 +6870,6 @@ class View(QtWidgets.QLabel):
         """Run G5M in channel given parameters."""
         locs = self.window.view.locs[channel]
         info = self.window.view.infos[channel]
-        if len(locs) < params["min_locs"]:
-            message = (
-                f"Channel #{channel+1} ("
-                f"{self.window.dataset_dialog.checks[channel].text()})"
-                " contains less localizations than the minimum number"
-                " required for G5M."
-            )
-            QtWidgets.QMessageBox.information(self.window, "Warning", message)
-            return None, None
-
-        # check for clusters that are likely fiducial markers or some
-        # impurities
-        max_locs_per_cluster = np.inf
-        n_frames = info[0]["Frames"]
-        max_locs = int(0.4 * n_frames)
-        cluster_ids, n_locs = np.unique(locs.group, return_counts=True)
-        if any(n_locs > max_locs):
-            qm = QtWidgets.QMessageBox()
-            message = (
-                f"Channel #{channel+1} ("
-                f"{self.window.dataset_dialog.checks[channel].text()})"
-                " contains clusters which likely represent fiducial"
-                " markers. These will likely extend the computation"
-                " time and possibly crash the process.\n\n"
-                "Would you like to remove such clusters?"
-            )
-            ret = qm.question(self.window, "Warning", message, qm.Yes | qm.No)
-            if ret == qm.Yes:
-                max_locs_per_cluster = max_locs
 
         centers, clustered_locs, info = g5m.g5m(
             locs=locs,
@@ -6902,7 +6880,7 @@ class View(QtWidgets.QLabel):
             bootstrap_check=params["bootstrap_check"],
             calibration=params.get("calibration", None),
             postprocess=params["postprocess_check"],
-            max_locs_per_cluster=max_locs_per_cluster,
+            max_locs_per_cluster=params["max_locs_per_cluster"][channel],
             asynch=params["multiprocessing_check"],
             callback_parent=self.window,
         )
@@ -6923,6 +6901,30 @@ class View(QtWidgets.QLabel):
             )
             QtWidgets.QMessageBox.information(self.window, "Warning", message)
             return False
+
+    def check_max_locs(self, channel: int) -> int:
+        """Check whether the data contains clusters with more localizations
+        than the maximum allowed for G5M."""
+        locs = self.window.view.locs[channel]
+        info = self.window.view.infos[channel]
+        channel_name = self.window.dataset_dialog.checks[channel].text()
+        n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
+        max_locs = int(0.4 * n_frames)
+        cluster_ids, n_locs = np.unique(locs["group"], return_counts=True)
+        if any(n_locs > max_locs):
+            qm = QtWidgets.QMessageBox()
+            message = (
+                f"Channel #{channel+1} ({channel_name})"
+                " contains clusters which can be fiducial markers."
+                " These will likely extend the computation"
+                " time and possibly crash the process.\n\n"
+                "Would you like to remove such clusters?"
+            )
+            ret = qm.question(self.window, "Warning", message, qm.Yes | qm.No)
+            if ret == qm.Yes:
+                return max_locs
+        else:
+            return np.inf
 
     def shifts_from_picked_coordinate(
         self,

@@ -1186,6 +1186,10 @@ class ParametersDialog(QtWidgets.QDialog):
             fp_calib = fp_calib_lam.get(wavelength)
             if fp_calib is not None:
                 self.update_z_calib(fp_calib)
+                # To avoid the situation where the user runs a 3D localization
+                # just because the calib file was loaded, uncheck the "Fit Z"
+                # checkbox;
+                self.fit_z_checkbox.setChecked(False)
 
     def update_z_calib(self, path: str) -> None:
         """Load the 3D calibration from a YAML file."""
@@ -2565,7 +2569,8 @@ class Window(QtWidgets.QMainWindow):
             )
         info = self.info + [localize_info | self.camera_info]
         self.select_locs_columns()  # save only selected columns
-        io.save_locs(path, self.locs, info)
+        # copy to avoid pandas warning:
+        io.save_locs(path, self.locs.copy(), info)
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""

@@ -94,8 +94,8 @@ def locs_from_fits(
 ) -> pd.DataFrame:
     """Convert fit results to localization DataFrame."""
     box_offset = int(box / 2)
-    x = theta[:, 0] + identifications["x"] - box_offset
-    y = theta[:, 1] + identifications["y"] - box_offset
+    x = theta[:, 0] + identifications["x"]  # - box_offset
+    y = theta[:, 1] + identifications["y"]  # - box_offset
     lpx = gausslq.localization_precision(
         theta[:, 2], theta[:, 4], theta[:, 5], theta[:, 3], em=em
     )

@@ -140,7 +140,7 @@ def calibrate_z(
     locs = fit_z(locs, info, calibration, magnification_factor, pixelsize=130)
     locs["z"] /= magnification_factor
 
-    plt.figure(figsize=(18, 10), constrained_layout=True)
+    plt.figure(figsize=(18, 10))
 
     plt.subplot(231)
     plt.plot(z_range, mean_sx, ".-", label="x")
@@ -306,12 +306,15 @@ def fit_z(
     Returns
     -------
     locs : pd.DataFrame
-        Localizations with the fitted z coordinates and their residuals
-        (d_zcalib).
+        Localizations with the fitted z coordinates, their residuals
+        (d_zcalib) and axial localization precision appended.
     """
     locs = locs.copy()
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
+    # in multiprocessing, pandas Series causes issues!
+    sx = locs["sx"].to_numpy()
+    sy = locs["sy"].to_numpy()
     z = np.zeros_like(locs["x"])
     square_d_zcalib = np.zeros_like(z)
     for i in range(len(z)):
@@ -320,7 +323,7 @@ def fit_z(
         result = minimize_scalar(
             _fit_z_target,
             bounds=[-1000, 1000],
-            args=(locs["sx"][i], locs["sy"][i], cx, cy),
+            args=(sx[i], sy[i], cx, cy),
         )
         z[i] = result.x
         square_d_zcalib[i] = result.fun

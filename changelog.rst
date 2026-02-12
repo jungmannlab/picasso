@@ -1,23 +1,33 @@
 Changelog
 =========
 
-Last change: 08-FEB-2026 CEST
+Last change: 12-FEB-2026 CEST
 
 0.9.6
 -----
 Important updates:
 ^^^^^^^^^^^^^^^^^^
+- Test subclustering plot (saved after G5M, can be plotted in Filter): fixed the labels of the plots
 - Change of API in ``picasso.postprocess.nn_analysis``: new inputs cause backward compatibility issues. The function now returns only the nearest neighbor distances, not the indices of the nearest neighbors.
 
 Small improvements:
 +++++++++++++++++++
-- Moved from merge sort to quick sort (often faster due to lower memory usage)
+- Moved from merge sort to quick sort (usually faster due to lower memory usage)
 - Render: increase the speed of picking circular locs, picking similar and filter by number of localizations (numba implementation)
 - Render property histogram shown before rendering is activated
 - Render property - removed legend
 - Render Nearest Neighbor Analysis - saves nearest neighbors distances in the localizations .hdf5 file
+- Render G5M dialog - adjusted the frame analysis checkbox
+- Render G5M: removed the check for min. locs
+- Render G5M: moved the check for too large clusters (or if any are present) before applying G5M to all channels (all channels analysis)
+- Render masking: mask out saved area uses previously saved area if available in the metadata
+- G5M documentation has been updated to include more troubleshooting tips and common issues, see `here <https://picassosr.readthedocs.io/en/latest/render.html#g5m>`__
 - Localize zooms in and out centered at the current view
+- Config file changes from 0.9.5 were `documented <https://picassosr.readthedocs.io/en/latest/localize.html>`__ and `config template <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ was updated
 - SPINNA 3D masking: z slicing added for visual inspection
+- SPINNA 3D homogeneous simulations automatically adjusts the observed density based on the z range set by the user and the xy area of the pick (if provided)
+- SPINNA allows for different mask bin size and blur in lateral and axial dimensions
+- SPINNA default mask blur of 500 nm in the API (previously 65 nm)
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - ``picasso.io.load_locs`` and ``save_locs`` ensure that the saved metadata contains the required keys
 - Updated documentation on filetypes and minimum requirements for HDF5 files and accompanying YAML metadata files in Picasso
@@ -32,7 +42,9 @@ Bug fixes:
 - Fixed localization masking for non-square mask (``picasso.masking.mask_locs``)
 - Correct axial localization precision in Localize (magnification factor)
 - Localize does not raise an error if QE is not found in the config file
+- Localize does not automatically fit z coordinates if a 3D calibration file is loaded from the config file
 - Render Test Clustering: fixed the full FOV button
+- Fixed CLI ``picasso join``
 
 0.9.4-5
 -------
@@ -50,7 +62,7 @@ Important updates:
 +++++++++++++++++++++
 - Picasso applies constrained layout to all matplotlib figures
 - SPINNA uses ``FigureCanvas`` instead of ``QSvgRenderer`` for displaying NND plots and mask legend
-- SPINNA default mask blur set to 500 nm
+- SPINNA default mask blur set to 500 nm (GUI)
 - 3D animation saves metadata
 - Some improvements in how DataFrames are handled (Filter, change from ``.values`` to ``.to_numpy()``)
 

@@ -716,14 +716,14 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     locs.replace([np.inf, -np.inf], np.nan, inplace=True)
     locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:
-    required_keys = ["Width", "Height", "Pixelsize", "Frames"]
+    required_keys = ["Width", "Height", "Frames"]
     for key in required_keys:
         value = get_from_metadata(info, key)
         if value is None:
             raise KeyError(f"Metadata is missing required key: '{key}'")
 
-    locs = locs[locs["x"] < info[0]["Width"]]
-    locs = locs[locs["y"] < info[0]["Height"]]
+    locs = locs[locs["x"] < get_from_metadata(info, "Width")]
+    locs = locs[locs["y"] < get_from_metadata(info, "Height")]
     for attr in [
         "x",
         "y",
@@ -1208,7 +1208,7 @@ def pick_areas_rectangle(
 
 def plot_subclustering_check(
     clustered_n_events: np.ndarray,
-    sparse_n_eveents: np.ndarray,
+    sparse_n_events: np.ndarray,
     plot_path: str | list[str] = "",
     return_fig: bool = False,
 ) -> tuple[plt.Figure, plt.Axes] | tuple[None, None]:
@@ -1235,9 +1235,9 @@ def plot_subclustering_check(
         (None, None).
     """
     m_far = clustered_n_events.mean()
-    m_close = sparse_n_eveents.mean()
+    m_close = sparse_n_events.mean()
     s_far = clustered_n_events.std()
-    s_close = sparse_n_eveents.std()
+    s_close = sparse_n_events.std()
 
     # create the plot
     fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
@@ -1248,17 +1248,17 @@ def plot_subclustering_check(
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
+        label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
         color="C0",
     )
     ax1.axvline(m_far, color="C0", linestyle="--")
-    vals, counts = np.unique(sparse_n_eveents, return_counts=True)
+    vals, counts = np.unique(sparse_n_events, return_counts=True)
     ax1.bar(
         vals,
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
+        label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
         color="C1",
     )
     ax1.axvline(m_close, color="C1", linestyle="--")
