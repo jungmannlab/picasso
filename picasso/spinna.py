@@ -863,7 +863,8 @@ class MaskGenerator:
     ----------
     binsize : tuple of floats
         Binsize used for histograming localizations (nm), one value
-        for each dimension.
+        for each dimension (x and y are always equal, z can be
+        different).
     locs : pd.DataFrame
         Localizations list used for creating the mask.
     locs_path : str
@@ -881,12 +882,8 @@ class MaskGenerator:
     roi : float
         ROI width/height (nm). Calculated from localizations' metadata.
     sigma : float or tuple of floats
-        Sigma used in gaussian filtering in nm. If a single float is
-        given, the same sigma is used for all dimensions. If a tuple of
-        floats is given, 2/3 values must be given for 2D/3D mask,
-        respectively, and the sigma for each dimension is specified
-        separately. If a 2D mask is to be generated, the potential third
-        value in the tuple is ignored.
+        Sigma used in gaussian filtering in nm, one value for each
+        dimension (x and y are always equal, z can be different).
     thresh : float
         Otsu threshold (see, scikit-image) used for masking and
         area/volume calculation.
@@ -910,26 +907,25 @@ class MaskGenerator:
     locs_path : str
         Path to the .hdf5 file with localizations/molecules.
     binsize : int or tuple of ints, optional
-        Binsize used for histograming localizations (nm). If a single
-        float is given, the same binsize is used for all dimensions. If
-        a tuple of floats is given, 2/3 values must be given for 2D/3D
-        mask, respectively, and the binsize for each dimension is
-        specified separately. If a 2D mask is to be generated, the
-        potential third value in the tuple is ignored. Default is 130 nm.
+        Binsize used for histograming localizations (nm). If an integer
+        is given, the same binsize is used for all dimensions. For a 3D
+        mask, different bin sizes in xy and z can be specified by
+        providing a tuple of 2 values. If a 2D mask is to be generated
+        and a tuple of size 2 is given, the second value is ignored.
+        Default is 130.
     sigma : int or tuple of ints, optional
-        Sigma used for gaussian filtering (nm). If a single float is
-        given, the same sigma is used for all dimensions. If a tuple of
-        floats is given, 2/3 values must be given for 2D/3D mask,
-        respectively, and the sigma for each dimension is specified
-        separately. If a 2D mask is to be generated, the potential third
-        value in the tuple is ignored. Default is 500 nm.
+        Sigma used for gaussian filtering (nm). If an integer is given,
+        the same sigma is used for all dimensions. For a 3D mask,
+        different sigmas in xy and z can be specified by providing a
+        tuple of 2 values. If a 2D mask is to be generated and a tuple
+        of size 2 is given, the second value is ignored. Default is 500.
     ndim : int, optional
         Dimensionality of the mask (2 or 3). If None, the dimensionality
         is taken from the loaded localizations/molecules. Default is
         None.
     run_checks : bool, optional
-        Whether to run input checks during initialization. Default is
-        False.
+        Not used since v0.9.6, kept for backward compatibility. Will
+        be removed in v0.10.0.
     """
 
     def __init__(
@@ -953,13 +949,8 @@ class MaskGenerator:
             if ndim is not None
             else self.locs.shape[1]
         )
-        # if a single value is given for binsize/sigma, convert it to a tuple
-        if isinstance(binsize, float) or isinstance(binsize, int):
-            binsize = (binsize,) * self.ndim
-        if isinstance(sigma, float) or isinstance(sigma, int):
-            sigma = (sigma,) * self.ndim
-        self.binsize = binsize
-        self.sigma = sigma
+        self.set_binsize(binsize)
+        self.set_sigma(sigma)
 
         self.mask = None
         self.thresh = None
@@ -969,9 +960,6 @@ class MaskGenerator:
         self.y_max = None
         self.z_min = None
         self.z_max = None
-
-        if run_checks:
-            self.ensure_correct_inputs()
 
         # camera pixel size
         self.pixelsize = lib.get_from_metadata(
@@ -984,45 +972,63 @@ class MaskGenerator:
             info[0]["Height"] * self.pixelsize,
         ]
 
-    def ensure_correct_inputs(self) -> None:
-        """Ensure correct data types used in initialization."""
-        # path
-        if not isinstance(self.locs_path, str):
-            raise TypeError(
-                "Path to localizations must be a string ending with .hdf5."
-            )
-        elif not self.locs_path.endswith(".hdf5"):
-            raise TypeError(
-                "Path to localizations must be a string ending with .hdf5."
-            )
-        # binsize
-        if not (
-            isinstance(self.binsize, tuple) or isinstance(self.binsize, list)
-        ):  # already converted to tuple if a single value is given
+    def set_binsize(self, binsize: int | tuple) -> None:
+        """Convert the input binsize to a tuple of 2/3 values.
+
+        Parameters
+        ----------
+        binsize: int or tuple
+            Binsize used for histograming localizations (nm). If an
+            integer is given, the same binsize is used for all
+            dimensions. For a 3D mask, different bin sizes in xy and z
+            can be specified by providing a tuple of 2 values. If a 2D
+            mask is to be generated and a tuple of size 2 is given, the
+            second value is ignored.
+        """
+        if isinstance(binsize, (int, float)):
+            binsize = (binsize,) * self.ndim
+        elif isinstance(binsize, (tuple, list)):
+            assert (
+                len(binsize) == 2
+            ), "If binsize is a tuple/list, it must have 2 values."
+            if self.ndim == 2:
+                binsize = (binsize[0], binsize[0])
+            else:
+                binsize = (binsize[0], binsize[0], binsize[1])
+        else:
             raise ValueError(
-                "Binsize must be a single number or a tuple of 2"
-                " numbers for 2D mask."
+                "Binsize must be a single number or a tuple of 2 numbers."
             )
-        # sigma
-        if not (
-            isinstance(self.sigma, tuple) or isinstance(self.sigma, list)
-        ):  # already converted to tuple if a single value is given
+        self.binsize = binsize
+
+    def set_sigma(self, sigma: int | tuple) -> None:
+        """Convert the input sigma to a tuple of 2/3 values.
+
+        Parameters
+        ----------
+        sigma: int or tuple
+            Sigma used for gaussian filtering (nm). If an integer is
+            given, the same sigma is used for all dimensions. For a 3D
+            mask, different sigmas in xy and z can be specified by
+            providing a tuple of 2 values. If a 2D mask is to be
+            generated and a tuple of size 2 is given, the second value is
+            ignored.
+        """
+        if isinstance(sigma, (int, float)):
+            sigma = (sigma,) * self.ndim
+        elif isinstance(sigma, (tuple, list)):
+            assert (
+                len(sigma) == 2
+            ), "If sigma is a tuple/list, it must have 2 values."
+            if self.ndim == 2:
+                sigma = (sigma[0], sigma[0])
+            else:
+                sigma = (sigma[0], sigma[0], sigma[1])
+        else:
             raise ValueError(
-                "Sigma must be a single number or a tuple of 2"
-                " numbers for 2D mask."
+                "Sigma must be a single number or a tuple of 2 numbers."
             )
-        # ndim
-        if self.ndim is not None:
-            if "z" in self.locs.columns and self.ndim not in [2, 3]:
-                raise ValueError(
-                    "Dimensionality of the mask must be either 2 or 3 for 3D"
-                    " localizations."
-                )
-            elif "z" not in self.locs.columns and self.ndim != 2:
-                raise ValueError(
-                    "Dimensionality of the mask must be 2 for 2D"
-                    " localizations."
-                )
+        self.sigma = sigma
 
     def render_locs(self) -> np.ndarray:
         """Render localizations histogram (2D or 3D), no blur.
@@ -1037,10 +1043,9 @@ class MaskGenerator:
 
         # 2D image
         if self.ndim == 2 or "z" not in self.locs.columns:
-            _, image = render.render_hist_anisotropic(
+            _, image = render.render_hist(
                 self.locs,
                 oversampling[0],
-                oversampling[1],
                 self.y_min,
                 self.x_min,
                 self.y_max,
@@ -1094,13 +1099,19 @@ class MaskGenerator:
         """
         assert all(_ > 0 for _ in self.binsize), "Binsize must be positive."
         assert all(_ >= 0 for _ in self.sigma), "Sigma must be non-negative."
+        print(f"{self.ndim=}, {self.binsize=}, {self.sigma=}")
+        assert (
+            len(self.binsize) == len(self.sigma) == self.ndim
+        ), "Binsize and sigma must have the same number of values as the dimensionality of the mask."
         if verbose:
             print(f"Generating a mask in {self.ndim}D.")
             print("Rendering localizations... (1/3)")
         image = self.render_locs()
         if verbose:
             print("Applying gaussian filter... (2/3)")
-        sigma = [self.sigma[i] / self.binsize[i] for i in range(self.ndim)]
+        sigma = [
+            self.sigma[i] / self.binsize[i] for i in range(len(self.sigma))
+        ]
         image = gaussian_filter(image, sigma=sigma, mode="constant")
         if verbose:
             print("Thresholding... (3/3)")
@@ -1605,7 +1616,7 @@ class StructureSimulator:
         mask pixel."""
         # Get mask pixel size #
         binsize = self.mask_info["Binsize (nm)"]
-        if isinstance(binsize, float) or isinstance(binsize, int):
+        if isinstance(binsize, (int, float)):
             binsize = [binsize, binsize]
 
         # Draw from multinomial distribution #
@@ -1649,7 +1660,7 @@ class StructureSimulator:
         Similar to 2D; see comments in self.simulate_centers_mask_2D
         for code explanation."""
         binsize = self.mask_info["Binsize (nm)"]
-        if isinstance(binsize, float) or isinstance(binsize, int):
+        if isinstance(binsize, (int, float)):
             binsize = [binsize, binsize, binsize]
         rng = np.random.default_rng()
         counts = rng.multinomial(self.N, pvals=self.mask.ravel())
@@ -2494,8 +2505,8 @@ class StructureMixer:
 
         if self.mask is not None:
             binsize = list(self.mask_info.values())[0]["Binsize (nm)"]
-            if isinstance(binsize, float) or isinstance(binsize, int):
-                binsize = [binsize, binsize, binsize]
+            if isinstance(binsize, (int, float)):
+                binsize = [binsize, binsize]
             height = list(self.mask.values())[0].shape[1] * binsize[1]
             width = list(self.mask.values())[0].shape[0] * binsize[0]
         else:

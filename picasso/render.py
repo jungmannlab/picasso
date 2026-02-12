@@ -726,51 +726,6 @@ def render_hist(
     return n, image
 
 
-def render_hist_anisotropic(
-    locs: pd.DataFrame,
-    oversampling_x: float,
-    oversampling_y: float,
-    y_min: float,
-    x_min: float,
-    y_max: float,
-    x_max: float,
-) -> tuple[int, np.ndarray]:
-    """Render localizations with no blur by assigning them to pixels.
-    Allows for different pixel sizes in x and y (oversampling).
-
-    Parameters
-    ----------
-    locs : pd.DataFrame
-        Localizations to be rendered.
-    oversampling_x, oversampling_y : float
-        Number of super-resolution pixels per camera pixel.
-    y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels)
-    y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels)
-
-    Returns
-    -------
-    n : int
-        Number of localizations rendered.
-    image : np.ndarray
-        Rendered image.
-    """
-    image, n_pixel_y, n_pixel_x, x, y, in_view = _render_setup_anisotropic(
-        locs["x"].to_numpy(),
-        locs["y"].to_numpy(),
-        oversampling_x,
-        oversampling_y,
-        y_min,
-        x_min,
-        y_max,
-        x_max,
-    )
-    _fill(image, x, y)
-    n = len(x)
-    return n, image
-
-
 @numba.jit(nopython=True, nogil=True)
 def render_hist3d(
     x: np.ndarray,

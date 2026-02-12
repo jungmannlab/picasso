@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 11-FEB-2026 CEST
+Last change: 12-FEB-2026 CEST
 
 0.9.6
 -----
@@ -26,7 +26,7 @@ Small improvements:
 - Config file changes from 0.9.5 were `documented <https://picassosr.readthedocs.io/en/latest/localize.html>`__ and `config template <https://github.com/jungmannlab/picasso/blob/master/picasso/config_template.yaml>`__ was updated
 - SPINNA 3D masking: z slicing added for visual inspection
 - SPINNA 3D homogeneous simulations automatically adjusts the observed density based on the z range set by the user and the xy area of the pick (if provided)
-- SPINNA allows for different mask bin size and blur in each dimension
+- SPINNA allows for different mask bin size and blur in lateral and axial dimensions
 - SPINNA default mask blur of 500 nm in the API (previously 65 nm)
 - Reduced copying and conversion of DataFrames to numpy arrays (less memory usage)
 - ``picasso.io.load_locs`` and ``save_locs`` ensure that the saved metadata contains the required keys

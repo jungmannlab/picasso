@@ -283,7 +283,11 @@ class MaskPreview(QtWidgets.QLabel):
         painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
         painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
         length_nm = self.mask_tab.scalebar_length.value()
-        pixelsize = self.mask_tab.mask_generator.binsize[0]
+        binsize = self.mask_tab.mask_generator.binsize
+        if isinstance(binsize, (int, float)):
+            pixelsize = binsize
+        else:
+            pixelsize = binsize[0]
         length_display = int(
             self.width() * length_nm / (pixelsize * self.image.shape[0])
         )
@@ -436,9 +440,9 @@ class MaskGeneratorTab(QtWidgets.QDialog):
     mask : np.ndarray
         Generated mask; pixel/voxel values give probability mass
         function for find a molecule in the pixel/voxel.
-    mask_binsize_x, mask_binsize_y, mask_binsize_z : QtWidgets.QSpinBox
-        Size of the mask pixel/voxel (nm) in each dimension
-    mask_blur_x, mask_blur_y, mask_blur_z : QtWidgets.QSpinBox
+    mask_binsize_xy, mask_binsize_z : QtWidgets.QSpinBox
+        Size of the mask pixel/voxel (nm) in each dimension.
+    mask_blur_xy, mask_blur_z : QtWidgets.QSpinBox
         Size of the Gaussian blur (nm) in each dimension.
     mask_generator : spinna.MaskGenerator
         Mask generator.
@@ -517,7 +521,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             "Load localizations/molecules for mask generation."
         )
         self.load_locs_button.released.connect(self.load_locs)
-        mask_layout.addWidget(self.load_locs_button, 0, 0, 1, 4)
+        mask_layout.addWidget(self.load_locs_button, 0, 0, 1, 3)
 
         # isotropic mask
         self.isotropic_mask_check = QtWidgets.QCheckBox("Isotropic mask")
@@ -525,81 +529,67 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             "Keep mask pixel/voxel size and blur isotropic?"
         )
         self.isotropic_mask_check.setChecked(True)
+        self.isotropic_mask_check.stateChanged.connect(
+            self.on_isotropic_mask_changed
+        )
         mask_layout.addWidget(self.isotropic_mask_check, 1, 0)
 
         # anisotropic mask labels
-        x_label = QtWidgets.QLabel("x")
-        x_label.setAlignment(QtCore.Qt.AlignCenter)
-        mask_layout.addWidget(x_label, 1, 1)
-        y_label = QtWidgets.QLabel("y")
-        y_label.setAlignment(QtCore.Qt.AlignCenter)
-        mask_layout.addWidget(y_label, 1, 2)
+        xy_label = QtWidgets.QLabel("xy")
+        xy_label.setAlignment(QtCore.Qt.AlignCenter)
+        mask_layout.addWidget(xy_label, 1, 1)
         z_label = QtWidgets.QLabel("z (3D only)")
         z_label.setAlignment(QtCore.Qt.AlignCenter)
-        mask_layout.addWidget(z_label, 1, 3)
+        mask_layout.addWidget(z_label, 1, 2)
 
         # mask pixel / voxel size
         mask_layout.addWidget(QtWidgets.QLabel("Mask pixel/voxel (nm):"), 2, 0)
-        self.mask_binsize_x = ignoreArrowsSpinBox()
-        self.mask_binsize_x.setRange(1, 10_000)
-        self.mask_binsize_x.setSingleStep(1)
-        self.mask_binsize_x.setValue(50)
-        self.mask_binsize_x.valueChanged.connect(self.on_mask_binsize_changed)
-        mask_layout.addWidget(self.mask_binsize_x, 2, 1)
-        self.mask_binsize_y = ignoreArrowsSpinBox()
-        self.mask_binsize_y.setRange(1, 10_000)
-        self.mask_binsize_y.setSingleStep(1)
-        self.mask_binsize_y.setValue(50)
-        self.mask_binsize_y.valueChanged.connect(self.on_mask_binsize_changed)
-        mask_layout.addWidget(self.mask_binsize_y, 2, 2)
+        self.mask_binsize_xy = ignoreArrowsSpinBox()
+        self.mask_binsize_xy.setRange(1, 10_000)
+        self.mask_binsize_xy.setSingleStep(1)
+        self.mask_binsize_xy.setValue(50)
+        self.mask_binsize_xy.valueChanged.connect(self.on_mask_binsize_changed)
+        mask_layout.addWidget(self.mask_binsize_xy, 2, 1)
         self.mask_binsize_z = ignoreArrowsSpinBox()
         self.mask_binsize_z.setRange(1, 10_000)
         self.mask_binsize_z.setSingleStep(1)
         self.mask_binsize_z.setValue(50)
         self.mask_binsize_z.valueChanged.connect(self.on_mask_binsize_changed)
-        mask_layout.addWidget(self.mask_binsize_z, 2, 3)
+        mask_layout.addWidget(self.mask_binsize_z, 2, 2)
 
         # mask blur
         mask_layout.addWidget(QtWidgets.QLabel("Gaussian blur (nm):"), 3, 0)
-        self.mask_blur_x = ignoreArrowsSpinBox()
-        self.mask_blur_x.setRange(0, 10_000)
-        self.mask_blur_x.setSingleStep(1)
-        self.mask_blur_x.setValue(500)
-        self.mask_blur_x.valueChanged.connect(self.on_mask_blur_changed)
-        mask_layout.addWidget(self.mask_blur_x, 3, 1)
-        self.mask_blur_y = ignoreArrowsSpinBox()
-        self.mask_blur_y.setRange(0, 10_000)
-        self.mask_blur_y.setSingleStep(1)
-        self.mask_blur_y.setValue(500)
-        self.mask_blur_y.valueChanged.connect(self.on_mask_blur_changed)
-        mask_layout.addWidget(self.mask_blur_y, 3, 2)
+        self.mask_blur_xy = ignoreArrowsSpinBox()
+        self.mask_blur_xy.setRange(0, 10_000)
+        self.mask_blur_xy.setSingleStep(1)
+        self.mask_blur_xy.setValue(500)
+        self.mask_blur_xy.valueChanged.connect(self.on_mask_blur_changed)
+        mask_layout.addWidget(self.mask_blur_xy, 3, 1)
         self.mask_blur_z = ignoreArrowsSpinBox()
         self.mask_blur_z.setRange(0, 10_000)
         self.mask_blur_z.setSingleStep(1)
         self.mask_blur_z.setValue(500)
         self.mask_blur_z.valueChanged.connect(self.on_mask_blur_changed)
-        mask_layout.addWidget(self.mask_blur_z, 3, 3)
+        mask_layout.addWidget(self.mask_blur_z, 3, 2)
 
         # ndimensions:
-        mask_layout.addWidget(
-            QtWidgets.QLabel("Mask dimensionality:"), 4, 0, 1, 2
-        )
+        mask_layout.addWidget(QtWidgets.QLabel("Mask dimensionality:"), 4, 0)
         self.mask_ndim = QtWidgets.QComboBox()
         self.mask_ndim.addItems(["2D", "3D"])
         self.mask_ndim.currentIndexChanged.connect(self.on_mask_ndim_changed)
-        mask_layout.addWidget(self.mask_ndim, 4, 2, 1, 2)
+        mask_layout.addWidget(self.mask_ndim, 4, 1, 1, 2)
 
         # mask type (binary, loc density)
         label = QtWidgets.QLabel("Mask type:")
         label.setToolTip(
             "Choose between a density (heterogeneous) mask or a binary mask."
         )
-        mask_layout.addWidget(label, 5, 0, 1, 2)
+        mask_layout.addWidget(label, 5, 0)
 
         self.mask_type = QtWidgets.QComboBox()
         self.mask_type.addItems(["Density map", "Binary"])
         self.mask_type.currentIndexChanged.connect(self.on_mask_type_changed)
-        mask_layout.addWidget(self.mask_type, 5, 2, 1, 2)
+        mask_layout.addWidget(self.mask_type, 5, 1, 1, 2)
 
         # generate mask
         self.generate_mask_button = QtWidgets.QPushButton("Generate mask")
@@ -608,11 +598,11 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         )
         self.generate_mask_button.released.connect(self.generate_mask)
         self.generate_mask_button.setEnabled(False)
-        mask_layout.addWidget(self.generate_mask_button, 6, 0, 1, 4)
+        mask_layout.addWidget(self.generate_mask_button, 6, 0, 1, 3)
 
         # thresholding density map
         self.thresholding_stack = QtWidgets.QStackedWidget()
-        mask_layout.addWidget(self.thresholding_stack, 7, 0, 1, 4)
+        mask_layout.addWidget(self.thresholding_stack, 7, 0, 1, 3)
         threshold_widget = QtWidgets.QWidget()
         self.thresholding_stack.addWidget(threshold_widget)
         thresholding_layout = QtWidgets.QHBoxLayout()
@@ -633,15 +623,12 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.thresholding_stack.addWidget(QtWidgets.QLabel("          "))
 
         # z slicing of a 3D mask
-        # hbox = QtWidgets.QHBoxLayout()
-        # mask_layout.addLayout(hbox, 7, 0, 1, 2)
         self.zslice_check = QtWidgets.QCheckBox("Show z-slice")
         self.zslice_check.setToolTip("Display a z-slice of the 3D mask?")
         self.zslice_check.setChecked(False)
         self.zslice_check.stateChanged.connect(self.apply_zslice)
         self.zslice_check.setVisible(False)
-        mask_layout.addWidget(self.zslice_check, 8, 0, 1, 2)
-        # hbox.addWidget(self.zslice_check, 1)
+        mask_layout.addWidget(self.zslice_check, 8, 0)
 
         self.zslice_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
         self.zslice_slider.setToolTip("Choose the z-slice to be displayed.")
@@ -649,14 +636,13 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.zslice_slider.setValue(0)
         self.zslice_slider.valueChanged.connect(self.apply_zslice)
         self.zslice_slider.setVisible(False)
-        mask_layout.addWidget(self.zslice_slider, 8, 2, 1, 2)
-        # hbox.addWidget(self.zslice_slider, 7)
+        mask_layout.addWidget(self.zslice_slider, 8, 1, 1, 2)
 
         # save mask
         self.save_mask_button = QtWidgets.QPushButton("Save mask")
         self.save_mask_button.released.connect(self.save_mask)
         self.save_mask_button.setEnabled(False)
-        mask_layout.addWidget(self.save_mask_button, 9, 0, 1, 4)
+        mask_layout.addWidget(self.save_mask_button, 9, 0, 1, 3)
 
         # PREVIEW NAVIGATION
         navigation_box = QtWidgets.QGroupBox("Navigation")
@@ -789,20 +775,19 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
     def generate_mask(self) -> None:
         """Generate a mask with the currently loaded settings."""
-        binsize_x = self.mask_binsize_x.value()
-        binsize_y = self.mask_binsize_y.value()
+        binsize_xy = self.mask_binsize_xy.value()
         binsize_z = self.mask_binsize_z.value()
-        sigma_x = self.mask_blur_x.value()
-        sigma_y = self.mask_blur_y.value()
+        sigma_xy = self.mask_blur_xy.value()
         sigma_z = self.mask_blur_z.value()
         ndim = int(self.mask_ndim.currentText()[0])
         if self.mask_generator is not None:
+            self.mask_generator.ndim = ndim
             if ndim == 2:
-                self.mask_generator.binsize = (binsize_x, binsize_y)
-                self.mask_generator.sigma = (sigma_x, sigma_y)
+                self.mask_generator.set_binsize(binsize_xy)
+                self.mask_generator.set_sigma(sigma_xy)
             else:
-                self.mask_generator.binsize = (binsize_x, binsize_y, binsize_z)
-                self.mask_generator.sigma = (sigma_x, sigma_y, sigma_z)
+                self.mask_generator.set_binsize((binsize_xy, binsize_z))
+                self.mask_generator.set_sigma((sigma_xy, sigma_z))
             self.mask_generator.ndim = ndim
             mode = ["loc_den", "binary"][self.mask_type.currentIndex()]
             status = lib.StatusDialog("Generating mask...", self.preview)
@@ -918,6 +903,17 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                 dimensions = f"{dims[0]}x{dims[1]}x{dims[2]}"
         return dimensions
 
+    def on_isotropic_mask_changed(self, state: int) -> None:
+        """If checked, set the z bin size and blur to the same value as
+        xy."""
+        if state == 2:  # checked
+            self.mask_binsize_z.blockSignals(True)
+            self.mask_binsize_z.setValue(self.mask_binsize_xy.value())
+            self.mask_binsize_z.blockSignals(False)
+            self.mask_blur_z.blockSignals(True)
+            self.mask_blur_z.setValue(self.mask_blur_xy.value())
+            self.mask_blur_z.blockSignals(False)
+
     def on_mask_ndim_changed(self, index: int) -> None:
         """Show/hide the z-slicing options for 3D masks."""
         if index == 0:  # 2D
@@ -934,8 +930,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         dimensions."""
         if self.isotropic_mask_check.isChecked():
             for binsize in (
-                self.mask_binsize_x,
-                self.mask_binsize_y,
+                self.mask_binsize_xy,
                 self.mask_binsize_z,
             ):
                 binsize.blockSignals(True)
@@ -947,8 +942,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         dimensions."""
         if self.isotropic_mask_check.isChecked():
             for blur in (
-                self.mask_blur_x,
-                self.mask_blur_y,
+                self.mask_blur_xy,
                 self.mask_blur_z,
             ):
                 blur.blockSignals(True)
