@@ -12,7 +12,7 @@ Important updates:
 
 Small improvements:
 +++++++++++++++++++
-- Moved from merge sort to quick sort (often faster due to lower memory usage)
+- Moved from merge sort to quick sort (usually faster due to lower memory usage)
 - Render: increase the speed of picking circular locs, picking similar and filter by number of localizations (numba implementation)
 - Render property histogram shown before rendering is activated
 - Render property - removed legend
