@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45", "wheel"]
+requires = ["setuptools>=45,<81", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -43,7 +43,7 @@ dependencies = [
     "playsound3==3.2.8",
     "imageio==2.37.0",
     "imageio-ffmpeg==0.6.0",
-    "PyImarisWriter==0.7.0; sys_platform=='win32'"
+    "PyImarisWriter==0.7.0; sys_platform=='win32'"  # may need to remove it, caused problems with 0.9.6 installer
 ]
 
 [project.optional-dependencies]
