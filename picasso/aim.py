@@ -49,7 +49,8 @@ def intersect1d(
         Indices of common elements in b.
     """
     aux = np.concatenate((a, b))
-    aux_sort_indices = np.argsort(aux, kind="mergesort")
+    # quicksort is not stable, do not change below!
+    aux_sort_indices = np.argsort(aux, kind="stable")
     aux = aux[aux_sort_indices]
 
     mask = aux[1:] == aux[:-1]
@@ -204,8 +205,8 @@ def run_intersections_multithread(
 def point_intersect_2d(
     l0_coords: np.ndarray,
     l0_counts: np.ndarray,
-    x1: np.ndarray,
-    y1: np.ndarray,
+    x1: pd.Series | np.ndarray,
+    y1: pd.Series | np.ndarray,
     intersect_d: float,
     width_units: int,
     shifts_xy: np.ndarray,
@@ -221,7 +222,7 @@ def point_intersect_2d(
         Unique values of the reference localizations.
     l0_counts : np.ndarray
         Counts of the unique values of reference localizations.
-    x1, y1 : np.ndarray
+    x1, y1 : pd.Series or np.ndarray
         x and y coordinates of the target (currently undrifted) localizations.
     intersect_d : float
         Intersect distance in camera pixels.
@@ -254,9 +255,9 @@ def point_intersect_2d(
 def point_intersect_3d(
     l0_coords: np.ndarray,
     l0_counts: np.ndarray,
-    x1: np.ndarray,
-    y1: np.ndarray,
-    z1: np.ndarray,
+    x1: pd.Series | np.ndarray,
+    y1: pd.Series | np.ndarray,
+    z1: pd.Series | np.ndarray,
     intersect_d: float,
     width_units: int,
     height_units: int,
@@ -272,7 +273,7 @@ def point_intersect_3d(
         Unique values of the reference localizations.
     l0_counts : np.ndarray
         Counts of the unique values of reference localizations.
-    x1, y1, z1 : np.ndarray
+    x1, y1, z1 : pd.Series or np.ndarray
         x, y, and z coordinates of the target (currently undrifted)
         localizations.
     intersect_d : float
@@ -372,11 +373,11 @@ def get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
 
 
 def intersection_max(
-    x: np.ndarray,
-    y: np.ndarray,
-    ref_x: np.ndarray,
-    ref_y: np.ndarray,
-    frame: np.ndarray,
+    x: pd.Series | np.ndarray,
+    y: pd.Series | np.ndarray,
+    ref_x: pd.Series | np.ndarray,
+    ref_y: pd.Series | np.ndarray,
+    frame: pd.Series | np.ndarray,
     seg_bounds: np.ndarray,
     intersect_d: float,
     roi_r: float,
@@ -388,12 +389,12 @@ def intersection_max(
 
     Parameters
     ----------
-    x, y : np.ndarray
+    x, y : pd.Series or np.ndarray
         x and y coordinates of the localizations.
-    ref_x_list, ref_y_list : np.ndarray
+    ref_x, ref_y : pd.Series or np.ndarray
         x and y coordinates of the reference localizations.
-    frame : np.ndarray
-        Frame indices of localizations.
+    frame : pd.Series or np.ndarray
+        Frame indices of localizations, starting at 1.
     seg_bounds : np.ndarray
         Frame indices of the segmentation bounds. Defines temporal
         intervals used to estimate drift.
@@ -529,13 +530,13 @@ def intersection_max(
 
 
 def intersection_max_z(
-    x: np.ndarray,
-    y: np.ndarray,
-    z: np.ndarray,
-    ref_x: np.ndarray,
-    ref_y: np.ndarray,
-    ref_z: np.ndarray,
-    frame: np.ndarray,
+    x: pd.Series | np.ndarray,
+    y: pd.Series | np.ndarray,
+    z: pd.Series | np.ndarray,
+    ref_x: pd.Series | np.ndarray,
+    ref_y: pd.Series | np.ndarray,
+    ref_z: pd.Series | np.ndarray,
+    frame: pd.Series | np.ndarray,
     seg_bounds: np.ndarray,
     intersect_d: float,
     roi_r: float,
@@ -696,7 +697,7 @@ def aim(
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
 
     # frames should start at 1
-    frame = (locs["frame"] + 1 - locs["frame"].min()).to_numpy()  # 1d array
+    frame = locs["frame"] + 1 - locs["frame"].min()  # 1d array
 
     # find the segmentation bounds (temporal intervals)
     seg_bounds = np.concatenate(
@@ -704,14 +705,14 @@ def aim(
     )
 
     # get the reference localizations (first interval)
-    ref_x = locs["x"][frame <= segmentation].to_numpy()
-    ref_y = locs["y"][frame <= segmentation].to_numpy()
+    ref_x = locs["x"][frame <= segmentation]
+    ref_y = locs["y"][frame <= segmentation]
 
     # RUN AIM TWICE #
     # the first run is with the first interval as reference
     x_pdc, y_pdc, drift_x1, drift_y1 = intersection_max(
-        locs["x"].to_numpy(),
-        locs["y"].to_numpy(),
+        locs["x"],
+        locs["y"],
         ref_x,
         ref_y,
         frame,
@@ -752,16 +753,16 @@ def aim(
     y_pdc += shift_y
 
     # 3D undrifting
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         if progress is not None:
             progress.zero_progress(description="Undrifting z (1/2)")
         ref_x = x_pdc[frame <= segmentation]
         ref_y = y_pdc[frame <= segmentation]
-        ref_z = locs["z"][frame <= segmentation].to_numpy()
+        ref_z = locs["z"][frame <= segmentation]
         z_pdc, drift_z1 = intersection_max_z(
             x_pdc,
             y_pdc,
-            locs["z"].to_numpy(),
+            locs["z"],
             ref_x,
             ref_y,
             ref_z,
@@ -809,7 +810,7 @@ def aim(
     # apply the drift to localizations
     locs["x"] = x_pdc
     locs["y"] = y_pdc
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         locs["z"] = z_pdc
 
     new_info = {

@@ -91,7 +91,7 @@ In Picasso 0.9.5, a new algorithm for molecular mapping (i.e., finding the posit
 
 G5M requires some preprocessing of localizations to filter out the badly fitted ones, especially the ones arising from crosstalk (overlapping blinking). These can be excluded from 2D data where the ellipticity and size of the image of an emitter in x and y can be filtered (in Picasso these are found under names “ellipticity”, “sx” and “sy”, respectively). Moreover, the photon count can be cut-off as crosstalk is likely to result in a higher-intensity signal. In 3D data these filters are less reliable due to astigmatism, however, “d_zcalib” could be used. We strongly encourage avoiding dense blinking, where emission signals from neighboring molecules overlap, especially during 3D image acquisition.
 
-Prior to molecular mapping, clustering of localizations is required to split the data into smaller chunks. For many datasets, DBSCAN works well. While in some cases some adjustments may be needed, we recommend the following DBSCAN parameters: In 2D, DBSCAN radius (epsilon) of 2*LP, in 3D - 3*LP (LP - average localization precision of the dataset, for example, NeNA or median localization precision). Default min. samples is set to 4. Clustering in Picasso adds the ``group`` column to the localization file, which is required for G5M.
+Prior to molecular mapping, clustering of localizations is required to split the data into smaller chunks. For many datasets, DBSCAN works well. While in some cases some adjustments may be needed, we recommend the following DBSCAN parameters: In 2D, DBSCAN radius (epsilon) of 2*LP, in 3D - 3*LP (LP - average localization precision of the dataset, for example, NeNA or median localization precision). Default min. samples is set to 4. Clustering in Picasso adds the ``group`` column to the localization file, which is required for G5M. **Note: G5M relies on the information in the ``group`` column, therefore, if it is overwritten (for example, by picking localizations after DBSCAN clustering), G5M will not work.**
 
 To account for fluorophore non-specific sticking, frame analysis is normally recommended (especially the filtering of st. dev. of frame per molecule). However, if localizations from neighboring localization clouds overlap, this is not sufficient due to ambigous assignment of localizations to molecules. Therefore, we recommend filtering of molecules that express too few binding events (saved in the column ``n_events``). In the publication, we recommend a threshold of at least 3 binding events per molecule.
 
@@ -101,7 +101,10 @@ As a final check for overfitting (i.e., too many assigned molecules), G5M automa
 
 If the outcome of G5M seems unsatisfactory, please check the following:
 
-- Make sure that the loc. precision values (columns ``lpx``, ``lpy``, ``lpz``) are correct, comparing NeNA and median loc. precision is a reasonable proxy (without fiducial markers!); the most common issue is a miscalibrated camera, leading to incorrect photon counts and thus incorrect loc. precisions;
+- Make sure that ``group`` column is present in the localization file and contains the correct information (i.e., from DBSCAN clustering, not from picking localizations);
+- Make sure that the loc. precision values (columns ``lpx``, ``lpy``, ``lpz``) are correct, comparing NeNA and median loc. precision is a reasonable proxy (without fiducial markers); the most common issue is a miscalibrated camera, leading to incorrect photon counts and thus incorrect loc. precisions;
+- Another reason why the loc. precision values can be off is due to the small box size in the localization step; especially in 3D astigmatic imaging, single-emitter images can be quite large, potentially exceeding the user-defined box size; in such cases, we recommend increasing the box size in the localization step and rerunning the analysis;
+- Inspect if the localizations were preprocessed as described above;
 - Rerun the analysis without postprocessing (filtering) and redo it manually, since the step may be too stringent, especially for short acquisition times;
 - Adjust min./max. σ, especially too low max. σ may lead to high false positive error rates (i.e., overfitting);
 - Adjust min. locs;
@@ -480,4 +483,4 @@ Opens a dialog where different clustering parameters can be checked on the loade
 
 Nearest Neighbor Analysis
 ^^^^^^^^^^^^^^^^^^^^^^^^^
-Calculates distances to the ``k``-th nearest neighbors between two channels (can be the same channel). ``k`` is defined by the user. The distances are stored in nm as a .csv file.
+Calculates distances to the ``k``-th nearest neighbors between two channels (can be the same channel). ``k`` is defined by the user. The distances are stored in nm as a .hdf5 localizations file with new columns ``nnd_1``, ``nnd_2``, ..., ``nnd_k`` for each localization in channel 1. The distances are calculated in 3D if both datasets have z information.

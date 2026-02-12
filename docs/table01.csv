@@ -10,6 +10,7 @@ lpx ,"The localization precision in x direction, in camera pixels, as estimated 
 lpy ,"The localization precision in y direction, in camera pixels, as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit (Mortensen et al., Nat Meth, 2010). ",float 
 net_gradient ,"The net gradient of this spot which is defined by the sum of gradient vector magnitudes within the fitting box, projected to the spot center. ",float 
 z,(Optional) The z coordinate fitted in 3D in nm. Please note the units are different for x and y coordinates.,float 
+lpz,(Optional) The localization precision in z direction in nm.,float
 d_zcalib,"(Optional) The value of the D function used for z fitting with astigmatism, see the supplement to Huang et al. 2008.",float 
 likelihood ,(Optional) The log-likelihood of the fit. Only available for MLE fitting.,float 
 iterations ,(Optional) The number of iterations of the fit procedure. Only available for MLE fitting.,long 

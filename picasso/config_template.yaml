@@ -1,3 +1,7 @@
+CameraPriority:
+  # Does not have to display all cameras, the ones listed here will be displayed first in Picasso Localize's parameters dialog
+  - HamamatsuHam_DCAM
+  - Andor Zyla 4.2 Plus
 Cameras:
   Andor Zyla 4.2 Plus:
     Pixelsize: 130
@@ -119,3 +123,12 @@ Cameras:
     Baseline: 0
     Sensitivity: 1.0
     Quantum Efficiency: 1.0
+z-calibrations: # This information is used to automatically set the z calibration file based on MicroManager metadata
+  HamamatsuHam_DCAM:
+    525: C:/path/to/your_3d_calib_525nm.yaml
+    595: C:/path/to/your_3d_calib_595nm.yaml
+    700: C:/path/to/your_3d_calib_700nm.yaml
+  Andor Zyla 4.2 Plus:
+    525: C:/path/to/your_3d_calib_525nm_another_camera.yaml
+    595: C:/path/to/your_3d_calib_595nm_another_camera.yaml
+    700: C:/path/to/your_3d_calib_700nm_another_camera.yaml

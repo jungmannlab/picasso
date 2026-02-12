@@ -94,8 +94,8 @@ def locs_from_fits(
 ) -> pd.DataFrame:
     """Convert fit results to localization DataFrame."""
     box_offset = int(box / 2)
-    x = theta[:, 0] + identifications["x"] - box_offset
-    y = theta[:, 1] + identifications["y"] - box_offset
+    x = theta[:, 0] + identifications["x"]  # - box_offset
+    y = theta[:, 1] + identifications["y"]  # - box_offset
     lpx = gausslq.localization_precision(
         theta[:, 2], theta[:, 4], theta[:, 5], theta[:, 3], em=em
     )
@@ -105,7 +105,7 @@ def locs_from_fits(
     a = np.maximum(theta[:, 4], theta[:, 5])
     b = np.minimum(theta[:, 4], theta[:, 5])
     ellipticity = (a - b) / a
-    if hasattr(identifications, "n_id"):
+    if "n_id" in identifications.columns:
         locs = pd.DataFrame(
             {
                 "frame": identifications["frame"].to_numpy().astype(np.uint32),
@@ -126,7 +126,7 @@ def locs_from_fits(
                 "n_id": identifications["n_id"].to_numpy().astype(np.uint32),
             }
         )
-        locs.sort_values(by="n_id", kind="mergesort", inplace=True)
+        locs.sort_values(by="n_id", kind="quicksort", inplace=True)
     else:
         locs = pd.DataFrame(
             {
@@ -147,5 +147,5 @@ def locs_from_fits(
                 ),
             }
         )
-        locs.sort_values(by="frame", kind="mergesort", inplace=True)
+        locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs

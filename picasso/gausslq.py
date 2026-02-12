@@ -393,7 +393,7 @@ def locs_from_fits(
     b = np.minimum(theta[:, 4], theta[:, 5])
     ellipticity = (a - b) / a
 
-    if hasattr(identifications, "n_id"):
+    if "n_id" in identifications.columns:
         locs = pd.DataFrame(
             {
                 "frame": identifications["frame"].astype(np.uint32),
@@ -412,7 +412,7 @@ def locs_from_fits(
                 "n_id": identifications["n_id"].astype(np.uint32),
             }
         )
-        locs.sort_values(by="n_id", kind="mergesort", inplace=True)
+        locs.sort_values(by="n_id", kind="quicksort", inplace=True)
     else:
         locs = pd.DataFrame(
             {
@@ -431,7 +431,7 @@ def locs_from_fits(
                 ),
             }
         )
-        locs.sort_values(by="frame", kind="mergesort", inplace=True)
+        locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
 
 
@@ -491,7 +491,7 @@ def locs_from_fits_gpufit(
             "net_gradient": identifications["net_gradient"].astype(np.float32),
         }
     )
-    locs.sort_values(by="frame", kind="mergesort", inplace=True)
+    locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
 
 
@@ -541,10 +541,10 @@ def localization_precision(
 
 
 def sigma_uncertainty(
-    sigma: np.ndarray,
-    sigma_orth: np.ndarray,
-    photons: np.ndarray,
-    bg: np.ndarray,
+    sigma: pd.Series | np.ndarray,
+    sigma_orth: pd.Series | np.ndarray,
+    photons: pd.Series | np.ndarray,
+    bg: pd.Series | np.ndarray,
 ) -> np.ndarray:
     """Calculate standard error of fitted sigma based on the 2D Gaussian
     least-squares fitting model with diagonal covariance matrix.
@@ -553,14 +553,14 @@ def sigma_uncertainty(
 
     Parameters
     ----------
-    sigma : np.ndarray
+    sigma : pd.Series | np.ndarray
         Fitted sigma values in camera pixels.
-    sigma_orth : np.ndarray
+    sigma_orth : pd.Series | np.ndarray
         Fitted sigma values in the orthogonal direction in camera
         pixels.
-    photons : np.ndarray
+    photons : pd.Series | np.ndarray
         Number of photons.
-    bg : np.ndarray
+    bg : pd.Series | np.ndarray
         Background photons per pixel.
 
     Returns

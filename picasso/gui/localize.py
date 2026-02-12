@@ -1186,6 +1186,10 @@ class ParametersDialog(QtWidgets.QDialog):
             fp_calib = fp_calib_lam.get(wavelength)
             if fp_calib is not None:
                 self.update_z_calib(fp_calib)
+                # To avoid the situation where the user runs a 3D localization
+                # just because the calib file was loaded, uncheck the "Fit Z"
+                # checkbox;
+                self.fit_z_checkbox.setChecked(False)
 
     def update_z_calib(self, path: str) -> None:
         """Load the 3D calibration from a YAML file."""
@@ -1357,13 +1361,13 @@ class ParametersDialog(QtWidgets.QDialog):
                                     if em_combo.itemText(index) == wavelength:
                                         em_combo.setCurrentIndex(index)
                                         break
-                                else:
-                                    raise ValueError(
-                                        (
-                                            "No quantum efficiency found"
-                                            " for wavelength " + wavelength
-                                        )
-                                    )
+                                # else:
+                                #     raise ValueError(
+                                #         (
+                                #             "No quantum efficiency found"
+                                #             " for wavelength " + wavelength
+                                #         )
+                                #     )
 
     def update_sensitivity(self) -> None:
         """Update the sensitivity settings for the current camera."""
@@ -1851,7 +1855,7 @@ class Window(QtWidgets.QMainWindow):
             self.identifications.sort_values(
                 by="frame",
                 inplace=True,
-                kind="mergesort",
+                kind="quicksort",
             )
 
             # remove all identifications that are oob
@@ -1955,7 +1959,7 @@ class Window(QtWidgets.QMainWindow):
             self.identifications.sort_values(
                 by="frame",
                 inplace=True,
-                kind="mergesort",
+                kind="quicksort",
             )
 
             # remove all identifications that are oob
@@ -2346,12 +2350,19 @@ class Window(QtWidgets.QMainWindow):
         """Fit z coordinates of the fitted localizations based on the
         calibration data."""
         self.status_bar.showMessage("Fitting z position...")
+        # avgroi won't really work but kept for compatibility
+        fitting_method = {
+            "LQ, Gaussian": "gausslq",
+            "MLE, integrated Gaussian": "gaussmle",
+            "Average of ROI": "gausslq",
+        }[self.parameters_dialog.fit_method.currentText()]
         self.fit_z_worker = FitZWorker(
             self.locs,
             self.info,
             self.parameters_dialog.z_calibration,
             self.parameters_dialog.magnification_factor.value(),
             self.parameters_dialog.pixelsize.value(),
+            fitting_method,
         )
         self.fit_z_worker.progressMade.connect(self.on_fit_z_progress)
         self.fit_z_worker.finished.connect(self.on_fit_z_finished)
@@ -2486,7 +2497,18 @@ class Window(QtWidgets.QMainWindow):
             if visible_scene_rect.width() / factor > self.movie.shape[2]:
                 self.fit_in_view()
                 return
+        # get the center of the current visible viewport in scene coordinates
+        viewport_rect = self.view.viewport().rect()
+        viewport_center = QtCore.QPointF(
+            viewport_rect.x() + viewport_rect.width() / 2.0,
+            viewport_rect.y() + viewport_rect.height() / 2.0,
+        )
+        scene_center = self.view.mapToScene(viewport_center.toPoint())
+        # apply the zoom
         self.view.scale(factor, factor)
+        # re-center the view on the same scene point
+        self.view.centerOn(scene_center)
+
         self.draw_frame()
 
     def save_spots(self, path: str) -> None:
@@ -2547,7 +2569,8 @@ class Window(QtWidgets.QMainWindow):
             )
         info = self.info + [localize_info | self.camera_info]
         self.select_locs_columns()  # save only selected columns
-        io.save_locs(path, self.locs, info)
+        # copy to avoid pandas warning:
+        io.save_locs(path, self.locs.copy(), info)
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""
@@ -2751,6 +2774,7 @@ class FitZWorker(QtCore.QThread):
         calibration: dict,
         magnification_factor: float,
         pixelsize: float,
+        fitting_method: Literal["gausslq", "gaussmle"],
     ) -> None:
         super().__init__()
         self.locs = locs
@@ -2758,6 +2782,7 @@ class FitZWorker(QtCore.QThread):
         self.calibration = calibration
         self.magnification_factor = magnification_factor
         self.pixelsize = pixelsize
+        self.fitting_method = fitting_method
 
     def run(self) -> None:
         t0 = time.time()
@@ -2768,6 +2793,7 @@ class FitZWorker(QtCore.QThread):
             self.calibration,
             self.magnification_factor,
             self.pixelsize,
+            fitting_method=self.fitting_method,
             filter=0,
             asynch=True,
         )

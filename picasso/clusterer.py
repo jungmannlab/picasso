@@ -55,13 +55,11 @@ def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     passed = 1
 
     # get mean frame
-    mean_frame = frame.to_numpy().mean()
+    mean_frame = frame.mean()
 
     # get maximum number of locs in a 1/20th of acquisition time
     n_locs = len(frame)
-    locs_binned = np.histogram(
-        frame.to_numpy(), bins=np.linspace(0, n_frames, 21)
-    )[0]
+    locs_binned = np.histogram(frame, bins=np.linspace(0, n_frames, 21))[0]
     max_locs_bin = locs_binned.max()
 
     # test if frame analysis passed
@@ -75,7 +73,9 @@ def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     return passed
 
 
-def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
+def frame_analysis(
+    labels: np.ndarray, frame: pd.Series | np.ndarray
+) -> np.ndarray:
     """Perform basic frame analysis on clustered localizations. Reject
     clusters whose mean frame is outside of the [20, 80] % (max frame)
     range or any 1/20th of measurement's time contains more than 80 % of
@@ -87,7 +87,7 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
     ----------
     labels : np.ndarray
         Cluster labels (-1 means no cluster assigned).
-    frame : np.ndarray
+    frame : pd.Series or np.ndarray
         Frame number for each localization.
 
     Returns
@@ -104,7 +104,7 @@ def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
     true_cluster = frame_grouped.apply(_frame_analysis, frame.max() + 1)
 
     # cluster ids that did not pass frame analysis
-    discard = true_cluster.index[true_cluster == 0].to_numpy()
+    discard = true_cluster.index[true_cluster == 0]
     # change labels of these clusters to -1
     labels[np.isin(labels, discard)] = -1
 
@@ -201,9 +201,7 @@ def _cluster(
 
 
 def cluster_2D(
-    x: np.ndarray,
-    y: np.ndarray,
-    frame: np.ndarray,
+    locs: pd.DataFrame,
     radius: float,
     min_locs: int,
     fa: bool,
@@ -212,10 +210,8 @@ def cluster_2D(
 
     Parameters
     ----------
-    x, y : np.ndarray
-        x and y coordinates to be clustered.
-    frame : np.ndarray
-        Frame number for each localization.
+    locs : pd.DataFrame
+        Localizations to be clustered.
     radius : float
         Clustering radius.
     min_locs : int
@@ -229,17 +225,25 @@ def cluster_2D(
         Cluster labels for each localization (-1 means no cluster
         assigned).
     """
-    X = np.stack((x, y)).T
+    X = locs[["x", "y"]].to_numpy()
 
     if not fa:
         frame = None
+    else:
+        frame = locs["frame"]
 
     labels = _cluster(X, radius, min_locs, frame)
 
     return labels
 
 
-def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
+def cluster_3D(
+    locs: pd.DataFrame,
+    radius_xy: float,
+    radius_z: float,
+    min_locs: int,
+    fa: bool,
+):
     """Prepare 3D input to be used by ``_cluster``.
 
     Scales z coordinates by radius_xy / radius_z
@@ -266,10 +270,13 @@ def cluster_3D(x, y, z, frame, radius_xy, radius_z, min_locs, fa):
         assigned).
     """
     radius = radius_xy
-    X = np.stack((x, y, z * radius_xy / radius_z)).T
+    X = locs[["x", "y", "z"]].to_numpy()
+    X[:, 2] *= radius_xy / radius_z
 
     if not fa:
         frame = None
+    else:
+        frame = locs["frame"]
 
     labels = _cluster(X, radius, min_locs, frame)
 
@@ -328,17 +335,15 @@ def cluster(
         is removed.
     """
     locs = locs.copy()
-    if hasattr(locs, "z"):  # 3D
+    if "z" in locs.columns:  # 3D
         if pixelsize is None or radius_z is None:
             raise ValueError(
                 "Camera pixel size and clustering radius in z must be"
                 " specified for 3D clustering."
             )
+        locs["z"] /= pixelsize  # convert from nm to px
         labels = cluster_3D(
-            locs["x"].to_numpy(),
-            locs["y"].to_numpy(),
-            locs["z"].to_numpy() / pixelsize,  # convert from nm to px
-            locs["frame"].to_numpy(),
+            locs,
             radius_xy,
             radius_z,
             min_locs,
@@ -346,14 +351,14 @@ def cluster(
         )
     else:
         labels = cluster_2D(
-            locs["x"].to_numpy(),
-            locs["y"].to_numpy(),
-            locs["frame"].to_numpy(),
+            locs,
             radius_xy,
             min_locs,
             frame_analysis,
         )
     locs = extract_valid_labels(locs, labels)
+    if "z" in locs.columns:
+        locs["z"] *= pixelsize  # convert back to nm
     return locs
 
 
@@ -430,7 +435,7 @@ def dbscan(
         is removed.
     """
     locs = locs.copy()
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         if pixelsize is None:
             raise ValueError(
                 "Camera pixel size must be specified as an integer for 3D"
@@ -515,21 +520,16 @@ def hdbscan(
         is removed.
     """
     locs = locs.copy()
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         if pixelsize is None:
             raise ValueError(
                 "Camera pixel size (nm) must be specified as an integer for 3D"
                 " clustering."
             )
-        X = np.vstack(
-            (
-                locs["x"].to_numpy(),
-                locs["y"].to_numpy(),
-                locs["z"].to_numpy() / pixelsize,
-            )
-        ).T
+        X = locs[["x", "y", "z"]].to_numpy()
+        X[:, 2] /= pixelsize
     else:
-        X = np.vstack((locs["x"].to_numpy(), locs["y"].to_numpy())).T
+        X = locs[["x", "y"]].to_numpy()
     labels = _hdbscan(
         X, min_cluster_size, min_samples, cluster_eps=cluster_eps
     )
@@ -633,7 +633,7 @@ def find_cluster_centers(
     n = np.array([_[14] for _ in centers_])
     n_events = np.array([_[15] for _ in centers_])  # number of locs in cluster
 
-    if hasattr(locs, "z"):
+    if "z" in locs.columns:
         z = np.array([_[16] for _ in centers_])
         std_z = np.array([_[17] for _ in centers_])
         volume = np.array([_[18] for _ in centers_])
@@ -660,7 +660,7 @@ def find_cluster_centers(
                 "n_events": n_events.astype(np.int32),
                 "volume": volume.astype(np.float32),
                 "convexhull": convexhull.astype(np.float32),
-                "group": res.index.to_numpy().astype(np.int32),  # group id
+                "group": res.index.astype(np.int32),  # group id
             }
         )
     else:
@@ -686,10 +686,10 @@ def find_cluster_centers(
                 "n_events": n_events.astype(np.int32),
                 "area": area.astype(np.float32),
                 "convexhull": convexhull.astype(np.float32),
-                "group": res.index.to_numpy().astype(np.int32),  # group id
+                "group": res.index.astype(np.int32),  # group id
             }
         )
-    if hasattr(locs, "group_input"):
+    if "group_input" in locs.columns:
         group_input = np.array([_[-1] for _ in centers_])
         centers["group_input"] = group_input.astype(np.int32)
 
@@ -763,7 +763,7 @@ def cluster_center(
     # consecutive frames
     x_events = np.split(grouplocs.x.to_numpy(), split_idx)
     n_events = len(x_events)  # number of binding events
-    if hasattr(grouplocs, "z"):
+    if "z" in grouplocs.columns:
         if pixelsize is None:
             raise ValueError(
                 "Camera pixel size must be specified as an integer for 3D"
@@ -839,13 +839,13 @@ def cluster_center(
             convexhull,
         ]
 
-    if hasattr(grouplocs, "group_input"):
+    if "group_input" in grouplocs.columns:
         # assumes only one group input!
         result.append(np.unique(grouplocs.group_input)[0])
     return result
 
 
-def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
+def _cluster_area(X: np.ndarray, lp: float) -> float:
     """Calculate cluster area (2D) or volume (3D). Uses Otsu
     thresholding of the images of the clusters to find areas/volumes.
 
@@ -853,9 +853,9 @@ def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
     ----------
     X : np.ndarray
         Array of points of shape (n_points, n_dim).
-    lp : np.ndarray
-        Localization precision in x and y of the cluster. The median
-        is taken to define the pixel size for image rendering
+    lp : float
+        Median localization precision in x and y of the dataset. Used to
+        define the pixel size for image rendering
 
     Returns
     -------
@@ -863,7 +863,7 @@ def _cluster_area(X: np.ndarray, lp: np.ndarray) -> float:
         Cluster area (2D) or volume (3D) in units of LP.
     """
     # get image
-    bin_size = np.median(lp) / 2  # pixel size for rendering
+    bin_size = lp / 2  # pixel size for rendering
     if X.shape[1] == 3:  # 3D
         bin_size_z = bin_size * 2.5  # just a rough estimate
         edges = [
@@ -914,13 +914,15 @@ def cluster_areas(
     areas : pd.DataFrame
         Cluster areas/volumes for each cluster.
     """
-    assert hasattr(locs, "group"), "Localizations must contain 'group' column."
+    assert (
+        "group" in locs.columns
+    ), "Localizations must contain 'group' column."
 
     # get pixel size from info
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
 
     groups = np.unique(locs["group"])
-    area_key = "Area (LP^2)" if not hasattr(locs, "z") else "Volume (LP^3)"
+    area_key = "Area (LP^2)" if "z" not in locs.columns else "Volume (LP^3)"
     areas = {
         "group": groups.astype(np.int32),
         area_key: np.zeros(len(groups), dtype=np.float32),
@@ -930,13 +932,13 @@ def cluster_areas(
     else:
         iterator = range(len(groups))
 
+    lp = np.median(locs[["lpx", "lpy"]].mean(axis=1))
     for idx in iterator:
         group_id = groups[idx]
         grouplocs = locs[locs["group"] == group_id]
         if not len(grouplocs):
             continue
-        lp = locs[["lpx", "lpy"]].to_numpy().mean(axis=1)
-        if hasattr(grouplocs, "z"):
+        if "z" in grouplocs.columns:
             X = grouplocs[["x", "y", "z"]].to_numpy()
             X[:, 2] /= pixelsize  # convert z to pixels
         else:
@@ -986,8 +988,8 @@ def test_subclustering(
     sparse_nevents : np.ndarray
         Number of events for sparse molecules.
     """
-    assert hasattr(
-        mols, "n_events"
+    assert (
+        "n_events" in mols.columns
     ), "The input molecules must have n_events attribute."
     assert sparse_dist > clustering_dist, (
         "The sparse distance must be larger than the clustering " "distance."
@@ -997,7 +999,7 @@ def test_subclustering(
         raise ValueError("Pixelsize not found in metadata.")
 
     # get 1st nearest neighbor distances
-    if hasattr(mols, "z"):
+    if "z" in mols.columns:
         coords = mols[["x", "y", "z"]].to_numpy()
         coords[:, 2] /= pixelsize
     else:
@@ -1008,8 +1010,8 @@ def test_subclustering(
     idx1 = indices[:, 1]
 
     # split molecules into clustered and monomeric
-    close_nnd_idx = idx1[np.where(nnd1 < clustering_dist / pixelsize)[0]]
-    far_nnd_idx = idx1[np.where(nnd1 >= sparse_dist / pixelsize)[0]]
+    close_nnd_idx = np.where(nnd1 < clustering_dist / pixelsize)[0]
+    far_nnd_idx = np.where(nnd1 >= sparse_dist / pixelsize)[0]
     close_mols = mols.iloc[close_nnd_idx]
     far_mols = mols.iloc[far_nnd_idx]
     clustered_nevents = close_mols["n_events"].to_numpy()
