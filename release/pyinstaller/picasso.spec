@@ -130,7 +130,7 @@ else:
 		a.scripts,
 		# a.binaries,
 		a.zipfiles,
-		# a.datas,
+		a.datas,
 		exclude_binaries=True,
 		name=exe_name,
 		debug=False,
