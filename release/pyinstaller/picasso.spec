@@ -5,7 +5,7 @@ import os
 import sys
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, COLLECT, BUNDLE, TOC
 import PyInstaller.utils.hooks
-import pkg_resources
+import importlib.resources
 import importlib.metadata
 import picasso
 
@@ -130,7 +130,7 @@ else:
 		a.scripts,
 		# a.binaries,
 		a.zipfiles,
-		# a.datas,
+		a.datas,
 		exclude_binaries=True,
 		name=exe_name,
 		debug=False,

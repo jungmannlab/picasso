@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 12-FEB-2026 CEST
+Last change: 16-FEB-2026 CEST
 
 0.9.6
 -----
@@ -33,6 +33,8 @@ Small improvements:
 - Updated documentation on filetypes and minimum requirements for HDF5 files and accompanying YAML metadata files in Picasso
 - Use ``"col" in df.columns`` instead of ``hasattr(df, "col")`` to check for columns in DataFrames (better readability)
 - ``picasso.postprocess`` functions ``picked_locs`` and ``pick_similar`` accept precomputed index blocks to speed up the picking of circular regions
+- One-click-installer's dependency on ``pkg_resources`` removed (since it has been removed from ``setuptools``)
+- Onc-click-installer: PyImarisWriter temporarily removed (caused problems with this release)
 
 Bug fixes:
 ++++++++++
