@@ -24,6 +24,8 @@ Name: "render"; Description: "Render"; Types: full custom
 Name: "average"; Description: "Average"; Types: full custom
 Name: "spinna"; Description: "SPINNA"; Types: full custom
 Name: "server"; Description: "Server"; Types: full custom
+Name: "nanotron"; Description: "Nanotron"; Types: full custom
+Name: "toraw"; Description: "ToRaw"; Types: full custom
 
 [Icons]
 Name: "{group}\Design"; Filename: "{app}\picassow.exe"; Parameters: "design"; Components: design; IconFilename: "{app}\picasso\gui\icons\design.ico"
@@ -34,7 +36,8 @@ Name: "{group}\Render"; Filename: "{app}\picassow.exe"; Parameters: "render"; Co
 Name: "{group}\Average"; Filename: "{app}\picassow.exe"; Parameters: "average"; Components: average; IconFilename: "{app}\picasso\gui\icons\average.ico"
 Name: "{group}\SPINNA"; Filename: "{app}\picassow.exe"; Parameters: "spinna"; Components: spinna; IconFilename: "{app}\picasso\gui\icons\spinna.ico"
 Name: "{group}\Server"; Filename: "{app}\picasso.exe"; Parameters: "server"; Components: server; IconFilename: "{app}\picasso\gui\icons\server.ico"
-
+Name: "{group}\Nanotron"; Filename: "{app}\picassow.exe"; Parameters: "nanotron"; Components: nanotron; IconFilename: "{app}\picasso\gui\icons\nanotron.ico"
+Name: "{group}\ToRaw"; Filename: "{app}\picassow.exe"; Parameters: "toraw"; Components: toraw; IconFilename: "{app}\picasso\gui\icons\toraw.ico"
 
 Name: "{autodesktop}\Design"; Filename: "{app}\picassow.exe"; Parameters: "design"; Components: design; IconFilename: "{app}\picasso\gui\icons\design.ico"
 Name: "{autodesktop}\Simulate"; Filename: "{app}\picassow.exe"; Parameters: "simulate"; Components: simulate; IconFilename: "{app}\picasso\gui\icons\simulate.ico"
@@ -44,6 +47,8 @@ Name: "{autodesktop}\Render"; Filename: "{app}\picassow.exe"; Parameters: "rende
 Name: "{autodesktop}\Average"; Filename: "{app}\picassow.exe"; Parameters: "average"; Components: average; IconFilename: "{app}\picasso\gui\icons\average.ico"
 Name: "{autodesktop}\SPINNA"; Filename: "{app}\picassow.exe"; Parameters: "spinna"; Components: spinna; IconFilename: "{app}\picasso\gui\icons\spinna.ico"
 Name: "{autodesktop}\Server"; Filename: "{app}\picasso.exe"; Parameters: "server"; Components: server; IconFilename: "{app}\picasso\gui\icons\server.ico"
+Name: "{autodesktop}\Nanotron"; Filename: "{app}\picassow.exe"; Parameters: "nanotron"; Components: nanotron; IconFilename: "{app}\picasso\gui\icons\nanotron.ico"
+Name: "{autodesktop}\ToRaw"; Filename: "{app}\picassow.exe"; Parameters: "toraw"; Components: toraw; IconFilename: "{app}\picasso\gui\icons\toraw.ico"
 
 [Registry]
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \

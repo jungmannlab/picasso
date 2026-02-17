@@ -1,7 +1,12 @@
 Changelog
 =========
 
-Last change: 16-FEB-2026 CEST
+Last change: 17-FEB-2026 CEST
+
+0.9.7
+-----
+- Windows one-click-installer allows for selecting only a subset of Picasso modules to install
+- Added ToRaw and Nanotron to Windows one-click-installer
 
 0.9.6
 -----
