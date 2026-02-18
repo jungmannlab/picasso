@@ -12,10 +12,10 @@ APP_NAME="Picasso"
 VERSION="0.9.6"
 BUNDLE_NAME="Picasso.app"
 DMG_NAME="Picasso-macOS-0.9.6"
-SPEC_FILE="picasso.spec"
-DIST_DIR="dist"
-BUILD_DIR="build"
-STAGING_DIR="dmg_staging"
+SPEC_FILE="../pyinstaller/picasso.spec"
+DIST_DIR="../pyinstaller/dist"
+BUILD_DIR="../pyinstaller/build"
+STAGING_DIR="macos_dmg_staging"
 APPS_LINK="/Applications"
 
 # -----------------------------------------------------------------------------
@@ -48,7 +48,7 @@ echo ">>> .app bundle created at $APP_PATH"
 echo ">>> Creating per-tool launcher scripts..."
 
 MACOS_DIR="$APP_PATH/Contents/MacOS"
-TOOLS=("design" "simulate" "localize" "filter" "render" "average" "spinna" "server")
+TOOLS=("design" "simulate" "localize" "filter" "render" "average" "spinna" "server" "nanotron" "toraw")
 
 for tool in "${TOOLS[@]}"; do
     launcher="$MACOS_DIR/picasso_$tool"
@@ -90,7 +90,7 @@ rm -f "${DMG_NAME}.dmg"
 
 create-dmg \
     --volname "$APP_NAME $VERSION" \
-    --volicon "logos/localize.icns" \
+    --volicon "../logos/localize.icns" \
     --window-pos 200 120 \
     --window-size 600 400 \
     --icon-size 100 \

@@ -12,6 +12,7 @@ import picasso
 
 ##################### User definitions
 exe_name = 'picasso'
+version = '0.9.6'
 script_name = 'picasso_pyinstaller.py'
 if sys.platform[:6] == "darwin":
 	icon = '../logos/localize.icns'
@@ -107,46 +108,79 @@ pyz = PYZ(
 	a.zipped_data,
 	cipher=block_cipher
 )
-
 if sys.platform[:5] == "linux":
-	exe = EXE(
-		pyz,
-		a.scripts,
-		a.binaries,
-		a.zipfiles,
-		a.datas,
-		name=bundle_name,
-		debug=False,
-		bootloader_ignore_signals=False,
-		strip=False,
-		upx=True,
-		console=True,
-		upx_exclude=[],
-		icon=icon
-	)
-else:
-	exe = EXE(
-		pyz,
-		a.scripts,
-		# a.binaries,
-		a.zipfiles,
-		a.datas,
-		exclude_binaries=True,
-		name=exe_name,
-		debug=False,
-		bootloader_ignore_signals=False,
-		strip=False,
-		upx=True,
-		console=True,
-		icon=icon
-	)
-	coll = COLLECT(
-		exe,
-		a.binaries,
-		# a.zipfiles,
-		a.datas,
-		strip=False,
-		upx=True,
-		upx_exclude=[],
-		name=exe_name
-	)
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.binaries,
+        a.zipfiles,
+        a.datas,
+        name=bundle_name,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=True,
+        upx_exclude=[],
+        icon=icon
+    )
+elif sys.platform[:6] == "darwin":  # macOS
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.zipfiles,
+        a.datas,
+        exclude_binaries=True,
+        name=exe_name,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=True,
+        icon=icon
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name=exe_name
+    )
+    app = BUNDLE(
+        coll,
+        name=exe_name.title() + '.app',
+        icon=icon,
+        bundle_identifier='org.jungmannlab.picasso',
+        info_plist={
+            'NSPrincipalClass': 'NSApplication',
+            'NSHighResolutionCapable': 'True',
+            'CFBundleShortVersionString': version,
+            'CFBundleVersion': version,
+        },
+    )
+else:  # Windows
+    exe = EXE(
+        pyz,
+        a.scripts,
+        a.zipfiles,
+        a.datas,
+        exclude_binaries=True,
+        name=exe_name,
+        debug=False,
+        bootloader_ignore_signals=False,
+        strip=False,
+        upx=True,
+        console=False,
+        icon=icon
+    )
+    coll = COLLECT(
+        exe,
+        a.binaries,
+        a.datas,
+        strip=False,
+        upx=True,
+        upx_exclude=[],
+        name=exe_name
+    )
