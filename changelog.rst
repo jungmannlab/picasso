@@ -7,6 +7,7 @@ Last change: 19-FEB-2026 CEST
 -----
 - Adjusted the ``config.yaml`` and plugins instructions for the one-click-installer Picasso release (new Pyinstaller stores everything in the ``_internal`` folder)
 - Fixed basic frame analysis in SMLM clusterer
+- Fixed labels of the vertical lines in the subcluster test plot
 - Fixed automatic Localize loading/unloading z-calibration paths when changing cameras
 
 0.9.6

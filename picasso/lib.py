@@ -1251,7 +1251,7 @@ def plot_subclustering_check(
         label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
         color="C0",
     )
-    ax1.axvline(m_far, color="C0", linestyle="--")
+    ax1.axvline(m_close, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
     ax1.bar(
         vals,
@@ -1261,7 +1261,7 @@ def plot_subclustering_check(
         label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
         color="C1",
     )
-    ax1.axvline(m_close, color="C1", linestyle="--")
+    ax1.axvline(m_far, color="C1", linestyle="--")
     ax1.set_xlabel("Number of events")
     ax1.set_ylabel("Counts")
     ax1.set_xlim(min_bin - 1, max_bin + 1)
