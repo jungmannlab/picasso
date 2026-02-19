@@ -656,6 +656,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.setWindowTitle("Parameters")
         self.setModal(False)
 
+        self.z_calibration = {}
         self.z_calibration_path = None
 
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -1190,6 +1191,10 @@ class ParametersDialog(QtWidgets.QDialog):
                 # just because the calib file was loaded, uncheck the "Fit Z"
                 # checkbox;
                 self.fit_z_checkbox.setChecked(False)
+            else:
+                self.update_z_calib(None)
+        else:
+            self.update_z_calib(None)
 
     def update_z_calib(self, path: str) -> None:
         """Load the 3D calibration from a YAML file."""
@@ -1201,6 +1206,13 @@ class ParametersDialog(QtWidgets.QDialog):
             self.z_calib_label.setText(os.path.basename(path))
             self.fit_z_checkbox.setEnabled(True)
             self.fit_z_checkbox.setChecked(True)
+        else:
+            self.z_calibration = {}
+            self.z_calibration_path = None
+            self.z_calib_label.setAlignment(QtCore.Qt.AlignCenter)
+            self.z_calib_label.setText("-- no calibration loaded --")
+            self.fit_z_checkbox.setChecked(False)
+            self.fit_z_checkbox.setEnabled(False)
 
     def quality_progress(self, msg: str, index: int, result: str) -> None:
         """Update the quality progress UI elements."""

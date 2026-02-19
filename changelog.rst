@@ -1,10 +1,14 @@
 Changelog
 =========
 
-Last change: 17-FEB-2026 CEST
+Last change: 19-FEB-2026 CEST
 
 0.9.7
 -----
+- Adjusted the ``config.yaml`` and plugins instructions for the one-click-installer Picasso release (new Pyinstaller stores everything in the ``_internal`` folder)
+- Fixed basic frame analysis in SMLM clusterer
+- Fixed labels of the vertical lines in the subcluster test plot
+- Fixed automatic Localize loading/unloading z-calibration paths when changing cameras
 - Windows one-click-installer allows for selecting only a subset of Picasso modules to install
 - Added ToRaw and Nanotron to Windows one-click-installer
 - **Not implemented yet**: one-click-installer for macOS (does not work yet!)

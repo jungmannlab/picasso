@@ -27,7 +27,31 @@ Identification and fitting of single-molecule spots
 Camera Config
 -------------
 
-Picasso can remember default cameras and will use saved camera parameters. In order to use camera configs, create a file named ``config.yaml`` in the picasso folder. To start with a template, modify ``config_template.yaml`` that can be found in the folder by default. Picasso will compare the entries with Micro-Manager-Metadata and match the sensitivity values. If no matching entries can be found (e.g., if the file was not created with Micro-Manager) the config file will still be used to create a dropdown menu to select the different categories. The camera config can also be used to define a default camera that will always be used. Indentions are used for definitions.
+Picasso can remember default cameras and will use saved camera parameters. In order to use camera configs, create a file named ``config.yaml`` in the ``picasso`` folder. Depending on how you installed Picasso, this is how you can find it:
+
+One click installer
+~~~~~~~~~~~~~~~~~~~
+If you downloaded an .exe Picasso file from the `release page <https://github.com/jungmannlab/picasso/releases>`_:
+
+- Navigate to the installation folder, by default, it's ``C:/Picasso``. *Before version 0.8.3, the default location was* ``C:/Program Files/Picasso``.
+- Go to the folder ``_internal/picasso``. *Before version 0.9.6, the folder was simply* ``picasso``.
+
+PyPI
+~~~~
+If you installed Picasso using ``pip install picassosr``:
+
+- Activate your conda environment where ``picassosr`` is installed by typing ``conda activate YOUR_ENVIRONMENT``.
+- To find the location of the package, type ``pip show picassosr`` and look for the line starting with ``Location:``.
+- Navigate to this location and go to ``picasso``.
+
+GitHub
+~~~~~~
+If you cloned the GitHub repository, you can add plugins by following these steps:
+- Find the directory where you cloned the GitHub repository with Picasso.
+- Go to ``picasso/picasso/gui/plugins``.
+- Copy the plugin(s) to this folder.
+
+To start with a template, modify ``config_template.yaml`` that can be found in the folder by default. Picasso will compare the entries with Micro-Manager-Metadata and match the sensitivity values. If no matching entries can be found (e.g., if the file was not created with Micro-Manager) the config file will still be used to create a dropdown menu to select the different categories. The camera config can also be used to define a default camera that will always be used. Indentions are used for definitions.
 
 Example: Default Camera
 ~~~~~~~~~~~~~~~~~~~~~~~

@@ -82,6 +82,7 @@ def test_ga(locs):
         min_locs=GA_MIN_LOCS,
         frame_analysis=True,
     )
+    assert len(clustered_locs), "No localizations returned after GA clustering"
     assert "group" in clustered_locs.columns, "GA did not add 'group' column"
     assert (
         -1 not in clustered_locs["group"].to_numpy()
@@ -100,6 +101,7 @@ def test_ga_3d(locs):
         radius_z=GA_RADIUS_Z,
         pixelsize=CAMERA_PIXEL_SIZE,
     )
+    assert len(clustered_locs), "No localizations returned after GA clustering"
     assert "group" in clustered_locs.columns, "GA did not add 'group' column"
     assert (
         -1 not in clustered_locs["group"].to_numpy()
