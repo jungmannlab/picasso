@@ -79,16 +79,20 @@ for tool_def in "${TOOLS[@]}"; do
     cat > "$launcher_script" <<EOF
 #!/bin/bash
 # Launcher for Picasso $display_name
-SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-MAIN_EXEC="/Applications/$MAIN_BUNDLE_NAME/Contents/MacOS/picasso"
+MAIN_APP="/Applications/$MAIN_BUNDLE_NAME"
+MAIN_EXEC="\$MAIN_APP/Contents/MacOS/picasso"
 
-# Check if main Picasso.app exists
 if [ ! -f "\$MAIN_EXEC" ]; then
     osascript -e 'display dialog "Picasso.app not found in Applications folder. Please install the main Picasso application first." buttons {"OK"} default button "OK" with icon stop'
     exit 1
 fi
 
-# Launch the tool
+# Set DYLD_LIBRARY_PATH so PyInstaller can find its bundled libraries
+INTERNAL_DIR="\$MAIN_APP/Contents/MacOS/_internal"
+if [ -d "\$INTERNAL_DIR" ]; then
+    export DYLD_LIBRARY_PATH="\$INTERNAL_DIR:\$DYLD_LIBRARY_PATH"
+fi
+
 exec "\$MAIN_EXEC" $argument "\$@"
 EOF
     chmod +x "$launcher_script"
