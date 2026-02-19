@@ -20,7 +20,6 @@ call pyinstaller ../pyinstaller/picassow.spec -y --clean
 call conda deactivate
 call conda remove -n picasso_installer --all -y
 
-call robocopy ../../picasso dist/picasso/picasso /E
 call robocopy ../../picasso dist/picasso/_internal/picasso /E
 call robocopy ../../picasso dist/picassow/_internal/picasso /E
 

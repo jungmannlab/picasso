@@ -7,7 +7,7 @@ Last change: 17-FEB-2026 CEST
 -----
 - Windows one-click-installer allows for selecting only a subset of Picasso modules to install
 - Added ToRaw and Nanotron to Windows one-click-installer
-- Added an installer for macOS (currently only for M-series)
+- **Not implemented yet**: one-click-installer for macOS (does not work yet!)
 
 0.9.6
 -----
