@@ -955,7 +955,7 @@ def test_subclustering(
     sparse_dist: float = 80,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Extract number of events from molecular maps based on their
-    numbers of binding events assinged.
+    numbers of binding events assigned.
 
     The reasoning is that 'subclustered' molecules will tend to have
     fewer binding events assigned to them since multiple molecules

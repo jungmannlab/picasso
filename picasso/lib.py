@@ -1234,10 +1234,10 @@ def plot_subclustering_check(
         Figure and axes if ``return_fig`` is True, otherwise
         (None, None).
     """
-    m_far = clustered_n_events.mean()
-    m_close = sparse_n_events.mean()
-    s_far = clustered_n_events.std()
-    s_close = sparse_n_events.std()
+    m_close = clustered_n_events.mean()
+    m_far = sparse_n_events.mean()
+    s_close = clustered_n_events.std()
+    s_far = sparse_n_events.std()
 
     # create the plot
     fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
