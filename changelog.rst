@@ -3,6 +3,11 @@ Changelog
 
 Last change: 19-FEB-2026 CEST
 
+0.9.7
+-----
+- Adjusted the ``config.yaml`` and plugins instructions for the one-click-installer Picasso release (new Pyinstaller stores everything in the ``_internal`` folder)
+- Fixed basic frame analysis in SMLM clusterer
+
 0.9.6
 -----
 Important updates:

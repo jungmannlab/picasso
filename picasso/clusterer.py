@@ -73,9 +73,7 @@ def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
     return passed
 
 
-def frame_analysis(
-    labels: np.ndarray, frame: pd.Series | np.ndarray
-) -> np.ndarray:
+def frame_analysis(labels: np.ndarray, frame: np.ndarray) -> np.ndarray:
     """Perform basic frame analysis on clustered localizations. Reject
     clusters whose mean frame is outside of the [20, 80] % (max frame)
     range or any 1/20th of measurement's time contains more than 80 % of
@@ -87,7 +85,7 @@ def frame_analysis(
     ----------
     labels : np.ndarray
         Cluster labels (-1 means no cluster assigned).
-    frame : pd.Series or np.ndarray
+    frame : np.ndarray
         Frame number for each localization.
 
     Returns
@@ -195,7 +193,8 @@ def _cluster(
     labels[np.isin(labels, to_discard)] = -1
 
     if frame is not None:
-        labels = frame_analysis(labels, frame)
+        # must convert frames to an array, do not change!
+        labels = frame_analysis(labels, frame.to_numpy())
 
     return labels
 
