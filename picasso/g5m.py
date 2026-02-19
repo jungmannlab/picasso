@@ -1780,7 +1780,7 @@ def convert_G5M_results(
         ).reshape(-1)
         rel_sigma_x = sigma_x / weighted_lpx / pixelsize
         rel_sigma_y = sigma_y / weighted_lpy / pixelsize
-        rel_sigma_z = sigma_z / weighted_lpz / pixelsize
+        rel_sigma_z = sigma_z / weighted_lpz
     else:
         sigma = np.sqrt(covariances) * pixelsize
         # relative sigma

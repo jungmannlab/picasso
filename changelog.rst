@@ -9,6 +9,7 @@ Last change: 19-FEB-2026 CEST
 - Fixed basic frame analysis in SMLM clusterer
 - Fixed labels of the vertical lines in the subcluster test plot
 - Fixed automatic Localize loading/unloading z-calibration paths when changing cameras
+- Fixed ``rel_sigma_z`` in G5M (previously incorrectly divided by pixel size)
 
 0.9.6
 -----
