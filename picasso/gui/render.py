@@ -7754,7 +7754,7 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def save_channel(
+    def get_channel_save_locs(
         self,
         title: str = "Choose a channel to save localizations",
     ) -> int | None:
@@ -12285,7 +12285,7 @@ class Window(QtWidgets.QMainWindow):
 
     def save_locs(self) -> None:
         """Save localizations in a given channel (or all channels)."""
-        channel = self.view.save_channel("Save localizations")
+        channel = self.view.get_channel_save_locs("Save localizations")
         if channel is not None:
             # combine all channels
             if channel is (len(self.view.locs_paths) + 1):
@@ -12358,7 +12358,7 @@ class Window(QtWidgets.QMainWindow):
     def save_picked_locs(self) -> None:
         """Save picked localizations in a given channel (or all
         channels)."""
-        channel = self.view.save_channel("Save picked localizations")
+        channel = self.view.get_channel_save_locs("Save picked localizations")
         if channel is not None:
             # combine channels to one .hdf5
             if channel is (len(self.view.locs_paths) + 1):
@@ -12403,7 +12403,7 @@ class Window(QtWidgets.QMainWindow):
 
     def save_picked_locs_separately(self) -> None:
         """Save picked localizations for each pick separately."""
-        channel = self.view.save_channel(
+        channel = self.view.get_channel_save_locs(
             "Save picked localizations separately"
         )
         if channel is not None:

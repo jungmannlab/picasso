@@ -2209,40 +2209,12 @@ class RotationWindow(QtWidgets.QMainWindow):
 
         self.window.view.update_scene()  # update scene in main window
 
-    def save_channel_multi(self) -> int | None:
-        """Open an input dialog to ask which channel to save. There is
-        an option to save all channels.
-
-        Returns
-        -------
-        int or None
-            Index of the chosen channel. None, if no locs found or
-            channel picked are found.
-        """
-        n_channels = len(self.view_rot.paths)
-        if n_channels == 0:
-            return None
-        elif n_channels == 1:
-            return 0
-        elif len(self.view_rot.paths) > 1:
-            pathlist = list(self.view_rot.paths)
-            pathlist.append("Save all at once")
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self,
-                "Save localizations",
-                "Channel:",
-                pathlist,
-                editable=False,
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
-
     def save_locs_rotated(self) -> None:
         """Save locs from the main window and provides rotation info for
         later loading."""
-        channel = self.window.view.save_channel("Save rotated localizations")
+        channel = self.window.view.get_channel_save_locs(
+            "Save rotated localizations"
+        )
         if channel is not None:
             # rotation info
             angx = int(self.view_rot.angx * 180 / np.pi)
