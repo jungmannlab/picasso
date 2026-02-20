@@ -11,7 +11,7 @@ Last change: 19-FEB-2026 CEST
 - Fixed automatic Localize loading/unloading z-calibration paths when changing cameras
 - Windows one-click-installer allows for selecting only a subset of Picasso modules to install
 - Added ToRaw and Nanotron to Windows one-click-installer
-- **Not implemented yet**: one-click-installer for macOS (does not work yet!)
+- *Experimental* One-click-installer for macOS (only for Apple Silicon)
 
 0.9.6
 -----

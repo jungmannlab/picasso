@@ -1,7 +1,7 @@
 #!/bin/bash
 # =============================================================================
-# build_dmg.sh
-# Builds a macOS DMG installer for Picasso 0.9.6
+# create_macos_dmg.sh
+# Builds a macOS DMG installer for Picasso
 # Requirements: PyInstaller, create-dmg (brew install create-dmg)
 # Usage: bash create_macos_dmg.sh
 # =============================================================================
@@ -11,8 +11,8 @@ set -e  # Exit immediately on any error
 APP_NAME="Picasso"
 VERSION="0.9.6"
 MAIN_BUNDLE_NAME="Picasso.app"
-DMG_NAME="Picasso-macOS-0.9.6"
-SPEC_FILE="../pyinstaller/picassow.spec"
+DMG_NAME="Picasso-macOS-$VERSION"
+PYINSTALLER_FILE="../pyinstaller/picasso_pyinstaller.py"
 DIST_DIR="../pyinstaller/dist"
 BUILD_DIR="../pyinstaller/build"
 STAGING_DIR="macos_dmg_staging"
@@ -30,11 +30,32 @@ declare -a TOOLS=(
     "Nanotron:nanotron:nanotron"
     "Toraw:toraw:toraw"
 )
+
+# -----------------------------------------------------------------------------
+# Step 0: Create a conda environment and prepare the package
+# -----------------------------------------------------------------------------
+echo ">>> Setting up conda environment and preparing package..."
+# Create conda environment (if not already created)
+echo "Creating conda environment 'installer'..."
+conda create -n installer python=3.10 -y
+conda activate installer
+pip install build
+cd ../..
+python -m build
+pip install dist/picassosr-$VERSION-py3-none-any.whl
+pip install pyinstaller==6.19
+cd release/one_click_macos_gui
+
 # -----------------------------------------------------------------------------
 # Step 1: Run PyInstaller to build the main .app bundle
 # -----------------------------------------------------------------------------
-echo ">>> Building main .app bundle with PyInstaller..."
-pyinstaller "$SPEC_FILE" \
+# echo ">>> Building main .app bundle with PyInstaller..."
+pyinstaller "$PYINSTALLER_FILE" \
+    --onedir \
+    --windowed \
+    --collect-all picasso \
+    --name picasso \
+    --icon ../logos/localize.icns \
     --distpath "$DIST_DIR" \
     --workpath "$BUILD_DIR" \
     --noconfirm
@@ -46,6 +67,31 @@ if [ ! -d "$MAIN_APP_PATH" ]; then
     exit 1
 fi
 echo ">>> Main .app bundle created at $MAIN_APP_PATH"
+
+# ---------------------------------------------------------------------------
+# Step 1b: Fix HDF5 library conflict (h5py 3.15.1 vs tables 3.10.1), which
+# happened at version 0.9..6
+# Both h5py and tables ship their own libhdf5.310.dylib from different HDF5
+# versions. PyInstaller may bundle the older (tables) copy, causing a symbol
+# mismatch at runtime. Force h5py's versions into the bundle.
+# ---------------------------------------------------------------------------
+H5PY_DYLIBS=$(python3 -c "import h5py, os; print(os.path.join(os.path.dirname(h5py.__file__), '.dylibs'))" 2>/dev/null || true)
+if [ -d "$H5PY_DYLIBS" ]; then
+    FRAMEWORKS_DIR="$MAIN_APP_PATH/Contents/Frameworks"
+    # Fall back to _internal for --onedir non-macOS-bundle layouts
+    if [ ! -d "$FRAMEWORKS_DIR" ]; then
+        FRAMEWORKS_DIR="$MAIN_APP_PATH/Contents/MacOS/_internal"
+    fi
+    if [ -d "$FRAMEWORKS_DIR" ]; then
+        echo ">>> Fixing HDF5 libraries: copying h5py's dylibs into bundle..."
+        for dylib in "$H5PY_DYLIBS"/libhdf5*.dylib; do
+            if [ -f "$dylib" ]; then
+                cp -f "$dylib" "$FRAMEWORKS_DIR/"
+                echo "    Copied $(basename "$dylib")"
+            fi
+        done
+    fi
+fi
 
 # Get the path to the main executable
 MAIN_EXECUTABLE="$MAIN_APP_PATH/Contents/MacOS/picasso"
@@ -209,3 +255,7 @@ echo "   - Picasso Server.app"
 echo "   - Picasso Nanotron.app"
 echo "   - Picasso Toraw.app"
 echo "============================================="
+
+# Delete the conda environment
+conda deactivate
+conda remove -n installer --all -y
