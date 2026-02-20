@@ -376,6 +376,7 @@ class ApplyDialog(QtWidgets.QDialog):
         )
         layout.addWidget(vars_label, 1, 0)
         self.label = QtWidgets.QLabel()
+        self.label.setWordWrap(True)
         layout.addWidget(self.label, 1, 1)
         self.update_vars(0)
         exp_label = QtWidgets.QLabel("Expression:")
