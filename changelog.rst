@@ -14,6 +14,7 @@ Last change: 20-FEB-2026 CEST
 - G5M output can save more columns (if present in the input localizations)
 - Fixed loading square picks in Render
 - Fixed appearance of the Apply expression dialog in Render for files with many columns
+- Further enhancement of G5M documentation
 
 0.9.6
 -----
