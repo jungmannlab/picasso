@@ -19,6 +19,8 @@ Last change: 20-FEB-2026 CEST
 - Further enhancement of G5M documentation
 - Render GUI: implemented filter by number of localizations for multichannel data
 - Render GUI: allow removal of any column from localizations, not only ``group``
+- Filter GUI: allow remove of any column from localizations
+- ``REQUIRED_COLUMNS`` moved from ``picasso.localize`` to ``picasso.lib``
 
 0.9.6
 -----

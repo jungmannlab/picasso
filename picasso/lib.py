@@ -43,6 +43,9 @@ _dialogs = []
 # StatusDialog is finished
 SOUND_NOTIFICATION_DURATION = 60  # seconds
 
+# Columns that are required for Picasso
+REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
+
 
 class ProgressDialog(QtWidgets.QProgressDialog):
     """ProgressDialog displays a progress dialog with a progress bar."""
@@ -264,6 +267,67 @@ class AutoDict(collections.defaultdict):
 
     def __init__(self, *args, **kwargs):
         super().__init__(AutoDict, *args, **kwargs)
+
+
+class RemoveColumnsDialog(QtWidgets.QDialog):
+    """Allow the user to select columns to be removed from the locs
+    DataFrame."""
+
+    def __init__(
+        self, window: QtWidgets.QMainWindow, columns: list[str]
+    ) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Remove columns")
+        self.setModal(True)
+        vbox = QtWidgets.QVBoxLayout(self)
+        self.setLayout(vbox)
+        self.checks = {}
+        for column in columns:
+            check = QtWidgets.QCheckBox(column)
+            check.setChecked(False)
+            if column in REQUIRED_COLUMNS:
+                check.setEnabled(False)
+            vbox.addWidget(check)
+            self.checks[column] = check
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow, columns: list[str]
+    ) -> tuple[list[str], bool]:
+        """Open the dialog and return the columns to be removed.
+
+        Parameters
+        ----------
+        parent : QMainWindow
+            Instance of the main window.
+        columns : list of str
+            List of column names in the locs DataFrame.
+
+        Returns
+        -------
+        to_remove : list of str
+            List of column names to be removed.
+        accepted : bool
+            True if the user clicked OK, False if the user clicked
+            Cancel.
+        """
+        dialog = RemoveColumnsDialog(parent, columns)
+        result = dialog.exec_()
+        to_remove = []
+        for col in columns:
+            if dialog.checks[col].isChecked():
+                to_remove.append(col)
+        return to_remove, result == QtWidgets.QDialog.Accepted
 
 
 def cancel_dialogs():

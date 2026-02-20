@@ -1473,7 +1473,7 @@ class LocColumnSelectionDialog(QtWidgets.QDialog):
             checkbox.setChecked(True)
             self.column_checkboxes[column] = checkbox
             vbox.addWidget(checkbox)
-            if column in localize.REQUIRED_COLUMNS:
+            if column in lib.REQUIRED_COLUMNS:
                 checkbox.setDisabled(True)
         for key, column in localize.LOCALIZATION_COLUMNS.items():
             if key == "Base":
@@ -1483,7 +1483,7 @@ class LocColumnSelectionDialog(QtWidgets.QDialog):
                 checkbox.setChecked(True)
                 self.column_checkboxes[col] = checkbox
                 vbox.addWidget(checkbox)
-                if col in localize.REQUIRED_COLUMNS:
+                if col in lib.REQUIRED_COLUMNS:
                     checkbox.setDisabled(True)
 
         self.load_user_settings()
