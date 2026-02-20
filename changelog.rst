@@ -17,6 +17,7 @@ Last change: 20-FEB-2026 CEST
 - Fixed initial x, y and N in LQ Gaussian fitting (might results in faster convergence and slightly different (<< NeNA) results) (#616)
 - Fixed picking circular regions around left and top edges of the FOV
 - Further enhancement of G5M documentation
+- Render GUI: implemented filter by number of localizations for multichannel data
 
 0.9.6
 -----
