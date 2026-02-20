@@ -1768,7 +1768,7 @@ def convert_G5M_results(
         sigma_x = np.sqrt(covariances[:, 0]) * pixelsize
         sigma_y = np.sqrt(covariances[:, 1]) * pixelsize
         sigma_z = np.sqrt(covariances[:, 2]) * pixelsize
-        lpz = sem[:, 2]
+        lpz = sem[:, 2] * pixelsize
         weighted_lpx = (
             (resp * locs_group["lpx"].to_numpy().reshape(-1, 1)).sum(0) / rsum
         ).reshape(-1)
@@ -1810,20 +1810,6 @@ def convert_G5M_results(
     log_likelihood = g5m.score_samples(X)
     locs_group["log_likelihood"] = log_likelihood
 
-    # photons, PSF size and background (weighted average)
-    photons = (
-        (resp * locs_group["photons"].to_numpy().reshape(-1, 1)).sum(0) / rsum
-    ).reshape(-1)
-    sx = (
-        (resp * locs_group["sx"].to_numpy().reshape(-1, 1)).sum(0) / rsum
-    ).reshape(-1)
-    sy = (
-        (resp * locs_group["sy"].to_numpy().reshape(-1, 1)).sum(0) / rsum
-    ).reshape(-1)
-    bg = (
-        (resp * locs_group["bg"].to_numpy().reshape(-1, 1)).sum(0) / rsum
-    ).reshape(-1)
-
     # extract the number of binding events, i.e., link localizations
     # and assign them to molecules - sticky events will likely have only
     # one or two such events associated
@@ -1861,10 +1847,6 @@ def convert_G5M_results(
                 "x": x.astype(np.float32),
                 "y": y.astype(np.float32),
                 "z": z.astype(np.float32),
-                "photons": photons.astype(np.float32),
-                "sx": sx.astype(np.float32),
-                "sy": sy.astype(np.float32),
-                "bg": bg.astype(np.float32),
                 "lpx": lpx.astype(np.float32),
                 "lpy": lpy.astype(np.float32),
                 "lpz": lpz.astype(np.float32),
@@ -1889,10 +1871,6 @@ def convert_G5M_results(
                 "std_frame": std_frame.astype(np.float32),
                 "x": x.astype(np.float32),
                 "y": y.astype(np.float32),
-                "photons": photons.astype(np.float32),
-                "sx": sx.astype(np.float32),
-                "sy": sy.astype(np.float32),
-                "bg": bg.astype(np.float32),
                 "lpx": lpx.astype(np.float32),
                 "lpy": lpy.astype(np.float32),
                 "fitted_sigma": sigma.astype(np.float32),
@@ -1905,6 +1883,25 @@ def convert_G5M_results(
                 "group_input": group_input.astype(np.int32),
             }
         )
+    # add mean values of extra columns from locs_group so that
+    # the info is not lost, e.g., mean photons
+    ignore_columns = [
+        "frame",
+        "x",
+        "y",
+        "z",
+        "lpx",
+        "lpy",
+        "lpz",
+        "group",
+        "group_input",
+    ]
+    for col in locs_group.columns:
+        if col not in ignore_columns:
+            centers[f"{col}_mean"] = (
+                (resp * locs_group[col].to_numpy().reshape(-1, 1)).sum(0)
+                / rsum
+            ).reshape(-1)
     return centers, locs_group
 
 

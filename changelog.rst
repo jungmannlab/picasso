@@ -10,6 +10,8 @@ Last change: 20-FEB-2026 CEST
 - Fixed labels of the vertical lines in the subcluster test plot
 - Fixed automatic Localize loading/unloading z-calibration paths when changing cameras
 - Fixed ``rel_sigma_z`` in G5M (previously incorrectly divided by pixel size)
+- Fixed G5M molmap ``lpz`` output
+- G5M output can save more columns (if present in the input localizations)
 - Fixed loading square picks in Render
 
 0.9.6
