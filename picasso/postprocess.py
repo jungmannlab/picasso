@@ -693,9 +693,9 @@ def _get_block_locs_at_numba(
     """
     step = 0
     for k in range(y_index - 1, y_index + 2):
-        if 0 < k < K:
+        if 0 <= k < K:
             for ll in range(x_index - 1, x_index + 2):
-                if 0 < ll < L:
+                if 0 <= ll < L:
                     if block_ends[k, ll] - block_starts[k, ll] > 0:
                         # numba does not work if you attach concatenate
                         # to an empty list so the first step is
