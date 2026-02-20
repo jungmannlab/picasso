@@ -383,7 +383,12 @@ class ApplyDialog(QtWidgets.QDialog):
             "Enter the expression here.\n"
             "For example, 'x += 10' to move x coordinates of the\n"
             "localizations in the selected channel 10 camera pixels to the"
-            " right."
+            " right.\n"
+            "Additionally, the following commands are supported:\n"
+            "- 'flip x z' to exchange x- and z-axes.\n"
+            "- 'spiral R N' to plot each localization over time in a spiral\n"
+            "  with radius R pixels and N turns.\n"
+            "- 'uspiral' to undo the last spiral action."
         )
         layout.addWidget(exp_label, 2, 0)
         self.cmd = QtWidgets.QLineEdit()
