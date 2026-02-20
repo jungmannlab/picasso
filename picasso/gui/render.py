@@ -7596,7 +7596,12 @@ class View(QtWidgets.QLabel):
             # load pick regions
             if "Shape" in file:
                 loaded_shape = file["Shape"]
-                if loaded_shape in ["Circle", "Rectangle", "Polygon"]:
+                if loaded_shape in [
+                    "Circle",
+                    "Rectangle",
+                    "Polygon",
+                    "Square",
+                ]:
                     self.load_picks(paths[0])
         else:
             paths = [
@@ -7963,6 +7968,11 @@ class View(QtWidgets.QLabel):
             self.window.tools_settings_dialog.pick_width.setValue(width)
         elif loaded_shape == "Polygon":
             self._picks = regions["Vertices"]
+        elif loaded_shape == "Square":
+            self._picks = regions["Centers"]
+            # no backward compatibility here, always in nm
+            width = regions["Side Length (nm)"]
+            self.window.tools_settings_dialog.pick_side_length.setValue(width)
         else:
             raise ValueError("Unrecognized pick shape")
 
