@@ -18,6 +18,7 @@ Last change: 20-FEB-2026 CEST
 - Fixed picking circular regions around left and top edges of the FOV
 - Further enhancement of G5M documentation
 - Render GUI: implemented filter by number of localizations for multichannel data
+- Render GUI: allow removal of any column from localizations, not only ``group``
 
 0.9.6
 -----
