@@ -147,7 +147,7 @@ EOF
     chmod +x "$launcher_script"
     
     # Copy the appropriate icon
-    icon_source="$MAIN_RESOURCES/picasso/gui/icons/${icon_name}.icns"
+    icon_source="../logos/${icon_name}.icns"
     if [ -f "$icon_source" ]; then
         cp "$icon_source" "$app_path/Contents/Resources/icon.icns"
     else
