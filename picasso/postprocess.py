@@ -38,6 +38,8 @@ def get_index_blocks(
     """Split localizations into blocks of the given size. Used for fast
     localization indexing (e.g., for picking).
 
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+
     Parameters
     ----------
     locs : pd.DataFrame
@@ -93,6 +95,8 @@ def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     """Return the shape of the index grid, given the movie and grid
     sizes.
 
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+
     Parameters
     ----------
     info : list of dicts
@@ -114,6 +118,8 @@ def index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
 def get_block_locs_at(x: float, y: float, index_blocks: tuple) -> np.ndarray:
     """Return the localizations in the blocks around the given
     coordinates.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
 
     Parameters
     ----------
@@ -152,7 +158,10 @@ def _fill_index_blocks(
     y_index: np.ndarray,
 ) -> None:
     """Fill the block starts and ends arrays with the indices of
-    localizations in the blocks."""
+    localizations in the blocks.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+    """
     Y, X = block_starts.shape
     N = len(x_index)
     k = 0
@@ -174,7 +183,10 @@ def _fill_index_block(
     j: int,
     k: int,
 ) -> int:
-    """Fill the block starts and ends arrays for a single block."""
+    """Fill the block starts and ends arrays for a single block.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+    """
     block_starts[i, j] = k
     while k < N and y_index[k] == i and x_index[k] == j:
         k += 1
@@ -194,6 +206,8 @@ def picked_locs(
 ) -> list[pd.DataFrame]:
     """Find picked localizations, i.e., localizations within the given
     regions of interest.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
 
     Parameters
     ----------
@@ -391,6 +405,8 @@ def pick_similar(
     This function calls ``_pick_similar`` which is implemented in numba
     for speed.
 
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+
     Parameters
     ----------
     locs : pd.DataFrame
@@ -522,6 +538,8 @@ def _pick_similar(
     ``pick_similar``. See that function for more user-friendly
     interface.
 
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+
     Parameters
     ----------
     x : np.ndarray
@@ -638,7 +656,10 @@ def n_block_locs_at(
     block_ends: np.ndarray,
 ) -> int:
     """Return the number of localizations in the blocks around the
-    given coordinates."""
+    given coordinates.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+    """
     step = 0
     for k in range(y_range - 1, y_range + 2):
         if 0 < k < K:
@@ -666,12 +687,15 @@ def _get_block_locs_at_numba(
     L: int,
 ) -> np.ndarray:
     """Numba implementation of ``get_block_locs_at``. Return the indices
-    of localizations in the blocks around the given coordinates."""
+    of localizations in the blocks around the given coordinates.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+    """
     step = 0
     for k in range(y_index - 1, y_index + 2):
-        if 0 < k < K:
+        if 0 <= k < K:
             for ll in range(x_index - 1, x_index + 2):
-                if 0 < ll < L:
+                if 0 <= ll < L:
                     if block_ends[k, ll] - block_starts[k, ll] > 0:
                         # numba does not work if you attach concatenate
                         # to an empty list so the first step is
@@ -708,7 +732,10 @@ def get_block_locs_at_numba(
     L: int,
 ) -> np.ndarray:
     """Numba implementation of ``get_block_locs_at. Return the
-    localizations in the blocks around the given coordinates."""
+    localizations in the blocks around the given coordinates.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+    """
     indices = _get_block_locs_at_numba(
         x_index,
         y_index,
@@ -728,7 +755,9 @@ def _locs_at_numba(
     r: float,
 ) -> np.ndarray:
     """Numba implementation of ``lib.locs_at``. Return the indices of
-    localizations at the given coordinates within radius ``r``."""
+    localizations at the given coordinates within radius ``r``.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0"""
     dx = locs_xy[0] - x
     dy = locs_xy[1] - y
     r2 = r**2
@@ -745,7 +774,10 @@ def locs_at_numba(
     r: float,
 ) -> np.ndarray:
     """Numba implementation of ``lib.locs_at``. Return the localizations
-    at the given coordinates within radius ``r``."""
+    at the given coordinates within radius ``r``.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0
+    """
     is_picked = _locs_at_numba(x, y, locs_xy, r)
     return locs_xy[:, is_picked]
 
@@ -753,7 +785,9 @@ def locs_at_numba(
 @numba.jit(nopython=True, nogil=True)
 def rmsd_at_com(locs_xy: np.ndarray) -> float:
     """Calculate the RMSD of the localizations at the center of mass
-    (COM) of the localizations."""
+    (COM) of the localizations.
+
+    Note: this function will be moved to ``picasso.lib`` in Picasso v0.11.0"""
     com_x = np.mean(locs_xy[0])
     com_y = np.mean(locs_xy[1])
     return np.sqrt(

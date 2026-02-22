@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 19-FEB-2026 CEST
+Last change: 20-FEB-2026 CEST
 
 0.9.7
 -----
@@ -9,6 +9,18 @@ Last change: 19-FEB-2026 CEST
 - Fixed basic frame analysis in SMLM clusterer
 - Fixed labels of the vertical lines in the subcluster test plot
 - Fixed automatic Localize loading/unloading z-calibration paths when changing cameras
+- Fixed ``rel_sigma_z`` in G5M (previously incorrectly divided by pixel size)
+- Fixed G5M molmap ``lpz`` output
+- G5M output can save more columns (if present in the input localizations)
+- Fixed loading square picks in Render
+- Fixed appearance of the Apply expression dialog in Render for files with many columns
+- Fixed initial x, y and N in LQ Gaussian fitting (might results in faster convergence and slightly different (<< NeNA) results) (#616)
+- Fixed picking circular regions around left and top edges of the FOV
+- Further enhancement of G5M documentation
+- Render GUI: implemented filter by number of localizations for multichannel data
+- Render GUI: allow removal of any column from localizations, not only ``group``
+- Filter GUI: allow remove of any column from localizations
+- ``REQUIRED_COLUMNS`` moved from ``picasso.localize`` to ``picasso.lib``
 - Windows one-click-installer allows for selecting only a subset of Picasso modules to install
 - Added ToRaw and Nanotron to Windows one-click-installer
 - *Experimental* One-click-installer for macOS (only for Apple Silicon)

@@ -30,16 +30,16 @@ def _sum_and_center_of_mass(
     size: int,
 ) -> tuple[float, float, float]:
     """Calculate the sum and center of mass of a 2D spot."""
-    x = 0.0
     y = 0.0
+    x = 0.0
     _sum_ = 0.0
     for i in range(size):
         for j in range(size):
-            x += spot[i, j] * i
-            y += spot[i, j] * j
+            y += spot[i, j] * i
+            x += spot[i, j] * j
             _sum_ += spot[i, j]
-    x /= _sum_
     y /= _sum_
+    x /= _sum_
     return _sum_, y, x
 
 

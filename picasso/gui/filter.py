@@ -621,7 +621,9 @@ class Window(QtWidgets.QMainWindow):
         filter_menu = menu_bar.addMenu("Filter")
         filter_action = filter_menu.addAction("Filter")
         filter_action.setShortcut("Ctrl+F")
-        filter_menu.triggered.connect(self.filter_num.show)
+        filter_action.triggered.connect(self.filter_num.show)
+        remove_columns_action = filter_menu.addAction("Remove columns")
+        remove_columns_action.triggered.connect(self.remove_columns)
         main_widget = QtWidgets.QWidget()
         hbox = QtWidgets.QHBoxLayout(main_widget)
         hbox.setContentsMargins(0, 0, 0, 0)
@@ -751,6 +753,21 @@ class Window(QtWidgets.QMainWindow):
         else:
             self.filter_log[field] = [xmin, xmax]
 
+    def remove_columns(self) -> None:
+        """Remove columns from the loaded dataset."""
+        if self.locs is None:
+            return
+        columns = self.locs.columns.to_list()
+        to_remove, ok = lib.RemoveColumnsDialog.getParams(self, columns)
+        if not ok or len(to_remove) == 0:
+            return
+        self.locs.drop(columns=to_remove, inplace=True)
+        self.update_locs(self.locs)
+        if "Removed columns" in self.filter_log:
+            self.filter_log["Removed columns"].extend(to_remove)
+        else:
+            self.filter_log["Removed columns"] = to_remove
+
     def save_file_dialog(self) -> None:
         if "x" in self.locs.columns:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)
@@ -766,7 +783,7 @@ class Window(QtWidgets.QMainWindow):
                 info = self.info + [filter_info]
                 io.save_locs(path, self.locs, info)
         else:
-            raise NotImplementedError("Saving only implmented for locs.")
+            raise NotImplementedError("Saving only implemented for locs.")
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         new_value = (
