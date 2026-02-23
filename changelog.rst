@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 20-FEB-2026 CEST
+Last change: 23-FEB-2026 CEST
 
 0.9.7
 -----
@@ -22,8 +22,8 @@ Last change: 20-FEB-2026 CEST
 - Filter GUI: allow remove of any column from localizations
 - ``REQUIRED_COLUMNS`` moved from ``picasso.localize`` to ``picasso.lib``
 - Windows one-click-installer allows for selecting only a subset of Picasso modules to install
-- Added ToRaw and Nanotron to Windows one-click-installer
-- *Experimental* One-click-installer for macOS (only for Apple Silicon)
+- Added ToRaw and Nanotron to one-click-installer
+- *Experimental* One-click-installer for macOS (only for Apple Silicon), see `here <https://github.com/jungmannlab/picasso/tree/master/release/one_click_macos_gui>`__
 
 0.9.6
 -----

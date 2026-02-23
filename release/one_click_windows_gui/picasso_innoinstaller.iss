@@ -28,28 +28,28 @@ Name: "nanotron"; Description: "Nanotron"; Types: full custom
 Name: "toraw"; Description: "ToRaw"; Types: full custom
 
 [Icons]
-Name: "{group}\Design"; Filename: "{app}\picassow.exe"; Parameters: "design"; IconFilename: "{app}\_internal\picasso\gui\icons\design.ico"
-Name: "{group}\Simulate"; Filename: "{app}\picassow.exe"; Parameters: "simulate"; IconFilename: "{app}\_internal\picasso\gui\icons\simulate.ico"
-Name: "{group}\Localize"; Filename: "{app}\picassow.exe"; Parameters: "localize"; IconFilename: "{app}\_internal\picasso\gui\icons\localize.ico"
-Name: "{group}\Filter"; Filename: "{app}\picassow.exe"; Parameters: "filter"; IconFilename: "{app}\_internal\picasso\gui\icons\filter.ico"
-Name: "{group}\Render"; Filename: "{app}\picassow.exe"; Parameters: "render"; IconFilename: "{app}\_internal\picasso\gui\icons\render.ico"
-Name: "{group}\Average"; Filename: "{app}\picassow.exe"; Parameters: "average"; IconFilename: "{app}\_internal\picasso\gui\icons\average.ico"
-Name: "{group}\SPINNA"; Filename: "{app}\picassow.exe"; Parameters: "spinna"; IconFilename: "{app}\_internal\picasso\gui\icons\spinna.ico"
-Name: "{group}\Server"; Filename: "{app}\picasso.exe"; Parameters: "server"; IconFilename: "{app}\_internal\picasso\gui\icons\server.ico"
-Name: "{group}\Nanotron"; Filename: "{app}\picassow.exe"; Parameters: "nanotron"; IconFilename: "{app}\_internal\picasso\gui\icons\nanotron.ico"
-Name: "{group}\ToRaw"; Filename: "{app}\picassow.exe"; Parameters: "toraw"; IconFilename: "{app}\_internal\picasso\gui\icons\toraw.ico"
+Name: "{group}\Design"; Filename: "{app}\picassow.exe"; Parameters: "design"; IconFilename: "{app}\_internal\picasso\gui\icons\design.ico"; Components: design
+Name: "{group}\Simulate"; Filename: "{app}\picassow.exe"; Parameters: "simulate"; IconFilename: "{app}\_internal\picasso\gui\icons\simulate.ico"; Components: simulate
+Name: "{group}\Localize"; Filename: "{app}\picassow.exe"; Parameters: "localize"; IconFilename: "{app}\_internal\picasso\gui\icons\localize.ico"; Components: localize
+Name: "{group}\Filter"; Filename: "{app}\picassow.exe"; Parameters: "filter"; IconFilename: "{app}\_internal\picasso\gui\icons\filter.ico"; Components: filter
+Name: "{group}\Render"; Filename: "{app}\picassow.exe"; Parameters: "render"; IconFilename: "{app}\_internal\picasso\gui\icons\render.ico"; Components: render
+Name: "{group}\Average"; Filename: "{app}\picassow.exe"; Parameters: "average"; IconFilename: "{app}\_internal\picasso\gui\icons\average.ico"; Components: average
+Name: "{group}\SPINNA"; Filename: "{app}\picassow.exe"; Parameters: "spinna"; IconFilename: "{app}\_internal\picasso\gui\icons\spinna.ico"; Components: spinna
+Name: "{group}\Server"; Filename: "{app}\picasso.exe"; Parameters: "server"; IconFilename: "{app}\_internal\picasso\gui\icons\server.ico"; Components: server
+Name: "{group}\Nanotron"; Filename: "{app}\picassow.exe"; Parameters: "nanotron"; IconFilename: "{app}\_internal\picasso\gui\icons\nanotron.ico"; Components: nanotron
+Name: "{group}\ToRaw"; Filename: "{app}\picassow.exe"; Parameters: "toraw"; IconFilename: "{app}\_internal\picasso\gui\icons\toraw.ico"; Components: toraw
 
 
-Name: "{autodesktop}\Design"; Filename: "{app}\picassow.exe"; Parameters: "design"; IconFilename: "{app}\_internal\picasso\gui\icons\design.ico"
-Name: "{autodesktop}\Simulate"; Filename: "{app}\picassow.exe"; Parameters: "simulate"; IconFilename: "{app}\_internal\picasso\gui\icons\simulate.ico"
-Name: "{autodesktop}\Localize"; Filename: "{app}\picassow.exe"; Parameters: "localize"; IconFilename: "{app}\_internal\picasso\gui\icons\localize.ico"
-Name: "{autodesktop}\Filter"; Filename: "{app}\picassow.exe"; Parameters: "filter"; IconFilename: "{app}\_internal\picasso\gui\icons\filter.ico"
-Name: "{autodesktop}\Render"; Filename: "{app}\picassow.exe"; Parameters: "render"; IconFilename: "{app}\_internal\picasso\gui\icons\render.ico"
-Name: "{autodesktop}\Average"; Filename: "{app}\picassow.exe"; Parameters: "average"; IconFilename: "{app}\_internal\picasso\gui\icons\average.ico"
-Name: "{autodesktop}\SPINNA"; Filename: "{app}\picassow.exe"; Parameters: "spinna"; IconFilename: "{app}\_internal\picasso\gui\icons\spinna.ico"
-Name: "{autodesktop}\Server"; Filename: "{app}\picasso.exe"; Parameters: "server"; IconFilename: "{app}\_internal\picasso\gui\icons\server.ico"
-Name: "{autodesktop}\Nanotron"; Filename: "{app}\picassow.exe"; Parameters: "nanotron"; IconFilename: "{app}\_internal\picasso\gui\icons\nanotron.ico"
-Name: "{autodesktop}\ToRaw"; Filename: "{app}\picassow.exe"; Parameters: "toraw"; IconFilename: "{app}\_internal\picasso\gui\icons\toraw.ico"
+Name: "{autodesktop}\Design"; Filename: "{app}\picassow.exe"; Parameters: "design"; IconFilename: "{app}\_internal\picasso\gui\icons\design.ico"; Components: design
+Name: "{autodesktop}\Simulate"; Filename: "{app}\picassow.exe"; Parameters: "simulate"; IconFilename: "{app}\_internal\picasso\gui\icons\simulate.ico"; Components: simulate
+Name: "{autodesktop}\Localize"; Filename: "{app}\picassow.exe"; Parameters: "localize"; IconFilename: "{app}\_internal\picasso\gui\icons\localize.ico"; Components: localize
+Name: "{autodesktop}\Filter"; Filename: "{app}\picassow.exe"; Parameters: "filter"; IconFilename: "{app}\_internal\picasso\gui\icons\filter.ico"; Components: filter
+Name: "{autodesktop}\Render"; Filename: "{app}\picassow.exe"; Parameters: "render"; IconFilename: "{app}\_internal\picasso\gui\icons\render.ico"; Components: render
+Name: "{autodesktop}\Average"; Filename: "{app}\picassow.exe"; Parameters: "average"; IconFilename: "{app}\_internal\picasso\gui\icons\average.ico"; Components: average
+Name: "{autodesktop}\SPINNA"; Filename: "{app}\picassow.exe"; Parameters: "spinna"; IconFilename: "{app}\_internal\picasso\gui\icons\spinna.ico"; Components: spinna
+Name: "{autodesktop}\Server"; Filename: "{app}\picasso.exe"; Parameters: "server"; IconFilename: "{app}\_internal\picasso\gui\icons\server.ico"; Components: server
+Name: "{autodesktop}\Nanotron"; Filename: "{app}\picassow.exe"; Parameters: "nanotron"; IconFilename: "{app}\_internal\picasso\gui\icons\nanotron.ico"; Components: nanotron
+Name: "{autodesktop}\ToRaw"; Filename: "{app}\picassow.exe"; Parameters: "toraw"; IconFilename: "{app}\_internal\picasso\gui\icons\toraw.ico"; Components: toraw
 
 [Registry]
 Root: HKLM; Subkey: "SYSTEM\CurrentControlSet\Control\Session Manager\Environment"; \

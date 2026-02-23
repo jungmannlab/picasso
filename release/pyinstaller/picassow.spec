@@ -168,7 +168,7 @@ else:  # Windows
         a.zipfiles,
         a.datas,
         exclude_binaries=True,
-        name=exe_name,
+        name='picassow',
         debug=False,
         bootloader_ignore_signals=False,
         strip=False,
@@ -183,5 +183,5 @@ else:  # Windows
         strip=False,
         upx=True,
         upx_exclude=[],
-        name=exe_name
+        name='picassow'
     )
