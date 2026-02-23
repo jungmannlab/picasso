@@ -28,10 +28,18 @@ If you installed Picasso using ``pip install picassosr``, you can add sound noti
 - Copy the sound files to this folder.
 
 
-One click installer
--------------------
+One click installer (Windows)
+-----------------------------
 If you installed Picasso using the one click installer from `the Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ , you can add sound notifications by following these steps:
 
 - Find the location where you installed Picasso. By default, it is ``C:/Picasso``. *Before version 0.8.3, the default location was* ``C:/Program Files/Picasso``.
 - Go to the following subfolder: ``picasso/gui/notification_sounds``.
 - Copy the sound files to this folder.
+
+
+One click installer (macOS)
+---------------------------
+If you installed Picasso using the one click installer from `the Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ , you can add sound notifications by following these steps:
+
+- Navigate to your Applications folder and right-click on the picasso app, then select "Show Package Contents".
+- Add your sound files to ``Contents/Frameworks/picasso/gui/notification_sounds``.

@@ -29,7 +29,6 @@ from PIL import Image
 import yaml
 import matplotlib
 import matplotlib.pyplot as plt
-import matplotlib.patches as patches
 import numpy as np
 import pandas as pd
 from matplotlib.backends.backend_qt5agg import FigureCanvas
@@ -195,6 +194,22 @@ def check_picks(f: Callable) -> Callable:
                 args[0],
                 "Pick Error",
                 "Please pick at least twice.",
+            )
+        else:
+            return f(args[0])
+
+    return wrapper
+
+
+def check_circular_picks(f: Callable) -> Callable:
+    """Decorator verifying if the picks are circular."""
+
+    def wrapper(*args):
+        if args[0]._pick_shape != "Circle":
+            QtWidgets.QMessageBox.warning(
+                args[0],
+                "Pick Error",
+                "This operation is only implemented for circular picks.",
             )
         else:
             return f(args[0])
@@ -376,6 +391,7 @@ class ApplyDialog(QtWidgets.QDialog):
         )
         layout.addWidget(vars_label, 1, 0)
         self.label = QtWidgets.QLabel()
+        self.label.setWordWrap(True)
         layout.addWidget(self.label, 1, 1)
         self.update_vars(0)
         exp_label = QtWidgets.QLabel("Expression:")
@@ -383,7 +399,12 @@ class ApplyDialog(QtWidgets.QDialog):
             "Enter the expression here.\n"
             "For example, 'x += 10' to move x coordinates of the\n"
             "localizations in the selected channel 10 camera pixels to the"
-            " right."
+            " right.\n"
+            "Additionally, the following commands are supported:\n"
+            "- 'flip x z' to exchange x- and z-axes.\n"
+            "- 'spiral R N' to plot each localization over time in a spiral\n"
+            "  with radius R pixels and N turns.\n"
+            "- 'uspiral' to undo the last spiral action."
         )
         layout.addWidget(exp_label, 2, 0)
         self.cmd = QtWidgets.QLineEdit()
@@ -5603,12 +5624,7 @@ class SlicerDialog(QtWidgets.QDialog):
 
     def calculate_histogram(self) -> None:
         """Calculate the histograms of z coordinates of each channel."""
-        # slice thickness
-        slice = self.pick_slice.value()
-        # ax = self.figure.add_subplot(111)
-
-        # # clear the plot
-        # plt.cla()
+        slice_thickness = self.pick_slice.value()
         self.ax.clear()
 
         # get colors for each channel (from dataset dialog)
@@ -5624,7 +5640,7 @@ class SlicerDialog(QtWidgets.QDialog):
         self.bins = np.arange(
             np.amin(np.hstack(self.zcoord)),
             np.amax(np.hstack(self.zcoord)),
-            slice,
+            slice_thickness,
         )
 
         # plot histograms
@@ -7596,7 +7612,12 @@ class View(QtWidgets.QLabel):
             # load pick regions
             if "Shape" in file:
                 loaded_shape = file["Shape"]
-                if loaded_shape in ["Circle", "Rectangle", "Polygon"]:
+                if loaded_shape in [
+                    "Circle",
+                    "Rectangle",
+                    "Polygon",
+                    "Square",
+                ]:
                     self.load_picks(paths[0])
         else:
             paths = [
@@ -7743,7 +7764,7 @@ class View(QtWidgets.QLabel):
             else:
                 return None
 
-    def save_channel(
+    def get_channel_save_locs(
         self,
         title: str = "Choose a channel to save localizations",
     ) -> int | None:
@@ -7963,6 +7984,11 @@ class View(QtWidgets.QLabel):
             self.window.tools_settings_dialog.pick_width.setValue(width)
         elif loaded_shape == "Polygon":
             self._picks = regions["Vertices"]
+        elif loaded_shape == "Square":
+            self._picks = regions["Centers"]
+            # no backward compatibility here, always in nm
+            width = regions["Side Length (nm)"]
+            self.window.tools_settings_dialog.pick_side_length.setValue(width)
         else:
             raise ValueError("Unrecognized pick shape")
 
@@ -8003,6 +8029,8 @@ class View(QtWidgets.QLabel):
         elif "Scale bar length (nm)" in file:
             disp_dlg.scalebar.setValue(file["Scale bar length (nm)"])
 
+    @check_picks
+    @check_circular_picks
     def subtract_picks(self, path: str) -> None:
         """Clear selected picks that cover the picks loaded from path.
 
@@ -8016,12 +8044,8 @@ class View(QtWidgets.QLabel):
         ValueError
             If .yaml file is not recognized.
         NotImplementedError
-            Rectangular picks have not been implemented yet.
+            Non-circular picks have not been implemented yet.
         """
-        if self._pick_shape != "Circle":
-            raise NotImplementedError(
-                "Subtracting picks implemented for circular picks only."
-            )
         oldpicks = self._picks.copy()
         pixelsize = self.window.display_settings_dlg.pixelsize.value()
 
@@ -8567,11 +8591,10 @@ class View(QtWidgets.QLabel):
         self.update_scene()
 
     @check_pick
+    @check_circular_picks
     def show_pick(self) -> None:
         """Let the user select picks based on their 2D scatter. Open
         ``self.pick_message_box`` to display information."""
-        if self._pick_shape != "Circle":
-            raise NotImplementedError("Implemented for circular picks only.")
         channel = self.get_channel3d("Select Channel")
 
         removelist = []  # picks to be removed
@@ -9037,107 +9060,139 @@ class View(QtWidgets.QLabel):
         self.update_scene()
 
     @check_picks
+    @check_circular_picks
     def filter_picks(self) -> None:
         """Filters picks by number of localizations."""
-        channel = self.get_channel("Filter picks by locs")
-        if channel is not None:
-            locs = self.all_locs[channel]
-            d = self.window.tools_settings_dialog.pick_diameter.value()
-            r = d / 2 / self.window.display_settings_dlg.pixelsize.value()
-            # index locs in a grid
-            index_blocks = self.get_index_blocks(channel)
+        channel = self.get_channel_all_seq(
+            "Filter picks by number of localizations"
+        )
+        if channel is None:
+            return
 
-            if self._picks:
-                removelist = []  # picks to remove
-                loccount = []  # n_locs in picks
+        # assumes circular picks
+        d = self.window.tools_settings_dialog.pick_diameter.value()
+        r = d / 2 / self.window.display_settings_dlg.pixelsize.value()
+        if channel is len(self.locs_paths):  # all channels
+            channels = list(range(len(self.locs_paths)))
+        else:
+            channels = [channel]
+        # number of locs in each pick
+        loccount = np.zeros((len(channels), len(self._picks)), dtype=int)
+        for i, channel_ in enumerate(channels):
+            loccount[i] = self._count_locs_in_picks(channel_, r)
+        loccount = np.array(loccount)  # shape (n_channels, n_picks)
+
+        # plot histogram with n_locs in picks
+        fig = plt.figure(constrained_layout=True)
+        fig.canvas.manager.set_window_title("Localizations in Picks")
+        ax = fig.add_subplot(111)
+        ax.set_title("Localizations in Picks ")
+
+        # get colors for each channel (from dataset dialog)
+        colors = [
+            _.palette().color(QtGui.QPalette.Window)
+            for _ in self.window.dataset_dialog.colordisp_all
+        ]
+        colors = [
+            [_.red() / 255, _.green() / 255, _.blue() / 255] for _ in colors
+        ]
+        bins = lib.calculate_optimal_bins(loccount.flatten(), max_n_bins=1000)
+
+        for i, channel in enumerate(channels):
+            ax.hist(
+                loccount[i],
+                bins=bins,
+                density=False,
+                facecolor=colors[channel],
+                alpha=0.5,
+            )
+        ax.set_xlabel("Number of localizations")
+        ax.set_ylabel("Counts")
+        fig.canvas.draw()
+
+        # display the histogram instead of the rendered locs
+        width, height = fig.canvas.get_width_height()
+        im = QtGui.QImage(
+            fig.canvas.buffer_rgba(),
+            width,
+            height,
+            QtGui.QImage.Format_RGBA8888,
+        )
+        self.setPixmap((QtGui.QPixmap(im)))
+        self.setAlignment(QtCore.Qt.AlignCenter)
+
+        # filter picks by n_locs
+        removelist = []
+        minlocs, ok = QtWidgets.QInputDialog.getInt(
+            self,
+            "Input Dialog",
+            "Enter minimum number of localizations:",
+            value=loccount.min(),
+            min=0,
+            max=loccount.max(),
+        )
+        if ok:
+            maxlocs, ok2 = QtWidgets.QInputDialog.getInt(
+                self,
+                "Input Dialog",
+                "Enter maximum number of localizations:",
+                value=loccount.max(),
+                min=minlocs,
+                max=loccount.max(),
+            )
+            if ok2:
                 progress = lib.ProgressDialog(
-                    "Counting in picks..", 0, len(self._picks) - 1, self
+                    "Removing picks..", 0, len(self._picks) - 1, self
                 )
                 progress.set_value(0)
                 progress.show()
-                locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
                 for i, pick in enumerate(self._picks):
-                    x, y = pick
-                    # extract locs at a given region - numba version
-                    block_locs_xy = postprocess.get_block_locs_at_numba(
-                        int(x / r),
-                        int(y / r),
-                        locs_xy,
-                        index_blocks[4],
-                        index_blocks[5],
-                        index_blocks[6],
-                        index_blocks[7],
-                    )
-                    pick_locs_xy = postprocess.locs_at_numba(
-                        x, y, block_locs_xy, r
-                    )
-                    loccount.append(pick_locs_xy.shape[1])
+                    for channel_idx, channel in enumerate(channels):
+                        n_locs = loccount[channel_idx, i]
+                        if n_locs > maxlocs or n_locs < minlocs:
+                            removelist.append(pick)
+                            # if one channel does not satisfy the condition,
+                            # move on to the next pick
+                            break
                     progress.set_value(i)
-                progress.close()
 
-                # plot histogram with n_locs in picks
-                fig = plt.figure(constrained_layout=True)
-                fig.canvas.manager.set_window_title("Localizations in Picks")
-                ax = fig.add_subplot(111)
-                ax.set_title("Localizations in Picks ")
-                n, bins, patches = ax.hist(
-                    loccount,
-                    bins="auto",
-                    density=True,
-                    facecolor="green",
-                    alpha=0.75,
-                )
-                ax.set_xlabel("Number of localizations")
-                ax.set_ylabel("Counts")
-                fig.canvas.draw()
-
-                width, height = fig.canvas.get_width_height()
-
-                # display the histogram instead of the rendered locs
-                im = QtGui.QImage(
-                    fig.canvas.buffer_rgba(),
-                    width,
-                    height,
-                    QtGui.QImage.Format_ARGB32,
-                )
-
-                self.setPixmap((QtGui.QPixmap(im)))
-                self.setAlignment(QtCore.Qt.AlignCenter)
-
-                # filter picks by n_locs
-                minlocs, ok = QtWidgets.QInputDialog.getInt(
-                    self,
-                    "Input Dialog",
-                    "Enter minimum number of localizations:",
-                )
-                if ok:
-                    maxlocs, ok2 = QtWidgets.QInputDialog.getInt(
-                        self,
-                        "Input Dialog",
-                        "Enter maximum number of localizations:",
-                        max(loccount),
-                        minlocs,
-                    )
-                    if ok2:
-                        progress = lib.ProgressDialog(
-                            "Removing picks..", 0, len(self._picks) - 1, self
-                        )
-                        progress.set_value(0)
-                        progress.show()
-                        for i, pick in enumerate(self._picks):
-
-                            if loccount[i] > maxlocs:
-                                removelist.append(pick)
-                            elif loccount[i] < minlocs:
-                                removelist.append(pick)
-                            progress.set_value(i)
-
+                # adjust the attributes
                 for pick in removelist:
                     self._picks.remove(pick)
                 self.n_picks = len(self._picks)
                 self.update_pick_info_short()
                 progress.close()
-                self.update_scene()
+        self.update_scene()
+
+    def _count_locs_in_picks(self, channel: int, r: float) -> list[int]:
+        """Count number of localizations for each pick in a given
+        channel."""
+        progress = lib.ProgressDialog(
+            "Counting in picks..", 0, len(self._picks) - 1, self
+        )
+        progress.set_value(0)
+        progress.show()
+        loccount = np.zeros(len(self._picks), dtype=int)
+        # index locs in a grid
+        index_blocks = self.get_index_blocks(channel)
+        locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
+        for i, pick in enumerate(self._picks):
+            x, y = pick
+            # extract locs at a given region - numba version
+            block_locs_xy = postprocess.get_block_locs_at_numba(
+                int(x / r),
+                int(y / r),
+                locs_xy,
+                index_blocks[4],
+                index_blocks[5],
+                index_blocks[6],
+                index_blocks[7],
+            )
+            pick_locs_xy = postprocess.locs_at_numba(x, y, block_locs_xy, r)
+            loccount[i] = pick_locs_xy.shape[1]
+            progress.set_value(i)
+        progress.close()
+        return loccount
 
     def index_locs(self, channel: int, fast_render: bool = False) -> None:
         """Indexes localizations from a given channel in a grid with
@@ -9221,6 +9276,7 @@ class View(QtWidgets.QLabel):
         self.add_picks(picks)
 
     @check_picks
+    @check_circular_picks
     def pick_similar(self) -> None:
         """Searche picks similar to the current picks.
 
@@ -9233,10 +9289,6 @@ class View(QtWidgets.QLabel):
         NotImplementedError
             If pick shape is rectangle.
         """
-        if self._pick_shape != "Circle":
-            raise NotImplementedError(
-                "Pick similar implemented for circular picks only."
-            )
         channel = self.get_channel("Pick similar")
         if channel is not None:
             d = (
@@ -11599,8 +11651,8 @@ class Window(QtWidgets.QMainWindow):
         apply_drift_action.triggered.connect(self.view.apply_drift)
 
         postprocess_menu.addSeparator()
-        group_action = postprocess_menu.addAction("Remove group info")
-        group_action.triggered.connect(self.remove_group)
+        columns_action = postprocess_menu.addAction("Remove columns")
+        columns_action.triggered.connect(self.remove_columns)
         sync_group_action = postprocess_menu.addAction(
             "Synchronize groups across channels"
         )
@@ -12216,12 +12268,25 @@ class Window(QtWidgets.QMainWindow):
         """Update window size."""
         self.update_info()
 
-    def remove_group(self) -> None:
-        """Remove field 'group' from localizations."""
-        channel = self.view.get_channel("Remove group")
+    def remove_columns(self) -> None:
+        """Remove user-selected columns from localizations."""
+        channel = self.view.get_channel("Remove columns")
         if channel is not None:
-            self.view.locs[channel].drop(columns="group", inplace=True)
-            self.view.all_locs[channel].drop(columns="group", inplace=True)
+            columns = self.view.all_locs[channel].columns.to_list()
+            to_remove, ok = lib.RemoveColumnsDialog.getParams(self, columns)
+            if not ok or len(to_remove) == 0:
+                return
+            locs = self.view.all_locs[channel].copy()
+            info = self.view.infos[channel]
+            new_info = {
+                "Generated by": f"Picasso v{__version__} Remove columns",
+                "Removed columns": to_remove,
+            }
+            locs.drop(columns=to_remove, inplace=True)
+
+            self.view.all_locs[channel] = locs
+            self.view.locs[channel] = locs.copy()
+            self.view.infos[channel] = info + [new_info]
             self.view.update_scene()
 
     def sync_groups(self) -> None:
@@ -12269,7 +12334,7 @@ class Window(QtWidgets.QMainWindow):
 
     def save_locs(self) -> None:
         """Save localizations in a given channel (or all channels)."""
-        channel = self.view.save_channel("Save localizations")
+        channel = self.view.get_channel_save_locs("Save localizations")
         if channel is not None:
             # combine all channels
             if channel is (len(self.view.locs_paths) + 1):
@@ -12342,7 +12407,7 @@ class Window(QtWidgets.QMainWindow):
     def save_picked_locs(self) -> None:
         """Save picked localizations in a given channel (or all
         channels)."""
-        channel = self.view.save_channel("Save picked localizations")
+        channel = self.view.get_channel_save_locs("Save picked localizations")
         if channel is not None:
             # combine channels to one .hdf5
             if channel is (len(self.view.locs_paths) + 1):
@@ -12387,7 +12452,7 @@ class Window(QtWidgets.QMainWindow):
 
     def save_picked_locs_separately(self) -> None:
         """Save picked localizations for each pick separately."""
-        channel = self.view.save_channel(
+        channel = self.view.get_channel_save_locs(
             "Save picked localizations separately"
         )
         if channel is not None:
