@@ -12,7 +12,7 @@ import picasso
 
 ##################### User definitions
 exe_name = 'picasso'
-version = '0.9.6'
+version = '0.9.7'
 script_name = 'picasso_pyinstaller.py'
 if sys.platform[:6] == "darwin":
 	icon = '../logos/localize.icns'

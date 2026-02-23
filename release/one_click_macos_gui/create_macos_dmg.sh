@@ -12,7 +12,7 @@ set -e  # Exit immediately on any error
 eval "$(conda shell.bash hook)"
 
 APP_NAME="Picasso"
-VERSION="0.9.6"
+VERSION="0.9.7"
 MAIN_BUNDLE_NAME="Picasso.app"
 DMG_NAME="Picasso-v$VERSION-macOS-Apple-Silicon"
 PYINSTALLER_FILE="../pyinstaller/picasso_pyinstaller.py"
