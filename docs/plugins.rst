@@ -8,13 +8,21 @@ Starting in version 0.5.0, Picasso supports plugins. Below are the instructions 
 
 *Keep in mind that the* ``__init__.py`` *file in the* ``picasso/picasso/gui/plugins`` *folder must not be modified or deleted.*
 
-One click installer
-~~~~~~~~~~~~~~~~~~~
+One click installer (Windows)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 **NOTE**: After uninstalling Picasso, ``Picasso`` folder may need to be deleted manually, as the uninstaller currently does not remove the plugins automatically.
 
 - Find the location where you installed Picasso. By default, it is ``C:/Picasso``. *Before version 0.8.3, the default location was* ``C:/Program Files/Picasso``.
 - Then go to the folder ``_internal/picasso/gui/plugins``. *Before version 0.9.6, the folder was* ``/picasso/gui/plugins``
 - Copy the plugin(s) to this folder.
+
+**NOTE**: Plugins added in this distribution will not be able to use packages that are not installed automatically (dependencies in the file ``pyproject.toml``).
+
+One click installer (macOS)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+- Navigate to your Applications folder and right-click on the picasso app, then select "Show Package Contents".
+- Add your plugin(s) to ``Contents/Frameworks/picasso/gui/plugins``.
 
 **NOTE**: Plugins added in this distribution will not be able to use packages that are not installed automatically (dependencies in the file ``pyproject.toml``).
 

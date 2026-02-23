@@ -5,6 +5,12 @@ This is the one-click installer for Picasso on Windows. The Picasso software is 
 
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
+How to install
+--------------
+
+1. Download the latest release from the `release page <https://github.com/jungmannlab/picasso/releases/>`__.
+2. Open the downloaded exe file and follow the installation instructions.
+
 Creating your own installer
 ---------------------------
 
@@ -15,9 +21,9 @@ Adding camera configuration and plugins
 
 Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. For more details, see `documentation <https://picassosr.readthedocs.io/en/latest/localize.html#camera-config>`__.
 
-To add your config.yaml file, navigate to your Picasso folder (by default ``C:\Picasso``) and find the subdirectory ``_internal\picasso``. Add the config file there.
+To add your config.yaml file, navigate to your Picasso folder (by default ``C:/Picasso``) and find the subdirectory ``_internal/picasso``. Add the config file there.
 
-Similarly, you can add Picasso plugins under the folder ``_internal\picasso\gui\plugins``. For more details on how to create plugins, see `documentation <https://picassosr.readthedocs.io/en/latest/plugins.html>`__.
+Similarly, you can add Picasso plugins under the folder ``_internal/picasso/gui/plugins``. For more details on how to create plugins, see `documentation <https://picassosr.readthedocs.io/en/latest/plugins.html>`__.
 
 Changelog
 ---------
