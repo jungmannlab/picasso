@@ -43,6 +43,9 @@ _dialogs = []
 # StatusDialog is finished
 SOUND_NOTIFICATION_DURATION = 60  # seconds
 
+# Columns that are required for Picasso
+REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
+
 
 class ProgressDialog(QtWidgets.QProgressDialog):
     """ProgressDialog displays a progress dialog with a progress bar."""
@@ -264,6 +267,67 @@ class AutoDict(collections.defaultdict):
 
     def __init__(self, *args, **kwargs):
         super().__init__(AutoDict, *args, **kwargs)
+
+
+class RemoveColumnsDialog(QtWidgets.QDialog):
+    """Allow the user to select columns to be removed from the locs
+    DataFrame."""
+
+    def __init__(
+        self, window: QtWidgets.QMainWindow, columns: list[str]
+    ) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Remove columns")
+        self.setModal(True)
+        vbox = QtWidgets.QVBoxLayout(self)
+        self.setLayout(vbox)
+        self.checks = {}
+        for column in columns:
+            check = QtWidgets.QCheckBox(column)
+            check.setChecked(False)
+            if column in REQUIRED_COLUMNS:
+                check.setEnabled(False)
+            vbox.addWidget(check)
+            self.checks[column] = check
+        # OK and Cancel buttons
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
+            QtCore.Qt.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow, columns: list[str]
+    ) -> tuple[list[str], bool]:
+        """Open the dialog and return the columns to be removed.
+
+        Parameters
+        ----------
+        parent : QMainWindow
+            Instance of the main window.
+        columns : list of str
+            List of column names in the locs DataFrame.
+
+        Returns
+        -------
+        to_remove : list of str
+            List of column names to be removed.
+        accepted : bool
+            True if the user clicked OK, False if the user clicked
+            Cancel.
+        """
+        dialog = RemoveColumnsDialog(parent, columns)
+        result = dialog.exec_()
+        to_remove = []
+        for col in columns:
+            if dialog.checks[col].isChecked():
+                to_remove.append(col)
+        return to_remove, result == QtWidgets.QDialog.Accepted
 
 
 def cancel_dialogs():
@@ -1234,10 +1298,10 @@ def plot_subclustering_check(
         Figure and axes if ``return_fig`` is True, otherwise
         (None, None).
     """
-    m_far = clustered_n_events.mean()
-    m_close = sparse_n_events.mean()
-    s_far = clustered_n_events.std()
-    s_close = sparse_n_events.std()
+    m_close = clustered_n_events.mean()
+    m_far = sparse_n_events.mean()
+    s_close = clustered_n_events.std()
+    s_far = sparse_n_events.std()
 
     # create the plot
     fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
@@ -1251,7 +1315,7 @@ def plot_subclustering_check(
         label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
         color="C0",
     )
-    ax1.axvline(m_far, color="C0", linestyle="--")
+    ax1.axvline(m_close, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
     ax1.bar(
         vals,
@@ -1261,7 +1325,7 @@ def plot_subclustering_check(
         label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
         color="C1",
     )
-    ax1.axvline(m_close, color="C1", linestyle="--")
+    ax1.axvline(m_far, color="C1", linestyle="--")
     ax1.set_xlabel("Number of events")
     ax1.set_ylabel("Counts")
     ax1.set_xlim(min_bin - 1, max_bin + 1)

@@ -27,7 +27,43 @@ Identification and fitting of single-molecule spots
 Camera Config
 -------------
 
-Picasso can remember default cameras and will use saved camera parameters. In order to use camera configs, create a file named ``config.yaml`` in the picasso folder. To start with a template, modify ``config_template.yaml`` that can be found in the folder by default. Picasso will compare the entries with Micro-Manager-Metadata and match the sensitivity values. If no matching entries can be found (e.g., if the file was not created with Micro-Manager) the config file will still be used to create a dropdown menu to select the different categories. The camera config can also be used to define a default camera that will always be used. Indentions are used for definitions.
+Picasso can remember default cameras and will use saved camera parameters. In order to use camera configs, create a file named ``config.yaml`` in the ``picasso`` folder. See below on how to locate it.
+
+To start with a template, modify ``config_template.yaml`` that can be found in the folder by default. Picasso will compare the entries with Micro-Manager-Metadata and match the sensitivity values. If no matching entries can be found (e.g., if the file was not created with Micro-Manager) the config file will still be used to create a dropdown menu to select the different categories. The camera config can also be used to define a default camera that will always be used. Indentions are used for definitions.
+
+One click installer (Windows)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you downloaded an .exe Picasso file from the `release page <https://github.com/jungmannlab/picasso/releases>`_:
+
+- Navigate to the installation folder, by default, it's ``C:/Picasso``. *Before version 0.8.3, the default location was* ``C:/Program Files/Picasso``.
+- Go to the folder ``_internal/picasso``. *Before version 0.9.6, the folder was simply* ``picasso``.
+- Add your config file there.
+
+One click installer (macOS)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+If you downloaded a .dmg Picasso file from the `release page <https://github.com/jungmannlab/picasso/releases>`_:
+
+- Navigate to your Applications folder and right-click on the picasso app, then select "Show Package Contents".
+- Go to the folder ``Contents/Frameworks/picasso``.
+- Add your config file there.
+
+PyPI
+~~~~
+If you installed Picasso using ``pip install picassosr``:
+
+- Activate your conda environment where ``picassosr`` is installed by typing ``conda activate YOUR_ENVIRONMENT``.
+- To find the location of the package, type ``pip show picassosr`` and look for the line starting with ``Location:``.
+- Navigate to this location and go to ``picasso``.
+- Add your config file there.
+
+GitHub
+~~~~~~
+If you cloned the GitHub repository, you can add plugins by following these steps:
+- Find the directory where you cloned the GitHub repository with Picasso.
+- Go to ``picasso/picasso/``.
+- Copy the config file to this folder.
 
 Example: Default Camera
 ~~~~~~~~~~~~~~~~~~~~~~~
