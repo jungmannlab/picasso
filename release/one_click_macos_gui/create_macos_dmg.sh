@@ -14,7 +14,7 @@ eval "$(conda shell.bash hook)"
 APP_NAME="Picasso"
 VERSION="0.9.6"
 MAIN_BUNDLE_NAME="Picasso.app"
-DMG_NAME="Picasso-macOS-$VERSION"
+DMG_NAME="Picasso-v$VERSION-macOS-Apple-Silicon"
 PYINSTALLER_FILE="../pyinstaller/picasso_pyinstaller.py"
 DIST_DIR="../pyinstaller/dist"
 BUILD_DIR="../pyinstaller/build"
@@ -71,6 +71,16 @@ if [ ! -d "$MAIN_APP_PATH" ]; then
 fi
 echo ">>> Main .app bundle created at $MAIN_APP_PATH"
 
+# Get the path to the main executable
+MAIN_EXECUTABLE="$MAIN_APP_PATH/Contents/MacOS/picasso"
+if [ ! -f "$MAIN_EXECUTABLE" ]; then
+    echo "ERROR: Main executable not found at $MAIN_EXECUTABLE"
+    exit 1
+fi
+
+# Get the resources directory for icons
+MAIN_RESOURCES="$MAIN_APP_PATH/Contents/Resources"
+
 # ---------------------------------------------------------------------------
 # Step 1b: Fix HDF5 library conflict (h5py 3.15.1 vs tables 3.10.1), which
 # happened at version 0.9..6
@@ -95,16 +105,6 @@ if [ -d "$H5PY_DYLIBS" ]; then
         done
     fi
 fi
-
-# Get the path to the main executable
-MAIN_EXECUTABLE="$MAIN_APP_PATH/Contents/MacOS/picasso"
-if [ ! -f "$MAIN_EXECUTABLE" ]; then
-    echo "ERROR: Main executable not found at $MAIN_EXECUTABLE"
-    exit 1
-fi
-
-# Get the resources directory for icons
-MAIN_RESOURCES="$MAIN_APP_PATH/Contents/Resources"
 
 # -----------------------------------------------------------------------------
 # Step 2: Create separate .app bundles for each tool
