@@ -1,23 +1,28 @@
-One-click installer for Windows
-===============================
+One-click installer for macOS
+=============================
 
-This is the one-click installer for Picasso on Windows. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
+This is the one-click installer for Picasso on macOS. The Picasso software is complemented by our `Nature Protocols publication <https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html>`__.
 
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
-Creating your own installer
----------------------------
+How to install
+--------------
 
-You can create the exe file yourself by cloning our GitHub repo and running the  script picasso/release/one_click_windows_gui/create_installer_windows.bat from the Command Prompt. Note that you must have conda installed on your computer.
+1. Download the latest release from the `release page <https://github.com/jungmannlab/picasso/releases/>`__.
+2. Open the downloaded dmg file and drag the "picasso" icon to your Applications folder first.
+3. Repeat the same for all other icons with separate Picasso modules (Localize, Render, etc) that you wish to use.
+4. **Note:** The main picasso app must remain in the Applications folder, the shortcuts for the other modules can be moved to the desktop or elsewhere if desired.
+
+Picasso is distributed without an Apple Developer ID, which means that macOS may block the installation of the software. If the steps above do not work, please follow the instructions under the `link <https://support.apple.com/en-gb/guide/mac-help/mh40616/mac>`__. Alternatively, you can create the dmg file yourself by cloning our GitHub repo and running the bash script ``picasso/release/one_click_macos_gui/create_macos_dmg.sh`` from the Terminal. Note that you must have conda installed on your computer.
 
 Adding camera configuration and plugins
 ---------------------------------------
 
-Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. For more details, see https://picassosr.readthedocs.io/en/latest/localize.html#camera-config.
+Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. For more details, see `documentation <https://picassosr.readthedocs.io/en/latest/localize.html#camera-config>`__.
 
-To add your config.yaml file, navigate to your Picasso folder (by default C:\Picasso) and find the subdirectory _interal\picasso. Add the config file there.
+To add your config.yaml file, navigate to your Applications folder and right-click on the picasso app, then select "Show Package Contents". Add your config file to Contents/Frameworks/picasso.
 
-Similarly, you can add Picasso plugins under the folder _internal\picasso\gui\plugins. For more details on how to create plugins, see https://picassosr.readthedocs.io/en/latest/plugins.html.
+Similarly, you can add Picasso plugins under the folder Contents/Frameworks/picasso/gui/plugins. For more details on how to create plugins, see `documentation <https://picassosr.readthedocs.io/en/latest/plugins.html>`__.
 
 Changelog
 ---------
