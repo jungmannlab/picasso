@@ -50,8 +50,18 @@ pip install pyinstaller==6.19
 cd release/one_click_macos_gui
 
 # -----------------------------------------------------------------------------
-# Step 1: Run PyInstaller to build the main .app bundle
+# Step 1: Clean previous build artifacts and run PyInstaller
 # -----------------------------------------------------------------------------
+echo ">>> Cleaning previous build artifacts..."
+if [ -d "$DIST_DIR" ]; then
+    echo "Removing $DIST_DIR..."
+    rm -rf "$DIST_DIR"
+fi
+if [ -d "$BUILD_DIR" ]; then
+    echo "Removing $BUILD_DIR..."
+    rm -rf "$BUILD_DIR"
+fi
+
 # echo ">>> Building main .app bundle with PyInstaller..."
 pyinstaller "$PYINSTALLER_FILE" \
     --onedir \
