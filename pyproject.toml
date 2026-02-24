@@ -44,6 +44,7 @@ dependencies = [
     "playsound3==3.2.8",
     "imageio==2.37.0",
     "imageio-ffmpeg==0.6.0",
+    "PyImarisWriter==0.7.0; sys_platform=='win32'"
 ]
 
 [project.optional-dependencies]
