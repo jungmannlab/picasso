@@ -537,39 +537,11 @@ def is_hexadecimal(text):
     bool
         True if text represents rgb, False otherwise.
     """
-    allowed_characters = [
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "7",
-        "8",
-        "9",
-        "a",
-        "b",
-        "c",
-        "d",
-        "e",
-        "f",
-        "A",
-        "B",
-        "C",
-        "D",
-        "E",
-        "F",
-    ]
-    sum_char = 0
-    if isinstance(text, str):
-        if text[0] == "#":
-            if len(text) == 7:
-                for char in text[1:]:
-                    if char in allowed_characters:
-                        sum_char += 1
-                if sum_char == 6:
-                    return True
+    allowed_characters = "0123456789abcdefABCDEF"
+    if isinstance(text, str) and text[0] == "#" and len(text) == 7:
+        n_valid = sum(char in allowed_characters for char in text[1:])
+        if n_valid == 6:
+            return True
     return False
 
 
