@@ -11,6 +11,10 @@ How to install
 1. Download the latest release from the `release page <https://github.com/jungmannlab/picasso/releases/>`__.
 2. Open the downloaded exe file and follow the installation instructions.
 
+⚠️ If installed in ``Program Files``, Render and Localize may not be available for non-administrator users. Therefore, we recommend installing Picasso outside of ``Program Files``. The current default location is ``C:\Picasso``.
+⚠️ When using Windows installer, camera config file needs to be moved to ``C:\Picasso\_internal\picasso``. *Before v0.9.7 under* ``C:\Picasso\picasso``.
+⚠️ Windows Safety features and Windows Defender may ask multiple times for permission during the installation and download.
+
 Creating your own installer
 ---------------------------
 
