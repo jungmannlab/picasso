@@ -10,6 +10,7 @@ authors = [
     {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
     {name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"},
 ]
+maintainers = [{name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"}]
 keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
 description = "Collection of tools for painting super-resolution images"
 readme = "readme.rst"

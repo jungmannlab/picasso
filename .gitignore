@@ -36,7 +36,9 @@ picasso/config.yaml
 
 # One-click-installer output
 release/one_click_windows_gui/Output/
+release/one_click_windows_gui/*.zip
 release/one_click_macos_gui/*.dmg
+release/one_click_macos_gui/*.zip
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
