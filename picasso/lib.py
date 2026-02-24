@@ -545,6 +545,120 @@ def is_hexadecimal(text):
     return False
 
 
+def is_path_available(
+    path: str, *, check_ext: str | list[str] = "", parent=None
+) -> bool:
+    """Check if a file or folder exists at the given path. Returns True
+    if there is not such path. Returns False if the path already exists.
+    Allows to easily change the extension of the path.
+
+    Parameters
+    ----------
+    path : str
+        Path to be checked.
+    check_ext : str or list of str, optional
+        Other extension(s) to be checked if they're available. Must
+        start with a dot (e.g., ".txt"). Default is "".
+    parent : QWidget, optional
+        Parent widget for the error message box if raise_error is True.
+        A message box will be displayed showing asking if the user wants
+        to continue without the file or folder if the path does not
+        exist.
+
+    Returns
+    -------
+    paths_available : list of bools
+        For each path generated with the new extension, True if the path
+        is available, False if the path already exists.
+
+    Raises
+    ------
+    ValueError
+        If check_ext is not empty and does not start with a dot.
+    """
+    if check_ext:
+        if isinstance(check_ext, str):
+            check_ext = [check_ext]
+        for ext in check_ext:
+            if not ext.startswith("."):
+                raise ValueError(f"Extension must start with a dot: {ext}")
+        paths = [os.path.splitext(path)[0] + ext for ext in check_ext]
+    else:
+        paths = [path]
+    paths_available = []
+    for path in paths:
+        if os.path.exists(path):
+            if parent is not None:
+                box = QtWidgets.QMessageBox(parent)
+                box.setIcon(QtWidgets.QMessageBox.Warning)
+                box.setWindowTitle("File or folder already exists")
+                box.setText(
+                    f"The path '{path}' already exists."
+                    "\nDo you wish to overwrite it?"
+                )
+                box.setStandardButtons(
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+                )
+                result = box.exec_()
+                if result != QtWidgets.QMessageBox.Yes:
+                    paths_available.append(False)
+                else:
+                    paths_available.append(True)
+            else:
+                paths_available.append(False)
+        else:
+            paths_available.append(True)
+    return paths_available
+
+
+def get_save_filename_ext_dialog(
+    parent: QtWidgets.QWidget,
+    caption: str,
+    directory: str,
+    filter: str,
+    check_ext: str | list[str] = "",
+) -> tuple[str, str]:
+    """Custom getSaveFileName dialog that can check for the existence of
+    files with other extensions (for example, if the user tries to save
+    a .yaml file with the same name as an existing .hdf5 file, it will
+    ask if the user wants to overwrite the .hdf5 file).
+
+    Parameters
+    ----------
+    parent : QWidget
+        Parent widget for the dialog.
+    caption : str
+        Dialog caption.
+    directory : str
+        Initial directory.
+    filter : str
+        File filter, e.g., "YAML files (*.yaml);;HDF5 files (*.hdf5)".
+    check_ext : str or list of str, optional
+        Other extension(s) to be checked if they're available. Must
+        start with a dot (e.g., ".txt"). Default is "".
+
+    Returns
+    -------
+    selected_path : str
+        Selected file path.
+    selected_filter : str
+        Selected file filter.
+    """
+    # first run the standard dialog to get the initial path and filter
+    selected_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+        parent, caption, directory, filter
+    )
+    # check for the existence of files with other extensions and ask the
+    # user if they want to overwrite them
+    if selected_path and check_ext:
+        paths_available = is_path_available(
+            selected_path, check_ext=check_ext, parent=parent
+        )
+        if not all(paths_available):
+            return "", ""
+    return selected_path, selected_filter
+
+
 @numba.njit
 def find_local_minima(arr: np.ndarray) -> np.ndarray:
     """Find positions of the local minima in a 1D numpy array.
