@@ -1199,9 +1199,14 @@ class ParametersDialog(QtWidgets.QDialog):
     def update_z_calib(self, path: str) -> None:
         """Load the 3D calibration from a YAML file."""
         if path:
-            with open(path, "r") as f:
-                self.z_calibration = yaml.full_load(f)
-                self.z_calibration_path = path
+            if os.path.exists(path):
+                with open(path, "r") as f:
+                    self.z_calibration = yaml.full_load(f)
+                    self.z_calibration_path = path
+            else:
+                self.update_z_calib(None)
+                self.z_calib_label.setText("-- calibration path not found --")
+                return
             self.z_calib_label.setAlignment(QtCore.Qt.AlignRight)
             self.z_calib_label.setText(os.path.basename(path))
             self.fit_z_checkbox.setEnabled(True)

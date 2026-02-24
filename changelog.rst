@@ -7,6 +7,7 @@ Last change: 24-FEB-2026 CEST
 -----
 - Added a function ``picasso.lib.get_save_filename_ext_dialog`` that can also check for the existence of the files with other extenstions (for example, if the user tries to save a .yaml file with the same name as an existing .hdf5 file, it will ask if the user wants to overwrite the .hdf5 file). This is implemented in all GUI modules when saving files.
 - ``PyImarisWriter`` is included in the one-click-installer again (Windows only)
+- Localize Parameters dialog displays a message if the z calibration path in the config file could not be found
 
 0.9.7
 -----
