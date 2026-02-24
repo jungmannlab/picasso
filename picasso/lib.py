@@ -557,8 +557,8 @@ def is_path_available(
     path : str
         Path to be checked.
     check_ext : str or list of str, optional
-        Other extension(s) to be checked if they're available. Must
-        start with a dot (e.g., ".txt"). Default is "".
+        Other extension(s) to be checked if they're available. Default
+        is "".
     parent : QWidget, optional
         Parent widget for the error message box if raise_error is True.
         A message box will be displayed showing asking if the user wants
@@ -579,9 +579,6 @@ def is_path_available(
     if check_ext:
         if isinstance(check_ext, str):
             check_ext = [check_ext]
-        for ext in check_ext:
-            if not ext.startswith("."):
-                raise ValueError(f"Extension must start with a dot: {ext}")
         paths = [os.path.splitext(path)[0] + ext for ext in check_ext]
     else:
         paths = [path]
@@ -613,29 +610,34 @@ def is_path_available(
 
 def get_save_filename_ext_dialog(
     parent: QtWidgets.QWidget,
-    caption: str,
-    directory: str,
-    filter: str,
+    caption: str = "",
+    directory: str = "",
+    filter: str = "",
     check_ext: str | list[str] = "",
 ) -> tuple[str, str]:
     """Custom getSaveFileName dialog that can check for the existence of
     files with other extensions (for example, if the user tries to save
     a .yaml file with the same name as an existing .hdf5 file, it will
-    ask if the user wants to overwrite the .hdf5 file).
+    ask if the user wants to overwrite the .hdf5 file). The output is
+    the same as for QtWidgets.QFileDialog.getSaveFileName.
 
     Parameters
     ----------
     parent : QWidget
         Parent widget for the dialog.
-    caption : str
-        Dialog caption.
-    directory : str
-        Initial directory.
-    filter : str
+    caption : str, optional
+        Dialog caption. Default is "".
+    directory : str, optional
+        Initial directory. Default is "".
+    filter : str, optional
         File filter, e.g., "YAML files (*.yaml);;HDF5 files (*.hdf5)".
+        Default is "".
     check_ext : str or list of str, optional
-        Other extension(s) to be checked if they're available. Must
-        start with a dot (e.g., ".txt"). Default is "".
+        Other extension(s) to be checked if they're available. Does not
+        have to be a strict ".ext" format, can also include a suffix to
+        the path, e.g., "_1.hdf5". If "", extensions are not checked,
+        giving the standard getSaveFileName dialog behavior. Default is
+        "".
 
     Returns
     -------

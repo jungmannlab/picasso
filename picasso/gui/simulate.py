@@ -1250,7 +1250,7 @@ class Window(QtWidgets.QMainWindow):
         self.currentround += 1
 
         if self.currentround == 1:
-            fileNameOld, exe = QtWidgets.QFileDialog.getSaveFileName(
+            fileNameOld, exe = lib.get_save_filename_ext_dialog(
                 self, "Save movie to..", filter="*.raw"
             )
             if fileNameOld:
@@ -2356,7 +2356,7 @@ class CalibrationDialog(QtWidgets.QDialog):
             tablecontent.append(rowdata)
 
         table[0] = tablecontent
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Export calibration table to.", filter="*.csv"
         )
         if path:

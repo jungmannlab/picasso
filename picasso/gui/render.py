@@ -878,7 +878,7 @@ class DatasetDialog(QtWidgets.QDialog):
         out_path = self.window.view.locs_paths[0].replace(
             ".hdf5", "_colors.txt"
         )
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Save colors to", out_path, filter="*.txt"
         )
         if path:
@@ -3222,8 +3222,11 @@ class ChangeFOV(QtWidgets.QDialog):
         path = self.window.view.locs_paths[0]
         base, ext = os.path.splitext(path)
         out_path = base + "_fov.txt"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save FOV to", out_path, filter="*.txt"
+        path, ext = lib.get_save_filename_ext_dialog(
+            self,
+            "Save FOV to",
+            out_path,
+            filter="*.txt",
         )
         fov = np.array(
             [
@@ -3646,13 +3649,14 @@ class InfoDialog(QtWidgets.QDialog):
 
             # get the name prefix for saving images
             if self.save_images_check.isChecked():
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save images",
                     self.window.view.locs_paths[channel].replace(
                         ".hdf5", "_frc_im.tif"
                     ),
                     filter="*.tif",
+                    check_ext=["_1.tif", "_2.tif"],
                 )
                 if not path:
                     return
@@ -4093,8 +4097,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         directory, file_name = os.path.split(self.paths[0])
         base, ext = os.path.splitext(file_name)
         name_mask = base + "_mask"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save mask to", name_mask, filter="*.npy"
+        path, ext = lib.get_save_filename_ext_dialog(
+            self, "Save mask to", name_mask, filter="*.npy", check_ext=".png"
         )
         if path:
             np.save(path, self.mask)
@@ -4108,7 +4112,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         directory, file_name = os.path.split(self.paths[0])
         base, ext = os.path.splitext(file_name)
         name_blur = base + "_blur"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Save blur to", name_blur, filter="*.png"
         )
         if path:
@@ -4250,21 +4254,23 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             path_in = self.paths[self.channel].replace(
                 ".hdf5", "_mask_in.hdf5"
             )
-            path_in, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path_in, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save localizations within mask",
                 path_in,
                 filter="*.hdf5",
+                check_ext=".yaml",
             )
             if path_in:
                 path_out = self.paths[self.channel].replace(
                     ".hdf5", "_mask_out.hdf5"
                 )
-                path_out, ext = QtWidgets.QFileDialog.getSaveFileName(
+                path_out, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save localizations outside of mask",
                     path_out,
                     filter="*.hdf5",
+                    check_ext=".yaml",
                 )
                 if path_out:
                     self._save_locs(self.channel, path_in, path_out)
@@ -4773,11 +4779,12 @@ class RESIDialog(QtWidgets.QDialog):
         suffix_centers = None  # suffix added to cluster centers
         apply_fa = self.apply_fa.isChecked()  # apply basic frame analysis?
 
-        resi_path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        resi_path, ext = lib.get_save_filename_ext_dialog(
             self.window,
             "Save RESI cluster centers",
             self.paths[0].replace(".hdf5", "_resi.hdf5"),
             filter="*.hdf5",
+            check_ext=".yaml",
         )
         info = self.window.view.infos[0]
         new_info = {
@@ -5700,7 +5707,7 @@ class SlicerDialog(QtWidgets.QDialog):
         except AttributeError:
             return
         out_path = base + ".tif"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Save z slices", out_path, filter="*.tif"
         )
         if path:
@@ -6362,11 +6369,18 @@ class View(QtWidgets.QLabel):
                         self._dbscan(channel, path, **params)
             else:
                 # get the path to save
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                check_ext = [".yaml"]
+                if params["save_centers"]:
+                    check_ext.append("_centers.hdf5")
+                    check_ext.append("_centers.yaml")
+                if params["save_areas"]:
+                    check_ext.append("_areas.csv")
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save clustered locs",
                     self.locs_paths[channel].replace(".hdf5", "_dbscan.hdf5"),
                     filter="*.hdf5",
+                    check_ext=check_ext,
                 )
                 if path:
                     self._dbscan(channel, path, **params)
@@ -6484,7 +6498,13 @@ class View(QtWidgets.QLabel):
                         self._hdbscan(channel, path, **params)
             else:
                 # get the path to save
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                check_ext = [".yaml"]
+                if params["save_centers"]:
+                    check_ext.append("_centers.hdf5")
+                    check_ext.append("_centers.yaml")
+                if params["save_areas"]:
+                    check_ext.append("_areas.csv")
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save clustered locs",
                     self.locs_paths[channel].replace(
@@ -6492,6 +6512,7 @@ class View(QtWidgets.QLabel):
                         "_hdbscan.hdf5",
                     ),
                     filter="*.hdf5",
+                    check_ext=check_ext,
                 )
                 if path:
                     self._hdbscan(channel, path, **params)
@@ -6619,13 +6640,20 @@ class View(QtWidgets.QLabel):
                         self._smlm_clusterer(channel, path, **params)
             else:
                 # get the path to save
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                check_ext = [".yaml"]
+                if params["save_centers"]:
+                    check_ext.append("_centers.hdf5")
+                    check_ext.append("_centers.yaml")
+                if params["save_areas"]:
+                    check_ext.append("_areas.csv")
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save clustered locs",
                     self.locs_paths[channel].replace(
                         ".hdf5", "_clustered.hdf5"
                     ),
                     filter="*.hdf5",
+                    check_ext=check_ext,
                 )
                 if path:
                     self._smlm_clusterer(channel, path, **params)
@@ -6842,19 +6870,24 @@ class View(QtWidgets.QLabel):
         else:
             base, _ = os.path.splitext(self.window.view.locs_paths[channel])
             out_path = base + "_molmap.hdf5"
-            path_molecules, _ = QtWidgets.QFileDialog.getSaveFileName(
-                self.window, "Save molecules", out_path, filter="*.hdf5"
+            path_molecules, _ = lib.get_save_filename_ext_dialog(
+                self.window,
+                "Save molecules",
+                out_path,
+                filter="*.hdf5",
+                check_ext=".yaml",
             )
             if not path_molecules:
                 return
 
             if params["clustered_locs"]:
                 out_path = base + "_molmap_clustered.hdf5"
-                path_clusters, _ = QtWidgets.QFileDialog.getSaveFileName(
+                path_clusters, _ = lib.get_save_filename_ext_dialog(
                     self.window,
                     "Save clustered localizations",
                     out_path,
                     filter="*.hdf5",
+                    check_ext=".yaml",
                 )
                 if not path_clusters:
                     return
@@ -8267,11 +8300,12 @@ class View(QtWidgets.QLabel):
         if not ok:
             return
         # get saved file name
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self,
             "Save nearest neighbor distances",
             self.locs_paths[channel1].replace(".hdf5", "_nn.hdf5"),
             filter="*.hdf5",
+            check_ext=".yaml",
         )
         if not path:
             return
@@ -8403,7 +8437,7 @@ class View(QtWidgets.QLabel):
         out_path = base + ".trace.txt"
 
         # get the name for saving
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Save trace as txt", out_path, filter="*.trace.txt"
         )
         if path:
@@ -8989,8 +9023,12 @@ class View(QtWidgets.QLabel):
         if saved_locs != []:
             base, ext = os.path.splitext(self.locs_paths[channel])
             out_path = base + "_cluster.hdf5"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save picked localizations", out_path, filter="*.hdf5"
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save picked localizations",
+                out_path,
+                filter="*.hdf5",
+                check_ext=".yaml",
             )
             if path:
                 saved_locs = pd.concat(saved_locs, ignore_index=True)
@@ -11773,12 +11811,19 @@ class Window(QtWidgets.QMainWindow):
             base, ext = os.path.splitext(self.view.locs_paths[idx])
         except AttributeError:
             return
+        scalebar = self.display_settings_dlg.scalebar_groupbox.isChecked()
         out_path = base + "_view.png"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save image", out_path, filter="*.png;;*.tif"
+        check_ext = [".yaml"]
+        if not scalebar:
+            check_ext.append("_scalebar.png")
+        path, ext = lib.get_save_filename_ext_dialog(
+            self,
+            "Save image",
+            out_path,
+            filter="*.png;;*.tif",
+            check_ext=check_ext,
         )
         if path:
-            scalebar = self.display_settings_dlg.scalebar_groupbox.isChecked()
             if not scalebar:
                 self.display_settings_dlg.scalebar_groupbox.setChecked(True)
                 qimage_scale = self.view.draw_scalebar(self.view.qimage)
@@ -11835,8 +11880,12 @@ class Window(QtWidgets.QMainWindow):
         except AttributeError:
             return
         out_path = base + ".png"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save image", out_path, filter="*.png;;*.tif"
+        path, ext = lib.get_save_filename_ext_dialog(
+            self,
+            "Save image",
+            out_path,
+            filter="*.png;;*.tif",
+            check_ext="yaml",
         )
         if path:
             movie_height, movie_width = self.view.movie_size()
@@ -11876,7 +11925,7 @@ class Window(QtWidgets.QMainWindow):
         if not ok or not item:
             return
         if item == ".txt for ImageJ":
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save localizations as txt (frames,x,y)",
                 base + ".txt",
@@ -11885,7 +11934,7 @@ class Window(QtWidgets.QMainWindow):
             if path:
                 io.export_txt_imagej(path, locs, info)
         elif item == ".txt for NIS":
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self,
                 (
                     "Save localizations as txt for NIS "
@@ -11897,7 +11946,7 @@ class Window(QtWidgets.QMainWindow):
             if path:
                 io.export_txt_nis(path, locs, info)
         elif item == ".xyz for Chimera":
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save localizations as xyz for chimera (molecule,x,y,z)",
                 base + ".chi.xyz",
@@ -11905,7 +11954,7 @@ class Window(QtWidgets.QMainWindow):
             if path:
                 io.export_xyz_chimera(path, locs, info)
         elif item == ".3d for ViSP":
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save localizations for 3D ViSP (x, y, z, photons, frame)",
                 base + ".visp.3d",
@@ -11913,7 +11962,7 @@ class Window(QtWidgets.QMainWindow):
             if path:
                 io.export_3d_visp(path, locs, info)
         elif item == ".csv for ThunderSTORM":
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self, "Save csv to", base + ".csv", filter="*.csv"
             )
             if path:
@@ -11924,7 +11973,7 @@ class Window(QtWidgets.QMainWindow):
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + ".ims"
 
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Export FOV as ims", out_path, filter="*.ims"
         )
 
@@ -12326,8 +12375,12 @@ class Window(QtWidgets.QMainWindow):
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_properties.hdf5"
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                    self, "Save pick properties", out_path, filter="*.hdf5"
+                path, ext = lib.get_save_filename_ext_dialog(
+                    self,
+                    "Save pick properties",
+                    out_path,
+                    filter="*.hdf5",
+                    check_ext=".yaml",
                 )
                 if path:
                     self.view.save_pick_properties(path, channel)
@@ -12340,11 +12393,12 @@ class Window(QtWidgets.QMainWindow):
             if channel is (len(self.view.locs_paths) + 1):
                 base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + "_multi.hdf5"
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save localizations",
                     out_path,
                     filter="*.hdf5",
+                    check_ext=".yaml",
                 )
                 if path:
                     # combine locs from all channels
@@ -12392,8 +12446,12 @@ class Window(QtWidgets.QMainWindow):
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_render.hdf5"
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
-                    self, "Save localizations", out_path, filter="*.hdf5"
+                path, ext = lib.get_save_filename_ext_dialog(
+                    self,
+                    "Save localizations",
+                    out_path,
+                    filter="*.hdf5",
+                    check_ext=".yaml",
                 )
                 if path:
                     info = self.view.infos[channel] + [
@@ -12413,11 +12471,12 @@ class Window(QtWidgets.QMainWindow):
             if channel is (len(self.view.locs_paths) + 1):
                 base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + "_picked_multi.hdf5"
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save picked localizations",
                     out_path,
                     filter="*.hdf5",
+                    check_ext=".yaml",
                 )
                 if path:
                     self.view.save_picked_locs_multi(path)
@@ -12441,11 +12500,12 @@ class Window(QtWidgets.QMainWindow):
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_picked.hdf5"
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save picked localizations",
                     out_path,
                     filter="*.hdf5",
+                    check_ext=".yaml",
                 )
                 if path:
                     self.view.save_picked_locs(path, channel)
@@ -12476,11 +12536,18 @@ class Window(QtWidgets.QMainWindow):
             if channel is (len(self.view.locs_paths) + 1):
                 base, ext = os.path.splitext(self.view.locs_paths[0])
                 out_path = base + "_multi_pick.hdf5"
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                check_ext = [
+                    f"_{i}.hdf5" for i in range(len(self.view._picks))
+                ]
+                check_ext.extend(
+                    [f"_{i}.yaml" for i in range(len(self.view._picks))]
+                )
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save picked localizations",
                     out_path,
                     filter="*.hdf5",
+                    check_ext=check_ext,
                 )
                 if path:
                     self.view.save_picked_locs_multi_sep(path)
@@ -12504,11 +12571,18 @@ class Window(QtWidgets.QMainWindow):
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
                 out_path = base + "_pick.hdf5"
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                check_ext = [
+                    f"_{i}.hdf5" for i in range(len(self.view._picks))
+                ]
+                check_ext.extend(
+                    [f"_{i}.yaml" for i in range(len(self.view._picks))]
+                )
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save picked localizations (separate picks)",
                     out_path,
                     filter="*.hdf5",
+                    check_ext=check_ext,
                 )
                 if path:
                     self.view.save_picked_locs_sep(path, channel)
@@ -12517,7 +12591,7 @@ class Window(QtWidgets.QMainWindow):
         """Save pick regions as .yaml."""
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + "_picks.yaml"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Save pick regions", out_path, filter="*.yaml"
         )
         if path:

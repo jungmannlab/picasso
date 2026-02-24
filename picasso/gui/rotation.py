@@ -557,8 +557,8 @@ class AnimationDialog(QtWidgets.QDialog):
 
         # get save file name
         out_path = self.window.view_rot.paths[0].replace(".hdf5", "_video.mp4")
-        name, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save animation", out_path, filter="*.mp4"
+        name, ext = lib.get_save_filename_ext_dialog(
+            self, "Save animation", out_path, filter="*.mp4", check_ext=".yaml"
         )
         if name:
             # width and height for building the animation; must be even
@@ -1681,8 +1681,15 @@ class ViewRotation(QtWidgets.QLabel):
             int(self.angy * 180 / np.pi),
             int(self.angz * 180 / np.pi),
         )
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save image", out_path, filter="*.png;;*.tif"
+        check_ext = [".yaml"]
+        if scalebar_box.isChecked():
+            check_ext.append("_scalebar.png")
+        path, ext = lib.get_save_filename_ext_dialog(
+            self,
+            "Save image",
+            out_path,
+            filter="*.png;;*.tif",
+            check_ext=check_ext,
         )
         if path:
             self.qimage.save(path)
@@ -2245,11 +2252,12 @@ class RotationWindow(QtWidgets.QMainWindow):
             if channel is (len(self.view_rot.paths) + 1):
                 base, ext = os.path.splitext(self.view_rot.paths[0])
                 out_path = base + "_multi.hdf5"
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save picked localizations",
                     out_path,
                     filter="*.hdf5",
+                    check_ext=".yaml",
                 )
                 if path:
                     # combine locs from all channels
@@ -2288,11 +2296,12 @@ class RotationWindow(QtWidgets.QMainWindow):
                 out_path = self.view_rot.paths[channel].replace(
                     ".hdf5", f"_rotated_{angx}_{angy}_{angz}.hdf5"
                 )
-                path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                path, ext = lib.get_save_filename_ext_dialog(
                     self,
                     "Save rotated localizations",
                     out_path,
                     filter="*hdf5",
+                    check_ext=".yaml",
                 )
                 info = self.view_rot.infos[channel] + new_info
                 io.save_locs(path, self.window.view.all_locs[channel], info)

@@ -2420,7 +2420,7 @@ class Window(QtWidgets.QMainWindow):
             if ok:
                 base, ext = os.path.splitext(self.movie_path)
                 out_path = base + "_3d_calib.yaml"
-                path, exe = QtWidgets.QFileDialog.getSaveFileName(
+                path, exe = lib.get_save_filename_ext_dialog(
                     self, "Save 3D calibration", out_path, filter="*.yaml"
                 )
                 if path:
@@ -2536,8 +2536,8 @@ class Window(QtWidgets.QMainWindow):
         if self.movie_path != []:
             base, ext = os.path.splitext(self.movie_path)
             path = base + "_spots.hdf5"
-            path, exe = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save spots", path, filter="*.hdf5"
+            path, exe = lib.get_save_filename_ext_dialog(
+                self, "Save spots", path, filter="*.hdf5", check_ext=".yaml"
             )
             if path:
                 self.save_spots(path)
@@ -2549,7 +2549,7 @@ class Window(QtWidgets.QMainWindow):
         except AttributeError:
             return
         out_path = base + "_view.png"
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Save image", out_path, filter="*.png;;*.tif"
         )
         if path:
@@ -2589,8 +2589,12 @@ class Window(QtWidgets.QMainWindow):
         if self.movie_path != []:
             base, ext = os.path.splitext(self.movie_path)
             locs_path = base + "_locs.hdf5"
-            path, exe = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save localizations", locs_path, filter="*.hdf5"
+            path, exe = lib.get_save_filename_ext_dialog(
+                self,
+                "Save localizations",
+                locs_path,
+                filter="*.hdf5",
+                check_ext=".yaml",
             )
             if path:
                 self.save_locs(path)

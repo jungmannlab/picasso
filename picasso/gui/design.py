@@ -656,11 +656,11 @@ class FoldingDialog(QtWidgets.QDialog):
 
         table[0] = tablecontent
         if hasattr(self, "pwd"):
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self, "Export folding table to.", self.pwd, filter="*.csv"
             )
         else:
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self, "Export folding table to.", filter="*.csv"
             )
         if path:
@@ -1370,11 +1370,11 @@ class Window(QtWidgets.QMainWindow):
     def saveDialog(self) -> None:
         """Open a dialog to save the design file."""
         if hasattr(self, "pwd"):
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self, "Save design to..", self.pwd, filter="*.yaml"
             )
         else:
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self, "Save design to..", filter="*.yaml"
             )
         if path:
@@ -1395,11 +1395,11 @@ class Window(QtWidgets.QMainWindow):
         """Screenshot the current view."""
         filetypes = "*.png;;*.pdf"
         if hasattr(self, "pwd"):
-            path, filter = QtWidgets.QFileDialog.getSaveFileName(
+            path, filter = lib.get_save_filename_ext_dialog(
                 self, "Save Screenshot to..", self.pwd, filter=filetypes
             )
         else:
-            path, filter = QtWidgets.QFileDialog.getSaveFileName(
+            path, filter = lib.get_save_filename_ext_dialog(
                 self, "Save Screenshot to..", filter=filetypes
             )
         if path:
@@ -1495,14 +1495,14 @@ class Window(QtWidgets.QMainWindow):
                         + " Plates generated."
                     )
                     if hasattr(self, "pwd"):
-                        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                        path, ext = lib.get_save_filename_ext_dialog(
                             self,
                             "Save csv files to.",
                             self.pwd,
                             filter="*.csv",
                         )
                     else:
-                        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                        path, ext = lib.get_save_filename_ext_dialog(
                             self, "Save csv files to.", filter="*.csv"
                         )
                     if path:
@@ -1626,14 +1626,14 @@ class Window(QtWidgets.QMainWindow):
                         platename,
                     )
                 if hasattr(self, "pwd"):
-                    path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    path, ext = lib.get_save_filename_ext_dialog(
                         self,
                         "Save pipetting schemes to.",
                         self.pwd,
                         filter="*.pdf",
                     )
                 else:
-                    path, ext = QtWidgets.QFileDialog.getSaveFileName(
+                    path, ext = lib.get_save_filename_ext_dialog(
                         self, "Save pipetting schemes to.", filter="*.pdf"
                     )
 
