@@ -62,11 +62,13 @@ if [ -d "$BUILD_DIR" ]; then
     rm -rf "$BUILD_DIR"
 fi
 
-# echo ">>> Building main .app bundle with PyInstaller..."
+echo ">>> Building main .app bundle with PyInstaller..."
 pyinstaller "$PYINSTALLER_FILE" \
     --onedir \
     --windowed \
     --collect-all picasso \
+    --collect-all streamlit \
+    --copy-metadata streamlit \
     --name picasso \
     --icon ../logos/localize.icns \
     --distpath "$DIST_DIR" \

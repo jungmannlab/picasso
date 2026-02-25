@@ -14,8 +14,25 @@ call pip install "dist/picassosr-0.9.7-py3-none-any.whl"
 call cd release/one_click_windows_gui
 
 call pip install pyinstaller==6.19.0
-call pyinstaller "../pyinstaller/picasso_pyinstaller.py" --onedir --collect-all picasso --collect-all PyImarisWriter --name picasso --icon "../logos/localize.ico" --noconfirm
-call pyinstaller "../pyinstaller/picasso_pyinstaller.py" --onedir --windowed --collect-all picasso --collect-all PyImarisWriter --name picassow --icon "../logos/localize.ico" --noconfirm
+call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
+    --onedir ^
+    --collect-all picasso ^
+    --collect-all PyImarisWriter ^
+    --collect-all streamlit ^
+    --copy-metadata streamlit ^
+    --name picasso ^
+    --icon "../logos/localize.ico" ^
+    --noconfirm
+call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
+    --onedir ^
+    --windowed ^
+    --collect-all picasso ^
+    --collect-all PyImarisWriter ^
+    --collect-all streamlit ^
+    --copy-metadata streamlit ^
+    --name picassow ^
+    --icon "../logos/localize.ico" ^
+    --noconfirm
 
 call conda deactivate
 call conda remove -n picasso_installer --all -y
