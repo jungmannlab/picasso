@@ -965,7 +965,8 @@ def test_subclustering(
     do not (sparse). If subclustering occurs, the clustered molecules
     should have a lower number of events on average.
 
-    DOI: *DOI will be added once available*
+    Introduced in Kowalewski, Reinhardt, et al. Nature Comms, 2026.
+    DOI: https://doi.org/10.1038/s41467-026-70198-5
 
     Parameters
     ----------

@@ -539,7 +539,9 @@ def axial_localization_precision_astig(
     """Calculate axial localization precision for astigmatic 3D imaging
     for given localizations based on calibration.
 
-    Based on Kowalewski, Reinhardt, et al. *DOI will be added once available*.
+    Based on Kowalewski, Reinhardt, et al. Nature Comms, 2026.
+    DOI: https://doi.org/10.1038/s41467-026-70198-5
+
 
     Parameters
     ----------
@@ -594,7 +596,8 @@ def _axial_localization_precision_astig(
     """Calculate axial localization precision for astigmatic 3D imaging
     for given localizations based on calibration.
 
-    Based on Kowalewski, Reinhardt, et al. *DOI will be added once available*.
+    Based on Kowalewski, Reinhardt, et al. Nature Comms, 2026.
+    DOI: https://doi.org/10.1038/s41467-026-70198-5
 
     Parameters
     ----------

@@ -886,8 +886,8 @@ def sigma_uncertainty(
     2014.
 
     TODO: this is likely slightly incorrect for astigmatic imaging
-    since spherical covariance Gaussian is assumed in Mortensen et
-    al., Nat Methods, 2010.
+    since spherical covariance Gaussian is assumed in the original
+    paper?
 
     Parameters
     ----------

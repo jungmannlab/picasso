@@ -49,7 +49,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - NeNA. DOI: `10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
 - FRC. DOI: `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
 - Theoretical lateral localization precision (Gauss LQ and MLE). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
-- Theoretical axial localization precision (Gauss LQ and MLE). DOI: *DOI will be added once available*
+- Theoretical axial localization precision (Gauss LQ and MLE). DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
 - MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
 - RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__ 
 - AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__
@@ -61,7 +61,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - Picasso: Server. DOI: `10.1038/s42003-022-03909-5 <https://doi.org/10.1038/s42003-022-03909-5>`__
 - SPINNA. DOI: `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
 - SPINNA for LE fitting. DOI: `10.1038/s41592-024-02242-5 <https://doi.org/10.1038/s41592-024-02242-5>`__
-- G5M. DOI: *DOI will be added once available*
+- G5M. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
 
 Credits
 -------

@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 24-FEB-2026 CEST
+Last change: 27-FEB-2026 CEST
 
 0.9.8
 -----
@@ -9,6 +9,7 @@ Last change: 24-FEB-2026 CEST
 - ``PyImarisWriter`` is included in the one-click-installer again (Windows only)
 - Localize Parameters dialog displays a message if the z calibration path in the config file could not be found
 - Fixed Picasso Server launching in one-click-installers
+- Added DOIs related to G5M and axial loc. precision
 
 0.9.7
 -----
@@ -89,8 +90,8 @@ Bug fixes:
 -------
 Important updates:
 ^^^^^^^^^^^^^^^^^^
-- **Algorithm for molecular mapping introduced (G5M)**, see documentation `here <https://picassosr.readthedocs.io/en/latest/render.html#g5m>`__ *DOI will be added once available*.
-- **Localize outputs axial localization precision for astigmatic imaging in 3D**,  *DOI will be added once available*. 
+- **Algorithm for molecular mapping introduced (G5M)**, see documentation `here <https://picassosr.readthedocs.io/en/latest/render.html#g5m>`__. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`_
+- **Localize outputs axial localization precision for astigmatic imaging in 3D**. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`_
 - Localize GUI allows the user to select which localization columns to save when saving localizations. See the new dialog in the *File* -> *Select columns to save*
 - Localize accepts frame bounds to analyze only a subset of frames
 - Config file accepts z calibration .yaml paths so that they can be automatically loaded when changing between cameras
