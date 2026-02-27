@@ -94,7 +94,7 @@ def _initial_sigmas(
         d2 = (i - size_half) ** 2
         sum_deviation_y += spot[i, size_half] * d2
         sum_deviation_x += spot[size_half, i] * d2
-        sum_y += spot[i, size_half]
+        sum_y += spot[i, size_half]  # TODO: is this correct?
         sum_x += spot[size_half, i]
     sy = np.sqrt(sum_deviation_y / sum_y)
     sx = np.sqrt(sum_deviation_x / sum_x)
@@ -249,9 +249,15 @@ def _erf(x: float) -> float:
 # TODO: check this is correct?
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _gaussian_integral(x: float, mu: float, sigma: float) -> float:
-    """Calculate the integral of a Gaussian function from negative
-    infinity to x."""
-    sq_norm = 0.70710678118654757 / sigma  # sq_norm = sqrt(0.5/sigma**2)
+    """Calculate the integral of a Gaussian function in a pixel in one
+    dimension (deltaE, equations 4a,b in Smith, et al (supplement)).
+
+    Note that the paper gives a wrong formula, the denominator within
+    ERF should be sqrt(2) * sigma, not sigma**2. This has been corrected
+    here."""
+    sq_norm = (
+        0.70710678118654757 / sigma
+    )  # sq_norm = sqrt(0.5/sigma**2)  #NOTE: the paper gives the incorrect value of 0.5/sigma**2
     d = x - mu
     return 0.5 * (
         math.erf((d + 0.5) * sq_norm) - math.erf((d - 0.5) * sq_norm)
@@ -260,21 +266,21 @@ def _gaussian_integral(x: float, mu: float, sigma: float) -> float:
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral(
-    x: float,
-    mu: float,
+    x: float,  # x_k
+    mu: float,  # theta_x
     sigma: float,
-    photons: float,
-    PSFc: float,
+    photons: float,  # theta_I_0
+    PSFc: float,  # delta_E_y
 ) -> tuple[float, float]:
-    """Calculate the first and second derivatives of the integral of a
-    Gaussian function with respect to x."""
+    """Calculate the first and second derivatives of the integral of
+    mu_k w.r.t theta_x, see equations 11a and 14a."""
     d = x - mu
     a = np.exp(-0.5 * ((d + 0.5) / sigma) ** 2)
     b = np.exp(-0.5 * ((d - 0.5) / sigma) ** 2)
-    dudt = -photons * PSFc * (a - b) / (np.sqrt(2.0 * np.pi) * sigma)
+    dudt = photons * PSFc * (b - a) / (np.sqrt(2.0 * np.pi) * sigma)
     d2udt2 = (
-        -photons
-        * ((d + 0.5) * a - (d - 0.5) * b)
+        photons
+        * ((d - 0.5) * b - (d + 0.5) * a)
         * PSFc
         / (np.sqrt(2.0 * np.pi) * sigma**3)
     )
@@ -283,14 +289,16 @@ def _derivative_gaussian_integral(
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral_1d_sigma(
-    x: float,
-    mu: float,
+    x: float,  # x_k
+    mu: float,  # theta_x
     sigma: float,
-    photons: float,
-    PSFc: float,
+    photons: float,  # theta_I_0
+    PSFc: float,  # delta_E_y
 ) -> tuple[float, float]:
-    """Calculate the first and second derivatives of the integral of a
-    Gaussian function with respect to sigma in 1D."""
+    """Used for calculating the first and second derivatives of the
+    integral of mu_k w.r.t sigma. While Smith et al do not provide the
+    formula, it can be easily derived, similarly to equations 10, 11 and
+    14."""
     ax = np.exp(-0.5 * ((x + 0.5 - mu) / sigma) ** 2)
     bx = np.exp(-0.5 * ((x - 0.5 - mu) / sigma) ** 2)
     dudt = (
@@ -307,33 +315,51 @@ def _derivative_gaussian_integral_1d_sigma(
 
 @numba.jit(nopython=True, nogil=True)
 def _derivative_gaussian_integral_2d_sigma(
-    x: float,
-    y: float,
-    mu: float,
-    nu: float,
+    x: float,  # x_k
+    y: float,  # y_k
+    mu: float,  # theta_x
+    nu: float,  # theta_y
     sigma: float,
-    photons: float,
-    PSFx: float,
-    PSFy: float,
+    photons: float,  # theta_I_0
+    PSFx: float,  # delta_E_x
+    PSFy: float,  # delta_E_y
 ) -> tuple[float, float]:
-    """Calculate the first and second derivatives of the integral of a
-    Gaussian function with respect to sigma in 2D."""
-    dSx, ddSx = _derivative_gaussian_integral_1d_sigma(
-        x,
-        mu,
-        sigma,
-        photons,
-        PSFy,
+    """Calculate the first and second derivatives of the integral of
+    mu_k w.r.t sigma. While Smith et al do not provide the formula, it
+    can be easily derived, similarly to equations 10, 11 and 14. The
+    derivation can be found under https://picassosr.readthedocs.io/en/latest/localize.html.  #TODO: add this derivation, modify the link to point to the subsection of the documentation
+    """
+    a_plus = (x - mu + 0.5) / (np.sqrt(2.0) * sigma)
+    a_minus = (x - mu - 0.5) / (np.sqrt(2.0) * sigma)
+    b_plus = (y - nu + 0.5) / (np.sqrt(2.0) * sigma)
+    b_minus = (y - nu - 0.5) / (np.sqrt(2.0) * sigma)
+
+    Fx = a_minus * np.exp(-(a_minus**2)) - a_plus * np.exp(-(a_plus**2))
+    Fy = b_minus * np.exp(-(b_minus**2)) - b_plus * np.exp(-(b_plus**2))
+    dPSFxdt = Fx / (np.sqrt(np.pi) * sigma)
+    dPSFydt = Fy / (np.sqrt(np.pi) * sigma)
+
+    d2PSFxdt2 = (1 / np.sqrt(np.pi)) * (
+        (-Fx / sigma**2)
+        + sigma ** (-2)
+        * (
+            -a_minus * np.exp(-(a_minus**2)) * (1 - 2 * a_minus**2)
+            + a_plus * np.exp(-(a_plus**2)) * (1 - 2 * a_plus**2)
+        )
     )
-    dSy, ddSy = _derivative_gaussian_integral_1d_sigma(
-        y,
-        nu,
-        sigma,
-        photons,
-        PSFx,
+    d2PSFydt2 = (1 / np.sqrt(np.pi)) * (
+        (-Fy / sigma**2)
+        + sigma ** (-2)
+        * (
+            -b_minus * np.exp(-(b_minus**2)) * (1 - 2 * b_minus**2)
+            + b_plus * np.exp(-(b_plus**2)) * (1 - 2 * b_plus**2)
+        )
     )
-    dudt = dSx + dSy
-    d2udt2 = ddSx + ddSy
+
+    dudt = photons * (PSFy * dPSFxdt + PSFx * dPSFydt)
+    d2udt2 = (
+        photons * PSFy * d2PSFxdt2 + 2 * dPSFxdt * dPSFydt + PSFx * d2PSFydt2
+    )
     return dudt, d2udt2
 
 
@@ -478,7 +504,11 @@ def _mlefit_sigma(
     max_it: int,
 ) -> None:
     """Fits a Gaussian to a single spot using Maximum Likelihood
-    Estimation (MLE) with a single sigma for both x and y dimensions."""
+    Estimation (MLE) with a single sigma for both x and y dimensions.
+
+    Based on the work of Smith, et al. Nature Methods, 2010. The
+    equations mentioned below refer to the supplementary information of
+    that paper."""
     n_params = 5
 
     spot = spots[index]
@@ -510,29 +540,44 @@ def _mlefit_sigma(
         numerator[:] = 0.0
         denominator[:] = 0.0
 
+        # at each iteration (theta update) we sum across all pixels in the spot,
+        # see equation 13
         for ii in range(size):
             for jj in range(size):
+                # this is delta E_x
                 PSFx = _gaussian_integral(ii, theta[0], theta[4])
+                # this is delta E_y
                 PSFy = _gaussian_integral(jj, theta[1], theta[4])
 
-                # Derivatives
+                # partial derivatives (PDs) (first and second order) of mu_k
+                # with respect to each of the model parameters (x, y, N,
+                # bg, sigma), used in equation 13
                 dudt[0], d2udt2[0] = _derivative_gaussian_integral(
-                    ii, theta[0], theta[4], theta[2], PSFy
-                )
+                    ii,
+                    theta[0],
+                    theta[4],
+                    theta[2],
+                    PSFy,  # TODO: check if ii should refer to x or y!!!! same for jj
+                )  # PDs with respect to theta_x
                 dudt[1], d2udt2[1] = _derivative_gaussian_integral(
                     jj, theta[1], theta[4], theta[2], PSFx
-                )
-                dudt[2] = PSFx * PSFy
+                )  # PDs with respect to theta_y
+                dudt[2] = PSFx * PSFy  # PDs w.r.t theta_I_0 (photons)
                 d2udt2[2] = 0.0
-                dudt[3] = 1.0
+                dudt[3] = 1.0  # PDs w.r.t theta_bg (background)
                 d2udt2[3] = 0.0
                 dudt[4], d2udt2[4] = _derivative_gaussian_integral_2d_sigma(
                     ii, jj, theta[0], theta[1], theta[4], theta[2], PSFx, PSFy
-                )
+                )  # PDs w.r.t theta_sigma; note that the paper does not
+                # give an explicit formula for this but it can be derived
+                # fairly easily following the logic of equations 10, 11
+                # and 14
 
-                model = theta[2] * dudt[2] + theta[3]
+                model = theta[2] * dudt[2] + theta[3]  # equation 2
                 cf = df = 0.0
-                data = spot[ii, jj]
+                data = spot[
+                    ii, jj
+                ]  # TODO: check if this should be spot[jj, ii] instead
                 if model > 10e-3:
                     cf = data / model - 1
                     df = data / model**2
@@ -842,7 +887,9 @@ def locs_from_fits(
     x = theta[:, 1] + identifications["x"] - box_offset
     y = theta[:, 0] + identifications["y"] - box_offset
     with np.errstate(invalid="ignore"):
-        lpy = np.sqrt(CRLBs[:, 0])
+        lpy = np.sqrt(
+            CRLBs[:, 0]
+        )  # TODO: maybe we should not use crlb at all? just the final Mortensen formula? (or stalling and rieger for a faster well-approximated formula)
         lpx = np.sqrt(CRLBs[:, 1])
         a = np.maximum(theta[:, 4], theta[:, 5])
         b = np.minimum(theta[:, 4], theta[:, 5])
@@ -886,7 +933,7 @@ def sigma_uncertainty(
     2014.
 
     TODO: this is likely slightly incorrect for astigmatic imaging
-    since spherical covariance Gaussian is assumed in Mortensen et
+    since spherical covariance Gaussian is assumed in Smith et
     al., Nat Methods, 2010.
 
     Parameters
