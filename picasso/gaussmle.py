@@ -298,7 +298,7 @@ def _derivative_gaussian_integral_sigma(
     integral of mu_k w.r.t sigma in the anisotropic case, sigma_x !=
     sigma_y. While Smith et al do not provide the formula, it can be
     easily derived, similarly to equations 10, 11 and 14. The derivation
-    can be found under https://picassosr.readthedocs.io/en/latest/localize.html#MLE-fitting.
+    can be found under https://picassosr.readthedocs.io/en/latest/localize.html#mle-fitting.
     """
     a_plus = (x - mu + 0.5) / (np.sqrt(2.0) * sigma_x)
     a_minus = (x - mu - 0.5) / (np.sqrt(2.0) * sigma_x)
@@ -330,7 +330,7 @@ def _derivative_gaussian_integral_iso_sigma(
     mu_k w.r.t sigma for the case of isotropic sigma. While Smith et al
     do not provide the formula, it can be easily derived, similarly to
     equations 10, 11 and 14. The derivation can be found under
-    https://picassosr.readthedocs.io/en/latest/localize.html#MLE-fitting.
+    https://picassosr.readthedocs.io/en/latest/localize.html#mle-fitting.
     """
     a_plus = (x - mu + 0.5) / (np.sqrt(2.0) * sigma)
     a_minus = (x - mu - 0.5) / (np.sqrt(2.0) * sigma)

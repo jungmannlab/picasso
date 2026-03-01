@@ -194,39 +194,38 @@ The original publication by `Smith et al., 2010 <https://doi.org/10.1038/nmeth.1
 Anisotropic σ update
 ~~~~~~~~~~~~~~~~~~~~
 
-Equation 13 in the supplementary information provides the formula for updating any model parameter :math:`\theta_i`. To update σ, we only need to find the first and second order partial derivatives of :math:`\mu_k` w.r.t. to :math:`\sigma_x` and :math:`\sigma_y`. The modified equation 1 is given by:
+Equation 13 in the supplementary information provides the formula for updating any model parameter $\theta_i$. To update σ, we only need to find the first and second order partial derivatives of $\mu_k$ w.r.t. to $\sigma_x$ and $\sigma_y$. The modified equation 1 is given by:
 
-.. math:: PSF(x, y) = \frac{1}{2\pi\sigma_x\sigma_y} \exp\left(-\frac{(x-\mu_x)^2}{2\sigma_x^2} - \frac{(y-\mu_y)^2}{2\sigma_y^2}\right)
+$$PSF(x, y) = \frac{1}{2\pi\sigma_x\sigma_y} \exp\left(-\frac{(x-\mu_x)^2}{2\sigma_x^2} - \frac{(y-\mu_y)^2}{2\sigma_y^2}\right)$$
 
 Then, equation 3 remains unchanged and equation 4 remains very similar to the original (note the original publication has a mistake in the denominators of the error functions):
 
-.. math:: \Delta E_x(x, y) = \frac{1}{2} \erf(\frac{x - \theta_x + \frac{1}{2}}{\sqrt{2}\sigma_x}) - \frac{1}{2} \erf(\frac{x - \theta_x - \frac{1}{2}}{\sqrt{2}\sigma_x})
-.. math:: \Delta E_y(x, y) = \frac{1}{2} \erf(\frac{y - \theta_y + \frac{1}{2}}{\sqrt{2}\sigma_y}) - \frac{1}{2} \erf(\frac{y - \theta_y - \frac{1}{2}}{\sqrt{2}\sigma_y})
+$$\Delta E_x(x, y) = \frac{1}{2} \erf(\frac{x - \theta_x + \frac{1}{2}}{\sqrt{2}\sigma_x}) - \frac{1}{2} \erf(\frac{x - \theta_x - \frac{1}{2}}{\sqrt{2}\sigma_x})$$
+$$\Delta E_y(x, y) = \frac{1}{2} \erf(\frac{y - \theta_y + \frac{1}{2}}{\sqrt{2}\sigma_y}) - \frac{1}{2} \erf(\frac{y - \theta_y - \frac{1}{2}}{\sqrt{2}\sigma_y})$$
 
-Equations 11 and 14 remain unchanged, except, similarly to above, :math:`\sigma` is replaced by :math:`\sigma_x` and :math:`\sigma_y`.
+Equations 11 and 14 remain unchanged, except, similarly to above, $\sigma$ is replaced by $\sigma_x$ and $\sigma_y$.
 
-Extending equation 11 to :math:`\theta_i = \sigma_x` gives:
+Extending equation 11 to $\theta_i = \sigma_x$ gives:
 
-.. math:: \frac{\partial \mu_k}{\partial \sigma_x} = \theta_{I_0} \Delta E_y \frac{\partial \Delta E_x}{\partial \sigma_x}
+$$\frac{\partial \mu_k}{\partial \sigma_x} = \theta_{I_0} \Delta E_y \frac{\partial \Delta E_x}{\partial \sigma_x}$$
 
-Letting :math:`a_{\pm} = \frac{x - \theta_x \pm \frac{1}{2}}{\sqrt{2}\sigma_x}` and :math:`F_x = a_- e^{-a_-^2} - a_+ e^{-a_+^2}` it can be easily shown that:
+Letting $a_{\pm} = \frac{x - \theta_x \pm \frac{1}{2}}{\sqrt{2}\sigma_x}$ and $F_x = a_- e^{-a_-^2} - a_+ e^{-a_+^2}$ it can be easily shown that:
 
-.. math:: \frac{\partial \Delta E_x}{\partial \sigma_x} = \frac{1}{\sqrt{\pi}\sigma_x} F_x
+$$\frac{\partial \Delta E_x}{\partial \sigma_x} = \frac{1}{\sqrt{\pi}\sigma_x} F_x$$
 
-Extending equation 14 to :math:`\theta_i = \sigma_x` gives:
+Extending equation 14 to $\theta_i = \sigma_x$ gives:
 
-.. math:: \frac{\partial^2 \mu_k}{\partial \sigma_x^2} = \theta_{I_0} \Delta E_y \frac{\partial^2 \Delta E_x}{\partial \sigma_x^2} = \theta_{I_0} \Delta E_y \frac{1}{\sqrt{\pi}}  \bigg(\frac{-F_x}{\sigma_x^2} + \frac{1}{\sigma_x} \frac{\partial F_x}{\partial \sigma_x}\bigg)
+$$\frac{\partial^2 \mu_k}{\partial \sigma_x^2} = \theta_{I_0} \Delta E_y \frac{\partial^2 \Delta E_x}{\partial \sigma_x^2} = \theta_{I_0} \Delta E_y \frac{1}{\sqrt{\pi}}  \bigg(\frac{-F_x}{\sigma_x^2} + \frac{1}{\sigma_x} \frac{\partial F_x}{\partial \sigma_x}\bigg)$$
 
-with :math:`\frac{\partial F_x}{\partial \sigma_x} = \frac{a_+}{\sigma_x} e^{-a_+^2} (1 - 2 a_+^2) - \frac{a_-}{\sigma_x} e^{-a_-^2} (1 - 2 a_-^2)`.
-
-Derivates w.r.t. :math:`\sigma_y` have the same form.
+with $\frac{\partial F_x}{\partial \sigma_x} = \frac{a_+}{\sigma_x} e^{-a_+^2} (1 - 2 a_+^2) - \frac{a_-}{\sigma_x} e^{-a_-^2} (1 - 2 a_-^2)$.
+Derivates w.r.t. $\sigma_y$ have the same form.
 
 Isotropic σ update
 ~~~~~~~~~~~~~~~~~~
 
-Using :math:`\sigma_x = \sigma_y = \sigma`, we get new formulas for the partial derivatives of :math:`\mu_k` w.r.t. to :math:`\sigma`:
+Using $\sigma_x = \sigma_y = \sigma$, we get new formulas for the partial derivatives of $\mu_k$ w.r.t. to $\sigma$:
 
-.. math:: \frac{\partial \mu_k}{\partial \sigma} = \theta_{I_0} \bigg( \Delta E_y \frac{\partial \Delta E_x}{\partial \sigma} + \Delta E_x \frac{\partial \Delta E_y}{\partial \sigma} \bigg)
-.. math:: \frac{\partial^2 \mu_k}{\partial \sigma^2} = \theta_{I_0} \bigg( \Delta E_y \frac{\partial^2 \Delta E_x}{\partial \sigma^2} + 2 \frac{\partial \Delta E_y}{\partial \sigma} \frac{\partial \Delta E_x}{\partial \sigma} + \Delta E_x \frac{\partial^2 \Delta E_y}{\partial \sigma^2}  \bigg)
+$$\frac{\partial \mu_k}{\partial \sigma} = \theta_{I_0} \bigg( \Delta E_y \frac{\partial \Delta E_x}{\partial \sigma} + \Delta E_x \frac{\partial \Delta E_y}{\partial \sigma} \bigg)$$
+$$\frac{\partial^2 \mu_k}{\partial \sigma^2} = \theta_{I_0} \bigg( \Delta E_y \frac{\partial^2 \Delta E_x}{\partial \sigma^2} + 2 \frac{\partial \Delta E_y}{\partial \sigma} \frac{\partial \Delta E_x}{\partial \sigma} + \Delta E_x \frac{\partial^2 \Delta E_y}{\partial \sigma^2}  \bigg)$$
 
 The rest of the equations remain unchanged.
