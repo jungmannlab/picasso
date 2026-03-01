@@ -21,8 +21,6 @@ import numba
 import numpy as np
 import pandas as pd
 
-GAMMA = np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
-
 
 @numba.jit(nopython=True, nogil=True)
 def _sum_and_center_of_mass(
@@ -94,7 +92,7 @@ def _initial_sigmas(
         d2 = (i - size_half) ** 2
         sum_deviation_y += spot[i, size_half] * d2
         sum_deviation_x += spot[size_half, i] * d2
-        sum_y += spot[i, size_half]  # TODO: is this correct?
+        sum_y += spot[i, size_half]
         sum_x += spot[size_half, i]
     sy = np.sqrt(sum_deviation_y / sum_y)
     sx = np.sqrt(sum_deviation_x / sum_x)
@@ -254,9 +252,7 @@ def _gaussian_integral(x: float, mu: float, sigma: float) -> float:
     Note that the paper gives a wrong formula, the denominator within
     ERF should be sqrt(2) * sigma, not sigma**2. This has been corrected
     here."""
-    sq_norm = (
-        0.70710678118654757 / sigma
-    )  # sq_norm = sqrt(0.5/sigma**2)  #NOTE: the paper gives the incorrect value of 0.5/sigma**2
+    sq_norm = 0.70710678118654757 / sigma  # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
     return 0.5 * (
         math.erf((d + 0.5) * sq_norm) - math.erf((d - 0.5) * sq_norm)
@@ -518,7 +514,6 @@ def _mlefit_sigma(
     # theta is [x, y, N, bg, S]
     theta = _initial_theta_sigma(spot, size)
     # Set maximum iteration for each parameter
-    # TODO: why is max_step even a thing here????
     max_step = np.zeros(n_params, dtype=np.float32)
     max_step[0:2] = theta[4]
     max_step[2:4] = 0.1 * theta[2:4]
@@ -552,10 +547,9 @@ def _mlefit_sigma(
                 # this is delta E_y
                 PSFy = _gaussian_integral(jj, theta[1], theta[4])
 
-                # partial derivatives (PDs) (first and second order) of mu_k
+                # Partial derivatives (PDs) (first and second order) of mu_k
                 # with respect to each of the model parameters (x, y, N,
                 # bg, sigma), used in equation 13
-                # TODO: check if ii should refer to x or y!!!! same for jj will affect the crlb code too!
                 dudt[0], d2udt2[0] = _derivative_gaussian_integral(
                     ii,
                     theta[0],
@@ -577,12 +571,10 @@ def _mlefit_sigma(
                 # fairly easily following the logic of equations 10, 11
                 # and 14
 
-                model = (
-                    theta[2] * PSFx * PSFy + theta[3]
-                )  # equation 2, model := mu_k
+                # equation 2, model := mu_k
+                model = theta[2] * PSFx * PSFy + theta[3]
                 cf = df = 0.0
-                # data := x_k TODO: check if this should be spot[jj, ii] instead
-                data = spot[ii, jj]
+                data = spot[jj, ii]  # data := x_k
                 if model > 10e-3:
                     cf = data / model - 1  # cf := (x_k / mu_k - 1) (eq 13)
                     df = data / model**2  # df := x_k / mu_k^2 (eq 13)
@@ -594,22 +586,15 @@ def _mlefit_sigma(
                     denominator[ll] += cf * d2udt2[ll] - df * dudt[ll] ** 2
 
         # The theta update
-        # TODO: I think that we should just use theta[ll] += numerator[ll] / denominator[ll] here, why is there so much code here instead?
         for ll in range(n_params):
             if denominator[ll] == 0.0:
-                update = np.sign(
-                    numerator[ll] * max_step[ll]
-                )  # TODO: why is max_step used here?????
+                update = np.sign(numerator[ll] * max_step[ll])
             else:
                 update = np.minimum(
                     np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
                     max_step[ll],
                 )
-            if kk < 5:
-                update *= GAMMA[
-                    ll
-                ]  # TODO: check if GAMMA is needed, feels like it's wrong, maybe due to bugs earlier?
-            theta[ll] -= update  # TODO: should it not be +=?
+            theta[ll] -= update
 
         # Other constraints
         theta[2] = np.maximum(theta[2], 1.0)
@@ -663,9 +648,7 @@ def _mlefit_sigma(
 
             # log-likelihood, see equation 7 + Stirling approximation
             if model > 0:
-                data = spot[
-                    ii, jj
-                ]  # TODO: check if this should be spot[jj, ii] instead
+                data = spot[jj, ii]
                 if data > 0:
                     log_likelihood += (
                         data * np.log(model)
@@ -701,16 +684,17 @@ def _mlefit_sigmaxy(
     """Fit a Gaussian to a single spot using Maximum Likelihood
     Estimation (MLE) with separate sigmas for x and y dimensions.
 
-    Check the comments in function ``_mlefit_sigma`` for more details,
-    on the code and the logic."""
+    Based on the work of Smith, et al. Nature Methods, 2010. The
+    equations mentioned below refer to the supplementary information of
+    that paper."""
     n_params = 6
 
     spot = spots[index]
     size, _ = spot.shape
 
-    # Initial values
     # theta is [x, y, N, bg, Sx (sigma_x), Sy (sigma_y)]
     theta = _initial_theta_sigmaxy(spot, size)
+    # Set maximum iteration for each parameter
     max_step = np.zeros(n_params, dtype=np.float32)
     max_step[0:2] = theta[4]
     max_step[2:4] = 0.1 * theta[2:4]
@@ -737,35 +721,44 @@ def _mlefit_sigmaxy(
         numerator[:] = 0.0
         denominator[:] = 0.0
 
+        # At each iteration (theta update) we sum across all pixels in the spot,
+        # see equation 13
         for ii in range(size):
             for jj in range(size):
                 # delta_Ex and delta_Ey
                 PSFx = _gaussian_integral(ii, theta[0], theta[4])
                 PSFy = _gaussian_integral(jj, theta[1], theta[5])
-                # Derivatives
+
+                # Partial derivatives (PDs) (first and second order) of mu_k
+                # with respect to each of the model parameters (x, y, N,
+                # bg, sigma), used in equation 13
                 dudt[0], d2udt2[0] = _derivative_gaussian_integral(
                     ii, theta[0], theta[4], theta[2], PSFy
-                )
+                )  # PDs with respect to theta_x
                 dudt[1], d2udt2[1] = _derivative_gaussian_integral(
                     jj, theta[1], theta[5], theta[2], PSFx
-                )
-                dudt[2] = PSFx * PSFy
+                )  # PDs with respect to theta_y
+                dudt[2] = PSFx * PSFy  # PDs w.r.t theta_I_0 (photons)
                 d2udt2[2] = 0.0
-                dudt[3] = 1.0
+                dudt[3] = 1.0  # PDs w.r.t theta_bg (background)
                 d2udt2[3] = 0.0
                 dudt[4], d2udt2[4] = _derivative_gaussian_integral_sigma(
                     ii, theta[0], theta[4], theta[2], PSFy
                 )
                 dudt[5], d2udt2[5] = _derivative_gaussian_integral_sigma(
                     jj, theta[1], theta[5], theta[2], PSFx
-                )
+                )  # PDs w.r.t sigma_y; note that the paper does not
+                # give an explicit formula for this but it can be derived
+                # fairly easily following the logic of equations 10, 11
+                # and 14
 
+                # equation 2, model := mu_k
                 model = theta[2] * PSFx * PSFy + theta[3]
                 cf = df = 0.0
-                data = spot[ii, jj]
+                data = spot[jj, ii]  # data := x_k
                 if model > 10e-3:
-                    cf = data / model - 1
-                    df = data / model**2
+                    cf = data / model - 1  # cf := (x_k / mu_k - 1) (eq 13)
+                    df = data / model**2  # df := x_k / mu_k^2 (eq 13)
                 cf = np.minimum(cf, 10e4)
                 df = np.minimum(df, 10e4)
 
@@ -773,15 +766,15 @@ def _mlefit_sigmaxy(
                     numerator[ll] += cf * dudt[ll]
                     denominator[ll] += cf * d2udt2[ll] - df * dudt[ll] ** 2
 
-        # The update
+        # The theta update
         for ll in range(n_params):
             if denominator[ll] == 0.0:
                 # This is case is not handled in Lidke's code
                 # but it seems to be a problem here
                 # (maybe due to many iterations)
-                theta[ll] -= GAMMA[ll] * np.sign(numerator[ll]) * max_step[ll]
+                theta[ll] -= np.sign(numerator[ll]) * max_step[ll]
             else:
-                theta[ll] -= GAMMA[ll] * np.minimum(
+                theta[ll] -= np.minimum(
                     np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
                     max_step[ll],
                 )
@@ -802,10 +795,12 @@ def _mlefit_sigmaxy(
         old_y = theta[1]
         old_sx = theta[4]
         old_sy = theta[5]
+
+    # Fitting is finished here, we save the results in the output arrays
     thetas[index] = theta
     iterations[index] = kk
 
-    # Calculating the CRLB and LogLikelihood
+    # Calculating the CRLB and log-likelihood
     log_likelihood = 0.0
     M = np.zeros((n_params, n_params), dtype=np.float32)
     for ii in range(size):
@@ -814,7 +809,8 @@ def _mlefit_sigmaxy(
             PSFy = _gaussian_integral(jj, theta[1], theta[5])
             model = theta[2] * PSFx * PSFy + theta[3]
 
-            # Calculating derivatives
+            # Calculating derivatives (only first order is needed for
+            # CRLB)
             dudt[0], d2udt2[0] = _derivative_gaussian_integral(
                 ii, theta[0], theta[4], theta[2], PSFy
             )
@@ -831,15 +827,15 @@ def _mlefit_sigmaxy(
             dudt[3] = 1.0
 
             # Building the Fisher Information Matrix
-            model = theta[2] * PSFx * PSFy + theta[3]
+            model = theta[2] * PSFx * PSFy + theta[3]  # model := mu_k
             for kk in range(n_params):
                 for ll in range(kk, n_params):
                     M[kk, ll] += dudt[ll] * dudt[kk] / model
                     M[ll, kk] = M[kk, ll]
 
-            # LogLikelihood
+            # log-likelihood, see equation 7 + Stirling approximation
             if model > 0:
-                data = spot[ii, jj]
+                data = spot[jj, ii]
                 if data > 0:
                     log_likelihood += (
                         data * np.log(model)
@@ -852,7 +848,7 @@ def _mlefit_sigmaxy(
 
     likelihoods[index] = log_likelihood
 
-    # Matrix inverse (CRLB=F^-1)
+    # Matrix inverse (CRLB=M^-1)
     Minv = np.linalg.pinv(M)
     CRLB = np.zeros(n_params, dtype=np.float32)
     for kk in range(n_params):
@@ -902,13 +898,11 @@ def locs_from_fits(
         (if available).
     """
     box_offset = int(box / 2)
-    x = theta[:, 1] + identifications["x"] - box_offset
-    y = theta[:, 0] + identifications["y"] - box_offset
+    x = theta[:, 0] + identifications["x"] - box_offset
+    y = theta[:, 1] + identifications["y"] - box_offset
     with np.errstate(invalid="ignore"):
-        lpy = np.sqrt(
-            CRLBs[:, 0]
-        )  # TODO: maybe we should not use crlb at all? just the final Mortensen formula? (or stalling and rieger for a faster well-approximated formula)
-        lpx = np.sqrt(CRLBs[:, 1])
+        lpx = np.sqrt(CRLBs[:, 0])
+        lpy = np.sqrt(CRLBs[:, 1])
         a = np.maximum(theta[:, 4], theta[:, 5])
         b = np.minimum(theta[:, 4], theta[:, 5])
         ellipticity = (a - b) / a
