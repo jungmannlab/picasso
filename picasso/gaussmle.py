@@ -246,7 +246,6 @@ def _erf(x: float) -> float:
     return np.sign(x)
 
 
-# TODO: check this is correct?
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _gaussian_integral(x: float, mu: float, sigma: float) -> float:
     """Calculate the integral of a Gaussian function in a pixel in one
@@ -298,7 +297,9 @@ def _derivative_gaussian_integral_sigma(
     """Used for calculating the first and second derivatives of the
     integral of mu_k w.r.t sigma in the anisotropic case, sigma_x !=
     sigma_y. While Smith et al do not provide the formula, it can be
-    easily derived, similarly to equations 10, 11 and 14."""
+    easily derived, similarly to equations 10, 11 and 14. The derivation
+    can be found under https://picassosr.readthedocs.io/en/latest/localize.html#MLE-fitting.
+    """
     a_plus = (x - mu + 0.5) / (np.sqrt(2.0) * sigma_x)
     a_minus = (x - mu - 0.5) / (np.sqrt(2.0) * sigma_x)
     Fx = a_minus * np.exp(-(a_minus**2)) - a_plus * np.exp(-(a_plus**2))
@@ -306,9 +307,9 @@ def _derivative_gaussian_integral_sigma(
     dPSFxdt = Fx / (np.sqrt(np.pi) * sigma_x)
     dudt = photons * PSFy * dPSFxdt
 
-    dFxdt = a_plus * np.exp(-(a_plus**2)) * (
+    dFxdt = a_plus / sigma_x * np.exp(-(a_plus**2)) * (
         1 - 2 * a_plus**2
-    ) - a_minus * np.exp(-(a_minus**2)) * (1 - 2 * a_minus**2)
+    ) - a_minus / sigma_x * np.exp(-(a_minus**2)) * (1 - 2 * a_minus**2)
     d2PSFxdt2 = (1 / np.sqrt(np.pi)) * (-Fx / sigma_x**2 + dFxdt / sigma_x)
     d2udt2 = photons * PSFy * d2PSFxdt2
     return dudt, d2udt2
@@ -329,7 +330,8 @@ def _derivative_gaussian_integral_iso_sigma(
     mu_k w.r.t sigma for the case of isotropic sigma. While Smith et al
     do not provide the formula, it can be easily derived, similarly to
     equations 10, 11 and 14. The derivation can be found under
-    https://picassosr.readthedocs.io/en/latest/localize.html."""  # TODO: add this derivation, modify the link to point to the subsection of the documentation
+    https://picassosr.readthedocs.io/en/latest/localize.html#MLE-fitting.
+    """
     a_plus = (x - mu + 0.5) / (np.sqrt(2.0) * sigma)
     a_minus = (x - mu - 0.5) / (np.sqrt(2.0) * sigma)
     b_plus = (y - nu + 0.5) / (np.sqrt(2.0) * sigma)
