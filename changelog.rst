@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 27-FEB-2026 CEST
+Last change: 02-MAR-2026 CEST
 
 0.9.8
 -----
@@ -10,6 +10,7 @@ Last change: 27-FEB-2026 CEST
 - Localize Parameters dialog displays a message if the z calibration path in the config file could not be found
 - Fixed Picasso Server launching in one-click-installers
 - Added DOIs related to G5M and axial loc. precision
+- Updated Picasso Average documentation
 
 0.9.7
 -----
