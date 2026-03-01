@@ -1386,10 +1386,10 @@ def plot_subclustering_check(
         Figure and axes if ``return_fig`` is True, otherwise
         (None, None).
     """
-    m_close = clustered_n_events.mean()
-    m_far = sparse_n_events.mean()
-    s_close = clustered_n_events.std()
-    s_far = sparse_n_events.std()
+    m_clustered = clustered_n_events.mean()
+    m_sparse = sparse_n_events.mean()
+    s_clustered = clustered_n_events.std()
+    s_sparse = sparse_n_events.std()
 
     # create the plot
     fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
@@ -1400,20 +1400,20 @@ def plot_subclustering_check(
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
+        label=f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}",
         color="C0",
     )
-    ax1.axvline(m_close, color="C0", linestyle="--")
+    ax1.axvline(m_clustered, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
     ax1.bar(
         vals,
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
+        label=f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}",
         color="C1",
     )
-    ax1.axvline(m_far, color="C1", linestyle="--")
+    ax1.axvline(m_sparse, color="C1", linestyle="--")
     ax1.set_xlabel("Number of events")
     ax1.set_ylabel("Counts")
     ax1.set_xlim(min_bin - 1, max_bin + 1)
