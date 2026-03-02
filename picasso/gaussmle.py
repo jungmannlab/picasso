@@ -807,7 +807,6 @@ def _mlefit_sigmaxy(
         for jj in range(size):
             PSFx = _gaussian_integral(ii, theta[0], theta[4])
             PSFy = _gaussian_integral(jj, theta[1], theta[5])
-            model = theta[2] * PSFx * PSFy + theta[3]
 
             # Calculating derivatives (only first order is needed for
             # CRLB)
@@ -906,7 +905,10 @@ def locs_from_fits(
         a = np.maximum(theta[:, 4], theta[:, 5])
         b = np.minimum(theta[:, 4], theta[:, 5])
         ellipticity = (a - b) / a
-
+        photons_unc = np.sqrt(CRLBs[:, 2])
+        bg_unc = np.sqrt(CRLBs[:, 3])
+        sx_unc = np.sqrt(CRLBs[:, 4])
+        sy_unc = np.sqrt(CRLBs[:, 5])
     locs = pd.DataFrame(
         {
             "frame": identifications["frame"].to_numpy(dtype=np.uint32),
@@ -922,6 +924,10 @@ def locs_from_fits(
             "net_gradient": identifications["net_gradient"].astype(np.float32),
             "log_likelihood": log_likelihoods.astype(np.float32),
             "iterations": iterations.astype(np.uint32),
+            "photons_unc": photons_unc.astype(np.float32),
+            "bg_unc": bg_unc.astype(np.float32),
+            "sx_unc": sx_unc.astype(np.float32),
+            "sy_unc": sy_unc.astype(np.float32),
         }
     )
     if "n_id" in identifications.columns:
@@ -943,10 +949,6 @@ def sigma_uncertainty(
 
     Based on the approximation by Rieger and Stallinga, ChemPhysChem,
     2014.
-
-    TODO: this is likely slightly incorrect for astigmatic imaging
-    since spherical covariance Gaussian is assumed in Smith et
-    al., Nat Methods, 2010.
 
     Parameters
     ----------

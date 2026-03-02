@@ -11,6 +11,7 @@ Last change: 02-MAR-2026 CEST
 - Fixed Picasso Server launching in one-click-installers
 - ``picasso.localize.fit`` default method changed to ``sigmaxy`` (anisotropic sigma fitting)
 - Fixed 2D MLE fitting and cleaned the docstrings for better readability (``picasso.gaussmle``)
+- MLE fitting saves CRLB uncertainties of fitted parameters: photons, background, sx and sy
 
 0.9.7
 -----

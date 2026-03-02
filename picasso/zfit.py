@@ -617,9 +617,35 @@ def _axial_localization_precision_astig(
         Calculated lpz values for the given localizations in nm.
     """
     if fitting_method == "gausslq":
-        sigma_uncertainty = gausslq.sigma_uncertainty
+        se_sx = (
+            gausslq.sigma_uncertainty(
+                locs["sx"], locs["sy"], locs["photons"], locs["bg"]
+            )
+            * pixelsize
+        )
+        se_sy = (
+            gausslq.sigma_uncertainty(
+                locs["sy"], locs["sx"], locs["photons"], locs["bg"]
+            )
+            * pixelsize
+        )
     elif fitting_method == "gaussmle":
-        sigma_uncertainty = gaussmle.sigma_uncertainty
+        if "sx_unc" not in locs.columns or "sy_unc" not in locs.columns:
+            se_sx = (
+                gaussmle.sigma_uncertainty(
+                    locs["sx"], locs["sy"], locs["photons"], locs["bg"]
+                )
+                * pixelsize
+            )
+            se_sy = (
+                gaussmle.sigma_uncertainty(
+                    locs["sy"], locs["sx"], locs["photons"], locs["bg"]
+                )
+                * pixelsize
+            )
+        else:
+            se_sx = locs["sx_unc"] * pixelsize
+            se_sy = locs["sy_unc"] * pixelsize
     else:
         raise ValueError("fitting_method must be 'gausslq' or 'gaussmle'.")
 
@@ -633,14 +659,6 @@ def _axial_localization_precision_astig(
     sqrt_wx_calib_prime = wx_calib_prime / (2 * sqrt_wx_calib)
     sqrt_wy_calib = np.sqrt(wy_calib)
     sqrt_wy_calib_prime = wy_calib_prime / (2 * sqrt_wy_calib)
-    se_sx = (
-        sigma_uncertainty(locs["sx"], locs["sy"], locs["photons"], locs["bg"])
-        * pixelsize
-    )
-    se_sy = (
-        sigma_uncertainty(locs["sy"], locs["sx"], locs["photons"], locs["bg"])
-        * pixelsize
-    )
     delta_sqrt_wx = (1 / (2 * np.sqrt(locs["sx"] * pixelsize))) * se_sx
     delta_sqrt_wy = (1 / (2 * np.sqrt(locs["sy"] * pixelsize))) * se_sy
     swxc2 = sqrt_wx_calib_prime**2
