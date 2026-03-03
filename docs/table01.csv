@@ -6,8 +6,8 @@ photons ,"The total number of detected photons from this event, not including ba
 sx ,The Point Spread Function width in camera pixels.,float 
 sy ,The Point Spread Function height in camera pixels.,float 
 bg ,"The number of background photons per pixel, not including the camera offset.",float 
-lpx ,"The localization precision in x direction, in camera pixels, as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit (Mortensen et al., Nat Meth, 2010). ",float 
-lpy ,"The localization precision in y direction, in camera pixels, as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit (Mortensen et al., Nat Meth, 2010). ",float 
+lpx ,"The localization precision in x direction, in camera pixels, as estimated by the Cramer-Rao Lower Bound (Mortensen et al., Nat Meth, 2010 and Smith et al., Nat Meth, 2010). ",float 
+lpy ,"The localization precision in y direction, in camera pixels, as estimated by the Cramer-Rao Lower Bound (Mortensen et al., Nat Meth, 2010 and Smith et al., Nat Meth, 2010). ",float 
 net_gradient ,"The net gradient of this spot which is defined by the sum of gradient vector magnitudes within the fitting box, projected to the spot center. ",float 
 z,(Optional) The z coordinate fitted in 3D in nm. Please note the units are different for x and y coordinates.,float 
 lpz,(Optional) The localization precision in z direction in nm.,float
@@ -21,3 +21,7 @@ n ,"(Optional) The number of localizations in this event, if localizations from 
 photon_rate ,"(Optional) The mean number of photons per frame, if localizations from consecutive frames have been linked. The total number of photons is set in the “photons” column. ",float 
 x_pick_rot ,"(Optional) Projection of localizations onto the axis of the rectangular pick. Only available after saving rectangular pick(s). ",float
 y_pick_rot ,"(Optional) Projection of localizations against the axis of the rectangular pick. Only available after saving rectangular pick(s). ",float
+photons_unc ,"(Optional) The uncertainty of the photons estimation as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
+bg_unc ,"(Optional) The uncertainty of the background estimation as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
+sx_unc ,"(Optional) The uncertainty of the sx estimation (camera pixels) as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float
+sy_unc ,"(Optional) The uncertainty of the sy estimation (camera pixels) as estimated by the Cramer-Rao Lower Bound of the Maximum Likelihood fit. ",float

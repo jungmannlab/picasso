@@ -998,15 +998,6 @@ class ParametersDialog(QtWidgets.QDialog):
         vbox.addWidget(z_groupbox)
 
         z_grid = QtWidgets.QGridLayout(z_groupbox)
-        z_grid.addWidget(
-            QtWidgets.QLabel(
-                "Non-integrated Gaussian fitting is recommend! (LQ)"
-            ),
-            0,
-            0,
-            1,
-            2,
-        )
         load_z_calib = QtWidgets.QPushButton("Load calibration")
         load_z_calib.setToolTip(
             "Load a 3D calibration file (.yaml).\n"
@@ -1016,27 +1007,27 @@ class ParametersDialog(QtWidgets.QDialog):
         )
         load_z_calib.setAutoDefault(False)
         load_z_calib.clicked.connect(self.load_z_calib)
-        z_grid.addWidget(load_z_calib, 1, 1)
+        z_grid.addWidget(load_z_calib, 0, 1)
         self.fit_z_checkbox = QtWidgets.QCheckBox("Fit Z")
         self.fit_z_checkbox.setEnabled(False)
-        z_grid.addWidget(self.fit_z_checkbox, 3, 1)
+        z_grid.addWidget(self.fit_z_checkbox, 2, 1)
         self.z_calib_label = QtWidgets.QLabel("-- no calibration loaded --")
         self.z_calib_label.setAlignment(QtCore.Qt.AlignCenter)
         self.z_calib_label.setSizePolicy(
             QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed
         )
-        z_grid.addWidget(self.z_calib_label, 1, 0)
+        z_grid.addWidget(self.z_calib_label, 0, 0)
         magnification_label = QtWidgets.QLabel("Magnification factor:")
         magnification_label.setToolTip(
             "Factor used to correct for z-position abberation due to\n"
             "refractive index mismatch, see Huang B, et al. Science. 2008."
         )
-        z_grid.addWidget(magnification_label, 2, 0)
+        z_grid.addWidget(magnification_label, 1, 0)
         self.magnification_factor = QtWidgets.QDoubleSpinBox()
         self.magnification_factor.setRange(0, 1e6)
         self.magnification_factor.setDecimals(4)
         self.magnification_factor.setValue(0.79)
-        z_grid.addWidget(self.magnification_factor, 2, 1)
+        z_grid.addWidget(self.magnification_factor, 1, 1)
 
         if "Cameras" in CONFIG:
             camera = self.camera.currentText()

@@ -50,6 +50,8 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - FRC. DOI: `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
 - Theoretical lateral localization precision (Gauss LQ and MLE). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
 - Theoretical axial localization precision (Gauss LQ and MLE). DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
+- Theoretical lateral localization precision (Gauss LQ). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
+- Theoretical axial localization precision (Gauss LQ and MLE). DOI: *DOI will be added once available*
 - MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
 - RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__ 
 - AIM undrifting. DOI: `10.1126/sciadv.adm776 <https://www.science.org/doi/10.1126/sciadv.adm7765>`__

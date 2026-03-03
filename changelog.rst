@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 02-MAR-2026 CEST
+Last change: 04-MAR-2026 CEST
 
 0.9.8
 -----
@@ -9,6 +9,9 @@ Last change: 02-MAR-2026 CEST
 - ``PyImarisWriter`` is included in the one-click-installer again (Windows only)
 - Localize Parameters dialog displays a message if the z calibration path in the config file could not be found
 - Fixed Picasso Server launching in one-click-installers
+- ``picasso.localize.fit`` default method changed to ``sigmaxy`` (anisotropic sigma fitting)
+- Fixed 3D MLE fitting and cleaned the docstrings for better readability (``picasso.gaussmle``)
+- MLE fitting saves CRLB uncertainties of fitted parameters: photons, background, sx and sy
 - Added DOIs related to G5M and axial loc. precision
 - Updated Picasso Average documentation
 

@@ -21,8 +21,6 @@ import numba
 import numpy as np
 import pandas as pd
 
-GAMMA = np.array([1.0, 1.0, 0.5, 1.0, 1.0, 1.0])
-
 
 @numba.jit(nopython=True, nogil=True)
 def _sum_and_center_of_mass(
@@ -246,11 +244,14 @@ def _erf(x: float) -> float:
     return np.sign(x)
 
 
-# TODO: check this is correct?
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _gaussian_integral(x: float, mu: float, sigma: float) -> float:
-    """Calculate the integral of a Gaussian function from negative
-    infinity to x."""
+    """Calculate the integral of a Gaussian function in a pixel in one
+    dimension (deltaE, equations 4a,b in Smith, et al (supplement)).
+
+    Note that the paper gives a wrong formula, the denominator within
+    ERF should be sqrt(2) * sigma, not sigma**2. This has been corrected
+    here."""
     sq_norm = 0.70710678118654757 / sigma  # sq_norm = sqrt(0.5/sigma**2)
     d = x - mu
     return 0.5 * (
@@ -260,80 +261,104 @@ def _gaussian_integral(x: float, mu: float, sigma: float) -> float:
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _derivative_gaussian_integral(
-    x: float,
-    mu: float,
+    x: float,  # x_k
+    mu: float,  # theta_x
     sigma: float,
-    photons: float,
-    PSFc: float,
+    photons: float,  # theta_I_0
+    PSFy: float,  # delta_E_y
 ) -> tuple[float, float]:
-    """Calculate the first and second derivatives of the integral of a
-    Gaussian function with respect to x."""
+    """Calculate the first and second derivatives of the integral of
+    mu_k w.r.t theta_x, see equations 11a and 14a."""
     d = x - mu
     a = np.exp(-0.5 * ((d + 0.5) / sigma) ** 2)
     b = np.exp(-0.5 * ((d - 0.5) / sigma) ** 2)
-    dudt = -photons * PSFc * (a - b) / (np.sqrt(2.0 * np.pi) * sigma)
+    dudt = photons * PSFy * (b - a) / (np.sqrt(2.0 * np.pi) * sigma)
     d2udt2 = (
-        -photons
-        * ((d + 0.5) * a - (d - 0.5) * b)
-        * PSFc
+        photons
+        * ((d - 0.5) * b - (d + 0.5) * a)
+        * PSFy
         / (np.sqrt(2.0 * np.pi) * sigma**3)
     )
     return dudt, d2udt2
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
-def _derivative_gaussian_integral_1d_sigma(
-    x: float,
-    mu: float,
-    sigma: float,
-    photons: float,
-    PSFc: float,
-) -> tuple[float, float]:
-    """Calculate the first and second derivatives of the integral of a
-    Gaussian function with respect to sigma in 1D."""
-    ax = np.exp(-0.5 * ((x + 0.5 - mu) / sigma) ** 2)
-    bx = np.exp(-0.5 * ((x - 0.5 - mu) / sigma) ** 2)
-    dudt = (
-        -photons
-        * (ax * (x + 0.5 - mu) - bx * (x - 0.5 - mu))
-        * PSFc
-        / (np.sqrt(2.0 * np.pi) * sigma**2)
+def _G(n, m, x, mu, sigma_x):
+    """Helper function for finding derivatives of the model w.r.t sigma
+    in the anisotropic case, see equation 20a."""
+    a_minus = x - mu - 0.5
+    a_plus = x - mu + 0.5
+    exp_minus = np.exp(-(a_minus**2) / (2 * sigma_x**2))
+    exp_plus = np.exp(-(a_plus**2) / (2 * sigma_x**2))
+    return (a_minus**m * exp_minus - a_plus**m * exp_plus) / (
+        sigma_x**n * np.sqrt(2 * np.pi)
     )
-    d2udt2 = -2.0 * dudt / sigma - photons * (
-        ax * (x + 0.5 - mu) ** 3 - bx * (x - 0.5 - mu) ** 3
-    ) * PSFc / (np.sqrt(2.0 * np.pi) * sigma**5)
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _derivative_gaussian_integral_sigma(
+    x: float,  # x_k
+    mu: float,  # theta_x
+    sigma_x: float,
+    photons: float,  # theta_I_0
+    PSFy: float,  # delta_E_y
+) -> tuple[float, float]:
+    """Used for calculating the first and second derivatives of the
+    integral of mu_k w.r.t sigma in the anisotropic case, sigma_x !=
+    sigma_y. Based on equations 21a and 21b."""
+    dudt = photons * PSFy * _G(2, 1, x, mu, sigma_x)
+    d2udt2 = (
+        photons
+        * PSFy
+        * (_G(5, 3, x, mu, sigma_x) - 2 * _G(3, 1, x, mu, sigma_x))
+    )
     return dudt, d2udt2
 
 
 @numba.jit(nopython=True, nogil=True)
-def _derivative_gaussian_integral_2d_sigma(
-    x: float,
-    y: float,
-    mu: float,
-    nu: float,
+def _derivative_gaussian_integral_iso_sigma(
+    x: float,  # x_k
+    y: float,  # y_k
+    mu: float,  # theta_x
+    nu: float,  # theta_y
     sigma: float,
-    photons: float,
-    PSFx: float,
-    PSFy: float,
+    photons: float,  # theta_I_0
+    PSFx: float,  # delta_E_x
+    PSFy: float,  # delta_E_y
 ) -> tuple[float, float]:
-    """Calculate the first and second derivatives of the integral of a
-    Gaussian function with respect to sigma in 2D."""
-    dSx, ddSx = _derivative_gaussian_integral_1d_sigma(
-        x,
-        mu,
-        sigma,
-        photons,
-        PSFy,
+    """Calculate the first and second derivatives of the integral of
+    mu_k w.r.t sigma for the case of isotropic sigma. While Smith et al
+    do not provide the formula, it can be easily derived, similarly to
+    equations 10, 11 14 and 21."""
+    a_plus = (x - mu + 0.5) / (np.sqrt(2.0) * sigma)
+    a_minus = (x - mu - 0.5) / (np.sqrt(2.0) * sigma)
+    b_plus = (y - nu + 0.5) / (np.sqrt(2.0) * sigma)
+    b_minus = (y - nu - 0.5) / (np.sqrt(2.0) * sigma)
+
+    Fx = a_minus * np.exp(-(a_minus**2)) - a_plus * np.exp(-(a_plus**2))
+    Fy = b_minus * np.exp(-(b_minus**2)) - b_plus * np.exp(-(b_plus**2))
+    dPSFxdt = Fx / (np.sqrt(np.pi) * sigma)
+    dPSFydt = Fy / (np.sqrt(np.pi) * sigma)
+
+    dFxdt = (
+        a_plus * np.exp(-(a_plus**2)) * (1 - 2 * a_plus**2)
+        - a_minus * np.exp(-(a_minus**2)) * (1 - 2 * a_minus**2)
+    ) / sigma
+    dFydy = (
+        b_plus * np.exp(-(b_plus**2)) * (1 - 2 * b_plus**2)
+        - b_minus * np.exp(-(b_minus**2)) * (1 - 2 * b_minus**2)
+    ) / sigma
+    d2PSFxdt2 = (1 / np.sqrt(np.pi)) * (
+        (-Fx / sigma**2) + sigma ** (-1) * dFxdt
     )
-    dSy, ddSy = _derivative_gaussian_integral_1d_sigma(
-        y,
-        nu,
-        sigma,
-        photons,
-        PSFx,
+    d2PSFydt2 = (1 / np.sqrt(np.pi)) * (
+        (-Fy / sigma**2) + sigma ** (-1) * dFydy
     )
-    dudt = dSx + dSy
-    d2udt2 = ddSx + ddSy
+
+    dudt = photons * (PSFy * dPSFxdt + PSFx * dPSFydt)
+    d2udt2 = (
+        photons * PSFy * d2PSFxdt2 + 2 * dPSFxdt * dPSFydt + PSFx * d2PSFydt2
+    )
     return dudt, d2udt2
 
 
@@ -478,7 +503,11 @@ def _mlefit_sigma(
     max_it: int,
 ) -> None:
     """Fits a Gaussian to a single spot using Maximum Likelihood
-    Estimation (MLE) with a single sigma for both x and y dimensions."""
+    Estimation (MLE) with a single sigma for both x and y dimensions.
+
+    Based on the work of Smith, et al. Nature Methods, 2010. The
+    equations mentioned below refer to the supplementary information of
+    that paper."""
     n_params = 5
 
     spot = spots[index]
@@ -486,6 +515,7 @@ def _mlefit_sigma(
 
     # theta is [x, y, N, bg, S]
     theta = _initial_theta_sigma(spot, size)
+    # Set maximum iteration for each parameter
     max_step = np.zeros(n_params, dtype=np.float32)
     max_step[0:2] = theta[4]
     max_step[2:4] = 0.1 * theta[2:4]
@@ -504,38 +534,52 @@ def _mlefit_sigma(
     kk = 0
     while (
         kk < max_it
-    ):  # we do this instead of a for loop for the special case of max_it=0
+    ):  # We do this instead of a for loop for the special case of max_it=0
         kk += 1
 
         numerator[:] = 0.0
         denominator[:] = 0.0
 
+        # At each iteration (theta update) we sum across all pixels in the spot,
+        # see equation 13
         for ii in range(size):
             for jj in range(size):
+                # this is delta E_x
                 PSFx = _gaussian_integral(ii, theta[0], theta[4])
+                # this is delta E_y
                 PSFy = _gaussian_integral(jj, theta[1], theta[4])
 
-                # Derivatives
+                # Partial derivatives (PDs) (first and second order) of mu_k
+                # with respect to each of the model parameters (x, y, N,
+                # bg, sigma), used in equation 13
                 dudt[0], d2udt2[0] = _derivative_gaussian_integral(
-                    ii, theta[0], theta[4], theta[2], PSFy
-                )
+                    ii,
+                    theta[0],
+                    theta[4],
+                    theta[2],
+                    PSFy,
+                )  # PDs with respect to theta_x
                 dudt[1], d2udt2[1] = _derivative_gaussian_integral(
                     jj, theta[1], theta[4], theta[2], PSFx
-                )
-                dudt[2] = PSFx * PSFy
+                )  # PDs with respect to theta_y
+                dudt[2] = PSFx * PSFy  # PDs w.r.t theta_I_0 (photons)
                 d2udt2[2] = 0.0
-                dudt[3] = 1.0
+                dudt[3] = 1.0  # PDs w.r.t theta_bg (background)
                 d2udt2[3] = 0.0
-                dudt[4], d2udt2[4] = _derivative_gaussian_integral_2d_sigma(
+                dudt[4], d2udt2[4] = _derivative_gaussian_integral_iso_sigma(
                     ii, jj, theta[0], theta[1], theta[4], theta[2], PSFx, PSFy
-                )
+                )  # PDs w.r.t theta_sigma; note that the paper does not
+                # give an explicit formula for this but it can be derived
+                # fairly easily following the logic of equations 10, 11
+                # and 14
 
-                model = theta[2] * dudt[2] + theta[3]
+                # equation 2, model := mu_k
+                model = theta[2] * PSFx * PSFy + theta[3]
                 cf = df = 0.0
-                data = spot[ii, jj]
+                data = spot[jj, ii]  # data := x_k
                 if model > 10e-3:
-                    cf = data / model - 1
-                    df = data / model**2
+                    cf = data / model - 1  # cf := (x_k / mu_k - 1) (eq 13)
+                    df = data / model**2  # df := x_k / mu_k^2 (eq 13)
                 cf = np.minimum(cf, 10e4)
                 df = np.minimum(df, 10e4)
 
@@ -543,7 +587,7 @@ def _mlefit_sigma(
                     numerator[ll] += cf * dudt[ll]
                     denominator[ll] += cf * d2udt2[ll] - df * dudt[ll] ** 2
 
-        # The update
+        # The theta update
         for ll in range(n_params):
             if denominator[ll] == 0.0:
                 update = np.sign(numerator[ll] * max_step[ll])
@@ -552,8 +596,6 @@ def _mlefit_sigma(
                     np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
                     max_step[ll],
                 )
-            if kk < 5:
-                update *= GAMMA[ll]
             theta[ll] -= update
 
         # Other constraints
@@ -571,55 +613,57 @@ def _mlefit_sigma(
             old_x = theta[0]
             old_y = theta[1]
 
+    # Fitting is finished here, we save the results in the output arrays
     thetas[index, 0:5] = theta
     thetas[index, 5] = theta[4]
     iterations[index] = kk
 
-    # Calculating the CRLB and LogLikelihood
-    Div = 0.0
-    M = np.zeros((n_params, n_params), dtype=np.float32)
+    # Calculating the CRLB and log-likelihood
+    log_likelihood = 0.0
+    M = np.zeros((n_params, n_params), dtype=np.float32)  # Fisher matrix
+    # Sum over all pixels
     for ii in range(size):
         for jj in range(size):
             PSFx = _gaussian_integral(ii, theta[0], theta[4])
             PSFy = _gaussian_integral(jj, theta[1], theta[4])
-            model = theta[3] + theta[2] * PSFx * PSFy
 
-            # Calculating derivatives
-            dudt[0], d2udt2[0] = _derivative_gaussian_integral(
+            # Calculating derivatives (only first order is needed for
+            # CRLB)
+            dudt[0], _ = _derivative_gaussian_integral(
                 ii, theta[0], theta[4], theta[2], PSFy
             )
-            dudt[1], d2udt2[1] = _derivative_gaussian_integral(
+            dudt[1], _ = _derivative_gaussian_integral(
                 jj, theta[1], theta[4], theta[2], PSFx
             )
-            dudt[4], d2udt2[4] = _derivative_gaussian_integral_2d_sigma(
+            dudt[4], _ = _derivative_gaussian_integral_iso_sigma(
                 ii, jj, theta[0], theta[1], theta[4], theta[2], PSFx, PSFy
             )
             dudt[2] = PSFx * PSFy
             dudt[3] = 1.0
 
             # Building the Fisher Information Matrix
-            model = theta[3] + theta[2] * dudt[2]
+            model = theta[2] * PSFx * PSFy + theta[3]  # model := mu_k
             for kk in range(n_params):
                 for ll in range(kk, n_params):
                     M[kk, ll] += dudt[ll] * dudt[kk] / model
                     M[ll, kk] = M[kk, ll]
 
-            # LogLikelihood
+            # log-likelihood, see equation 7 + Stirling approximation
             if model > 0:
-                data = spot[ii, jj]
+                data = spot[jj, ii]
                 if data > 0:
-                    Div += (
+                    log_likelihood += (
                         data * np.log(model)
                         - model
                         - data * np.log(data)
                         + data
                     )
                 else:
-                    Div += -model
+                    log_likelihood += -model
 
-    likelihoods[index] = Div
+    likelihoods[index] = log_likelihood
 
-    # Matrix inverse (CRLB=F^-1)
+    # Matrix inverse (CRLB = M^-1)
     Minv = np.linalg.pinv(M)
     CRLB = np.zeros(n_params, dtype=np.float32)
     for kk in range(n_params):
@@ -640,15 +684,19 @@ def _mlefit_sigmaxy(
     max_it: int,
 ) -> None:
     """Fit a Gaussian to a single spot using Maximum Likelihood
-    Estimation (MLE) with separate sigmas for x and y dimensions."""
+    Estimation (MLE) with separate sigmas for x and y dimensions.
+
+    Based on the work of Smith, et al. Nature Methods, 2010. The
+    equations mentioned below refer to the supplementary information of
+    that paper."""
     n_params = 6
 
     spot = spots[index]
     size, _ = spot.shape
 
-    # Initial values
-    # theta is [x, y, N, bg, Sx, Sy]
+    # theta is [x, y, N, bg, Sx (sigma_x), Sy (sigma_y)]
     theta = _initial_theta_sigmaxy(spot, size)
+    # Set maximum iteration for each parameter
     max_step = np.zeros(n_params, dtype=np.float32)
     max_step[0:2] = theta[4]
     max_step[2:4] = 0.1 * theta[2:4]
@@ -675,34 +723,44 @@ def _mlefit_sigmaxy(
         numerator[:] = 0.0
         denominator[:] = 0.0
 
+        # At each iteration (theta update) we sum across all pixels in the spot,
+        # see equation 13
         for ii in range(size):
             for jj in range(size):
+                # delta_Ex and delta_Ey
                 PSFx = _gaussian_integral(ii, theta[0], theta[4])
                 PSFy = _gaussian_integral(jj, theta[1], theta[5])
-                # Derivatives
+
+                # Partial derivatives (PDs) (first and second order) of mu_k
+                # with respect to each of the model parameters (x, y, N,
+                # bg, sigma), used in equation 13
                 dudt[0], d2udt2[0] = _derivative_gaussian_integral(
                     ii, theta[0], theta[4], theta[2], PSFy
-                )
+                )  # PDs with respect to theta_x
                 dudt[1], d2udt2[1] = _derivative_gaussian_integral(
                     jj, theta[1], theta[5], theta[2], PSFx
-                )
-                dudt[2] = PSFx * PSFy
+                )  # PDs with respect to theta_y
+                dudt[2] = PSFx * PSFy  # PDs w.r.t theta_I_0 (photons)
                 d2udt2[2] = 0.0
-                dudt[3] = 1.0
+                dudt[3] = 1.0  # PDs w.r.t theta_bg (background)
                 d2udt2[3] = 0.0
-                dudt[4], d2udt2[4] = _derivative_gaussian_integral_1d_sigma(
+                dudt[4], d2udt2[4] = _derivative_gaussian_integral_sigma(
                     ii, theta[0], theta[4], theta[2], PSFy
                 )
-                dudt[5], d2udt2[5] = _derivative_gaussian_integral_1d_sigma(
+                dudt[5], d2udt2[5] = _derivative_gaussian_integral_sigma(
                     jj, theta[1], theta[5], theta[2], PSFx
-                )
+                )  # PDs w.r.t sigma_y; note that the paper does not
+                # give an explicit formula for this but it can be derived
+                # fairly easily following the logic of equations 10, 11
+                # and 14
 
-                model = theta[2] * dudt[2] + theta[3]
+                # equation 2, model := mu_k
+                model = theta[2] * PSFx * PSFy + theta[3]
                 cf = df = 0.0
-                data = spot[ii, jj]
+                data = spot[jj, ii]  # data := x_k
                 if model > 10e-3:
-                    cf = data / model - 1
-                    df = data / model**2
+                    cf = data / model - 1  # cf := (x_k / mu_k - 1) (eq 13)
+                    df = data / model**2  # df := x_k / mu_k^2 (eq 13)
                 cf = np.minimum(cf, 10e4)
                 df = np.minimum(df, 10e4)
 
@@ -710,15 +768,15 @@ def _mlefit_sigmaxy(
                     numerator[ll] += cf * dudt[ll]
                     denominator[ll] += cf * d2udt2[ll] - df * dudt[ll] ** 2
 
-        # The update
+        # The theta update
         for ll in range(n_params):
             if denominator[ll] == 0.0:
                 # This is case is not handled in Lidke's code
                 # but it seems to be a problem here
                 # (maybe due to many iterations)
-                theta[ll] -= GAMMA[ll] * np.sign(numerator[ll]) * max_step[ll]
+                theta[ll] -= np.sign(numerator[ll]) * max_step[ll]
             else:
-                theta[ll] -= GAMMA[ll] * np.minimum(
+                theta[ll] -= np.minimum(
                     np.maximum(numerator[ll] / denominator[ll], -max_step[ll]),
                     max_step[ll],
                 )
@@ -739,57 +797,59 @@ def _mlefit_sigmaxy(
         old_y = theta[1]
         old_sx = theta[4]
         old_sy = theta[5]
+
+    # Fitting is finished here, we save the results in the output arrays
     thetas[index] = theta
     iterations[index] = kk
 
-    # Calculating the CRLB and LogLikelihood
-    Div = 0.0
+    # Calculating the CRLB and log-likelihood
+    log_likelihood = 0.0
     M = np.zeros((n_params, n_params), dtype=np.float32)
     for ii in range(size):
         for jj in range(size):
             PSFx = _gaussian_integral(ii, theta[0], theta[4])
             PSFy = _gaussian_integral(jj, theta[1], theta[5])
-            model = theta[3] + theta[2] * PSFx * PSFy
 
-            # Calculating derivatives
+            # Calculating derivatives (only first order is needed for
+            # CRLB)
             dudt[0], d2udt2[0] = _derivative_gaussian_integral(
                 ii, theta[0], theta[4], theta[2], PSFy
             )
             dudt[1], d2udt2[1] = _derivative_gaussian_integral(
                 jj, theta[1], theta[5], theta[2], PSFx
             )
-            dudt[4], d2udt2[4] = _derivative_gaussian_integral_1d_sigma(
+            dudt[4], d2udt2[4] = _derivative_gaussian_integral_sigma(
                 ii, theta[0], theta[4], theta[2], PSFy
             )
-            dudt[5], d2udt2[5] = _derivative_gaussian_integral_1d_sigma(
+            dudt[5], d2udt2[5] = _derivative_gaussian_integral_sigma(
                 jj, theta[1], theta[5], theta[2], PSFx
             )
             dudt[2] = PSFx * PSFy
             dudt[3] = 1.0
 
             # Building the Fisher Information Matrix
-            model = theta[3] + theta[2] * dudt[2]
+            model = theta[2] * PSFx * PSFy + theta[3]  # model := mu_k
             for kk in range(n_params):
                 for ll in range(kk, n_params):
                     M[kk, ll] += dudt[ll] * dudt[kk] / model
                     M[ll, kk] = M[kk, ll]
 
-            # LogLikelihood
+            # log-likelihood, see equation 7 + Stirling approximation
             if model > 0:
-                data = spot[ii, jj]
+                data = spot[jj, ii]
                 if data > 0:
-                    Div += (
+                    log_likelihood += (
                         data * np.log(model)
                         - model
                         - data * np.log(data)
                         + data
                     )
                 else:
-                    Div += -model
+                    log_likelihood += -model
 
-    likelihoods[index] = Div
+    likelihoods[index] = log_likelihood
 
-    # Matrix inverse (CRLB=F^-1)
+    # Matrix inverse (CRLB=M^-1)
     Minv = np.linalg.pinv(M)
     CRLB = np.zeros(n_params, dtype=np.float32)
     for kk in range(n_params):
@@ -839,15 +899,18 @@ def locs_from_fits(
         (if available).
     """
     box_offset = int(box / 2)
-    x = theta[:, 1] + identifications["x"] - box_offset
-    y = theta[:, 0] + identifications["y"] - box_offset
+    x = theta[:, 0] + identifications["x"] - box_offset
+    y = theta[:, 1] + identifications["y"] - box_offset
     with np.errstate(invalid="ignore"):
-        lpy = np.sqrt(CRLBs[:, 0])
-        lpx = np.sqrt(CRLBs[:, 1])
+        lpx = np.sqrt(CRLBs[:, 0])
+        lpy = np.sqrt(CRLBs[:, 1])
         a = np.maximum(theta[:, 4], theta[:, 5])
         b = np.minimum(theta[:, 4], theta[:, 5])
         ellipticity = (a - b) / a
-
+        photons_unc = np.sqrt(CRLBs[:, 2])
+        bg_unc = np.sqrt(CRLBs[:, 3])
+        sx_unc = np.sqrt(CRLBs[:, 4])
+        sy_unc = np.sqrt(CRLBs[:, 5])
     locs = pd.DataFrame(
         {
             "frame": identifications["frame"].to_numpy(dtype=np.uint32),
@@ -863,6 +926,10 @@ def locs_from_fits(
             "net_gradient": identifications["net_gradient"].astype(np.float32),
             "log_likelihood": log_likelihoods.astype(np.float32),
             "iterations": iterations.astype(np.uint32),
+            "photons_unc": photons_unc.astype(np.float32),
+            "bg_unc": bg_unc.astype(np.float32),
+            "sx_unc": sx_unc.astype(np.float32),
+            "sy_unc": sy_unc.astype(np.float32),
         }
     )
     if "n_id" in identifications.columns:
@@ -884,10 +951,6 @@ def sigma_uncertainty(
 
     Based on the approximation by Rieger and Stallinga, ChemPhysChem,
     2014.
-
-    TODO: this is likely slightly incorrect for astigmatic imaging
-    since spherical covariance Gaussian is assumed in the original
-    paper?
 
     Parameters
     ----------
