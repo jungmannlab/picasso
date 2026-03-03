@@ -265,21 +265,34 @@ def _derivative_gaussian_integral(
     mu: float,  # theta_x
     sigma: float,
     photons: float,  # theta_I_0
-    PSFc: float,  # delta_E_y
+    PSFy: float,  # delta_E_y
 ) -> tuple[float, float]:
     """Calculate the first and second derivatives of the integral of
     mu_k w.r.t theta_x, see equations 11a and 14a."""
     d = x - mu
     a = np.exp(-0.5 * ((d + 0.5) / sigma) ** 2)
     b = np.exp(-0.5 * ((d - 0.5) / sigma) ** 2)
-    dudt = photons * PSFc * (b - a) / (np.sqrt(2.0 * np.pi) * sigma)
+    dudt = photons * PSFy * (b - a) / (np.sqrt(2.0 * np.pi) * sigma)
     d2udt2 = (
         photons
         * ((d - 0.5) * b - (d + 0.5) * a)
-        * PSFc
+        * PSFy
         / (np.sqrt(2.0 * np.pi) * sigma**3)
     )
     return dudt, d2udt2
+
+
+@numba.jit(nopython=True, nogil=True, cache=False)
+def _G(n, m, x, mu, sigma_x):
+    """Helper function for finding derivatives of the model w.r.t sigma
+    in the anisotropic case, see equation 20a."""
+    a_minus = x - mu - 0.5
+    a_plus = x - mu + 0.5
+    exp_minus = np.exp(-(a_minus**2) / (2 * sigma_x**2))
+    exp_plus = np.exp(-(a_plus**2) / (2 * sigma_x**2))
+    return (a_minus**m * exp_minus - a_plus**m * exp_plus) / (
+        sigma_x**n * np.sqrt(2 * np.pi)
+    )
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
@@ -292,22 +305,13 @@ def _derivative_gaussian_integral_sigma(
 ) -> tuple[float, float]:
     """Used for calculating the first and second derivatives of the
     integral of mu_k w.r.t sigma in the anisotropic case, sigma_x !=
-    sigma_y. While Smith et al do not provide the formula, it can be
-    easily derived, similarly to equations 10, 11 and 14. The derivation
-    can be found under https://picassosr.readthedocs.io/en/latest/localize.html#mle-fitting.
-    """
-    a_plus = (x - mu + 0.5) / (np.sqrt(2.0) * sigma_x)
-    a_minus = (x - mu - 0.5) / (np.sqrt(2.0) * sigma_x)
-    Fx = a_minus * np.exp(-(a_minus**2)) - a_plus * np.exp(-(a_plus**2))
-
-    dPSFxdt = Fx / (np.sqrt(np.pi) * sigma_x)
-    dudt = photons * PSFy * dPSFxdt
-
-    dFxdt = a_plus / sigma_x * np.exp(-(a_plus**2)) * (
-        1 - 2 * a_plus**2
-    ) - a_minus / sigma_x * np.exp(-(a_minus**2)) * (1 - 2 * a_minus**2)
-    d2PSFxdt2 = (1 / np.sqrt(np.pi)) * (-Fx / sigma_x**2 + dFxdt / sigma_x)
-    d2udt2 = photons * PSFy * d2PSFxdt2
+    sigma_y. Based on equations 21a and 21b."""
+    dudt = photons * PSFy * _G(2, 1, x, mu, sigma_x)
+    d2udt2 = (
+        photons
+        * PSFy
+        * (_G(5, 3, x, mu, sigma_x) - 2 * _G(3, 1, x, mu, sigma_x))
+    )
     return dudt, d2udt2
 
 
@@ -325,9 +329,7 @@ def _derivative_gaussian_integral_iso_sigma(
     """Calculate the first and second derivatives of the integral of
     mu_k w.r.t sigma for the case of isotropic sigma. While Smith et al
     do not provide the formula, it can be easily derived, similarly to
-    equations 10, 11 and 14. The derivation can be found under
-    https://picassosr.readthedocs.io/en/latest/localize.html#mle-fitting.
-    """
+    equations 10, 11 14 and 21."""
     a_plus = (x - mu + 0.5) / (np.sqrt(2.0) * sigma)
     a_minus = (x - mu - 0.5) / (np.sqrt(2.0) * sigma)
     b_plus = (y - nu + 0.5) / (np.sqrt(2.0) * sigma)
