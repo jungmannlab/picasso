@@ -2397,6 +2397,19 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         maxdist_label.setToolTip("Maximum distance to plot (nm).")
         const_layout.addRow(maxdist_label, self.max_dist)
 
+        # y limit
+        self.ylimmax = QtWidgets.QDoubleSpinBox()
+        self.ylimmax.setRange(0.0, 1.0)
+        self.ylimmax.setValue(0.0)
+        self.ylimmax.setDecimals(4)
+        self.ylimmax.setSingleStep(0.001)
+        ylimmax_label = QtWidgets.QLabel("Y-axis max.:")
+        ylimmax_label.setToolTip(
+            "Maximum value in the y-axis. If 0, the maximum is set\n"
+            "automatically based on the data."
+        )
+        const_layout.addRow(ylimmax_label, self.ylimmax)
+
         # title
         self.title = QtWidgets.QLineEdit()
         self.title.setText("Nearest Neighbors Distances:")
@@ -2543,6 +2556,10 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
                 self, "Warning", "Max. distance is lower than min. distance."
             )
             return {}
+        if self.ylimmax.value() == 0:
+            ylim = None
+        else:
+            ylim = (0, self.ylimmax.value())
 
         binsize_sim = self.binsize_sim.value()
         binsize_exp = self.binsize_exp.value()
@@ -2567,6 +2584,7 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
             "binsize_exp": binsize_exp,
             "min_dist": mindist,
             "max_dist": maxdist,
+            "ylim": ylim,
             "title": title,
             "xlabel": self.xlabel.text(),
             "ylabel": self.ylabel.text(),
@@ -4412,6 +4430,7 @@ class SimulationsTab(QtWidgets.QDialog):
                 fig=self.nnd_fig,
                 ax=self.nnd_ax,
                 xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                ylim=plot_params["ylim"],
                 fontsize_labels=8,
                 fontsize_ticks=6,
                 fontsize_title=8,
@@ -4430,6 +4449,7 @@ class SimulationsTab(QtWidgets.QDialog):
                 fig=self.nnd_fig,
                 ax=self.nnd_ax,
                 xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                ylim=plot_params["ylim"],
                 fontsize_labels=8,
                 fontsize_ticks=6,
                 fontsize_title=8,
@@ -4505,6 +4525,7 @@ class SimulationsTab(QtWidgets.QDialog):
                     fig=fig,
                     ax=ax,
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                    ylim=plot_params["ylim"],
                     fontsize_labels=8,
                     fontsize_ticks=6,
                     fontsize_title=8,
@@ -4522,6 +4543,7 @@ class SimulationsTab(QtWidgets.QDialog):
                     fig=fig,
                     ax=ax,
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                    ylim=plot_params["ylim"],
                     fontsize_labels=8,
                     fontsize_ticks=6,
                     fontsize_title=8,
