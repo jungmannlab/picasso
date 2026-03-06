@@ -2479,16 +2479,12 @@ def g5m(
     if postprocess:
         # filter out by mean frame, std frame, p_val and n_events
         n_frames = info[0]["Frames"]
-        min_frame = 0.1 * n_frames
-        max_frame = 0.9 * n_frames
         min_std_frame = 0.1 * n_frames
         min_pval = 0.015
         min_n_events = 3
 
         idx = (
-            (centers["frame"] > min_frame)
-            & (centers["frame"] < max_frame)
-            & (centers["std_frame"] > min_std_frame)
+            (centers["std_frame"] > min_std_frame)
             & (centers["p_val"] > min_pval)
             & (centers["n_events"] > min_n_events)
         )
@@ -2497,8 +2493,6 @@ def g5m(
             np.isin(clustered_locs["group"], np.arange(len(idx))[idx])
         ]
         info[-1]["Filtered"] = True
-        info[-1]["Filter; min. mean frame"] = min_frame
-        info[-1]["Filter; max. mean frame"] = max_frame
         info[-1]["Filter; min. std frame"] = min_std_frame
         info[-1]["Filter; min. p value"] = min_pval
         info[-1]["Filter; min. n_events"] = min_n_events

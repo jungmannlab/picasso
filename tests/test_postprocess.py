@@ -239,9 +239,10 @@ def test_g5m(locs, info):
         loc_prec_handle="abs",
         sigma_bounds=(1 / 130, 3 / 130),
     )
-    assert (
-        "p_val" in g5m_mols.columns
-    ), "'p_val' column missing in g5m molecules (global loc prec, no bootstrap, not multiprocessed)"
+    assert "p_val" in g5m_mols.columns, (
+        "'p_val' column missing in g5m molecules (global loc prec, no "
+        "bootstrap, not multiprocessed)"
+    )
 
 
 def test_g5m_3d(locs, info):

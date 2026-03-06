@@ -2201,7 +2201,12 @@ class G5MDialog(QtWidgets.QDialog):
         self.calibration = None
 
         # min locs per molecule
-        grid.addWidget(QtWidgets.QLabel("Min. locs:"), grid.rowCount(), 0)
+        minlocs_label = QtWidgets.QLabel("Min. locs:")
+        minlocs_label.setToolTip(
+            "Minimum number of localizations per molecule to be"
+            " considered valid."
+        )
+        grid.addWidget(minlocs_label, grid.rowCount(), 0)
         self.min_locs = QtWidgets.QSpinBox()
         self.min_locs.setSingleStep(1)
         self.min_locs.setRange(2, 999)
@@ -2210,11 +2215,12 @@ class G5MDialog(QtWidgets.QDialog):
 
         # loc precision handling - local values or absolute sigma bounds
         self.loc_prec_handling = QtWidgets.QComboBox()
+        self.loc_prec_handling.setToolTip(
+            "Choose whether to constrain Gaussian \u03c3 based on loc.\n"
+            "precision values (local) or to use absolute \u03c3 bounds."
+        )
         self.loc_prec_handling.addItems(
-            [
-                "Local loc. precision",
-                "Custom \u03c3 bounds",
-            ]
+            ["Local loc. precision", "Custom \u03c3 bounds"]
         )
         self.loc_prec_handling.setCurrentIndex(0)
         self.loc_prec_handling.currentIndexChanged.connect(
@@ -2223,6 +2229,10 @@ class G5MDialog(QtWidgets.QDialog):
         grid.addWidget(self.loc_prec_handling, grid.rowCount(), 0, 1, 2)
         # two associated input boxes - min and max values
         self.min_sigma_label = QtWidgets.QLabel("Min. \u03c3 factor:")
+        self.min_sigma_label.setToolTip(
+            "Minimum \u03c3 factor relative to localization precision\n"
+            "values (local) or absolute min. \u03c3."
+        )
         grid.addWidget(self.min_sigma_label, grid.rowCount(), 0)
         self.min_sigma = QtWidgets.QDoubleSpinBox()
         self.min_sigma.setDecimals(2)
@@ -2231,6 +2241,10 @@ class G5MDialog(QtWidgets.QDialog):
         self.min_sigma.setRange(0.00, 100.00)
         grid.addWidget(self.min_sigma, grid.rowCount() - 1, 1)
         self.max_sigma_label = QtWidgets.QLabel("Max. \u03c3 factor:")
+        self.max_sigma_label.setToolTip(
+            "Maximum \u03c3 factor relative to localization precision\n"
+            "values (local) or absolute max. \u03c3."
+        )
         grid.addWidget(self.max_sigma_label, grid.rowCount(), 0)
         self.max_sigma = QtWidgets.QDoubleSpinBox()
         self.max_sigma.setDecimals(2)
@@ -2241,17 +2255,27 @@ class G5MDialog(QtWidgets.QDialog):
 
         # bootstrap for SEM?
         self.bootstrap_check = QtWidgets.QCheckBox("Bootstrap SEM")
+        self.bootstrap_check.setToolTip(
+            "Bootstrap to estimate the molecule's position uncertainty?\n"
+            "Note it will take longer to run."
+        )
         self.bootstrap_check.setChecked(False)
         grid.addWidget(self.bootstrap_check, grid.rowCount(), 0, 1, 2)
 
         # apply multiprocessing?
         self.multiprocessing_check = QtWidgets.QCheckBox("Use multiprocessing")
+        self.multiprocessing_check.setToolTip(
+            "Use multiprocessing to speed up the analysis?"
+        )
         self.multiprocessing_check.setChecked(True)
         grid.addWidget(self.multiprocessing_check, grid.rowCount(), 0, 1, 2)
 
         # save clustered localizations?
         self.clustered_check = QtWidgets.QCheckBox(
             "Save clustered localizations"
+        )
+        self.clustered_check.setToolTip(
+            "Save an extra .hdf5 file containing the clustered localizations?"
         )
         self.clustered_check.setChecked(False)
         grid.addWidget(self.clustered_check, grid.rowCount(), 0, 1, 2)
@@ -2260,11 +2284,25 @@ class G5MDialog(QtWidgets.QDialog):
         self.postprocess_check = QtWidgets.QCheckBox(
             "Filter invalid molecules\nand frame analysis"
         )
+        self.postprocess_check.setToolTip(
+            "Perform postprocessing to filter out sticking events\n"
+            "and low-quality fits.\n"
+            "The applied filters are:\n"
+            "- std_frame: < 10% of the acquisition time\n"
+            "- n_events > 3\n"
+            "- p_val < 0.015"
+        )
         # self.postprocess_check.setChecked(True)
         grid.addWidget(self.postprocess_check, grid.rowCount(), 0, 1, 2)
 
         # check for cluster areas/volumes?
         self.cluster_size_button = QtWidgets.QPushButton("Check cluster sizes")
+        self.cluster_size_button.setToolTip(
+            "Roughly estimate the number of molecules per DBSCAN cluster\n"
+            "based on the area of the clusters. This is to avoid fitting\n"
+            "G5M to clusters with many molecules (which could lower accuracy\n"
+            "and slow down the analysis)."
+        )
         self.cluster_size_button.clicked.connect(self.check_cluster_sizes)
         grid.addWidget(self.cluster_size_button, grid.rowCount(), 0, 1, 2)
         self.cluster_size_label = QtWidgets.QLabel("")
@@ -2281,6 +2319,11 @@ class G5MDialog(QtWidgets.QDialog):
             self.buttons.buttons()[0].setEnabled(False)
             self.load_calib_button = QtWidgets.QPushButton(
                 "Load 3D calibration"
+            )
+            self.load_calib_button.setToolTip(
+                "Load the 3D calibration .yaml file used in Localize.\n"
+                "If the file was found in the metadata, it will be"
+                " loaded automatically."
             )
             self.load_calib_button.clicked.connect(self.load_calibration)
             grid.addWidget(self.load_calib_button, grid.rowCount(), 0, 1, 2)
