@@ -7,7 +7,7 @@
 import numpy as np
 import pandas as pd
 import pytest
-from picasso import io, clusterer, g5m, postprocess
+from picasso import io, clusterer, g5m, postprocess, zfit
 
 # parameters
 PICK_SIZE = 1.5  # in camera pixels
@@ -245,33 +245,41 @@ def test_g5m(locs, info):
 
 
 def test_g5m_3d(locs, info):
-    # make 3d dbscaned locs
+    # make 3d dbscaned locs (z position in nm)
     dbscan_locs = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)
-    dbscan_locs["z"] = np.random.normal(0, 2 / 130, size=len(dbscan_locs))
-
     assert len(dbscan_locs), "DBSCAN returned no localizations for 3D test"
+    dbscan_locs["z"] = np.random.normal(0, 2, size=len(dbscan_locs))
+    dbscan_locs["lpz"] = zfit.axial_localization_precision(
+        dbscan_locs, info, calibration=CALIB_3D, fitting_method="gaussmle"
+    )
 
-    # g5m_mols, _, _ = g5m.g5m( TODO: the tests work on my computer, check later why github fails
-    #     dbscan_locs,
-    #     info,
-    #     min_locs=5,
-    #     bootstrap_check=True,
-    #     calibration=CALIB_3D,
-    #     asynch=False,
-    # )
-    # assert (
-    #     "p_val" in g5m_mols.columns
-    # ), "'p_val' column missing in 3D g5m molecules"
+    g5m_mols, _, _ = g5m.g5m(
+        dbscan_locs,
+        info,
+        min_locs=5,
+        bootstrap_check=True,
+        calibration=CALIB_3D,
+        asynch=False,
+    )
+    assert len(g5m_mols), "g5m returned no molecules for 3D test"
+    assert (
+        "p_val" in g5m_mols.columns
+    ), "'p_val' column missing in 3D g5m molecules"
 
-    # g5m_mols, _, _ = g5m.g5m(
-    #     dbscan_locs,
-    #     info,
-    #     min_locs=5,
-    #     bootstrap_check=False,
-    #     calibration=CALIB_3D,
-    #     loc_prec_handle="abs",
-    #     sigma_bounds=(1 / 130, 3 / 130),
-    # )
-    # assert (
-    #     "p_val" in g5m_mols.columns
-    # ), "'p_val' column missing in 3D g5m molecules (global loc prec, no bootstrap, not multiprocessed)"
+    g5m_mols, _, _ = g5m.g5m(
+        dbscan_locs,
+        info,
+        min_locs=5,
+        bootstrap_check=False,
+        calibration=CALIB_3D,
+        loc_prec_handle="abs",
+        sigma_bounds=(1 / 130, 3 / 130),
+    )
+    assert len(g5m_mols), (
+        "g5m returned no molecules for 3D test (global loc prec, no bootstrap,"
+        " not multiprocessed)"
+    )
+    assert "p_val" in g5m_mols.columns, (
+        "'p_val' column missing in 3D g5m molecules (global loc prec, no"
+        " bootstrap, not multiprocessed)"
+    )

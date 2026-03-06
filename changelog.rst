@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 04-MAR-2026 CEST
+Last change: 06-MAR-2026 CEST
 
 0.9.8
 -----
@@ -14,6 +14,7 @@ Last change: 04-MAR-2026 CEST
 - MLE fitting saves CRLB uncertainties of fitted parameters: photons, background, sx and sy
 - Added DOIs related to G5M and axial loc. precision
 - Updated Picasso Average documentation
+- Fixed G5M 3D CI test
 
 0.9.7
 -----

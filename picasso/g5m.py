@@ -1650,7 +1650,7 @@ def bootstrap_sem(
                 means_init=g5m.means,
                 mag_factor=g5m.mag_factor,
             )
-            lp = locs[["lpx", "lpy"]].to_numpy()
+            lp = locs[["lpx", "lpy", "lpz"]].to_numpy()
         else:
             g5m_boot = G5M_2D(
                 n_components=len(g5m.valid_idx),
