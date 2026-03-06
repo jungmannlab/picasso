@@ -1041,15 +1041,54 @@ class ParametersDialog(QtWidgets.QDialog):
                     self.update_sensitivity()
 
         # Sample quality
-        quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
-        quality_groupbox.setToolTip("Estimate drift, bright time and NeNA.")
+        quality_groupbox = QtWidgets.QGroupBox(
+            "Postprocessing and Sample Quality"
+        )
+        quality_groupbox.setToolTip(
+            "Drift correction + drift, bright time and NeNA estimates."
+        )
         vbox.addWidget(quality_groupbox)
         quality_grid = QtWidgets.QGridLayout(quality_groupbox)
+
+        # drift correction
+        self.aim_undrift_checkbox = QtWidgets.QCheckBox("Apply AIM")
+        self.aim_undrift_checkbox.setToolTip(
+            "Apply the AIM for drift correction"
+        )
+        self.aim_undrift_checkbox.setChecked(False)
+        self.aim_undrift_checkbox.stateChanged.connect(
+            self.on_aim_undrift_changed
+        )
+        quality_grid.addWidget(self.aim_undrift_checkbox, 0, 0)
+
+        aim_segmentation_label = QtWidgets.QLabel("Segmentation")
+        aim_segmentation_label.setAlignment(
+            QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
+        )
+        aim_segmentation_label.setToolTip(
+            "Select the number of frames in a segment for AIM."
+        )
+        quality_grid.addWidget(aim_segmentation_label, 0, 1)
+        self.aim_segmentation = QtWidgets.QSpinBox()
+        self.aim_segmentation.setRange(1, 100_000)
+        self.aim_segmentation.setValue(1000)
+        self.aim_segmentation.setSingleStep(100)
+        self.aim_segmentation.setEnabled(False)
+        quality_grid.addWidget(self.aim_segmentation, 0, 2)
+
+        self.fiducial_check = QtWidgets.QCheckBox("Use fiducials")
+        self.fiducial_check.setToolTip(
+            "Use fiducial markers for drift correction?\n"
+        )
+        self.fiducial_check.setChecked(False)
+        quality_grid.addWidget(self.fiducial_check, 0, 3)
+
+        # sample quality
         self.quality_check = QtWidgets.QPushButton(
             "Estimate and add to database"
         )
         self.quality_check.setEnabled(False)
-        quality_grid.addWidget(self.quality_check, 1, 2)
+        quality_grid.addWidget(self.quality_check, 1, 0, 1, 4)
         self.quality_check.clicked.connect(self.check_quality)
 
         self.quality_grid_labels = [
@@ -1238,6 +1277,13 @@ class ParametersDialog(QtWidgets.QDialog):
         self.q_worker.progressMade.connect(self.quality_progress)
         self.q_worker.finished.connect(self.quality_progress_finished)
         self.q_worker.start()
+
+    def on_aim_undrift_changed(self, state: int) -> None:
+        """Enable/disable AIM segmentation spinbox."""
+        if state == 0:  # unchecked
+            self.aim_segmentation.setEnabled(False)
+        else:  # checked
+            self.aim_segmentation.setEnabled(True)
 
     def on_box_changed(self) -> None:
         """Handle changes to the parameter boxes."""
