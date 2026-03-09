@@ -2594,14 +2594,16 @@ class Window(QtWidgets.QMainWindow):
                 drift["y"] += fiducials_drift["y"]
                 if "z" in fiducials_drift.columns:
                     drift["z"] += fiducials_drift["z"]
+            else:
+                drift = fiducials_drift
 
             # apply drift
             frames = self.locs["frame"]
-            self.locs["x"] -= drift["x"].iloc[frames].to_numpy()
-            self.locs["y"] -= drift["y"].iloc[frames].to_numpy()
+            self.locs["x"] -= fiducials_drift["x"].iloc[frames].to_numpy()
+            self.locs["y"] -= fiducials_drift["y"].iloc[frames].to_numpy()
             # If z coordinate exists, also apply drift there
             if "z" in self.locs.columns:
-                self.locs["z"] -= drift["z"].iloc[frames].to_numpy()
+                self.locs["z"] -= fiducials_drift["z"].iloc[frames].to_numpy()
             self.status_bar.showMessage(
                 "Fiducial-based drift correction finished."
             )
