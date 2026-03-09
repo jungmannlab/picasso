@@ -23,15 +23,18 @@ import yaml
 import numpy as np
 import pandas as pd
 from .. import (
-    io,
-    localize,
+    aim,
+    avgroi,
+    CONFIG,
+    imageprocess,
     gausslq,
     gaussmle,
-    zfit,
+    io,
+    localize,
     lib,
-    CONFIG,
-    avgroi,
+    postprocess,
     __version__,
+    zfit,
 )
 from PyQt5 import QtCore, QtGui, QtWidgets
 from playsound3 import playsound
@@ -1551,8 +1554,12 @@ class Window(QtWidgets.QMainWindow):
 
     Attributes
     ----------
+    camera_info : dict
+        Camera information, such as gain, sensitivity, etc.
     contrast_dialog : ContrastDialog
         The dialog for adjusting display contrast.
+    extra_info : list of dict
+        Movie metadata in a format of a dictionary, with Localize info.
     identifications : pd.DataFrame
         Identified spots - frame, position, net gradient.
     last_identification_info : dict
@@ -1560,6 +1567,9 @@ class Window(QtWidgets.QMainWindow):
         Used to save user settings when closing the application.
     locs : pd.DataFrame
         Resulting localizations.
+    info : list of dict
+        Movie metadata in a format of a dictionary, without Localize
+        info, see self.extra_info.
     movie : np.memmap or None
         Loaded movie (frame, y, x).
     movie_path : list[str]
@@ -1609,6 +1619,8 @@ class Window(QtWidgets.QMainWindow):
         self.locs = None
         self.movie_path = []
         self.frame_range = None  # analyze all frames by default
+        self.info = []
+        self.extra_info = []
 
         self.load_user_settings()
 
@@ -2520,6 +2532,24 @@ class Window(QtWidgets.QMainWindow):
             self.parameters_dialog.quality_check.setEnabled(True)
 
         self.parameters_dialog.gpufit_checkbox.setDisabled(False)
+        self.status_bar.showMessage(f"Saved {len(self.locs)} localizations.")
+
+        # apply drift if requested
+        aim_check = self.parameters_dialog.aim_undrift_checkbox.isChecked()
+        aim_segmentation = self.parameters_dialog.aim_segmentation.value()
+        fiducial_check = self.parameters_dialog.fiducial_check.isChecked()
+        if aim_check or fiducial_check:
+            self.status_bar.showMessage("Applying drift correction...")
+            self.drift_worker = DriftWorker(
+                self.locs,
+                self.extra_info,
+                aim_check,
+                aim_segmentation,
+                fiducial_check,
+            )
+            self.drift_worker.progressMade.connect(self.on_drift_progress)
+            self.drift_worker.finished.connect(self.on_drift_finished)
+            self.drift_worker.start()
 
     def fit_in_view(self) -> None:
         """Reset the zoom in the scene."""
@@ -2621,10 +2651,10 @@ class Window(QtWidgets.QMainWindow):
             localize_info["Z Calibration"] = (
                 self.parameters_dialog.z_calibration
             )
-        info = self.info + [localize_info | self.camera_info]
+        self.extra_info = self.info + [localize_info | self.camera_info]
         self.select_locs_columns()  # save only selected columns
         # copy to avoid pandas warning:
-        io.save_locs(path, self.locs.copy(), info)
+        io.save_locs(path, self.locs.copy(), self.extra_info)
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""
@@ -2865,6 +2895,72 @@ class FitZWorker(QtCore.QThread):
         locs = zfit.locs_from_futures(fs, filter=0)
         dt = time.time() - t0
         self.finished.emit(locs, dt)
+
+
+class DriftWorker(QtCore.QThread):
+    """Run drift correction with AIM and/or fiducial markers on the
+    fitted localizations."""
+
+    progressMade = QtCore.pyqtSignal(str, int)
+    finished = QtCore.pyqtSignal(str)
+
+    def __init__(
+        self,
+        locs: pd.DataFrame,
+        extra_info: list[dict],
+        aim_check: bool,
+        aim_segmentation: int,
+        fiducial_check: bool,
+    ) -> None:
+        super().__init__()
+        self.locs = locs
+        self.extra_info = extra_info
+        self.aim_check = aim_check
+        self.aim_segmentation = aim_segmentation
+        self.fiducial_check = fiducial_check
+
+    def run(self) -> None:
+        if self.aim_check:
+            # TODO: figure out how ot implement self.emit_aim_progress
+            undrift_locs, new_info, drift = aim.aim(
+                self.locs,
+                self.extra_info,
+                self.aim_segmentation,
+                callback=self.emit_aim_progress,
+            )
+            self.locs = undrift_locs
+            self.extra_info = new_info
+        if self.fiducial_check:
+            # TODO: progress just emit a string saying that fiducials are being searched for
+            fiducial_picks, box = imageprocess.find_fiducials(
+                self.locs, self.extra_info
+            )
+
+            # TODO: figure out how to implement self.emit_fiducial_progress
+            picked_fiducials = postprocess.picked_locs(
+                self.locs,
+                self.extra_info,
+                picks=fiducial_picks,
+                pick_shape="Circle",
+                pick_size=box / 2,
+                add_group=False,
+                callback=self.emit_fiducial_progress,
+            )
+
+            # TODO: add a progress made signal that drift is being calculated and applied
+            drift = postprocess.undrift_from_picked(
+                picked_fiducials, self.extra_info
+            )
+
+            # apply drift
+            frames = self.locs["frame"]
+            self.locs["x"] -= drift["x"].iloc[frames].to_numpy()
+            self.locs["y"] -= drift["y"].iloc[frames].to_numpy()
+            # If z coordinate exists, also apply drift there
+            if "z" in self.locs.columns:
+                self.locs["z"] -= drift["z"].iloc[frames].to_numpy()
+
+        # TODO: emit finished
 
 
 class QualityWorker(QtCore.QThread):

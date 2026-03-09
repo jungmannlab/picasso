@@ -423,7 +423,7 @@ class Window(QtWidgets.QMainWindow):
             "Resulting standard deviation of photons per emitter per frame."
         )
         photonstdframe = QtWidgets.QLabel("Photons Std (frame)")
-        photonbudget = QtWidgets.QLabel("Photonbudget")
+        photonbudget = QtWidgets.QLabel("Photon budget")
         photonbudget.setToolTip(
             "Number of photons a molecule can emit before bleaching."
         )
