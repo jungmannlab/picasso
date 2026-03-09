@@ -49,15 +49,15 @@ CURRENTROUND = 0
 ADVANCEDMODE = 0  # 1 is with calibration of noise model
 # CAMERA
 IMAGESIZE_DEFAULT = 32
-ITIME_DEFAULT = 300
-FRAMES_DEFAULT = 7500
-PIXELSIZE_DEFAULT = 160
+ITIME_DEFAULT = 100
+FRAMES_DEFAULT = 5000
+PIXELSIZE_DEFAULT = 130
 # PAINT
-KON_DEFAULT = 1600000
-IMAGERCONCENTRATION_DEFAULT = 5
-MEANBRIGHT_DEFAULT = 500
+KON_DEFAULT = 37000000  # 5xR1 at 500 pM
+IMAGERCONCENTRATION_DEFAULT = 0.5
+MEANBRIGHT_DEFAULT = 280
 # IMAGER
-LASERPOWER_DEFAULT = 1.5  # POWER DENSITY
+LASERPOWER_DEFAULT = 0.175  # POWER DENSITY
 POWERDENSITY_CONVERSION = 20
 STDFACTOR = 1.82
 if ADVANCEDMODE:
@@ -66,7 +66,7 @@ PSF_DEFAULT = 0.82
 PHOTONRATE_DEFAULT = 53
 PHOTONRATESTD_DEFAULT = 29
 PHOTONBUDGET_DEFAULT = 1500000
-PHOTONSLOPE_DEFAULT = 35
+PHOTONSLOPE_DEFAULT = 1300
 PHOTONSLOPESTD_DEFAULT = 19
 if ADVANCEDMODE:
     PHOTONSLOPE_DEFAULT = 1.77
@@ -362,7 +362,8 @@ class Window(QtWidgets.QMainWindow):
         self.konEdit.setDecimals(0)
         self.konEdit.setSingleStep(100000)
         self.imagerconcentrationEdit = QtWidgets.QDoubleSpinBox()
-        self.imagerconcentrationEdit.setRange(0.01, 1000)
+        self.imagerconcentrationEdit.setDecimals(4)
+        self.imagerconcentrationEdit.setRange(0.0001, 1000)
         self.taudEdit = QtWidgets.QLabel()
         self.taubEdit = QtWidgets.QDoubleSpinBox()
         self.taubEdit.setRange(1, 10000)
@@ -413,17 +414,17 @@ class Window(QtWidgets.QMainWindow):
         psf_fwhm.setToolTip(
             "Full Width at Half Maximum (FWHM) of the PSF in nm."
         )
-        photonrate = QtWidgets.QLabel("Photonrate")
+        photonrate = QtWidgets.QLabel("Photon rate")
         photonsframe = QtWidgets.QLabel("Photons (frame)")
         photonsframe.setToolTip(
             "Resulting mean number of photons per emitter per frame."
         )
-        photonratestd = QtWidgets.QLabel("Photonrate Std")
+        photonratestd = QtWidgets.QLabel("Photon rate Std")
         photonratestd.setToolTip(
             "Resulting standard deviation of photons per emitter per frame."
         )
         photonstdframe = QtWidgets.QLabel("Photons Std (frame)")
-        photonbudget = QtWidgets.QLabel("Photonbudget")
+        photonbudget = QtWidgets.QLabel("Photon budget")
         photonbudget.setToolTip(
             "Number of photons a molecule can emit before bleaching."
         )
@@ -431,6 +432,7 @@ class Window(QtWidgets.QMainWindow):
         photonslopeStd = QtWidgets.QLabel("Photonrate Std ")
 
         self.laserpowerEdit = QtWidgets.QDoubleSpinBox()
+        self.laserpowerEdit.setDecimals(3)
         self.laserpowerEdit.setRange(0, 10)
         self.laserpowerEdit.setSingleStep(0.1)
         self.psfEdit = QtWidgets.QDoubleSpinBox()
@@ -451,6 +453,7 @@ class Window(QtWidgets.QMainWindow):
         self.photonbudgetEdit.setDecimals(0)
 
         self.photonslopeEdit = QtWidgets.QDoubleSpinBox()
+        self.photonslopeEdit.setRange(0, 10000)
         self.photonslopeStdEdit = QtWidgets.QDoubleSpinBox()
 
         self.laserpowerEdit.setValue(LASERPOWER_DEFAULT)

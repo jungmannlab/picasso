@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 06-MAR-2026 CEST
+Last change: 09-MAR-2026 CEST
 
 0.9.8
 -----
@@ -16,6 +16,7 @@ Last change: 06-MAR-2026 CEST
 - Updated Picasso Average documentation
 - Removed mean frame filtering for G5M filtering/postprocessing
 - Added tool tips to G5M dialog
+- Changed default parameters in Simulate to reflect a typical DNA origami measurement
 - SPINNA GUI allows for user-defined max y-axis value in the NND plot
 - Fixed G5M 3D CI test
 
