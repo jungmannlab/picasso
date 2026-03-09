@@ -23,15 +23,18 @@ import yaml
 import numpy as np
 import pandas as pd
 from .. import (
-    io,
-    localize,
+    aim,
+    avgroi,
+    CONFIG,
+    imageprocess,
     gausslq,
     gaussmle,
-    zfit,
+    io,
+    localize,
     lib,
-    CONFIG,
-    avgroi,
+    postprocess,
     __version__,
+    zfit,
 )
 from PyQt5 import QtCore, QtGui, QtWidgets
 from playsound3 import playsound
@@ -1041,15 +1044,54 @@ class ParametersDialog(QtWidgets.QDialog):
                     self.update_sensitivity()
 
         # Sample quality
-        quality_groupbox = QtWidgets.QGroupBox("Sample Quality")
-        quality_groupbox.setToolTip("Estimate drift, bright time and NeNA.")
+        quality_groupbox = QtWidgets.QGroupBox(
+            "Postprocessing and Sample Quality"
+        )
+        quality_groupbox.setToolTip(
+            "Drift correction + drift, bright time and NeNA estimates."
+        )
         vbox.addWidget(quality_groupbox)
         quality_grid = QtWidgets.QGridLayout(quality_groupbox)
+
+        # drift correction
+        self.aim_undrift_checkbox = QtWidgets.QCheckBox("Apply AIM")
+        self.aim_undrift_checkbox.setToolTip(
+            "Apply the AIM for drift correction"
+        )
+        self.aim_undrift_checkbox.setChecked(False)
+        self.aim_undrift_checkbox.stateChanged.connect(
+            self.on_aim_undrift_changed
+        )
+        quality_grid.addWidget(self.aim_undrift_checkbox, 0, 0)
+
+        aim_segmentation_label = QtWidgets.QLabel("Segmentation")
+        aim_segmentation_label.setAlignment(
+            QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
+        )
+        aim_segmentation_label.setToolTip(
+            "Select the number of frames in a segment for AIM."
+        )
+        quality_grid.addWidget(aim_segmentation_label, 0, 1)
+        self.aim_segmentation = QtWidgets.QSpinBox()
+        self.aim_segmentation.setRange(1, 100_000)
+        self.aim_segmentation.setValue(1000)
+        self.aim_segmentation.setSingleStep(100)
+        self.aim_segmentation.setEnabled(False)
+        quality_grid.addWidget(self.aim_segmentation, 0, 2)
+
+        self.fiducial_check = QtWidgets.QCheckBox("Use fiducials")
+        self.fiducial_check.setToolTip(
+            "Use fiducial markers for drift correction?\n"
+        )
+        self.fiducial_check.setChecked(False)
+        quality_grid.addWidget(self.fiducial_check, 0, 3)
+
+        # sample quality
         self.quality_check = QtWidgets.QPushButton(
             "Estimate and add to database"
         )
         self.quality_check.setEnabled(False)
-        quality_grid.addWidget(self.quality_check, 1, 2)
+        quality_grid.addWidget(self.quality_check, 1, 0, 1, 4)
         self.quality_check.clicked.connect(self.check_quality)
 
         self.quality_grid_labels = [
@@ -1238,6 +1280,13 @@ class ParametersDialog(QtWidgets.QDialog):
         self.q_worker.progressMade.connect(self.quality_progress)
         self.q_worker.finished.connect(self.quality_progress_finished)
         self.q_worker.start()
+
+    def on_aim_undrift_changed(self, state: int) -> None:
+        """Enable/disable AIM segmentation spinbox."""
+        if state == 0:  # unchecked
+            self.aim_segmentation.setEnabled(False)
+        else:  # checked
+            self.aim_segmentation.setEnabled(True)
 
     def on_box_changed(self) -> None:
         """Handle changes to the parameter boxes."""
@@ -1505,8 +1554,12 @@ class Window(QtWidgets.QMainWindow):
 
     Attributes
     ----------
+    camera_info : dict
+        Camera information, such as gain, sensitivity, etc.
     contrast_dialog : ContrastDialog
         The dialog for adjusting display contrast.
+    extra_info : list of dict
+        Movie metadata in a format of a dictionary, with Localize info.
     identifications : pd.DataFrame
         Identified spots - frame, position, net gradient.
     last_identification_info : dict
@@ -1514,6 +1567,9 @@ class Window(QtWidgets.QMainWindow):
         Used to save user settings when closing the application.
     locs : pd.DataFrame
         Resulting localizations.
+    info : list of dict
+        Movie metadata in a format of a dictionary, without Localize
+        info, see self.extra_info.
     movie : np.memmap or None
         Loaded movie (frame, y, x).
     movie_path : list[str]
@@ -1563,6 +1619,8 @@ class Window(QtWidgets.QMainWindow):
         self.locs = None
         self.movie_path = []
         self.frame_range = None  # analyze all frames by default
+        self.info = []
+        self.extra_info = []
 
         self.load_user_settings()
 
@@ -2474,6 +2532,89 @@ class Window(QtWidgets.QMainWindow):
             self.parameters_dialog.quality_check.setEnabled(True)
 
         self.parameters_dialog.gpufit_checkbox.setDisabled(False)
+        self.status_bar.showMessage(f"Saved {len(self.locs)} localizations.")
+
+        # apply drift if requested
+        aim_check = self.parameters_dialog.aim_undrift_checkbox.isChecked()
+        aim_segmentation = self.parameters_dialog.aim_segmentation.value()
+        fiducial_check = self.parameters_dialog.fiducial_check.isChecked()
+        if aim_check or fiducial_check:
+            self.drift_correction(aim_check, aim_segmentation, fiducial_check)
+
+    def drift_correction(
+        self, aim_check: bool, aim_segmentation: int, fiducial_check: bool
+    ) -> None:
+        """Apply drift correction to the fitted localizations and save
+        the drift-corrected localizations and the .txt drift files."""
+        drift = None
+
+        if aim_check:
+            self.status_bar.showMessage("Applying AIM drift correction...")
+            undrift_locs, new_info, drift = aim.aim(
+                self.locs,
+                self.extra_info,
+                aim_segmentation,
+            )
+            self.locs = undrift_locs
+            self.extra_info = new_info
+            self.status_bar.showMessage("AIM finished.")
+
+        if fiducial_check:
+            self.status_bar.showMessage(
+                "Finding fiducials for drift correction..."
+            )
+            fiducial_picks, box = imageprocess.find_fiducials(
+                self.locs, self.extra_info
+            )
+            if len(fiducial_picks) == 0:
+                self.status_bar.showMessage(
+                    "No fiducials found. Skipping fiducial-based drift "
+                    "correction."
+                )
+                return
+            self.status_bar.showMessage(
+                f"Found {len(fiducial_picks)} fiducials. Applying drift "
+                "correction..."
+            )
+            picked_fiducials = postprocess.picked_locs(
+                self.locs,
+                self.extra_info,
+                picks=fiducial_picks,
+                pick_shape="Circle",
+                pick_size=box / 2,
+                add_group=False,
+            )
+
+            # find drift from each picked fiducial
+            fiducials_drift = postprocess.undrift_from_picked(
+                picked_fiducials, self.extra_info
+            )
+            if drift is not None:
+                drift["x"] += fiducials_drift["x"]
+                drift["y"] += fiducials_drift["y"]
+                if "z" in fiducials_drift.columns:
+                    drift["z"] += fiducials_drift["z"]
+            else:
+                drift = fiducials_drift
+
+            # apply drift
+            frames = self.locs["frame"]
+            self.locs["x"] -= fiducials_drift["x"].iloc[frames].to_numpy()
+            self.locs["y"] -= fiducials_drift["y"].iloc[frames].to_numpy()
+            # If z coordinate exists, also apply drift there
+            if "z" in self.locs.columns:
+                self.locs["z"] -= fiducials_drift["z"].iloc[frames].to_numpy()
+            self.status_bar.showMessage(
+                "Fiducial-based drift correction finished."
+            )
+        # save the drift-corrected localizations
+        base, ext = os.path.splitext(self.movie_path)
+        self.save_locs(base + "_locs_undrifted.hdf5")
+        # save txt drift file
+        np.savetxt(base + "_locs_drift.txt", drift, newline="\r\n")
+        self.status_bar.showMessage(
+            "Saved drift-corrected localizations and drift file."
+        )
 
     def fit_in_view(self) -> None:
         """Reset the zoom in the scene."""
@@ -2575,10 +2716,10 @@ class Window(QtWidgets.QMainWindow):
             localize_info["Z Calibration"] = (
                 self.parameters_dialog.z_calibration
             )
-        info = self.info + [localize_info | self.camera_info]
+        self.extra_info = self.info + [localize_info | self.camera_info]
         self.select_locs_columns()  # save only selected columns
         # copy to avoid pandas warning:
-        io.save_locs(path, self.locs.copy(), info)
+        io.save_locs(path, self.locs.copy(), self.extra_info)
 
     def save_locs_dialog(self) -> None:
         """Get the path to save localizations."""

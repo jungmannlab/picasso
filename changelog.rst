@@ -19,6 +19,7 @@ Last change: 09-MAR-2026 CEST
 - Changed default parameters in Simulate to reflect a typical DNA origami measurement
 - SPINNA GUI allows for user-defined max y-axis value in the NND plot
 - Fixed G5M 3D CI test
+- Localize GUI allows the user to automatically undrift localizations
 
 0.9.7
 -----
