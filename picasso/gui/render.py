@@ -10573,7 +10573,7 @@ class View(QtWidgets.QLabel):
             params["intersect_d"] = params["intersect_d"] / pixelsize
             params["roi_r"] = params["roi_r"] / pixelsize
             if ok:
-                n_frames = info[0]["Frames"]
+                n_frames = lib.get_from_metadata(info, "Frames")
                 n_segments = int(np.ceil(n_frames / params["segmentation"]))
                 progress = lib.ProgressDialog(
                     "Undrifting by AIM (1/2)", 0, n_segments, self.window

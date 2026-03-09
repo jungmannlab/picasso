@@ -2539,17 +2539,80 @@ class Window(QtWidgets.QMainWindow):
         aim_segmentation = self.parameters_dialog.aim_segmentation.value()
         fiducial_check = self.parameters_dialog.fiducial_check.isChecked()
         if aim_check or fiducial_check:
-            self.status_bar.showMessage("Applying drift correction...")
-            self.drift_worker = DriftWorker(
+            self.drift_correction(aim_check, aim_segmentation, fiducial_check)
+
+    def drift_correction(
+        self, aim_check: bool, aim_segmentation: int, fiducial_check: bool
+    ) -> None:
+        """Apply drift correction to the fitted localizations and save
+        the drift-corrected localizations and the .txt drift files."""
+        drift = None
+
+        if aim_check:
+            self.status_bar.showMessage("Applying AIM drift correction...")
+            undrift_locs, new_info, drift = aim.aim(
                 self.locs,
                 self.extra_info,
-                aim_check,
                 aim_segmentation,
-                fiducial_check,
             )
-            self.drift_worker.progressMade.connect(self.on_drift_progress)
-            self.drift_worker.finished.connect(self.on_drift_finished)
-            self.drift_worker.start()
+            self.locs = undrift_locs
+            self.extra_info = new_info
+            self.status_bar.showMessage("AIM finished.")
+
+        if fiducial_check:
+            self.status_bar.showMessage(
+                "Finding fiducials for drift correction..."
+            )
+            fiducial_picks, box = imageprocess.find_fiducials(
+                self.locs, self.extra_info
+            )
+            if len(fiducial_picks) == 0:
+                self.status_bar.showMessage(
+                    "No fiducials found. Skipping fiducial-based drift "
+                    "correction."
+                )
+                return
+            self.status_bar.showMessage(
+                f"Found {len(fiducial_picks)} fiducials. Applying drift "
+                "correction..."
+            )
+            picked_fiducials = postprocess.picked_locs(
+                self.locs,
+                self.extra_info,
+                picks=fiducial_picks,
+                pick_shape="Circle",
+                pick_size=box / 2,
+                add_group=False,
+            )
+
+            # find drift from each picked fiducial
+            fiducials_drift = postprocess.undrift_from_picked(
+                picked_fiducials, self.extra_info
+            )
+            if drift is not None:
+                drift["x"] += fiducials_drift["x"]
+                drift["y"] += fiducials_drift["y"]
+                if "z" in fiducials_drift.columns:
+                    drift["z"] += fiducials_drift["z"]
+
+            # apply drift
+            frames = self.locs["frame"]
+            self.locs["x"] -= drift["x"].iloc[frames].to_numpy()
+            self.locs["y"] -= drift["y"].iloc[frames].to_numpy()
+            # If z coordinate exists, also apply drift there
+            if "z" in self.locs.columns:
+                self.locs["z"] -= drift["z"].iloc[frames].to_numpy()
+            self.status_bar.showMessage(
+                "Fiducial-based drift correction finished."
+            )
+        # save the drift-corrected localizations
+        base, ext = os.path.splitext(self.movie_path)
+        self.save_locs(base + "_locs_undrifted.hdf5")
+        # save txt drift file
+        np.savetxt(base + "_locs_drift.txt", drift, newline="\r\n")
+        self.status_bar.showMessage(
+            "Saved drift-corrected localizations and drift file."
+        )
 
     def fit_in_view(self) -> None:
         """Reset the zoom in the scene."""
@@ -2895,72 +2958,6 @@ class FitZWorker(QtCore.QThread):
         locs = zfit.locs_from_futures(fs, filter=0)
         dt = time.time() - t0
         self.finished.emit(locs, dt)
-
-
-class DriftWorker(QtCore.QThread):
-    """Run drift correction with AIM and/or fiducial markers on the
-    fitted localizations."""
-
-    progressMade = QtCore.pyqtSignal(str, int)
-    finished = QtCore.pyqtSignal(str)
-
-    def __init__(
-        self,
-        locs: pd.DataFrame,
-        extra_info: list[dict],
-        aim_check: bool,
-        aim_segmentation: int,
-        fiducial_check: bool,
-    ) -> None:
-        super().__init__()
-        self.locs = locs
-        self.extra_info = extra_info
-        self.aim_check = aim_check
-        self.aim_segmentation = aim_segmentation
-        self.fiducial_check = fiducial_check
-
-    def run(self) -> None:
-        if self.aim_check:
-            # TODO: figure out how ot implement self.emit_aim_progress
-            undrift_locs, new_info, drift = aim.aim(
-                self.locs,
-                self.extra_info,
-                self.aim_segmentation,
-                callback=self.emit_aim_progress,
-            )
-            self.locs = undrift_locs
-            self.extra_info = new_info
-        if self.fiducial_check:
-            # TODO: progress just emit a string saying that fiducials are being searched for
-            fiducial_picks, box = imageprocess.find_fiducials(
-                self.locs, self.extra_info
-            )
-
-            # TODO: figure out how to implement self.emit_fiducial_progress
-            picked_fiducials = postprocess.picked_locs(
-                self.locs,
-                self.extra_info,
-                picks=fiducial_picks,
-                pick_shape="Circle",
-                pick_size=box / 2,
-                add_group=False,
-                callback=self.emit_fiducial_progress,
-            )
-
-            # TODO: add a progress made signal that drift is being calculated and applied
-            drift = postprocess.undrift_from_picked(
-                picked_fiducials, self.extra_info
-            )
-
-            # apply drift
-            frames = self.locs["frame"]
-            self.locs["x"] -= drift["x"].iloc[frames].to_numpy()
-            self.locs["y"] -= drift["y"].iloc[frames].to_numpy()
-            # If z coordinate exists, also apply drift there
-            if "z" in self.locs.columns:
-                self.locs["z"] -= drift["z"].iloc[frames].to_numpy()
-
-        # TODO: emit finished
 
 
 class QualityWorker(QtCore.QThread):
