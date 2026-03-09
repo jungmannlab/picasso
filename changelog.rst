@@ -20,6 +20,7 @@ Last change: 09-MAR-2026 CEST
 - SPINNA GUI allows for user-defined max y-axis value in the NND plot
 - Fixed G5M 3D CI test
 - Localize GUI allows the user to automatically undrift localizations
+- Render export localizations supports exporting all channels sequentially
 
 0.9.7
 -----

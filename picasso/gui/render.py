@@ -11951,10 +11951,12 @@ class Window(QtWidgets.QMainWindow):
 
     def export_multi(self):
         """Ask the user to choose a type of export."""
-        channel = self.view.get_channel("Select channel to export")
-        locs = self.view.all_locs[channel]
-        info = self.view.infos[channel]
-        base, ext = os.path.splitext(self.view.locs_paths[channel])
+        # get channel
+        channel = self.view.get_channel_all_seq("Select channel to export")
+        if channel is None:
+            return
+
+        # get export type
         items = [
             ".txt for ImageJ",
             ".txt for NIS",
@@ -11967,49 +11969,49 @@ class Window(QtWidgets.QMainWindow):
         )
         if not ok or not item:
             return
+        # extract extension from item
+        ext = item.split()[0]
+
+        # get save file name
+        if channel is len(self.view.locs_paths):  # all channels
+            base, _ = os.path.splitext(self.view.locs_paths[0])
+            suffix, ok = QtWidgets.QInputDialog.getText(
+                self,
+                "Export all channels",
+                "Enter suffix",
+                QtWidgets.QLineEdit.Normal,
+                f"_export{ext}",
+            )
+            if not ok or not suffix.endswith(ext):
+                return
+            for channel in range(len(self.view.locs_paths)):
+                base, _ = os.path.splitext(self.view.locs_paths[channel])
+                path = base + suffix
+                self.export_multi_channel(channel, item, path)
+        else:  # single channel
+            base, _ = os.path.splitext(self.view.locs_paths[channel])
+            path, _ = lib.get_save_filename_ext_dialog(
+                self,
+                "Export localizations",
+                base + f"_export{ext}",
+                filter=f"*{ext}",
+            )
+            self.export_multi_channel(channel, item, path)
+
+    def export_multi_channel(self, channel: int, item: str, path: str) -> None:
+        """Export localizations for a single channel."""
+        locs = self.view.all_locs[channel]
+        info = self.view.infos[channel]
         if item == ".txt for ImageJ":
-            path, ext = lib.get_save_filename_ext_dialog(
-                self,
-                "Save localizations as txt (frames,x,y)",
-                base + ".txt",
-                filter="*.txt",
-            )
-            if path:
-                io.export_txt_imagej(path, locs, info)
+            io.export_txt_imagej(path, locs, info)
         elif item == ".txt for NIS":
-            path, ext = lib.get_save_filename_ext_dialog(
-                self,
-                (
-                    "Save localizations as txt for NIS "
-                    "(x,y,z,channel,width,bg,length,area,frame)"
-                ),
-                base + ".nis.txt",
-                filter="*.nis.txt",
-            )
-            if path:
-                io.export_txt_nis(path, locs, info)
+            io.export_txt_nis(path, locs, info)
         elif item == ".xyz for Chimera":
-            path, ext = lib.get_save_filename_ext_dialog(
-                self,
-                "Save localizations as xyz for chimera (molecule,x,y,z)",
-                base + ".chi.xyz",
-            )
-            if path:
-                io.export_xyz_chimera(path, locs, info)
+            io.export_xyz_chimera(path, locs, info)
         elif item == ".3d for ViSP":
-            path, ext = lib.get_save_filename_ext_dialog(
-                self,
-                "Save localizations for 3D ViSP (x, y, z, photons, frame)",
-                base + ".visp.3d",
-            )
-            if path:
-                io.export_3d_visp(path, locs, info)
+            io.export_3d_visp(path, locs, info)
         elif item == ".csv for ThunderSTORM":
-            path, ext = lib.get_save_filename_ext_dialog(
-                self, "Save csv to", base + ".csv", filter="*.csv"
-            )
-            if path:
-                io.export_thunderstorm(path, locs, info)
+            io.export_thunderstorm(path, locs, info)
 
     def export_fov_ims(self) -> None:
         """Exports current FOV to .ims"""
