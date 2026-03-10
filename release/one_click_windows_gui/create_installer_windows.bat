@@ -10,7 +10,7 @@ call conda activate picasso_installer
 call pip install build
 call python -m build
 
-call pip install "dist/picassosr-0.9.7-py3-none-any.whl"
+call pip install "dist/picassosr-0.9.8-py3-none-any.whl"
 call cd release/one_click_windows_gui
 
 call pip install pyinstaller==6.19.0
