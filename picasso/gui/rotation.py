@@ -1442,6 +1442,27 @@ class ViewRotation(QtWidgets.QLabel):
             self.viewport = viewport
             self.update_scene()
 
+    def xy_projection(self) -> None:
+        """Set angles to 0 to get XY projection."""
+        self.angx = 0
+        self.angy = 0
+        self.angz = 0
+        self.update_scene()
+
+    def xz_projection(self) -> None:
+        """Set angles to get XZ projection."""
+        self.angx = np.pi / 2
+        self.angy = 0
+        self.angz = 0
+        self.update_scene()
+
+    def yz_projection(self) -> None:
+        """Set angles to get YZ projection."""
+        self.angx = 0
+        self.angy = np.pi / 2
+        self.angz = 0
+        self.update_scene()
+
     def to_left_rot(self) -> None:
         """Shift pick in the main window."""
         height, width = self.viewport_size()
@@ -2137,6 +2158,14 @@ class RotationWindow(QtWidgets.QMainWindow):
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcut("Ctrl+W")
         fit_in_view_action.triggered.connect(self.view_rot.fit_in_view_rotated)
+
+        view_menu.addSeparator()
+        xy_proj_action = view_menu.addAction("XY projection")
+        xy_proj_action.triggered.connect(self.view_rot.xy_projection)
+        xz_proj_action = view_menu.addAction("XZ projection")
+        xz_proj_action.triggered.connect(self.view_rot.xz_projection)
+        yz_proj_action = view_menu.addAction("YZ projection")
+        yz_proj_action.triggered.connect(self.view_rot.yz_projection)
 
         view_menu.addSeparator()
         to_left_action = view_menu.addAction("Left")

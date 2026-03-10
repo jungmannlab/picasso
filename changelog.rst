@@ -22,6 +22,7 @@ Last change: 10-MAR-2026 CEST
 - Localize GUI allows the user to automatically undrift localizations
 - Render export localizations supports exporting all channels sequentially
 - Render 3D window always brings the selected region's mean z position to 0 for easier visualization
+- Render 3D: added buttons for xy, xz and yz projections
 
 0.9.7
 -----
