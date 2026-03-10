@@ -5,28 +5,34 @@ Last change: 10-MAR-2026 CEST
 
 0.9.8
 -----
+Small improvements:
++++++++++++++++++++
 - Added a function ``picasso.lib.get_save_filename_ext_dialog`` that can also check for the existence of the files with other extenstions (for example, if the user tries to save a .yaml file with the same name as an existing .hdf5 file, it will ask if the user wants to overwrite the .hdf5 file). This is implemented in all GUI modules when saving files.
 - ``PyImarisWriter`` is included in the one-click-installer again (Windows only)
-- Localize Parameters dialog displays a message if the z calibration path in the config file could not be found
-- Fixed Picasso Server launching in one-click-installers
-- ``picasso.localize.fit`` default method changed to ``sigmaxy`` (anisotropic sigma fitting)
-- Fixed 3D MLE fitting and cleaned the docstrings for better readability (``picasso.gaussmle``)
-- MLE fitting saves CRLB uncertainties of fitted parameters: photons, background, sx and sy
-- Added DOIs related to G5M and axial loc. precision
-- Updated Picasso Average documentation
-- Removed mean frame filtering for G5M filtering/postprocessing
-- Added tool tips to G5M dialog
-- Changed default parameters in Simulate to reflect a typical DNA origami measurement
-- SPINNA GUI allows for user-defined max y-axis value in the NND plot
-- Fixed G5M 3D CI test
 - Localize GUI allows the user to automatically undrift localizations
+- Localize Parameters dialog displays a message if the z calibration path in the config file could not be found
+- MLE fitting saves CRLB uncertainties of fitted parameters: photons, background, sx and sy
+- ``picasso.localize.fit`` default method changed to ``sigmaxy`` (anisotropic sigma fitting)
 - Render export localizations supports exporting all channels sequentially
-- Render 3D window always brings the selected region's mean z position to 0 for easier visualization
-- Render 3D: added buttons for xy, xz and yz projections
-- G5M automatically saves the check on relative sigma
-- Fixed how Picasso: Simulates splits photons across binding events
 - Changed default max. frames in linking (dark times calculation) to 3 (previously 1) (both GUI and ``picasso.postprocess.link``)
 - Added number of binding events to Render's "Show info" dialog
+- Render 3D window always brings the selected region's mean z position to 0 for easier visualization
+- Render 3D: added buttons for xy, xz and yz projections
+- Added DOIs related to G5M and axial loc. precision
+- Removed mean frame filtering for G5M filtering/postprocessing
+- Added tool tips to G5M dialog
+- G5M automatically saves the check on relative sigma
+- Updated Picasso Average documentation
+- Changed default parameters in Simulate to reflect a typical DNA origami measurement
+- SPINNA GUI allows for user-defined max y-axis value in the NND plot
+
+Bug fixes:
+++++++++++
+- Fixed Picasso Server launching in one-click-installers
+- Fixed 3D MLE fitting and cleaned the docstrings for better readability (``picasso.gaussmle``)
+- Fixed how Picasso: Simulates splits photons across binding events
+- Fixed G5M 3D CI test
+
 
 0.9.7
 -----
