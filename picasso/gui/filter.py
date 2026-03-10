@@ -530,7 +530,7 @@ class SubclusterNum(QtWidgets.QDialog):
         if self.save_vals.isChecked():
             base, ext = os.path.splitext(self.window.locs_path)
             out_path = base + "_subcluster_test.csv"
-            path, ext = QtWidgets.QFileDialog.getSaveFileName(
+            path, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save histogram values",
                 out_path,
@@ -772,8 +772,12 @@ class Window(QtWidgets.QMainWindow):
         if "x" in self.locs.columns:  # Saving only for locs
             base, ext = os.path.splitext(self.locs_path)
             out_path = base + "_filter.hdf5"
-            path, exe = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save localizations", out_path, filter="*.hdf5"
+            path, exe = lib.get_save_filename_ext_dialog(
+                self,
+                "Save localizations",
+                out_path,
+                filter="*.hdf5",
+                check_ext=".yaml",
             )
             if path:
                 filter_info = self.filter_log.copy()

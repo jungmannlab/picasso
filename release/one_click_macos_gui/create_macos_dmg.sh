@@ -12,7 +12,7 @@ set -e  # Exit immediately on any error
 eval "$(conda shell.bash hook)"
 
 APP_NAME="Picasso"
-VERSION="0.9.7"
+VERSION="0.9.8"
 MAIN_BUNDLE_NAME="Picasso.app"
 DMG_NAME="Picasso-v$VERSION-macOS-Apple-Silicon"
 PYINSTALLER_FILE="../pyinstaller/picasso_pyinstaller.py"
@@ -50,13 +50,25 @@ pip install pyinstaller==6.19
 cd release/one_click_macos_gui
 
 # -----------------------------------------------------------------------------
-# Step 1: Run PyInstaller to build the main .app bundle
+# Step 1: Clean previous build artifacts and run PyInstaller
 # -----------------------------------------------------------------------------
-# echo ">>> Building main .app bundle with PyInstaller..."
+echo ">>> Cleaning previous build artifacts..."
+if [ -d "$DIST_DIR" ]; then
+    echo "Removing $DIST_DIR..."
+    rm -rf "$DIST_DIR"
+fi
+if [ -d "$BUILD_DIR" ]; then
+    echo "Removing $BUILD_DIR..."
+    rm -rf "$BUILD_DIR"
+fi
+
+echo ">>> Building main .app bundle with PyInstaller..."
 pyinstaller "$PYINSTALLER_FILE" \
     --onedir \
     --windowed \
     --collect-all picasso \
+    --collect-all streamlit \
+    --copy-metadata streamlit \
     --name picasso \
     --icon ../logos/localize.icns \
     --distpath "$DIST_DIR" \

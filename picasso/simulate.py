@@ -239,7 +239,7 @@ def paintgen(
         )  # Get the first frame in which something happens in on-event
         onFrames = int(
             np.ceil((eventsum[i] - tempFrame * time) / time)
-        )  # Number of frames in which photon emittance happens
+        )  # Number of frames in which photon emission happens
 
         if photons * onFrames > photonbudget:
             onFrames = int(
@@ -257,7 +257,7 @@ def paintgen(
                 )
             # CASE 2: all photons are emitted in two frames
             elif onFrames == 2:
-                if j == 1:  # photons in first onframe
+                if j == 0:  # photons in first onframe
                     photonsinframe[1 + tempFrame] = int(
                         np.random.poisson(
                             ((tempFrame + 1) * time - eventsum[i - 1])
@@ -273,25 +273,25 @@ def paintgen(
                             * photons
                         )
                     )
-            else:  # CASE 3: all photons are mitted in three or more frames
-                if j == 1:
+            else:  # CASE 3: all photons are emitted in three or more frames
+                if j == 0:  # photons in first onframe (partial)
                     photonsinframe[1 + tempFrame] = int(
                         np.random.poisson(
                             ((tempFrame + 1) * time - eventsum[i - 1])
                             / time
                             * photons
                         )
-                    )  # Indexing starts with 0
-                elif j == onFrames:
+                    )
+                elif j == onFrames - 1:  # photons in last onframe (partial)
                     photonsinframe[onFrames + tempFrame] = int(
                         np.random.poisson(
-                            (eventsum(i) - (tempFrame + onFrames - 1) * time)
+                            (eventsum[i] - (tempFrame + onFrames - 1) * time)
                             / time
                             * photons
                         )
                     )
-                else:
-                    photonsinframe[tempFrame + j] = int(
+                else:  # photons in middle frames (full)
+                    photonsinframe[1 + tempFrame + j] = int(
                         np.random.poisson(photons)
                     )
 

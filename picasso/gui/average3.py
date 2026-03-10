@@ -497,8 +497,12 @@ class Window(QtWidgets.QMainWindow):
                 out_locs.drop(columns="z", inplace=True)
 
             out_path = os.path.splitext(self.locs_paths[i])[0] + "_avg3.hdf5"
-            path, exe = QtWidgets.QFileDialog.getSaveFileName(
-                self, "Save localizations", out_path, filter="*.hdf5"
+            path, exe = lib.get_save_filename_ext_dialog(
+                self,
+                "Save localizations",
+                out_path,
+                filter="*.hdf5",
+                check_ext=".yaml",
             )
             io.save_locs(path, out_locs, info)
 

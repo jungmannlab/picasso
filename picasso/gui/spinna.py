@@ -299,7 +299,7 @@ class MaskPreview(QtWidgets.QLabel):
 
     def save_current_view(self) -> None:
         """Save self.image (QImage, the current view) as png or tif."""
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+        path, _ = lib.get_save_filename_ext_dialog(
             self,
             "Save current view",
             directory=self.mask_tab.window.pwd,
@@ -832,11 +832,12 @@ class MaskGeneratorTab(QtWidgets.QDialog):
     def save_mask(self) -> None:
         """Save the generated mask."""
         if self.mask is not None:
-            path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            path, _ = lib.get_save_filename_ext_dialog(
                 self,
                 "Save mask",
                 self.locs_path.replace(".hdf5", "_mask.npy"),
                 filter="*.npy",
+                check_ext=".yaml",
             )
             if path:
                 # if threshold was applied, save the thresholded mask
@@ -1656,7 +1657,7 @@ class StructuresTab(QtWidgets.QDialog):
     def save_structures(self) -> None:
         """Save current structures as a .yaml file."""
         self.update_current_structure()  # in case it was not saved yet
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+        path, _ = lib.get_save_filename_ext_dialog(
             self,
             "Save structures",
             directory=self.window.pwd,
@@ -1679,7 +1680,7 @@ class StructuresTab(QtWidgets.QDialog):
 
     def load_structures(self) -> None:
         """Load structures from in a .yaml file."""
-        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+        path, _ = lib.get_save_filename_ext_dialog(
             self,
             "Load structures",
             directory=self.window.pwd,
@@ -1869,7 +1870,7 @@ class StructuresTab(QtWidgets.QDialog):
 
     def save_preview(self) -> None:
         """Save current preview."""
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+        path, _ = lib.get_save_filename_ext_dialog(
             self,
             "Save current view",
             directory=self.window.pwd,
@@ -2396,6 +2397,19 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
         maxdist_label.setToolTip("Maximum distance to plot (nm).")
         const_layout.addRow(maxdist_label, self.max_dist)
 
+        # y limit
+        self.ylimmax = QtWidgets.QDoubleSpinBox()
+        self.ylimmax.setRange(0.0, 1.0)
+        self.ylimmax.setValue(0.0)
+        self.ylimmax.setDecimals(4)
+        self.ylimmax.setSingleStep(0.001)
+        ylimmax_label = QtWidgets.QLabel("Y-axis max.:")
+        ylimmax_label.setToolTip(
+            "Maximum value in the y-axis. If 0, the maximum is set\n"
+            "automatically based on the data."
+        )
+        const_layout.addRow(ylimmax_label, self.ylimmax)
+
         # title
         self.title = QtWidgets.QLineEdit()
         self.title.setText("Nearest Neighbors Distances:")
@@ -2542,6 +2556,10 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
                 self, "Warning", "Max. distance is lower than min. distance."
             )
             return {}
+        if self.ylimmax.value() == 0:
+            ylim = None
+        else:
+            ylim = (0, self.ylimmax.value())
 
         binsize_sim = self.binsize_sim.value()
         binsize_exp = self.binsize_exp.value()
@@ -2566,6 +2584,7 @@ class NNDPlotSettingsDialog(QtWidgets.QDialog):
             "binsize_exp": binsize_exp,
             "min_dist": mindist,
             "max_dist": maxdist,
+            "ylim": ylim,
             "title": title,
             "xlabel": self.xlabel.text(),
             "ylabel": self.ylabel.text(),
@@ -3422,7 +3441,7 @@ class SimulationsTab(QtWidgets.QDialog):
             out_path = self.structures_path.replace(
                 ".yaml", "_search_space.csv"
             )
-            save, ext = QtWidgets.QFileDialog.getSaveFileName(
+            save, ext = lib.get_save_filename_ext_dialog(
                 self, "Save numbers of structures", out_path, filter="*.csv"
             )
             if not save:
@@ -3588,7 +3607,7 @@ class SimulationsTab(QtWidgets.QDialog):
         save = ""
         if self.save_fit_results_check.isChecked():
             out_path = self.structures_path.replace(".yaml", "_fit_scores.csv")
-            save, ext = QtWidgets.QFileDialog.getSaveFileName(
+            save, ext = lib.get_save_filename_ext_dialog(
                 self, "Save fitting scores", out_path, filter="*.csv"
             )
             if not save:
@@ -3694,7 +3713,7 @@ class SimulationsTab(QtWidgets.QDialog):
         """Save fit results in .txt with all parameters used."""
         metadata = self.summarize_fit_results()
         out_path = self.structures_path.replace(".yaml", "_fit_summary.txt")
-        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+        path, _ = lib.get_save_filename_ext_dialog(
             self, "Save fitting summary", out_path, filter="*.txt"
         )
         if path:
@@ -3970,7 +3989,7 @@ class SimulationsTab(QtWidgets.QDialog):
         # check if the molecules are to be saved
         if self.save_sim_result_check.isChecked():
             out_path = self.structures_path.replace(".yaml", "_sim.hdf5")
-            path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            path, _ = lib.get_save_filename_ext_dialog(
                 self,
                 "Save positions of simulated molecules",
                 out_path,
@@ -4411,6 +4430,7 @@ class SimulationsTab(QtWidgets.QDialog):
                 fig=self.nnd_fig,
                 ax=self.nnd_ax,
                 xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                ylim=plot_params["ylim"],
                 fontsize_labels=8,
                 fontsize_ticks=6,
                 fontsize_title=8,
@@ -4429,6 +4449,7 @@ class SimulationsTab(QtWidgets.QDialog):
                 fig=self.nnd_fig,
                 ax=self.nnd_ax,
                 xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                ylim=plot_params["ylim"],
                 fontsize_labels=8,
                 fontsize_ticks=6,
                 fontsize_title=8,
@@ -4473,7 +4494,7 @@ class SimulationsTab(QtWidgets.QDialog):
             return
 
         out_path = self.structures_path.replace(".yaml", f"_NND")
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
+        path, ext = lib.get_save_filename_ext_dialog(
             self, "Save NND plots", out_path, filter="*.png;;*.svg"
         )
         if not path:
@@ -4504,6 +4525,7 @@ class SimulationsTab(QtWidgets.QDialog):
                     fig=fig,
                     ax=ax,
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                    ylim=plot_params["ylim"],
                     fontsize_labels=8,
                     fontsize_ticks=6,
                     fontsize_title=8,
@@ -4521,6 +4543,7 @@ class SimulationsTab(QtWidgets.QDialog):
                     fig=fig,
                     ax=ax,
                     xlim=(plot_params["min_dist"], plot_params["max_dist"]),
+                    ylim=plot_params["ylim"],
                     fontsize_labels=8,
                     fontsize_ticks=6,
                     fontsize_title=8,
@@ -4543,8 +4566,11 @@ class SimulationsTab(QtWidgets.QDialog):
             return
 
         out_path = self.structures_path.replace(".yaml", "_NND_values")
-        path, ext = QtWidgets.QFileDialog.getSaveFileName(
-            self, "Save NND values", out_path, filter="*.csv"
+        path, ext = lib.get_save_filename_ext_dialog(
+            self,
+            "Save NND values",
+            out_path,
+            filter="*.csv",
         )
         if not path:
             return
