@@ -788,7 +788,7 @@ def fit(
     box: int,
     eps: float = 0.001,
     max_it: int = 100,
-    method: Literal["sigma", "sigmaxy"] = "sigma",
+    method: Literal["sigma", "sigmaxy"] = "sigmaxy",
 ) -> pd.DataFrame:
     """Fit Gaussians using Maximum Likelihood Estimation (MLE) to the
     identified spots in a movie to localize fluorescent molecules. See

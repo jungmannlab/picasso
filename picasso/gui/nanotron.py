@@ -659,11 +659,12 @@ class train_dialog(QtWidgets.QDialog):
 
         if self.mlp is not None:
 
-            fname, ext = QtWidgets.QFileDialog.getSaveFileName(
+            fname, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save mode file",
                 "model.sav",
                 ".sav",
+                check_ext=".yaml",
             )
 
             base, ext = os.path.splitext(fname)

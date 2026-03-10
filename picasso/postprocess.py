@@ -895,7 +895,7 @@ def distance_histogram(
 
 def nena(
     locs: pd.DataFrame,
-    info: None,
+    info: any = None,
     callback: Callable[[int], None] | None = None,
 ) -> tuple[dict, float]:
     """Calculate NeNA - experimental estimate of localization
@@ -907,10 +907,11 @@ def nena(
     ----------
     locs : pd.DataFrame
         Localizations.
-    info : None
+    info : any
         Metadata of the localizations. Not used.
     callback : function or None
-        Function to display progress. If None, no progress is displayed.
+        Function to display progress (takes in an integer). If None, no
+        progress is displayed.
 
     Returns
     -------
@@ -1453,7 +1454,7 @@ def link(
     locs: pd.DataFrame,
     info: list[dict],
     r_max: float = 0.05,
-    max_dark_time: int = 1,
+    max_dark_time: int = 3,
     combine_mode: Literal["average", "refit"] = "average",
     remove_ambiguous_lengths: bool = True,
 ) -> pd.DataFrame:

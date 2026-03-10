@@ -11,6 +11,10 @@ How to install
 1. Download the latest release from the `release page <https://github.com/jungmannlab/picasso/releases/>`__.
 2. Open the downloaded exe file and follow the installation instructions.
 
+⚠️ If installed in ``Program Files``, Render and Localize may not be available for non-administrator users. Therefore, we recommend installing Picasso outside of ``Program Files``. The current default location is ``C:\Picasso``.
+⚠️ When using Windows installer, camera config file needs to be moved to ``C:\Picasso\_internal\picasso``. *Before v0.9.7 under* ``C:\Picasso\picasso``.
+⚠️ Windows Safety features and Windows Defender may ask multiple times for permission during the installation and download.
+
 Creating your own installer
 ---------------------------
 
@@ -50,6 +54,8 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - NeNA. DOI: `10.1007/s00418-014-1192-3 <https://doi.org/10.1007/s00418-014-1192-3>`__
 - FRC. DOI: `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
 - Theoretical lateral localization precision (Gauss LQ and MLE). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
+- Theoretical axial localization precision (Gauss LQ and MLE). DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
+- Theoretical lateral localization precision (Gauss LQ). DOI: `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
 - Theoretical axial localization precision (Gauss LQ and MLE). DOI: *DOI will be added once available*
 - MLE fitting. DOI: `10.1038/nmeth.1449 <https://doi.org/10.1038/nmeth.1449>`__
 - RCC undrifting: DOI: `10.1364/OE.22.015982 <https://doi.org/10.1364/OE.22.015982>`__ 
@@ -62,7 +68,7 @@ If you use Picasso in your research, please cite our Nature Protocols publicatio
 - Picasso: Server. DOI: `10.1038/s42003-022-03909-5 <https://doi.org/10.1038/s42003-022-03909-5>`__
 - SPINNA. DOI: `10.1038/s41467-025-59500-z <https://doi.org/10.1038/s41467-025-59500-z>`__
 - SPINNA for LE fitting. DOI: `10.1038/s41592-024-02242-5 <https://doi.org/10.1038/s41592-024-02242-5>`__
-- G5M. DOI: *DOI will be added once available*
+- G5M. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
 
 Credits
 -------

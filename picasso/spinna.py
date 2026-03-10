@@ -736,8 +736,9 @@ def get_NN_dist_simulated(
 
     Parameters
     ----------
-    N_str : list of np.ndarrays
-        Numbers of structures to be simulated.
+    N_str : list or np.ndarray
+        Numbers of structures to be simulated for each structure in
+        ``mixer``.
     N_sim : int
         Number of times the simulation is repeated.
     mixer : StructureMixer

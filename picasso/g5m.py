@@ -3,8 +3,8 @@ picasso.g5m
 ~~~~~~~~~~~
 
 Gaussian Mixture Modeling with Modifications for Molecular Mapping
-(G5M). Published in: Kowalewski, Reinhardt, et al. *DOI will be added once
-available*.
+(G5M). Published in: Kowalewski, Reinhardt, et al. Nature Comms, 2026.
+DOI: * https://doi.org/10.1038/s41467-026-70198-5.
 
 G5M is based on the sklearn implementation of Gaussian Mixture Modeling
 (GMM) with numba optimizations for fitting, as well as for kmeans++
@@ -1650,7 +1650,7 @@ def bootstrap_sem(
                 means_init=g5m.means,
                 mag_factor=g5m.mag_factor,
             )
-            lp = locs[["lpx", "lpy"]].to_numpy()
+            lp = locs[["lpx", "lpy", "lpz"]].to_numpy()
         else:
             g5m_boot = G5M_2D(
                 n_components=len(g5m.valid_idx),
@@ -2479,16 +2479,12 @@ def g5m(
     if postprocess:
         # filter out by mean frame, std frame, p_val and n_events
         n_frames = info[0]["Frames"]
-        min_frame = 0.1 * n_frames
-        max_frame = 0.9 * n_frames
         min_std_frame = 0.1 * n_frames
         min_pval = 0.015
         min_n_events = 3
 
         idx = (
-            (centers["frame"] > min_frame)
-            & (centers["frame"] < max_frame)
-            & (centers["std_frame"] > min_std_frame)
+            (centers["std_frame"] > min_std_frame)
             & (centers["p_val"] > min_pval)
             & (centers["n_events"] > min_n_events)
         )
@@ -2497,8 +2493,6 @@ def g5m(
             np.isin(clustered_locs["group"], np.arange(len(idx))[idx])
         ]
         info[-1]["Filtered"] = True
-        info[-1]["Filter; min. mean frame"] = min_frame
-        info[-1]["Filter; max. mean frame"] = max_frame
         info[-1]["Filter; min. std frame"] = min_std_frame
         info[-1]["Filter; min. p value"] = min_pval
         info[-1]["Filter; min. n_events"] = min_n_events

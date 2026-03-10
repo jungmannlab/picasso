@@ -537,40 +537,128 @@ def is_hexadecimal(text):
     bool
         True if text represents rgb, False otherwise.
     """
-    allowed_characters = [
-        "0",
-        "1",
-        "2",
-        "3",
-        "4",
-        "5",
-        "6",
-        "7",
-        "8",
-        "9",
-        "a",
-        "b",
-        "c",
-        "d",
-        "e",
-        "f",
-        "A",
-        "B",
-        "C",
-        "D",
-        "E",
-        "F",
-    ]
-    sum_char = 0
-    if isinstance(text, str):
-        if text[0] == "#":
-            if len(text) == 7:
-                for char in text[1:]:
-                    if char in allowed_characters:
-                        sum_char += 1
-                if sum_char == 6:
-                    return True
+    allowed_characters = "0123456789abcdefABCDEF"
+    if isinstance(text, str) and text[0] == "#" and len(text) == 7:
+        n_valid = sum(char in allowed_characters for char in text[1:])
+        if n_valid == 6:
+            return True
     return False
+
+
+def is_path_available(
+    path: str, *, check_ext: str | list[str] = "", parent=None
+) -> bool:
+    """Check if a file or folder exists at the given path. Returns True
+    if there is not such path. Returns False if the path already exists.
+    Allows to easily change the extension of the path.
+
+    Parameters
+    ----------
+    path : str
+        Path to be checked.
+    check_ext : str or list of str, optional
+        Other extension(s) to be checked if they're available. Default
+        is "".
+    parent : QWidget, optional
+        Parent widget for the error message box if raise_error is True.
+        A message box will be displayed showing asking if the user wants
+        to continue without the file or folder if the path does not
+        exist.
+
+    Returns
+    -------
+    paths_available : list of bools
+        For each path generated with the new extension, True if the path
+        is available, False if the path already exists.
+
+    Raises
+    ------
+    ValueError
+        If check_ext is not empty and does not start with a dot.
+    """
+    if check_ext:
+        if isinstance(check_ext, str):
+            check_ext = [check_ext]
+        paths = [os.path.splitext(path)[0] + ext for ext in check_ext]
+    else:
+        paths = [path]
+    paths_available = []
+    for path in paths:
+        if os.path.exists(path):
+            if parent is not None:
+                box = QtWidgets.QMessageBox(parent)
+                box.setIcon(QtWidgets.QMessageBox.Warning)
+                box.setWindowTitle("File or folder already exists")
+                box.setText(
+                    f"The path '{path}' already exists."
+                    "\nDo you wish to overwrite it?"
+                )
+                box.setStandardButtons(
+                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+                )
+                result = box.exec_()
+                if result != QtWidgets.QMessageBox.Yes:
+                    paths_available.append(False)
+                else:
+                    paths_available.append(True)
+            else:
+                paths_available.append(False)
+        else:
+            paths_available.append(True)
+    return paths_available
+
+
+def get_save_filename_ext_dialog(
+    parent: QtWidgets.QWidget,
+    caption: str = "",
+    directory: str = "",
+    filter: str = "",
+    check_ext: str | list[str] = "",
+) -> tuple[str, str]:
+    """Custom getSaveFileName dialog that can check for the existence of
+    files with other extensions (for example, if the user tries to save
+    a .yaml file with the same name as an existing .hdf5 file, it will
+    ask if the user wants to overwrite the .hdf5 file). The output is
+    the same as for QtWidgets.QFileDialog.getSaveFileName.
+
+    Parameters
+    ----------
+    parent : QWidget
+        Parent widget for the dialog.
+    caption : str, optional
+        Dialog caption. Default is "".
+    directory : str, optional
+        Initial directory. Default is "".
+    filter : str, optional
+        File filter, e.g., "YAML files (*.yaml);;HDF5 files (*.hdf5)".
+        Default is "".
+    check_ext : str or list of str, optional
+        Other extension(s) to be checked if they're available. Does not
+        have to be a strict ".ext" format, can also include a suffix to
+        the path, e.g., "_1.hdf5". If "", extensions are not checked,
+        giving the standard getSaveFileName dialog behavior. Default is
+        "".
+
+    Returns
+    -------
+    selected_path : str
+        Selected file path.
+    selected_filter : str
+        Selected file filter.
+    """
+    # first run the standard dialog to get the initial path and filter
+    selected_path, selected_filter = QtWidgets.QFileDialog.getSaveFileName(
+        parent, caption, directory, filter
+    )
+    # check for the existence of files with other extensions and ask the
+    # user if they want to overwrite them
+    if selected_path and check_ext:
+        paths_available = is_path_available(
+            selected_path, check_ext=check_ext, parent=parent
+        )
+        if not all(paths_available):
+            return "", ""
+    return selected_path, selected_filter
 
 
 @numba.njit
@@ -1298,10 +1386,10 @@ def plot_subclustering_check(
         Figure and axes if ``return_fig`` is True, otherwise
         (None, None).
     """
-    m_close = clustered_n_events.mean()
-    m_far = sparse_n_events.mean()
-    s_close = clustered_n_events.std()
-    s_far = sparse_n_events.std()
+    m_clustered = clustered_n_events.mean()
+    m_sparse = sparse_n_events.mean()
+    s_clustered = clustered_n_events.std()
+    s_sparse = sparse_n_events.std()
 
     # create the plot
     fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
@@ -1312,20 +1400,20 @@ def plot_subclustering_check(
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Clustered {m_close:.1f} +/- {s_close:.1f}",
+        label=f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}",
         color="C0",
     )
-    ax1.axvline(m_close, color="C0", linestyle="--")
+    ax1.axvline(m_clustered, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
     ax1.bar(
         vals,
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Sparse {m_far:.1f} +/- {s_far:.1f}",
+        label=f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}",
         color="C1",
     )
-    ax1.axvline(m_far, color="C1", linestyle="--")
+    ax1.axvline(m_sparse, color="C1", linestyle="--")
     ax1.set_xlabel("Number of events")
     ax1.set_ylabel("Counts")
     ax1.set_xlim(min_bin - 1, max_bin + 1)
@@ -1341,3 +1429,46 @@ def plot_subclustering_check(
     else:
         plt.close(fig)
         return None, None
+
+
+def plot_rel_sigma_check(
+    mols: pd.DataFrame, info: list[dict], path: str
+) -> None:
+    """Plot the relative sigma of G5M molecules to inspect if lp values
+    reflect the experimental sizes of localization clouds.
+
+    Parameters
+    ----------
+    mols : pd.DataFrame
+        Molecules to be plotted, output of ``picasso.g5m.g5m``.
+    info : list of dicts
+        Molecuels metadata.
+    path : str
+        Path to save the plot.
+    """
+    if "z" in mols.columns:
+        # three plots, one for each dimension
+        fig, axes = plt.subplots(3, 1, figsize=(6, 8), constrained_layout=True)
+        bins = calculate_optimal_bins(
+            np.concatenate(
+                (mols["rel_sigma_x"], mols["rel_sigma_y"], mols["rel_sigma_z"])
+            )
+        )
+        for i, dim in enumerate(["x", "y", "z"]):
+            ax = axes[i]
+            ax.hist(
+                mols[f"rel_sigma_{dim}"], bins=bins, color=f"C{i}", alpha=0.7
+            )
+            ax.set_xlabel(f"Relative sigma {dim}")
+            ax.set_ylabel("Counts")
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
+    else:
+        # only one plot
+        fig, ax = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
+        bins = calculate_optimal_bins(mols["rel_sigma"])
+        ax.hist(mols["rel_sigma"], bins=bins, color="C0", alpha=0.7)
+        ax.set_xlabel("Relative sigma")
+        ax.set_ylabel("Counts")
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
