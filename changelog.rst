@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 09-MAR-2026 CEST
+Last change: 10-MAR-2026 CEST
 
 0.9.8
 -----
@@ -21,6 +21,7 @@ Last change: 09-MAR-2026 CEST
 - Fixed G5M 3D CI test
 - Localize GUI allows the user to automatically undrift localizations
 - Render export localizations supports exporting all channels sequentially
+- Render 3D window always brings the selected region's mean z position to 0 for easier visualization
 
 0.9.7
 -----
