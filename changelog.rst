@@ -3,6 +3,20 @@ Changelog
 
 Last change: 10-MAR-2026 CEST
 
+0.10.0
+------
+Backward incompatible changes:
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Important updates:
+^^^^^^^^^^^^^^^^^^
+
+Small improvements:
++++++++++++++++++++
+
+Bug fixes:
+++++++++++
+
 0.9.8-9
 -------
 Small improvements:
