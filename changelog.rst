@@ -23,6 +23,7 @@ Last change: 10-MAR-2026 CEST
 - Render export localizations supports exporting all channels sequentially
 - Render 3D window always brings the selected region's mean z position to 0 for easier visualization
 - Render 3D: added buttons for xy, xz and yz projections
+- G5M automatically saves the check on relative sigma
 
 0.9.7
 -----

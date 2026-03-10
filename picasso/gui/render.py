@@ -6948,6 +6948,12 @@ class View(QtWidgets.QLabel):
                     sparse_events,
                     path_molecules.replace(".hdf5", "_subcluster_check.png"),
                 )
+                # automatically save rel_sigma plot
+                lib.plot_rel_sigma_check(
+                    g5m_centers,
+                    info,
+                    path_molecules.replace(".hdf5", "_relsigma_check.png"),
+                )
                 if params["clustered_locs"]:
                     if clustered_locs is not None:
                         io.save_locs(path_clusters, clustered_locs, info)

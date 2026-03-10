@@ -1429,3 +1429,46 @@ def plot_subclustering_check(
     else:
         plt.close(fig)
         return None, None
+
+
+def plot_rel_sigma_check(
+    mols: pd.DataFrame, info: list[dict], path: str
+) -> None:
+    """Plot the relative sigma of G5M molecules to inspect if lp values
+    reflect the experimental sizes of localization clouds.
+
+    Parameters
+    ----------
+    mols : pd.DataFrame
+        Molecules to be plotted, output of ``picasso.g5m.g5m``.
+    info : list of dicts
+        Molecuels metadata.
+    path : str
+        Path to save the plot.
+    """
+    if "z" in mols.columns:
+        # three plots, one for each dimension
+        fig, axes = plt.subplots(3, 1, figsize=(6, 8), constrained_layout=True)
+        bins = calculate_optimal_bins(
+            np.concatenate(
+                (mols["rel_sigma_x"], mols["rel_sigma_y"], mols["rel_sigma_z"])
+            )
+        )
+        for i, dim in enumerate(["x", "y", "z"]):
+            ax = axes[i]
+            ax.hist(
+                mols[f"rel_sigma_{dim}"], bins=bins, color=f"C{i}", alpha=0.7
+            )
+            ax.set_xlabel(f"Relative sigma {dim}")
+            ax.set_ylabel("Counts")
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
+    else:
+        # only one plot
+        fig, ax = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
+        bins = calculate_optimal_bins(mols["rel_sigma"])
+        ax.hist(mols["rel_sigma"], bins=bins, color="C0", alpha=0.7)
+        ax.set_xlabel("Relative sigma")
+        ax.set_ylabel("Counts")
+        fig.savefig(path, dpi=300)
+        plt.close(fig)
