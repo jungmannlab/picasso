@@ -1454,7 +1454,7 @@ def link(
     locs: pd.DataFrame,
     info: list[dict],
     r_max: float = 0.05,
-    max_dark_time: int = 1,
+    max_dark_time: int = 3,
     combine_mode: Literal["average", "refit"] = "average",
     remove_ambiguous_lengths: bool = True,
 ) -> pd.DataFrame:
