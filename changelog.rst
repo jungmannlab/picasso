@@ -32,7 +32,7 @@ Bug fixes:
 - Fixed 3D MLE fitting and cleaned the docstrings for better readability (``picasso.gaussmle``)
 - Fixed how Picasso: Simulates splits photons across binding events
 - Fixed G5M 3D CI test
-
+- Fixed Render 3D scale bar
 
 0.9.7
 -----

@@ -1704,7 +1704,9 @@ class ViewRotation(QtWidgets.QLabel):
             int(self.angz * 180 / np.pi),
         )
         check_ext = [".yaml"]
-        if scalebar_box.isChecked():
+        scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
+        scalebar = scalebar_box.isChecked()
+        if scalebar:
             check_ext.append("_scalebar.png")
         path, ext = lib.get_save_filename_ext_dialog(
             self,
@@ -1716,8 +1718,6 @@ class ViewRotation(QtWidgets.QLabel):
         if path:
             self.qimage.save(path)
             self.export_current_view_info(path)
-            scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
-            scalebar = scalebar_box.isChecked()
             if not scalebar:
                 scalebar_box.setChecked(True)
                 self.update_scene()
