@@ -744,12 +744,18 @@ class ViewRotation(QtWidgets.QLabel):
                 0
             ]  # only one pick, take the first element
             temp["z"] /= self.pixelsize
-            temp["z"] -= temp["z"].mean()
             # same for lpz if present
             if "lpz" in temp.columns:
                 temp["lpz"] /= self.pixelsize
             self.locs.append(temp)
             self.infos.append(self.window.window.view.infos[i])
+
+        # shift z positions of locs so that the middle of the dataset is
+        # at z = 0
+        all_locs_z = np.concatenate([_["z"].to_numpy() for _ in self.locs])
+        z_shift = all_locs_z.mean()
+        for i in range(n_channels):
+            self.locs[i]["z"] -= z_shift
 
         # assign self.group_color if single channel and group info
         # present
