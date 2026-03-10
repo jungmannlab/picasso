@@ -3447,7 +3447,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.change_display.clicked.connect(self.change_fov.show)
 
         # Movie
-        movie_groupbox = QtWidgets.QGroupBox("Movie")
+        movie_groupbox = QtWidgets.QGroupBox("Precision")
         vbox.addWidget(movie_groupbox)
         self.movie_grid = QtWidgets.QGridLayout(movie_groupbox)
         med_lp_label = QtWidgets.QLabel("Median localization precision:")
@@ -3541,6 +3541,8 @@ class InfoDialog(QtWidgets.QDialog):
         self.picks_grid.addWidget(compute_pick_info_button, 1, 0, 1, 3)
         self.picks_grid.addWidget(QtWidgets.QLabel("<b>Mean</b"), 2, 1)
         self.picks_grid.addWidget(QtWidgets.QLabel("<b>Std</b>"), 2, 2)
+
+        # n locs
         row = self.picks_grid.rowCount()
         nlocspick_label = QtWidgets.QLabel("No. of localizations:")
         nlocspick_label.setToolTip(
@@ -3551,6 +3553,20 @@ class InfoDialog(QtWidgets.QDialog):
         self.picks_grid.addWidget(self.n_localizations_mean, row, 1)
         self.n_localizations_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.n_localizations_std, row, 2)
+
+        # n events
+        row = self.picks_grid.rowCount()
+        neventspick_label = QtWidgets.QLabel("No. of events:")
+        neventspick_label.setToolTip(
+            "Number of binding events per pick (mean and std)."
+        )
+        self.picks_grid.addWidget(neventspick_label, row, 0)
+        self.n_events_mean = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.n_events_mean, row, 1)
+        self.n_events_std = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.n_events_std, row, 2)
+
+        # rmsd
         row = self.picks_grid.rowCount()
         rmsd_label = QtWidgets.QLabel("RMSD to COM (nm):")
         rmsd_label.setToolTip(
@@ -3573,6 +3589,8 @@ class InfoDialog(QtWidgets.QDialog):
         self.picks_grid.addWidget(self.rmsd_z_mean, row, 1)
         self.rmsd_z_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.rmsd_z_std, row, 2)
+
+        # qpaint
         row = self.picks_grid.rowCount()
         ignore_dark_label = QtWidgets.QLabel("Ignore dark times <=")
         ignore_dark_label.setToolTip(
@@ -11036,6 +11054,7 @@ class View(QtWidgets.QLabel):
             picked_locs = self.picked_locs(channel)
             n_picks = len(picked_locs)
             N = np.empty(n_picks)  # number of locs per pick
+            n_events = np.empty(n_picks)  # number of events per pick
             rmsd = np.empty(n_picks)  # rmsd in each pick
             length = np.empty(n_picks)  # estimated mean bright time
             dark = np.empty(n_picks)  # estimated mean dark time
@@ -11070,6 +11089,7 @@ class View(QtWidgets.QLabel):
                             locs, info, r_max=r_max, max_dark_time=t
                         )
                     locs = postprocess.compute_dark_times(locs)
+                    n_events[i] = len(locs)  # linked locs are binding events
                     length[i] = estimate_kinetic_rate(locs["len"].to_numpy())
                     dark[i] = estimate_kinetic_rate(locs["dark"].to_numpy())
                     new_locs.append(locs)
@@ -11085,6 +11105,12 @@ class View(QtWidgets.QLabel):
             self.window.info_dialog.n_localizations_std.setText(
                 "{:.2f}".format(np.nanstd(N))
             )  # std number of locs per pick
+            self.window.info_dialog.n_events_mean.setText(
+                "{:.2f}".format(np.nanmean(n_events))
+            )  # mean number of events per pick
+            self.window.info_dialog.n_events_std.setText(
+                "{:.2f}".format(np.nanstd(n_events))
+            )  # std number of events per pick
             self.window.info_dialog.rmsd_mean.setText(
                 "{:.2}".format(np.nanmean(rmsd))
             )  # mean rmsd per pick

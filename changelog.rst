@@ -26,6 +26,7 @@ Last change: 10-MAR-2026 CEST
 - G5M automatically saves the check on relative sigma
 - Fixed how Picasso: Simulates splits photons across binding events
 - Changed default max. frames in linking (dark times calculation) to 3 (previously 1) (both GUI and ``picasso.postprocess.link``)
+- Added number of binding events to Render's "Show info" dialog
 
 0.9.7
 -----
