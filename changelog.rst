@@ -1,12 +1,13 @@
 Changelog
 =========
 
-Last change: 10-MAR-2026 CEST
+Last change: 15-MAR-2026 CEST
 
 0.10.0
 ------
 Backward incompatible changes:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+- Added deprecation warnings for functions:
 
 Important updates:
 ^^^^^^^^^^^^^^^^^^

@@ -330,6 +330,17 @@ class RemoveColumnsDialog(QtWidgets.QDialog):
         return to_remove, result == QtWidgets.QDialog.Accepted
 
 
+def deprecation_warning(message: str) -> None:
+    """Display a deprecation warning message.
+
+    Parameters
+    ----------
+    message : str
+        The deprecation warning message to be displayed.
+    """
+    warnings.warn(message, DeprecationWarning, stacklevel=2)
+
+
 def cancel_dialogs():
     """Closes all open dialogs (``ProgressDialog`` and ``StatusDialog``)
     in the GUI."""
@@ -793,7 +804,7 @@ def append_to_rec(
     rec_array : np.recarray
         Recarray with the new column.
     """
-    warnings.warn(
+    deprecation_warning(
         "Appending to recarrays is deprecated and will be removed in Picasso"
         " 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
         " recarrays. Simply use locs['new_column'] = data to add a new column"
@@ -1159,7 +1170,7 @@ def remove_from_rec(rec_array: np.recarray, name: str) -> np.recarray:
     rec_array : np.recarray
         Recarray without the column.
     """
-    warnings.warn(
+    deprecation_warning(
         "Removing columns from recarrays is deprecated and will be removed in "
         " Picasso 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
         " recarrays. Simply use locs.drop('new_column', axis=1) to remove a"
