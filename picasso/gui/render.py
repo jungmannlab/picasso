@@ -4117,8 +4117,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.channel = self.window.view.get_channel("Mask image")
         self.cmap = self.window.display_settings_dlg.colormap.currentText()
         info = self.infos[self.channel][0]
-        self.x_max = info["Width"]
-        self.y_max = info["Height"]
+        self.x_max = lib.get_from_metadata(info, "Width", raise_error=True)
+        self.y_max = lib.get_from_metadata(info, "Height", raise_error=True)
         self.update_plots()
 
         # adjust the size of the dialog to fit its contents
@@ -4263,8 +4263,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         locs_in, locs_out = masking.mask_locs(
             locs,
             self.mask,
-            self.x_max,
-            self.y_max,
+            info=self.infos[self.channel],
         )
         self.index_locs.append(locs_in)  # locs in the mask
         self.index_locs_out.append(locs_out)  # locs outside the mask
