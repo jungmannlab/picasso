@@ -34,6 +34,15 @@ from PyQt5 import QtWidgets
 
 from . import lib, zfit, __version__
 
+
+SPOT_SIZE_DEPRECATION_WARNING = (
+    "The `spot_size`, `z_range` and `mag_factor` parameters are"
+    " deprecated since v0.10.0 and will be removed in v0.11.0. Please"
+    " use the calibration dictionary instead, which should contain the "
+    "keys 'X Coefficients', 'Y Coefficients' and 'Magnification "
+    "factor', see https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration."
+)
+
 # default min. number of localizations per molecule
 MIN_LOCS = 10
 # default number of rounds without BIC improvement to terminate the
@@ -129,6 +138,22 @@ def square_elements_2d(X: np.ndarray) -> np.ndarray:
         for j in range(n):
             output[i, j] = X[i, j] ** 2
     return output
+
+
+@njit(fastmath=fastmath)
+def poly1d(coeffs, xs):
+    """Use Horner's method to evaluate a polynomial with coefficients
+    `coeffs` at points `xs`. Coefficients are in the form [a_n, a_{n-1},
+    ..., a_0] for the polynomial a_n*x^n + a_{n-1}*x^{n-1} + ... + a_0.
+    """
+    out = np.empty(len(xs))
+    for i in range(len(xs)):
+        result = 0.0
+        x = xs[i]
+        for c in coeffs:
+            result = result * x + c
+        out[i] = result
+    return out
 
 
 # In sklearn's GaussianMixture implementation, the term in the nominator
@@ -290,6 +315,10 @@ class G5M(metaclass=ABCMeta):
 
     Attributes
     ----------
+    calibration : dict
+        Calibration dictionary with x and y coefficients and
+        magnification factor. Required for 3D data only. See
+        https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
     converged : bool
         True if the G5M converged, False otherwise.
     covariances_ : np.ndarray
@@ -305,7 +334,7 @@ class G5M(metaclass=ABCMeta):
     mag_factor : float
         Magnification factor for astigmatism fitting. Required for 3D
         data only. Extracted from the 3D calibration file, see
-        ``unpack_calibration``.
+        ``unpack_calibration``. Deprecated since v0.10.0, use calibration instead.
     means_init : np.ndarray, optional
         Initial means of the G5M components. If None, the means are
         initialized using kmeans++. Default is None.
@@ -343,7 +372,7 @@ class G5M(metaclass=ABCMeta):
     spot_size : (2,) np.ndarray, optional
         Spot width and height for astigmatism fitting. Required for 3D
         data only. Extracted from the 3D calibration file, see
-        ``unpack_calibration``. Default is None.
+        ``unpack_calibration``. Deprecated since v0.10.0, use calibration instead.
     valid_idx : np.ndarray
         Indices of valid components (based on min_locs), applied after
         fitting. Its length gives the number of valid components.
@@ -355,7 +384,7 @@ class G5M(metaclass=ABCMeta):
     z_range : np.ndarray, optional
         Z range for astigmatism fitting. Required for 3D data only.
         Extracted from the 3D calibration file, see
-        ``unpack_calibration``.
+        ``unpack_calibration``. Deprecated since v0.10.0, use calibration instead.
         Default is None.
 
     Parameters
@@ -396,7 +425,10 @@ class G5M(metaclass=ABCMeta):
         self.loc_prec_handle = "local"
 
         # for 3D compatibility
-        self.spot_size = None
+        self.calibration = None
+        self.spot_size = (
+            None  # deprecated since v0.10.0, use calibration instead
+        )
         self.z_range = None
         self.mag_factor = None
 
@@ -494,9 +526,23 @@ class G5M(metaclass=ABCMeta):
             sigma_bounds=self.sigma_bounds,
             lp=lp,
             loc_prec_handle=loc_prec_handle,
-            spot_size=self.spot_size,
+            cx=(
+                self.calibration["X Coefficients"]
+                if self.calibration
+                else np.array([])
+            ),
+            cy=(
+                self.calibration["Y Coefficients"]
+                if self.calibration
+                else np.array([])
+            ),
+            mag_factor=(
+                self.calibration["Magnification factor"]
+                if self.calibration
+                else self.mag_factor
+            ),
+            spot_size=self.spot_size,  # TODO: deprecated since v0.10.0, use calibration instead
             z_range=self.z_range,
-            mag_factor=self.mag_factor,
         )
         if w is None:
             return None
@@ -713,12 +759,16 @@ def m_step_2D(
     sigma_bounds: tuple[float, float],
     lp: np.ndarray,
     loc_prec_handle: Literal["local", "abs"],
-    spot_size: np.ndarray | None = None,  # for 3D consistency
+    cx: dict | None = None,  # for 3D consistency
+    cy: dict | None = None,  # for 3D consistency
+    spot_size: (
+        np.ndarray | None
+    ) = None,  # deprecated since v0.10.0, use cx/cy instead
     z_range: np.ndarray | None = None,
-    mag_factor: float | None = None,
+    mag_factor: float | None = None,  # NOTEL keep mag_factor!
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """2D m step. spot_size, z_range and mag_factor are not used and are
-    here for compatibility with the 3D m step."""
+    """2D m step. cx, cy, spot_size, z_range and mag_factor are not
+    used and are here for compatibility with the 3D m step."""
     min_cov = sigma_bounds[0] ** 2
     max_cov = sigma_bounds[1] ** 2
     resp = np.exp(log_resp)
@@ -1147,15 +1197,20 @@ def m_step_3D(
     sigma_bounds: tuple[float, float],
     lp: np.ndarray,
     loc_prec_handle: Literal["local", "abs"],
-    spot_size: np.ndarray,
-    z_range: np.ndarray,
-    mag_factor: float = 0.79,
+    cx: np.ndarray = np.array([]),
+    cy: np.ndarray = np.array([]),
+    spot_size: np.ndarray = np.array([]).reshape(
+        0, 0
+    ),  # TODO: remove in v0.11.0, use cx/cy instead
+    z_range: np.ndarray = np.array([]),
+    mag_factor: float = 0.79,  # NOTE: keep mag_factor!
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Modified m-step to handle astigmatism in 3D G5M.
 
     The astigmatism modification handles the astigmatism effect in
     3D DNA-PAINT data. As in sklearn's implementation, the weights,
-    means and diagonal covariance matrices are estimated first. In the
+    means and diagonal covariance matrices are estimated first, together
+    with the min/max constrainsts, like in ``m_step_2D``. In the
     next step, sigma bound are imposed and then the ratio of the spot
     width and height is extracted from calibration, based on the z
     position, for each component and imposed on the covariances' x and
@@ -1219,14 +1274,21 @@ def m_step_3D(
 
     # impose the ratio of x and y covariances based on the spot width
     # and height ratio
-
-    # find the spot width and height for each component
-    z_idx = np.abs(z_range[:, np.newaxis] - (means[:, 2] / mag_factor)).argmin(
-        0
-    )  # find the closest z values to the current means
-    spot_width, spot_height = spot_size
-    # impose their ratio of x and y covariances
-    ratio = spot_width[z_idx] / spot_height[z_idx]
+    if len(cx):
+        z_position_calib = means[:, 2] / mag_factor
+        spot_width = poly1d(cx, z_position_calib)
+        spot_height = poly1d(cy, z_position_calib)
+        ratio = spot_width / spot_height
+    else:  # TODO: remove in v0.11.0
+        # find the spot width and height for each component
+        z_idx = np.abs(
+            z_range[:, np.newaxis] - (means[:, 2] / mag_factor)
+        ).argmin(
+            0
+        )  # find the closest z values to the current means
+        spot_width, spot_height = spot_size
+        # impose their ratio of x and y covariances
+        ratio = spot_width[z_idx] / spot_height[z_idx]
     covs_xy = np.empty((covs.shape[0], 2))
     covs_xy[:, 0] = covs[:, 0]
     covs_xy[:, 1] = covs[:, 1]
@@ -1242,13 +1304,18 @@ def find_optimal_G5M_3D(
     X: np.ndarray,
     min_locs: int,
     sigma_bounds: tuple[float, float],
-    spot_size: np.ndarray,
-    z_range: np.ndarray,
     *,
     lp: np.ndarray,
+    calibration: dict = {},  # TODO: make it not optional in v0.11.0
     loc_prec_handle: Literal["local", "abs"] = "local",
     max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
-    mag_factor: float = 0.79,
+    spot_size: np.ndarray = np.array([]).reshape(
+        0, 0
+    ),  # TODO: remove in v0.11.0, use calibration instead
+    z_range: np.ndarray = np.array(
+        []
+    ),  # TODO: remove in v0.11.0, use calibration instead
+    mag_factor: float = 0.79,  # TODO: keep mag_factor in v0.11.0, remove spot_size and z_range in favor of calibration
 ) -> G5M_3D:
     """Find optimal G5M for given 3D data X.
 
@@ -1263,11 +1330,6 @@ def find_optimal_G5M_3D(
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
         absolute bounds on sigma.
-    spot_size : (2,) np.ndarray
-        Spot width and height from the 3D calibration for each z
-        position (...)
-    z_range : np.ndarray
-        (...) and the corresponding z values (in camera pixels).
     lp : np.ndarray
         Localization precision for each localization in x, y and z. Only
         used if loc_prec_handle is "local". Shape (n_samples, 3).
@@ -1276,13 +1338,25 @@ def find_optimal_G5M_3D(
         of points around each component are used to bound sigmas. Else,
         sigma_bounds specifies the absolute bounds on sigmas. Default
         is "local".
+    calibration: dict
+        Calibration dictionary with the following keys:
+        "X Coefficients", "Y Coefficients" and "Magnification factor".
+        See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
     max_rounds_without_best_bic : int, optional
         Maximum number of rounds without BIC improvement to terminate
         the search for optimal G5M n_components. Default is
         `MAX_ROUNDS_WITHOUT_BEST_BIC`.
+    spot_size : (2,) np.ndarray, optional
+        Spot width and height from the 3D calibration for each z
+        position (...). Deprecated since v0.10.0. Use calibration
+        instead.
+    z_range : np.ndarray, optional
+        (...) and the corresponding z values (in camera pixels).
+        Deprecated since v0.10.0. Use calibration instead.
     mag_factor : float, optional
         Magnification factor used for correcting the refractive index
-        mismatch for 3D imaging. Default is 0.79.
+        mismatch for 3D imaging. Deprecated since v0.10.0. Use calibration
+        instead. Default is 0.79.
 
     Returns
     -------
@@ -1295,7 +1369,19 @@ def find_optimal_G5M_3D(
         "Localization precisions (lp) must have the shape of (N, 3) "
         "where N is the number of localizations."
     )
-
+    if spot_size.size > 0 or z_range.size > 0:
+        lib.deprecation_warning(SPOT_SIZE_DEPRECATION_WARNING)
+    else:
+        for key in [
+            "X Coefficients",
+            "Y Coefficients",
+            "Magnification factor",
+        ]:
+            assert key in calibration, (
+                "Calibration dictionary must contain the keys 'X "
+                "Coefficients', 'Y Coefficients' and 'Magnification "
+                "factor'"
+            )
     n_components = 1
     rounds_without_best_bic = 0
     best_bic = np.inf
@@ -1311,6 +1397,7 @@ def find_optimal_G5M_3D(
             n_components=n_components,
             min_locs=min_locs,
             sigma_bounds=sigma_bounds,
+            calibration=calibration,
             spot_size=spot_size,
             z_range=z_range,
             mag_factor=mag_factor,
@@ -1358,9 +1445,8 @@ def run_g5m_group_3D(
         Localizations.
     calibration : dict
         Calibration dictionary with the following keys:
-        "X Coefficients", "Y Coefficients", "Step size in nm",
-        "Number of frames" and "Magnification factor", see
-        ``unpack_calibration`` for more details.
+        "X Coefficients", "Y Coefficients" and "Magnification factor".
+        See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
     min_locs : int, optional
         Minimum number of localizations per component. Default is
         `MIN_LOCS`.
@@ -1416,10 +1502,6 @@ def run_g5m_group_3D(
     if n_locs < min_locs or n_locs > max_locs_per_cluster:
         return None, None
 
-    spot_size, z_range, mag_factor = lib.unpack_calibration(
-        calibration, pixelsize
-    )
-
     if loc_prec_handle == "local":
         lp = locs_group[["lpx", "lpy", "lpz"]].to_numpy()
     else:
@@ -1432,12 +1514,10 @@ def run_g5m_group_3D(
         X,
         min_locs=min_locs,
         sigma_bounds=sigma_bounds,
-        spot_size=spot_size,
-        z_range=z_range,
         lp=lp,
         loc_prec_handle=loc_prec_handle,
+        calibration=calibration,
         max_rounds_without_best_bic=max_rounds_without_best_bic,
-        mag_factor=mag_factor,
     )
     if g5m is None or len(g5m.valid_idx) == 0:
         return None, None
@@ -1459,14 +1539,27 @@ class G5M_3D(G5M):
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
         absolute bounds on sigma.
-    spot_size : np.ndarray
+    calibration : dict
+        Calibration dictionary with the following keys:
+        "X Coefficients", "Y Coefficients" and "Magnification factor".
+        See https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
+    spot_size : np.ndarray, optional
         Spot width and height from the 3D calibration for each z
-        position.
-    z_range : np.ndarray
+        position. Deprecated since v0.10.0. Use calibration instead,
+        which should contain the keys 'X Coefficients', 'Y Coefficients'
+        and 'Magnification factor', see https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
+    z_range : np.ndarray, optional
         Corresponding z values (in camera pixels) for the spot size.
+        Deprecated since v0.10.0. Use calibration instead, which should
+        contain the keys 'X Coefficients', 'Y Coefficients' and
+        'Magnification factor', see https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
     mag_factor : float, optional
         Magnification factor used for correcting the refractive index
-        mismatch for 3D imaging. Default is 0.79.
+        mismatch for 3D imaging. Deprecated since v0.10.0. Use
+        calibration instead, which should contain the keys
+        'X Coefficients', 'Y Coefficients' and 'Magnification factor',
+        see https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
+        Default is 0.79.
     means_init : np.ndarray or None, optional
         Initial means (mu) of the Gaussian components. If None, the
         means are initialized using kmeans++. Default is None.
@@ -1477,18 +1570,45 @@ class G5M_3D(G5M):
         n_components: int,
         min_locs: int,
         sigma_bounds: tuple[float, float],
-        spot_size: np.ndarray,
-        z_range: np.ndarray,
         *,
-        mag_factor: float = 0.79,
+        calibration: dict = {},
+        spot_size: np.ndarray = np.array([]).reshape(
+            0, 0
+        ),  # TODO: remove in v0.11.0, use calibration instead
+        z_range: np.ndarray = np.array(
+            []
+        ),  # TODO: remove in v0.11.0, use calibration instead
+        mag_factor: float = 0.79,  # TODO: remove in v0.11.0, use calibration instead
         means_init: np.ndarray | None = None,
     ) -> None:
+        if spot_size.size > 0 or z_range.size > 0 or mag_factor is not None:
+            lib.deprecation_warning(SPOT_SIZE_DEPRECATION_WARNING)
+        else:
+            for key in [
+                "X Coefficients",
+                "Y Coefficients",
+                "Magnification factor",
+            ]:
+                assert key in calibration, (
+                    "Calibration dictionary must contain the keys 'X "
+                    "Coefficients', 'Y Coefficients' and 'Magnification "
+                    "factor'"
+                )
         super().__init__(
             n_components=n_components,
             min_locs=min_locs,
             sigma_bounds=sigma_bounds,
             means_init=means_init,
         )
+        # if calibration is not None:  TODO: does it make the funciton run faster?
+        #     # ensure that np arrays are used rather than lists
+        #     calibration["X Coefficients"] = np.array(
+        #         calibration["X Coefficients"], dtype=np.float64
+        #     )
+        #     calibration["Y Coefficients"] = np.array(
+        #         calibration["Y Coefficients"], dtype=np.float64
+        #     )
+        self.calibration = calibration
         self.spot_size = spot_size
         self.z_range = z_range
         self.mag_factor = mag_factor
@@ -1645,10 +1765,11 @@ def bootstrap_sem(
                 n_components=len(g5m.valid_idx),
                 min_locs=g5m.min_locs,
                 sigma_bounds=g5m.sigma_bounds,
+                calibration=g5m.calibration,
                 spot_size=g5m.spot_size,
                 z_range=g5m.z_range,
-                means_init=g5m.means,
                 mag_factor=g5m.mag_factor,
+                means_init=g5m.means,
             )
             lp = locs[["lpx", "lpy", "lpz"]].to_numpy()
         else:
@@ -1949,7 +2070,10 @@ def sum_G5Ms(g5ms: list[G5M]) -> G5M:
         n_components=len(weights),
         min_locs=g5ms[0].min_locs,
         sigma_bounds=g5ms[0].sigma_bounds,
-        spot_size=g5ms[0].spot_size,
+        calibration=g5ms[0].calibration,
+        spot_size=g5ms[
+            0
+        ].spot_size,  # deprecated since v0.10.0, use calibration instead
         z_range=g5ms[0].z_range,
         mag_factor=g5ms[0].mag_factor,
     )
@@ -1972,9 +2096,13 @@ def fit_G5M(
     *,
     lp: np.ndarray,
     loc_prec_handle: Literal["local", "abs"] = "local",
-    spot_size: np.ndarray | None = None,
-    z_range: np.ndarray | None = None,
-    mag_factor: float | None = None,
+    cx: np.ndarray = np.array([]),
+    cy: np.ndarray = np.array([]),
+    spot_size: np.ndarray = np.array([]).reshape(
+        0, 0
+    ),  # deprecated since v0.10.0, use cx/cy instead
+    z_range: np.ndarray = np.array([]),
+    mag_factor: float = 0.79,  # NOTE: keep mag factor
 ) -> tuple[
     tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
     bool,
@@ -2015,19 +2143,21 @@ def fit_G5M(
         of points around each component are used to bound sigmas. Else,
         sigma_bounds specifies the absolute bounds on sigmas. Default
         is "local".
+    cx, cy : np.ndarray, optional
+        X and Y coefficients for astigmatism fitting. Required for 3D
+        data only. Extracted from the 3D calibration file, see
+        https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration.
     spot_size : (2,) np.ndarray, optional
         Spot width and height for astigmatism fitting. Required for 3D
         data only. Extracted from the 3D calibration file, see
-        ``unpack_calibration``. Default is None.
+        ``unpack_calibration``. Deprecated since v0.10.0. Use
+        cx/cy instead.
     z_range : np.ndarray, optional
         Z range for astigmatism fitting. Required for 3D data only.
-        Extracted from the 3D calibration file, see
-        ``unpack_calibration``.
-        Default is None.
+        Deprecated since v0.10.0. Use cx/cy instead.
     mag_factor : float, optional
         Magnification factor for astigmatism fitting. Required for 3D
-        data only. Extracted from the 3D calibration file, see
-        ``unpack_calibration``. Default is None.
+        data only. Deprecated since v0.10.0. Use cx/cy instead.
 
     Returns
     -------
@@ -2046,17 +2176,21 @@ def fit_G5M(
         e_step = e_step_3D
         m_step = m_step_3D
         check_resolution = check_G5M_resolution_3D
-        if spot_size is None or z_range is None or mag_factor is None:
+        if (not len(cx) or not len(cy)) and (
+            not len(spot_size) or not len(z_range)
+        ):
             raise ValueError(
-                "spot_size, z_range and mag_factor are required for "
-                "3D data."
+                "Calibration dictionary with the keys 'X Coefficients', 'Y "
+                "Coefficients' and 'Magnification factor' is required for 3D "
+                f"data. {SPOT_SIZE_DEPRECATION_WARNING}"
             )
     else:
         raise ValueError(
             "Only 2D and 3D data are supported. Data points suggest "
             f"{X.shape[1]} dimensions. The initial precisions suggest "
             f"{init_precisions_cholesky.ndim} dimensions. 3D data "
-            "requires spot_size, z_range and mag_factor."
+            "requires a calibration dictionary with the keys 'X Coefficients', "
+            "'Y Coefficients' and 'Magnification factor'."
         )
 
     converged = False
@@ -2091,9 +2225,11 @@ def fit_G5M(
                 sigma_bounds=sigma_bounds,
                 lp=lp,
                 loc_prec_handle=loc_prec_handle,
-                spot_size=spot_size,
-                z_range=z_range,
+                cx=cx,
+                cy=cy,
                 mag_factor=mag_factor,
+                spot_size=spot_size,  # deprecated since v0.10.0, use cx/cy instead
+                z_range=z_range,
             )
             lower_bound = log_prob_norm
             change = lower_bound - prev_lower_bound
@@ -2293,9 +2429,9 @@ def g5m(
         using bootstrapping. If False, the standard, single Gaussian SEM
         is used as approximation. Default is False.
     calibration : dict, optional
-        Calibration dictionary with x and y coefficients, z step size
-        and the number of frames, see run_g5m_group_3D for more details.
-        Only required for 3D data. Default is None.
+        Calibration dictionary with x and y coefficients and
+        magnification factor. Only required for 3D data. Default is
+        None.
     postprocess : bool, optional
         If True, the G5M components are postprocessed to remove likely
         sticky events (mean frame, std frame, n_events filtering).
@@ -2345,7 +2481,10 @@ def g5m(
     # check that calibration is provided for 3D data
     if "z" in locs.columns and calibration is None:
         raise ValueError(
-            "Calibration dictionary must be provided for 3D data."
+            "Calibration dictionary must be provided for 3D data. "
+            "The dictionary must specify 'X Coefficients' and 'Y "
+            "Coefficients' and 'Magnification factor'. See "
+            "https://picassosr.readthedocs.io/en/latest/localize.html#d-calibration"
         )
 
     # determine how many steps are displayed in the progress bar
@@ -2468,12 +2607,6 @@ def g5m(
     if "z" in locs.columns:
         new_info["X Coefficients"] = calibration["X Coefficients"]
         new_info["Y Coefficients"] = calibration["Y Coefficients"]
-        new_info["Calibration z Step size in nm"] = calibration[
-            "Step size in nm"
-        ]
-        new_info["Calibration number of frames"] = calibration[
-            "Number of frames"
-        ]
         new_info["Magnification factor"] = calibration["Magnification factor"]
     info = info + [new_info]
     if postprocess:

@@ -7,13 +7,14 @@ Last change: 15-MAR-2026 CEST
 ------
 Backward incompatible changes:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-- Added deprecation warnings for functions:
+- Added deprecation warnings for functions: ``picasso.lib.unpack_calibration`` and the ``spot_size``, ``z_range`` parameters in the G5M functions. ``picasso.g5m.g5m`` now uses calibration coefficients only for setting sigma constraints in 3D for more accurate results.
 
 Important updates:
 ^^^^^^^^^^^^^^^^^^
 
 Small improvements:
 +++++++++++++++++++
+- G5M calculated more accurate sigma constraints in 3D
 
 Bug fixes:
 ++++++++++

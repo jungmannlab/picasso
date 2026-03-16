@@ -710,6 +710,9 @@ def unpack_calibration(
     """Extract calibration file for 3D G5M. Return spot widths and
     heights and the corresponding z values + magnification factor.
 
+    New in v0.10.0: the function is deprecated and will be removed in
+    Picasso 0.11.0.
+
     Parameters
     ----------
     calibration : dict
@@ -728,6 +731,12 @@ def unpack_calibration(
     mag_factor : float
         Magnification factor for the 3D calibration.
     """
+    deprecation_warning(
+        "The function 'unpack_calibration' is deprecated and will be"
+        " removed in Picasso 0.11.0. 3D G5M, for which this function"
+        " was originally implemented, only requires x and y"
+        " coefficients."
+    )
     cx = calibration["X Coefficients"]
     cy = calibration["Y Coefficients"]
     z_step_size = calibration["Step size in nm"]

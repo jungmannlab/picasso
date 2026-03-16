@@ -506,8 +506,8 @@ def axial_localization_precision(
     info : list of dicts
         Localizations metadata.
     calibration : dict
-        Calibration dictionary with x and y coefficients, z step size
-        and the number of frames.
+        Calibration dictionary with x and y coefficients and
+        magnification factor.
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".
