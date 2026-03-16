@@ -7,7 +7,6 @@ Last change: 15-MAR-2026 CEST
 ------
 Backward incompatible changes:
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-- Added deprecation warnings for functions: ``picasso.lib.unpack_calibration`` and the ``spot_size``, ``z_range`` parameters in the G5M functions. ``picasso.g5m.g5m`` now uses calibration coefficients only for setting sigma constraints in 3D for more accurate results.
 
 Important updates:
 ^^^^^^^^^^^^^^^^^^
@@ -18,6 +17,11 @@ Small improvements:
 
 Bug fixes:
 ++++++++++
+
+Deprecation warnings:
++++++++++++++++++++++
+- ``picasso.lib.unpack_calibration`` and the ``spot_size``, ``z_range`` parameters in the G5M functions. ``picasso.g5m.g5m`` now uses calibration coefficients only for setting sigma constraints in 3D for more accurate results.
+- ``picasso.clusterer.cluster_center`` (will be renamed to ``_cluster_center`` and become a private function in the future release)
 
 0.9.8-9
 -------
