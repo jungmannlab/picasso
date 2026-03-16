@@ -6834,34 +6834,6 @@ class View(QtWidgets.QLabel):
         # ask the user to input n_frames, step_size and mag_factor of
         # the calib file in the 3D case
         if "calibration" in params.keys():
-            if "Step size in nm" not in params["calibration"].keys():
-                z_step_size, ok = QtWidgets.QInputDialog.getDouble(
-                    self.window,
-                    "Input Dialog",
-                    "Enter z step size in the calibration (nm)",
-                    5,
-                    1,
-                    999,
-                    1,
-                )
-                if not ok:
-                    return
-                params["calibration"]["Step size in nm"] = z_step_size
-
-            if "Number of frames" not in params["calibration"].keys():
-                n_frames, ok = QtWidgets.QInputDialog.getInt(
-                    self.window,
-                    "Input Dialog",
-                    "Enter number of frames in the calibration",
-                    200,
-                    1,
-                    99999,
-                    1,
-                )
-                if not ok:
-                    return
-                params["calibration"]["Number of frames"] = n_frames
-
             if "Magnification factor" not in params["calibration"].keys():
                 mag_factor, ok = QtWidgets.QInputDialog.getDouble(
                     self.window,
