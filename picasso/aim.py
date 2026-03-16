@@ -23,7 +23,17 @@ from tqdm import tqdm
 from . import lib, __version__
 
 
-def intersect1d(
+def intersect1d(a: np.ndarray, b: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Alias for _intersect1d which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "intersect1d is deprecated and will be removed in v0.11.0."
+        " Use _intersect1d instead."
+    )
+    return _intersect1d(a, b)
+
+
+def _intersect1d(
     a: np.ndarray,
     b: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
@@ -66,6 +76,21 @@ def count_intersections(
     l1_coords: np.ndarray,
     l1_counts: np.ndarray,
 ) -> int:
+    """Alias for _count_intersections which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "count_intersections is deprecated and will be removed in v0.11.0."
+        " Use _count_intersections instead."
+    )
+    return _count_intersections(l0_coords, l0_counts, l1_coords, l1_counts)
+
+
+def _count_intersections(
+    l0_coords: np.ndarray,
+    l0_counts: np.ndarray,
+    l1_coords: np.ndarray,
+    l1_counts: np.ndarray,
+) -> int:
     """Count the number of intersected localizations between the two
     datasets. We assume that the intersection distance is 1 and since
     the coordinates are expressed in the units of intersection distance,
@@ -90,7 +115,7 @@ def count_intersections(
         Number of intersections.
     """
     # indices of common elements
-    idx0, idx1 = intersect1d(l0_coords, l1_coords)
+    idx0, idx1 = _intersect1d(l0_coords, l1_coords)
     # extract the counts of these elements
     l0_counts_subset = l0_counts[idx0]
     l1_counts_subset = l1_counts[idx1]
@@ -101,6 +126,25 @@ def count_intersections(
 
 
 def run_intersections(
+    l0_coords: np.ndarray,
+    l0_counts: np.ndarray,
+    l1_coords: np.ndarray,
+    l1_counts: np.ndarray,
+    shifts_xy: np.ndarray,
+    box: int,
+) -> np.ndarray:
+    """Alias for _run_intersections which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "run_intersections is deprecated and will be removed in v0.11.0."
+        " Use _run_intersections instead."
+    )
+    return _run_intersections(
+        l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box
+    )
+
+
+def _run_intersections(
     l0_coords: np.ndarray,
     l0_counts: np.ndarray,
     l1_coords: np.ndarray,
@@ -139,7 +183,7 @@ def run_intersections(
     l1_coords_shifted = l1_coords[:, np.newaxis] + shifts_xy
     # go through each element in the local search region
     for i in range(len(shifts_xy)):
-        n_intersections = count_intersections(
+        n_intersections = _count_intersections(
             l0_coords, l0_counts, l1_coords_shifted[:, i], l1_counts
         )
         roi_cc[i] = n_intersections
@@ -147,6 +191,25 @@ def run_intersections(
 
 
 def run_intersections_multithread(
+    l0_coords: np.ndarray,
+    l0_counts: np.ndarray,
+    l1_coords: np.ndarray,
+    l1_counts: np.ndarray,
+    shifts_xy: np.ndarray,
+    box: int,
+) -> np.ndarray:
+    """Alias for _run_intersections_multithread which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "run_intersections_multithread is deprecated and will be removed in v0.11.0."
+        " Use _run_intersections_multithread instead."
+    )
+    return _run_intersections_multithread(
+        l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box
+    )
+
+
+def _run_intersections_multithread(
     l0_coords: np.ndarray,
     l0_counts: np.ndarray,
     l1_coords: np.ndarray,
@@ -186,7 +249,7 @@ def run_intersections_multithread(
     executor = ThreadPoolExecutor(n_workers)
     f = [
         executor.submit(
-            count_intersections,
+            _count_intersections,
             l0_coords,
             l0_counts,
             l1_coords_shifted[:, i],
@@ -203,6 +266,34 @@ def run_intersections_multithread(
 
 
 def point_intersect_2d(
+    l0_coords: np.ndarray,
+    l0_counts: np.ndarray,
+    x1: pd.Series | np.ndarray,
+    y1: pd.Series | np.ndarray,
+    intersect_d: float,
+    width_units: int,
+    shifts_xy: np.ndarray,
+    box: int,
+) -> np.ndarray:
+    """Alias for _point_intersect_2d which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "point_intersect_2d is deprecated and will be removed in v0.11.0."
+        " Use _point_intersect_2d instead."
+    )
+    return _point_intersect_2d(
+        l0_coords,
+        l0_counts,
+        x1,
+        y1,
+        intersect_d,
+        width_units,
+        shifts_xy,
+        box,
+    )
+
+
+def _point_intersect_2d(
     l0_coords: np.ndarray,
     l0_counts: np.ndarray,
     x1: pd.Series | np.ndarray,
@@ -246,13 +337,43 @@ def point_intersect_2d(
     # get unique values and counts of the target localizations
     l1_coords, l1_counts = np.unique(l1, return_counts=True)
     # run the intersections counting
-    roi_cc = run_intersections_multithread(
+    roi_cc = _run_intersections_multithread(
         l0_coords, l0_counts, l1_coords, l1_counts, shifts_xy, box
     )
     return roi_cc
 
 
 def point_intersect_3d(
+    l0_coords: np.ndarray,
+    l0_counts: np.ndarray,
+    x1: pd.Series | np.ndarray,
+    y1: pd.Series | np.ndarray,
+    z1: pd.Series | np.ndarray,
+    intersect_d: float,
+    width_units: int,
+    height_units: int,
+    shifts_z: np.ndarray,
+) -> np.ndarray:
+    """Alias for _point_intersect_3d which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "point_intersect_3d is deprecated and will be removed in v0.11.0."
+        " Use _point_intersect_3d instead."
+    )
+    return _point_intersect_3d(
+        l0_coords,
+        l0_counts,
+        x1,
+        y1,
+        z1,
+        intersect_d,
+        width_units,
+        height_units,
+        shifts_z,
+    )
+
+
+def _point_intersect_3d(
     l0_coords: np.ndarray,
     l0_counts: np.ndarray,
     x1: pd.Series | np.ndarray,
@@ -303,13 +424,23 @@ def point_intersect_3d(
     # get unique values and counts of the target localizations
     l1_coords, l1_counts = np.unique(l1, return_counts=True)
     # run the intersections counting
-    roi_cc = run_intersections_multithread(
+    roi_cc = _run_intersections_multithread(
         l0_coords, l0_counts, l1_coords, l1_counts, shifts_z, 1
     )
     return roi_cc
 
 
 def get_fft_peak(roi_cc: np.ndarray, roi_size: int) -> tuple[float, float]:
+    """Alias for _get_fft_peak which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "get_fft_peak is deprecated and will be removed in v0.11.0."
+        " Use _get_fft_peak instead."
+    )
+    return _get_fft_peak(roi_cc, roi_size)
+
+
+def _get_fft_peak(roi_cc: np.ndarray, roi_size: int) -> tuple[float, float]:
     """Estimate the precise sub-pixel position of the peak of ``roi_cc``
     with FFT.
 
@@ -346,6 +477,16 @@ def get_fft_peak(roi_cc: np.ndarray, roi_size: int) -> tuple[float, float]:
 
 
 def get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
+    """Alias for _get_fft_peak_z which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "get_fft_peak_z is deprecated and will be removed in v0.11.0."
+        " Use _get_fft_peak_z instead."
+    )
+    return _get_fft_peak_z(roi_cc, roi_size)
+
+
+def _get_fft_peak_z(roi_cc: np.ndarray, roi_size: int) -> float:
     """Estimate the precise sub-pixel position of the peak of 1D
     ``roi_cc``.
 
@@ -486,7 +627,7 @@ def intersection_max(
         y1 += rel_drift_y
 
         # count the number of intersected localizations
-        roi_cc = point_intersect_2d(
+        roi_cc = _point_intersect_2d(
             l0_coords,
             l0_counts,
             x1,
@@ -499,7 +640,7 @@ def intersection_max(
 
         # estimate the precise sub-pixel position of the peak of roi_cc
         # with FFT
-        px, py = get_fft_peak(roi_cc, 2 * roi_r)
+        px, py = _get_fft_peak(roi_cc, 2 * roi_r)
 
         # update the relative drift reference for the subsequent
         # segmented subset (interval) and save the drifts
@@ -610,7 +751,7 @@ def intersection_max_z(
         z1 += rel_drift_z
 
         # count the number of intersected localizations
-        roi_cc = point_intersect_3d(
+        roi_cc = _point_intersect_3d(
             l0_coords,
             l0_counts,
             x1,
@@ -624,7 +765,7 @@ def intersection_max_z(
 
         # estimate the precise sub-pixel position of the peak of roi_cc
         # with FFT
-        pz = get_fft_peak_z(roi_cc, 2 * roi_r)
+        pz = _get_fft_peak_z(roi_cc, 2 * roi_r)
 
         # update the relative drift reference for the subsequent
         # segmented subset (interval) and save the drifts
