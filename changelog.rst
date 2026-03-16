@@ -10,6 +10,7 @@ Backward incompatible changes:
 
 Important updates:
 ^^^^^^^^^^^^^^^^^^
+- Moved from PyQt5 to PyQt6
 
 Small improvements:
 +++++++++++++++++++
