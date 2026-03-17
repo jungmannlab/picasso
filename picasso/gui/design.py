@@ -1815,6 +1815,11 @@ def main():
             p.execute()
 
     window.show()
+
+    from ..updater import setup_gui_update_check
+
+    setup_gui_update_check(window)
+
     sys.exit(app.exec_())
 
     def excepthook(type, value, tback):

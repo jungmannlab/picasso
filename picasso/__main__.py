@@ -2632,19 +2632,12 @@ def main():
     # Parse
     args = parser.parse_args()
     if args.command:
-        # check for updates - depending on whether a gui is opened or
-        # the CLI is used, either open a message box or print the update
-        # info to the console
+        # check for updates and print in the console if available
         from .updater import get_update_url, check_and_notify
         import sys
 
-        def _notify_update(latest_version):
-            url = get_update_url(latest_version)
-            print(
-                f"\n⚡ Update available: v{latest_version}  →  {url}\n",
-                file=sys.stderr,
-            )
-
+        cli_update_check = True
+        update_thread = None
         gui_apps = [
             "toraw",
             "localize",
@@ -2658,23 +2651,18 @@ def main():
             "spinna",
         ]
         if args.command in gui_apps:
-            # ensure that gui is opened (only one argument in the parser)
-            if len(sys.argv) == 2:
+            if len(sys.argv) == 2:  # only the gui is opened
+                cli_update_check = False
+        if cli_update_check:
 
-                def _notify_update(latest_version):
-                    from PyQt5.QtWidgets import QMessageBox, QApplication
+            def _notify_update(latest_version):
+                url = get_update_url(latest_version)
+                print(
+                    f"\n⚡ Picasso update available: v{latest_version}\n\n{url}",
+                    file=sys.stderr,
+                )
 
-                    url = get_update_url(latest_version)
-                    app = QApplication([])
-                    msg = QMessageBox()
-                    msg.setIcon(QMessageBox.Information)
-                    msg.setWindowTitle("Update available")
-                    msg.setText(
-                        f"⚡ Update available: v{latest_version}  →  {url}"
-                    )
-                    msg.exec_()
-
-        check_and_notify(_notify_update)
+            update_thread = check_and_notify(_notify_update)
 
         if args.command == "toraw":
             from .gui import toraw
@@ -2823,6 +2811,11 @@ def main():
             _cluster_combine_dist(args.files)
     else:
         parser.print_help()
+        return
+
+    # wait for the update check to finish before exiting
+    if update_thread is not None:
+        update_thread.join(timeout=6)
 
 
 if __name__ == "__main__":
