@@ -1053,6 +1053,10 @@ class TiffMap:
             tag = self.read("H")
             type = self.TIFF_TYPES[self.read("H")]
             count = self.read(self._count_type)
+            # If the value doesn't fit inline, the field holds an offset to it.
+            # Threshold is _value_field_size (4 for classic, 8 for BigTIFF).
+            if count * self.TYPE_SIZES[type] > self._value_field_size:
+                self.file.seek(self.read(self._offset_type))
             if tag == 256:
                 self.width = self.read(type, count)
             elif tag == 257:
