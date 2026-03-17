@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 16-MAR-2026 CEST
+Last change: 17-MAR-2026 CEST
 
 0.10.0
 ------
@@ -11,6 +11,7 @@ Backward incompatible changes:
 Important updates:
 ^^^^^^^^^^^^^^^^^^
 - Moved from PyQt5 to PyQt6
+- Picasso automatically checks for updates when launched and notifies the user if a new version is available
 
 Small improvements:
 +++++++++++++++++++

@@ -1882,7 +1882,6 @@ def _g5m(
 
 def main():
     # Main parser
-    # picasso_logo()
     parser = argparse.ArgumentParser("picasso")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -2633,6 +2632,50 @@ def main():
     # Parse
     args = parser.parse_args()
     if args.command:
+        # check for updates - depending on whether a gui is opened or
+        # the CLI is used, either open a message box or print the update
+        # info to the console
+        from .updater import get_update_url, check_and_notify
+        import sys
+
+        def _notify_update(latest_version):
+            url = get_update_url(latest_version)
+            print(
+                f"\n⚡ Update available: v{latest_version}  →  {url}\n",
+                file=sys.stderr,
+            )
+
+        gui_apps = [
+            "toraw",
+            "localize",
+            "filter",
+            "render",
+            "average",
+            "nanotron",
+            "average3",
+            "simulate",
+            "design",
+            "spinna",
+        ]
+        if args.command in gui_apps:
+            # ensure that gui is opened (only one argument in the parser)
+            if len(sys.argv) == 2:
+
+                def _notify_update(latest_version):
+                    from PyQt5.QtWidgets import QMessageBox, QApplication
+
+                    url = get_update_url(latest_version)
+                    app = QApplication([])
+                    msg = QMessageBox()
+                    msg.setIcon(QMessageBox.Information)
+                    msg.setWindowTitle("Update available")
+                    msg.setText(
+                        f"⚡ Update available: v{latest_version}  →  {url}"
+                    )
+                    msg.exec_()
+
+        check_and_notify(_notify_update)
+
         if args.command == "toraw":
             from .gui import toraw
 
