@@ -1162,7 +1162,7 @@ class TiffMap:
         }
         # The following block is MM-specific
         self.file.seek(self.first_ifd_offset)
-        n_entries = self.read(self._n_entries_type)  # was hardcoded "H"
+        n_entries = self.read(self._n_entries_type)
         for i in range(n_entries):
             self.file.seek(
                 self.first_ifd_offset + self._ifd_count_size + i * self._entry_size
