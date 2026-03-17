@@ -1071,6 +1071,7 @@ class TiffMap:
         # Collect image offsets by walking the IFD chain.
         self.image_offsets = []
         offset = self.first_ifd_offset
+        last_offset = self.first_ifd_offset  # safe fallback if first read fails
         while offset != 0:
             self.file.seek(offset)
             n_entries = self.read(self._n_entries_type)
