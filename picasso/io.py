@@ -1251,7 +1251,7 @@ class TiffMap:
         self.file.close()
 
     def tofile(self, file_handle, byte_order=None):
-        do_byteswap = byte_order != self.byte_order
+        do_byteswap = byte_order != self._tif_byte_order
         for image in self:
             if do_byteswap:
                 image = image.byteswap()
