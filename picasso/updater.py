@@ -77,14 +77,15 @@ def get_update_url() -> str:
 
 def should_check_today() -> bool:
     """Only check once per day."""
-    # try:
-    #     settings = io.load_user_settings()
-    #     if settings["Updates"].get("Last update check", False):
-    #         last = datetime.fromisoformat(settings["Updates"]["Last update check"])
-    #         return datetime.now() - last > timedelta(hours=24)
-    # except Exception:
-    #     return True #TODO: uncomment
-    return True  # always check for updates (disable once we have a working system)
+    try:
+        settings = io.load_user_settings()
+        if settings["Updates"].get("Last update check", False):
+            last = datetime.fromisoformat(
+                settings["Updates"]["Last update check"]
+            )
+            return datetime.now() - last > timedelta(hours=24)
+    except Exception:
+        return True
 
 
 def skip_version(version: str) -> None:
@@ -98,7 +99,7 @@ def skip_version(version: str) -> None:
 def snooze_until(days: int) -> None:
     """User chose 'remind me later' — suppress for N days."""
     settings = io.load_user_settings()
-    settings["Updates"]["Snoozed_until"] = (
+    settings["Updates"]["Snoozed until"] = (
         datetime.now() + timedelta(days=days)
     ).isoformat()
     io.save_user_settings(settings)
@@ -121,7 +122,7 @@ def should_notify(latest_version: str) -> bool:
     if settings["Updates"].get("Skipped version") == latest_version:
         return False
 
-    snoozed = settings["Updates"].get("Snoozed_until")
+    snoozed = settings["Updates"].get("Snoozed until")
     if snoozed and datetime.now() < datetime.fromisoformat(snoozed):
         return False  # still within snooze window
 
@@ -201,42 +202,42 @@ def setup_gui_update_check(parent=None):
         msg = get_update_url()
         # if one-click-installer is used, allow the user to open the release
         # page
-        if msg == URL_LATEST_RELEASE:
-            box = QtWidgets.QMessageBox(
-                QtWidgets.QMessageBox.Information,
-                "Update available",
-                f"Picasso v{latest_version} is available!\n\n{msg}",
-                parent=parent,
-            )
-            open_btn = box.addButton(
-                "Open in Browser", QtWidgets.QMessageBox.ActionRole
-            )
-            remind_btn = box.addButton(
-                "Remind me in 7 days", QtWidgets.QMessageBox.ActionRole
-            )
-            skip_btn = box.addButton(
-                "Skip this version", QtWidgets.QMessageBox.ActionRole
-            )
-            disable_btn = box.addButton(
-                "Don't check for updates", QtWidgets.QMessageBox.ActionRole
-            )
-            close_btn = box.addButton(QtWidgets.QMessageBox.Close)
-            box.exec_()
-            if box.clickedButton() == open_btn:
-                webbrowser.open(URL_LATEST_RELEASE)
-            elif box.clickedButton() == remind_btn:
-                snooze_until(days=7)
-            elif box.clickedButton() == skip_btn:
-                skip_version(latest_version)
-            elif box.clickedButton() == disable_btn:
-                disable_updates()
-        # if installed via pip, show the pip command
-        else:
-            QtWidgets.QMessageBox.information(
-                parent,
-                "Update available",
-                f"Picasso v{latest_version} is available!\n\n{msg}",
-            )
+        # if msg == URL_LATEST_RELEASE:
+        box = QtWidgets.QMessageBox(
+            QtWidgets.QMessageBox.Information,
+            "Update available",
+            f"Picasso v{latest_version} is available!\n\n{msg}",
+            parent=parent,
+        )
+        open_btn = box.addButton(
+            "Open in Browser", QtWidgets.QMessageBox.ActionRole
+        )
+        remind_btn = box.addButton(
+            "Remind me in 7 days", QtWidgets.QMessageBox.ActionRole
+        )
+        skip_btn = box.addButton(
+            "Skip this version", QtWidgets.QMessageBox.ActionRole
+        )
+        disable_btn = box.addButton(
+            "Don't check for updates", QtWidgets.QMessageBox.ActionRole
+        )
+        close_btn = box.addButton(QtWidgets.QMessageBox.Close)
+        box.exec_()
+        if box.clickedButton() == open_btn:
+            webbrowser.open(URL_LATEST_RELEASE)
+        elif box.clickedButton() == remind_btn:
+            snooze_until(days=7)
+        elif box.clickedButton() == skip_btn:
+            skip_version(latest_version)
+        elif box.clickedButton() == disable_btn:
+            disable_updates()
+        # # if installed via pip, show the pip command
+        # else:
+        #     QtWidgets.QMessageBox.information(
+        #         parent,
+        #         "Update available",
+        #         f"Picasso v{latest_version} is available!\n\n{msg}",
+        #     )
 
     notifier.update_found.connect(_show_dialog)
 
