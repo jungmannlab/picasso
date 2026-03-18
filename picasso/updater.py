@@ -79,17 +79,58 @@ def should_check_today() -> bool:
     """Only check once per day."""
     # try:
     #     settings = io.load_user_settings()
-    #     if settings.get("Last update check", False):
-    #         last = datetime.fromisoformat(settings["Last update check"])
+    #     if settings["Updates"].get("Last update check", False):
+    #         last = datetime.fromisoformat(settings["Updates"]["Last update check"])
     #         return datetime.now() - last > timedelta(hours=24)
     # except Exception:
     #     return True #TODO: uncomment
     return True  # always check for updates (disable once we have a working system)
 
 
+def skip_version(version: str) -> None:
+    """Mark the current latest version as "skipped" so the user won't be
+    notified about it again."""
+    settings = io.load_user_settings()
+    settings["Updates"]["Skipped version"] = version
+    io.save_user_settings(settings)
+
+
+def snooze_until(days: int) -> None:
+    """User chose 'remind me later' — suppress for N days."""
+    settings = io.load_user_settings()
+    settings["Updates"]["Snoozed_until"] = (
+        datetime.now() + timedelta(days=days)
+    ).isoformat()
+    io.save_user_settings(settings)
+
+
+def disable_updates() -> None:
+    """User chose 'don't check for updates' — disable future checks."""
+    settings = io.load_user_settings()
+    settings["Updates"]["Disabled"] = True
+    io.save_user_settings(settings)
+
+
+def should_notify(latest_version: str) -> bool:
+    """Check user settings to decide whether to show update notification
+    for the given version."""
+    settings = io.load_user_settings()
+    if settings["Updates"].get("Disabled", False):
+        return False
+
+    if settings["Updates"].get("Skipped version") == latest_version:
+        return False
+
+    snoozed = settings["Updates"].get("Snoozed_until")
+    if snoozed and datetime.now() < datetime.fromisoformat(snoozed):
+        return False  # still within snooze window
+
+    return should_check_today()
+
+
 def mark_checked():
     settings = io.load_user_settings()
-    settings["Last update check"] = datetime.now().isoformat()
+    settings["Updates"]["Last update check"] = datetime.now().isoformat()
     io.save_user_settings(settings)
 
 
@@ -98,16 +139,41 @@ def check_and_notify(notify_callback):
     update found. Returns the thread so callers can join it."""
 
     def _check():
-        if not should_check_today():
+        available, latest = is_update_available()
+        if not should_notify(latest):
             return
         mark_checked()
-        available, latest = is_update_available()
         if available:
             notify_callback(latest)
 
     t = threading.Thread(target=_check, daemon=True)
     t.start()
     return t
+
+
+def cli_notify_update(latest_version):
+    url = get_update_url()
+    print(
+        f"\n⚡ Picasso update available: v{latest_version}\n\n{url}",
+        file=sys.stderr,
+    )
+    print(
+        f"   Would you like to silence update notifications?", file=sys.stderr
+    )
+    print(f"   [1] Remind me in 7 days", file=sys.stderr)
+    print(f"   [2] Skip this version", file=sys.stderr)
+    print(f"   [9] Disable update checks", file=sys.stderr)
+    print(
+        f"   [Enter] Do nothing for now (remind tomorrow)\n", file=sys.stderr
+    )
+
+    choice = input("   Choice: ").strip()
+    if choice == "1":
+        snooze_until(days=7)
+    elif choice == "2":
+        skip_version(latest_version)
+    elif choice == "9":
+        disable_updates()
 
 
 def setup_gui_update_check(parent=None):
@@ -145,10 +211,25 @@ def setup_gui_update_check(parent=None):
             open_btn = box.addButton(
                 "Open in Browser", QtWidgets.QMessageBox.ActionRole
             )
-            box.addButton(QtWidgets.QMessageBox.Close)
+            remind_btn = box.addButton(
+                "Remind me in 7 days", QtWidgets.QMessageBox.ActionRole
+            )
+            skip_btn = box.addButton(
+                "Skip this version", QtWidgets.QMessageBox.ActionRole
+            )
+            disable_btn = box.addButton(
+                "Don't check for updates", QtWidgets.QMessageBox.ActionRole
+            )
+            close_btn = box.addButton(QtWidgets.QMessageBox.Close)
             box.exec_()
             if box.clickedButton() == open_btn:
                 webbrowser.open(URL_LATEST_RELEASE)
+            elif box.clickedButton() == remind_btn:
+                snooze_until(days=7)
+            elif box.clickedButton() == skip_btn:
+                skip_version(latest_version)
+            elif box.clickedButton() == disable_btn:
+                disable_updates()
         # if installed via pip, show the pip command
         else:
             QtWidgets.QMessageBox.information(

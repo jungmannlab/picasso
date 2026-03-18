@@ -2633,7 +2633,7 @@ def main():
     args = parser.parse_args()
     if args.command:
         # check for updates and print in the console if available
-        from .updater import get_update_url, check_and_notify
+        from .updater import cli_notify_update, check_and_notify
         import sys
 
         cli_update_check = True
@@ -2654,15 +2654,7 @@ def main():
             if len(sys.argv) == 2:  # only the gui is opened
                 cli_update_check = False
         if cli_update_check:
-
-            def _notify_update(latest_version):
-                url = get_update_url()
-                print(
-                    f"\n⚡ Picasso update available: v{latest_version}\n\n{url}",
-                    file=sys.stderr,
-                )
-
-            update_thread = check_and_notify(_notify_update)
+            update_thread = check_and_notify(cli_notify_update)
 
         if args.command == "toraw":
             from .gui import toraw
