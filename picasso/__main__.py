@@ -2656,7 +2656,7 @@ def main():
         if cli_update_check:
 
             def _notify_update(latest_version):
-                url = get_update_url(latest_version)
+                url = get_update_url()
                 print(
                     f"\n⚡ Picasso update available: v{latest_version}\n\n{url}",
                     file=sys.stderr,

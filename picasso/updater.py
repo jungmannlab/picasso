@@ -46,7 +46,7 @@ def is_update_available() -> tuple[bool, str | None]:
         return False, None
 
 
-def get_update_url(latest_version: str) -> str:
+def get_update_url() -> str:
     """Return the appropriate update URL based on how the app is running."""
 
     # PyInstaller sets this attribute when running as a bundled .exe
@@ -129,13 +129,33 @@ def setup_gui_update_check(parent=None):
     notifier = _Notifier()
 
     def _show_dialog(latest_version):
+        import webbrowser
+
         mark_checked()
-        url = get_update_url(latest_version)
-        QtWidgets.QMessageBox.information(
-            parent,
-            "Update Available",
-            f"Picasso v{latest_version} is available!\n\n{url}",
-        )
+        msg = get_update_url()
+        # if one-click-installer is used, allow the user to open the release
+        # page
+        if msg == URL_LATEST_RELEASE:
+            box = QtWidgets.QMessageBox(
+                QtWidgets.QMessageBox.Information,
+                "Update available",
+                f"Picasso v{latest_version} is available!\n\n{msg}",
+                parent=parent,
+            )
+            open_btn = box.addButton(
+                "Open in Browser", QtWidgets.QMessageBox.ActionRole
+            )
+            box.addButton(QtWidgets.QMessageBox.Close)
+            box.exec_()
+            if box.clickedButton() == open_btn:
+                webbrowser.open(URL_LATEST_RELEASE)
+        # if installed via pip, show the pip command
+        else:
+            QtWidgets.QMessageBox.information(
+                parent,
+                "Update available",
+                f"Picasso v{latest_version} is available!\n\n{msg}",
+            )
 
     notifier.update_found.connect(_show_dialog)
 
