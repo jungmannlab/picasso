@@ -23,7 +23,7 @@ import pandas as pd
 import scipy
 from scipy import signal
 
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, render, __version__
 
@@ -119,7 +119,7 @@ class View(QtWidgets.QLabel):
         super().__init__()
         self.window = window
         self.setMinimumSize(1, 1)
-        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.setAcceptDrops(True)
         self._pixmap = None
 
@@ -150,7 +150,9 @@ class View(QtWidgets.QLabel):
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
         self._pixmap = QtGui.QPixmap.fromImage(qimage)
         self.set_pixmap(self._pixmap)
 
@@ -159,8 +161,8 @@ class View(QtWidgets.QLabel):
             pixmap.scaled(
                 self.width(),
                 self.height(),
-                QtCore.Qt.KeepAspectRatio,
-                QtCore.Qt.FastTransformation,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.FastTransformation,
             )
         )
 
@@ -206,11 +208,11 @@ class Window(QtWidgets.QMainWindow):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open)
         file_menu.addAction(open_action)
         save_action = file_menu.addAction("Save")
-        save_action.setShortcut(QtGui.QKeySequence.Save)
+        save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
         process_menu = menu_bar.addMenu("Process")
@@ -538,7 +540,7 @@ class Window(QtWidgets.QMainWindow):
                     " Please load file with picked localizations."
                 )
             )
-            msgBox.exec_()
+            msgBox.exec()
 
         else:
             locs = lib.ensure_sanity(locs, info)
@@ -772,12 +774,14 @@ class Window(QtWidgets.QMainWindow):
         self._bgra[..., 0] = cmap[:, 2][image]
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
 
         qimage = qimage.scaled(
             self.viewxy.width(),
             int(np.round(self.viewxy.height() * Y / X)),
-            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
         pixmap = QtGui.QPixmap.fromImage(qimage)
 
@@ -837,12 +841,14 @@ class Window(QtWidgets.QMainWindow):
         bgra = np.minimum(bgra, 1)
         self._bgra = self.to_8bit(bgra)
 
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
 
         qimage = qimage.scaled(
             self.viewxy.width(),
             int(np.round(self.viewxy.height() * Y / X)),
-            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
         pixmap = QtGui.QPixmap.fromImage(qimage)
 
@@ -920,10 +926,13 @@ class Window(QtWidgets.QMainWindow):
         size = fig.canvas.size()
         width, height = size.width(), size.height()
         im = QtGui.QImage(
-            fig.canvas.buffer_rgba(), width, height, QtGui.QImage.Format_ARGB32
+            fig.canvas.buffer_rgba(),
+            width,
+            height,
+            QtGui.QImage.Format.Format_ARGB32,
         )
         self.viewcp.setPixmap((QtGui.QPixmap(im)))
-        self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+        self.viewcp.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         plt.close(fig)
 
         self.centerofmass_all()
@@ -1217,10 +1226,10 @@ class Window(QtWidgets.QMainWindow):
                 fig.canvas.buffer_rgba(),
                 width,
                 height,
-                QtGui.QImage.Format_ARGB32,
+                QtGui.QImage.Format.Format_ARGB32,
             )
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
-            self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+            self.viewcp.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             plt.close(fig)
 
         if self.radio_sym_custom.isChecked():
@@ -1250,10 +1259,10 @@ class Window(QtWidgets.QMainWindow):
                 fig.canvas.buffer_rgba(),
                 width,
                 height,
-                QtGui.QImage.Format_ARGB32,
+                QtGui.QImage.Format.Format_ARGB32,
             )
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
-            self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+            self.viewcp.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             plt.close(fig)
 
         if self.modelchk.isChecked():
@@ -1357,10 +1366,10 @@ class Window(QtWidgets.QMainWindow):
                 fig.canvas.buffer_rgba(),
                 width,
                 height,
-                QtGui.QImage.Format_ARGB32,
+                QtGui.QImage.Format.Format_ARGB32,
             )
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
-            self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+            self.viewcp.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             plt.close(fig)
 
         # TODO: Sort these functions out,
@@ -1391,10 +1400,10 @@ class Window(QtWidgets.QMainWindow):
                 fig.canvas.buffer_rgba(),
                 width,
                 height,
-                QtGui.QImage.Format_ARGB32,
+                QtGui.QImage.Format.Format_ARGB32,
             )
             self.viewcp.setPixmap((QtGui.QPixmap(im)))
-            self.viewcp.setAlignment(QtCore.Qt.AlignCenter)
+            self.viewcp.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
             plt.close(fig)
 
         if self.modelchk.isChecked():
@@ -1946,7 +1955,7 @@ class Window(QtWidgets.QMainWindow):
         self.qimage = qimage.scaled(
             self.viewxy.width(),
             self.viewxy.height(),
-            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
 
     def adjust_viewport_to_view(self, viewport):
@@ -1991,7 +2000,9 @@ class Window(QtWidgets.QMainWindow):
             )
         self._bgra[:, :, 3].fill(255)
         Y, X = self._bgra.shape[:2]
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
         return qimage
 
     def get_render_kwargs(
@@ -2117,12 +2128,12 @@ def main():
         errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
-        errorbox.exec_()
+        errorbox.exec()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

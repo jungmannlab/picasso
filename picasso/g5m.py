@@ -30,7 +30,7 @@ from numba import njit
 from scipy.special import erf
 from sklearn.utils import check_random_state
 from tqdm import tqdm
-from PyQt5 import QtWidgets
+from PyQt6 import QtWidgets
 
 from . import lib, zfit, __version__
 

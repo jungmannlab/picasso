@@ -21,7 +21,7 @@ import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 import numpy as _np
 from matplotlib.backends.backend_pdf import PdfPages
-from PyQt5 import QtCore, QtGui, QtWidgets, QtPrintSupport
+from PyQt6 import QtCore, QtGui, QtWidgets, QtPrintSupport
 
 from .. import io as _io
 from .. import design, design_sequences
@@ -62,7 +62,7 @@ def plotPlate(
     rowsStr = ["A", "B", "C", "D", "E", "F", "G", "H"]
     rowsStr = rowsStr[::-1]
 
-    fig = plt.figure(constrained_layout=True, frameon=False)
+    fig = plt.figure(frameon=False)
     fig.set_size_inches(5, 8)
     ax = plt.Axes(fig, [0.0, 0.0, 1.0, 1.0])
     ax.set_axis_off()
@@ -349,8 +349,9 @@ class PipettingDialog(QtWidgets.QDialog):
         layout.addWidget(self.uniqueCounter)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
 
@@ -413,10 +414,10 @@ class PipettingDialog(QtWidgets.QDialog):
         dialog = PipettingDialog(parent)
         if pwd:
             dialog.pwd = pwd
-        result = dialog.exec_()
+        result = dialog.exec()
         fulllist = dialog.getfulllist()
 
-        return (fulllist, result == QtWidgets.QDialog.Accepted)
+        return (fulllist, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
 class SeqDialog(QtWidgets.QDialog):
@@ -456,8 +457,9 @@ class SeqDialog(QtWidgets.QDialog):
         layout.addWidget(self.table)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
 
@@ -721,9 +723,13 @@ class FoldingDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> tuple[list[str], list[str], bool]:
         dialog = FoldingDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         tablelong, tableshort = dialog.evalTable()
-        return (tablelong, tableshort, result == QtWidgets.QDialog.Accepted)
+        return (
+            tablelong,
+            tableshort,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
+        )
 
 
 class PlateDialog(QtWidgets.QDialog):
@@ -768,8 +774,9 @@ class PlateDialog(QtWidgets.QDialog):
         layout.addWidget(self.radio2)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
 
@@ -794,9 +801,9 @@ class PlateDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> tuple[int, bool]:
         dialog = PlateDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         selection = dialog.evalSelection()
-        return (selection, result == QtWidgets.QDialog.Accepted)
+        return (selection, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
 class BindingSiteItem(QtWidgets.QGraphicsPolygonItem):
@@ -1342,7 +1349,7 @@ class Window(QtWidgets.QMainWindow):
         super().__init__()
         self.mainscene = Scene(self)
         self.view = QtWidgets.QGraphicsView(self.mainscene)
-        self.view.setRenderHint(QtGui.QPainter.Antialiasing)
+        self.view.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
         self.setCentralWidget(self.view)
         self.statusBar().showMessage(
             "Ready."
@@ -1378,6 +1385,9 @@ class Window(QtWidgets.QMainWindow):
                 self, "Save design to..", filter="*.yaml"
             )
         if path:
+            base, ext = os.path.splitext(path)
+            if ext == ".yml":
+                path = base + ".yaml"
             self.mainscene.saveCanvas(path)
             self.statusBar().showMessage("File saved as: " + path)
             self.pwd = os.path.dirname(path)
@@ -1646,16 +1656,12 @@ class Window(QtWidgets.QMainWindow):
                     with PdfPages(path) as pdf:
                         for x in range(0, len(platenames)):
                             progress.set_value(x)
-                            # pdf.savefig(allfig[x])
                             pdf.savefig(
                                 allfig[x],
                                 bbox_inches="tight",
                                 pad_inches=0.2,
                                 dpi=200,
                             )
-                            # base, ext = _ospath.splitext(path)
-                            # csv_path = base + ".csv"
-                            # design.savePlate(csv_path, exportlist)
                     progress.close()
                     self.statusBar().showMessage(
                         "Pippetting scheme saved to: " + path
@@ -1788,7 +1794,9 @@ class MainWindow(QtWidgets.QWidget):
 
         # make white background
         palette = QtGui.QPalette()
-        palette.setColor(QtGui.QPalette.Background, QtCore.Qt.white)
+        palette.setColor(
+            QtGui.QPalette.ColorRole.Window, QtCore.Qt.GlobalColor.white
+        )
         self.setPalette(palette)
 
         menu_bar = QtWidgets.QMenuBar(self)
@@ -1820,7 +1828,7 @@ def main():
 
     setup_gui_update_check(window)
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
@@ -1830,7 +1838,7 @@ def main():
             "An error occured",
             message,
         )
-        errorbox.exec_()
+        errorbox.exec()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook

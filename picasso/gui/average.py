@@ -25,7 +25,7 @@ import numba
 import scipy
 import numpy as np
 import pandas as pd
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, render, __version__
 
@@ -307,8 +307,8 @@ class ParametersDialog(QtWidgets.QDialog):
         iter_label.setToolTip("Number of averaging iterations.")
         grid.addWidget(iter_label, 1, 0)
         self.iterations = QtWidgets.QSpinBox()
-        self.iterations.setRange(0, int(1e7))
-        self.iterations.setValue(10)
+        self.iterations.setRange(1, int(1e7))
+        self.iterations.setValue(3)
         grid.addWidget(self.iterations, 1, 1)
 
     def on_disp_px_size_changed(self) -> None:
@@ -344,7 +344,7 @@ class View(QtWidgets.QLabel):
         super().__init__()
         self.window = window
         self.setMinimumSize(1, 1)
-        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.setAcceptDrops(True)
         self._pixmap = None
         self.running = False
@@ -508,7 +508,9 @@ class View(QtWidgets.QLabel):
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
         self._bgra[..., 3] = 255
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
         self._pixmap = QtGui.QPixmap.fromImage(qimage)
         self.set_pixmap(self._pixmap)
 
@@ -517,8 +519,8 @@ class View(QtWidgets.QLabel):
             pixmap.scaled(
                 self.width(),
                 self.height(),
-                QtCore.Qt.KeepAspectRatio,
-                QtCore.Qt.FastTransformation,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.FastTransformation,
             )
         )
 
@@ -561,11 +563,11 @@ class Window(QtWidgets.QMainWindow):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open)
         file_menu.addAction(open_action)
         save_action = file_menu.addAction("Save")
-        save_action.setShortcut(QtGui.QKeySequence.Save)
+        save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save)
         file_menu.addAction(save_action)
         process_menu = menu_bar.addMenu("Process")
@@ -633,12 +635,12 @@ def main() -> None:
             "An error occured",
             message,
         )
-        errorbox.exec_()
+        errorbox.exec()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
