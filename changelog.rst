@@ -5,14 +5,12 @@ Last change: 24-MAR-2026 CEST
 
 0.9.10
 ------
-Important updates:
-^^^^^^^^^^^^^^^^^^
-
 Small improvements:
 +++++++++++++++++++
 - ``picasso.aim.aim`` accepts progress as a ``lib.ProgressDialog``, ``"console"`` or ``None``
 - SPINNA GUI: Small adjustment to GUI when loading search space
 - Adjusted label in subcluster check plot
+- Subcluster check plot outputs p value and test statistic
 
 Bug fixes:
 ++++++++++

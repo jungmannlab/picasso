@@ -29,6 +29,7 @@ from matplotlib.backends.backend_qt5agg import (
     FigureCanvas,
     NavigationToolbar2QT,
 )
+from scipy import stats
 from PyQt5 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
 from tqdm import tqdm
@@ -1417,6 +1418,45 @@ def pick_areas_rectangle(
     return areas
 
 
+def permutation_test(
+    arr1: np.ndarray, arr2: np.ndarray, iterations: int = 1000
+) -> tuple[float, float, float]:
+    """Perform a permutation test to compare two arrays. The test
+    statistic is the Kolmogorov-Smirnov statistic.
+
+    Parameters
+    ----------
+    arr1, arr2 : np.ndarray
+        Arrays to be compared.
+    iterations : int, optional
+        Number of permutations to perform. Default is 1000.
+
+    Returns
+    -------
+    obs_d : float
+        Observed KS statistic.
+    p_perm : float
+        Permutation p-value.
+    ks_pval : float
+        KS test theoretical p-value.
+    """
+    combined = np.concatenate([arr1, arr2])
+    n1 = len(arr1)
+
+    # observe the real difference
+    obs_d, ks_pval = stats.ks_2samp(arr1, arr2)
+
+    # build null distribution by shuffling
+    null_dist = []
+    for _ in range(iterations):
+        shuffled = np.random.permutation(combined)
+        d_perm, _ = stats.ks_2samp(shuffled[:n1], shuffled[n1:])
+        null_dist.append(d_perm)
+
+    p_perm = np.sum(np.array(null_dist) >= obs_d) / iterations
+    return obs_d, p_perm, ks_pval
+
+
 def plot_subclustering_check(
     clustered_n_events: np.ndarray,
     sparse_n_events: np.ndarray,
@@ -1456,12 +1496,13 @@ def plot_subclustering_check(
     s_sparse = sparse_n_events.std()
 
     # create the plot
-    fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
+    fig, ax1 = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
     min_bin, max_bin = np.percentile(clustered_n_events, [2.5, 97.5])
     vals, counts = np.unique(clustered_n_events, return_counts=True)
-    label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
     if clustering_dist is not None:
-        label += f", d < {clustering_dist:.1f} nm"
+        label = f"Clustered (d < {clustering_dist:.1f} nm) {m_clustered:.1f} +/- {s_clustered:.1f}"
+    else:
+        label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
     ax1.bar(
         vals,
         counts,
@@ -1472,9 +1513,10 @@ def plot_subclustering_check(
     )
     ax1.axvline(m_clustered, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
-    label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
     if sparse_dist is not None:
-        label += f", d > {sparse_dist:.1f} nm"
+        label = f"Sparse (d > {sparse_dist:.1f} nm) {m_sparse:.1f} +/- {s_sparse:.1f}"
+    else:
+        label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
     ax1.bar(
         vals,
         counts,
@@ -1487,6 +1529,15 @@ def plot_subclustering_check(
     ax1.set_xlabel("Number of events")
     ax1.set_ylabel("Counts")
     ax1.set_xlim(min_bin - 1, max_bin + 1)
+    # add stat. tests in the title:
+    stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
+    p_value_str = r"$p_{value}$"
+    title = (
+        f"KS test: stat={stat:.4f}\n"
+        f"permutation {p_value_str}={p_perm:.4f}\n"
+        f"theoretical {p_value_str}={p:.4f}"
+    )
+    ax1.set_title(title, fontsize=10)
     ax1.legend()
     if len(plot_path):
         if isinstance(plot_path, str):
