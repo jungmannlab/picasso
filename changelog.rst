@@ -11,10 +11,12 @@ Important updates:
 Small improvements:
 +++++++++++++++++++
 - ``picasso.aim.aim`` accepts progress as a ``lib.ProgressDialog``, ``"console"`` or ``None``
+- SPINNA GUI: Small adjustment to GUI when loading search space
 
 Bug fixes:
 ++++++++++
 - Fixed AIM in Localize GUI
+- Fixed saving search space in SPINNA for multiple-target structures
 
 0.9.8-9
 -------
