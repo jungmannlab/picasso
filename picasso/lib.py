@@ -1422,6 +1422,8 @@ def plot_subclustering_check(
     sparse_n_events: np.ndarray,
     plot_path: str | list[str] = "",
     return_fig: bool = False,
+    clustering_dist: float | None = None,
+    sparse_dist: float | None = None,
 ) -> tuple[plt.Figure, plt.Axes] | tuple[None, None]:
     """Plot the results of subclustering analysis, see
     ``picasso.clusterer.test_subclustering``.
@@ -1438,6 +1440,9 @@ def plot_subclustering_check(
         is "".
     return_fig : bool, optional
         If True, the figure and axes are returned. Default is False.
+    clustering_dist, sparse_dist : float, optional
+        Clustering and sparse distances that are displayed in the
+        legend. If None, distances are not displayed. Default is None.
 
     Returns
     -------
@@ -1454,22 +1459,28 @@ def plot_subclustering_check(
     fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
     min_bin, max_bin = np.percentile(clustered_n_events, [2.5, 97.5])
     vals, counts = np.unique(clustered_n_events, return_counts=True)
+    label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
+    if clustering_dist is not None:
+        label += f", d < {clustering_dist:.1f} nm"
     ax1.bar(
         vals,
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}",
+        label=label,
         color="C0",
     )
     ax1.axvline(m_clustered, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
+    label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
+    if sparse_dist is not None:
+        label += f", d > {sparse_dist:.1f} nm"
     ax1.bar(
         vals,
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}",
+        label=label,
         color="C1",
     )
     ax1.axvline(m_sparse, color="C1", linestyle="--")

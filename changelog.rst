@@ -12,6 +12,7 @@ Small improvements:
 +++++++++++++++++++
 - ``picasso.aim.aim`` accepts progress as a ``lib.ProgressDialog``, ``"console"`` or ``None``
 - SPINNA GUI: Small adjustment to GUI when loading search space
+- Adjusted label in subcluster check plot
 
 Bug fixes:
 ++++++++++

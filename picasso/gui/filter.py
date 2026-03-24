@@ -558,7 +558,11 @@ class SubclusterNum(QtWidgets.QDialog):
             )
             df.to_csv(path, index=False)
         fig, ax = lib.plot_subclustering_check(
-            clustered_nevents, sparse_nevents, return_fig=True
+            clustered_nevents,
+            sparse_nevents,
+            return_fig=True,
+            clustering_dist=dist_clustered,
+            sparse_dist=dist_sparse,
         )
         plt.show()
 
