@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 20-MAR-2026 CEST
+Last change: 23-MAR-2026 CEST
 
 0.10.0
 ------
@@ -12,6 +12,7 @@ Last change: 20-MAR-2026 CEST
 **Important updates:**
 ^^^^^^^^^^^^^^^^^^^^^^
 - Picasso automatically checks for updates when launched and notifies the user if a new version is available
+- Installing Picasso as a package has less stringent dependencies requirements, the exact versions are specified for one-click-installers only
 
 *Small improvements:*
 +++++++++++++++++++++
