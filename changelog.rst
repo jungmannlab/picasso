@@ -5,6 +5,10 @@ Last change: 24-MAR-2026 CEST
 
 0.9.10
 ------
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- Added support for loading BigTIFF in Picasso Localize (#631), big thanks to @boydcpeters
+
 Small improvements:
 +++++++++++++++++++
 - ``picasso.aim.aim`` accepts progress as a ``lib.ProgressDialog``, ``"console"`` or ``None``
