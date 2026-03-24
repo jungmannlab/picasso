@@ -36,7 +36,7 @@ from .. import (
     __version__,
     zfit,
 )
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 from playsound3 import playsound
 
 try:
@@ -53,12 +53,12 @@ class RubberBand(QtWidgets.QRubberBand):
     """Red rubber band for selecting ROI."""
 
     def __init__(self, parent: QtWidgets.QWidget) -> None:
-        super().__init__(QtWidgets.QRubberBand.Rectangle, parent)
+        super().__init__(QtWidgets.QRubberBand.Shape.Rectangle, parent)
 
     def paintEvent(self, event: QtGui.QPaintEvent) -> None:
         """Change the color of the rubber band."""
         painter = QtGui.QPainter(self)
-        color = QtGui.QColor(QtCore.Qt.blue)
+        color = QtGui.QColor(QtCore.Qt.GlobalColor.blue)
         painter.setPen(QtGui.QPen(color))
         rect = event.rect()
         rect.setHeight(int(rect.height() - 1))
@@ -108,36 +108,42 @@ class View(QtWidgets.QGraphicsView):
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Start either a rubber band for selecting a ROI or panning the
         view."""
-        if event.button() == QtCore.Qt.LeftButton and not self.numeric_roi:
+        if (
+            event.button() == QtCore.Qt.MouseButton.LeftButton
+            and not self.numeric_roi
+        ):
             self.roi_origin = QtCore.QPoint(event.pos())
             self.rubberband.setGeometry(
                 QtCore.QRect(self.roi_origin, QtCore.QSize())
             )
             self.rubberband.show()
-        elif event.button() == QtCore.Qt.RightButton:
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
             self.pan = True
-            self.pan_start_x = event.x()
-            self.pan_start_y = event.y()
-            self.setCursor(QtCore.Qt.ClosedHandCursor)
+            self.pan_start_x = event.pos().x()
+            self.pan_start_y = event.pos().y()
+            self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
             event.accept()
         else:
             event.ignore()
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Update the rubber band or pan the view."""
-        if event.buttons() == QtCore.Qt.LeftButton and not self.numeric_roi:
+        if (
+            event.buttons() == QtCore.Qt.MouseButton.LeftButton
+            and not self.numeric_roi
+        ):
             self.rubberband.setGeometry(
                 QtCore.QRect(self.roi_origin, event.pos())
             )
         if self.pan:
             self.hscrollbar.setValue(
-                self.hscrollbar.value() - event.x() + self.pan_start_x
+                self.hscrollbar.value() - event.pos().x() + self.pan_start_x
             )
             self.vscrollbar.setValue(
-                self.vscrollbar.value() - event.y() + self.pan_start_y
+                self.vscrollbar.value() - event.pos().y() + self.pan_start_y
             )
-            self.pan_start_x = event.x()
-            self.pan_start_y = event.y()
+            self.pan_start_x = event.pos().x()
+            self.pan_start_y = event.pos().y()
             self.window.draw_frame()
             event.accept()
         else:
@@ -145,7 +151,10 @@ class View(QtWidgets.QGraphicsView):
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
         """Select the ROI or stop panning the view."""
-        if event.button() == QtCore.Qt.LeftButton and not self.numeric_roi:
+        if (
+            event.button() == QtCore.Qt.MouseButton.LeftButton
+            and not self.numeric_roi
+        ):
             self.roi_end = QtCore.QPoint(event.pos())
             dx = abs(self.roi_end.x() - self.roi_origin.x())
             dy = abs(self.roi_end.y() - self.roi_origin.y())
@@ -165,9 +174,9 @@ class View(QtWidgets.QGraphicsView):
                 )
                 self.numeric_roi = False
             self.window.draw_frame()
-        elif event.button() == QtCore.Qt.RightButton:
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
             self.pan = False
-            self.setCursor(QtCore.Qt.ArrowCursor)
+            self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
             event.accept()
         else:
             event.ignore()
@@ -520,8 +529,9 @@ class PromptInfoDialog(QtWidgets.QDialog):
         vbox.addLayout(hbox)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -534,7 +544,7 @@ class PromptInfoDialog(QtWidgets.QDialog):
         parent: QtWidgets.QWidget | None = None,
     ) -> tuple[dict, bool, bool]:
         dialog = PromptInfoDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         info = {}
         info["Byte Order"] = (
             ">" if dialog.byte_order.currentText() == "Big Endian" else "<"
@@ -544,7 +554,7 @@ class PromptInfoDialog(QtWidgets.QDialog):
         info["Height"] = dialog.movie_height.value()
         info["Width"] = dialog.movie_width.value()
         save = dialog.save.isChecked()
-        return (info, save, result == QtWidgets.QDialog.Accepted)
+        return (info, save, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
 class PromptChannelDialog(QtWidgets.QDialog):
@@ -566,8 +576,9 @@ class PromptChannelDialog(QtWidgets.QDialog):
         vbox.addLayout(hbox)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -582,9 +593,9 @@ class PromptChannelDialog(QtWidgets.QDialog):
     ) -> tuple[dict, bool, bool]:
         dialog = PromptChannelDialog(parent)
         dialog.byte_order.addItems(channels)
-        result = dialog.exec_()
+        result = dialog.exec()
         channel = dialog.byte_order.currentText()
-        return (channel, result == QtWidgets.QDialog.Accepted)
+        return (channel, result == QtWidgets.QDialog.DialogCode.Accepted)
 
 
 class ParametersDialog(QtWidgets.QDialog):
@@ -704,7 +715,7 @@ class ParametersDialog(QtWidgets.QDialog):
         self.mng_slider.setToolTip(
             "Adjust the minimum net gradient for spot identification."
         )
-        self.mng_slider.setOrientation(QtCore.Qt.Horizontal)
+        self.mng_slider.setOrientation(QtCore.Qt.Orientation.Horizontal)
         self.mng_slider.setRange(0, 10000)
         self.mng_slider.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
         self.mng_slider.setSingleStep(1)
@@ -761,7 +772,9 @@ class ParametersDialog(QtWidgets.QDialog):
         identification_grid.addWidget(label, 5, 0)
         self.roi_edit = QtWidgets.QLineEdit()
         regex = r"\d+,\d+,\d+,\d+"  # regex for 4 integers separated by commas
-        validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
+        validator = QtGui.QRegularExpressionValidator(
+            QtCore.QRegularExpression(regex)
+        )
         self.roi_edit.setValidator(validator)
         self.roi_edit.editingFinished.connect(self.on_roi_edit_finished)
         self.roi_edit.textChanged.connect(self.on_roi_edit_changed)
@@ -777,7 +790,9 @@ class ParametersDialog(QtWidgets.QDialog):
         identification_grid.addWidget(label, 6, 0)
         self.frames_edit = QtWidgets.QLineEdit()
         regex = r"\d+,\d+"  # regex for 2 integers separated by a comma
-        validator = QtGui.QRegExpValidator(QtCore.QRegExp(regex))
+        validator = QtGui.QRegularExpressionValidator(
+            QtCore.QRegularExpression(regex)
+        )
         self.frames_edit.setValidator(validator)
         self.frames_edit.editingFinished.connect(self.on_frames_edit_finished)
         self.frames_edit.textChanged.connect(self.on_frames_edit_changed)
@@ -863,8 +878,8 @@ class ParametersDialog(QtWidgets.QDialog):
                         self.emission_combos[cam] = emission_combo
                 spacer = QtWidgets.QWidget()
                 spacer.setSizePolicy(
-                    QtWidgets.QSizePolicy.Preferred,
-                    QtWidgets.QSizePolicy.Expanding,
+                    QtWidgets.QSizePolicy.Policy.Preferred,
+                    QtWidgets.QSizePolicy.Policy.Expanding,
                 )
                 cam_grid.addWidget(spacer, cam_grid.rowCount(), 0)
 
@@ -1015,9 +1030,10 @@ class ParametersDialog(QtWidgets.QDialog):
         self.fit_z_checkbox.setEnabled(False)
         z_grid.addWidget(self.fit_z_checkbox, 2, 1)
         self.z_calib_label = QtWidgets.QLabel("-- no calibration loaded --")
-        self.z_calib_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.z_calib_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.z_calib_label.setSizePolicy(
-            QtWidgets.QSizePolicy.Ignored, QtWidgets.QSizePolicy.Fixed
+            QtWidgets.QSizePolicy.Policy.Ignored,
+            QtWidgets.QSizePolicy.Policy.Fixed,
         )
         z_grid.addWidget(self.z_calib_label, 0, 0)
         magnification_label = QtWidgets.QLabel("Magnification factor:")
@@ -1066,7 +1082,8 @@ class ParametersDialog(QtWidgets.QDialog):
 
         aim_segmentation_label = QtWidgets.QLabel("Segmentation")
         aim_segmentation_label.setAlignment(
-            QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter
+            QtCore.Qt.AlignmentFlag.AlignRight
+            | QtCore.Qt.AlignmentFlag.AlignVCenter
         )
         aim_segmentation_label.setToolTip(
             "Select the number of frames in a segment for AIM."
@@ -1240,14 +1257,16 @@ class ParametersDialog(QtWidgets.QDialog):
                 self.update_z_calib(None)
                 self.z_calib_label.setText("-- calibration path not found --")
                 return
-            self.z_calib_label.setAlignment(QtCore.Qt.AlignRight)
+            self.z_calib_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
             self.z_calib_label.setText(os.path.basename(path))
             self.fit_z_checkbox.setEnabled(True)
             self.fit_z_checkbox.setChecked(True)
         else:
             self.z_calibration = {}
             self.z_calibration_path = None
-            self.z_calib_label.setAlignment(QtCore.Qt.AlignCenter)
+            self.z_calib_label.setAlignment(
+                QtCore.Qt.AlignmentFlag.AlignCenter
+            )
             self.z_calib_label.setText("-- no calibration loaded --")
             self.fit_z_checkbox.setChecked(False)
             self.fit_z_checkbox.setEnabled(False)
@@ -1662,7 +1681,7 @@ class Window(QtWidgets.QMainWindow):
             for column, checkbox in self.columns_dialog.column_checkboxes.items()
         }
         io.save_user_settings(settings)
-        QtWidgets.qApp.closeAllWindows()
+        QtWidgets.QApplication.instance().closeAllWindows()
 
     def init_menu_bar(self) -> None:
         """Initialize the menu bar."""
@@ -1698,13 +1717,13 @@ class Window(QtWidgets.QMainWindow):
 
         file_menu.addSeparator()
         sounds_menu = file_menu.addMenu("Sound notifications")
-        sounds_actiongroup = QtWidgets.QActionGroup(file_menu)
+        sounds_actiongroup = QtGui.QActionGroup(file_menu)
         default_sound_path = lib.get_sound_notification_path()  # last used
         default_sound_name = os.path.basename(str(default_sound_path))
         for sound in lib.get_available_sound_notifications():
             sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
             action = sounds_actiongroup.addAction(
-                QtWidgets.QAction(sound_name, sounds_menu, checkable=True)
+                QtGui.QAction(sound_name, sounds_menu, checkable=True)
             )
             action.setObjectName(sound)  # store full name
             if default_sound_name == sound:
@@ -2137,7 +2156,11 @@ class Window(QtWidgets.QMainWindow):
             frame = frame.astype("uint8")
             height, width = frame.shape
             image = QtGui.QImage(
-                frame.data, width, height, width, QtGui.QImage.Format_Indexed8
+                frame.data,
+                width,
+                height,
+                width,
+                QtGui.QImage.Format.Format_Indexed8,
             )
             image.setColorTable(CMAP_GRAYSCALE)
             pixmap = QtGui.QPixmap.fromImage(image)
@@ -2241,7 +2264,7 @@ class Window(QtWidgets.QMainWindow):
             # draw a rectangle
             x = self.view.width() - length_displaypxl - 40
             y = self.view.height() - height_displaypxl - 20
-            pen = QtGui.QPen(QtCore.Qt.NoPen)
+            pen = QtGui.QPen(QtCore.Qt.PenStyle.NoPen)
             brush = QtGui.QBrush(QtGui.QColor("white"))
             polygon = self.view.mapToScene(
                 x,
@@ -2278,7 +2301,8 @@ class Window(QtWidgets.QMainWindow):
             )
             text_item.setPos(text_x, text_y)
             text_item.setFlag(
-                QtWidgets.QGraphicsItem.ItemIgnoresTransformations, True
+                QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,
+                True,
             )
 
     @property
@@ -2567,10 +2591,22 @@ class Window(QtWidgets.QMainWindow):
                 self.locs, self.extra_info
             )
             if len(fiducial_picks) == 0:
-                self.status_bar.showMessage(
-                    "No fiducials found. Skipping fiducial-based drift "
-                    "correction."
-                )
+                if drift is not None:
+                    # save the AIM drift-corrected localizations
+                    base, ext = os.path.splitext(self.movie_path)
+                    self.save_locs(base + "_locs_undrifted.hdf5")
+                    # save txt drift file
+                    np.savetxt(base + "_locs_drift.txt", drift, newline="\r\n")
+                    self.status_bar.showMessage(
+                        "Saved AIM drift-corrected localizations. No "
+                        "fiducials found, only AIM drift correction "
+                        "applied."
+                    )
+                else:
+                    self.status_bar.showMessage(
+                        "No fiducials found. Skipping fiducial-based "
+                        "drift correction."
+                    )
                 return
             self.status_bar.showMessage(
                 f"Found {len(fiducial_picks)} fiducials. Applying drift "
@@ -2624,7 +2660,9 @@ class Window(QtWidgets.QMainWindow):
             self.movie.shape[2],
             self.movie.shape[1],
         )
-        self.view.fitInView(rectangle, QtCore.Qt.KeepAspectRatio)
+        self.view.fitInView(
+            rectangle, QtCore.Qt.AspectRatioMode.KeepAspectRatio
+        )
         self.draw_frame()
 
     def zoom_in(self) -> None:
@@ -2692,7 +2730,7 @@ class Window(QtWidgets.QMainWindow):
         if path:
             qimage = QtGui.QImage(
                 self.scene.itemsBoundingRect().size().toSize(),
-                QtGui.QImage.Format_ARGB32,
+                QtGui.QImage.Format.Format_ARGB32,
             )
             qimage.fill(QtGui.QColor("transparent"))  # TODO: crop image
             painter = QtGui.QPainter(qimage)
@@ -3057,6 +3095,10 @@ def main():
 
     window.show()
 
+    from ..updater import setup_gui_update_check
+
+    setup_gui_update_check(window)
+
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
@@ -3065,12 +3107,12 @@ def main():
             "An error occured",
             message,
         )
-        errorbox.exec_()
+        errorbox.exec()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook  # #excepthook
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

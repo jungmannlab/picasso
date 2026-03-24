@@ -18,7 +18,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import imageio.v2 as imageio
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, render, lib, __version__
 
@@ -354,7 +354,7 @@ class AnimationDialog(QtWidgets.QDialog):
 
             show_position = QtWidgets.QPushButton("Show position")
             show_position.setToolTip("Move to this position.")
-            show_position.setFocusPolicy(QtCore.Qt.NoFocus)
+            show_position.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
             show_position.clicked.connect(
                 partial(self.retrieve_position, i - 1)
             )
@@ -396,7 +396,7 @@ class AnimationDialog(QtWidgets.QDialog):
         self.add.setToolTip(
             "Add the current rotation/view to the animation sequence."
         )
-        self.add.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.add.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.add.clicked.connect(self.add_position)
         self.layout.addWidget(self.add, 11, 2)
 
@@ -404,19 +404,19 @@ class AnimationDialog(QtWidgets.QDialog):
         self.delete.setToolTip(
             "Remove the last position from the animation sequence."
         )
-        self.delete.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.delete.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.delete.clicked.connect(self.delete_position)
         self.layout.addWidget(self.delete, 12, 2)
 
         self.build = QtWidgets.QPushButton("Build\nanimation")
         self.build.setToolTip("Create the animation as an .mp4 file.")
-        self.build.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.build.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.build.clicked.connect(self.build_animation)
         self.layout.addWidget(self.build, 11, 3)
 
         self.stay = QtWidgets.QPushButton("Stay in the\n position")
         self.stay.setToolTip("Add the current position again (no movement).")
-        self.stay.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.stay.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.stay.clicked.connect(partial(self.add_position, True))
         self.layout.addWidget(self.stay, 12, 3)
 
@@ -670,7 +670,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.block_x = False
         self.block_y = False
         self.block_z = False
-        self.setFocusPolicy(QtCore.Qt.ClickFocus)
+        self.setFocusPolicy(QtCore.Qt.FocusPolicy.ClickFocus)
 
     def sizeHint(self) -> QtCore.QSize:
         return QtCore.QSize(*self._size_hint)
@@ -823,7 +823,9 @@ class ViewRotation(QtWidgets.QLabel):
         self._bgra[:, :, 3].fill(255)
         # build QImage
         Y, X = self._bgra.shape[:2]
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
         return qimage
 
     def render_multi_channel(
@@ -1105,7 +1107,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.qimage = qimage.scaled(
             self.width(),
             self.height(),
-            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
         # draw scalebar, legend, rotation and measuring points
         self.qimage = self.draw_scalebar(self.qimage)
@@ -1140,7 +1142,7 @@ class ViewRotation(QtWidgets.QLabel):
             )
             height = 10
             painter = QtGui.QPainter(image)
-            painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
+            painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
             painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
             if self.window.dataset_dialog.wbackground.isChecked():
                 painter.setBrush(QtGui.QBrush(QtGui.QColor("black")))
@@ -1162,7 +1164,7 @@ class ViewRotation(QtWidgets.QLabel):
                     y - 25,
                     text_width,
                     text_height,
-                    QtCore.Qt.AlignHCenter,
+                    QtCore.Qt.AlignmentFlag.AlignHCenter,
                     str(scalebar) + " nm",
                 )
         return image
@@ -1194,7 +1196,7 @@ class ViewRotation(QtWidgets.QLabel):
                     palette = self.window.dataset_dialog.colordisp_all[
                         i
                     ].palette()
-                    color = palette.color(QtGui.QPalette.Window)
+                    color = palette.color(QtGui.QPalette.ColorRole.Window)
                     painter.setPen(QtGui.QColor(color))
                     font = painter.font()
                     font.setPixelSize(16)
@@ -1569,16 +1571,20 @@ class ViewRotation(QtWidgets.QLabel):
         locs, panning."""
         if self._mode == "Rotate":
             if self._pan:  # panning
-                rel_x_move = (event.x() - self.pan_start_x) / self.width()
-                rel_y_move = (event.y() - self.pan_start_y) / self.height()
+                rel_x_move = (
+                    event.pos().x() - self.pan_start_x
+                ) / self.width()
+                rel_y_move = (
+                    event.pos().y() - self.pan_start_y
+                ) / self.height()
 
                 # this partially accounts for rotation of locs
                 rel_y_move /= np.cos(self.angx)
                 rel_x_move /= np.cos(self.angy)
 
                 self.pan_relative(rel_y_move, rel_x_move)
-                self.pan_start_x = event.x()
-                self.pan_start_y = event.y()
+                self.pan_start_x = event.pos().x()
+                self.pan_start_y = event.pos().y()
 
             else:  # rotating
                 height, width = self.viewport_size()
@@ -1593,7 +1599,7 @@ class ViewRotation(QtWidgets.QLabel):
                 # rotate around x and y or y and z axes, depending on
                 # whether Ctrl/Command is pressed
                 modifiers = QtWidgets.QApplication.keyboardModifiers()
-                if modifiers == QtCore.Qt.ControlModifier:
+                if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
                     if not self.block_y:
                         self.angz += float(2 * np.pi * rel_pos_y / height)
                     if not self.block_z:
@@ -1611,17 +1617,17 @@ class ViewRotation(QtWidgets.QLabel):
         example, starting rotating locs or panning."""
         if self._mode == "Rotate":
             # start rotation
-            if event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 pos = self.map_to_movie(event.pos())
                 self._rotation.append([float(pos[0]), float(pos[1])])
                 event.accept()
 
             # start panning
-            elif event.button() == QtCore.Qt.RightButton:
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 self._pan = True
-                self.pan_start_x = event.x()
-                self.pan_start_y = event.y()
-                self.setCursor(QtCore.Qt.ClosedHandCursor)
+                self.pan_start_x = event.pos().x()
+                self.pan_start_y = event.pos().y()
+                self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
                 event.accept()
 
     def mouseReleaseEvent(self, event: QtGui.QMouseEvent) -> None:
@@ -1630,12 +1636,12 @@ class ViewRotation(QtWidgets.QLabel):
         point."""
         if self._mode == "Measure":
             # add point
-            if event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 x, y = self.map_to_movie(event.pos())
                 self.add_point((x, y))
                 event.accept()
             # remove point
-            elif event.button() == QtCore.Qt.RightButton:
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 self.remove_points()
                 event.accept()
             else:
@@ -1643,11 +1649,11 @@ class ViewRotation(QtWidgets.QLabel):
 
         elif self._mode == "Rotate":
             # stop rotation
-            if event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 self._rotation = []
                 event.accept()
             # stop panning
-            elif event.button() == QtCore.Qt.RightButton:
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 self._pan = False
                 event.accept()
 
@@ -1735,6 +1741,7 @@ class ViewRotation(QtWidgets.QLabel):
         """Export current view's information."""
         (y_min, x_min), (y_max, x_max) = self.viewport
         fov = [x_min, y_min, x_max - x_min, y_max - y_min]
+        fov = [float(_) for _ in fov]
         d = self.window.display_settings_dlg
         colors = [
             _.currentText() for _ in self.window.dataset_dialog.colorselection
@@ -1890,7 +1897,7 @@ class ViewRotation(QtWidgets.QLabel):
         width = viewport[1][1] - viewport[0][1]
         return width
 
-    def set_mode(self, action: QtWidgets.QAction) -> None:
+    def set_mode(self, action: QtGui.QAction) -> None:
         """Set ``self._mode`` for QMouseEvents.
 
         Activated when Rotate or Measure is chosen from Tools menu
@@ -2078,19 +2085,19 @@ class RotationWindow(QtWidgets.QMainWindow):
 
     Attributes
     ----------
-    angles_action : QtWidgets.QAction
+    angles_action : QtGui.QAction
         Action to toggle the display of current rotation angles.
     animation_dialog : AnimationDialog
         Instance of animation dialog.
     display_settings_dlg : DisplaySettingsRotationDialog
         Instance of display settings rotation dialog.
-    legend_action : QtWidgets.QAction
+    legend_action : QtGui.QAction
         Action to toggle the display of the legend.
     menu_bar : QMenuBar
         Menu bar with menus: File, View, Tools.
     menus : list
         Contains File, View and Tools menus, used for plugins.
-    rotation_action : QtWidgets.QAction
+    rotation_action : QtGui.QAction
         Action to toggle the display of reference axes.
     view_rot : ViewRotation
         Instance of the class for displaying rendered localizations.
@@ -2199,17 +2206,17 @@ class RotationWindow(QtWidgets.QMainWindow):
 
         # menu bar - Tools
         tools_menu = self.menu_bar.addMenu("Tools")
-        tools_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
+        tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
 
         measure_tool_action = tools_actiongroup.addAction(
-            QtWidgets.QAction("Measure", tools_menu, checkable=True)
+            QtGui.QAction("Measure", tools_menu, checkable=True)
         )
         measure_tool_action.setShortcut("Ctrl+M")
         tools_menu.addAction(measure_tool_action)
         tools_actiongroup.triggered.connect(self.view_rot.set_mode)
 
         rotate_tool_action = tools_actiongroup.addAction(
-            QtWidgets.QAction("Rotate", tools_menu, checkable=True)
+            QtGui.QAction("Rotate", tools_menu, checkable=True)
         )
         rotate_tool_action.setShortcut("Ctrl+R")
         tools_menu.addAction(rotate_tool_action)

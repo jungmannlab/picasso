@@ -12,7 +12,7 @@ Graphical user interface for converting movies to raw files.
 import sys
 import os
 import os.path
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 import traceback
 from .. import io, lib, __version__
 
@@ -110,12 +110,15 @@ class Window(QtWidgets.QWidget):
         self.progress_dialog.setBar(progress_bar)
         self.progress_dialog.setMaximum(n_movies)
         self.progress_dialog.setWindowTitle(f"Picasso v{__version__}: ToRaw")
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModal)
+        self.progress_dialog.setWindowModality(
+            QtCore.Qt.WindowModality.WindowModal
+        )
         self.progress_dialog.canceled.connect(self.cancel)
         self.progress_dialog.closeEvent = self.cancel
         self.worker = Worker(movie_groups)
         self.worker.progressMade.connect(self.update_progress)
         self.worker.finished.connect(self.on_finished)
+        self.worker.interrupted.connect(self.on_interrupted)
         self.worker.start()
         self.progress_dialog.show()
 
@@ -131,23 +134,36 @@ class Window(QtWidgets.QWidget):
             self, f"Picasso v{__version__}: ToRaw", "Conversion complete."
         )
 
+    def on_interrupted(self, message):
+        self.progress_dialog.close()
+        QtWidgets.QMessageBox.critical(
+            self,
+            f"Picasso v{__version__}: ToRaw",
+            "An error occurred:\n\n" + message,
+        )
+
 
 class Worker(QtCore.QThread):
     """Worker thread for processing movie groups."""
 
     progressMade = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(int)
-    interrupted = QtCore.pyqtSignal()
+    interrupted = QtCore.pyqtSignal(str)  # NEW: report errors to main thread
 
     def __init__(self, movie_groups):
         super().__init__()
         self.movie_groups = movie_groups
 
     def run(self):
-        for i, (basename, paths) in enumerate(self.movie_groups.items()):
-            io.to_raw_combined(basename, paths)
-            self.progressMade.emit(i + 1)
-        self.finished.emit(i)
+        try:
+            n_done = 0
+            for i, (basename, paths) in enumerate(self.movie_groups.items()):
+                io.to_raw_combined(basename, paths)
+                n_done = i + 1
+                self.progressMade.emit(n_done)
+            self.finished.emit(n_done)
+        except Exception:
+            self.interrupted.emit(traceback.format_exc())
 
 
 def main():
@@ -155,20 +171,24 @@ def main():
     window = Window()
     window.show()
 
+    from ..updater import setup_gui_update_check
+
+    setup_gui_update_check(window)
+
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
+        QtCore.QCoreApplication.instance().processEvents()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
+        QtWidgets.QMessageBox.critical(
             window,
             "An error occured",
             message,
         )
-        errorbox.exec_()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

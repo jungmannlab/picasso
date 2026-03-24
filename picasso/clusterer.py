@@ -611,7 +611,7 @@ def find_cluster_centers(
     grouplocs = locs.groupby(locs["group"])
 
     # get cluster centers
-    res = grouplocs.apply(cluster_center, pixelsize, include_groups=False)
+    res = grouplocs.apply(_cluster_center, pixelsize, include_groups=False)
     centers_ = res.values
 
     # convert to DataFrame and save
@@ -696,6 +696,20 @@ def find_cluster_centers(
 
 
 def cluster_center(
+    grouplocs: pd.SeriesGroupBy,
+    pixelsize: float | None = None,
+    separate_lp: bool = False,
+) -> pd.Series:
+    """Alias for _cluster_center which will be a private function in the
+    future release. Kept for backward compatibility."""
+    lib.deprecation_warning(
+        "cluster_center is deprecated and will be removed in v0.11.0."
+        " Use _cluster_center instead."
+    )
+    return _cluster_center(grouplocs, pixelsize, separate_lp)
+
+
+def _cluster_center(
     grouplocs: pd.SeriesGroupBy,
     pixelsize: float | None = None,
     separate_lp: bool = False,

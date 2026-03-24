@@ -30,8 +30,8 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import confusion_matrix
 
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtGui import QIcon
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtGui import QIcon
 
 from .. import io, lib, render, nanotron, __version__
 
@@ -583,7 +583,7 @@ class train_dialog(QtWidgets.QDialog):
         self.train_btn.clicked.connect(self.train)
         self.train_btn.setDisabled(True)
         self.train_label = QtWidgets.QLabel("")
-        self.train_label.setAlignment(QtCore.Qt.AlignCenter)
+        self.train_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.learning_curve_btn = QtWidgets.QPushButton(
             "Show Learning History"
         )
@@ -619,9 +619,13 @@ class train_dialog(QtWidgets.QDialog):
         progress_box = QtWidgets.QGroupBox()
         progress_grid = QtWidgets.QGridLayout(progress_box)
         self.progress_sets_label = QtWidgets.QLabel()
-        self.progress_sets_label.setAlignment(QtCore.Qt.AlignLeft)
+        self.progress_sets_label.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignLeft
+        )
         self.progress_imgs_label = QtWidgets.QLabel()
-        self.progress_imgs_label.setAlignment(QtCore.Qt.AlignRight)
+        self.progress_imgs_label.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignRight
+        )
         self.progress_bar = QtWidgets.QProgressBar(self)
 
         progress_grid.addWidget(self.progress_sets_label, 0, 0, 1, 1)
@@ -809,7 +813,7 @@ class train_dialog(QtWidgets.QDialog):
 
         if "group" not in locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
-            msgBox.setIcon(QtWidgets.QMessageBox.Warning)
+            msgBox.setIcon(QtWidgets.QMessageBox.Icon.Warning)
             msgBox.setWindowTitle("Warning")
             msgBox.setText("No groups found")
             msgBox.setInformativeText(
@@ -818,7 +822,7 @@ class train_dialog(QtWidgets.QDialog):
                     "Please load file with picked localizations."
                 )
             )
-            msgBox.exec_()
+            msgBox.exec()
         else:
             self.training_files[(file)] = locs
             self.f_btns[file].setText("Loaded")
@@ -883,7 +887,7 @@ class train_dialog(QtWidgets.QDialog):
                         "Datasets are inbalanced. "
                         "This can cause training artifacts. "
                     )
-                    msgBox.exec_()
+                    msgBox.exec()
 
                 if val <= 0.5:
                     print("Dataset {} not large enough.".format(key))
@@ -899,7 +903,7 @@ class train_dialog(QtWidgets.QDialog):
                         "This can cause training artifacts. "
                         "Try to gather more data for class {}.".format(key)
                     )
-                    msgBox.exec_()
+                    msgBox.exec()
 
         return passed
 
@@ -907,10 +911,10 @@ class train_dialog(QtWidgets.QDialog):
 
         if self.generator_running:
             msgBox = QtWidgets.QMessageBox(self)
-            msgBox.setIcon(QtWidgets.QMessageBox.Warning)
+            msgBox.setIcon(QtWidgets.QMessageBox.Icon.Warning)
             msgBox.setWindowTitle("Warning")
             msgBox.setText("Preparation already running")
-            msgBox.exec_()
+            msgBox.exec()
         elif self.check_set():
             self.generator_running = True
 
@@ -944,14 +948,14 @@ class train_dialog(QtWidgets.QDialog):
 
         else:
             msgBox = QtWidgets.QMessageBox(self)
-            msgBox.setIcon(QtWidgets.QMessageBox.Warning)
+            msgBox.setIcon(QtWidgets.QMessageBox.Icon.Warning)
             msgBox.setWindowTitle("Warning")
             msgBox.setText("No all data sets loaded or names defined")
             msgBox.setInformativeText(
                 "Check if all names are set up correctly."
                 " Duplicate names are not valid."
             )
-            msgBox.exec_()
+            msgBox.exec()
 
     def prepare_progress(
         self,
@@ -998,13 +1002,12 @@ class View(QtWidgets.QLabel):
         super().__init__()
         self.window = window
         self.setMinimumSize(512, 512)
-        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         self.setAcceptDrops(True)
         self._pixmap = None
         self.locs = None
         self.rubberband = QtWidgets.QRubberBand(
-            QtWidgets.QRubberBand.Rectangle,
-            self,
+            QtWidgets.QRubberBand.Shape.Rectangle, self
         )
         self.rubberband.setStyleSheet("selection-background-color: white")
 
@@ -1036,7 +1039,9 @@ class View(QtWidgets.QLabel):
         self._bgra[..., 1] = cmap[:, 1][image]
         self._bgra[..., 2] = cmap[:, 0][image]
         self._bgra[:, :, 3].fill(255)
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
         self._pixmap = QtGui.QPixmap.fromImage(qimage)
         self.set_pixmap(self._pixmap)
 
@@ -1045,8 +1050,8 @@ class View(QtWidgets.QLabel):
             pixmap.scaled(
                 self.width(),
                 self.height(),
-                QtCore.Qt.KeepAspectRatio,
-                QtCore.Qt.FastTransformation,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatio,
+                QtCore.Qt.TransformationMode.FastTransformation,
             )
         )
 
@@ -1082,11 +1087,11 @@ class Window(QtWidgets.QMainWindow):
 
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open)
         file_menu.addAction(open_action)
         export_action = file_menu.addAction("Save")
-        export_action.setShortcut(QtGui.QKeySequence.Save)
+        export_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         export_action.triggered.connect(self.export)
         file_menu.addAction(export_action)
 
@@ -1202,7 +1207,7 @@ class Window(QtWidgets.QMainWindow):
             msgBox.setWindowTitle("Information")
             msgBox.setText("No model found")
             msgBox.setInformativeText("Load model first and try again.")
-            msgBox.exec_()
+            msgBox.exec()
 
     def show_probs(self):
 
@@ -1214,7 +1219,7 @@ class Window(QtWidgets.QMainWindow):
                 msgBox.setWindowTitle("Information")
                 msgBox.setText("No predictions found")
                 msgBox.setInformativeText("Predict first and try again.")
-                msgBox.exec_()
+                msgBox.exec()
             else:
 
                 canvas = lib.GenericPlotWindow("Probabilities", "nanotron")
@@ -1280,7 +1285,7 @@ class Window(QtWidgets.QMainWindow):
 
         if "group" not in self.locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
-            msgBox.setIcon(QtWidgets.QMessageBox.Warning)
+            msgBox.setIcon(QtWidgets.QMessageBox.Icon.Warning)
             msgBox.setWindowTitle("Warning")
             msgBox.setText("No groups found")
             msgBox.setInformativeText(
@@ -1289,7 +1294,7 @@ class Window(QtWidgets.QMainWindow):
                     " Please load file with picked localizations."
                 )
             )
-            msgBox.exec_()
+            msgBox.exec()
         else:
             groups = np.unique(self.locs.group)
             groups_max = max(groups)
@@ -1395,7 +1400,7 @@ class Window(QtWidgets.QMainWindow):
             msgBox.setWindowTitle("Information")
             ("No predictions found")
             msgBox.setInformativeText("Predict first and try again.")
-            msgBox.exec_()
+            msgBox.exec()
             return
 
         export_map = []
@@ -1522,6 +1527,10 @@ def main():
 
     window.show()
 
+    from ..updater import setup_gui_update_check
+
+    setup_gui_update_check(window)
+
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
@@ -1530,12 +1539,12 @@ def main():
             "An error occured",
             message,
         )
-        errorbox.exec_()
+        errorbox.exec()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

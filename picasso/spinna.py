@@ -1100,7 +1100,6 @@ class MaskGenerator:
         """
         assert all(_ > 0 for _ in self.binsize), "Binsize must be positive."
         assert all(_ >= 0 for _ in self.sigma), "Sigma must be non-negative."
-        print(f"{self.ndim=}, {self.binsize=}, {self.sigma=}")
         assert (
             len(self.binsize) == len(self.sigma) == self.ndim
         ), "Binsize and sigma must have the same number of values as the dimensionality of the mask."

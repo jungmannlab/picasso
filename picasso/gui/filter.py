@@ -25,7 +25,7 @@ from matplotlib.backends.backend_qt5agg import (
 )
 from matplotlib.widgets import SpanSelector, RectangleSelector
 from matplotlib.colors import LogNorm
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, clusterer, __version__
 
@@ -84,9 +84,9 @@ class TableModel(QtCore.QAbstractTableModel):
     def data(
         self,
         index: QtCore.QModelIndex,
-        role: int = QtCore.Qt.DisplayRole,
+        role: int = QtCore.Qt.ItemDataRole.DisplayRole,
     ) -> str | None:
-        if role == QtCore.Qt.DisplayRole:
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
             data = self.locs.iloc[index.row(), index.column()]
             return str(data)
         return None
@@ -97,10 +97,10 @@ class TableModel(QtCore.QAbstractTableModel):
         orientation: QtCore.Qt.Orientation,
         role: int,
     ) -> str | None:
-        if role == QtCore.Qt.DisplayRole:
-            if orientation == QtCore.Qt.Horizontal:
+        if role == QtCore.Qt.ItemDataRole.DisplayRole:
+            if orientation == QtCore.Qt.Orientation.Horizontal:
                 return self.locs.columns[section]
-            elif orientation == QtCore.Qt.Vertical:
+            elif orientation == QtCore.Qt.Orientation.Vertical:
                 return self.index + section
         return None
 
@@ -131,9 +131,13 @@ class TableView(QtWidgets.QTableView):
         super().__init__(parent)
         self.window = window
         self.setAcceptDrops(True)
-        self.setVerticalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(
+            QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
         vertical_header = self.verticalHeader()
-        vertical_header.sectionResizeMode(QtWidgets.QHeaderView.Fixed)
+        vertical_header.setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Fixed
+        )
         vertical_header.setDefaultSectionSize(ROW_HEIGHT)
         vertical_header.setFixedWidth(70)
 
@@ -433,7 +437,7 @@ class FilterNum(QtWidgets.QDialog):
 
         # filter button
         filter_button = QtWidgets.QPushButton("Filter")
-        filter_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        filter_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         filter_button.clicked.connect(self.filter)
         self.layout.addWidget(filter_button, 3, 0, 1, 2)
 
@@ -489,7 +493,7 @@ class SubclusterNum(QtWidgets.QDialog):
         self.setWindowIcon(icon)
 
         self.layout = QtWidgets.QFormLayout()
-        self.layout.setLabelAlignment(QtCore.Qt.AlignLeft)
+        self.layout.setLabelAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         self.setLayout(self.layout)
 
         self.distance_clustered = QtWidgets.QDoubleSpinBox()
@@ -518,7 +522,7 @@ class SubclusterNum(QtWidgets.QDialog):
         self.save_vals.setChecked(False)
         self.layout.addRow(self.save_vals)
         test_button = QtWidgets.QPushButton("Test subclustering")
-        test_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        test_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         test_button.clicked.connect(self.plot)
         self.layout.addRow(test_button)
 
@@ -602,11 +606,11 @@ class Window(QtWidgets.QMainWindow):
         menu_bar = self.menuBar()
         file_menu = menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_file_dialog)
         file_menu.addAction(open_action)
         save_action = file_menu.addAction("Save")
-        save_action.setShortcut(QtGui.QKeySequence.Save)
+        save_action.setShortcut(QtGui.QKeySequence.StandardKey.Save)
         save_action.triggered.connect(self.save_file_dialog)
         file_menu.addAction(save_action)
         plot_menu = menu_bar.addMenu("Plot")
@@ -803,7 +807,7 @@ class Window(QtWidgets.QMainWindow):
         if self.locs is not None:
             settings["Filter"]["PWD"] = self.pwd
             io.save_user_settings(settings)
-        QtWidgets.qApp.closeAllWindows()
+        QtWidgets.QApplication.instance().closeAllWindows()
 
 
 def main():
@@ -827,6 +831,10 @@ def main():
 
     window.show()
 
+    from ..updater import setup_gui_update_check
+
+    setup_gui_update_check(window)
+
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         message = "".join(traceback.format_exception(type, value, tback))
@@ -835,12 +843,12 @@ def main():
             "An error occured",
             message,
         )
-        errorbox.exec_()
+        errorbox.exec()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

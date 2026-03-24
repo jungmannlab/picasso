@@ -20,12 +20,15 @@ import pandas as pd
 from scipy import ndimage as ndi
 from statsmodels.nonparametric.smoothers_lowess import lowess as loess
 
+from . import lib
+
 
 def mask_locs(
     locs: pd.DataFrame,
     mask: np.ndarray,
-    width: float,
-    height: float,
+    width: float = None,
+    height: float = None,
+    info: list[dict] = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Mask localizations given a binary mask.
 
@@ -36,9 +39,13 @@ def mask_locs(
     mask : np.ndarray
         Binary mask where True indicates the area to keep.
     width : float
-        Maximum x coordinate of the localizations.
+        Maximum x coordinate of the localizations. Deprecated, will be
+        removed in v0.11.0.
     height : float
-        Maximum y coordinate of the localizations.
+        Maximum y coordinate of the localizations. Deprecated, will be
+        removed in v0.11.0.
+    info : list of dict
+        Localization metadata containing 'Width' and 'Height' keys.
 
     Returns
     -------
@@ -47,6 +54,18 @@ def mask_locs(
     locs_out : pd.DataFrame
         Localizations outside the mask.
     """
+    # deprecation of width and height (use info instead) TODO: remove in v0.11.0
+    if width is not None or height is not None:
+        lib.deprecation_warning(
+            "'width' and 'height' are deprecated parameters in "
+            "'mask_locs'. Please provide 'info' with 'Width' and "
+            "'Height' keys instead, see ``io.load_locs``.",
+        )
+    elif info is not None:
+        width = lib.get_from_metadata(info, "Width")
+        height = lib.get_from_metadata(info, "Height")
+    else:
+        raise ValueError("`mask_locs` requires `info` parameter.")
     x_ind = np.int32(np.floor(locs["x"] / width * mask.shape[1]))
     y_ind = np.int32(np.floor(locs["y"] / height * mask.shape[0]))
 

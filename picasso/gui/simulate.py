@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.optimize import curve_fit
 from scipy.stats import norm
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, simulate, __version__
 
@@ -251,7 +251,8 @@ class Window(QtWidgets.QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Picasso v{__version__}: Simulate")
         self.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "simulate.ico")
@@ -336,8 +337,8 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QSpacerItem(
                 1,
                 1,
-                QtWidgets.QSizePolicy.Minimum,
-                QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Policy.Minimum,
+                QtWidgets.QSizePolicy.Policy.Expanding,
             )
         )
 
@@ -393,8 +394,8 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QSpacerItem(
                 1,
                 1,
-                QtWidgets.QSizePolicy.Minimum,
-                QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Policy.Minimum,
+                QtWidgets.QSizePolicy.Policy.Expanding,
             )
         )
 
@@ -859,8 +860,8 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QSpacerItem(
                 1,
                 1,
-                QtWidgets.QSizePolicy.Minimum,
-                QtWidgets.QSizePolicy.Expanding,
+                QtWidgets.QSizePolicy.Policy.Minimum,
+                QtWidgets.QSizePolicy.Policy.Expanding,
             )
         )
 
@@ -1245,7 +1246,7 @@ class Window(QtWidgets.QMainWindow):
         noexchangecolors = len(set(exchangeroundstoSim))
         exchangecolors = list(set(exchangeroundstoSim))
 
-        if self.concatExchangeEdit.checkState():
+        if self.concatExchangeEdit.isChecked():
             conrounds = noexchangecolors
         else:
             conrounds = self.conroundsEdit.value()
@@ -1273,9 +1274,9 @@ class Window(QtWidgets.QMainWindow):
             structureNo = self.structurenoEdit.value()
             structureFrame = self.structureframeEdit.value()
             structureIncorporation = self.structureIncorporationEdit.value()
-            structureArrangement = int(self.structurerandomEdit.checkState())
+            structureArrangement = int(self.structurerandomEdit.isChecked())
             structureOrientation = int(
-                self.structurerandomOrientationEdit.checkState()
+                self.structurerandomOrientationEdit.isChecked()
             )
             structurex = self.structurexxEdit.text()
             structurey = self.structureyyEdit.text()
@@ -1300,7 +1301,7 @@ class Window(QtWidgets.QMainWindow):
             if ADVANCEDMODE:
                 photonslopeStd = self.photonslopeStdEdit.value()
 
-            if self.photonslopemodeEdit.checkState():
+            if self.photonslopemodeEdit.isChecked():
                 photonratestd = 0
 
             # CAMERA PARAMETERS
@@ -1342,11 +1343,11 @@ class Window(QtWidgets.QMainWindow):
             handless = self.vectorToString(struct[3, :])
             handle3d = self.vectorToString(struct[4, :])
 
-            mode3Dstate = int(self.mode3DEdit.checkState())
+            mode3Dstate = int(self.mode3DEdit.isChecked())
 
             t0 = time.time()
 
-            if self.concatExchangeEdit.checkState():
+            if self.concatExchangeEdit.isChecked():
                 # Overwrite the number to not trigger the for loop
                 noexchangecolors = 1
 
@@ -1356,7 +1357,7 @@ class Window(QtWidgets.QMainWindow):
                     base, ext = os.path.splitext(fileNameOld)
                     fileName = f"{base}_{i}{ext}"
                     partstruct = struct[:, struct[2, :] == exchangecolors[i]]
-                elif self.concatExchangeEdit.checkState():
+                elif self.concatExchangeEdit.isChecked():
                     fileName = fileNameOld
                     partstruct = struct[
                         :,
@@ -1438,7 +1439,7 @@ class Window(QtWidgets.QMainWindow):
                     "Imager.Photonrate": photonrate,
                     "Imager.Photonrate Std": photonratestd,
                     "Imager.Constant Photonrate Std": int(
-                        self.photonslopemodeEdit.checkState()
+                        self.photonslopemodeEdit.isChecked()
                     ),
                     "Imager.Photonbudget": photonbudget,
                     "Imager.Laserpower": laserpower,
@@ -1618,14 +1619,14 @@ class Window(QtWidgets.QMainWindow):
             self.structureexEdit.setText(info[0]["Structure.StructureEx"])
             try:
                 self.structure3DEdit.setText(info[0]["Structure.Structure3D"])
-                self.mode3DEdit.setCheckState(info[0]["Structure.3D"])
+                self.mode3DEdit.setChecked(info[0]["Structure.3D"])
                 self.cx(info[0]["Structure.CX"])
                 self.cy(info[0]["Structure.CY"])
             except Exception as e:
                 print(e)
                 pass
             try:
-                self.photonslopemodeEdit.setCheckState(
+                self.photonslopemodeEdit.setChecked(
                     info[0]["Imager.Constant Photonrate Std"]
                 )
             except Exception as e:
@@ -1643,10 +1644,10 @@ class Window(QtWidgets.QMainWindow):
                 info[0]["Structure.Incorporation"]
             )
 
-            self.structurerandomEdit.setCheckState(
+            self.structurerandomEdit.setChecked(
                 info[0]["Structure.Arrangement"]
             )
-            self.structurerandomOrientationEdit.setCheckState(
+            self.structurerandomOrientationEdit.setChecked(
                 info[0]["Structure.Orientation"]
             )
 
@@ -1913,12 +1914,12 @@ class Window(QtWidgets.QMainWindow):
         number = self.structurenoEdit.value()
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
-        arrangement = int(self.structurerandomEdit.checkState())
+        arrangement = int(self.structurerandomEdit.isChecked())
         gridpos = simulate.generatePositions(
             number, imageSize, frame, arrangement
         )
 
-        orientation = int(self.structurerandomOrientationEdit.checkState())
+        orientation = int(self.structurerandomOrientationEdit.isChecked())
         incorporation = self.structureIncorporationEdit.value() / 100
         exchange = 0
 
@@ -2324,8 +2325,8 @@ class CalibrationDialog(QtWidgets.QDialog):
 
         self.buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.ActionRole
-            | QtWidgets.QDialogButtonBox.Ok
-            | QtWidgets.QDialogButtonBox.Cancel,
+            | QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
             self,
         )
 
@@ -2402,7 +2403,7 @@ class CalibrationDialog(QtWidgets.QDialog):
             counter += 1
             self.pbar.setValue((counter - 1) / self.tifCounter * 100)
             print(f"Current Dataset: {counter} of {self.tifCounter}")
-            QtWidgets.qApp.processEvents()
+            QtWidgets.QApplication.instance().processEvents()
             movie, info = io.load_movie(element)
 
             movie = movie[0:100, :, :]
@@ -2550,9 +2551,16 @@ class CalibrationDialog(QtWidgets.QDialog):
     ) -> tuple[list, list, list, list, list, bool]:
         """Create the dialog and return (date, time, accepted)."""
         dialog = CalibrationDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         bg, bgstd, las, time, conc = dialog.evalTable()
-        return bg, bgstd, las, time, conc, result == QtWidgets.QDialog.Accepted
+        return (
+            bg,
+            bgstd,
+            las,
+            time,
+            conc,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
+        )
 
 
 def main():
@@ -2576,7 +2584,12 @@ def main():
             p.execute()
 
     window.show()
-    sys.exit(app.exec_())
+
+    from ..updater import setup_gui_update_check
+
+    setup_gui_update_check(window)
+
+    sys.exit(app.exec())
 
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
@@ -2586,7 +2599,7 @@ def main():
             "An error occured",
             message,
         )
-        errorbox.exec_()
+        errorbox.exec()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook

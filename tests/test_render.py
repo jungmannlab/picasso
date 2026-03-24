@@ -115,6 +115,5 @@ def test_masking_methods(image):
 
 def test_masking(locs, info, image):
     mask = masking.mask_image(image, method="otsu")[0]
-    width = lib.get_from_metadata(info, "Width")
-    height = lib.get_from_metadata(info, "Height")
-    locs_in, locs_out = masking.mask_locs(locs, mask, width, height)
+    locs_in, locs_out = masking.mask_locs(locs, mask, info=info)
+    assert len(locs_in) + len(locs_out) == len(locs), "Total locs mismatch"

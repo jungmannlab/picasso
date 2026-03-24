@@ -1882,7 +1882,6 @@ def _g5m(
 
 def main():
     # Main parser
-    # picasso_logo()
     parser = argparse.ArgumentParser("picasso")
     subparsers = parser.add_subparsers(dest="command")
 
@@ -2633,6 +2632,30 @@ def main():
     # Parse
     args = parser.parse_args()
     if args.command:
+        # check for updates and print in the console if available
+        from .updater import cli_notify_update, check_and_notify
+        import sys
+
+        cli_update_check = True
+        update_thread = None
+        gui_apps = [
+            "toraw",
+            "localize",
+            "filter",
+            "render",
+            "average",
+            "nanotron",
+            "average3",
+            "simulate",
+            "design",
+            "spinna",
+        ]
+        if args.command in gui_apps:
+            if len(sys.argv) == 2:  # only the gui is opened
+                cli_update_check = False
+        if cli_update_check:
+            update_thread = check_and_notify(cli_notify_update)
+
         if args.command == "toraw":
             from .gui import toraw
 
@@ -2780,6 +2803,11 @@ def main():
             _cluster_combine_dist(args.files)
     else:
         parser.print_help()
+        return
+
+    # wait for the update check to finish before exiting
+    if update_thread is not None:
+        update_thread.join(timeout=6)
 
 
 if __name__ == "__main__":

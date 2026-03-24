@@ -37,7 +37,7 @@ from scipy.ndimage.filters import gaussian_filter
 from scipy.optimize import curve_fit, OptimizeWarning
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import (
     aim,
@@ -228,7 +228,8 @@ class FloatEdit(QtWidgets.QLineEdit):
     def __init__(self) -> None:
         super().__init__()
         self.setSizePolicy(
-            QtWidgets.QSizePolicy.Preferred, QtWidgets.QSizePolicy.Preferred
+            QtWidgets.QSizePolicy.Policy.Preferred,
+            QtWidgets.QSizePolicy.Policy.Preferred,
         )
         self.editingFinished.connect(self.onEditingFinished)
 
@@ -413,8 +414,9 @@ class ApplyDialog(QtWidgets.QDialog):
         vbox.addLayout(hbox)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -428,10 +430,10 @@ class ApplyDialog(QtWidgets.QDialog):
         """Obtain the expression as a string and the channel to be
         manipulated."""
         dialog = ApplyDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         cmd = dialog.cmd.text()
         channel = dialog.channel.currentIndex()
-        return (cmd, channel, result == QtWidgets.QDialog.Accepted)
+        return (cmd, channel, result == QtWidgets.QDialog.DialogCode.Accepted)
 
     def update_vars(self, index: int) -> None:
         """Update the variables that can be manipulated and show them in
@@ -534,12 +536,12 @@ class DatasetDialog(QtWidgets.QDialog):
             "Save the current list of colors to a .txt file."
         )
         layout.addWidget(save_button, 0, 2)
-        save_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        save_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         save_button.clicked.connect(self.save_colors)
         load_button = QtWidgets.QPushButton("Load colors")
         load_button.setToolTip("Load a list of colors from a .txt file.")
         layout.addWidget(load_button, 1, 2)
-        load_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        load_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         load_button.clicked.connect(self.load_colors)
 
         # add scrollable area which will display all channels, below
@@ -549,7 +551,7 @@ class DatasetDialog(QtWidgets.QDialog):
         self.container = QtWidgets.QWidget()
         scroll.setWidget(self.container)
         self.scroll_area = QtWidgets.QGridLayout(self.container)
-        self.scroll_area.setAlignment(QtCore.Qt.AlignTop)
+        self.scroll_area.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         layout.addWidget(scroll, 4, 0, 1, 3)
 
         self.checks = []
@@ -674,11 +676,12 @@ class DatasetDialog(QtWidgets.QDialog):
             colors = lib.get_colors(len(self.checks) + 1)
             r, g, b = colors[-1]
             palette.setColor(
-                QtGui.QPalette.Window, QtGui.QColor.fromRgbF(r, g, b, 1)
+                QtGui.QPalette.ColorRole.Window,
+                QtGui.QColor.fromRgbF(r, g, b, 1),
             )
         else:
             palette.setColor(
-                QtGui.QPalette.Window,
+                QtGui.QPalette.ColorRole.Window,
                 QtGui.QColor.fromRgbF(*self.rgb[index], 1),
             )
         colordisp.setAutoFillBackground(True)
@@ -851,18 +854,20 @@ class DatasetDialog(QtWidgets.QDialog):
             n_channels = len(self.checks)
             r, g, b = lib.get_colors(n_channels)[n]
             palette.setColor(
-                QtGui.QPalette.Window, QtGui.QColor.fromRgbF(r, g, b, 1)
+                QtGui.QPalette.ColorRole.Window,
+                QtGui.QColor.fromRgbF(r, g, b, 1),
             )
         elif lib.is_hexadecimal(color):
             color = color.lstrip("#")
             r, g, b = tuple(int(color[i : i + 2], 16) / 255 for i in (0, 2, 4))
             palette.setColor(
-                QtGui.QPalette.Window, QtGui.QColor.fromRgbF(r, g, b, 1)
+                QtGui.QPalette.ColorRole.Window,
+                QtGui.QColor.fromRgbF(r, g, b, 1),
             )
         elif color in self.default_colors:
             i = self.default_colors.index(color)
             palette.setColor(
-                QtGui.QPalette.Window,
+                QtGui.QPalette.ColorRole.Window,
                 QtGui.QColor.fromRgbF(
                     self.rgb[i][0],
                     self.rgb[i][1],
@@ -942,22 +947,22 @@ class PlotDialog(QtWidgets.QDialog):
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Yes
-            | QtWidgets.QDialogButtonBox.No
-            | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+            | QtWidgets.QDialogButtonBox.StandardButton.No
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         layout_grid.addWidget(self.buttons)
-        self.buttons.button(QtWidgets.QDialogButtonBox.Yes).clicked.connect(
-            self.on_accept
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.No).clicked.connect(
-            self.on_reject
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(
-            self.on_cancel
-        )
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+        ).clicked.connect(self.on_accept)
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.No
+        ).clicked.connect(self.on_reject)
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        ).clicked.connect(self.on_cancel)
 
     def on_accept(self) -> None:
         self.setResult(1)
@@ -1024,9 +1029,9 @@ class PlotDialog(QtWidgets.QDialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
             plt.gca().patch.set_facecolor("black")
-            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.xaxis.pane.set_facecolor((0, 0, 0, 1.0))
+            ax.yaxis.pane.set_facecolor((0, 0, 0, 1.0))
+            ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
         else:
             colors = color_sys
             for ll in range(len(all_picked_locs)):
@@ -1051,11 +1056,11 @@ class PlotDialog(QtWidgets.QDialog):
             ax.set_zlabel("Z [nm]")
 
             plt.gca().patch.set_facecolor("black")
-            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.xaxis.pane.set_facecolor((0, 0, 0, 1.0))
+            ax.yaxis.pane.set_facecolor((0, 0, 0, 1.0))
+            ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
-        dialog.exec_()
+        dialog.exec()
         return dialog.result
 
 
@@ -1080,22 +1085,22 @@ class PlotDialogIso(QtWidgets.QDialog):
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Yes
-            | QtWidgets.QDialogButtonBox.No
-            | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+            | QtWidgets.QDialogButtonBox.StandardButton.No
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         layout_grid.addWidget(self.buttons)
-        self.buttons.button(QtWidgets.QDialogButtonBox.Yes).clicked.connect(
-            self.on_accept
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.No).clicked.connect(
-            self.on_reject
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(
-            self.on_cancel
-        )
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+        ).clicked.connect(self.on_accept)
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.No
+        ).clicked.connect(self.on_reject)
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        ).clicked.connect(self.on_cancel)
 
     def on_accept(self) -> None:
         self.setResult(1)
@@ -1140,7 +1145,7 @@ class PlotDialogIso(QtWidgets.QDialog):
         if mode == 1:
             locs = all_picked_locs[current]
 
-            colors = locs["z"]
+            colors = locs["z"].copy()
             colors[colors > locs["z"].mean() + 3 * locs["z"].std()] = (
                 locs["z"].mean() + 3 * locs["z"].std()
             )
@@ -1168,9 +1173,9 @@ class PlotDialogIso(QtWidgets.QDialog):
             )
             ax.set_title("3D")
             # plt.gca().patch.set_facecolor('black')
-            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.xaxis.pane.set_facecolor((0, 0, 0, 1.0))
+            ax.yaxis.pane.set_facecolor((0, 0, 0, 1.0))
+            ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
             # AXES 2
             ax2.scatter(locs["x"], locs["y"], c=colors, cmap="jet", s=2)
@@ -1243,9 +1248,9 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax.set_ylabel("Y [Px]")
             ax.set_zlabel("Z [nm]")
 
-            ax.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-            ax.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+            ax.xaxis.pane.set_facecolor((0, 0, 0, 1.0))
+            ax.yaxis.pane.set_facecolor((0, 0, 0, 1.0))
+            ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
             # AXES 2
             ax2.set_xlabel("X [Px]")
@@ -1289,7 +1294,7 @@ class PlotDialogIso(QtWidgets.QDialog):
             ax4.set_title("YZ")
             ax4.set_facecolor("black")
 
-        dialog.exec_()
+        dialog.exec()
         return dialog.result
 
 
@@ -1311,10 +1316,10 @@ class ClsDlg3D(QtWidgets.QDialog):
         self.layout_grid.addWidget(self.canvas, 1, 0, 8, 5)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Yes
-            | QtWidgets.QDialogButtonBox.No
-            | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+            | QtWidgets.QDialogButtonBox.StandardButton.No
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         self.layout_grid.addWidget(self.buttons, 10, 0, 1, 3)
@@ -1326,15 +1331,15 @@ class ClsDlg3D(QtWidgets.QDialog):
 
         self.layout_grid.addWidget(self.n_clusters_spin, 10, 4, 1, 1)
 
-        self.buttons.button(QtWidgets.QDialogButtonBox.Yes).clicked.connect(
-            self.on_accept
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.No).clicked.connect(
-            self.on_reject
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(
-            self.on_cancel
-        )
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+        ).clicked.connect(self.on_accept)
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.No
+        ).clicked.connect(self.on_reject)
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        ).clicked.connect(self.on_cancel)
 
         self.start_clusters = 0
         self.n_clusters_spin.valueChanged.connect(self.on_cluster)
@@ -1459,12 +1464,12 @@ class ClsDlg3D(QtWidgets.QDialog):
         ax2.set_ylabel("Y [nm]")
         ax2.set_zlabel("Z [nm]")
 
-        ax1.w_xaxis.set_pane_color((0, 0, 0, 1.0))
-        ax1.w_yaxis.set_pane_color((0, 0, 0, 1.0))
-        ax1.w_zaxis.set_pane_color((0, 0, 0, 1.0))
+        ax1.xaxis.pane.set_facecolor((0, 0, 0, 1.0))
+        ax1.yaxis.pane.set_facecolor((0, 0, 0, 1.0))
+        ax1.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
         plt.gca().patch.set_facecolor("black")
 
-        dialog.exec_()
+        dialog.exec()
 
         checks = [not _.isChecked() for _ in dialog.checks]
         checks = np.asarray(np.where(checks)) + 1
@@ -1515,10 +1520,10 @@ class ClsDlg2D(QtWidgets.QDialog):
         self.layout_grid.addWidget(self.canvas, 1, 0, 1, 5)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Yes
-            | QtWidgets.QDialogButtonBox.No
-            | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+            | QtWidgets.QDialogButtonBox.StandardButton.No
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         self.layout_grid.addWidget(self.buttons, 2, 0, 1, 3)
@@ -1534,15 +1539,15 @@ class ClsDlg2D(QtWidgets.QDialog):
 
         self.layout_grid.addWidget(self.n_clusters_spin, 2, 4, 1, 1)
 
-        self.buttons.button(QtWidgets.QDialogButtonBox.Yes).clicked.connect(
-            self.on_accept
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.No).clicked.connect(
-            self.on_reject
-        )
-        self.buttons.button(QtWidgets.QDialogButtonBox.Cancel).clicked.connect(
-            self.on_cancel
-        )
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Yes
+        ).clicked.connect(self.on_accept)
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.No
+        ).clicked.connect(self.on_reject)
+        self.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        ).clicked.connect(self.on_cancel)
 
         self.start_clusters = 0
         self.n_clusters_spin.valueChanged.connect(self.on_cluster)
@@ -1652,7 +1657,7 @@ class ClsDlg2D(QtWidgets.QDialog):
         ax2.set_xlabel("X [nm]")
         ax2.set_ylabel("Y [nm]")
 
-        dialog.exec_()
+        dialog.exec()
 
         checks = [not _.isChecked() for _ in dialog.checks]
         checks = np.asarray(np.where(checks)) + 1
@@ -1745,8 +1750,9 @@ class AIMDialog(QtWidgets.QDialog):
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -1760,14 +1766,14 @@ class AIMDialog(QtWidgets.QDialog):
         """Create the dialog and converts and return the requested
         values for AIM."""
         dialog = AIMDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         # convert intersect_d and max_drift to pixels
         params = {
             "segmentation": dialog.segmentation.value(),
             "intersect_d": dialog.intersect_d.value(),
             "roi_r": dialog.max_drift.value(),
         }
-        return params, result == QtWidgets.QDialog.Accepted
+        return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
 class DbscanDialog(QtWidgets.QDialog):
@@ -1847,8 +1853,9 @@ class DbscanDialog(QtWidgets.QDialog):
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -1862,14 +1869,14 @@ class DbscanDialog(QtWidgets.QDialog):
         """Create the dialog and return the requested values for
         DBSCAN."""
         dialog = DbscanDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         return {
             "radius": dialog.radius.value(),
             "min_density": dialog.density.value(),
             "min_locs": dialog.min_locs.value(),
             "save_centers": dialog.save_centers.isChecked(),
             "save_areas": dialog.save_areas.isChecked(),
-        }, result == QtWidgets.QDialog.Accepted
+        }, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
 class HdbscanDialog(QtWidgets.QDialog):
@@ -1950,8 +1957,9 @@ class HdbscanDialog(QtWidgets.QDialog):
 
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -1965,7 +1973,7 @@ class HdbscanDialog(QtWidgets.QDialog):
         """Create the dialog and return the requested values for
         HDBSCAN."""
         dialog = HdbscanDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         return (
             {
                 "min_cluster": dialog.min_cluster.value(),
@@ -1974,7 +1982,7 @@ class HdbscanDialog(QtWidgets.QDialog):
                 "save_centers": dialog.save_centers.isChecked(),
                 "save_areas": dialog.save_areas.isChecked(),
             },
-            result == QtWidgets.QDialog.Accepted,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
         )
 
 
@@ -2025,8 +2033,9 @@ class LinkDialog(QtWidgets.QDialog):
         vbox.addLayout(hbox)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -2040,11 +2049,11 @@ class LinkDialog(QtWidgets.QDialog):
         """Create the dialog and return the requested values for
         linking."""
         dialog = LinkDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         return (
             dialog.max_distance.value(),
             dialog.max_dark_time.value(),
-            result == QtWidgets.QDialog.Accepted,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
         )
 
 
@@ -2151,8 +2160,9 @@ class SMLMDialog(QtWidgets.QDialog):
         vbox.addLayout(hbox)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -2167,7 +2177,7 @@ class SMLMDialog(QtWidgets.QDialog):
         """Create the dialog and return the requested values for
         SMLM clusterer."""
         dialog = SMLMDialog(parent, flag_3D=flag_3D)
-        result = dialog.exec_()
+        result = dialog.exec()
         return (
             {
                 "radius_xy": dialog.radius_xy.value(),
@@ -2177,7 +2187,7 @@ class SMLMDialog(QtWidgets.QDialog):
                 "save_centers": dialog.save_centers.isChecked(),
                 "save_areas": dialog.save_areas.isChecked(),
             },
-            result == QtWidgets.QDialog.Accepted,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
         )
 
 
@@ -2311,8 +2321,9 @@ class G5MDialog(QtWidgets.QDialog):
         vbox.addLayout(grid)
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         if self.flag_3D:  # 3d calibration
@@ -2340,7 +2351,7 @@ class G5MDialog(QtWidgets.QDialog):
     ) -> tuple[dict, bool]:
         """Get the parameters for G5M."""
         dialog = G5MDialog(parent, channel)
-        result = dialog.exec_()
+        result = dialog.exec()
         px = dialog.window.display_settings_dlg.pixelsize.value()
         if dialog.loc_prec_handling.currentIndex() == 0:  # local sigma
             loc_prec_handle = "local"
@@ -2365,7 +2376,7 @@ class G5MDialog(QtWidgets.QDialog):
             params["pixelsize"] = px
         return (
             params,
-            result == QtWidgets.QDialog.Accepted,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
         )
 
     def handle_loc_prec(self, idx: int) -> None:
@@ -2588,33 +2599,33 @@ class TestClustererDialog(QtWidgets.QDialog):
 
         # shortcuts for navigating in View
         # arrows
-        left_action = QtWidgets.QAction(self)
+        left_action = QtGui.QAction(self)
         left_action.setShortcut("Alt+A")
         left_action.triggered.connect(self.view.to_left)
         self.addAction(left_action)
 
-        right_action = QtWidgets.QAction(self)
+        right_action = QtGui.QAction(self)
         right_action.setShortcut("Alt+D")
         right_action.triggered.connect(self.view.to_right)
         self.addAction(right_action)
 
-        up_action = QtWidgets.QAction(self)
+        up_action = QtGui.QAction(self)
         up_action.setShortcut("Alt+W")
         up_action.triggered.connect(self.view.to_up)
         self.addAction(up_action)
 
-        down_action = QtWidgets.QAction(self)
+        down_action = QtGui.QAction(self)
         down_action.setShortcut("Alt+S")
         down_action.triggered.connect(self.view.to_down)
         self.addAction(down_action)
 
         # zooming
-        zoomin_action = QtWidgets.QAction(self)
+        zoomin_action = QtGui.QAction(self)
         zoomin_action.setShortcut("Alt+=")
         zoomin_action.triggered.connect(self.view.zoom_in)
         self.addAction(zoomin_action)
 
-        zoomout_action = QtWidgets.QAction(self)
+        zoomout_action = QtGui.QAction(self)
         zoomout_action.setShortcut("Alt+-")
         zoomout_action.triggered.connect(self.view.zoom_out)
         self.addAction(zoomout_action)
@@ -3000,8 +3011,12 @@ class TestClustererView(QtWidgets.QLabel):
         bgra = self.view.to_8bit(bgra)
         bgra[:, :, 3].fill(255)  # black background
         qimage = QtGui.QImage(
-            bgra.data, X, Y, QtGui.QImage.Format_RGB32
-        ).scaled(self._size, self._size, QtCore.Qt.KeepAspectRatioByExpanding)
+            bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        ).scaled(
+            self._size,
+            self._size,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+        )
         self.setPixmap(QtGui.QPixmap.fromImage(qimage))
 
     def split_locs(self) -> list[pd.DataFrame]:
@@ -3703,9 +3718,10 @@ class InfoDialog(QtWidgets.QDialog):
                     self,
                     "Viewport too large",
                     text,
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
                 )
-                if not reply == QtWidgets.QMessageBox.Yes:
+                if not reply == QtWidgets.QMessageBox.StandardButton.Yes:
                     return
 
             # get the name prefix for saving images
@@ -3963,6 +3979,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.setWindowTitle("Generate Mask")
         self.setModal(False)
         self.channel = 0
+        self.index_locs = []
+        self.index_locs_out = []
 
         main_layout = QtWidgets.QVBoxLayout(self)
         scroll = QtWidgets.QScrollArea(self)
@@ -4038,7 +4056,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         show_hist_button.setToolTip(
             "Show histogram of the pixel values in the blurred image"
         )
-        show_hist_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        show_hist_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         show_hist_button.clicked.connect(self.show_hist)
         threshold_layout.addWidget(show_hist_button)
 
@@ -4063,7 +4081,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         load_mask_button.setToolTip(
             "Load a previously saved mask (.npy file)."
         )
-        load_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        load_mask_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         load_mask_button.clicked.connect(self.load_mask)
         mask_grid.addWidget(load_mask_button, 1, 0)
 
@@ -4073,7 +4091,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             "Additionally an image file is saved as .png."
         )
         self.save_mask_button.setEnabled(False)
-        self.save_mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.save_mask_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.save_mask_button.clicked.connect(self.save_mask)
         mask_grid.addWidget(self.save_mask_button, 1, 1)
 
@@ -4082,13 +4100,13 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             "Save the blurred image as a .png file."
         )
         self.save_blur_button.setEnabled(False)
-        self.save_blur_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.save_blur_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.save_blur_button.clicked.connect(self.save_blur)
         mask_grid.addWidget(self.save_blur_button, 1, 2)
 
         mask_button = QtWidgets.QPushButton("Mask")
         mask_button.setToolTip("Apply the mask to the localizations.")
-        mask_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        mask_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         mask_button.clicked.connect(self.mask_locs)
         mask_grid.addWidget(mask_button, 2, 0)
 
@@ -4097,7 +4115,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
             "Save localization inside and outside the mask."
         )
         self.save_button.setEnabled(False)
-        self.save_button.setFocusPolicy(QtCore.Qt.NoFocus)
+        self.save_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.save_button.clicked.connect(self.save_locs)
         mask_grid.addWidget(self.save_button, 2, 1, 1, 2)
 
@@ -4117,8 +4135,8 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         self.channel = self.window.view.get_channel("Mask image")
         self.cmap = self.window.display_settings_dlg.colormap.currentText()
         info = self.infos[self.channel][0]
-        self.x_max = info["Width"]
-        self.y_max = info["Height"]
+        self.x_max = lib.get_from_metadata(info, "Width", raise_error=True)
+        self.y_max = lib.get_from_metadata(info, "Height", raise_error=True)
         self.update_plots()
 
         # adjust the size of the dialog to fit its contents
@@ -4263,8 +4281,7 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         locs_in, locs_out = masking.mask_locs(
             locs,
             self.mask,
-            self.x_max,
-            self.y_max,
+            info=self.infos[self.channel],
         )
         self.index_locs.append(locs_in)  # locs in the mask
         self.index_locs_out.append(locs_out)  # locs outside the mask
@@ -4285,6 +4302,14 @@ class MaskSettingsDialog(QtWidgets.QDialog):
 
     def save_locs(self) -> None:
         """Save masked localizations."""
+        if not self.index_locs or not self.index_locs_out:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No masked localizations",
+                "Please apply the mask to the localizations first by clicking "
+                "'Mask' before saving.",
+            )
+            return
         if self.save_all.isChecked():  # save all channels
             suffix_in, ok1 = QtWidgets.QInputDialog.getText(
                 self,
@@ -4448,16 +4473,18 @@ class MaskSettingsDialog(QtWidgets.QDialog):
         bgra[..., 1] = cmap[:, 1][image]
         bgra[..., 2] = cmap[:, 0][image]
         bgra[..., 3] = 255  # set alpha channel to fully opaque
-        qimage = QtGui.QImage(bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
         qimage = qimage.scaled(
             300,
             300,
-            QtCore.Qt.KeepAspectRatioByExpanding,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
         pixmap = QtGui.QPixmap.fromImage(qimage)
         if title:
             painter = QtGui.QPainter(pixmap)
-            painter.setPen(QtGui.QPen(QtCore.Qt.white))
+            painter.setPen(QtGui.QPen(QtCore.Qt.GlobalColor.white))
             painter.setFont(QtGui.QFont("Arial", 15))
             painter.drawText(10, 20, title)
             painter.end()
@@ -5299,7 +5326,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
 
         self.canvas_prop = FigureCanvas(self.figure_prop)
         self.canvas_prop.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
         self.canvas_prop.setMinimumSize(QtCore.QSize(fw * dpi, fh * dpi))
         render_grid.addWidget(self.canvas_prop, 6, 0, 6, 2)
@@ -5639,12 +5667,12 @@ class SlicerDialog(QtWidgets.QDialog):
         self.pick_slice.valueChanged.connect(self.on_pick_slice_changed)
         slicer_grid.addWidget(self.pick_slice, 0, 1)
 
-        self.sl = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.sl = QtWidgets.QSlider(QtCore.Qt.Orientation.Horizontal)
         self.sl.setToolTip("Select the z slice to be displayed.")
         self.sl.setMinimum(0)
         self.sl.setMaximum(50)
         self.sl.setValue(25)
-        self.sl.setTickPosition(QtWidgets.QSlider.TicksBelow)
+        self.sl.setTickPosition(QtWidgets.QSlider.TickPosition.TicksBelow)
         self.sl.setTickInterval(1)
         self.sl.valueChanged.connect(self.on_slice_position_changed)
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
@@ -5697,7 +5725,7 @@ class SlicerDialog(QtWidgets.QDialog):
 
         # get colors for each channel (from dataset dialog)
         colors = [
-            _.palette().color(QtGui.QPalette.Window)
+            _.palette().color(QtGui.QPalette.ColorRole.Window)
             for _ in self.window.dataset_dialog.colordisp_all
         ]
         self.colors = [
@@ -5807,11 +5835,11 @@ class SlicerDialog(QtWidgets.QDialog):
                                 cache=False, viewport=viewport
                             )
                             gray = qimage.convertToFormat(
-                                QtGui.QImage.Format_RGB16
+                                QtGui.QImage.Format.Format_RGB16
                             )
                         else:  # current FOV
                             gray = self.window.view.qimage.convertToFormat(
-                                QtGui.QImage.Format_RGB16
+                                QtGui.QImage.Format.Format_RGB16
                             )
                         gray.save(out_path)
                         progress.set_value(i)
@@ -5955,10 +5983,11 @@ class View(QtWidgets.QLabel):
         super().__init__()
         self.setAcceptDrops(True)
         self.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
         self.rubberband = QtWidgets.QRubberBand(
-            QtWidgets.QRubberBand.Rectangle, self
+            QtWidgets.QRubberBand.Shape.Rectangle, self
         )
         self.rubberband.setStyleSheet("selection-background-color: white")
         self.window = window
@@ -6014,7 +6043,7 @@ class View(QtWidgets.QLabel):
         # read .hdf5 and .yaml files
         try:
             locs, info = io.load_locs(path, qt_parent=self)
-        except io.NoMetadataFileError:
+        except (io.NoMetadataFileError, KeyError):
             return
 
         # update pixelsize (credits to Boyd Peters #602)
@@ -6173,8 +6202,8 @@ class View(QtWidgets.QLabel):
 
     def add_polygon_point(
         self,
-        point_movie: tuple[float, float],
-        point_screen: tuple[float, float],
+        point_movie: QtCore.QPoint,
+        point_screen: QtCore.QPoint,
     ) -> None:
         """Add a new point to the polygon or closes the current
         polygon."""
@@ -6834,34 +6863,6 @@ class View(QtWidgets.QLabel):
         # ask the user to input n_frames, step_size and mag_factor of
         # the calib file in the 3D case
         if "calibration" in params.keys():
-            if "Step size in nm" not in params["calibration"].keys():
-                z_step_size, ok = QtWidgets.QInputDialog.getDouble(
-                    self.window,
-                    "Input Dialog",
-                    "Enter z step size in the calibration (nm)",
-                    5,
-                    1,
-                    999,
-                    1,
-                )
-                if not ok:
-                    return
-                params["calibration"]["Step size in nm"] = z_step_size
-
-            if "Number of frames" not in params["calibration"].keys():
-                n_frames, ok = QtWidgets.QInputDialog.getInt(
-                    self.window,
-                    "Input Dialog",
-                    "Enter number of frames in the calibration",
-                    200,
-                    1,
-                    99999,
-                    1,
-                )
-                if not ok:
-                    return
-                params["calibration"]["Number of frames"] = n_frames
-
             if "Magnification factor" not in params["calibration"].keys():
                 mag_factor, ok = QtWidgets.QInputDialog.getDouble(
                     self.window,
@@ -7484,7 +7485,7 @@ class View(QtWidgets.QLabel):
             )
             height = 10  # display pixels
             painter = QtGui.QPainter(image)
-            painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
+            painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
             painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
 
             # white scalebar not visible on white background
@@ -7514,7 +7515,7 @@ class View(QtWidgets.QLabel):
                     y - 25,
                     text_width,
                     text_height,
-                    QtCore.Qt.AlignHCenter,
+                    QtCore.Qt.AlignmentFlag.AlignHCenter,
                     str(scalebar) + " nm",
                 )
         return image
@@ -7542,9 +7543,11 @@ class View(QtWidgets.QLabel):
             dy = 24  # space between names
             for i in range(n_channels):
                 if self.window.dataset_dialog.checks[i].isChecked():
-                    painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
+                    painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
                     colordisp = self.window.dataset_dialog.colordisp_all[i]
-                    color = colordisp.palette().color(QtGui.QPalette.Window)
+                    color = colordisp.palette().color(
+                        QtGui.QPalette.ColorRole.Window
+                    )
                     painter.setPen(QtGui.QPen(color))
                     font = painter.font()
                     font.setPixelSize(16)
@@ -7631,7 +7634,7 @@ class View(QtWidgets.QLabel):
             qimage = qimage.scaled(
                 self.width(),
                 self.height(),
-                QtCore.Qt.KeepAspectRatioByExpanding,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             )
             # draw scalebar, minimap and legend
             self.qimage_no_picks = self.draw_scalebar(qimage)
@@ -7810,12 +7813,14 @@ class View(QtWidgets.QLabel):
             bgra[:, :, 1] = cmap[:, 1][image]
             bgra[:, :, 2] = cmap[:, 0][image]
             bgra[:, :, 3] = 255
-            qimage = QtGui.QImage(bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+            qimage = QtGui.QImage(
+                bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+            )
             # modify qimage like in self.draw_scene
             qimage = qimage.scaled(
                 self.width(),
                 self.height(),
-                QtCore.Qt.KeepAspectRatioByExpanding,
+                QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             )
             qimage = self.draw_scalebar(qimage)
             qimage = self.draw_minimap(qimage)
@@ -8177,7 +8182,7 @@ class View(QtWidgets.QLabel):
             )
             self.update_scene(picks_only=True)
 
-    def map_to_movie(self, position: QtCore.QPoint) -> tuple[float, float]:
+    def map_to_movie(self, position: QtCore.QPoint) -> QtCore.QPoint:
         """Convert coordinates from display units to camera units."""
         x_rel = position.x() / self.width()
         x_movie = x_rel * self.viewport_width() + self.viewport[0][1]
@@ -8213,17 +8218,21 @@ class View(QtWidgets.QLabel):
                 )
             # if panning
             if self._pan:
-                rel_x_move = (event.x() - self.pan_start_x) / self.width()
-                rel_y_move = (event.y() - self.pan_start_y) / self.height()
+                rel_x_move = (
+                    event.pos().x() - self.pan_start_x
+                ) / self.width()
+                rel_y_move = (
+                    event.pos().y() - self.pan_start_y
+                ) / self.height()
                 self.pan_relative(rel_y_move, rel_x_move)
-                self.pan_start_x = event.x()
-                self.pan_start_y = event.y()
+                self.pan_start_x = event.pos().x()
+                self.pan_start_y = event.pos().y()
         # if drawing a rectangular pick
         elif self._mode == "Pick":
             if self._pick_shape == "Rectangle":
                 if self._rectangle_pick_ongoing:
-                    self.rectangle_pick_current_x = event.x()
-                    self.rectangle_pick_current_y = event.y()
+                    self.rectangle_pick_current_x = event.pos().x()
+                    self.rectangle_pick_current_y = event.pos().y()
                     self.update_scene(picks_only=True)
 
     def mousePressEvent(self, event: QtCore.QEvent) -> None:
@@ -8234,7 +8243,7 @@ class View(QtWidgets.QLabel):
 
         if self._mode == "Zoom":
             # start drawing a zoom-in rectangle
-            if event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 if len(self.locs) > 0:  # locs are loaded already
                     if not self.rubberband.isVisible():
                         self.origin = QtCore.QPoint(event.pos())
@@ -8243,21 +8252,21 @@ class View(QtWidgets.QLabel):
                         )
                         self.rubberband.show()
             # start panning
-            elif event.button() == QtCore.Qt.RightButton:
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 self._pan = True
-                self.pan_start_x = event.x()
-                self.pan_start_y = event.y()
-                self.setCursor(QtCore.Qt.ClosedHandCursor)
+                self.pan_start_x = event.pos().x()
+                self.pan_start_y = event.pos().y()
+                self.setCursor(QtCore.Qt.CursorShape.ClosedHandCursor)
                 event.accept()
             else:
                 event.ignore()
         # start drawing rectangular pick
         elif self._mode == "Pick":
-            if event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 if self._pick_shape == "Rectangle":
                     self._rectangle_pick_ongoing = True
-                    self.rectangle_pick_start_x = event.x()
-                    self.rectangle_pick_start_y = event.y()
+                    self.rectangle_pick_start_x = event.pos().x()
+                    self.rectangle_pick_start_y = event.pos().y()
                     self.rectangle_pick_start = self.map_to_movie(event.pos())
 
     def mouseReleaseEvent(self, event: QtCore.QEvent) -> None:
@@ -8268,7 +8277,7 @@ class View(QtWidgets.QLabel):
 
         if self._mode == "Zoom":
             if (
-                event.button() == QtCore.Qt.LeftButton
+                event.button() == QtCore.Qt.MouseButton.LeftButton
                 and self.rubberband.isVisible()
             ):  # zoom in if the zoom-in rectangle is visible
                 end = QtCore.QPoint(event.pos())
@@ -8286,9 +8295,9 @@ class View(QtWidgets.QLabel):
                     self.update_scene(viewport)
                 self.rubberband.hide()
             # stop panning
-            elif event.button() == QtCore.Qt.RightButton:
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 self._pan = False
-                self.setCursor(QtCore.Qt.ArrowCursor)
+                self.setCursor(QtCore.Qt.CursorShape.ArrowCursor)
                 event.accept()
                 self.update_scene()
             else:
@@ -8296,19 +8305,19 @@ class View(QtWidgets.QLabel):
         elif self._mode == "Pick":
             if self._pick_shape in ["Circle", "Square"]:
                 # add pick
-                if event.button() == QtCore.Qt.LeftButton:
+                if event.button() == QtCore.Qt.MouseButton.LeftButton:
                     x, y = self.map_to_movie(event.pos())
                     self.add_pick((x, y))
                     event.accept()
                 # remove pick
-                elif event.button() == QtCore.Qt.RightButton:
+                elif event.button() == QtCore.Qt.MouseButton.RightButton:
                     x, y = self.map_to_movie(event.pos())
                     self.remove_picks((x, y))
                     event.accept()
                 else:
                     event.ignore()
             elif self._pick_shape == "Rectangle":
-                if event.button() == QtCore.Qt.LeftButton:
+                if event.button() == QtCore.Qt.MouseButton.LeftButton:
                     # finish drawing rectangular pick and add it
                     rectangle_pick_end = self.map_to_movie(event.pos())
                     self._rectangle_pick_ongoing = False
@@ -8316,7 +8325,7 @@ class View(QtWidgets.QLabel):
                         (self.rectangle_pick_start, rectangle_pick_end)
                     )
                     event.accept()
-                elif event.button() == QtCore.Qt.RightButton:
+                elif event.button() == QtCore.Qt.MouseButton.RightButton:
                     # remove pick
                     x, y = self.map_to_movie(event.pos())
                     self.remove_picks((x, y))
@@ -8325,19 +8334,19 @@ class View(QtWidgets.QLabel):
                     event.ignore()
             elif self._pick_shape == "Polygon":
                 # add a point to the polygon
-                if event.button() == QtCore.Qt.LeftButton:
+                if event.button() == QtCore.Qt.MouseButton.LeftButton:
                     point_movie = self.map_to_movie(event.pos())
                     self.add_polygon_point(point_movie, event.pos())
                 # remove the last point from the polygon
-                elif event.button() == QtCore.Qt.RightButton:
+                elif event.button() == QtCore.Qt.MouseButton.RightButton:
                     self.remove_polygon_point()
         elif self._mode == "Measure":
-            if event.button() == QtCore.Qt.LeftButton:
+            if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 # add measure point
                 x, y = self.map_to_movie(event.pos())
                 self.add_point((x, y))
                 event.accept()
-            elif event.button() == QtCore.Qt.RightButton:
+            elif event.button() == QtCore.Qt.MouseButton.RightButton:
                 # remove measure points
                 x, y = self.map_to_movie(event.pos())
                 self.remove_points()
@@ -8555,20 +8564,25 @@ class View(QtWidgets.QLabel):
         )
 
         msgBox.addButton(
-            QtWidgets.QPushButton("Accept"), QtWidgets.QMessageBox.YesRole
+            QtWidgets.QPushButton("Accept"),
+            QtWidgets.QMessageBox.ButtonRole.YesRole,
         )  # keep the pick
         msgBox.addButton(
-            QtWidgets.QPushButton("Reject"), QtWidgets.QMessageBox.NoRole
+            QtWidgets.QPushButton("Reject"),
+            QtWidgets.QMessageBox.ButtonRole.NoRole,
         )  # remove the pick
         msgBox.addButton(
-            QtWidgets.QPushButton("Back"), QtWidgets.QMessageBox.ResetRole
+            QtWidgets.QPushButton("Back"),
+            QtWidgets.QMessageBox.ButtonRole.ResetRole,
         )  # go one pick back
         msgBox.addButton(
-            QtWidgets.QPushButton("Cancel"), QtWidgets.QMessageBox.RejectRole
+            QtWidgets.QPushButton("Cancel"),
+            QtWidgets.QMessageBox.ButtonRole.RejectRole,
         )  # leave selecting picks
 
         qr = self.frameGeometry()
-        cp = QtWidgets.QDesktopWidget().availableGeometry().center()
+        screen = QtGui.QGuiApplication.primaryScreen()
+        cp = screen.availableGeometry().center()
         qr.moveCenter(cp)
         msgBox.move(qr.topLeft())
 
@@ -8645,11 +8659,11 @@ class View(QtWidgets.QLabel):
                         fig.canvas.buffer_rgba(),
                         width,
                         height,
-                        QtGui.QImage.Format_ARGB32,
+                        QtGui.QImage.Format.Format_ARGB32,
                     )
 
                     self.setPixmap((QtGui.QPixmap(im)))
-                    self.setAlignment(QtCore.Qt.AlignCenter)
+                    self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
                     # update info
                     params["n_removed"] = len(removelist)
@@ -8659,25 +8673,21 @@ class View(QtWidgets.QLabel):
 
                     # message box with buttons
                     msgBox = self.pick_message_box(params)
+                    msgBox.exec()
+                    reply = msgBox.clickedButton().text()
 
-                    reply = msgBox.exec()
-
-                    if reply == 0:
-                        # accepted
+                    if reply == "Accept":
                         if pick in removelist:
                             removelist.remove(pick)
-                    elif reply == 3:
-                        # cancel
-                        break
-                    elif reply == 2:
-                        # back
+                    elif reply == "Reject":
+                        removelist.append(pick)
+                    elif reply == "Back":
                         if i >= 2:
                             i -= 2
                         else:
                             i = -1
-                    else:
-                        # discard
-                        removelist.append(pick)
+                    else:  # cancel
+                        break
 
                     i += 1
                     plt.close()
@@ -8757,11 +8767,11 @@ class View(QtWidgets.QLabel):
                             fig.canvas.buffer_rgba(),
                             width,
                             height,
-                            QtGui.QImage.Format_ARGB32,
+                            QtGui.QImage.Format.Format_ARGB32,
                         )
 
                         self.setPixmap((QtGui.QPixmap(im)))
-                        self.setAlignment(QtCore.Qt.AlignCenter)
+                        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
                         # update selection info
                         params["n_removed"] = len(removelist)
@@ -8770,25 +8780,21 @@ class View(QtWidgets.QLabel):
                         params["i"] = i
 
                         msgBox = self.pick_message_box(params)
+                        msgBox.exec()
+                        reply = msgBox.clickedButton().text()
 
-                        reply = msgBox.exec()
-
-                        if reply == 0:
-                            # accepted
+                        if reply == "Accept":
                             if pick in removelist:
                                 removelist.remove(pick)
-                        elif reply == 3:
-                            # cancel
-                            break
-                        elif reply == 2:
-                            # back
+                        elif reply == "Reject":
+                            removelist.append(pick)
+                        elif reply == "Back":
                             if i >= 2:
                                 i -= 2
                             else:
                                 i = -1
-                        else:
-                            # discard
-                            removelist.append(pick)
+                        else:  # cancel
+                            break
 
                         i += 1
                         plt.close()
@@ -8820,7 +8826,7 @@ class View(QtWidgets.QLabel):
                         y_min = pick[1] - r
                         y_max = pick[1] + r
                         ax.scatter(
-                            locs["x"], locs["y"], c=colors[channel], s=2
+                            locs["x"], locs["y"], color=colors[channel], s=2
                         )
                         ax.set_xlabel("X [Px]")
                         ax.set_ylabel("Y [Px]")
@@ -8835,11 +8841,11 @@ class View(QtWidgets.QLabel):
                             fig.canvas.buffer_rgba(),
                             width,
                             height,
-                            QtGui.QImage.Format_ARGB32,
+                            QtGui.QImage.Format.Format_ARGB32,
                         )
 
                         self.setPixmap((QtGui.QPixmap(im)))
-                        self.setAlignment(QtCore.Qt.AlignCenter)
+                        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
                         params["n_removed"] = len(removelist)
                         params["n_kept"] = i - params["n_removed"]
@@ -8847,25 +8853,21 @@ class View(QtWidgets.QLabel):
                         params["i"] = i
 
                         msgBox = self.pick_message_box(params)
+                        msgBox.exec()
+                        reply = msgBox.clickedButton().text()
 
-                        reply = msgBox.exec()
-
-                        if reply == 0:
-                            # accepted
+                        if reply == "Accept":
                             if pick in removelist:
                                 removelist.remove(pick)
-                        elif reply == 3:
-                            # cancel
-                            break
-                        elif reply == 2:
-                            # back
+                        elif reply == "Reject":
+                            removelist.append(pick)
+                        elif reply == "Back":
                             if i >= 2:
                                 i -= 2
                             else:
                                 i = -1
-                        else:
-                            # discard
-                            removelist.append(pick)
+                        else:  # cancel
+                            break
 
                         i += 1
                         plt.close()
@@ -9195,7 +9197,7 @@ class View(QtWidgets.QLabel):
 
         # get colors for each channel (from dataset dialog)
         colors = [
-            _.palette().color(QtGui.QPalette.Window)
+            _.palette().color(QtGui.QPalette.ColorRole.Window)
             for _ in self.window.dataset_dialog.colordisp_all
         ]
         colors = [
@@ -9221,10 +9223,10 @@ class View(QtWidgets.QLabel):
             fig.canvas.buffer_rgba(),
             width,
             height,
-            QtGui.QImage.Format_RGBA8888,
+            QtGui.QImage.Format.Format_RGBA8888,
         )
         self.setPixmap((QtGui.QPixmap(im)))
-        self.setAlignment(QtCore.Qt.AlignCenter)
+        self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
         # filter picks by n_locs
         removelist = []
@@ -9650,7 +9652,9 @@ class View(QtWidgets.QLabel):
         self._bgra[:, :, 3].fill(255)
         # build QImage
         Y, X = self._bgra.shape[:2]
-        qimage = QtGui.QImage(self._bgra.data, X, Y, QtGui.QImage.Format_RGB32)
+        qimage = QtGui.QImage(
+            self._bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
+        )
         return qimage
 
     def read_colors(self, n_channels: int | None = None) -> list[list[float]]:
@@ -10246,6 +10250,8 @@ class View(QtWidgets.QLabel):
         path : str
             Path for saving pick regions.
         """
+        if len(self._picks) == 0:
+            return
         picks = {}
         if self._pick_shape == "Circle":
             d = self.window.tools_settings_dialog.pick_diameter.value()
@@ -10442,10 +10448,10 @@ class View(QtWidgets.QLabel):
         self.window.display_settings_dlg.minimum_render.blockSignals(False)
         self.activate_property_menu()
         self.window.display_settings_dlg.render_check.setEnabled(True)
-        self.window.display_settings_dlg.render_check.setCheckState(False)
+        self.window.display_settings_dlg.render_check.setChecked(False)
         self.activate_render_property()
 
-    def set_mode(self, action: QtWidgets.QAction) -> None:
+    def set_mode(self, action: QtGui.QAction) -> None:
         """Set ``self._mode`` for QMouseEvents.
 
         Activated when ``Zoom``, ``Pick`` or ``Measure`` is chosen from
@@ -10453,7 +10459,7 @@ class View(QtWidgets.QLabel):
 
         Parameters
         ----------
-        action : QtWidgets.QAction
+        action : QtGui.QAction
             Action defined in Window.__init__: ("Zoom", "Pick" or
             "Measure")
         """
@@ -10474,9 +10480,9 @@ class View(QtWidgets.QLabel):
                 self,
                 "",
                 "This action will delete any existing picks. Continue?",
-                qm.Yes | qm.No,
+                qm.StandardButton.Yes | qm.StandardButton.No,
             )
-            if ret == qm.No:
+            if ret == qm.StandardButton.No:
                 shape_index = t_dialog.pick_shape.findText(self._pick_shape)
                 self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
                     shape_index
@@ -10977,7 +10983,7 @@ class View(QtWidgets.QLabel):
                 if diameter < 100:
                     pixmap_size = ceil(diameter) + 1
                     pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
-                    pixmap.fill(QtCore.Qt.transparent)
+                    pixmap.fill(QtCore.Qt.GlobalColor.transparent)
                     painter = QtGui.QPainter(pixmap)
                     painter.setPen(QtGui.QColor("white"))
                     if self.window.dataset_dialog.wbackground.isChecked():
@@ -10995,7 +11001,7 @@ class View(QtWidgets.QLabel):
                 diameter = POLYGON_POINTER_SIZE
                 pixmap_size = ceil(diameter) + 1
                 pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
-                pixmap.fill(QtCore.Qt.transparent)
+                pixmap.fill(QtCore.Qt.GlobalColor.transparent)
                 painter = QtGui.QPainter(pixmap)
                 painter.setPen(QtGui.QColor("white"))
                 if self.window.dataset_dialog.wbackground.isChecked():
@@ -11016,7 +11022,7 @@ class View(QtWidgets.QLabel):
                 if side_length < 100:
                     pixmap_size = ceil(side_length) + 1
                     pixmap = QtGui.QPixmap(pixmap_size, pixmap_size)
-                    pixmap.fill(QtCore.Qt.transparent)
+                    pixmap.fill(QtCore.Qt.GlobalColor.transparent)
                     painter = QtGui.QPainter(pixmap)
                     painter.setPen(QtGui.QColor("white"))
                     if self.window.dataset_dialog.wbackground.isChecked():
@@ -11420,9 +11426,9 @@ class View(QtWidgets.QLabel):
         Press Ctrl/Command to zoom in/out.
         """
         modifiers = QtWidgets.QApplication.keyboardModifiers()
-        if modifiers == QtCore.Qt.ControlModifier:
+        if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
             scale = 1.008 ** (-event.angleDelta().y())
-            position = self.map_to_movie(event.pos())
+            position = self.map_to_movie(event.position())
             self.zoom(scale, cursor_position=position)
 
 
@@ -11527,7 +11533,7 @@ class Window(QtWidgets.QMainWindow):
         # menu bar - File
         file_menu = self.menu_bar.addMenu("File")
         open_action = file_menu.addAction("Open")
-        open_action.setShortcut(QtGui.QKeySequence.Open)
+        open_action.setShortcut(QtGui.QKeySequence.StandardKey.Open)
         open_action.triggered.connect(self.open_file_dialog)
         open_rot_action = file_menu.addAction("Open rotated localizations")
         open_rot_action.setShortcut("Ctrl+Shift+O")
@@ -11577,13 +11583,13 @@ class Window(QtWidgets.QMainWindow):
         # sound notification submenu
         file_menu.addSeparator()
         sounds_menu = file_menu.addMenu("Sound notifications")
-        sounds_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
+        sounds_actiongroup = QtGui.QActionGroup(self.menu_bar)
         default_sound_path = lib.get_sound_notification_path()  # last used
         default_sound_name = os.path.basename(str(default_sound_path))
         for sound in lib.get_available_sound_notifications():
             sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
             action = sounds_actiongroup.addAction(
-                QtWidgets.QAction(sound_name, sounds_menu, checkable=True)
+                QtGui.QAction(sound_name, sounds_menu, checkable=True)
             )
             action.setObjectName(sound)  # store full name
             if default_sound_name == sound:
@@ -11649,20 +11655,20 @@ class Window(QtWidgets.QMainWindow):
 
         # menu bar - Tools
         tools_menu = self.menu_bar.addMenu("Tools")
-        tools_actiongroup = QtWidgets.QActionGroup(self.menu_bar)
+        tools_actiongroup = QtGui.QActionGroup(self.menu_bar)
         zoom_tool_action = tools_actiongroup.addAction(
-            QtWidgets.QAction("Zoom", tools_menu, checkable=True)
+            QtGui.QAction("Zoom", tools_menu, checkable=True)
         )
         zoom_tool_action.setShortcut("Ctrl+Z")
         tools_menu.addAction(zoom_tool_action)
         zoom_tool_action.setChecked(True)
         pick_tool_action = tools_actiongroup.addAction(
-            QtWidgets.QAction("Pick", tools_menu, checkable=True)
+            QtGui.QAction("Pick", tools_menu, checkable=True)
         )
         pick_tool_action.setShortcut("Ctrl+P")
         tools_menu.addAction(pick_tool_action)
         measure_tool_action = tools_actiongroup.addAction(
-            QtWidgets.QAction("Measure", tools_menu, checkable=True)
+            QtGui.QAction("Measure", tools_menu, checkable=True)
         )
         measure_tool_action.setShortcut("Ctrl+M")
         tools_menu.addAction(measure_tool_action)
@@ -11873,7 +11879,7 @@ class Window(QtWidgets.QMainWindow):
                 self.view.locs_paths[0]
             )
         io.save_user_settings(settings)
-        QtWidgets.qApp.closeAllWindows()
+        QtWidgets.QApplication.instance().closeAllWindows()
 
     def export_current(self) -> None:
         """Export current view as .png or .tif."""
@@ -12028,7 +12034,8 @@ class Window(QtWidgets.QMainWindow):
                 base + f"_export{ext}",
                 filter=f"*{ext}",
             )
-            self.export_multi_channel(channel, item, path)
+            if path:
+                self.export_multi_channel(channel, item, path)
 
     def export_multi_channel(self, channel: int, item: str, path: str) -> None:
         """Export localizations for a single channel."""
@@ -12604,9 +12611,10 @@ class Window(QtWidgets.QMainWindow):
                     self,
                     "Warning",
                     warning,
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
                 )
-                if reply == QtWidgets.QMessageBox.No:
+                if reply == QtWidgets.QMessageBox.StandardButton.No:
                     return
 
             # combine channels to one .hdf5
@@ -12768,19 +12776,20 @@ def main():
 
     window.show()
 
+    from ..updater import setup_gui_update_check
+
+    setup_gui_update_check(window)
+
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         QtCore.QCoreApplication.instance().processEvents()
         message = "".join(traceback.format_exception(type, value, tback))
-        errorbox = QtWidgets.QMessageBox.critical(
-            window, "An error occured", message
-        )
-        errorbox.exec_()
+        QtWidgets.QMessageBox.critical(window, "An error occured", message)
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

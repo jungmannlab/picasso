@@ -29,7 +29,7 @@ from matplotlib.backends.backend_qt5agg import (
     FigureCanvas,
     NavigationToolbar2QT,
 )
-from PyQt5 import QtCore, QtWidgets, QtGui
+from PyQt6 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
 
 from picasso import io
@@ -58,7 +58,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             minimum,
             maximum,
             parent,
-            QtCore.Qt.CustomizeWindowHint,
+            QtCore.Qt.WindowType.CustomizeWindowHint,
         )
         self.description_base = description  # without time estimate
         self.initalized = None
@@ -138,7 +138,7 @@ class StatusDialog(QtWidgets.QDialog):
     def __init__(self, description, parent):
         super(StatusDialog, self).__init__(
             parent,
-            QtCore.Qt.CustomizeWindowHint,
+            QtCore.Qt.WindowType.CustomizeWindowHint,
         )
         _dialogs.append(self)
         vbox = QtWidgets.QVBoxLayout(self)
@@ -203,7 +203,7 @@ class ScrollableGroupBox(QtWidgets.QGroupBox):
             self.content_layout = QtWidgets.QGridLayout(self)
         elif layout == "form":
             self.content_layout = QtWidgets.QFormLayout(self)
-        self.content_layout.setAlignment(QtCore.Qt.AlignTop)
+        self.content_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
         self.content_layout.setSpacing(10)
         self.content_layout.setContentsMargins(10, 10, 10, 10)
 
@@ -292,8 +292,9 @@ class RemoveColumnsDialog(QtWidgets.QDialog):
             self.checks[column] = check
         # OK and Cancel buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -322,12 +323,23 @@ class RemoveColumnsDialog(QtWidgets.QDialog):
             Cancel.
         """
         dialog = RemoveColumnsDialog(parent, columns)
-        result = dialog.exec_()
+        result = dialog.exec()
         to_remove = []
         for col in columns:
             if dialog.checks[col].isChecked():
                 to_remove.append(col)
-        return to_remove, result == QtWidgets.QDialog.Accepted
+        return to_remove, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
+def deprecation_warning(message: str) -> None:
+    """Display a deprecation warning message.
+
+    Parameters
+    ----------
+    message : str
+        The deprecation warning message to be displayed.
+    """
+    warnings.warn(message, DeprecationWarning, stacklevel=2)
 
 
 def cancel_dialogs():
@@ -392,13 +404,13 @@ def get_available_sound_notifications() -> list[str | None]:
     return filenames
 
 
-def set_sound_notification(action: QtWidgets.QAction) -> None:
+def set_sound_notification(action: QtGui.QAction) -> None:
     """Save the selected sound notification in the user settings
     file.
 
     Parameters
     ----------
-    action : QtWidgets.QAction
+    action : QtGui.QAction
         The action representing the selected sound notification.
     """
     settings = io.load_user_settings()
@@ -587,17 +599,18 @@ def is_path_available(
         if os.path.exists(path):
             if parent is not None:
                 box = QtWidgets.QMessageBox(parent)
-                box.setIcon(QtWidgets.QMessageBox.Warning)
+                box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
                 box.setWindowTitle("File or folder already exists")
                 box.setText(
                     f"The path '{path}' already exists."
                     "\nDo you wish to overwrite it?"
                 )
                 box.setStandardButtons(
-                    QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No
                 )
-                result = box.exec_()
-                if result != QtWidgets.QMessageBox.Yes:
+                result = box.exec()
+                if result != QtWidgets.QMessageBox.StandardButton.Yes:
                     paths_available.append(False)
                 else:
                     paths_available.append(True)
@@ -658,6 +671,10 @@ def get_save_filename_ext_dialog(
         )
         if not all(paths_available):
             return "", ""
+    # if the user selected a .yml file, change the extension to .yaml
+    # for consistency
+    if selected_path.endswith(".yml"):
+        selected_path = selected_path[:-4] + ".yaml"
     return selected_path, selected_filter
 
 
@@ -699,6 +716,9 @@ def unpack_calibration(
     """Extract calibration file for 3D G5M. Return spot widths and
     heights and the corresponding z values + magnification factor.
 
+    New in v0.10.0: the function is deprecated and will be removed in
+    Picasso 0.11.0.
+
     Parameters
     ----------
     calibration : dict
@@ -717,6 +737,12 @@ def unpack_calibration(
     mag_factor : float
         Magnification factor for the 3D calibration.
     """
+    deprecation_warning(
+        "The function 'unpack_calibration' is deprecated and will be"
+        " removed in Picasso 0.11.0. 3D G5M, for which this function"
+        " was originally implemented, only requires x and y"
+        " coefficients."
+    )
     cx = calibration["X Coefficients"]
     cy = calibration["Y Coefficients"]
     z_step_size = calibration["Step size in nm"]
@@ -793,7 +819,7 @@ def append_to_rec(
     rec_array : np.recarray
         Recarray with the new column.
     """
-    warnings.warn(
+    deprecation_warning(
         "Appending to recarrays is deprecated and will be removed in Picasso"
         " 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
         " recarrays. Simply use locs['new_column'] = data to add a new column"
@@ -864,6 +890,7 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     locs : pd.DataFrame
         Localizations that pass the sanity checks.
     """
+    locs = locs.copy()  # pandas SettingWithCopyWarning
     # no inf and nan:
     locs.replace([np.inf, -np.inf], np.nan, inplace=True)
     locs.dropna(axis=0, how="any", inplace=True)
@@ -1159,7 +1186,7 @@ def remove_from_rec(rec_array: np.recarray, name: str) -> np.recarray:
     rec_array : np.recarray
         Recarray without the column.
     """
-    warnings.warn(
+    deprecation_warning(
         "Removing columns from recarrays is deprecated and will be removed in "
         " Picasso 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
         " recarrays. Simply use locs.drop('new_column', axis=1) to remove a"

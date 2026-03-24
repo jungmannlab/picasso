@@ -1,7 +1,34 @@
 Changelog
 =========
 
-Last change: 10-MAR-2026 CEST
+Last change: 20-MAR-2026 CEST
+
+0.10.0
+------
+**Backward incompatible changes:**
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+- Moved from PyQt5 to PyQt6, PyQt5 support has been removed. If Picasso is installed via PyPI (``pip install picassosr``) or one-click-installer, no action needs to be taken. **Otherwise please install PyQt6 when updating Picasso to v0.10.0!**
+
+**Important updates:**
+^^^^^^^^^^^^^^^^^^^^^^
+- Picasso automatically checks for updates when launched and notifies the user if a new version is available
+
+*Small improvements:*
++++++++++++++++++++++
+- G5M calculated more accurate sigma constraints in 3D
+- Adjusted default parameters in Average
+
+*Bug fixes:*
+++++++++++++
+- Fixed 3D render screenshot metadata
+- Fixed ToRaw
+
+*Deprecation warnings:*
++++++++++++++++++++++++
+- ``picasso.lib.unpack_calibration`` and the ``spot_size``, ``z_range`` parameters in the G5M functions. ``picasso.g5m.g5m`` now uses calibration coefficients only for setting sigma constraints in 3D for more accurate results.
+- ``picasso.clusterer.cluster_center`` (will be renamed to ``_cluster_center`` and become a private function in v0.11.0)
+- ``picasso.aim``: ``intersect1d``, ``count_intersections``, ``run_intersections``, ``run_intersections_multithread``, ``get_fft_peak``, ``get_fft_peak_z``, ``point_intersect_2d`` and ``point_intersect_3d`` (will become private functions in v0.11.0)
+- ``picasso.masking.mask_locs`` uses metadata rather than now deprecated ``width`` and ``height`` parameters
 
 0.9.8-9
 -------

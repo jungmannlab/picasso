@@ -20,12 +20,13 @@ import threading
 import warnings
 from typing import Callable
 
+from tables import File
 import yaml
 import h5py
 import nd2
 import numpy as np
 import pandas as pd
-from PyQt5.QtWidgets import QWidget, QMessageBox
+from PyQt6.QtWidgets import QWidget, QMessageBox
 
 from . import lib, __version__
 
@@ -1208,7 +1209,7 @@ class TiffMap:
         self.file.close()
 
     def tofile(self, file_handle, byte_order=None):
-        do_byteswap = byte_order != self.byte_order
+        do_byteswap = byte_order != self._tif_byte_order
         for image in self:
             if do_byteswap:
                 image = image.byteswap()
@@ -1579,7 +1580,20 @@ def load_locs(
         Metadata information loaded from the file, typically a list of
         dictionaries containing various metadata fields.
     """
-    locs = pd.read_hdf(path, key="locs")
+    try:
+        locs = pd.read_hdf(path, key="locs")
+    except KeyError as e:  # if "locs" key not found
+        print(
+            f"\nAn error occured. File: {path} does not contain a "
+            "'locs' dataset."
+        )
+        if qt_parent is not None:
+            QMessageBox.critical(
+                qt_parent,
+                "An error occured",
+                f"File: {path} does not contain a 'locs' dataset.",
+            )
+        raise KeyError(e)
     info = load_info(path, qt_parent=qt_parent)
     locs = lib.ensure_sanity(locs, info)
     return locs, info

@@ -34,7 +34,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from scipy.spatial.transform import Rotation
-from PyQt5 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, spinna, __version__
 
@@ -75,7 +75,7 @@ def ignore_escape_key(event: QtCore.QEvent) -> None:
     """Ignore the escape key. This function is applied to each of the
     tabs in the main window since we do not want to hide the currently
     viewed tab."""
-    if event.key() == QtCore.Qt.Key_Escape:
+    if event.key() == QtCore.Qt.Key.Key_Escape:
         event.ignore()
 
 
@@ -157,7 +157,7 @@ class ignoreArrowsSpinBox(QtWidgets.QSpinBox):
         super().__init__(*args, **kwargs)
 
     def keyPressEvent(self, event):
-        if event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right):
+        if event.key() in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right):
             self.clearFocus()
         else:
             super().keyPressEvent(event)
@@ -171,7 +171,7 @@ class ignoreArrowsDoubleSpinBox(QtWidgets.QDoubleSpinBox):
         super().__init__(*args, **kwargs)
 
     def keyPressEvent(self, event):
-        if event.key() in (QtCore.Qt.Key_Left, QtCore.Qt.Key_Right):
+        if event.key() in (QtCore.Qt.Key.Key_Left, QtCore.Qt.Key.Key_Right):
             self.clearFocus()
         else:
             super().keyPressEvent(event)
@@ -266,11 +266,11 @@ class MaskPreview(QtWidgets.QLabel):
         bgra[..., 3].fill(255)
 
         qimage = QtGui.QImage(
-            bgra.data, X, Y, QtGui.QImage.Format_RGB32
+            bgra.data, X, Y, QtGui.QImage.Format.Format_RGB32
         ).scaled(
             self.width(),
             self.height(),
-            QtCore.Qt.KeepAspectRatio,  # ByExpanding,
+            QtCore.Qt.AspectRatioMode.KeepAspectRatio,  # ByExpanding,
         )
         return qimage
 
@@ -280,7 +280,7 @@ class MaskPreview(QtWidgets.QLabel):
             return image
 
         painter = QtGui.QPainter(image)
-        painter.setPen(QtGui.QPen(QtCore.Qt.NoPen))
+        painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
         painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
         length_nm = self.mask_tab.scalebar_length.value()
         binsize = self.mask_tab.mask_generator.binsize
@@ -500,7 +500,7 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         preview_grid.addWidget(self.scalebar_check, 1, 0)
 
         label = QtWidgets.QLabel("Scale bar length (nm):")
-        label.setAlignment(QtCore.Qt.AlignRight)
+        label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         preview_grid.addWidget(label, 1, 1)
         self.scalebar_length = ignoreArrowsSpinBox()
         self.scalebar_length.setEnabled(False)
@@ -536,10 +536,10 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         # anisotropic mask labels
         xy_label = QtWidgets.QLabel("xy")
-        xy_label.setAlignment(QtCore.Qt.AlignCenter)
+        xy_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         mask_layout.addWidget(xy_label, 1, 1)
         z_label = QtWidgets.QLabel("z (3D only)")
-        z_label.setAlignment(QtCore.Qt.AlignCenter)
+        z_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         mask_layout.addWidget(z_label, 1, 2)
 
         # mask pixel / voxel size
@@ -630,7 +630,9 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.zslice_check.setVisible(False)
         mask_layout.addWidget(self.zslice_check, 8, 0)
 
-        self.zslice_slider = QtWidgets.QSlider(QtCore.Qt.Horizontal)
+        self.zslice_slider = QtWidgets.QSlider(
+            QtCore.Qt.Orientation.Horizontal
+        )
         self.zslice_slider.setToolTip("Choose the z-slice to be displayed.")
         self.zslice_slider.setRange(0, 10)
         self.zslice_slider.setValue(0)
@@ -702,7 +704,8 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.ax_mask_legend = self.fig.add_subplot(111)
         self.legend = FigureCanvas(self.fig)
         self.legend.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
         self.legend.setMinimumSize(
             QtCore.QSize(
@@ -738,15 +741,17 @@ class MaskGeneratorTab(QtWidgets.QDialog):
             "Mask area/volume above Otsu threshold;\n"
             "Number of pixels/voxels per dimension"
         )
-        self.mask_info_display1.setAlignment(QtCore.Qt.AlignRight)
+        self.mask_info_display1.setAlignment(
+            QtCore.Qt.AlignmentFlag.AlignRight
+        )
         # make sure that the dash symbols are aligned
         self.mask_info_display1.setFixedWidth(
-            self.mask_info_display1.fontMetrics().width(
+            self.mask_info_display1.fontMetrics().horizontalAdvance(
                 f"{' '*MASK_INFO_OFFSET}Volume (\u03bcm\u00b3):"
             )
         )
         self.mask_info_display2 = QtWidgets.QLabel("-\n-")
-        self.mask_info_display2.setAlignment(QtCore.Qt.AlignLeft)
+        self.mask_info_display2.setAlignment(QtCore.Qt.AlignmentFlag.AlignLeft)
         mask_info_layout.addWidget(self.mask_info_display1)
         mask_info_layout.addWidget(self.mask_info_display2)
 
@@ -853,9 +858,10 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                         self,
                         "Save all z-slices?",
                         question,
-                        QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
+                        QtWidgets.QMessageBox.StandardButton.Yes
+                        | QtWidgets.QMessageBox.StandardButton.No,
                     )
-                    if reply == QtWidgets.QMessageBox.Yes:
+                    if reply == QtWidgets.QMessageBox.StandardButton.Yes:
                         for z in range(self.mask.shape[2]):
                             image = self.mask[:, :, z]
                             image /= image.max()
@@ -1146,7 +1152,7 @@ class StructurePreview(QtWidgets.QLabel):
             image.data,
             STRUCTURE_PREVIEW_SIZE,
             STRUCTURE_PREVIEW_SIZE,
-            QtGui.QImage.Format_RGB32,
+            QtGui.QImage.Format.Format_RGB32,
         )
         qimage = self.draw_molecular_targets(qimage)
         qimage = self.draw_title(qimage)
@@ -1307,19 +1313,19 @@ class StructurePreview(QtWidgets.QLabel):
     def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define the action when mouse is clicked. If left button is
         clicked, the structure starts to be rotated."""
-        if event.button() == QtCore.Qt.LeftButton:
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.rotating = True
-            self._rotation.append([event.x(), event.y()])
+            self._rotation.append([event.pos().x(), event.pos().y()])
 
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define the action when mouse is moved. If self.rotating,
         the rotation angles are updated."""
         if self.rotating:
-            self._rotation.append([event.x(), event.y()])
+            self._rotation.append([event.pos().x(), event.pos().y()])
             rel_pos_x = self._rotation[-1][0] - self._rotation[-2][0]
             rel_pos_y = self._rotation[-1][1] - self._rotation[-2][1]
             modifiers = QtWidgets.QApplication.keyboardModifiers()
-            if modifiers == QtCore.Qt.ControlModifier:
+            if modifiers == QtCore.Qt.KeyboardModifier.ControlModifier:
                 self.angz += 2 * np.pi * rel_pos_y / STRUCTURE_PREVIEW_SIZE
                 self.angy += 2 * np.pi * rel_pos_x / STRUCTURE_PREVIEW_SIZE
             else:
@@ -1331,12 +1337,12 @@ class StructurePreview(QtWidgets.QLabel):
         """Define the action when mouse is released. If left button is
         released, the rotation stops. If right button is released, a
         new molecular target is added."""
-        if event.button() == QtCore.Qt.LeftButton:
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.rotating = False
             self._rotation = []
             # event.accept()
-        elif event.button() == QtCore.Qt.RightButton:
-            self.add_molecular_target_mouse(event.x(), event.y())
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
+            self.add_molecular_target_mouse(event.pos().x(), event.pos().y())
 
     def add_molecular_target_mouse(self, x: float, y: float) -> None:
         """Add a new molecular target at a right mouse button click.
@@ -1462,7 +1468,7 @@ class StructuresTab(QtWidgets.QDialog):
 
         length_label = QtWidgets.QLabel("Length (nm):")
         length_label.setToolTip("Scale bar length.")
-        length_label.setAlignment(QtCore.Qt.AlignRight)
+        length_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
         preview_layout.addWidget(length_label, 1, 2)
         self.scalebar_length = QtWidgets.QDoubleSpinBox()
         self.scalebar_length.setDecimals(1)
@@ -1559,7 +1565,7 @@ class StructuresTab(QtWidgets.QDialog):
             self,
             "",
             "Enter structure's title:",
-            QtWidgets.QLineEdit.Normal,
+            QtWidgets.QLineEdit.EchoMode.Normal,
             f"structure_{len(self.structures)+1}",
         )
         if ok:
@@ -1680,7 +1686,7 @@ class StructuresTab(QtWidgets.QDialog):
 
     def load_structures(self) -> None:
         """Load structures from in a .yaml file."""
-        path, _ = lib.get_save_filename_ext_dialog(
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
             "Load structures",
             directory=self.window.pwd,
@@ -1937,8 +1943,9 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         layout.addRow(self.save_check, QtWidgets.QLabel(" "))
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         vbox.addWidget(self.buttons)
@@ -1951,12 +1958,12 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         targets per simulation, number of simulations, resolution
         factor, check if the results are to be saved."""
         dialog = GenerateSearchSpaceDialog(parent)
-        result = dialog.exec_()
+        result = dialog.exec()
         return [
             int(dialog.n_sim_spin.value()),
             int(dialog.granularity_spin.value()),
             dialog.save_check.isChecked(),
-            result == QtWidgets.QDialog.Accepted,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
         ]
 
 
@@ -2086,8 +2093,9 @@ class CompareModelsDialog(QtWidgets.QDialog):
 
         # cancel/accept buttons
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.Ok | QtWidgets.QDialogButtonBox.Cancel,
-            QtCore.Qt.Horizontal,
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
             self,
         )
         layout.addWidget(self.buttons)
@@ -2100,7 +2108,7 @@ class CompareModelsDialog(QtWidgets.QDialog):
         targets: list[str],
     ) -> tuple[list[dict], list[str], dict[str, np.ndarray], bool, bool]:
         dialog = CompareModelsDialog(parent, targets)
-        result = dialog.exec_()
+        result = dialog.exec()
         label_unc = {}
         if dialog.label_unc_checkbox.isChecked():
             for target in targets:
@@ -2117,7 +2125,7 @@ class CompareModelsDialog(QtWidgets.QDialog):
             [os.path.basename(path) for path in dialog.model_paths],
             label_unc,
             dialog.save_fit_scores.isChecked(),
-            result == QtWidgets.QDialog.Accepted,
+            result == QtWidgets.QDialog.DialogCode.Accepted,
         )
 
     def on_label_unc_toggled(self, state: bool) -> None:
@@ -2869,7 +2877,8 @@ class SimulationsTab(QtWidgets.QDialog):
         self.nnd_ax.set_xlim(0, 200)
         self.nnd_canvas = FigureCanvas(self.nnd_fig)
         self.nnd_canvas.setSizePolicy(
-            QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Expanding
+            QtWidgets.QSizePolicy.Policy.Expanding,
+            QtWidgets.QSizePolicy.Policy.Expanding,
         )
         self.nnd_canvas.setMinimumSize(
             QtCore.QSize(
@@ -4661,13 +4670,13 @@ class Window(QtWidgets.QMainWindow):
         # menu bar
         file_menu = self.menuBar().addMenu("File")
         sounds_menu = file_menu.addMenu("Sound notifications")
-        sounds_actiongroup = QtWidgets.QActionGroup(self.menuBar())
+        sounds_actiongroup = QtGui.QActionGroup(self.menuBar())
         default_sound_path = lib.get_sound_notification_path()  # last used
         default_sound_name = os.path.basename(str(default_sound_path))
         for sound in lib.get_available_sound_notifications():
             sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
             action = sounds_actiongroup.addAction(
-                QtWidgets.QAction(sound_name, sounds_menu, checkable=True)
+                QtGui.QAction(sound_name, sounds_menu, checkable=True)
             )
             action.setObjectName(sound)  # store full name
             if default_sound_name == sound:
@@ -4683,14 +4692,10 @@ class Window(QtWidgets.QMainWindow):
         settings = io.load_user_settings()
         settings["SPINNA"]["PWD"] = self.pwd
         io.save_user_settings(settings)
-        QtWidgets.qApp.closeAllWindows()
+        QtWidgets.QApplication.instance().closeAllWindows()
 
 
 def main():
-    QtWidgets.QApplication.setAttribute(
-        QtCore.Qt.AA_EnableHighDpiScaling, True
-    )
-    QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
     app = QtWidgets.QApplication(sys.argv)
     window = Window()
 
@@ -4711,6 +4716,10 @@ def main():
 
     window.show()
 
+    from ..updater import setup_gui_update_check
+
+    setup_gui_update_check(window)
+
     def excepthook(type, value, tback):
         lib.cancel_dialogs()
         QtCore.QCoreApplication.instance().processEvents()
@@ -4718,12 +4727,12 @@ def main():
         errorbox = QtWidgets.QMessageBox.critical(
             window, "An error occured", message
         )
-        errorbox.exec_()
+        errorbox.exec()
         sys.__excepthook__(type, value, tback)
 
     sys.excepthook = excepthook
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":
