@@ -1,7 +1,25 @@
 Changelog
 =========
 
-Last change: 10-MAR-2026 CEST
+Last change: 24-MAR-2026 CEST
+
+0.9.10
+------
+Important updates:
+^^^^^^^^^^^^^^^^^^
+- Added support for loading BigTIFF in Picasso Localize (#631), big thanks to @boydcpeters
+
+Small improvements:
++++++++++++++++++++
+- ``picasso.aim.aim`` accepts progress as a ``lib.ProgressDialog``, ``"console"`` or ``None``
+- SPINNA GUI: Small adjustment to GUI when loading search space
+- Adjusted label in subcluster check plot
+- Subcluster check plot outputs p value and test statistic
+
+Bug fixes:
+++++++++++
+- Fixed AIM in Localize GUI
+- Fixed saving search space in SPINNA for multiple-target structures
 
 0.9.8-9
 -------

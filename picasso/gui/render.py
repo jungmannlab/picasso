@@ -6883,6 +6883,8 @@ class View(QtWidgets.QLabel):
             max_locs_per_channel.append(self.check_max_locs(i))
         params["max_locs_per_cluster"] = max_locs_per_channel
 
+        # for subcluster check plots
+        clustering_dist, sparse_dist = 25, 80  # nm
         if channel == len(self.window.view.locs):  # apply to all
             suffix_molecules, ok = QtWidgets.QInputDialog.getText(
                 self.window,
@@ -6916,11 +6918,15 @@ class View(QtWidgets.QLabel):
                     clust_events, sparse_events = clusterer.test_subclustering(
                         g5m_centers,
                         info,
+                        clustering_dist=clustering_dist,
+                        sparse_dist=sparse_dist,
                     )
                     lib.plot_subclustering_check(
                         clust_events,
                         sparse_events,
                         path.replace(".hdf5", "_subcluster_check.png"),
+                        clustering_dist=clustering_dist,
+                        sparse_dist=sparse_dist,
                     )
                 if params["clustered_locs"]:
                     path = self.window.view.locs_paths[i].replace(
@@ -6960,11 +6966,15 @@ class View(QtWidgets.QLabel):
                 clust_events, sparse_events = clusterer.test_subclustering(
                     g5m_centers,
                     info,
+                    clustering_dist=clustering_dist,
+                    sparse_dist=sparse_dist,
                 )
                 lib.plot_subclustering_check(
                     clust_events,
                     sparse_events,
                     path_molecules.replace(".hdf5", "_subcluster_check.png"),
+                    clustering_dist=clustering_dist,
+                    sparse_dist=sparse_dist,
                 )
                 # automatically save rel_sigma plot
                 lib.plot_rel_sigma_check(

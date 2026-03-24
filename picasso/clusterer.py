@@ -994,9 +994,7 @@ def test_subclustering(
     assert sparse_dist > clustering_dist, (
         "The sparse distance must be larger than the clustering " "distance."
     )
-    pixelsize = lib.get_from_metadata(info, "Pixelsize")
-    if pixelsize is None:
-        raise ValueError("Pixelsize not found in metadata.")
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
 
     # get 1st nearest neighbor distances
     if "z" in mols.columns:

@@ -562,7 +562,9 @@ class ND2Movie(AbstractPicassoMovie):
         for dim in required_dims:
             if dim not in self.nd2file.sizes.keys():
                 raise KeyError(
-                    "Required dimension {:s} not in file {:s}".format(dim, self.path)
+                    "Required dimension {:s} not in file {:s}".format(
+                        dim, self.path
+                    )
                 )
         if self.nd2file.ndim != len(required_dims):
             raise KeyError(
@@ -655,9 +657,9 @@ class ND2Movie(AbstractPicassoMovie):
         sensitivity_category2 = "Sensitivity/DynamicRange"
         info["Micro-Manager Metadata"] = {
             camera_name + "-" + sensitivity_category: readout_rate,
-            camera_name + "-" + sensitivity_category2: (
-                readout_mode + " " + conversion_gain
-            ),
+            camera_name
+            + "-"
+            + sensitivity_category2: (readout_mode + " " + conversion_gain),
             "Filter": filter,
         }
         info["Picasso Metadata"] = {
@@ -689,7 +691,9 @@ class ND2Movie(AbstractPicassoMovie):
 
         text_info = nd2file.text_info
         try:
-            mmmeta["capturing"] = self.nikontext_to_dict(text_info["capturing"])
+            mmmeta["capturing"] = self.nikontext_to_dict(
+                text_info["capturing"]
+            )
         except Exception:
             pass
         try:
@@ -697,7 +701,9 @@ class ND2Movie(AbstractPicassoMovie):
         except Exception:
             pass
         try:
-            mmmeta["description"] = self.nikontext_to_dict(text_info["description"])
+            mmmeta["description"] = self.nikontext_to_dict(
+                text_info["description"]
+            )
         except Exception:
             pass
         try:
@@ -736,11 +742,15 @@ class ND2Movie(AbstractPicassoMovie):
                 curr_keys.append(itparts[0])
                 cls.set_nested_dict_entry(out, curr_keys, {})
             elif len(itparts) == 2:
-                cls.set_nested_dict_entry(out, curr_keys + [itparts[0]], itparts[1])
+                cls.set_nested_dict_entry(
+                    out, curr_keys + [itparts[0]], itparts[1]
+                )
             elif len(itparts) == 3:
                 curr_keys.append(itparts[0])
                 cls.set_nested_dict_entry(out, curr_keys, {})
-                cls.set_nested_dict_entry(out, curr_keys + [itparts[1]], itparts[2])
+                cls.set_nested_dict_entry(
+                    out, curr_keys + [itparts[1]], itparts[2]
+                )
             elif len(itparts) > 3:
                 curr_keys.append(itparts[0])
                 cls.set_nested_dict_entry(out, curr_keys, {})
@@ -953,7 +963,9 @@ class ND2Movie(AbstractPicassoMovie):
                 if channel in channels:
                     wavelength = channels[channel]
                     parameters["wavelength"] = str(wavelength)
-                    parameters["qe"] = cam_config["Quantum Efficiency"][wavelength]
+                    parameters["qe"] = cam_config["Quantum Efficiency"][
+                        wavelength
+                    ]
         if "qe" not in parameters.keys():
             parameters["qe"] = [1]
         if "wavelength" not in parameters.keys():
@@ -1038,7 +1050,9 @@ class TiffMap:
             self.file.seek(8)
             self.first_ifd_offset = self.read("Q")
         else:
-            raise ValueError(f"Not a valid TIFF file (magic number={magic}): {path}")
+            raise ValueError(
+                f"Not a valid TIFF file (magic number={magic}): {path}"
+            )
 
         # Read info from first IFD.
         # Entry layout per IFD entry:
@@ -1048,7 +1062,9 @@ class TiffMap:
         n_entries = self.read(self._n_entries_type)
         for i in range(n_entries):
             self.file.seek(
-                self.first_ifd_offset + self._ifd_count_size + i * self._entry_size
+                self.first_ifd_offset
+                + self._ifd_count_size
+                + i * self._entry_size
             )
             tag = self.read("H")
             type = self.TIFF_TYPES[self.read("H")]
@@ -1075,7 +1091,9 @@ class TiffMap:
         # Collect image offsets by walking the IFD chain.
         self.image_offsets = []
         offset = self.first_ifd_offset
-        last_offset = self.first_ifd_offset  # safe fallback if first read fails
+        last_offset = (
+            self.first_ifd_offset
+        )  # safe fallback if first read fails
         while offset != 0:
             self.file.seek(offset)
             n_entries = self.read(self._n_entries_type)
@@ -1083,7 +1101,9 @@ class TiffMap:
                 # Some MM files have trailing nonsense bytes
                 break
             for i in range(n_entries):
-                self.file.seek(offset + self._ifd_count_size + i * self._entry_size)
+                self.file.seek(
+                    offset + self._ifd_count_size + i * self._entry_size
+                )
                 tag = self.read("H")
                 if tag == 273:
                     type = self.TIFF_TYPES[self.read("H")]
@@ -1093,8 +1113,12 @@ class TiffMap:
 
             # Seek to the next-IFD pointer, which sits immediately after
             # all entries. Its width is _offset_type (4 or 8 bytes).
-            self.file.seek(offset + self._ifd_count_size + n_entries * self._entry_size)
-            last_offset = offset + self._ifd_count_size + n_entries * self._entry_size
+            self.file.seek(
+                offset + self._ifd_count_size + n_entries * self._entry_size
+            )
+            last_offset = (
+                offset + self._ifd_count_size + n_entries * self._entry_size
+            )
             offset = self.read(self._offset_type)
         self.n_frames = len(self.image_offsets)
         self.last_ifd_offset = last_offset
@@ -1135,7 +1159,9 @@ class TiffMap:
                 indices = range(*it.indices(self.n_frames))
                 return np.array([self.get_frame(_) for _ in indices])
             elif it == Ellipsis:
-                return np.array([self.get_frame(_) for _ in range(self.n_frames)])
+                return np.array(
+                    [self.get_frame(_) for _ in range(self.n_frames)]
+                )
             elif isinstance(it, int) or np.issubdtype(it, np.integer):
                 return self.get_frame(it)
             raise TypeError
@@ -1165,7 +1191,9 @@ class TiffMap:
         n_entries = self.read(self._n_entries_type)
         for i in range(n_entries):
             self.file.seek(
-                self.first_ifd_offset + self._ifd_count_size + i * self._entry_size
+                self.first_ifd_offset
+                + self._ifd_count_size
+                + i * self._entry_size
             )
             tag = self.read("H")
             type = self.TIFF_TYPES[self.read("H")]
@@ -1294,7 +1322,9 @@ class TiffMultiMap(AbstractPicassoMovie):
         matches = [re.match(pattern, _) for _ in entries]
         matches = [_ for _ in matches if _ is not None]
         paths_indices = [(int(_.group(1)), _.group(0)) for _ in matches]
-        self.paths = [self.path] + [path for index, path in sorted(paths_indices)]
+        self.paths = [self.path] + [
+            path for index, path in sorted(paths_indices)
+        ]
         self.maps = [TiffMap(path, verbose=verbose) for path in self.paths]
         self.n_maps = len(self.maps)
         self.n_frames_per_map = [_.n_frames for _ in self.maps]
@@ -1433,8 +1463,13 @@ class TiffMultiMap(AbstractPicassoMovie):
             gain = mm_info[camera + "-" + gain_property_name]
             if "EM Switch Property" in cam_config:
                 switch_property_name = cam_config["EM Switch Property"]["Name"]
-                switch_property_value = mm_info[camera + "-" + switch_property_name]
-                if switch_property_value == cam_config["EM Switch Property"][True]:
+                switch_property_value = mm_info[
+                    camera + "-" + switch_property_name
+                ]
+                if (
+                    switch_property_value
+                    == cam_config["EM Switch Property"][True]
+                ):
                     parameters["gain"] = int(gain)
         if "gain" not in parameters.keys():
             parameters["gain"] = [1]
@@ -1454,7 +1489,9 @@ class TiffMultiMap(AbstractPicassoMovie):
                 if channel in channels:
                     wavelength = channels[channel]
                     parameters["wavelength"] = [str(wavelength)]
-                    parameters["qe"] = [cam_config["Quantum Efficiency"][wavelength]]
+                    parameters["qe"] = [
+                        cam_config["Quantum Efficiency"][wavelength]
+                    ]
         if "qe" not in parameters.keys():
             parameters["qe"] = [1]
         if "wavelength" not in parameters.keys():
@@ -1528,7 +1565,9 @@ def get_movie_groups(paths: list[str]) -> dict[str, list[str]]:
                 match_info["index"] = int(match_info["index"])
         basenames = set([_["base"] for _ in match_infos])
         for basename in basenames:
-            match_infos_group = [_ for _ in match_infos if _["base"] == basename]
+            match_infos_group = [
+                _ for _ in match_infos if _["base"] == basename
+            ]
             group = [_["path"] for _ in match_infos_group]
             indices = [_["index"] for _ in match_infos_group]
             group = [path for (index, path) in sorted(zip(indices, group))]
@@ -1772,7 +1811,9 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         )
 
 
-def export_xyz_chimera(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
+def export_xyz_chimera(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> None:
     """Export localizations as .xyz for CHIMERA. The file contains
     only x, y, z. Raise a warning if no z coordinate found.
 
@@ -1837,7 +1878,9 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         )
 
 
-def export_thunderstorm(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
+def export_thunderstorm(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> None:
     """Export localizations as .csv for ThunderSTORM.
 
     Parameters
@@ -1873,7 +1916,9 @@ def export_thunderstorm(path: str, locs: pd.DataFrame, info: list[dict]) -> None
     loctxt["id"] = np.arange(len(loctxt), dtype=np.int32)
     loctxt[["x", "y", "sx", "sy"]] *= pixelsize
     loctxt["bkgstd [photon]"] = 0
-    loctxt["uncertainty_xy [nm]"] = (loctxt["lpx"] + loctxt["lpy"]) / 2 * pixelsize
+    loctxt["uncertainty_xy [nm]"] = (
+        (loctxt["lpx"] + loctxt["lpy"]) / 2 * pixelsize
+    )
     column_mapper = {
         "x": "x [nm]",
         "y": "y [nm]",
