@@ -31,6 +31,7 @@ from matplotlib.backends.backend_qt5agg import (
 )
 from PyQt5 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
+from tqdm import tqdm
 
 from picasso import io
 
@@ -131,6 +132,12 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
                 playsound(self.sound_notification_path, block=False)
 
+    def get_iterator(self, start=None, end=None):
+        """Get an iterator for the progress dialog."""
+        start = self.value() if start is None else start
+        end = self.maximum() if end is None else end
+        return range(start, end)
+
 
 class StatusDialog(QtWidgets.QDialog):
     """StatusDialog displays the description string in a dialog."""
@@ -178,7 +185,7 @@ class MockProgress:
     def closeEvent(self, *args, **kwargs):
         pass
 
-    def zero_progress(self, *args, **kwargs):
+    def zero_progress(self, description, *args, **kwargs):
         pass
 
     def close(self, *args, **kwargs):
@@ -189,6 +196,58 @@ class MockProgress:
 
     def play_sound_notification(self, *args, **kwargs):
         pass
+
+    def get_iterator(self, start=0, end=100):
+        return range(start, end)
+
+
+class TqdmProgress:
+    """Class to absorb calls to ProgressDialog but is used to display
+    tqdm progress bar instead."""
+
+    def __init__(self, *args, **kwargs):
+        self.description_base = (
+            "" if "description" not in kwargs else kwargs["description"]
+        )
+        self.iterator = None
+
+    def init(self, *args, **kwargs):
+        pass
+
+    def set_value(self, value, *args, **kwargs):
+        if self.iterator is not None:
+            self.iterator.update(value - self.iterator.n)
+
+    def setMaximum(self, *args, **kwargs):
+        pass
+
+    def update(self, *args, **kwargs):
+        pass
+
+    def closeEvent(self, *args, **kwargs):
+        pass
+
+    def zero_progress(self, description, *args, **kwargs):
+        self.description_base = description
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def setLabelText(self, *args, **kwargs):
+        pass
+
+    def play_sound_notification(self, *args, **kwargs):
+        pass
+
+    def get_iterator(self, start=0, end=100, unit="segment"):
+        """Get an iterator for the progress bar."""
+        iterator = tqdm(
+            range(start, end),
+            desc=self.description_base,
+            unit=unit,
+        )
+        self.iterator = iterator
+        return iterator
 
 
 class ScrollableGroupBox(QtWidgets.QGroupBox):

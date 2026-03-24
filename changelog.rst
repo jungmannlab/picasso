@@ -1,7 +1,20 @@
 Changelog
 =========
 
-Last change: 10-MAR-2026 CEST
+Last change: 24-MAR-2026 CEST
+
+0.9.10
+------
+Important updates:
+^^^^^^^^^^^^^^^^^^
+
+Small improvements:
++++++++++++++++++++
+- ``picasso.aim.aim`` accepts progress as a ``lib.ProgressDialog``, ``"console"`` or ``None``
+
+Bug fixes:
+++++++++++
+- Fixed AIM in Localize GUI
 
 0.9.8-9
 -------

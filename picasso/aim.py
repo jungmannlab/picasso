@@ -383,7 +383,9 @@ def intersection_max(
     roi_r: float,
     width: int,
     aim_round: int = 1,
-    progress: Callable[[int], None] | Literal["console"] | None = None,
+    progress: (
+        lib.ProgressDialog | lib.TqdmProgress | lib.MockProgress | None
+    ) = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Maximize intersection (undrift) for 2D localizations.
 
@@ -410,9 +412,10 @@ def intersection_max(
         as reference, the second round uses the entire dataset as
         reference. The impact is that in the second round, the first
         interval is also undrifted.
-    progress : lib.ProgressDialog or "console" or None, optional
-        Progress dialog. If "console", progress is displayed with tqdm.
-        If None, progress is not displayed. Default is None.
+    progress : lib.ProgressDialog | lib.TqdmProgress | lib.MockProgress \
+        | None, optional
+        Progress dialog. If TqdmProgress, progress is displayed with tqdm.
+        If None or MockProgress, progress is not displayed. Default is None.
 
     Returns
     -------
@@ -458,14 +461,7 @@ def intersection_max(
 
     # initialize progress such that if GUI is used, tqdm is omitted
     start_idx = 1 if aim_round == 1 else 0
-    if progress != "console":
-        iterator = range(start_idx, n_segments)
-    else:
-        iterator = tqdm(
-            range(start_idx, n_segments),
-            desc=f"Undrifting ({aim_round}/2)",
-            unit="segment",
-        )
+    iterator = progress.get_iterator(start_idx, n_segments)
 
     # run across each segment
     for s in iterator:
@@ -509,10 +505,7 @@ def intersection_max(
         drift_y[s] = -rel_drift_y
 
         # update progress
-        if progress != "console":
-            progress.set_value(s)
-        else:
-            iterator.update(s - iterator.n)
+        progress.set_value(s)
 
     # interpolate the drifts (cubic spline) for all frames
     t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
@@ -544,7 +537,9 @@ def intersection_max_z(
     height: int,
     pixelsize: float,
     aim_round: int = 1,
-    progress: Callable[[int], None] | None = None,
+    progress: (
+        lib.ProgressDialog | lib.TqdmProgress | lib.MockProgress | None
+    ) = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Maximize intersection (undrift) for 3D localizations. Assumes
     that x and y coordinates were already undrifted. x and y are in
@@ -583,14 +578,7 @@ def intersection_max_z(
 
     # initialize progress such that if GUI is used, tqdm is omitted
     start_idx = 1 if aim_round == 1 else 0
-    if progress is not None:
-        iterator = range(start_idx, n_segments)
-    else:
-        iterator = tqdm(
-            range(start_idx, n_segments),
-            desc=f"Undrifting z ({aim_round}/2)",
-            unit="segment",
-        )
+    iterator = progress.get_iterator(start_idx, n_segments)
 
     # run across each segment
     for s in iterator:
@@ -632,10 +620,7 @@ def intersection_max_z(
         drift_z[s] = -rel_drift_z
 
         # update progress
-        if progress is not None:
-            progress.set_value(s)
-        else:
-            iterator.update(s - iterator.n)
+        progress.set_value(s)
 
     # interpolate the drifts (cubic spline) for all frames
     t = (seg_bounds[1:] + seg_bounds[:-1]) / 2
@@ -659,7 +644,7 @@ def aim(
     segmentation: int = 100,
     intersect_d: float = 20 / 130,
     roi_r: float = 60 / 130,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.ProgressDialog | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Apply AIM undrifting to the localizations.
 
@@ -676,9 +661,9 @@ def aim(
     roi_r : float
         Radius of the local search region in camera pixels. Should be
         larger than the  maximum expected drift within segmentation.
-    progress : picasso.lib.ProgressDialog, optional
-        Progress dialog. If None, progress is displayed with into the
-        console. Default is None.
+    progress : picasso.lib.ProgressDialog or "console" or None, optional
+        Progress dialog. If "console", progress is displayed in the
+        console. If None, no progress is displayed. Default is None.
 
     Returns
     -------
@@ -689,6 +674,16 @@ def aim(
     drift : pd.DataFrame
         Drift in x and y directions (and z if applicable).
     """
+    assert (
+        progress is None
+        or progress == "console"
+        or isinstance(progress, lib.ProgressDialog)
+    ), "progress must be None, 'console', or a ProgressDialog instance."
+    if progress is None:
+        progress = lib.MockProgress()
+    elif progress == "console":
+        progress = lib.TqdmProgress(description="Undrifting by AIM (1/2)")
+
     locs = locs.copy()
     # extract metadata
     width = lib.get_from_metadata(info, "Width", raise_error=True)
@@ -724,8 +719,7 @@ def aim(
         progress=progress,
     )
     # the second run is with the entire dataset as reference
-    if progress is not None:
-        progress.zero_progress(description="Undrifting by AIM (2/2)")
+    progress.zero_progress(description="Undrifting by AIM (2/2)")
     x_pdc, y_pdc, drift_x2, drift_y2 = intersection_max(
         x_pdc,
         y_pdc,
@@ -754,8 +748,7 @@ def aim(
 
     # 3D undrifting
     if "z" in locs.columns:
-        if progress is not None:
-            progress.zero_progress(description="Undrifting z (1/2)")
+        progress.zero_progress(description="Undrifting z (1/2)")
         ref_x = x_pdc[frame <= segmentation]
         ref_y = y_pdc[frame <= segmentation]
         ref_z = locs["z"][frame <= segmentation]
@@ -776,8 +769,7 @@ def aim(
             aim_round=1,
             progress=progress,
         )
-        if progress is not None:
-            progress.zero_progress(description="Undrifting z (2/2)")
+        progress.zero_progress(description="Undrifting z (2/2)")
         z_pdc, drift_z2 = intersection_max_z(
             x_pdc,
             y_pdc,
@@ -812,7 +804,6 @@ def aim(
     locs["y"] = y_pdc
     if "z" in locs.columns:
         locs["z"] = z_pdc
-
     new_info = {
         "Generated by": f"Picasso v{__version__} AIM",
         "Intersect distance (nm)": intersect_d * pixelsize,
@@ -820,8 +811,5 @@ def aim(
         "Search regions radius (nm)": roi_r * pixelsize,
     }
     new_info = info + [new_info]
-
-    if progress is not None:
-        progress.close()
-
+    progress.close()
     return locs, new_info, drift

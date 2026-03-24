@@ -2554,6 +2554,7 @@ class Window(QtWidgets.QMainWindow):
                 self.locs,
                 self.extra_info,
                 aim_segmentation,
+                progress=None,
             )
             self.locs = undrift_locs
             self.extra_info = new_info
