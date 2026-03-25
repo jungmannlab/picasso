@@ -15,7 +15,7 @@ Picasso
 .. image:: https://static.pepy.tech/personalized-badge/picassosr?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads
  :target: https://pepy.tech/project/picassosr
 
-.. image:: main_render.png
+.. image:: https://raw.githubusercontent.com/jungmannlab/picasso/master/main_render.png
    :width: 750
    :height: 564
    :alt: UML Render view
