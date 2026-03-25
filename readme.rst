@@ -24,13 +24,9 @@ Collection of tools for painting super-resolution images. The Picasso software i
 
 A comprehensive documentation can be found here: `Read the Docs <https://picassosr.readthedocs.io/en/latest/?badge=latest>`__.
 
-Picasso 0.9.5
----------------
-In this version, a new algorithm for molecular mapping (G5M) was introduced. Additionally, axial localization precision for astigmatic 3D imaging is now calculated and saved when using Picasso Localize. DOI: `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__.
-
-Picasso 0.9
------------
-In this version, localizations (and other ``.hdf5`` files) are read using ``pandas.read_hdf`` rather than converting an ``h5py.File`` object to a numpy recarray. Thus, rather than ``numpy.recarray``, localizations are now ``pandas.DataFrame`` objects. **This change may cause backward compatibility issues if you are using Picasso as a package (downloaded from PyPI).**
+Picasso 0.10
+------------
+In this version, a lot of new architectural (behind the scenes) changes were introduced to make Picasso more modular, maintainable and accessible to both developers and end-users. The adaptations include flexible dependencies and Python versions, etc. You are invited to explore these improvements `here <https://github.com/jungmannlab/picasso/blob/master/changelog.rst>`_.
 
 Changelog
 ---------
@@ -39,19 +35,16 @@ To see all changes introduced across releases, see `here <https://github.com/jun
 Installation
 ------------
 
-Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows. Here you will also find the Nature Protocols legacy version. 
+Check out the `Picasso release page <https://github.com/jungmannlab/picasso/releases/>`__ to download and run the latest compiled one-click installer for Windows or MacOS (the latter is experimental and feedback is welcome). Here you will also find the Nature Protocols legacy version (v0.1.0).
 
-For the platform-independent usage of Picasso (e.g., with Linux and Mac Os X), please follow the advanced installation instructions below.
+Python is also distributed as a PyPI package that is platform-independent (``pip install picassosr``) which grants not only GUI but also access to Picasso’s internal routines in custom Python programs. For more details, see the "Via PyPI" section below. For examples of how to use Picasso in Python scripts, see the section "Example Usage" below.
 
-Other installation modes (Python 3.10)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-As an alternative to the stand-alone program for end-users, Picasso can be installed as a Python package. This is the preferred option to use Picasso’s internal routines in custom Python programs. Those can be imported by running, for example, ``from picasso import io`` (see the "Example usage" tab below) to use input/output functions from Picasso. For windows, it is still possible to use Picasso as an end-user by creating the respective shortcuts. This allows Picasso to be used on the same system by both programmers and end-users.
+Note: Since v0.10.0 Picasso is more flexible in terms of dependencies and Python versions. Previously only Python 3.10 was supported, now newer versions are encouraged.
 
 Via PyPI
 ^^^^^^^^
 
-1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
+1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.14``. Note you can use other Python versions as well.
 2. Activate the environment: ``conda activate picasso``.
 3. Install Picasso package using: ``pip install picassosr``.
 4. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
@@ -61,21 +54,20 @@ For Developers (local, editable installation)
 
 If you wish to use your local version of Picasso with your own modifications:
 
-1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.10``
+1. Open the console/terminal and create a new conda environment: ``conda create --name picasso python=3.14``. Note you can use other Python versions as well.
 2. Activate the environment: ``conda activate picasso``.
 3. Change to the directory of choice using ``cd``.
 4. Clone this GitHub repository by running ``git clone https://github.com/jungmannlab/picasso``. Alternatively, `download <https://github.com/jungmannlab/picasso/archive/master.zip>`__ the zip file and unzip it.
 5. Open the Picasso directory: ``cd picasso``.
 6. You can modify Picasso code in this directory.
 7. To create a *local* Picasso package to use it in other Python scripts, run ``pip install -e ".[dev]"``. When you change the code in the ``picasso`` directory, the changes will be reflected in the package.
-8. You can now run any Picasso function directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
+8. You can now run any Picasso module directly from the console/terminal by running: ``picasso render``, ``picasso localize``, etc, or import Picasso functions in your own Python scripts.
 
 Optional packages
 ^^^^^^^^^^^^^^^^^
 
 Regardless of whether Picasso was installed via PyPI or by cloning the GitHub repository, some packages may be additionally installed to allow extra functionality:
 
-- ``pip install pyinstaller`` if you plan to additionally compile your own installer with `Pyinstaller <https://pyinstaller.org/en/stable/>`__.
 - *(Windows only)* ``pip install PyImarisWriter==0.7.0`` to enable .ims files in Localize and Render. Note that ``PyImarisWriter`` has been tested only on Windows.
 - *(Windows only)* To enable GPU least-squares fitting in Localize, follow instructions on `Gpufit <https://github.com/gpufit/Gpufit>`__ to install the Gpufit python library in your conda environment. In practice, this means downloading the zipfile from the `release page <https://github.com/gpufit/Gpufit/releases>`__ (non-cublas version, i.e., the lighter file) and installing the Python wheel (see instructions in the zipfile). Picasso Localize will automatically import the library if present and enables a checkbox for GPU fitting when selecting the LQ-Method.
 
@@ -102,7 +94,7 @@ Besides using the GUI, you can use picasso like any other Python module. Conside
   path = 'testdata_locs.hdf5'
   locs, info = io.load_locs(path)
   
-  # Link localizations and calcualte dark times
+  # Link localizations and calculate dark times
   linked_locs = postprocess.link(picked_locs, info, r_max=0.05, max_dark_time=1)
   linked_locs_dark = postprocess.compute_dark_times(linked_locs)
 
