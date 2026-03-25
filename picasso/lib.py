@@ -29,8 +29,10 @@ from matplotlib.backends.backend_qt5agg import (
     FigureCanvas,
     NavigationToolbar2QT,
 )
+from scipy import stats
 from PyQt6 import QtCore, QtWidgets, QtGui
 from playsound3 import playsound
+from tqdm import tqdm
 
 from picasso import io
 
@@ -131,6 +133,12 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
                 playsound(self.sound_notification_path, block=False)
 
+    def get_iterator(self, start=None, end=None):
+        """Get an iterator for the progress dialog."""
+        start = self.value() if start is None else start
+        end = self.maximum() if end is None else end
+        return range(start, end)
+
 
 class StatusDialog(QtWidgets.QDialog):
     """StatusDialog displays the description string in a dialog."""
@@ -178,7 +186,7 @@ class MockProgress:
     def closeEvent(self, *args, **kwargs):
         pass
 
-    def zero_progress(self, *args, **kwargs):
+    def zero_progress(self, description, *args, **kwargs):
         pass
 
     def close(self, *args, **kwargs):
@@ -189,6 +197,58 @@ class MockProgress:
 
     def play_sound_notification(self, *args, **kwargs):
         pass
+
+    def get_iterator(self, start=0, end=100):
+        return range(start, end)
+
+
+class TqdmProgress:
+    """Class to absorb calls to ProgressDialog but is used to display
+    tqdm progress bar instead."""
+
+    def __init__(self, *args, **kwargs):
+        self.description_base = (
+            "" if "description" not in kwargs else kwargs["description"]
+        )
+        self.iterator = None
+
+    def init(self, *args, **kwargs):
+        pass
+
+    def set_value(self, value, *args, **kwargs):
+        if self.iterator is not None:
+            self.iterator.update(value - self.iterator.n)
+
+    def setMaximum(self, *args, **kwargs):
+        pass
+
+    def update(self, *args, **kwargs):
+        pass
+
+    def closeEvent(self, *args, **kwargs):
+        pass
+
+    def zero_progress(self, description, *args, **kwargs):
+        self.description_base = description
+
+    def close(self, *args, **kwargs):
+        pass
+
+    def setLabelText(self, *args, **kwargs):
+        pass
+
+    def play_sound_notification(self, *args, **kwargs):
+        pass
+
+    def get_iterator(self, start=0, end=100, unit="segment"):
+        """Get an iterator for the progress bar."""
+        iterator = tqdm(
+            range(start, end),
+            desc=self.description_base,
+            unit=unit,
+        )
+        self.iterator = iterator
+        return iterator
 
 
 class ScrollableGroupBox(QtWidgets.QGroupBox):
@@ -1385,11 +1445,52 @@ def pick_areas_rectangle(
     return areas
 
 
+def permutation_test(
+    arr1: np.ndarray, arr2: np.ndarray, iterations: int = 1000
+) -> tuple[float, float, float]:
+    """Perform a permutation test to compare two arrays. The test
+    statistic is the Kolmogorov-Smirnov statistic.
+
+    Parameters
+    ----------
+    arr1, arr2 : np.ndarray
+        Arrays to be compared.
+    iterations : int, optional
+        Number of permutations to perform. Default is 1000.
+
+    Returns
+    -------
+    obs_d : float
+        Observed KS statistic.
+    p_perm : float
+        Permutation p-value.
+    ks_pval : float
+        KS test theoretical p-value.
+    """
+    combined = np.concatenate([arr1, arr2])
+    n1 = len(arr1)
+
+    # observe the real difference
+    obs_d, ks_pval = stats.ks_2samp(arr1, arr2)
+
+    # build null distribution by shuffling
+    null_dist = []
+    for _ in range(iterations):
+        shuffled = np.random.permutation(combined)
+        d_perm, _ = stats.ks_2samp(shuffled[:n1], shuffled[n1:])
+        null_dist.append(d_perm)
+
+    p_perm = np.sum(np.array(null_dist) >= obs_d) / iterations
+    return obs_d, p_perm, ks_pval
+
+
 def plot_subclustering_check(
     clustered_n_events: np.ndarray,
     sparse_n_events: np.ndarray,
     plot_path: str | list[str] = "",
     return_fig: bool = False,
+    clustering_dist: float | None = None,
+    sparse_dist: float | None = None,
 ) -> tuple[plt.Figure, plt.Axes] | tuple[None, None]:
     """Plot the results of subclustering analysis, see
     ``picasso.clusterer.test_subclustering``.
@@ -1406,6 +1507,9 @@ def plot_subclustering_check(
         is "".
     return_fig : bool, optional
         If True, the figure and axes are returned. Default is False.
+    clustering_dist, sparse_dist : float, optional
+        Clustering and sparse distances that are displayed in the
+        legend. If None, distances are not displayed. Default is None.
 
     Returns
     -------
@@ -1419,31 +1523,48 @@ def plot_subclustering_check(
     s_sparse = sparse_n_events.std()
 
     # create the plot
-    fig, ax1 = plt.subplots(1, figsize=(6, 3), constrained_layout=True)
+    fig, ax1 = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
     min_bin, max_bin = np.percentile(clustered_n_events, [2.5, 97.5])
     vals, counts = np.unique(clustered_n_events, return_counts=True)
+    if clustering_dist is not None:
+        label = f"Clustered (d < {clustering_dist:.1f} nm) {m_clustered:.1f} +/- {s_clustered:.1f}"
+    else:
+        label = f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}"
     ax1.bar(
         vals,
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Clustered {m_clustered:.1f} +/- {s_clustered:.1f}",
+        label=label,
         color="C0",
     )
     ax1.axvline(m_clustered, color="C0", linestyle="--")
     vals, counts = np.unique(sparse_n_events, return_counts=True)
+    if sparse_dist is not None:
+        label = f"Sparse (d > {sparse_dist:.1f} nm) {m_sparse:.1f} +/- {s_sparse:.1f}"
+    else:
+        label = f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}"
     ax1.bar(
         vals,
         counts,
         width=0.8,
         alpha=0.5,
-        label=f"Sparse {m_sparse:.1f} +/- {s_sparse:.1f}",
+        label=label,
         color="C1",
     )
     ax1.axvline(m_sparse, color="C1", linestyle="--")
     ax1.set_xlabel("Number of events")
     ax1.set_ylabel("Counts")
     ax1.set_xlim(min_bin - 1, max_bin + 1)
+    # add stat. tests in the title:
+    stat, p_perm, p = permutation_test(clustered_n_events, sparse_n_events)
+    p_value_str = r"$p_{value}$"
+    title = (
+        f"KS test: stat={stat:.4f}\n"
+        f"permutation {p_value_str}={p_perm:.4f}\n"
+        f"theoretical {p_value_str}={p:.4f}"
+    )
+    ax1.set_title(title, fontsize=10)
     ax1.legend()
     if len(plot_path):
         if isinstance(plot_path, str):

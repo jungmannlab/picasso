@@ -1906,7 +1906,9 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         Checkbox for saving the results as a .csv file.
     """
 
-    def __init__(self, sim_tab: QtWidgets.QWidget) -> None:
+    def __init__(
+        self, sim_tab: QtWidgets.QWidget, loading_dialog: bool = False
+    ) -> None:
         super().__init__(sim_tab)
         self.setWindowTitle("Enter parameters")
         vbox = QtWidgets.QVBoxLayout(self)
@@ -1940,6 +1942,8 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
             "Save the resulting search space as a .csv file?"
         )
         self.save_check.setChecked(False)
+        if loading_dialog:
+            self.save_check.setVisible(False)
         layout.addRow(self.save_check, QtWidgets.QLabel(" "))
 
         self.buttons = QtWidgets.QDialogButtonBox(
@@ -1953,11 +1957,15 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         self.buttons.rejected.connect(self.reject)
 
     @staticmethod
-    def getParams(parent: QtWidgets.QWidget) -> list:
+    def getParams(
+        parent: QtWidgets.QWidget, loading_dialog: bool = False
+    ) -> list:
         """Create the dialog and returns the numbers of molecular
         targets per simulation, number of simulations, resolution
         factor, check if the results are to be saved."""
-        dialog = GenerateSearchSpaceDialog(parent)
+        dialog = GenerateSearchSpaceDialog(
+            parent, loading_dialog=loading_dialog
+        )
         result = dialog.exec()
         return [
             int(dialog.n_sim_spin.value()),
@@ -3553,23 +3561,31 @@ class SimulationsTab(QtWidgets.QDialog):
                     structure_name: np.int32(df[f"N_{structure_name}"])
                     for structure_name in titles
                 }
-                # get granularity and n_sim_fit from the user
-                n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
-                    self,
-                    "",
-                    "Number of simulations per tested combination",
-                    value=10,
-                    min=1,
-                    max=1000,
-                    step=1,
+                # # get granularity and n_sim_fit from the user
+                # n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
+                #     self,
+                #     "",
+                #     "Number of simulations per tested combination",
+                #     value=10,
+                #     min=1,
+                #     max=1000,
+                #     step=1,
+                # )
+                # if not ok:
+                #     return
+                # granularity, ok = QtWidgets.QInputDialog.getInt(
+                #     self, "", "Granularity", value=21, min=1, max=1000, step=1
+                # )
+                # if not ok:
+                #     return
+                n_sim_fit, granularity, _, ok = (
+                    GenerateSearchSpaceDialog.getParams(
+                        self, loading_dialog=True
+                    )
                 )
                 if not ok:
                     return
-                granularity, ok = QtWidgets.QInputDialog.getInt(
-                    self, "", "Granularity", value=21, min=1, max=1000, step=1
-                )
-                if not ok:
-                    return
+
                 self.n_sim_fit = n_sim_fit
                 self.granularity = granularity
                 # update the generate n structures button
