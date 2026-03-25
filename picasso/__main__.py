@@ -514,6 +514,7 @@ def _undrift_aim(
             segmentation,
             intersectdist,
             roiradius,
+            progress="console",
         )
         base, ext = os.path.splitext(path)
         io.save_locs(base + "_aim.hdf5", locs, new_info)
