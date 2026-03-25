@@ -10,7 +10,8 @@ call conda activate picasso_installer
 call pip install build
 call python -m build
 
-call pip install "dist/picassosr-0.9.10-py3-none-any.whl[installer]"
+for /f %%i in ('python -c "from picasso.version import __version__; print(__version__)"') do set PICASSO_VERSION=%%i
+call pip install "dist/picassosr-%PICASSO_VERSION%-py3-none-any.whl[installer]"
 call cd release/one_click_windows_gui
 
 call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
@@ -37,4 +38,4 @@ call conda deactivate
 call conda remove -n picasso_installer --all -y
 
 copy dist\picassow\picassow.exe dist\picasso\picassow.exe
-call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" picasso_innoinstaller.iss
+call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAPP_VERSION=%PICASSO_VERSION% picasso_innoinstaller.iss

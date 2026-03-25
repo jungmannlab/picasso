@@ -21,6 +21,7 @@ Last change: 25-MAR-2026 CEST
 - Render GUI: show NeNA/FRC plot automatically calculates them if not done already
 - Adjusted installation instructions
 - Badges added to the GitHub repository (PyPI version and Python version)
+- Only ``picasso.version.py`` determines software version globally, thus ``bumpversion`` is not needed anymore
 
 *Bug fixes:*
 ++++++++++++
