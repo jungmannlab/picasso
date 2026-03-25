@@ -45,8 +45,7 @@ conda activate installer
 pip install build
 cd ../..
 python -m build
-pip install dist/picassosr-$VERSION-py3-none-any.whl
-pip install pyinstaller==6.19
+pip install dist/picassosr-$VERSION-py3-none-any.whl[installer]
 cd release/one_click_macos_gui
 
 # -----------------------------------------------------------------------------
