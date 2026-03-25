@@ -10,10 +10,19 @@ Picasso
 
 .. image:: http://img.shields.io/badge/DOI-10.1038/nprot.2017.024-52c92e.svg
    :target: https://doi.org/10.1038/nprot.2017.024
-   :alt: CI
+   :alt: DOI
 
 .. image:: https://static.pepy.tech/personalized-badge/picassosr?period=total&units=international_system&left_color=black&right_color=brightgreen&left_text=Downloads
- :target: https://pepy.tech/project/picassosr
+   :target: https://pepy.tech/project/picassosr
+   :alt: Downloads
+
+ .. image:: https://img.shields.io/pypi/pyversions/picassosr
+   :target: https://pypi.org/project/picassosr/
+   :alt: Python versions
+
+.. image:: https://img.shields.io/pypi/v/picassosr
+   :target: https://pypi.org/project/picassosr/
+   :alt: PyPI version
 
 .. image:: main_render.png
    :width: 750
