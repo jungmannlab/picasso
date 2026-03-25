@@ -14,7 +14,7 @@ maintainers = [{name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com
 keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
 description = "Collection of tools for painting super-resolution images"
 readme = "readme.rst"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.15"
 license = "MIT"
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -28,26 +28,26 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "PyQt6>=6.10.2",
-    "numpy>=2.2.6",
-    "matplotlib>=3.10.7",
-    "h5py>=3.15.1",
-    "numba>=0.62.1",
-    "scipy>=1.15.3",
-    "pandas>=2.3.3",
-    "tables>=3.10.1",
-    "pyyaml>=6.0.3",
-    "scikit-learn>=1.7.2",
-    "tqdm>=4.67.1",
-    "streamlit>=1.50.0",
-    "nd2>=0.10.4",
-    "sqlalchemy>=2.0.44",
-    "plotly-express>=0.4.1",
-    "watchdog>=6.0.0",
-    "psutil>=7.1.1",
-    "playsound3>=3.2.8",
-    "imageio>=2.37.0",
-    "imageio-ffmpeg>=0.6.0",
+    "PyQt6>=6.10.2,<7",  # prevent backwards incompatible changes
+    "numpy>=2.2.6,<3",
+    "matplotlib>=3.10.7,<4",
+    "h5py>=3.15.1,<4",
+    "numba>=0.62.1,<1",
+    "scipy>=1.15.3,<2",
+    "pandas>=2.3.3,<3",
+    "tables>=3.10.1,<4",
+    "pyyaml>=6.0.3,<7",
+    "scikit-learn>=1.7.2,<2",
+    "tqdm>=4.67.1,<5",
+    "streamlit>=1.50.0,<2",
+    "nd2>=0.10.4,<1",
+    "sqlalchemy>=2.0.44,<3",
+    "plotly-express>=0.4.1,<1",
+    "watchdog>=6.0.0,<7",
+    "psutil>=7.1.1,<8",
+    "playsound3>=3.2.8,<4",
+    "imageio>=2.37.0,<3",
+    "imageio-ffmpeg>=0.6.0,<1",
     "PyImarisWriter==0.7.0; sys_platform=='win32'"
 ]
 
