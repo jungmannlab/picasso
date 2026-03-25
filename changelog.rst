@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 20-MAR-2026 CEST
+Last change: 25-MAR-2026 CEST
 
 0.10.0
 ------
@@ -17,11 +17,13 @@ Last change: 20-MAR-2026 CEST
 +++++++++++++++++++++
 - G5M calculated more accurate sigma constraints in 3D
 - Adjusted default parameters in Average
+- Render GUI: show NeNA/FRC plot automatically calculates them if not done already
 
 *Bug fixes:*
 ++++++++++++
 - Fixed 3D render screenshot metadata
 - Fixed ToRaw
+- Fixed distances in NeNA plot (previously plotting multiple times kept increasing the values)
 
 *Deprecation warnings:*
 +++++++++++++++++++++++
@@ -29,7 +31,6 @@ Last change: 20-MAR-2026 CEST
 - ``picasso.clusterer.cluster_center`` (will be renamed to ``_cluster_center`` and become a private function in v0.11.0)
 - ``picasso.aim``: ``intersect1d``, ``count_intersections``, ``run_intersections``, ``run_intersections_multithread``, ``get_fft_peak``, ``get_fft_peak_z``, ``point_intersect_2d`` and ``point_intersect_3d`` (will become private functions in v0.11.0)
 - ``picasso.masking.mask_locs`` uses metadata rather than now deprecated ``width`` and ``height`` parameters
-Last change: 24-MAR-2026 CEST
 
 0.9.10
 ------

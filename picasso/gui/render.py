@@ -20,6 +20,7 @@ import time
 import os.path
 import importlib
 import pkgutil
+from copy import deepcopy
 from math import ceil
 from collections import Counter
 from functools import partial
@@ -3487,9 +3488,7 @@ class InfoDialog(QtWidgets.QDialog):
         self.nena_button.setAutoDefault(False)
         self.movie_grid.addWidget(self.nena_button, 2, 0)
         show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
-        show_nena_plot_button.setToolTip(
-            "Show NeNA plot (only after it was calculated)."
-        )
+        show_nena_plot_button.setToolTip("Display NeNA fit.")
         show_nena_plot_button.clicked.connect(self.show_nena_plot)
         self.movie_grid.addWidget(show_nena_plot_button, 2, 1)
 
@@ -3516,9 +3515,7 @@ class InfoDialog(QtWidgets.QDialog):
         calculate_frc_button.clicked.connect(self.calculate_frc_resolution)
         self.frc_grid.addWidget(calculate_frc_button, 2, 0)
         show_frc_button = QtWidgets.QPushButton("Show FRC plot")
-        show_frc_button.setToolTip(
-            "Show FRC plot (only after it was calculated)."
-        )
+        show_frc_button.setToolTip("Display FRC fit.")
         show_frc_button.clicked.connect(self.show_frc_plot)
         self.frc_grid.addWidget(show_frc_button, 2, 1)
 
@@ -3786,12 +3783,7 @@ class InfoDialog(QtWidgets.QDialog):
     def show_frc_plot(self) -> None:
         """Show FRC plot window."""
         if not self.frc_result:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "FRC not calculated",
-                "Please calculate FRC resolution first.",
-            )
-            return
+            self.calculate_frc_resolution()
         self.frc_window = FRCPlotWindow(self)
         self.frc_window.plot(self.frc_result)
         self.frc_window.show()
@@ -3799,12 +3791,7 @@ class InfoDialog(QtWidgets.QDialog):
     def show_nena_plot(self) -> None:
         """Show NeNA plot window."""
         if not self.nena_result:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "NeNA not calculated",
-                "Please calculate NeNA precision first.",
-            )
-            return
+            self.calculate_nena_lp()
         # keep a reference to the window to prevent garbage collection
         self.nena_window = NenaPlotWindow(self)
         self.nena_window.plot(self.nena_result)
@@ -3852,10 +3839,13 @@ class NenaPlotWindow(QtWidgets.QTabWidget):
 
     def plot(self, nena_result: dict) -> None:
         self.figure.clear()
-        d = nena_result["d"]
+        d = deepcopy(nena_result["d"])
         ax = self.figure.add_subplot(111)
         d *= self.info_dialog.window.display_settings_dlg.pixelsize.value()
-        ax.set_title("Next frame neighbor distance histogram")
+        ax.set_title(
+            "Next frame neighbor distance histogram, "
+            f"\u03c3 = {self.info_dialog.lp:.2f} nm"
+        )
         ax.plot(d, nena_result["data"], label="Data")
         ax.plot(d, nena_result["best_fit"], label="Fit")
         ax.set_xlabel("Distance (nm)")
