@@ -307,12 +307,14 @@ def generate_N_structures(
         # find proportions first, just like in
         # StructureMixer.convert_counts_to_props
         props = np.zeros(N_structures.shape, dtype=np.float32)
+        print(f"{N_structures.shape=}")
+        print(f"{N_total=}")
         for i, structure in enumerate(structures):
             N_str_total = np.zeros(N_structures.shape[0], dtype=np.float32)
             N_per_target = structure.get_ind_target_count(targets)
             for N_mol in N_per_target:
                 N_str_total = N_str_total + N_mol * N_structures[:, i]
-            prop = np.round(100 * N_str_total / N_total, 2)
+            prop = np.round(100 * N_str_total / N_total.sum(), 2)
             props[:, i] = prop
         # if rounding error occurs, delete from the first non-zero element
         rows_to_correct = np.where(np.sum(props, axis=1) != 100)[0]
