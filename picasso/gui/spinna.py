@@ -1966,6 +1966,7 @@ class GenerateSearchSpaceDialog(QtWidgets.QDialog):
         dialog = GenerateSearchSpaceDialog(
             parent, loading_dialog=loading_dialog
         )
+        dialog = GenerateSearchSpaceDialog(parent)
         result = dialog.exec()
         return [
             int(dialog.n_sim_spin.value()),
