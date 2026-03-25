@@ -3233,7 +3233,7 @@ class ChangeFOV(QtWidgets.QDialog):
         self.setLayout(self.layout)
         xlabel = QtWidgets.QLabel("X:")
         xlabel.setToolTip(
-            "X coordinate of the top-left corner (display pixels)."
+            "X coordinate of the top-left corner (camera pixels)."
         )
         self.layout.addWidget(xlabel, 0, 0)
         self.x_box = QtWidgets.QDoubleSpinBox()
@@ -3242,7 +3242,7 @@ class ChangeFOV(QtWidgets.QDialog):
         self.layout.addWidget(self.x_box, 0, 1)
         ylabel = QtWidgets.QLabel("Y:")
         ylabel.setToolTip(
-            "Y coordinate of the top-left corner (display pixels)."
+            "Y coordinate of the top-left corner (camera pixels)."
         )
         self.layout.addWidget(ylabel, 1, 0)
         self.y_box = QtWidgets.QDoubleSpinBox()
@@ -3250,14 +3250,14 @@ class ChangeFOV(QtWidgets.QDialog):
         self.y_box.setRange(-100, 1e6)
         self.layout.addWidget(self.y_box, 1, 1)
         w_label = QtWidgets.QLabel("Width:")
-        w_label.setToolTip("Width of the FOV (display pixels).")
+        w_label.setToolTip("Width of the FOV (camera pixels).")
         self.layout.addWidget(w_label, 2, 0)
         self.w_box = QtWidgets.QDoubleSpinBox()
         self.w_box.setKeyboardTracking(False)
         self.w_box.setRange(0, 1e3)
         self.layout.addWidget(self.w_box, 2, 1)
         h_label = QtWidgets.QLabel("Height:")
-        h_label.setToolTip("Height of the FOV (display pixels).")
+        h_label.setToolTip("Height of the FOV (camera pixels).")
         self.layout.addWidget(h_label, 3, 0)
         self.h_box = QtWidgets.QDoubleSpinBox()
         self.h_box.setKeyboardTracking(False)
@@ -3272,7 +3272,10 @@ class ChangeFOV(QtWidgets.QDialog):
         self.layout.addWidget(self.savefov, 5, 0)
         self.savefov.clicked.connect(self.save_fov)
         self.loadfov = QtWidgets.QPushButton("Load FOV")
-        self.loadfov.setToolTip("Load FOV from a .txt file.")
+        self.loadfov.setToolTip(
+            "Load FOV from a .txt file.\n"
+            "Also available by dropping a .txt file on the main window."
+        )
         self.layout.addWidget(self.loadfov, 6, 0)
         self.loadfov.clicked.connect(self.load_fov)
 
@@ -3461,6 +3464,19 @@ class InfoDialog(QtWidgets.QDialog):
         )
         display_grid.addWidget(self.change_display, 4, 0)
         self.change_display.clicked.connect(self.change_fov.show)
+
+        self.save_fov_button = QtWidgets.QPushButton("Save FOV")
+        self.save_fov_button.setToolTip("Save current FOV as a .txt file.")
+        display_grid.addWidget(self.save_fov_button, 5, 0)
+        self.save_fov_button.clicked.connect(self.change_fov.save_fov)
+
+        self.load_fov_button = QtWidgets.QPushButton("Load FOV")
+        self.load_fov_button.setToolTip(
+            "Load FOV from a .txt file.\n"
+            "Also available by dropping a .txt file on the main window."
+        )
+        display_grid.addWidget(self.load_fov_button, 5, 1)
+        self.load_fov_button.clicked.connect(self.change_fov.load_fov)
 
         # Movie
         movie_groupbox = QtWidgets.QGroupBox("Precision")

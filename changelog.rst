@@ -18,6 +18,7 @@ Last change: 25-MAR-2026 CEST
 - G5M calculated more accurate sigma constraints in 3D
 - Adjusted default parameters in Average
 - Render GUI: show NeNA/FRC plot automatically calculates them if not done already
+- Render GUI: more accessible saving/loading of FOVs as .txt files
 
 *Bug fixes:*
 ++++++++++++
