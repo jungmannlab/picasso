@@ -926,9 +926,6 @@ class MaskGenerator:
         Dimensionality of the mask (2 or 3). If None, the dimensionality
         is taken from the loaded localizations/molecules. Default is
         None.
-    run_checks : bool, optional
-        Not used since v0.9.6, kept for backward compatibility. Will
-        be removed in v0.10.0.
     """
 
     def __init__(
@@ -937,7 +934,7 @@ class MaskGenerator:
         binsize: int | tuple = 130,
         sigma: int | tuple = 500,
         ndim: int | None = None,
-        run_checks: bool = False,
+        run_checks=None,
     ) -> None:
         # open localizations
         locs, info = io.load_locs(locs_path)
@@ -974,6 +971,12 @@ class MaskGenerator:
             info[0]["Width"] * self.pixelsize,
             info[0]["Height"] * self.pixelsize,
         ]
+
+        if run_checks is not None:
+            lib.deprecation_warning(
+                "The argument run_checks is not used since v0.9.6 and is"
+                " deprecated. It will be removed in v0.11.0."
+            )
 
     def set_binsize(self, binsize: int | tuple) -> None:
         """Convert the input binsize to a tuple of 2/3 values.
