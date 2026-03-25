@@ -11616,6 +11616,9 @@ class Window(QtWidgets.QMainWindow):
         # remove all locs
         file_menu.addSeparator()
         delete_action = file_menu.addAction("Remove all localizations")
+        delete_action.setShortcuts(
+            ["Ctrl+Shift+Backspace", "Ctrl+Shift+Delete"]
+        )
         delete_action.triggered.connect(self.remove_locs)
 
         # menu bar - View

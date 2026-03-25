@@ -19,6 +19,7 @@ Last change: 25-MAR-2026 CEST
 - Adjusted default parameters in Average
 - Render GUI: show NeNA/FRC plot automatically calculates them if not done already
 - Render GUI: more accessible saving/loading of FOVs as .txt files
+- Render GUI: keyboard combo for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)
 
 *Bug fixes:*
 ++++++++++++
