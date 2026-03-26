@@ -27,6 +27,7 @@ from functools import partial
 from typing import Callable, Literal
 from PIL import Image
 
+from matplotlib import image
 import yaml
 import matplotlib
 import matplotlib.pyplot as plt
@@ -7557,18 +7558,31 @@ class View(QtWidgets.QLabel):
             x = 12
             y = 26
             dy = 24  # space between names
+            padding = 4  # padding around text
+            font = painter.font()
+            font.setPixelSize(16)
+            painter.setFont(font)
+            fm = QtGui.QFontMetrics(font)
             for i in range(n_channels):
                 if self.window.dataset_dialog.checks[i].isChecked():
+                    text = self.window.dataset_dialog.checks[i].text()
+                    # draw black background
+                    text_rect = fm.boundingRect(text)
+                    bg_rect = QtCore.QRect(
+                        x - padding,
+                        y - fm.ascent() - padding,
+                        text_rect.width() + 2 * padding,
+                        fm.height() + 2 * padding,
+                    )
                     painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
+                    painter.setBrush(QtGui.QBrush(QtCore.Qt.GlobalColor.black))
+                    painter.drawRect(bg_rect)
+                    # draw colored text
                     colordisp = self.window.dataset_dialog.colordisp_all[i]
                     color = colordisp.palette().color(
                         QtGui.QPalette.ColorRole.Window
                     )
                     painter.setPen(QtGui.QPen(color))
-                    font = painter.font()
-                    font.setPixelSize(16)
-                    painter.setFont(font)
-                    text = self.window.dataset_dialog.checks[i].text()
                     painter.drawText(QtCore.QPoint(x, y), text)
                     y += dy
         return image
