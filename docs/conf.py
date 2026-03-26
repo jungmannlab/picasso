@@ -26,7 +26,12 @@ author = "Maximilian T. Strauss"
 # The short X.Y version
 version = ""
 # The full version, including alpha/beta/rc tags
-release = "0.9.10"
+import os, sys
+
+sys.path.insert(0, os.path.abspath("../.."))
+from picasso.version import __version__
+
+release = __version__
 
 # -- General configuration ---------------------------------------------------
 

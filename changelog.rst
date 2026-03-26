@@ -12,12 +12,16 @@ Last change: 25-MAR-2026 CEST
 **Important updates:**
 ^^^^^^^^^^^^^^^^^^^^^^
 - Picasso automatically checks for updates when launched and notifies the user if a new version is available
+- Installing Picasso as a package has less stringent dependencies and Python requirements, the exact versions are specified for one-click-installers only
 
 *Small improvements:*
 +++++++++++++++++++++
 - G5M calculated more accurate sigma constraints in 3D
 - Adjusted default parameters in Average
 - Render GUI: show NeNA/FRC plot automatically calculates them if not done already
+- Adjusted installation instructions
+- Badges added to the GitHub repository (PyPI version and Python version)
+- Only ``picasso.version.py`` determines software version globally, thus ``bumpversion`` is not needed anymore
 - Render GUI: more accessible saving/loading of FOVs as .txt files
 - Render GUI: keyboard combo for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)
 

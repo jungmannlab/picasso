@@ -12,7 +12,7 @@ set -e  # Exit immediately on any error
 eval "$(conda shell.bash hook)"
 
 APP_NAME="Picasso"
-VERSION="0.9.10"
+VERSION=$(python3 -c "from picasso.version import __version__; print(__version__)")
 MAIN_BUNDLE_NAME="Picasso.app"
 DMG_NAME="Picasso-v$VERSION-macOS-Apple-Silicon"
 PYINSTALLER_FILE="../pyinstaller/picasso_pyinstaller.py"
@@ -45,8 +45,7 @@ conda activate installer
 pip install build
 cd ../..
 python -m build
-pip install dist/picassosr-$VERSION-py3-none-any.whl
-pip install pyinstaller==6.19
+pip install dist/picassosr-$VERSION-py3-none-any.whl[installer]
 cd release/one_click_macos_gui
 
 # -----------------------------------------------------------------------------
