@@ -219,6 +219,25 @@ def check_circular_picks(f: Callable) -> Callable:
     return wrapper
 
 
+class LogDoubleSpinBox(QtWidgets.QDoubleSpinBox):
+    """QDoubleSpinBox with logarithmic step size."""
+
+    def __init__(
+        self, parent: QtWidgets.QWidget | None = None, factor: float = 1.2
+    ) -> None:
+        super().__init__(parent)
+        self._factor = factor  # multiply/divide by this on each step
+
+    def stepBy(self, steps: int) -> None:
+        if steps > 0:
+            if self.value() <= 10 ** (-self.decimals()):
+                self.setValue(2 * 10 ** (-self.decimals()))
+            else:
+                self.setValue(self.value() * (self._factor**steps))
+        elif steps < 0:
+            self.setValue(self.value() / (self._factor ** abs(steps)))
+
+
 class FloatEdit(QtWidgets.QLineEdit):
     """Class used for adjusting the influx rate in the info dialog.
 
@@ -5098,9 +5117,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
             " rendered."
         )
         contrast_grid.addWidget(minimum_label, 0, 0)
-        self.minimum = QtWidgets.QDoubleSpinBox()
+        self.minimum = LogDoubleSpinBox()
         self.minimum.setRange(0, 999999)
-        self.minimum.setSingleStep(5)
         self.minimum.setValue(0)
         self.minimum.setDecimals(6)
         self.minimum.setKeyboardTracking(False)
@@ -5112,9 +5130,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
             " rendered."
         )
         contrast_grid.addWidget(maximum_label, 1, 0)
-        self.maximum = QtWidgets.QDoubleSpinBox()
+        self.maximum = LogDoubleSpinBox()
         self.maximum.setRange(0, 999999)
-        self.maximum.setSingleStep(5)
         self.maximum.setValue(100)
         self.maximum.setDecimals(6)
         self.maximum.setKeyboardTracking(False)

@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 26-MAR-2026 CEST
+Last change: 27-MAR-2026 CEST
 
 0.10.0
 ------
@@ -25,6 +25,7 @@ Last change: 26-MAR-2026 CEST
 - Render GUI: more accessible saving/loading of FOVs as .txt files
 - Render GUI: keyboard combo for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)
 - Render GUI: legend is displayed on black background for better visibility
+- Render GUI: log-scaling of contrast
 
 *Bug fixes:*
 ++++++++++++
