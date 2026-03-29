@@ -7,16 +7,17 @@ Last change: 29-MAR-2026 CEST
 ------
 **Backward incompatible changes:**
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-- Moved from PyQt5 to PyQt6, PyQt5 support has been removed. If Picasso is installed via PyPI (``pip install picassosr``) or one-click-installer, no action needs to be taken. **Otherwise please install PyQt6 when updating Picasso to v0.10.0!**
+- Moved from PyQt5 to PyQt6, PyQt5 support has been removed. If Picasso is installed via PyPI (``pip install picassosr``) or one-click-installer, no action needs to be taken. **Otherwise please install PyQt6 when updating Picasso to v0.10.0.**
 
 **Important updates:**
 ^^^^^^^^^^^^^^^^^^^^^^
 - Picasso automatically checks for updates when launched and notifies the user if a new version is available
 - Installing Picasso as a package has less stringent dependencies and Python requirements, the exact versions are specified for one-click-installers only
+- Render GUI: added support for reading .csv files from ThunderSTORM
 
 *Small improvements:*
 +++++++++++++++++++++
-- G5M calculated more accurate sigma constraints in 3D
+- G5M calculates more accurate sigma constraints in 3D
 - Adjusted default parameters in Average
 - Render GUI: show NeNA/FRC plot automatically calculates them if not done already
 - Adjusted installation instructions

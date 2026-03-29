@@ -6056,6 +6056,8 @@ class View(QtWidgets.QLabel):
         """Load localizations from an .hdf5 file and the associated
         .yaml metadata file.
 
+        New in v0.10.0: Can read a ThunderSTORM .csv file.
+
         Parameters
         ----------
         path : str
@@ -6064,11 +6066,29 @@ class View(QtWidgets.QLabel):
             Specifies if the loaded files should be rendered
             (default True).
         """
-        # read .hdf5 and .yaml files
-        try:
-            locs, info = io.load_locs(path, qt_parent=self)
-        except (io.NoMetadataFileError, KeyError):
-            return
+        if path.endswith(".hdf5"):  # standard Picasso localization file
+            # read .hdf5 and .yaml files
+            try:
+                locs, info = io.load_locs(path, qt_parent=self)
+            except (io.NoMetadataFileError, KeyError):
+                return
+        elif path.endswith(".csv"):  # ThunderSTORM localization file
+            pixelsize, ok = QtWidgets.QInputDialog.getDouble(
+                self,
+                "Camera pixel size",
+                "Enter camera pixel size in nm:",
+                value=100,
+                min=0.01,
+                max=10000,
+                decimals=2,
+            )
+            if not ok:
+                return
+            locs, info = io.import_ts(path, pixelsize)
+        else:
+            raise ValueError(
+                "Unsupported file format. Please load a .hdf5 or .csv file."
+            )
 
         # update pixelsize (credits to Boyd Peters #602)
         pixelsize = lib.get_from_metadata(
@@ -6188,7 +6208,10 @@ class View(QtWidgets.QLabel):
                     QtWidgets.QMessageBox.warning(
                         self,
                         "Error",
-                        f"An error occurred while loading {os.path.basename(path)}:\n{str(e)}",
+                        (
+                            "An error occurred while loading "
+                            f"{os.path.basename(path)}:\n{str(e)}"
+                        ),
                     )
                 pd.set_value(i + 1)
             if len(self.locs):  # if loading was successful
@@ -7769,6 +7792,8 @@ class View(QtWidgets.QLabel):
                     "Square",
                 ]:
                     self.load_picks(paths[0])
+        if extensions == [".csv"]:  # just one csv dropped, thunderstorm
+            self.add_multiple(paths)
         else:
             paths = [
                 path for path, ext in zip(paths, extensions) if ext == ".hdf5"

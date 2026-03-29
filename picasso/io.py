@@ -1996,7 +1996,39 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     info : list of dicts
         Minimal metadata information.
     """
+    expected_columns = [
+        "frame",
+        "x [nm]",
+        "y [nm]",
+        "intensity [photon]",
+        "offset [photon]",
+        "uncertainty_xy [nm]",
+        "sigma [nm]",
+    ]
+    expected_columns_z = [
+        "frame",
+        "x [nm]",
+        "y [nm]",
+        "z [nm]",
+        "intensity [photon]",
+        "offset [photon]",
+        "uncertainty_xy [nm]",
+        "sigma1 [nm]",
+        "sigma2 [nm]",
+    ]
     data = pd.read_csv(path)
+    if "z [nm]" in data.columns:
+        if not all([col in data.columns for col in expected_columns_z]):
+            raise ValueError(
+                "Expected columns for 3D ThunderSTORM .csv: "
+                f"{expected_columns_z}. Found: {list(data.columns)}."
+            )
+    else:
+        if not all([col in data.columns for col in expected_columns]):
+            raise ValueError(
+                "Expected columns for 2D ThunderSTORM .csv: "
+                f"{expected_columns}. Found: {list(data.columns)}."
+            )
     frames = data["frame"].astype(int)
     # make sure frames start at zero:
     frames = frames - np.min(frames)
