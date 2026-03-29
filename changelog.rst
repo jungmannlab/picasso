@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 27-MAR-2026 CEST
+Last change: 29-MAR-2026 CEST
 
 0.10.0
 ------
@@ -26,6 +26,7 @@ Last change: 27-MAR-2026 CEST
 - Render GUI: keyboard combo for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)
 - Render GUI: legend is displayed on black background for better visibility
 - Render GUI: log-scaling of contrast
+- SPINNA allows user-defined threshold for the binary mask
 
 *Bug fixes:*
 ++++++++++++

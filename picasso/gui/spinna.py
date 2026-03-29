@@ -467,9 +467,6 @@ class MaskGeneratorTab(QtWidgets.QDialog):
     thresholding_value : QtWidgets.QDoubleSpinBox
         Value of the threshold for the density map mask type. Gives the
         probability cutoff.
-    thresholding_stack : QtWidgets.QStackedWidget
-        Stack of widgets that are shown/hidden depending on the mask
-        type.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -588,7 +585,6 @@ class MaskGeneratorTab(QtWidgets.QDialog):
 
         self.mask_type = QtWidgets.QComboBox()
         self.mask_type.addItems(["Density map", "Binary"])
-        self.mask_type.currentIndexChanged.connect(self.on_mask_type_changed)
         mask_layout.addWidget(self.mask_type, 5, 1, 1, 2)
 
         # generate mask
@@ -600,27 +596,21 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         self.generate_mask_button.setEnabled(False)
         mask_layout.addWidget(self.generate_mask_button, 6, 0, 1, 3)
 
-        # thresholding density map
-        self.thresholding_stack = QtWidgets.QStackedWidget()
-        mask_layout.addWidget(self.thresholding_stack, 7, 0, 1, 3)
-        threshold_widget = QtWidgets.QWidget()
-        self.thresholding_stack.addWidget(threshold_widget)
-        thresholding_layout = QtWidgets.QHBoxLayout()
-        threshold_widget.setLayout(thresholding_layout)
-
+        # threshold
+        threshold_layout = QtWidgets.QHBoxLayout()
+        mask_layout.addLayout(threshold_layout, 7, 0, 1, 3)
         self.thresholding_check = QtWidgets.QCheckBox("Apply threshold")
         self.thresholding_check.setToolTip(
             "Set minimum probability cutoff in the mask?"
         )
         self.thresholding_check.setChecked(False)
         self.thresholding_check.stateChanged.connect(self.apply_threshold)
-        thresholding_layout.addWidget(self.thresholding_check)
+        threshold_layout.addWidget(self.thresholding_check)
         self.thresholding_value = ignoreArrowsDoubleSpinBox()
         self.thresholding_value.setRange(0, 1)
         self.thresholding_value.setSingleStep(1e-8)
         self.thresholding_value.setDecimals(8)
-        thresholding_layout.addWidget(self.thresholding_value)
-        self.thresholding_stack.addWidget(QtWidgets.QLabel("          "))
+        threshold_layout.addWidget(self.thresholding_value)
 
         # z slicing of a 3D mask
         self.zslice_check = QtWidgets.QCheckBox("Show z-slice")
@@ -819,10 +809,15 @@ class MaskGeneratorTab(QtWidgets.QDialog):
         if self.mask is None:
             return
 
+        thresh = self.thresholding_value.value()
         if state == 0:  # unchecked
             self.mask = deepcopy(self.mask_generator.mask)
         elif state == 2:  # checked
-            self.mask[self.mask < self.thresholding_value.value()] = 0
+            if self.mask_type.currentIndex() == 0:  # density map
+                self.mask[self.mask < thresh] = 0
+            else:
+                self.mask = np.zeros_like(self.mask_generator.image)
+                self.mask[self.mask_generator.image > thresh] = 1
             self.mask = self.mask / self.mask.sum()
         self.preview.on_mask_generated(full_fov=False)
         self.update_mask_info()
@@ -955,14 +950,6 @@ class MaskGeneratorTab(QtWidgets.QDialog):
                 blur.blockSignals(True)
                 blur.setValue(value)
                 blur.blockSignals(False)
-
-    def on_mask_type_changed(self) -> None:
-        """Show/hide the thresholding options for the density map mask
-        type."""
-        if self.mask_type.currentIndex() == 0:  # density map
-            self.thresholding_stack.setCurrentIndex(0)
-        elif self.mask_type.currentIndex() == 1:
-            self.thresholding_stack.setCurrentIndex(1)
 
     def on_preview_updated(self, image: np.ndarray) -> None:
         """Update the legend according to the current field of view.

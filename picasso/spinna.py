@@ -868,6 +868,9 @@ class MaskGenerator:
         Binsize used for histograming localizations (nm), one value
         for each dimension (x and y are always equal, z can be
         different).
+    image : np.array
+        Histogram of localizations used for creating the mask. The last
+        step before applying threshold/extracting a binary mask.
     locs : pd.DataFrame
         Localizations list used for creating the mask.
     locs_path : str
@@ -1082,6 +1085,7 @@ class MaskGenerator:
         self,
         apply_thresh: bool = False,
         mode: Literal["loc_den", "binary"] = "loc_den",
+        thresh: float | None = None,
         verbose: bool = False,
     ) -> MaskGenerator:
         """Generate a mask (available after class initialization). The
@@ -1090,14 +1094,17 @@ class MaskGenerator:
 
         Parameters
         ----------
-        apply_thresh : bool (default=False)
+        apply_thresh : bool, optional
             Whether or not apply Otsu thresholding to the density map
-            mask. Does not apply to binary mask.
-        mode : {'loc_den', 'binary'}
+            mask. Does not apply to binary mask. Default is False.
+        mode : {'loc_den', 'binary'}, optional
             If 'loc_den', mask giving probability mass function is
             created. If 'binary', a binary mask is created (i.e., each
             pixel/voxel specifies if a molecule can be found at the
-            given region or not)
+            given region or not). Default is 'loc_den'.
+        thresh : float, optional
+            Threshold value to apply. If None, Otsu thresholding is used.
+            Default is None.
 
         Returns
         -------
@@ -1121,7 +1128,10 @@ class MaskGenerator:
         if verbose:
             print("Thresholding... (3/3)")
         image = np.float64(image / image.sum())
-        self.thresh = masking.threshold_otsu(image)
+        self.image = deepcopy(image)
+        self.thresh = (
+            masking.threshold_otsu(image) if thresh is None else thresh
+        )
 
         if mode == "loc_den":
             if apply_thresh:
@@ -1130,9 +1140,9 @@ class MaskGenerator:
         elif mode == "binary":
             self.mask = np.zeros_like(image, dtype=np.float64)
             self.mask[image > self.thresh] = 1
-            self.mask = self.mask / self.mask.sum()
         else:
             raise ValueError("mode must be either 'loc_den' or 'binary'.")
+        self.mask = self.mask / self.mask.sum()
         return self
 
     def save_mask(self, path: str, save_png: bool = False) -> None:
@@ -1141,9 +1151,9 @@ class MaskGenerator:
         If .npy is saved, it is accompanied by a metadata .yaml file
         used for reading the mask in StructureSimulator.
 
-        save_png : bool (default=False)
+        save_png : bool, optional
             Whether or not save the mask as .png (3D mask will be
-            summed along z axis).
+            summed along z axis). Default is False.
         """
         if self.mask is None:
             return
