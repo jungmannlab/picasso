@@ -21,6 +21,7 @@ Last change: 29-MAR-2026 CEST
 - Render GUI: show NeNA/FRC plot automatically calculates them if not done already
 - Adjusted installation instructions
 - Badges added to the GitHub repository (PyPI version and Python version)
+- ``picasso.lib.merge_locs`` allows for more flexible frame incrementing when merging localizations lists
 - Only ``picasso.version.py`` determines software version globally, thus ``bumpversion`` is not needed anymore
 - Render GUI: more accessible saving/loading of FOVs as .txt files
 - Render GUI: keyboard combo for closing all localizations (Ctrl+Shift+Backspace or Ctrl+Shift+Delete)

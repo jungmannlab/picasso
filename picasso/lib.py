@@ -900,7 +900,7 @@ def append_to_rec(
 
 def merge_locs(
     locs_list: list[pd.DataFrame],
-    increment_frames: bool = True,
+    increment_frames: bool | list[int] = True,
 ) -> pd.DataFrame:
     """Merge localization lists into one file. Can increment frames
     to avoid overlapping frames.
@@ -909,22 +909,43 @@ def merge_locs(
     ----------
     locs_list : list of pd.DataFrame's
         List of localization lists to be merged.
-    increment_frames : bool, optional
+    increment_frames : bool or list, optional
         If True, increments frames of each localization list by the
-        maximum frame number of the previous localization list. Useful
-        when the localization lists are from different movies but
-        represent the same stack. Default is True.
+        maximum frame number of the previous localization list. If a
+        list is given, each element is an integer increment of the frame
+        indices for each localization list. Useful when the localization
+        lists are from different movies but represent the same stack.
+        Default is True.
 
     Returns
     -------
     locs : pd.DataFrame
         Merged localizations.
     """
+    assert isinstance(
+        increment_frames, (bool, list)
+    ), "increment_frames must be a boolean or a list of integers."
+    if isinstance(increment_frames, list):
+        assert len(increment_frames) == len(locs_list), (
+            "If increment_frames is a list, its length must be the same"
+            " as locs_list."
+        )
+        assert all(isinstance(i, int) for i in increment_frames), (
+            "If increment_frames is a list, all its elements must be "
+            "integers."
+        )
     if increment_frames:
-        last_frame = 0
+        last_frame = 0 if increment_frames is True else increment_frames[0]
         for i, locs in enumerate(locs_list):
             locs["frame"] += last_frame
-            last_frame = locs["frame"][-1].max()
+            if increment_frames is True:
+                last_frame = locs["frame"].max()
+            else:
+                last_frame = (
+                    increment_frames[i + 1]
+                    if i + 1 < len(increment_frames)
+                    else 0
+                )
             locs_list[i] = locs
     locs = pd.concat(locs_list, ignore_index=True)
     return locs
