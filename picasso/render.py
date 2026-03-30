@@ -28,7 +28,7 @@ def render(
     blur_method: (
         Literal["gaussian", "gaussian_iso", "smooth", "convolve"] | None
     ) = None,
-    min_blur_width: float = 0,
+    min_blur_width: float = 0.0,
     ang: tuple | None = None,
 ) -> tuple[int, np.ndarray]:
     """Render localizations given FOV and blur method.

@@ -1900,6 +1900,126 @@ class DbscanDialog(QtWidgets.QDialog):
         }, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
+class ExportKwargsDialog(QtWidgets.QDialog):
+    """Choose parameters for exporting an image.
+
+    ...
+
+    Attributes
+    ----------
+    blur_method : QtWidgets.QComboBox
+        Blur method.
+    disp_px_size : QtWidgets.QDoubleSpinBox
+        Display pixel size in nm.
+    min_blur_width : QtWidgets.QDoubleSpinBox
+        Minimum blur width in nm.
+    width, height : QtWidgets.QDoubleSpinBox
+        Width and height of the exported image in camera pixels.
+    x, y : QtWidgets.QDoubleSpinBox
+        X and Y coordinates of the top left corner of the exported image
+        in camera pixels.
+    """
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Image parameters")
+        layout = QtWidgets.QFormLayout(self)
+        # helper variables
+        viewport = window.view.viewport  # ((ymin, xmin), (ymax, xmax))
+        disp_settings = window.display_settings_dlg
+
+        self.x = QtWidgets.QDoubleSpinBox()
+        self.x.setRange(-1e6, 1e6)
+        self.x.setDecimals(5)
+        self.x.setSingleStep(0.1)
+        self.x.setValue(viewport[0][1])
+        layout.addRow("X, top left corner (cam. pixels)", self.x)
+        self.y = QtWidgets.QDoubleSpinBox()
+        self.y.setRange(-1e6, 1e6)
+        self.y.setDecimals(5)
+        self.y.setSingleStep(0.1)
+        self.y.setValue(viewport[0][0])
+        layout.addRow("Y, top left corner (cam. pixels)", self.y)
+        self.width = QtWidgets.QDoubleSpinBox()
+        self.width.setRange(0.01, 1e6)
+        self.width.setDecimals(5)
+        self.width.setSingleStep(0.1)
+        self.width.setValue(viewport[1][1] - viewport[0][1])
+        layout.addRow("Width (cam. pixels)", self.width)
+        self.height = QtWidgets.QDoubleSpinBox()
+        self.height.setRange(0.01, 1e6)
+        self.height.setDecimals(5)
+        self.height.setSingleStep(0.1)
+        self.height.setValue(viewport[1][0] - viewport[0][0])
+        layout.addRow("Height (cam. pixels)", self.height)
+        self.disp_px_size = QtWidgets.QDoubleSpinBox()
+        self.disp_px_size.setRange(0.1, 1e6)
+        self.disp_px_size.setSingleStep(1.0)
+        self.disp_px_size.setDecimals(5)
+        self.disp_px_size.setValue(disp_settings.disp_px_size.value())
+        layout.addRow("Display pixel size (nm)", self.disp_px_size)
+        self.min_blur_width = QtWidgets.QDoubleSpinBox()
+        self.min_blur_width.setRange(0, 1e6)
+        self.min_blur_width.setDecimals(1)
+        self.min_blur_width.setSingleStep(0.1)
+        self.min_blur_width.setValue(disp_settings.min_blur_width.value())
+        layout.addRow("Minimum blur width (nm)", self.min_blur_width)
+        self.blur_method = QtWidgets.QComboBox()
+        self.blur_method.addItems(
+            [
+                "None",
+                "One-pixel",
+                "Global loc. prec.",
+                "Individual loc. prec.",
+                "Individual loc. prec., iso",
+            ]
+        )
+        current_button = disp_settings.blur_methods[
+            disp_settings.blur_buttongroup.checkedButton()
+        ]
+        self.blur_method.setCurrentIndex(
+            ["None", "smooth", "convolve", "gaussian", "gaussian_iso"].index(
+                current_button
+            )
+        )
+        layout.addRow("Blur method", self.blur_method)
+
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        layout.addRow(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow | None = None,
+    ) -> tuple[dict, bool]:
+        """Create the dialog and return the requested values for
+        exporting an image."""
+        dialog = ExportKwargsDialog(parent)
+        result = dialog.exec()
+        # convert from X, Y, W, H to the viewport format
+        xmin = dialog.x.value()
+        xmax = dialog.x.value() + dialog.width.value()
+        ymin = dialog.y.value()
+        ymax = dialog.y.value() + dialog.height.value()
+        viewport = ((ymin, xmin), (ymax, xmax))
+        return (
+            {
+                "viewport": viewport,
+                "disp_px_size": dialog.disp_px_size.value(),
+                "min_blur_width": dialog.min_blur_width.value(),
+                "blur_method": dialog.blur_method.currentText(),
+            },
+            result == QtWidgets.QDialog.DialogCode.Accepted,
+        )
+
+
 class HdbscanDialog(QtWidgets.QDialog):
     """Choose parameters for HDBSCAN. See scikit-learn for details.
 
@@ -8032,15 +8152,28 @@ class View(QtWidgets.QLabel):
         viewport: (
             tuple[tuple[float, float], tuple[float, float]] | None
         ) = None,
+        disp_px_size: float | None = None,
+        min_blur_width: float | None = None,
+        blur_method: str | None = None,
     ) -> dict:
         """Return a dictionary to be used for the keyword arguments of
         ``picasso.render.render``.
 
         Parameters
         ----------
-        viewport : tuple
+        viewport : tuple, optional
             Specifies the FOV to be rendered ``((y_min, x_min),
             (y_max, x_max))``. If None, the current viewport is taken.
+            Default is None.
+        disp_px_size : float, optional
+            Display pixel size in nm. If None, the value from Display
+            Settings Dialog is taken. Default is None.
+        min_blur_width : float, optional
+            Minimum blur width in nm. If None, the value from Display
+            Settings Dialog is taken. Default is None.
+        blur_method : str, optional
+            Blur method to be used. If None, the method selected in
+            Display Settings Dialog is taken. Default is None.
 
         Returns
         -------
@@ -8054,46 +8187,64 @@ class View(QtWidgets.QLabel):
         if self._pan:  # no blur when panning
             blur_method = None
         else:  # selected method
-            blur_method = disp_dlg.blur_methods[
-                disp_dlg.blur_buttongroup.checkedButton()
-            ]
+            if blur_method is None:
+                blur_method = disp_dlg.blur_methods[
+                    disp_dlg.blur_buttongroup.checkedButton()
+                ]
+            else:
+                blur_method = {
+                    "None": None,
+                    "One-pixel": "smooth",
+                    "Global loc. prec.": "convolve",
+                    "Individual loc. prec.": "gaussian",
+                    "Individual loc. prec., iso": "gaussian_iso",
+                }[
+                    blur_method
+                ]  # convert from display name to render name
 
         # oversampling
         optimal_oversampling = self.display_pixels_per_viewport_pixels()
-        if disp_dlg.dynamic_disp_px.isChecked():
-            oversampling = optimal_oversampling
-            disp_dlg.set_disp_px_silently(
-                disp_dlg.pixelsize.value() / optimal_oversampling
-            )
-        else:
-            oversampling = float(
-                disp_dlg.pixelsize.value() / disp_dlg.disp_px_size.value()
-            )
-            if oversampling > optimal_oversampling:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Display pixel size too low",
-                    (
-                        "Oversampling will be adjusted to"
-                        " match the display pixel density."
-                    ),
-                )
+        if disp_px_size is None:
+            if disp_dlg.dynamic_disp_px.isChecked():
                 oversampling = optimal_oversampling
                 disp_dlg.set_disp_px_silently(
                     disp_dlg.pixelsize.value() / optimal_oversampling
                 )
+            else:
+                oversampling = float(
+                    disp_dlg.pixelsize.value() / disp_dlg.disp_px_size.value()
+                )
+                if oversampling > optimal_oversampling:
+                    QtWidgets.QMessageBox.information(
+                        self,
+                        "Display pixel size too low",
+                        (
+                            "Oversampling will be adjusted to"
+                            " match the display pixel density."
+                        ),
+                    )
+                    oversampling = optimal_oversampling
+                    disp_dlg.set_disp_px_silently(
+                        disp_dlg.pixelsize.value() / optimal_oversampling
+                    )
+        else:
+            oversampling = float(pixelsize / disp_px_size)
 
-        # viewport
-        if viewport is None:
-            viewport = self.viewport
+        # viewport and min blur
+        viewport = self.viewport if viewport is None else viewport
+
+        min_blur_width = (
+            disp_dlg.min_blur_width.value()
+            if min_blur_width is None
+            else min_blur_width
+        )
+        min_blur_width = float(min_blur_width / pixelsize)
 
         kwargs = {
             "oversampling": oversampling,
             "viewport": viewport,
             "blur_method": blur_method,
-            "min_blur_width": float(
-                disp_dlg.min_blur_width.value() / pixelsize
-            ),
+            "min_blur_width": min_blur_width,
         }
         return kwargs
 
@@ -9681,6 +9832,9 @@ class View(QtWidgets.QLabel):
         viewport: (
             tuple[tuple[float, float], tuple[float, float]] | None
         ) = None,
+        disp_px_size: float | None = None,
+        min_blur_width: float | None = None,
+        blur_method: str | None = None,
     ) -> QtGui.QImage:
         """Get QImage with rendered localizations.
 
@@ -9695,6 +9849,15 @@ class View(QtWidgets.QLabel):
         viewport : tuple, optional
             Viewport to be rendered ``((y_min, x_min), (y_max, x_max))``.
             If None, takes current viewport. Default is None.
+        disp_px_size : float, optional
+            Display pixel size in nm. If None, the value from Display
+            Settings Dialog is taken. Default is None.
+        min_blur_width : float, optional
+            Minimum blur width in nm. If None, the value from Display
+            Settings Dialog is taken. Default is None.
+        blur_method : str, optional
+            Blur method to be used. If None, the method selected in
+            Display Settings Dialog is taken. Default is None.
 
         Returns
         -------
@@ -9702,7 +9865,12 @@ class View(QtWidgets.QLabel):
             Shows rendered locs; 8 bit.
         """
         # get oversampling, blur method, etc
-        kwargs = self.get_render_kwargs(viewport=viewport)
+        kwargs = self.get_render_kwargs(
+            viewport=viewport,
+            disp_px_size=disp_px_size,
+            min_blur_width=min_blur_width,
+            blur_method=blur_method,
+        )
 
         n_channels = len(self.locs)
         # render single or multi channel data
@@ -11640,6 +11808,8 @@ class Window(QtWidgets.QMainWindow):
         export_complete_action = file_menu.addAction("Export complete image")
         export_complete_action.setShortcut("Ctrl+Shift+E")
         export_complete_action.triggered.connect(self.export_complete)
+        export_kwargs_action = file_menu.addAction("Export manually")
+        export_kwargs_action.triggered.connect(self.export_kwargs)
         export_grayscale_action = file_menu.addAction(
             "Export channels in grayscale"
         )
@@ -11991,36 +12161,78 @@ class Window(QtWidgets.QMainWindow):
             self.export_current_info(path)
         self.view.setMinimumSize(1, 1)
 
-    def export_current_info(self, path: str) -> None:
+    def export_current_info(
+        self,
+        path: str,
+        viewport: (
+            tuple[tuple[float, float], tuple[float, float]] | None
+        ) = None,
+        disp_px_size: float | None = None,
+        min_blur_width: float | None = None,
+        blur_method: str | None = None,
+    ) -> None:
         """Export information about the current file in .yaml format.
-        See ``self.export_current``.
+        See ``self.export_current`` and ``self.export_kwargs``.
 
         Parameters
         ----------
         path : str
             Path for saving the original image with .png or .tif
             extension. If None, info is returned and is not saved.
+        viewport : tuple, optional
+            Viewport to be rendered ``((y_min, x_min),
+            (y_max, x_max))``. If None, takes current viewport. Default
+            is None.
+        disp_px_size : float, optional
+            Display pixel size in nm. If None, the value from Display
+            Settings Dialog is taken. Default is None.
+        min_blur_width : float, optional
+            Minimum blur width in nm. If None, the value from Display
+            Settings Dialog is taken. Default is None.
+        blur_method : str, optional
+            Blur method to be used. If None, the method selected in
+            Display Settings Dialog is taken. Default is None.
         """
-        fov_info = [
-            self.info_dialog.change_fov.x_box.value(),
-            self.info_dialog.change_fov.y_box.value(),
-            self.info_dialog.change_fov.w_box.value(),
-            self.info_dialog.change_fov.h_box.value(),
-        ]
+        if viewport is None:
+            fov_info = [
+                self.info_dialog.change_fov.x_box.value(),
+                self.info_dialog.change_fov.y_box.value(),
+                self.info_dialog.change_fov.w_box.value(),
+                self.info_dialog.change_fov.h_box.value(),
+            ]
+        else:
+            fov_info = [
+                viewport[0][1],
+                viewport[0][0],
+                viewport[1][1] - viewport[0][1],
+                viewport[1][0] - viewport[0][0],
+            ]
         d = self.display_settings_dlg
         colors = [_.currentText() for _ in self.dataset_dialog.colorselection]
         info = {
             "FOV (X, Y, Width, Height)": fov_info,
             "Zoom": d.zoom.value(),
-            "Display pixel size (nm)": d.disp_px_size.value(),
+            "Display pixel size (nm)": (
+                d.disp_px_size.value()
+                if disp_px_size is None
+                else disp_px_size
+            ),
             "Min. density": d.minimum.value(),
             "Max. density": d.maximum.value(),
             "Colormap": d.colormap.currentText(),
-            "Blur method": d.blur_methods[d.blur_buttongroup.checkedButton()],
+            "Blur method": (
+                d.blur_methods[d.blur_buttongroup.checkedButton()]
+                if blur_method is None
+                else blur_method
+            ),
             "Scale bar length (nm)": d.scalebar.value(),
             "Localizations loaded": self.view.locs_paths,
             "Colors": colors,
-            "Min. blur (nm)": d.min_blur_width.value(),
+            "Min. blur (nm)": (
+                d.min_blur_width.value()
+                if min_blur_width is None
+                else min_blur_width
+            ),
         }
         if path is not None:
             path, ext = os.path.splitext(path)
@@ -12049,6 +12261,50 @@ class Window(QtWidgets.QMainWindow):
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage.save(path)
             self.export_current_info(path)
+
+    def export_kwargs(self) -> None:
+        """Exports a FOV given GUI-independent kwargs."""
+        try:
+            base, ext = os.path.splitext(self.view.locs_paths[0])
+        except AttributeError:
+            return
+        out_path = base + "_view.png"
+        path, ext = lib.get_save_filename_ext_dialog(
+            self,
+            "Save image",
+            out_path,
+            filter="*.png;;*.tif",
+            check_ext=".yaml",
+        )
+        if not path:
+            return
+
+        kwargs, ok = ExportKwargsDialog.getParams(self)
+        if not ok:
+            return
+
+        # adjust constast temporarily
+        min_spin = self.display_settings_dlg.minimum
+        max_spin = self.display_settings_dlg.maximum
+        old_min = min_spin.value()
+        old_max = max_spin.value()
+        old_disp_px_size = self.display_settings_dlg.disp_px_size.value()
+        new_min = old_min * (kwargs["disp_px_size"] / old_disp_px_size) ** 2
+        new_max = old_max * (kwargs["disp_px_size"] / old_disp_px_size) ** 2
+        min_spin.blockSignals(True)
+        max_spin.blockSignals(True)
+        min_spin.setValue(new_min)
+        max_spin.setValue(new_max)
+
+        qimage = self.view.render_scene(cache=False, **kwargs)
+        qimage.save(path)
+        self.export_current_info(path, **kwargs)
+
+        # restore contrast
+        min_spin.setValue(old_min)
+        max_spin.setValue(old_max)
+        min_spin.blockSignals(False)
+        max_spin.blockSignals(False)
 
     def export_grayscale(self) -> None:
         """Export each channel in grayscale."""
