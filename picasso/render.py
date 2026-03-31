@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import signal
 from scipy.spatial.transform import Rotation
+from PyQt6 import QtGui, QtCore, QtSvg
 
 
 _DRAW_MAX_SIGMA = 3  # max. sigma from mean to render (mu +/- 3 sigma)
@@ -1285,3 +1286,40 @@ def locs_rotation(
     y = oversampling * (y - y_min)
     z *= oversampling
     return x, y, in_view, z
+
+
+def export_qimage_to_pdf(
+    image: QtGui.QImage, path: str, dpi: int = 96
+) -> None:
+    writer = QtGui.QPdfWriter(path)
+
+    # Fixed physical page size (1 image pixel = 1/96 inch, regardless of dpi)
+    width_mm = image.width() * 25.4 / 96
+    height_mm = image.height() * 25.4 / 96
+
+    page_size = QtGui.QPageSize(
+        QtCore.QSizeF(width_mm, height_mm),
+        QtGui.QPageSize.Unit.Millimeter,
+    )
+    writer.setPageSize(page_size)
+    writer.setResolution(dpi)
+
+    # Painter coordinates: 1 unit = 1/dpi inch, so full page =
+    # (width_mm / 25.4) * dpi = image.width() * dpi / 96
+    draw_width = image.width() * dpi / 96
+    draw_height = image.height() * dpi / 96
+
+    painter = QtGui.QPainter(writer)
+    painter.drawImage(QtCore.QRectF(0, 0, draw_width, draw_height), image)
+    painter.end()
+
+
+def export_qimage_to_svg(image: QtGui.QImage, path: str):
+    generator = QtSvg.QSvgGenerator()
+    generator.setFileName(path)
+    generator.setSize(image.size())
+    generator.setViewBox(QtCore.QRect(0, 0, image.width(), image.height()))
+
+    painter = QtGui.QPainter(generator)
+    painter.drawImage(0, 0, image)
+    painter.end()

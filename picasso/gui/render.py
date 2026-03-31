@@ -7985,12 +7985,12 @@ class View(QtWidgets.QLabel):
                 viewport = [(y_min, x_min), (y_max, x_max)]
                 self.update_scene(viewport=viewport)
 
-    def export_grayscale(self, suffix: str) -> None:
+    def export_grayscale(self, suffix: str, dpi: int = 96) -> None:
         """Export grayscale rendering of the current viewport for each
         channel separately."""
         kwargs = self.get_render_kwargs()
         for i, locs in enumerate(self.all_locs):
-            path = self.locs_paths[i].replace(".hdf5", f"{suffix}.png")
+            path = self.locs_paths[i].replace(".hdf5", suffix)
             # render like in self.render_single_channel and
             # self.render_scene
             _, image = render.render(locs, **kwargs, info=self.infos[i])
@@ -8020,7 +8020,12 @@ class View(QtWidgets.QLabel):
             qimage = self.draw_picks(qimage)
             qimage = self.draw_points(qimage)
             # save image
-            qimage.save(path)
+            if path.endswith(".pdf"):
+                render.export_qimage_to_pdf(qimage, path)
+            elif path.endswith(".svg"):
+                render.export_qimage_to_svg(qimage, path)
+            else:
+                qimage.save(path)
 
             # save metadata
             info = self.window.export_current_info(path=None)
@@ -12127,7 +12132,7 @@ class Window(QtWidgets.QMainWindow):
         QtWidgets.QApplication.instance().closeAllWindows()
 
     def export_current(self) -> None:
-        """Export current view as .png or .tif."""
+        """Export current view image."""
         try:
             # get the index of the first checked (displayed) channel
             checked_channels = [
@@ -12146,18 +12151,38 @@ class Window(QtWidgets.QMainWindow):
             self,
             "Save image",
             out_path,
-            filter="*.png;;*.tif",
+            filter="*.png;;*.tif;;*.pdf;;*.svg",
             check_ext=check_ext,
         )
         if path:
+            if path.endswith(".pdf"):
+                dpi, ok = QtWidgets.QInputDialog.getInt(
+                    self,
+                    "DPI for PDF export",
+                    "Enter DPI for PDF export",
+                    value=96,
+                    min=1,
+                )
+                if not ok:
+                    return
             if not scalebar:
                 self.display_settings_dlg.scalebar_groupbox.setChecked(True)
                 qimage_scale = self.view.draw_scalebar(self.view.qimage)
                 new_path, ext = os.path.splitext(path)
                 new_path = new_path + "_scalebar" + ext
-                qimage_scale.save(new_path)
+                if path.endswith(".pdf"):
+                    render.export_qimage_to_pdf(
+                        qimage_scale, new_path, dpi=dpi
+                    )
+                else:
+                    qimage_scale.save(new_path)
                 self.display_settings_dlg.scalebar_groupbox.setChecked(False)
-            self.view.qimage.save(path)
+            if path.endswith(".pdf"):
+                render.export_qimage_to_pdf(self.view.qimage, path, dpi=dpi)
+            elif path.endswith(".svg"):
+                render.export_qimage_to_svg(self.view.qimage, path)
+            else:
+                self.view.qimage.save(path)
             self.export_current_info(path)
         self.view.setMinimumSize(1, 1)
 
@@ -12242,7 +12267,7 @@ class Window(QtWidgets.QMainWindow):
             return info
 
     def export_complete(self) -> None:
-        """Export the whole field of view as .png or .tif."""
+        """Export the whole field of view as an image."""
         try:
             base, ext = os.path.splitext(self.view.locs_paths[0])
         except AttributeError:
@@ -12252,14 +12277,28 @@ class Window(QtWidgets.QMainWindow):
             self,
             "Save image",
             out_path,
-            filter="*.png;;*.tif",
+            filter="*.png;;*.tif;;*.pdf",
             check_ext="yaml",
         )
         if path:
             movie_height, movie_width = self.view.movie_size()
             viewport = [(0, 0), (movie_height, movie_width)]
             qimage = self.view.render_scene(cache=False, viewport=viewport)
-            qimage.save(path)
+            if path.endswith(".pdf"):
+                dpi, ok = QtWidgets.QInputDialog.getInt(
+                    self,
+                    "DPI for PDF export",
+                    "Enter DPI for PDF export",
+                    value=96,
+                    min=1,
+                )
+                if not ok:
+                    return
+                render.export_qimage_to_pdf(qimage, path, dpi=dpi)
+            elif path.endswith(".svg"):
+                render.export_qimage_to_svg(qimage, path)
+            else:
+                qimage.save(path)
             self.export_current_info(path)
 
     def export_kwargs(self) -> None:
@@ -12273,7 +12312,7 @@ class Window(QtWidgets.QMainWindow):
             self,
             "Save image",
             out_path,
-            filter="*.png;;*.tif",
+            filter="*.png;;*.tif;;*.pdf;;*.svg",
             check_ext=".yaml",
         )
         if not path:
@@ -12297,7 +12336,21 @@ class Window(QtWidgets.QMainWindow):
         max_spin.setValue(new_max)
 
         qimage = self.view.render_scene(cache=False, **kwargs)
-        qimage.save(path)
+        if path.endswith(".pdf"):
+            dpi, ok = QtWidgets.QInputDialog.getInt(
+                self,
+                "DPI for PDF export",
+                "Enter DPI for PDF export",
+                value=96,
+                min=1,
+            )
+            if not ok:
+                return
+            render.export_qimage_to_pdf(qimage, path, dpi=dpi)
+        elif path.endswith(".svg"):
+            render.export_qimage_to_svg(qimage, path)
+        else:
+            qimage.save(path)
         self.export_current_info(path, **kwargs)
 
         # restore contrast
@@ -12311,12 +12364,28 @@ class Window(QtWidgets.QMainWindow):
         suffix, ok = QtWidgets.QInputDialog.getText(
             self,
             "Save each channel in grayscale",
-            "Enter suffix for the screenshots",
+            "Enter suffix with extension (.png, .tif, .pdf or .svg)",
             QtWidgets.QLineEdit.Normal,
-            "_grayscale",
+            "_grayscale.png",
         )
         if ok:
-            self.view.export_grayscale(suffix)
+            assert suffix.endswith((".png", ".tif", ".pdf", ".svg")), (
+                "Invalid extension. Only .png, .tif, .pdf and .svg are"
+                " allowed."
+            )
+            if suffix.endswith(".pdf"):
+                dpi, ok = QtWidgets.QInputDialog.getInt(
+                    self,
+                    "DPI for PDF export",
+                    "Enter DPI for PDF export",
+                    value=96,
+                    min=1,
+                )
+                if not ok:
+                    return
+            else:
+                dpi = None
+            self.view.export_grayscale(suffix, dpi=dpi)
 
     def export_multi(self):
         """Ask the user to choose a type of export."""
