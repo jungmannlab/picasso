@@ -27,7 +27,6 @@ from functools import partial
 from typing import Callable, Literal
 from PIL import Image
 
-from matplotlib import image
 import yaml
 import matplotlib
 import matplotlib.pyplot as plt
@@ -5184,7 +5183,6 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         super().__init__(window)
         self.window = window
         self.setWindowTitle("Display Settings")
-        self.resize(200, 0)
         self.setModal(False)
 
         main_layout = QtWidgets.QVBoxLayout(self)
@@ -12062,7 +12060,9 @@ class Window(QtWidgets.QMainWindow):
         test_cluster_action.triggered.connect(self.test_clusterer_dialog.show)
 
         postprocess_menu.addSeparator()
-        nn_action = postprocess_menu.addAction("Nearest Neighbor Analysis")
+        nn_action = postprocess_menu.addAction(
+            "Calculate nearest neighbor distances"
+        )
         nn_action.triggered.connect(self.view.nearest_neighbor)
 
         postprocess_menu.addSeparator()

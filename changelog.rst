@@ -1,7 +1,7 @@
 Changelog
 =========
 
-Last change: 31-MAR-2026 CEST
+Last change: 01-APR-2026 CEST
 
 0.10.0
 ------
@@ -29,6 +29,7 @@ Last change: 31-MAR-2026 CEST
 - Render GUI: legend is displayed on black background for better visibility
 - Render GUI: log-scaling of contrast
 - Render GUI: new image exporting with manually selected rendering options + support for .pdf and .svg formats
+- Render GUI: changed the name "Nearest Neighbor Analysis" to "Calculate nearest neighbor distances" for better clarity
 - SPINNA allows user-defined threshold for the binary mask
 
 *Bug fixes:*
