@@ -5180,6 +5180,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         Contains zoom's magnitude.
     """
 
+    DOCS_URL = "https://picassosr.readthedocs.io/en/latest/render.html#display-settings"
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -5219,6 +5221,8 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.disp_px_size.setKeyboardTracking(False)
         self.disp_px_size.valueChanged.connect(self.on_disp_px_changed)
         general_grid.addWidget(self.disp_px_size, 1, 1)
+        # squeeze in the help button
+        general_grid.addWidget(lib.HelpButton(self.DOCS_URL), 2, 0)
         self.dynamic_disp_px = QtWidgets.QCheckBox("dynamic")
         self.dynamic_disp_px.setChecked(True)
         self.dynamic_disp_px.toggled.connect(self.set_dynamic_disp_px)
@@ -5258,7 +5262,7 @@ class DisplaySettingsDialog(QtWidgets.QDialog):
         self.maximum.valueChanged.connect(self.update_scene)
         contrast_grid.addWidget(self.maximum, 1, 1)
         c_label = QtWidgets.QLabel("Colormap:")
-        c_label.setToolTip("Colormap used for rendering.")
+        c_label.setToolTip("Colormap used for rendering single-channel data.")
         contrast_grid.addWidget(c_label, 2, 0)
         self.colormap = QtWidgets.QComboBox()
         self.colormap.addItems(plt.colormaps())

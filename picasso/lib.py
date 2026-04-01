@@ -391,6 +391,43 @@ class RemoveColumnsDialog(QtWidgets.QDialog):
         return to_remove, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
+class HelpButton(QtWidgets.QToolButton):
+    """A reusable ? button that opens a URL."""
+
+    def __init__(
+        self, url: str, parent=None, size: int | tuple[int, int] = 22
+    ) -> None:
+        super().__init__(parent)
+        self.help_url = url
+        self.setText("?")
+        if isinstance(size, int):
+            size = (size, size)
+        self.setFixedSize(*size)
+        self.setToolTip("Open documentation")
+        self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
+        self.setStyleSheet(
+            """
+            QToolButton {
+                border: 1px solid palette(mid);
+                border-radius: 11px;
+                font-weight: bold;
+                font-size: 12px;
+                color: palette(button-text);
+                background: palette(button);
+            }
+            QToolButton:hover {
+                background: palette(highlight);
+                color: palette(highlighted-text);
+                border-color: palette(highlight);
+            }
+        """
+        )
+        self.clicked.connect(self._open_docs)
+
+    def _open_docs(self) -> None:
+        QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.help_url))
+
+
 def deprecation_warning(message: str) -> None:
     """Display a deprecation warning message.
 
