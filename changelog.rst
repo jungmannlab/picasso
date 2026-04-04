@@ -30,6 +30,7 @@ Last change: 01-APR-2026 CEST
 - Render GUI: log-scaling of contrast
 - Render GUI: new image exporting with manually selected rendering options + support for .pdf and .svg formats
 - Render GUI: changed the name "Nearest Neighbor Analysis" to "Calculate nearest neighbor distances" for better clarity
+- Render GUI: optimal scale bar is only set upon user's request, also in 3D
 - SPINNA allows user-defined threshold for the binary mask
 
 *Bug fixes:*

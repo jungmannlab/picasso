@@ -227,6 +227,15 @@ class DisplaySettingsRotationDialog(QtWidgets.QDialog):
         self.scalebar_text.setToolTip("Display the length of the scale bar?")
         self.scalebar_text.stateChanged.connect(self.render_scene)
         scalebar_grid.addWidget(self.scalebar_text, 1, 0)
+        self.optimal_scalebar_check = QtWidgets.QCheckBox("Automatic length")
+        self.optimal_scalebar_check.setToolTip(
+            "Set the scale bar length to approximately 1/8 of the current "
+            "viewport width."
+        )
+        self.optimal_scalebar_check.stateChanged.connect(
+            self.window.view_rot.set_optimal_scalebar
+        )
+        scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
 
         self._silent_disp_px_update = False
 
@@ -1503,24 +1512,28 @@ class ViewRotation(QtWidgets.QLabel):
         self.window.move_pick(0, dy)
         self.shift_viewport(0, dy)
 
-    def set_optimal_scalebar(self) -> None:
+    def set_optimal_scalebar(self, force: bool = False) -> None:
         """Sets scalebar to approx. 1/8 of the current viewport's
         width."""
-        width = self.viewport_width()
-        width_nm = width * self.pixelsize
-        optimal_scalebar = width_nm / 8
-        # approximate to the nearest thousands, hundreds, tens or ones
-        if optimal_scalebar > 10_000:
-            scalebar = 10_000
-        elif optimal_scalebar > 1_000:
-            scalebar = int(1_000 * round(optimal_scalebar / 1_000))
-        elif optimal_scalebar > 100:
-            scalebar = int(100 * round(optimal_scalebar / 100))
-        elif optimal_scalebar > 10:
-            scalebar = int(10 * round(optimal_scalebar / 10))
-        else:
-            scalebar = int(round(optimal_scalebar))
-        self.window.display_settings_dlg.scalebar.setValue(scalebar)
+        if (
+            force
+            or self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
+        ):
+            width = self.viewport_width()
+            width_nm = width * self.pixelsize
+            optimal_scalebar = width_nm / 8
+            # approximate to the nearest thousands, hundreds, tens or ones
+            if optimal_scalebar > 10_000:
+                scalebar = 10_000
+            elif optimal_scalebar > 1_000:
+                scalebar = int(1_000 * round(optimal_scalebar / 1_000))
+            elif optimal_scalebar > 100:
+                scalebar = int(100 * round(optimal_scalebar / 100))
+            elif optimal_scalebar > 10:
+                scalebar = int(10 * round(optimal_scalebar / 10))
+            else:
+                scalebar = int(round(optimal_scalebar))
+            self.window.display_settings_dlg.scalebar.setValue(scalebar)
 
     def shift_viewport(self, dx: float, dy: float) -> None:
         """Move viewport by a given amount.
@@ -1731,6 +1744,7 @@ class ViewRotation(QtWidgets.QLabel):
             self.qimage.save(path)
             self.export_current_view_info(path)
             if not scalebar:
+                self.set_optimal_scalebar(force=True)
                 scalebar_box.setChecked(True)
                 self.update_scene()
                 self.qimage.save(path.replace(".png", "_scalebar.png"))
